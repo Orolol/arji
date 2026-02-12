@@ -9,6 +9,14 @@ export interface CodexOptions {
   prompt: string;
   cwd?: string;
   model?: string;
+  onRawChunk?: (chunk: {
+    source: "stdout" | "stderr";
+    index: number;
+    text: string;
+    emittedAt: string;
+  }) => void;
+  onOutputChunk?: (chunk: { text: string; emittedAt: string }) => void;
+  onResponseChunk?: (chunk: { text: string; emittedAt: string }) => void;
 }
 
 /**
@@ -22,7 +30,15 @@ export interface CodexOptions {
  * by the process manager.
  */
 export function spawnCodex(options: CodexOptions): SpawnedClaude {
-  const { mode, prompt, cwd, model } = options;
+  const {
+    mode,
+    prompt,
+    cwd,
+    model,
+    onRawChunk,
+    onOutputChunk,
+    onResponseChunk,
+  } = options;
 
   // Temp file for -o (reliable output capture)
   const outputFile = path.join(
@@ -77,6 +93,8 @@ export function spawnCodex(options: CodexOptions): SpawnedClaude {
     const startTime = Date.now();
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
+    let stdoutChunkIndex = 0;
+    let stderrChunkIndex = 0;
 
     child = nodeSpawn("codex", args, {
       cwd: effectiveCwd,
@@ -86,10 +104,24 @@ export function spawnCodex(options: CodexOptions): SpawnedClaude {
 
     child.stdout?.on("data", (chunk: Buffer) => {
       stdoutChunks.push(chunk);
+      stdoutChunkIndex += 1;
+      onRawChunk?.({
+        source: "stdout",
+        index: stdoutChunkIndex,
+        text: chunk.toString("utf-8"),
+        emittedAt: new Date().toISOString(),
+      });
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
       stderrChunks.push(chunk);
+      stderrChunkIndex += 1;
+      onRawChunk?.({
+        source: "stderr",
+        index: stderrChunkIndex,
+        text: chunk.toString("utf-8"),
+        emittedAt: new Date().toISOString(),
+      });
     });
 
     child.on("error", (err) => {
@@ -128,6 +160,20 @@ export function spawnCodex(options: CodexOptions): SpawnedClaude {
 
       // Best output: -o file > stdout
       const result = fileOutput || stdout.trim();
+
+      if (fileOutput) {
+        onOutputChunk?.({
+          text: fileOutput,
+          emittedAt: new Date().toISOString(),
+        });
+      }
+
+      if (result) {
+        onResponseChunk?.({
+          text: result,
+          emittedAt: new Date().toISOString(),
+        });
+      }
 
       console.log(
         "[spawn] codex exited, code:",

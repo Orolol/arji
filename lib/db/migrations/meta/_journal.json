@@ -36,6 +36,13 @@
       "when": 1770969600000,
       "tag": "0004_session_lifecycle_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1770970800000,
+      "tag": "0005_codex_session_chunks",
+      "breakpoints": true
     }
   ]
 }

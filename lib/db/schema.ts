@@ -3,6 +3,7 @@ import {
   text,
   integer,
   real,
+  index,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
@@ -116,6 +117,41 @@ export const agentSessions = sqliteTable("agent_sessions", {
   error: text("error"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const agentSessionSequences = sqliteTable("agent_session_sequences", {
+  sessionId: text("session_id")
+    .primaryKey()
+    .notNull()
+    .references(() => agentSessions.id, { onDelete: "cascade" }),
+  nextSequence: integer("next_sequence").notNull().default(1),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const agentSessionChunks = sqliteTable(
+  "agent_session_chunks",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    streamType: text("stream_type").notNull(), // raw | output | response
+    sequence: integer("sequence").notNull(),
+    chunkKey: text("chunk_key"),
+    content: text("content").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    sessionSequenceUnique: uniqueIndex(
+      "agent_session_chunks_session_sequence_unique"
+    ).on(table.sessionId, table.sequence),
+    sessionStreamKeyUnique: uniqueIndex(
+      "agent_session_chunks_session_stream_key_unique"
+    ).on(table.sessionId, table.streamType, table.chunkKey),
+    sessionStreamSequenceIdx: index(
+      "agent_session_chunks_session_stream_sequence_idx"
+    ).on(table.sessionId, table.streamType, table.sequence),
+  })
+);
 
 export const ticketComments = sqliteTable("ticket_comments", {
   id: text("id").primaryKey(),

@@ -58,6 +58,35 @@ describe("Schema: existing columns preserved", () => {
   });
 });
 
+describe("Schema: session chunk tables", () => {
+  it("has agentSessionSequences table columns", () => {
+    const cols = schema.agentSessionSequences;
+    expect(cols.sessionId).toBeDefined();
+    expect(cols.nextSequence).toBeDefined();
+    expect(cols.updatedAt).toBeDefined();
+  });
+
+  it("has agentSessionChunks table columns", () => {
+    const cols = schema.agentSessionChunks;
+    expect(cols.id).toBeDefined();
+    expect(cols.sessionId).toBeDefined();
+    expect(cols.streamType).toBeDefined();
+    expect(cols.sequence).toBeDefined();
+    expect(cols.chunkKey).toBeDefined();
+    expect(cols.content).toBeDefined();
+    expect(cols.createdAt).toBeDefined();
+  });
+
+  it("has uniqueness constraints for session+sequence and stream+key", () => {
+    const extraConfig =
+      schema.agentSessionChunks[Symbol.for("drizzle:ExtraConfigBuilder")](
+        schema.agentSessionChunks
+      );
+    expect(extraConfig.sessionSequenceUnique).toBeDefined();
+    expect(extraConfig.sessionStreamKeyUnique).toBeDefined();
+  });
+});
+
 describe("Schema: agentPrompts table", () => {
   it("has required columns", () => {
     const cols = schema.agentPrompts;

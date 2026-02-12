@@ -4,6 +4,7 @@ import { agentSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { processManager } from "@/lib/claude/process-manager";
 import fs from "fs";
+import { listSessionChunks } from "@/lib/agent-sessions/chunks";
 import {
   getSessionStatusForApi,
   isSessionLifecycleConflictError,
@@ -36,11 +37,28 @@ export async function GET(
     }
   }
 
+  let chunkStreams: {
+    raw: ReturnType<typeof listSessionChunks>;
+    output: ReturnType<typeof listSessionChunks>;
+    response: ReturnType<typeof listSessionChunks>;
+  } | null = null;
+
+  try {
+    chunkStreams = {
+      raw: listSessionChunks(sessionId, "raw"),
+      output: listSessionChunks(sessionId, "output"),
+      response: listSessionChunks(sessionId, "response"),
+    };
+  } catch {
+    chunkStreams = null;
+  }
+
   return NextResponse.json({
     data: {
       ...session,
       status: getSessionStatusForApi(session.status),
       logs,
+      chunkStreams,
     },
   });
 }

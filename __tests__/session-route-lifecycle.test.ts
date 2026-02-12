@@ -12,6 +12,10 @@ const { dbChain } = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({
   db: dbChain,
+  sqlite: {
+    prepare: vi.fn(),
+    transaction: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/db/schema", () => ({
