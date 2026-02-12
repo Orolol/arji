@@ -4,7 +4,6 @@ import {
   releases,
   projects,
   epics,
-  documents,
   settings,
 } from "@/lib/db/schema";
 import { eq, desc, inArray } from "drizzle-orm";
@@ -12,6 +11,9 @@ import { createId } from "@/lib/utils/nanoid";
 import { spawnClaude } from "@/lib/claude/spawn";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
 import simpleGit from "simple-git";
+import { pushTag } from "@/lib/git/remote";
+import { createDraftRelease } from "@/lib/github/releases";
+import { logSyncOperation } from "@/lib/github/sync-log";
 
 export async function GET(
   _request: NextRequest,
@@ -35,11 +37,18 @@ export async function POST(
 ) {
   const { projectId } = await params;
   const body = await request.json();
-  const { version, title, epicIds, generateChangelog = true } = body as {
+  const {
+    version,
+    title,
+    epicIds,
+    generateChangelog = true,
+    pushToGitHub = false,
+  } = body as {
     version: string;
     title?: string;
     epicIds: string[];
     generateChangelog?: boolean;
+    pushToGitHub?: boolean;
   };
 
   if (!version) {
@@ -137,6 +146,72 @@ ${epicSummaries}
     }
   }
 
+  // GitHub integration: push tag and create draft release
+  let githubReleaseId: number | null = null;
+  let githubReleaseUrl: string | null = null;
+  let pushedAt: string | null = null;
+  const githubErrors: string[] = [];
+
+  if (pushToGitHub && gitTag && project.githubOwnerRepo && project.gitRepoPath) {
+    const [owner, repo] = project.githubOwnerRepo.split("/");
+
+    // Push tag to remote
+    try {
+      await pushTag(project.gitRepoPath, gitTag);
+      logSyncOperation({
+        projectId,
+        operation: "tag",
+        status: "success",
+        detail: JSON.stringify({ tag: gitTag, action: "push" }),
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      githubErrors.push(`Tag push failed: ${errorMsg}`);
+      logSyncOperation({
+        projectId,
+        operation: "tag",
+        status: "failure",
+        detail: JSON.stringify({ tag: gitTag, error: errorMsg }),
+      });
+    }
+
+    // Create draft GitHub release
+    try {
+      const releaseTitle = title
+        ? `v${version} — ${title}`
+        : `v${version}`;
+      const ghRelease = await createDraftRelease({
+        owner,
+        repo,
+        tag: gitTag,
+        title: releaseTitle,
+        body: changelog,
+      });
+      githubReleaseId = ghRelease.id;
+      githubReleaseUrl = ghRelease.url;
+      pushedAt = new Date().toISOString();
+      logSyncOperation({
+        projectId,
+        operation: "release",
+        status: "success",
+        detail: JSON.stringify({
+          releaseId: ghRelease.id,
+          tag: gitTag,
+          draft: true,
+        }),
+      });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      githubErrors.push(`GitHub release creation failed: ${errorMsg}`);
+      logSyncOperation({
+        projectId,
+        operation: "release",
+        status: "failure",
+        detail: JSON.stringify({ tag: gitTag, error: errorMsg }),
+      });
+    }
+  }
+
   // Save release
   const id = createId();
   db.insert(releases)
@@ -148,10 +223,19 @@ ${epicSummaries}
       changelog,
       epicIds: JSON.stringify(epicIds),
       gitTag,
+      githubReleaseId,
+      githubReleaseUrl,
+      pushedAt,
       createdAt: new Date().toISOString(),
     })
     .run();
 
   const release = db.select().from(releases).where(eq(releases.id, id)).get();
-  return NextResponse.json({ data: release }, { status: 201 });
+
+  const responseData: Record<string, unknown> = { data: release };
+  if (githubErrors.length > 0) {
+    responseData.githubErrors = githubErrors;
+  }
+
+  return NextResponse.json(responseData, { status: 201 });
 }
