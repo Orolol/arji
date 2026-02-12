@@ -1,7 +1,19 @@
 {
-  "name": "arij-setup",
+  "name": "arij",
   "version": "0.1.0",
-  "private": true,
+  "description": "A local, AI-first project orchestrator with a web interface for managing multi-project workflows with Claude Code as the execution engine.",
+  "bin": {
+    "arij": "./bin/arij.mjs"
+  },
+  "files": [
+    "bin",
+    "app",
+    "public",
+    "next.config.ts",
+    "tsconfig.json",
+    "postcss.config.mjs",
+    "eslint.config.mjs"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
