@@ -49,7 +49,7 @@ export const userStories = sqliteTable("user_stories", {
   title: text("title").notNull(),
   description: text("description"),
   acceptanceCriteria: text("acceptance_criteria"),
-  status: text("status").default("todo"), // todo | in_progress | done
+  status: text("status").default("todo"), // todo | in_progress | review | done
   position: integer("position").default(0),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
@@ -84,6 +84,7 @@ export const agentSessions = sqliteTable("agent_sessions", {
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
   epicId: text("epic_id").references(() => epics.id),
+  userStoryId: text("user_story_id").references(() => userStories.id),
   status: text("status").default("pending"), // pending | running | completed | failed | cancelled
   mode: text("mode").default("code"), // plan | code
   prompt: text("prompt"),
@@ -93,6 +94,17 @@ export const agentSessions = sqliteTable("agent_sessions", {
   startedAt: text("started_at"),
   completedAt: text("completed_at"),
   error: text("error"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const ticketComments = sqliteTable("ticket_comments", {
+  id: text("id").primaryKey(),
+  userStoryId: text("user_story_id")
+    .notNull()
+    .references(() => userStories.id, { onDelete: "cascade" }),
+  author: text("author").notNull(), // user | agent
+  content: text("content").notNull(),
+  agentSessionId: text("agent_session_id").references(() => agentSessions.id),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 

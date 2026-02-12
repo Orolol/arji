@@ -22,6 +22,7 @@ import { useEpicDetail } from "@/hooks/useEpicDetail";
 import { PRIORITY_LABELS, KANBAN_COLUMNS, COLUMN_LABELS } from "@/lib/types/kanban";
 import { Plus, Trash2, Check, Circle, Loader2, GitBranch } from "lucide-react";
 import { useState } from "react";
+import Link from "next/link";
 
 interface EpicDetailProps {
   projectId: string;
@@ -170,15 +171,16 @@ export function EpicDetail({ projectId, epicId, open, onClose }: EpicDetailProps
                       >
                         {statusIcon(us.status)}
                       </button>
-                      <span
-                        className={`flex-1 text-sm ${
+                      <Link
+                        href={`/projects/${projectId}/stories/${us.id}`}
+                        className={`flex-1 text-sm hover:underline ${
                           us.status === "done"
                             ? "line-through text-muted-foreground"
                             : ""
                         }`}
                       >
                         {us.title}
-                      </span>
+                      </Link>
                       <Button
                         variant="ghost"
                         size="icon"

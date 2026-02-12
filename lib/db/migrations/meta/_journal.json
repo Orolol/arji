@@ -8,6 +8,13 @@
       "when": 1770824510382,
       "tag": "0000_rare_apocalypse",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1770889670409,
+      "tag": "0001_gorgeous_lockjaw",
+      "breakpoints": true
     }
   ]
 }

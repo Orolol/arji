@@ -464,3 +464,203 @@ Work through the user stories in order. If a story depends on another, implement
 
   return parts.filter(Boolean).join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// 8. Ticket Build Prompt (Send-to-Dev)
+// ---------------------------------------------------------------------------
+
+export interface PromptComment {
+  author: "user" | "agent";
+  content: string;
+  createdAt: string;
+}
+
+/**
+ * Builds the prompt for implementing a single ticket (user story) with
+ * Claude Code in code mode. Includes project context, epic context, the
+ * ticket details, and the full comment history.
+ */
+export function buildTicketBuildPrompt(
+  project: PromptProject,
+  documents: PromptDocument[],
+  epic: PromptEpic,
+  story: PromptUserStory,
+  comments: PromptComment[],
+  globalPrompt?: string | null,
+): string {
+  const parts: string[] = [];
+
+  parts.push(globalSection(globalPrompt));
+  parts.push(`# Project: ${project.name}\n`);
+  parts.push(section("Project Specification", project.spec));
+  parts.push(documentsSection(documents));
+
+  // Epic context
+  parts.push(`## Epic Context\n`);
+  parts.push(`### ${epic.title}\n`);
+  if (epic.description) {
+    parts.push(`${epic.description.trim()}\n`);
+  }
+
+  // Ticket details
+  parts.push(`## Ticket to Implement\n`);
+  parts.push(`### ${story.title}\n`);
+  if (story.description) {
+    parts.push(`${story.description.trim()}\n`);
+  }
+  if (story.acceptanceCriteria) {
+    parts.push(`**Acceptance Criteria:**\n`);
+    parts.push(`${story.acceptanceCriteria.trim()}\n`);
+  }
+
+  // Comment history
+  if (comments.length > 0) {
+    parts.push(`## Comment History\n`);
+    const formatted = comments.map((c) => {
+      const prefix = c.author === "user" ? "**User:**" : "**Agent:**";
+      return `${prefix}\n${c.content.trim()}`;
+    });
+    parts.push(formatted.join("\n\n") + "\n");
+  }
+
+  parts.push(`## Instructions
+
+Implement this ticket following the specification and acceptance criteria above. Consider all comments in the history — they may contain clarifications, feedback, or specific instructions.
+
+1. Create or modify the necessary files.
+2. Ensure all acceptance criteria are met.
+3. Commit your changes with a clear, descriptive commit message referencing the ticket title.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// 9. Review Prompt (Agent Review)
+// ---------------------------------------------------------------------------
+
+export type ReviewType = "security" | "code_review" | "compliance";
+
+const REVIEW_CHECKLISTS: Record<ReviewType, string> = {
+  security: `## Security Audit Checklist
+
+Review the code changes for this ticket against the following security criteria:
+
+1. **OWASP Top 10**: Check for injection flaws (SQL, XSS, command injection), broken authentication, sensitive data exposure, XML external entities, broken access control, security misconfiguration, insecure deserialization, using components with known vulnerabilities, insufficient logging.
+2. **Input Validation**: All user inputs are validated and sanitized. No raw user input reaches SQL queries, shell commands, or HTML rendering.
+3. **Authentication & Authorization**: Auth checks are present where required. No privilege escalation paths. Session handling is secure.
+4. **Secrets Exposure**: No hardcoded API keys, passwords, tokens, or credentials in code. Secrets loaded from environment variables or secure config.
+5. **Data Protection**: Sensitive data encrypted at rest and in transit. No PII in logs. Proper error messages that don't leak internal details.
+6. **Dependencies**: No known vulnerable dependencies introduced. Lockfile is consistent.
+
+For each finding, specify:
+- **Severity**: Critical / High / Medium / Low / Info
+- **Location**: File path and line number
+- **Description**: What the issue is
+- **Recommendation**: How to fix it`,
+
+  code_review: `## Code Review Checklist
+
+Review the code changes for this ticket against the following quality criteria:
+
+1. **Readability**: Code is clear, well-structured, and easy to understand. Variable/function names are descriptive. Complex logic is commented.
+2. **DRY Principle**: No significant code duplication. Shared logic is properly abstracted.
+3. **Error Handling**: All error paths are handled gracefully. No unhandled promise rejections. Proper error messages for users.
+4. **Performance**: No obvious performance issues (N+1 queries, unnecessary re-renders, missing indexes, large payloads). Efficient algorithms for the data sizes involved.
+5. **Naming Conventions**: Consistent naming (camelCase for JS/TS, proper component naming for React). File names match conventions.
+6. **Type Safety**: Full TypeScript types, no \`any\` types. Proper interfaces for data structures.
+7. **Testing**: Adequate test coverage. Edge cases considered. Tests are maintainable and descriptive.
+8. **API Design**: Consistent REST conventions. Proper HTTP status codes. Clear request/response shapes.
+
+For each finding, specify:
+- **Severity**: Critical / Major / Minor / Suggestion
+- **Location**: File path and line number
+- **Description**: What the issue is
+- **Recommendation**: How to improve it`,
+
+  compliance: `## Compliance & Accessibility Checklist
+
+Review the code changes for this ticket against the following standards:
+
+1. **WCAG Accessibility (Level AA)**:
+   - Semantic HTML elements used correctly (headings, landmarks, lists)
+   - All interactive elements are keyboard-accessible
+   - Proper ARIA labels and roles where needed
+   - Color contrast meets 4.5:1 ratio for text
+   - Focus indicators visible
+   - Form inputs have associated labels
+   - Images have alt text
+   - Screen reader compatibility
+2. **Internationalization (i18n) Readiness**:
+   - No hardcoded user-facing strings (or flagged for future extraction)
+   - Date/number formatting considers locale
+   - RTL layout support not broken
+   - Text containers can accommodate longer translations
+3. **License Compliance**:
+   - New dependencies use compatible licenses (MIT, Apache 2.0, BSD)
+   - No GPL-licensed packages in a proprietary codebase (unless intended)
+   - Attribution requirements met
+
+For each finding, specify:
+- **Severity**: Critical / Major / Minor / Suggestion
+- **Location**: File path and line number
+- **Description**: What the issue is
+- **Recommendation**: How to fix it`,
+};
+
+/**
+ * Builds the prompt for a review agent (plan mode). Each review type gets a
+ * specialized checklist. The agent reads the code and posts findings as a
+ * comment.
+ */
+export function buildReviewPrompt(
+  project: PromptProject,
+  documents: PromptDocument[],
+  epic: PromptEpic,
+  story: PromptUserStory,
+  reviewType: ReviewType,
+  globalPrompt?: string | null,
+): string {
+  const parts: string[] = [];
+
+  parts.push(globalSection(globalPrompt));
+  parts.push(`# Project: ${project.name}\n`);
+  parts.push(section("Project Specification", project.spec));
+  parts.push(documentsSection(documents));
+
+  // Epic context
+  parts.push(`## Epic Context\n`);
+  parts.push(`### ${epic.title}\n`);
+  if (epic.description) {
+    parts.push(`${epic.description.trim()}\n`);
+  }
+
+  // Ticket details
+  parts.push(`## Ticket Under Review\n`);
+  parts.push(`### ${story.title}\n`);
+  if (story.description) {
+    parts.push(`${story.description.trim()}\n`);
+  }
+  if (story.acceptanceCriteria) {
+    parts.push(`**Acceptance Criteria:**\n`);
+    parts.push(`${story.acceptanceCriteria.trim()}\n`);
+  }
+
+  // Review checklist
+  parts.push(REVIEW_CHECKLISTS[reviewType]);
+
+  parts.push(`\n## Instructions
+
+You are performing a **${reviewType.replace("_", " ")}** on the code changes for the ticket described above.
+
+1. Read the relevant source files in the current working directory.
+2. Evaluate the code against every item in the checklist above.
+3. Produce a structured report with your findings.
+4. If no issues are found for a category, state "No issues found."
+5. End with a summary: total findings by severity, and an overall assessment (Approved / Approved with Minor Issues / Changes Requested).
+
+Your response should be a well-formatted markdown report.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}

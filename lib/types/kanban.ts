@@ -56,3 +56,13 @@ export interface ReorderItem {
   status: string;
   position: number;
 }
+
+export const USER_STORY_STATUSES = ["todo", "in_progress", "review", "done"] as const;
+export type UserStoryStatus = (typeof USER_STORY_STATUSES)[number];
+
+export const USER_STORY_STATUS_LABELS: Record<UserStoryStatus, string> = {
+  todo: "To Do",
+  in_progress: "In Progress",
+  review: "Review",
+  done: "Done",
+};
