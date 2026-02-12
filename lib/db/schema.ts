@@ -63,6 +63,7 @@ export const chatConversations = sqliteTable("chat_conversations", {
   label: text("label").notNull().default("Brainstorm"),
   status: text("status").default("active"), // active | generating | generated | error
   epicId: text("epic_id").references(() => epics.id),
+  provider: text("provider").default("claude-code"), // claude-code | codex
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -87,6 +88,8 @@ export const agentSessions = sqliteTable("agent_sessions", {
   userStoryId: text("user_story_id").references(() => userStories.id),
   status: text("status").default("pending"), // pending | running | completed | failed | cancelled
   mode: text("mode").default("code"), // plan | code
+  orchestrationMode: text("orchestration_mode").default("solo"), // solo | team
+  provider: text("provider").default("claude-code"), // claude-code | codex
   prompt: text("prompt"),
   logsPath: text("logs_path"),
   branchName: text("branch_name"),
