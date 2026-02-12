@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { chatConversations, chatMessages } from "@/lib/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
+import { resolveAgentProvider } from "@/lib/agent-config/providers";
 
 export async function GET(
   request: NextRequest,
@@ -21,6 +22,7 @@ export async function GET(
   if (conversations.length === 0) {
     const id = createId();
     const now = new Date().toISOString();
+    const defaultProvider = await resolveAgentProvider("chat", projectId);
 
     db.insert(chatConversations)
       .values({
@@ -28,6 +30,7 @@ export async function GET(
         projectId,
         type: "brainstorm",
         label: "Brainstorm",
+        provider: defaultProvider,
         createdAt: now,
       })
       .run();
@@ -64,6 +67,12 @@ export async function POST(
   const id = createId();
   const now = new Date().toISOString();
 
+  // Resolve default provider from agent-config if not explicitly provided
+  let provider = body.provider;
+  if (!provider) {
+    provider = await resolveAgentProvider("chat", projectId);
+  }
+
   db.insert(chatConversations)
     .values({
       id,
@@ -71,7 +80,7 @@ export async function POST(
       type: body.type || "brainstorm",
       label: body.label || "Brainstorm",
       epicId: body.epicId || null,
-      provider: body.provider || "claude-code",
+      provider,
       createdAt: now,
     })
     .run();

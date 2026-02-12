@@ -22,6 +22,11 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { ProviderSelect, type ProviderType } from "@/components/shared/ProviderSelect";
 import { MessageList } from "@/components/chat/MessageList";
 import { MessageInput } from "@/components/chat/MessageInput";
@@ -39,6 +44,7 @@ import { cn } from "@/lib/utils";
 const DEFAULT_PANEL_RATIO = 0.4;
 const MIN_PANE_WIDTH = 300;
 const DIVIDER_WIDTH = 6;
+const MOBILE_BREAKPOINT = 768;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -72,10 +78,29 @@ interface UnifiedChatPanelProps {
   onEpicCreated?: () => void;
 }
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    function check() {
+      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+    }
+
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  return isMobile;
+}
+
 export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPanelProps>(
   function UnifiedChatPanel({ projectId, children, onEpicCreated }, ref) {
     const router = useRouter();
     const containerRef = useRef<HTMLDivElement>(null);
+    const isMobile = useIsMobile();
     const [panelState, setPanelState] = useState<UnifiedPanelState>("collapsed");
     const [panelRatio, setPanelRatio] = useState(DEFAULT_PANEL_RATIO);
     const [isDragging, setIsDragging] = useState(false);
@@ -105,6 +130,11 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
 
     const storageKey = useMemo(
       () => `arij.unified-chat-panel.ratio.${projectId}`,
+      [projectId],
+    );
+
+    const panelStateStorageKey = useMemo(
+      () => `arij.unified-chat-panel.state.${projectId}`,
       [projectId],
     );
 
@@ -273,6 +303,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       [openChatConversation, createNewConversationTab],
     );
 
+    // Load persisted panel ratio
     useEffect(() => {
       if (typeof window === "undefined") {
         return;
@@ -288,12 +319,28 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       setPanelRatio(parsed);
     }, [storageKey]);
 
+    // Persist panel ratio
     useEffect(() => {
       if (typeof window === "undefined") {
         return;
       }
       window.localStorage.setItem(storageKey, panelRatio.toFixed(4));
     }, [panelRatio, storageKey]);
+
+    // Load persisted panel state
+    useEffect(() => {
+      if (typeof window === "undefined") return;
+      const saved = window.localStorage.getItem(panelStateStorageKey);
+      if (saved === "collapsed" || saved === "expanded" || saved === "hidden") {
+        setPanelState(saved);
+      }
+    }, [panelStateStorageKey]);
+
+    // Persist panel state
+    useEffect(() => {
+      if (typeof window === "undefined") return;
+      window.localStorage.setItem(panelStateStorageKey, panelState);
+    }, [panelState, panelStateStorageKey]);
 
     useEffect(() => {
       if (!isDragging || panelState !== "expanded") {
@@ -392,6 +439,196 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       });
     }
 
+    const chatPanelContent = (
+      <>
+        <div className="flex h-10 items-center justify-end gap-1 border-b border-border px-2">
+          {!isMobile && (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setPanelState("collapsed")}
+                aria-label="Collapse panel"
+              >
+                <PanelRightClose className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setPanelState("hidden")}
+                aria-label="Hide panel"
+              >
+                <EyeOff className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+        </div>
+
+        <div className="flex h-[calc(100%-2.5rem)] flex-col">
+          <div className="border-b border-border flex items-center gap-0 overflow-x-auto" data-testid="chat-tab-bar">
+            {tabConversations.map((conversation) => {
+              const isActive = conversation.id === activeId;
+              return (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  data-testid={`conversation-tab-${conversation.id}`}
+                  data-agent-type={
+                    isEpicCreationConversationAgentType(conversation.type)
+                      ? "epic_creation"
+                      : "brainstorm"
+                  }
+                  onClick={() => setActiveId(conversation.id)}
+                  className={cn(
+                    "group flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors",
+                    isActive
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {isEpicCreationConversationAgentType(conversation.type) ? (
+                    <Sparkles className="h-3 w-3" />
+                  ) : (
+                    <MessageSquare className="h-3 w-3" />
+                  )}
+                  <span>{truncateLabel(conversation.label || "Conversation")}</span>
+                  {conversation.status === "generating" && (
+                    <span
+                      data-testid={`active-indicator-${conversation.id}`}
+                      className="h-2 w-2 rounded-full bg-primary animate-pulse"
+                      aria-label="Agent active"
+                    />
+                  )}
+                  {openConversationIds.length > 1 && (
+                    <span
+                      role="button"
+                      data-testid={`close-tab-${conversation.id}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        closeTab(conversation.id);
+                      }}
+                      className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
+                    >
+                      <X className="h-3 w-3" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+
+            <button
+              type="button"
+              data-testid="new-conversation-tab"
+              onClick={() => void createNewConversationTab({ type: "brainstorm", label: "Brainstorm" })}
+              className="flex items-center justify-center w-7 h-7 mx-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              title="New conversation"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <div className="p-3 border-b border-border flex items-center justify-between gap-2">
+            <h3 className="font-medium text-sm">{activeConversation?.label || "Chat"}</h3>
+            <div className="flex items-center gap-2">
+              <ProviderSelect
+                value={activeProvider}
+                onChange={handleProviderChange}
+                codexAvailable={codexAvailable}
+                codexInstalled={codexInstalled}
+                disabled={!activeConversation || hasMessages || sending}
+                className="w-36 h-7 text-xs"
+              />
+              {isBrainstorm && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleGenerateSpec}
+                  disabled={generatingSpec}
+                  className="text-xs"
+                >
+                  {generatingSpec ? (
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                  ) : (
+                    <Sparkles className="h-3 w-3 mr-1" />
+                  )}
+                  Generate Spec & Plan
+                </Button>
+              )}
+              {canCreateEpic && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="default"
+                  onClick={handleCreateEpic}
+                  disabled={epicCreating || sending}
+                  className="text-xs"
+                >
+                  {epicCreating ? (
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                  ) : (
+                    <Sparkles className="h-3 w-3 mr-1" />
+                  )}
+                  Create Epic & Generate Stories
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-auto">
+            {isEpicCreation && !hasMessages && !loading && (
+              <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                Describe your epic idea and I&apos;ll help you structure it with user stories and acceptance criteria.
+              </div>
+            )}
+            <MessageList messages={messages} loading={loading} streamStatus={streamStatus} />
+            {pendingQuestions && (
+              <div className="px-3 pb-3">
+                <QuestionCards questions={pendingQuestions} onSubmit={answerQuestions} disabled={sending} />
+              </div>
+            )}
+          </div>
+
+          <MessageInput
+            projectId={projectId}
+            onSend={sendMessage}
+            disabled={sending || !activeConversation}
+            placeholder={isEpicCreation ? "Describe your epic idea..." : "Ask a question..."}
+          />
+        </div>
+      </>
+    );
+
+    // Mobile: use Sheet (full-screen drawer) when expanded
+    if (panelState === "expanded" && isMobile) {
+      return (
+        <div ref={containerRef} className="relative h-full w-full overflow-hidden">
+          <div className="h-full w-full">{children}</div>
+          <Sheet
+            open
+            onOpenChange={(open) => {
+              if (!open) setPanelState("collapsed");
+            }}
+          >
+            <SheetContent
+              side="right"
+              className="w-full sm:max-w-full p-0 flex flex-col"
+              showCloseButton={false}
+              data-testid="unified-panel-mobile-sheet"
+            >
+              <SheetTitle className="sr-only">Chat Panel</SheetTitle>
+              {chatPanelContent}
+            </SheetContent>
+          </Sheet>
+        </div>
+      );
+    }
+
+    // Desktop: side-by-side split pane when expanded
     if (panelState === "expanded") {
       return (
         <div ref={containerRef} className="flex h-full w-full overflow-hidden">
@@ -419,161 +656,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
             style={{ width: panelWidthPx }}
             data-testid="unified-panel-expanded"
           >
-            <div className="flex h-10 items-center justify-end gap-1 border-b border-border px-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setPanelState("collapsed")}
-                aria-label="Collapse panel"
-              >
-                <PanelRightClose className="h-4 w-4" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setPanelState("hidden")}
-                aria-label="Hide panel"
-              >
-                <EyeOff className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="flex h-[calc(100%-2.5rem)] flex-col">
-              <div className="border-b border-border flex items-center gap-0 overflow-x-auto" data-testid="chat-tab-bar">
-                {tabConversations.map((conversation) => {
-                  const isActive = conversation.id === activeId;
-                  return (
-                    <button
-                      key={conversation.id}
-                      type="button"
-                      data-testid={`conversation-tab-${conversation.id}`}
-                      data-agent-type={
-                        isEpicCreationConversationAgentType(conversation.type)
-                          ? "epic_creation"
-                          : "brainstorm"
-                      }
-                      onClick={() => setActiveId(conversation.id)}
-                      className={cn(
-                        "group flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors",
-                        isActive
-                          ? "border-primary text-foreground"
-                          : "border-transparent text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {isEpicCreationConversationAgentType(conversation.type) ? (
-                        <Sparkles className="h-3 w-3" />
-                      ) : (
-                        <MessageSquare className="h-3 w-3" />
-                      )}
-                      <span>{truncateLabel(conversation.label || "Conversation")}</span>
-                      {conversation.status === "generating" && (
-                        <span
-                          data-testid={`active-indicator-${conversation.id}`}
-                          className="h-2 w-2 rounded-full bg-primary animate-pulse"
-                          aria-label="Agent active"
-                        />
-                      )}
-                      {openConversationIds.length > 1 && (
-                        <span
-                          role="button"
-                          data-testid={`close-tab-${conversation.id}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            closeTab(conversation.id);
-                          }}
-                          className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
-                        >
-                          <X className="h-3 w-3" />
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-
-                <button
-                  type="button"
-                  data-testid="new-conversation-tab"
-                  onClick={() => void createNewConversationTab({ type: "brainstorm", label: "Brainstorm" })}
-                  className="flex items-center justify-center w-7 h-7 mx-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                  title="New conversation"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              </div>
-
-              <div className="p-3 border-b border-border flex items-center justify-between gap-2">
-                <h3 className="font-medium text-sm">{activeConversation?.label || "Chat"}</h3>
-                <div className="flex items-center gap-2">
-                  <ProviderSelect
-                    value={activeProvider}
-                    onChange={handleProviderChange}
-                    codexAvailable={codexAvailable}
-                    codexInstalled={codexInstalled}
-                    disabled={!activeConversation || hasMessages || sending}
-                    className="w-36 h-7 text-xs"
-                  />
-                  {isBrainstorm && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={handleGenerateSpec}
-                      disabled={generatingSpec}
-                      className="text-xs"
-                    >
-                      {generatingSpec ? (
-                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                      ) : (
-                        <Sparkles className="h-3 w-3 mr-1" />
-                      )}
-                      Generate Spec & Plan
-                    </Button>
-                  )}
-                  {canCreateEpic && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="default"
-                      onClick={handleCreateEpic}
-                      disabled={epicCreating || sending}
-                      className="text-xs"
-                    >
-                      {epicCreating ? (
-                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                      ) : (
-                        <Sparkles className="h-3 w-3 mr-1" />
-                      )}
-                      Create Epic & Generate Stories
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-auto">
-                {isEpicCreation && !hasMessages && !loading && (
-                  <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                    Describe your epic idea and I&apos;ll help you structure it with user stories and acceptance criteria.
-                  </div>
-                )}
-                <MessageList messages={messages} loading={loading} streamStatus={streamStatus} />
-                {pendingQuestions && (
-                  <div className="px-3 pb-3">
-                    <QuestionCards questions={pendingQuestions} onSubmit={answerQuestions} disabled={sending} />
-                  </div>
-                )}
-              </div>
-
-              <MessageInput
-                projectId={projectId}
-                onSend={sendMessage}
-                disabled={sending || !activeConversation}
-                placeholder={isEpicCreation ? "Describe your epic idea..." : "Ask a question..."}
-              />
-            </div>
+            {chatPanelContent}
           </aside>
         </div>
       );
