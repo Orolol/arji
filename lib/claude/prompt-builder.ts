@@ -940,6 +940,133 @@ Your response should be a well-formatted markdown report.
   return parts.filter(Boolean).join("\n");
 }
 
+/**
+ * Builds the prompt for a custom review agent (plan mode).
+ * Uses the custom agent's system prompt instead of a built-in checklist.
+ */
+export function buildCustomReviewPrompt(
+  project: PromptProject,
+  documents: PromptDocument[],
+  epic: PromptEpic,
+  story: PromptUserStory,
+  customAgentName: string,
+  customSystemPrompt: string,
+  globalPrompt?: string | null,
+): string {
+  const parts: string[] = [];
+
+  parts.push(globalSection(globalPrompt));
+  parts.push(`# Project: ${project.name}\n`);
+  parts.push(section("Project Specification", project.spec));
+  parts.push(documentsSection(documents));
+
+  // Epic context
+  parts.push(`## Epic Context\n`);
+  parts.push(`### ${epic.title}\n`);
+  if (epic.description) {
+    parts.push(`${epic.description.trim()}\n`);
+  }
+
+  // Ticket details
+  parts.push(`## Ticket Under Review\n`);
+  parts.push(`### ${story.title}\n`);
+  if (story.description) {
+    parts.push(`${story.description.trim()}\n`);
+  }
+  if (story.acceptanceCriteria) {
+    parts.push(`**Acceptance Criteria:**\n`);
+    parts.push(`${story.acceptanceCriteria.trim()}\n`);
+  }
+
+  // Custom review instructions
+  parts.push(`## ${customAgentName} Review Criteria\n`);
+  parts.push(`${customSystemPrompt.trim()}\n`);
+
+  parts.push(`\n## Instructions
+
+You are performing a **${customAgentName}** review on the code changes for the ticket described above.
+
+1. Read the relevant source files in the current working directory.
+2. Evaluate the code against the review criteria above.
+3. Produce a structured report with your findings.
+4. If no issues are found for a category, state "No issues found."
+5. End with a summary: total findings by severity, and an overall assessment (Approved / Approved with Minor Issues / Changes Requested).
+
+Your response should be a well-formatted markdown report.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}
+
+/**
+ * Builds the prompt for a custom epic-level review agent (plan mode).
+ */
+export function buildCustomEpicReviewPrompt(
+  project: PromptProject,
+  documents: PromptDocument[],
+  epic: PromptEpic,
+  userStories: PromptUserStory[],
+  customAgentName: string,
+  customSystemPrompt: string,
+  globalPrompt?: string | null,
+): string {
+  const parts: string[] = [];
+
+  parts.push(globalSection(globalPrompt));
+  parts.push(`# Project: ${project.name}\n`);
+  parts.push(section("Project Specification", project.spec));
+  parts.push(documentsSection(documents));
+
+  // Epic details
+  parts.push(`## Epic Under Review\n`);
+  parts.push(`### ${epic.title}\n`);
+  if (epic.description) {
+    parts.push(`${epic.description.trim()}\n`);
+  }
+
+  // All user stories
+  if (userStories.length > 0) {
+    parts.push(`### User Stories\n`);
+    const storyLines = userStories.map((us) => {
+      const lines: string[] = [];
+      lines.push(`- **${us.title}**`);
+      if (us.description) {
+        lines.push(`  ${us.description.trim()}`);
+      }
+      if (us.acceptanceCriteria) {
+        lines.push(`  **Acceptance criteria:**`);
+        const criteria = us.acceptanceCriteria
+          .trim()
+          .split("\n")
+          .map((line) => `  ${line}`)
+          .join("\n");
+        lines.push(criteria);
+      }
+      return lines.join("\n");
+    });
+    parts.push(storyLines.join("\n\n") + "\n");
+  }
+
+  // Custom review instructions
+  parts.push(`## ${customAgentName} Review Criteria\n`);
+  parts.push(`${customSystemPrompt.trim()}\n`);
+
+  parts.push(`\n## Instructions
+
+You are performing a **${customAgentName}** review on the entire epic described above, covering all user stories.
+
+1. Read the relevant source files in the current working directory.
+2. Evaluate the code against the review criteria above.
+3. Produce a structured report with your findings.
+4. If no issues are found for a category, state "No issues found."
+5. End with a summary: total findings by severity, and an overall assessment (Approved / Approved with Minor Issues / Changes Requested).
+
+Your response should be a well-formatted markdown report.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // 10. Merge Conflict Resolution Prompt
 // ---------------------------------------------------------------------------
