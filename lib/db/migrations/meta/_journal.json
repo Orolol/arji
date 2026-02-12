@@ -29,6 +29,13 @@
       "when": 1770913774657,
       "tag": "0003_conscious_jigsaw",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1770936578767,
+      "tag": "0004_fixed_spirit",
+      "breakpoints": true
     }
   ]
 }
