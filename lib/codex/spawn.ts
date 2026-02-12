@@ -35,8 +35,11 @@ export function spawnCodex(options: CodexOptions): SpawnedClaude {
   // Sandbox mode
   if (mode === "code") {
     args.push("--dangerously-bypass-approvals-and-sandbox");
+  } else if (mode === "analyze") {
+    // analyze → can read + write workspace files (e.g. arji.json)
+    args.push("-s", "workspace-write");
   } else {
-    // plan / analyze → read-only
+    // plan → read-only
     args.push("-s", "read-only");
   }
 
@@ -45,7 +48,7 @@ export function spawnCodex(options: CodexOptions): SpawnedClaude {
   args.push("-C", effectiveCwd);
 
   // Common flags
-  args.push("--skip-git-repo-check", "--ephemeral");
+  args.push("--skip-git-repo-check");
 
   // Capture final message to file (avoids mixing with banners/logs)
   args.push("-o", outputFile);

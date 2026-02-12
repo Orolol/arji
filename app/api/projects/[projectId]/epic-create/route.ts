@@ -7,6 +7,8 @@ import { spawnClaude } from "@/lib/claude/spawn";
 import { buildEpicCreationPrompt } from "@/lib/claude/prompt-builder";
 import { readArjiJson } from "@/lib/sync/arji-json";
 import { exportArjiJson, tryExportArjiJson } from "@/lib/sync/export";
+import { getProvider } from "@/lib/providers";
+import type { ProviderType } from "@/lib/providers";
 
 export async function POST(
   request: NextRequest,
@@ -64,16 +66,27 @@ export async function POST(
     // 2. Export current arji.json so Claude sees up-to-date data
     await exportArjiJson(projectId);
 
-    // 3. Spawn Claude in analyze mode (can read + write files)
-    console.log("[epic-create] Spawning Claude CLI in analyze mode, cwd:", project.gitRepoPath);
+    // Determine provider from conversation
+    let provider: ProviderType = "claude-code";
+    if (body.conversationId) {
+      const conv = db.select().from(chatConversations).where(eq(chatConversations.id, body.conversationId)).get();
+      if (conv?.provider === "codex") {
+        provider = "codex";
+      }
+    }
 
-    const { promise } = spawnClaude({
-      mode: "analyze",
+    // 3. Spawn agent in analyze/code mode (can read + write files)
+    console.log(`[epic-create] Spawning ${provider} CLI, cwd:`, project.gitRepoPath);
+
+    const agentProvider = getProvider(provider);
+    const session = agentProvider.spawn({
+      sessionId: `epic-create-${createId()}`,
       prompt,
       cwd: project.gitRepoPath,
+      mode: "analyze",
     });
 
-    const result = await promise;
+    const result = await session.promise;
 
     if (!result.success) {
       // Update conversation status to "error"

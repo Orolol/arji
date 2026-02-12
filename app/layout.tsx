@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { LayoutDashboard, Settings, FolderKanban } from "lucide-react";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { AgentConfigButton } from "@/components/agent-config/AgentConfigButton";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff2",
@@ -53,6 +54,7 @@ export default function RootLayout({
                     <LayoutDashboard className="h-5 w-5" />
                   </Link>
                 </div>
+                <AgentConfigButton />
                 <ThemeToggle />
                 <Link
                   href="/settings"

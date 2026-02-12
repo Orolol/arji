@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastSyncedAt": "2026-02-12T16:08:47.763Z",
+  "lastSyncedAt": "2026-02-12T19:34:47.542Z",
   "project": {
     "name": "Arij",
     "description": "A local, AI-first project orchestrator that provides a web interface for managing multi-project workflows with Claude Code as the execution engine. It covers the full project lifecycle: ideation, specification, kanban-based planning, automated code generation via Claude Code CLI, real-time agent monitoring, and release management.",
@@ -9,7 +9,7 @@
   },
   "epics": [
     {
-      "id": "YSRcTJ44AneP",
+      "id": "vAR_xx1Qr69i",
       "title": "Project Import (Existing Codebase Analysis)",
       "description": "Import an existing project by pointing to a local directory. Claude Code analyzes the codebase and generates epics/user stories with confidence scores. User can preview and edit before importing.",
       "priority": 0,
@@ -18,7 +18,7 @@
       "branchName": null,
       "user_stories": [
         {
-          "id": "yAaGXj_KBH8M",
+          "id": "VFn1DLHMbWuQ",
           "title": "Select project folder for import",
           "description": "As a developer, I want to provide the path to an existing project folder, so that Arij can analyze it.",
           "acceptance_criteria": "- [x] Path input field with folder icon\n- [x] Analyze button disabled when path is empty\n- [x] Loading state during analysis\n- [ ] Path validation (directory exists)\n- [ ] Tests",
@@ -26,7 +26,7 @@
           "position": 0
         },
         {
-          "id": "iRH3rRSBFGYG",
+          "id": "n90yheKiA4f9",
           "title": "Analyze existing codebase with Claude Code",
           "description": "As a developer, I want Claude Code to scan my codebase and identify epics, user stories, and their statuses, so that I can start from an accurate project state.",
           "acceptance_criteria": "- [x] Claude Code spawned in analyze mode with restricted tools\n- [x] Structured prompt requesting JSON output with project info, epics, US\n- [x] Confidence scores and evidence for each status assessment\n- [x] Robust JSON parsing with fallbacks\n- [ ] Tests for import API and JSON parsing",
@@ -34,7 +34,7 @@
           "position": 1
         },
         {
-          "id": "iMmVruLmWAfL",
+          "id": "fp7B8i4RCOKG",
           "title": "Preview and edit imported data before saving",
           "description": "As a developer, I want to review and adjust the detected epics and user stories before they are saved, so that the import is accurate.",
           "acceptance_criteria": "- [x] Editable project name and description\n- [x] Epic list with inline editing and delete\n- [x] User stories displayed within epics\n- [x] Status badges with color coding\n- [x] Confidence percentage display\n- [x] Validate & Import button creates project + epics + US in DB\n- [ ] Tests",
@@ -44,16 +44,91 @@
       ]
     },
     {
-      "id": "rLeT3OSozRSp",
-      "title": "Agent Teams & Codex Provider Integration",
-      "description": "Two-part feature: (1) Agent Teams mode that leverages Claude Code's native Task tool to delegate multiple tickets to sub-agents in a single session, and (2) OpenAI Codex integration as an alternative AI provider alongside Claude Code.\n\n## Implementation Plan\n\n### Part A — Agent Teams (Claude Code Only)\n\n**Schema & Data Layer:**\n- Add `orchestrationMode` column to `agentSessions` table (`'solo' | 'team'`, default `'solo'`)\n- Team mode is exclusive to Claude Code (Codex has no equivalent sub-agent delegation)\n\n**Prompt Builder:**\n- New `buildTeamBuildPrompt()` function that describes all selected epics with their worktree paths\n- Instructs Claude Code to act as a team lead and use the `Task` tool to spawn sub-agents per ticket\n- Lets CC decide team composition and size\n\n**Build Route Changes:**\n- When `team=true` in the batch build request, pre-create all git worktrees for selected epics\n- Spawn a single CC session from the main repo root (not inside a worktree)\n- Add `Task` to the `--allowedTools` list for team mode\n- Track as a single `agentSession` with `orchestrationMode: 'team'`\n- On completion, update all associated epics' statuses\n\n**UI — Build Toolbar:**\n- Add 'Team mode' checkbox in the build toolbar, visible when 2+ epics are selected\n- Checkbox disabled when fewer than 2 epics selected or when provider is Codex\n- Tooltip explains team mode behavior\n\n### Part B — Codex Provider Integration\n\n**Provider Abstraction Layer:**\n- New `lib/providers/` directory with provider interface (`AgentProvider`)\n- `lib/providers/claude-code.ts` — wraps existing CC spawn logic\n- `lib/providers/codex.ts` — wraps `@openai/codex-sdk` using `Codex` class, `startThread()`, `runStreamed()` for streaming events\n- `lib/providers/index.ts` — factory function `getProvider(type: 'claude-code' | 'codex')`\n- Codex provider uses `workingDirectory` option on `startThread()` for worktree paths\n\n**Schema Changes:**\n- Add `provider` column to `agentSessions` (`'claude-code' | 'codex'`, default `'claude-code'`)\n- Add `provider` column to `chatConversations` (if table exists) or chat messages\n\n**Process Manager Generalization:**\n- Refactor `lib/claude/process-manager.ts` to accept provider-agnostic session handles\n- Codex sessions tracked via thread ID, CC sessions tracked via PID\n- Unified start/cancel/status interface\n\n**Build & Review Routes:**\n- Build route accepts `provider` parameter, dispatches via provider factory\n- Review route accepts `provider` parameter\n- Send-to-dev route accepts `provider` parameter\n\n**UI — Provider Selector:**\n- Dropdown in build toolbar to choose between Claude Code and Codex\n- Provider selector in Send to Dev dialog\n- Provider selector in Agent Review dialog\n- Provider toggle in chat header (locked/disabled after first message in conversation)\n- Codex option disabled with tooltip if no API key configured\n\n**Settings:**\n- Add Codex API key field to Settings page\n- Stored in `settings` table with key `codex_api_key`\n- Validated on save (non-empty string check)\n\n**Codex SDK Integration Details:**\n- Install `@openai/codex-sdk` dependency\n- Use `new Codex({ env: { CODEX_API_KEY: ... } })` with API key from settings\n- `startThread({ workingDirectory })` for worktree-scoped execution\n- `runStreamed()` for streaming events, map to unified event format\n- Thread IDs stored in session metadata for resumption support",
-      "priority": 2,
+      "id": "_iXuiyo_bsrs",
+      "title": "Agent Configuration Side Panel & Custom Review Agents",
+      "description": "Dedicated side panel for configuring agent prompts (global + per-project override), creating custom review agents, and setting the default AI provider per agent type.\n\n## Implementation Plan\n\n### Phase 1 — Schema & Data Layer\n\n**Agent Prompts Table:**\n- Add `agentPrompts` table: id, agentType (text: 'build', 'review_security', 'review_code', 'review_compliance', 'chat', 'spec_generation', 'team_build', 'ticket_build'), systemPrompt (text), scope ('global' | projectId), createdAt, updatedAt\n- Global prompts have scope='global', project overrides store the projectId\n- When resolving a prompt, project-scoped prompt takes precedence over global, which takes precedence over built-in defaults\n\n**Custom Review Agents Table:**\n- Add `customReviewAgents` table: id, name (text), systemPrompt (text), scope ('global' | projectId), position (integer), isEnabled (integer, default 1), createdAt, updatedAt\n- Custom review agents are user-defined and appear alongside the 3 built-in review types\n\n**Agent Provider Defaults Table:**\n- Add `agentProviderDefaults` table: id, agentType (text), provider ('claude-code' | 'codex'), scope ('global' | projectId), createdAt, updatedAt\n- Allows setting CC or Codex as default per agent type, with project override\n\n### Phase 2 — API Routes\n\n**Agent Prompts:**\n- `GET /api/agent-config/prompts` — list all global agent prompts\n- `GET /api/projects/[projectId]/agent-config/prompts` — list project-scoped prompts (merged with global defaults)\n- `PUT /api/agent-config/prompts/[agentType]` — upsert global prompt for an agent type\n- `PUT /api/projects/[projectId]/agent-config/prompts/[agentType]` — upsert project override\n- `DELETE /api/projects/[projectId]/agent-config/prompts/[agentType]` — remove project override (fall back to global)\n\n**Custom Review Agents:**\n- `GET /api/agent-config/review-agents` — list global custom review agents\n- `GET /api/projects/[projectId]/agent-config/review-agents` — list project-scoped + global review agents\n- `POST /api/agent-config/review-agents` — create a custom review agent (global)\n- `POST /api/projects/[projectId]/agent-config/review-agents` — create project-scoped review agent\n- `PATCH /api/agent-config/review-agents/[agentId]` — update name, prompt, enabled status\n- `DELETE /api/agent-config/review-agents/[agentId]` — delete a custom review agent\n\n**Agent Provider Defaults:**\n- `GET /api/agent-config/providers` — list global provider defaults per agent type\n- `PUT /api/agent-config/providers/[agentType]` — set global default provider for agent type\n- `PUT /api/projects/[projectId]/agent-config/providers/[agentType]` — set project override\n\n### Phase 3 — Prompt Builder Integration\n- Refactor all prompt builder functions to load custom prompts from DB before composing\n- Resolution order: project override → global custom → built-in default\n- Update `buildReviewPrompt` to accept custom review agent prompts in addition to built-in types\n- Update `buildBuildPrompt`, `buildChatPrompt`, `buildSpecPrompt`, `buildTeamBuildPrompt`, `buildTicketBuildPrompt` to use configurable prompts\n\n### Phase 4 — Side Panel UI\n- New `AgentConfigPanel` component accessible from the main sidebar\n- Three tabs: **Agent Prompts**, **Review Agents**, **Provider Defaults**\n- Agent Prompts tab: list of agent types with expandable prompt editors, toggle between global/project scope\n- Review Agents tab: list of built-in (read-only name) + custom review agents, each with name/prompt fields, add/delete actions\n- Provider Defaults tab: per-agent-type dropdown to select CC or Codex as default\n- Panel slides in from the left sidebar, can be toggled open/closed\n\n### Phase 5 — Review Dialog Integration\n- Update the Agent Review dialog on the story detail page to include custom review agents alongside the 3 built-in types\n- Custom agents displayed as additional checkboxes with their name\n- Each selected custom agent dispatches a plan-mode agent with the custom prompt\n- Agent output posted as a comment with the custom agent's name as label",
+      "priority": 0,
       "status": "done",
       "position": 1,
       "branchName": null,
       "user_stories": [
         {
-          "id": "2oiRW1aYAD95",
+          "id": "tx-Zl7tpROpQ",
+          "title": "As a developer, I want database tables for agent prompts, custom review agents, and provider defaults so that agent configuration is persisted",
+          "description": "Add three new tables to the Drizzle schema: `agentPrompts` (id, agentType, systemPrompt, scope, createdAt, updatedAt), `customReviewAgents` (id, name, systemPrompt, scope, position, isEnabled, createdAt, updatedAt), and `agentProviderDefaults` (id, agentType, provider, scope, createdAt, updatedAt). The `scope` field is 'global' for app-wide config or a projectId for project overrides. Generate and push the migration.",
+          "acceptance_criteria": "- [ ] `agentPrompts` table added to `lib/db/schema.ts` with agentType, systemPrompt, scope fields\n- [ ] `customReviewAgents` table added with name, systemPrompt, scope, position, isEnabled fields\n- [ ] `agentProviderDefaults` table added with agentType, provider, scope fields\n- [ ] Unique constraint on (agentType, scope) for agentPrompts and agentProviderDefaults\n- [ ] Unique constraint on (name, scope) for customReviewAgents\n- [ ] Drizzle migration generated and pushed successfully\n- [ ] TypeScript types exported for all new tables",
+          "status": "review",
+          "position": 0
+        },
+        {
+          "id": "UtjggzzkB6Hv",
+          "title": "As a developer, I want API routes for managing agent prompts so that I can configure system prompts per agent type globally and per project",
+          "description": "Create CRUD API routes for agent prompts. `GET /api/agent-config/prompts` returns all global prompts. `PUT /api/agent-config/prompts/[agentType]` upserts a global prompt. `GET /api/projects/[projectId]/agent-config/prompts` returns merged prompts (project override > global > built-in). `PUT/DELETE` on project-scoped route manages overrides. Built-in defaults are returned when no custom prompt exists.",
+          "acceptance_criteria": "- [ ] `GET /api/agent-config/prompts` returns all global agent prompts with built-in defaults for missing types\n- [ ] `PUT /api/agent-config/prompts/[agentType]` upserts global prompt (validates agentType is known)\n- [ ] `GET /api/projects/[projectId]/agent-config/prompts` returns merged view with project overrides\n- [ ] `PUT /api/projects/[projectId]/agent-config/prompts/[agentType]` upserts project-scoped override\n- [ ] `DELETE /api/projects/[projectId]/agent-config/prompts/[agentType]` removes project override\n- [ ] Consistent `{ data }` / `{ error }` response shape\n- [ ] Known agent types: build, review_security, review_code, review_compliance, chat, spec_generation, team_build, ticket_build",
+          "status": "review",
+          "position": 1
+        },
+        {
+          "id": "WrhNpCAaTHeQ",
+          "title": "As a developer, I want API routes for custom review agents so that I can create, edit, and delete specialized review agents",
+          "description": "Create CRUD API routes for custom review agents. `POST /api/agent-config/review-agents` creates a global custom review agent with a name and system prompt. `PATCH` updates name/prompt/enabled. `DELETE` removes the agent. Project-scoped routes allow project-specific review agents. `GET` returns combined list of global + project-scoped agents.",
+          "acceptance_criteria": "- [ ] `GET /api/agent-config/review-agents` returns all global custom review agents\n- [ ] `POST /api/agent-config/review-agents` creates a custom review agent with name and systemPrompt\n- [ ] `PATCH /api/agent-config/review-agents/[agentId]` updates name, systemPrompt, or isEnabled\n- [ ] `DELETE /api/agent-config/review-agents/[agentId]` deletes a custom review agent\n- [ ] `GET /api/projects/[projectId]/agent-config/review-agents` returns global + project-scoped agents\n- [ ] `POST /api/projects/[projectId]/agent-config/review-agents` creates project-scoped agent\n- [ ] Name uniqueness validated within scope\n- [ ] Consistent `{ data }` / `{ error }` response shape",
+          "status": "review",
+          "position": 2
+        },
+        {
+          "id": "Devxf446SeBA",
+          "title": "As a developer, I want API routes for agent provider defaults so that I can set Claude Code or Codex as the default per agent type",
+          "description": "Create API routes for managing default provider per agent type. `GET /api/agent-config/providers` returns all global defaults. `PUT /api/agent-config/providers/[agentType]` sets the global default provider for an agent type. Project-scoped routes allow per-project overrides. Defaults to 'claude-code' when no configuration exists.",
+          "acceptance_criteria": "- [ ] `GET /api/agent-config/providers` returns provider defaults for all agent types\n- [ ] `PUT /api/agent-config/providers/[agentType]` sets global default provider ('claude-code' or 'codex')\n- [ ] `PUT /api/projects/[projectId]/agent-config/providers/[agentType]` sets project-scoped override\n- [ ] `GET /api/projects/[projectId]/agent-config/providers` returns merged defaults (project > global > 'claude-code')\n- [ ] Validates provider value is 'claude-code' or 'codex'\n- [ ] Consistent `{ data }` / `{ error }` response shape",
+          "status": "review",
+          "position": 3
+        },
+        {
+          "id": "pkFmc04YaYAg",
+          "title": "As a developer, I want the prompt builder to use configurable prompts so that custom agent prompts are injected into all Claude Code sessions",
+          "description": "Refactor all prompt builder functions (`buildBuildPrompt`, `buildChatPrompt`, `buildSpecPrompt`, `buildTeamBuildPrompt`, `buildTicketBuildPrompt`, `buildReviewPrompt`) to load custom prompts from the database before composing. Resolution order: project-scoped override → global custom prompt → existing built-in default. Update `buildReviewPrompt` to accept custom review agent prompts alongside built-in review types.",
+          "acceptance_criteria": "- [ ] All prompt builders accept an optional custom system prompt parameter\n- [ ] New `resolveAgentPrompt(agentType, projectId?)` helper queries DB and returns the resolved prompt\n- [ ] Resolution order: project override → global custom → built-in default\n- [ ] `buildReviewPrompt` supports custom review agent types with their own system prompts\n- [ ] Build, chat, spec, team build, and ticket build prompt builders all use `resolveAgentPrompt`\n- [ ] Built-in default prompts extracted as constants for fallback\n- [ ] No behavioral change when no custom prompts are configured (backwards compatible)",
+          "status": "review",
+          "position": 4
+        },
+        {
+          "id": "74Bovpp-m5Yn",
+          "title": "As a developer, I want an Agent Configuration side panel so that I can manage agent prompts, review agents, and provider defaults from a dedicated UI",
+          "description": "Create an `AgentConfigPanel` component that slides in from the main sidebar. The panel has three tabs: Agent Prompts (list of agent types with expandable textarea editors, global/project scope toggle), Review Agents (list of built-in + custom agents with add/edit/delete), and Provider Defaults (per-agent dropdown to select CC or Codex). Add a sidebar icon/button to toggle the panel. When inside a project view, show project-scoped config with option to fall back to global.",
+          "acceptance_criteria": "- [ ] `AgentConfigPanel` component renders as a slide-in panel from the sidebar\n- [ ] Sidebar button/icon to toggle the panel open/closed\n- [ ] Agent Prompts tab lists all agent types with expandable prompt editors\n- [ ] Each prompt editor shows built-in default as placeholder, custom prompt as value\n- [ ] Scope toggle (Global / Project) when inside a project view\n- [ ] Review Agents tab lists built-in agents (name read-only) and custom agents (editable)\n- [ ] Add button to create a new custom review agent with name and prompt fields\n- [ ] Delete button on custom review agents with confirmation\n- [ ] Provider Defaults tab shows dropdown per agent type with Claude Code / Codex options\n- [ ] All changes saved via API with loading states and success/error feedback\n- [ ] Panel uses shadcn/ui components consistent with existing UI",
+          "status": "review",
+          "position": 5
+        },
+        {
+          "id": "jHak6e2XpW0D",
+          "title": "As a developer, I want custom review agents to appear in the Agent Review dialog so that I can trigger specialized reviews on tickets",
+          "description": "Update the Agent Review dialog on the story detail page to dynamically load custom review agents from the API alongside the 3 built-in review types (Security, Code Review, Compliance). Custom agents are displayed as additional checkboxes with their name. Each selected custom agent dispatches a plan-mode agent with its custom system prompt. Agent output is posted as a comment with the custom agent's name as label.",
+          "acceptance_criteria": "- [ ] Agent Review dialog fetches custom review agents from API on open\n- [ ] Custom agents displayed as checkboxes alongside built-in review types\n- [ ] Disabled custom agents (isEnabled=false) are hidden from the dialog\n- [ ] Review API route (`POST .../review`) accepts custom agent IDs in addition to built-in type strings\n- [ ] Each selected custom agent dispatches a plan-mode session with its system prompt\n- [ ] Agent output posted as comment with custom agent name as label (e.g., 'UI Review')\n- [ ] Built-in review types continue to work unchanged",
+          "status": "review",
+          "position": 6
+        },
+        {
+          "id": "Uap-yetNoenX",
+          "title": "As a developer, I want provider defaults to be used automatically in build, review, and chat flows so that I don't have to select the provider each time",
+          "description": "Update all action flows (build toolbar, send-to-dev, agent review, chat) to read the configured default provider for the relevant agent type before dispatching. The provider selector UI should pre-select the configured default instead of always defaulting to Claude Code. Manual selection still overrides the default for that session.",
+          "acceptance_criteria": "- [ ] Build toolbar pre-selects the configured default provider for 'build' agent type\n- [ ] Send-to-dev dialog pre-selects the default provider for 'ticket_build' agent type\n- [ ] Agent Review dialog uses the default provider for each review agent type\n- [ ] Chat panel pre-selects the default provider for 'chat' agent type\n- [ ] Manual provider selection overrides the default for that action\n- [ ] Falls back to 'claude-code' when no default is configured\n- [ ] Provider defaults resolved with project > global > 'claude-code' precedence",
+          "status": "review",
+          "position": 7
+        }
+      ]
+    },
+    {
+      "id": "4wJJ42xg9gz3",
+      "title": "Agent Teams & Codex Provider Integration",
+      "description": "Two-part feature: (1) Agent Teams mode that leverages Claude Code's native Task tool to delegate multiple tickets to sub-agents in a single session, and (2) OpenAI Codex integration as an alternative AI provider alongside Claude Code.\n\n## Implementation Plan\n\n### Part A — Agent Teams (Claude Code Only)\n\n**Schema & Data Layer:**\n- Add `orchestrationMode` column to `agentSessions` table (`'solo' | 'team'`, default `'solo'`)\n- Team mode is exclusive to Claude Code (Codex has no equivalent sub-agent delegation)\n\n**Prompt Builder:**\n- New `buildTeamBuildPrompt()` function that describes all selected epics with their worktree paths\n- Instructs Claude Code to act as a team lead and use the `Task` tool to spawn sub-agents per ticket\n- Lets CC decide team composition and size\n\n**Build Route Changes:**\n- When `team=true` in the batch build request, pre-create all git worktrees for selected epics\n- Spawn a single CC session from the main repo root (not inside a worktree)\n- Add `Task` to the `--allowedTools` list for team mode\n- Track as a single `agentSession` with `orchestrationMode: 'team'`\n- On completion, update all associated epics' statuses\n\n**UI — Build Toolbar:**\n- Add 'Team mode' checkbox in the build toolbar, visible when 2+ epics are selected\n- Checkbox disabled when fewer than 2 epics selected or when provider is Codex\n- Tooltip explains team mode behavior\n\n### Part B — Codex Provider Integration\n\n**Provider Abstraction Layer:**\n- New `lib/providers/` directory with provider interface (`AgentProvider`)\n- `lib/providers/claude-code.ts` — wraps existing CC spawn logic\n- `lib/providers/codex.ts` — wraps `@openai/codex-sdk` using `Codex` class, `startThread()`, `runStreamed()` for streaming events\n- `lib/providers/index.ts` — factory function `getProvider(type: 'claude-code' | 'codex')`\n- Codex provider uses `workingDirectory` option on `startThread()` for worktree paths\n\n**Schema Changes:**\n- Add `provider` column to `agentSessions` (`'claude-code' | 'codex'`, default `'claude-code'`)\n- Add `provider` column to `chatConversations` (if table exists) or chat messages\n\n**Process Manager Generalization:**\n- Refactor `lib/claude/process-manager.ts` to accept provider-agnostic session handles\n- Codex sessions tracked via thread ID, CC sessions tracked via PID\n- Unified start/cancel/status interface\n\n**Build & Review Routes:**\n- Build route accepts `provider` parameter, dispatches via provider factory\n- Review route accepts `provider` parameter\n- Send-to-dev route accepts `provider` parameter\n\n**UI — Provider Selector:**\n- Dropdown in build toolbar to choose between Claude Code and Codex\n- Provider selector in Send to Dev dialog\n- Provider selector in Agent Review dialog\n- Provider toggle in chat header (locked/disabled after first message in conversation)\n- Codex option disabled with tooltip if no API key configured\n\n**Settings:**\n- Add Codex API key field to Settings page\n- Stored in `settings` table with key `codex_api_key`\n- Validated on save (non-empty string check)\n\n**Codex SDK Integration Details:**\n- Install `@openai/codex-sdk` dependency\n- Use `new Codex({ env: { CODEX_API_KEY: ... } })` with API key from settings\n- `startThread({ workingDirectory })` for worktree-scoped execution\n- `runStreamed()` for streaming events, map to unified event format\n- Thread IDs stored in session metadata for resumption support",
+      "priority": 0,
+      "status": "done",
+      "position": 2,
+      "branchName": null,
+      "user_stories": [
+        {
+          "id": "2WI6CAV-8z1G",
           "title": "As a developer, I want an orchestrationMode column on agent sessions so that team-mode builds are tracked separately from solo builds",
           "description": "Add `orchestrationMode` column to the `agentSessions` table in the Drizzle schema with values 'solo' (default) or 'team'. This column distinguishes single-epic builds from multi-epic team-mode sessions. Add `provider` column to `agentSessions` with values 'claude-code' (default) or 'codex'. Push the schema changes.",
           "acceptance_criteria": "- [ ] `orchestrationMode` column added to `agentSessions` with type text, default 'solo'\n- [ ] `provider` column added to `agentSessions` with type text, default 'claude-code'\n- [ ] `provider` column added to chat-related table (chatMessages or chatConversations) if applicable\n- [ ] Drizzle migration generated and pushed successfully\n- [ ] Existing agent session queries still work (default values applied)\n- [ ] TypeScript types updated to reflect new columns",
@@ -61,7 +136,7 @@
           "position": 0
         },
         {
-          "id": "2laGhKFTJPfT",
+          "id": "cgMW3seh5ZMS",
           "title": "As a developer, I want a provider abstraction layer so that Claude Code and Codex can be used interchangeably for builds and reviews",
           "description": "Create `lib/providers/` directory with a unified `AgentProvider` interface. Implement `claude-code.ts` wrapping the existing CC spawn logic and `codex.ts` wrapping `@openai/codex-sdk`. Add a factory function `getProvider(type)` that returns the appropriate provider. Install `@openai/codex-sdk` as a dependency.",
           "acceptance_criteria": "- [ ] `lib/providers/types.ts` defines `AgentProvider` interface with `spawn`, `cancel`, `getStatus` methods\n- [ ] `lib/providers/claude-code.ts` wraps existing CC spawn logic, implements `AgentProvider`\n- [ ] `lib/providers/codex.ts` wraps `@openai/codex-sdk` using `Codex` class, `startThread()`, `runStreamed()`\n- [ ] `lib/providers/index.ts` exports `getProvider('claude-code' | 'codex')` factory\n- [ ] `@openai/codex-sdk` added to package.json dependencies\n- [ ] Codex provider uses `workingDirectory` option on `startThread()` for worktree paths\n- [ ] Codex provider reads API key from settings table",
@@ -69,7 +144,7 @@
           "position": 1
         },
         {
-          "id": "PC2XRYOn_NmK",
+          "id": "j77dMFfKjrlp",
           "title": "As a developer, I want a team build prompt so that Claude Code can act as team lead and delegate tickets to sub-agents",
           "description": "Create `buildTeamBuildPrompt()` in `lib/claude/prompt-builder.ts`. The prompt describes all selected epics with their worktree paths, user stories, and acceptance criteria. It instructs Claude Code to act as a team lead, use the `Task` tool to spawn sub-agents, and lets CC decide team composition and task allocation.",
           "acceptance_criteria": "- [ ] `buildTeamBuildPrompt()` function added to prompt-builder.ts\n- [ ] Prompt includes project spec and global prompt\n- [ ] Prompt lists all selected epics with their titles, descriptions, and user stories\n- [ ] Each epic's worktree path is included so sub-agents know where to work\n- [ ] Prompt instructs CC to use `Task` tool for delegation\n- [ ] Prompt explicitly tells CC to decide team size and composition\n- [ ] Prompt includes build instructions (commit conventions, testing expectations)",
@@ -77,7 +152,7 @@
           "position": 2
         },
         {
-          "id": "l4D9kbmzgVDa",
+          "id": "gr169dFuJ-v1",
           "title": "As a developer, I want the batch build route to support team mode so that a single CC session manages multiple epics via sub-agents",
           "description": "Modify the batch build API route (`app/api/projects/[projectId]/build/route.ts`). When `team=true` is passed, pre-create all git worktrees for the selected epics, then spawn ONE Claude Code session from the main repo root with `Task` in `--allowedTools`. Track as a single `agentSession` with `orchestrationMode: 'team'`. On completion, update all associated epics' statuses.",
           "acceptance_criteria": "- [ ] Build route accepts `team: boolean` parameter in request body\n- [ ] When `team=true`, all selected epic worktrees are pre-created before CC spawn\n- [ ] Single CC session spawned from main repo root (not inside a worktree)\n- [ ] `Task` added to `--allowedTools` for team-mode sessions\n- [ ] Session created with `orchestrationMode: 'team'` in database\n- [ ] All selected epic IDs associated with the team session\n- [ ] On session completion, all associated epics' statuses are updated\n- [ ] When `team=false` or absent, existing solo-mode behavior preserved",
@@ -85,7 +160,7 @@
           "position": 3
         },
         {
-          "id": "yDSC6MlbkIj5",
+          "id": "Ea5JQEGJ4Yuw",
           "title": "As a developer, I want the build route and action routes to accept a provider parameter so that I can choose between Claude Code and Codex",
           "description": "Update the batch build route, send-to-dev route, and agent review route to accept an optional `provider` parameter ('claude-code' or 'codex'). Use the provider factory to dispatch to the correct backend. Store the provider in the created `agentSession` record. Default to 'claude-code' if not specified.",
           "acceptance_criteria": "- [ ] Batch build route (`/api/projects/[projectId]/build`) accepts `provider` parameter\n- [ ] Send-to-dev route (`/api/projects/[projectId]/epics/[epicId]/build` or stories route) accepts `provider` parameter\n- [ ] Review route accepts `provider` parameter\n- [ ] Provider factory used to dispatch to correct backend\n- [ ] `provider` field stored in created `agentSession` records\n- [ ] Default to 'claude-code' when `provider` not specified\n- [ ] Team mode rejected with error if `provider` is 'codex' (Codex has no Task tool)",
@@ -93,7 +168,7 @@
           "position": 4
         },
         {
-          "id": "_GdYMJsZvaR8",
+          "id": "iH2s5SpSEO_e",
           "title": "As a developer, I want the process manager generalized so that both CC and Codex sessions can be tracked and cancelled uniformly",
           "description": "Refactor `lib/claude/process-manager.ts` to handle provider-agnostic session tracking. CC sessions are tracked by PID (existing behavior). Codex sessions are tracked by thread ID. Provide a unified start/cancel/status/listActive interface that works for both providers.",
           "acceptance_criteria": "- [ ] Process manager accepts a `provider` type when registering a new session\n- [ ] CC sessions tracked by PID with SIGTERM→SIGKILL fallback (existing behavior preserved)\n- [ ] Codex sessions tracked by thread ID, cancellation via Codex SDK API\n- [ ] `listActive()`, `getStatus()`, `cancel()` work uniformly across both providers\n- [ ] Session metadata includes provider type for display purposes\n- [ ] No breaking changes to existing CC session management",
@@ -101,7 +176,7 @@
           "position": 5
         },
         {
-          "id": "A5kOMTJrBGCQ",
+          "id": "u901zMPbQl0S",
           "title": "As a developer, I want a Team mode checkbox in the build toolbar so that I can launch multi-epic builds as a coordinated team",
           "description": "Add a 'Team mode' checkbox to the kanban build toolbar. The checkbox is visible when 2 or more epics are selected and the provider is Claude Code. When checked, the build request includes `team: true`. Add a tooltip explaining that team mode lets CC coordinate sub-agents. Disable the checkbox when fewer than 2 epics are selected or when Codex is the selected provider.",
           "acceptance_criteria": "- [ ] 'Team mode' checkbox rendered in build toolbar next to the Build button\n- [ ] Checkbox only visible when 2+ epics are selected\n- [ ] Checkbox disabled with tooltip when provider is Codex\n- [ ] Checking the box passes `team: true` in the build API request\n- [ ] Tooltip explains team mode: 'Launch a single CC session that coordinates sub-agents for each epic'\n- [ ] Unchecked by default (solo mode is the default behavior)\n- [ ] Checkbox state resets when selection changes to fewer than 2 epics",
@@ -109,7 +184,7 @@
           "position": 6
         },
         {
-          "id": "LwGhUPmjI0EZ",
+          "id": "qr-JVz_Q3_H6",
           "title": "As a developer, I want a provider selector in the build toolbar, Send to Dev dialog, and Agent Review dialog so that I can choose between Claude Code and Codex",
           "description": "Add a dropdown/toggle to select the AI provider in: (1) the kanban build toolbar, (2) the Send to Dev dialog, (3) the Agent Review dialog. The selector shows 'Claude Code' and 'Codex' options. Codex option is disabled with a tooltip if no API key is configured in settings. The selected provider is passed to the respective API routes.",
           "acceptance_criteria": "- [ ] Provider dropdown in build toolbar with Claude Code and Codex options\n- [ ] Provider dropdown in Send to Dev dialog\n- [ ] Provider dropdown in Agent Review dialog\n- [ ] Codex option disabled with 'Configure API key in Settings' tooltip when no key set\n- [ ] Selected provider passed to respective API routes in request body\n- [ ] Claude Code is the default selection\n- [ ] Provider selection persists within the session (remembers last choice)",
@@ -117,7 +192,7 @@
           "position": 7
         },
         {
-          "id": "o2iRrfD8O07k",
+          "id": "PrbrYqPg2uRu",
           "title": "As a developer, I want a provider toggle in the chat header so that I can choose between Claude Code and Codex for brainstorming conversations",
           "description": "Add a provider toggle (Claude Code / Codex) in the chat panel header. The toggle is enabled when creating a new conversation and becomes disabled/locked after the first message is sent. The selected provider is stored with the conversation and used for all subsequent messages in that thread.",
           "acceptance_criteria": "- [ ] Provider toggle rendered in chat panel header\n- [ ] Toggle enabled before any messages are sent in the conversation\n- [ ] Toggle disabled/locked after the first message (provider immutable per conversation)\n- [ ] Selected provider stored in database with the conversation\n- [ ] All messages in the conversation use the locked provider\n- [ ] Visual indicator shows which provider is active (icon or label)\n- [ ] Codex option disabled if no API key configured",
@@ -125,7 +200,7 @@
           "position": 8
         },
         {
-          "id": "gbE_KX-Pv2CK",
+          "id": "5kPIdvZ0aIWc",
           "title": "As a developer, I want a Codex API key field in Settings so that I can configure the Codex provider",
           "description": "Add a 'Codex API Key' input field to the Settings page. The key is stored in the `settings` table with key `codex_api_key`. The field uses a password-type input with show/hide toggle. Validate that the key is non-empty on save. The key is read by the Codex provider when spawning sessions.",
           "acceptance_criteria": "- [ ] 'Codex API Key' field added to Settings page\n- [ ] Password-type input with show/hide toggle\n- [ ] Key stored in `settings` table with key `codex_api_key`\n- [ ] Save button with loading state and success/error feedback\n- [ ] Non-empty validation on save\n- [ ] Existing settings (global prompt) unaffected\n- [ ] Codex provider reads key from settings table on session spawn",
@@ -135,16 +210,16 @@
       ]
     },
     {
-      "id": "6lCNLmCL75wS",
+      "id": "R9H1_aAgudez",
       "title": "Ticket Comments, Send-to-Dev & Agent Review",
       "description": "Add a comment system to user stories (tickets), a dedicated story detail page replacing the sheet, and review workflows powered by Claude Code agents.\n\n## Implementation Plan\n\n### Phase 1 — Schema & Data Layer\n- Add `ticketComments` table (id, userStoryId, author: 'user'|'agent', content, agentSessionId?, createdAt)\n- Add `userStoryId` column to `agentSessions` to link agent work back to a specific ticket\n- Add `\"review\"` as a valid status for user stories (todo → in_progress → review → done)\n\n### Phase 2 — API Routes\n- `GET/PATCH /api/projects/[projectId]/stories/[storyId]` — fetch & update story detail\n- `GET/POST /api/projects/[projectId]/stories/[storyId]/comments` — list & add comments\n- `POST /api/projects/[projectId]/stories/[storyId]/build` — dispatch a code-mode agent for the ticket (send-to-dev)\n- `POST /api/projects/[projectId]/stories/[storyId]/review` — dispatch review agents (security, code-review, compliance/accessibility)\n\n### Phase 3 — Hooks\n- `useStoryDetail` — fetch story with epic context\n- `useComments` — fetch comments with 5s polling\n- `useTicketAgent` — dispatch agent + poll session status, auto-post final output as agent comment\n\n### Phase 4 — Story Detail Page\n- New route: `/projects/[projectId]/stories/[storyId]`\n- Two-column layout: left = story details (title, description, acceptance criteria, status, priority), right = comment thread\n- Navigate to this page by clicking story titles in the epic detail view\n\n### Phase 5 — Send to Dev\n- Available on tickets in `todo` or `in_progress` status\n- \"Send to Dev\" button opens a dialog with an optional comment field\n- On confirm: post comment (if provided), dispatch code-mode agent with ticket context + full comment history, move ticket to `in_progress`\n- Agent reuses the epic's existing git worktree/branch with concurrency guard\n\n### Phase 6 — Agent Review (Review status)\n- Available on tickets in `review` status\n- \"Send to Dev\" button (requires mandatory comment explaining what to fix) → dispatches code agent, moves ticket back to `in_progress`\n- \"Agent Review\" button opens dialog with 3 checkboxes: Security, Code Review, Compliance/Accessibility\n- Each selected review type dispatches a separate agent in plan mode with a specialized review checklist\n- Agent outputs are posted as comments on the ticket\n\n### Phase 7 — Approve & Merge\n- \"Approve\" action on review-status tickets marks the ticket as `done`\n- Triggers merge of the epic's worktree branch into the target branch\n\n### Prompt Builder\n- `buildTicketBuildPrompt` — code mode, includes project spec, epic context, ticket details, and full comment history\n- `buildReviewPrompt` — plan mode, 3 specialized checklists (security audit, code review best practices, compliance/accessibility standards)",
-      "priority": 2,
+      "priority": 0,
       "status": "done",
-      "position": 2,
-      "branchName": "feature/epic-6lCNLmCL75wS-ticket-comments-send-to-dev-agent-review",
+      "position": 3,
+      "branchName": null,
       "user_stories": [
         {
-          "id": "UQgy3FzhIg5E",
+          "id": "pNQZ8pdzWkb6",
           "title": "As a developer, I want a comments table in the database so that ticket comments are persisted and queryable",
           "description": "Add a `ticketComments` table to the Drizzle schema with fields: id, userStoryId (FK), author ('user'|'agent'), content, agentSessionId (nullable FK), createdAt. Add `userStoryId` column to `agentSessions`. Add 'review' as a valid user story status.",
           "acceptance_criteria": "- [ ] `ticketComments` table created in `lib/db/schema.ts` with proper foreign keys and cascade deletes\n- [ ] `userStoryId` column added to `agentSessions` table referencing `userStories.id`\n- [ ] User story status now supports 'review' in addition to 'todo', 'in_progress', 'done'\n- [ ] Drizzle migration generated and pushed successfully\n- [ ] Types updated in `lib/types/kanban.ts` if needed",
@@ -152,7 +227,7 @@
           "position": 0
         },
         {
-          "id": "kILpXUjip3Ep",
+          "id": "4XcxMBMK3qjZ",
           "title": "As a developer, I want API routes for story detail and comments so that the frontend can fetch and manage ticket data",
           "description": "Create API routes: GET/PATCH for story detail at `/api/projects/[projectId]/stories/[storyId]`, and GET/POST for comments at `/api/projects/[projectId]/stories/[storyId]/comments`. GET story returns story with epic context. POST comment accepts author and content fields.",
           "acceptance_criteria": "- [ ] `GET /api/projects/[projectId]/stories/[storyId]` returns story with parent epic info\n- [ ] `PATCH /api/projects/[projectId]/stories/[storyId]` updates story fields (title, description, status, acceptance_criteria)\n- [ ] `GET /api/projects/[projectId]/stories/[storyId]/comments` returns comments ordered by createdAt ascending\n- [ ] `POST /api/projects/[projectId]/stories/[storyId]/comments` creates a comment with author and content\n- [ ] Consistent `{ data }` / `{ error }` response shape\n- [ ] 404 handling for missing stories",
@@ -160,7 +235,7 @@
           "position": 1
         },
         {
-          "id": "f9kCKxaW7mHF",
+          "id": "o8UBfdmF12O4",
           "title": "As a developer, I want a story detail page so that I can view and manage a ticket with its full comment thread",
           "description": "Create a new page at `app/projects/[projectId]/stories/[storyId]/page.tsx` with a two-column layout. Left column shows story details (title, description, acceptance criteria, status badge, priority). Right column shows the comment thread with input field. Replace the current sheet-based story view with navigation to this page.",
           "acceptance_criteria": "- [ ] Page route `/projects/[projectId]/stories/[storyId]` renders correctly\n- [ ] Left column displays editable story title, description, acceptance criteria\n- [ ] Status badge and priority displayed with color coding\n- [ ] Right column shows scrollable comment thread with author labels and timestamps\n- [ ] Comment input field with submit button at the bottom\n- [ ] User can add comments that appear immediately (optimistic UI)\n- [ ] Comments poll every 5 seconds for new entries\n- [ ] Clicking a story title in the epic detail view navigates to this page",
@@ -168,7 +243,7 @@
           "position": 2
         },
         {
-          "id": "VYM9NWOuFvdY",
+          "id": "HR-nFFQELWqr",
           "title": "As a developer, I want hooks for story detail and comments so that the UI stays in sync with the backend",
           "description": "Create `useStoryDetail` hook (fetches story with epic context, supports mutation), `useComments` hook (fetches comments with 5s polling interval, supports adding comments), and `useTicketAgent` hook (dispatches agent, polls session status, auto-posts agent output as comment when done).",
           "acceptance_criteria": "- [ ] `useStoryDetail` hook fetches and caches story data, provides update function\n- [ ] `useComments` hook returns comments array, polls every 5s, provides addComment function\n- [ ] `useTicketAgent` hook dispatches build/review agents via API, tracks session status\n- [ ] Agent output is automatically posted as an 'agent' comment when session completes\n- [ ] Loading and error states handled in all hooks",
@@ -176,7 +251,7 @@
           "position": 3
         },
         {
-          "id": "bMlE0DO5M10t",
+          "id": "FYfgayRe59Ec",
           "title": "As a developer, I want to send a ticket to dev so that Claude Code implements the ticket in the epic's worktree",
           "description": "Add a 'Send to Dev' action for tickets in `todo` or `in_progress` status. Opens a dialog with an optional comment field. On confirm: posts comment if provided, dispatches a code-mode Claude Code agent with the ticket context and full comment history, and moves the ticket to `in_progress`. Reuses the epic's existing git worktree/branch with a concurrency guard preventing parallel code-mode builds on the same epic.",
           "acceptance_criteria": "- [ ] 'Send to Dev' button visible on story detail page for todo/in_progress tickets\n- [ ] Dialog opens with optional comment textarea\n- [ ] Comment posted before agent dispatch if provided\n- [ ] `POST /api/projects/[projectId]/stories/[storyId]/build` dispatches code-mode agent\n- [ ] Agent prompt includes project spec, epic context, ticket details, and all comments\n- [ ] Ticket status moves to `in_progress` on dispatch\n- [ ] Agent reuses epic's existing worktree and branch\n- [ ] Concurrency guard prevents parallel code-mode builds on the same epic\n- [ ] Agent final output posted as 'agent' comment when session completes",
@@ -184,7 +259,7 @@
           "position": 4
         },
         {
-          "id": "UZnVJwG5rBAP",
+          "id": "IbruFprMyXPQ",
           "title": "As a developer, I want to send a review-status ticket back to dev with a mandatory comment so that Claude Code can address my feedback",
           "description": "For tickets in `review` status, add a 'Send to Dev' action that requires a mandatory comment explaining what needs to be fixed. On confirm: posts the comment, dispatches a code-mode agent with the full comment history (including the new feedback), and moves the ticket back to `in_progress`.",
           "acceptance_criteria": "- [ ] 'Send to Dev' button visible on story detail page for review-status tickets\n- [ ] Dialog opens with mandatory comment textarea (submit disabled when empty)\n- [ ] Comment posted before agent dispatch\n- [ ] Code-mode agent dispatched with full comment history including the new feedback\n- [ ] Ticket status moves from `review` to `in_progress`\n- [ ] Same concurrency guard and worktree reuse as the standard send-to-dev flow",
@@ -192,7 +267,7 @@
           "position": 5
         },
         {
-          "id": "iazmQjpHwwZi",
+          "id": "gF5M3UOTaShZ",
           "title": "As a developer, I want to trigger agent reviews on review-status tickets so that Claude Code checks security, code quality, and compliance",
           "description": "For tickets in `review` status, add an 'Agent Review' button that opens a dialog with 3 checkboxes: Security, Code Review, Compliance/Accessibility. Each selected review type dispatches a separate Claude Code agent in plan mode with a specialized review checklist. Each agent's output is posted as a separate 'agent' comment on the ticket.",
           "acceptance_criteria": "- [ ] 'Agent Review' button visible on story detail page for review-status tickets\n- [ ] Dialog with 3 checkboxes: Security, Code Review, Compliance/Accessibility\n- [ ] At least one checkbox must be selected to submit\n- [ ] `POST /api/projects/[projectId]/stories/[storyId]/review` accepts array of review types\n- [ ] Each selected type dispatches a separate plan-mode agent with specialized prompt\n- [ ] Security review checks: OWASP top 10, input validation, auth/authz, secrets exposure\n- [ ] Code review checks: readability, DRY, error handling, performance, naming conventions\n- [ ] Compliance review checks: WCAG accessibility, i18n readiness, license compliance\n- [ ] Each agent's output posted as a separate 'agent' comment with review type label",
@@ -200,7 +275,7 @@
           "position": 6
         },
         {
-          "id": "Ew-tasqNn0sZ",
+          "id": "bQ_aglUKuaPp",
           "title": "As a developer, I want to approve a review-status ticket so that it is marked done and the branch is merged",
           "description": "Add an 'Approve' action on review-status tickets that marks the ticket as `done`. Optionally triggers a merge of the epic's worktree branch into the target branch if all stories in the epic are done.",
           "acceptance_criteria": "- [ ] 'Approve' button visible on story detail page for review-status tickets\n- [ ] Clicking 'Approve' moves ticket status from `review` to `done`\n- [ ] If all stories in the parent epic are now `done`, epic status is also updated\n- [ ] Branch merge triggered when epic is fully complete (all stories done)\n- [ ] Success/error feedback displayed to the user",
@@ -210,16 +285,16 @@
       ]
     },
     {
-      "id": "ognzLUuGz8i1",
+      "id": "lJL18nXj0nwh",
       "title": "Release Management",
       "description": "Create releases by selecting completed epics, generate changelogs via Claude Code, create git tags, and maintain release history.",
       "priority": 0,
       "status": "done",
-      "position": 3,
+      "position": 4,
       "branchName": null,
       "user_stories": [
         {
-          "id": "bC_0JITQ00nE",
+          "id": "p5_Wvw87OH32",
           "title": "Create a release with selected epics",
           "description": "As a developer, I want to create a release by selecting completed epics and specifying a version, so that I can track what's included in each release.",
           "acceptance_criteria": "- [x] Release creation dialog with version and title\n- [x] Epic selection (filters to done/review status)\n- [x] Release persisted with epic IDs\n- [x] Release list display\n- [ ] Tests",
@@ -227,7 +302,7 @@
           "position": 0
         },
         {
-          "id": "LIFZfCn2Axyj",
+          "id": "p4-P_qfndpqp",
           "title": "Generate changelog automatically",
           "description": "As a developer, I want to auto-generate a changelog using Claude Code based on the selected epics, so that I save time writing release notes.",
           "acceptance_criteria": "- [x] Toggle to enable changelog generation\n- [x] Claude Code plan mode generates changelog\n- [x] Fallback auto-generated changelog if Claude fails\n- [x] Changelog displayed on release card\n- [ ] Tests",
@@ -235,7 +310,7 @@
           "position": 1
         },
         {
-          "id": "FDhf8-mkKJkc",
+          "id": "80PMFB5tXPCv",
           "title": "Create git tags for releases",
           "description": "As a developer, I want a git tag to be created when I make a release, so that the release is tracked in version control.",
           "acceptance_criteria": "- [x] Git tag created with version string\n- [x] Tag name stored in DB\n- [x] Tag displayed on release card\n- [x] Graceful handling if git repo not configured\n- [ ] Tests",
@@ -245,16 +320,16 @@
       ]
     },
     {
-      "id": "joqw4J8Dfveq",
+      "id": "sIweK-FyXnSy",
       "title": "Chat Image Upload & Clipboard Paste",
       "description": "Add image support to chat panels — users can upload images via a file picker or paste them from the clipboard. Images are saved locally, displayed as thumbnails before sending, and rendered inline in chat messages.\n\n## Implementation Plan\n\n### Phase 1 — Storage & Schema\n- Create `data/uploads/` directory for storing chat image files (gitignored)\n- Add `chatAttachments` table to Drizzle schema (id, chatMessageId FK, fileName, filePath, mimeType, sizeBytes, createdAt)\n- Add cascade delete from chatMessages to chatAttachments\n- Generate and push migration\n\n### Phase 2 — Upload API\n- Create `POST /api/projects/[projectId]/chat/upload` route\n- Accept multipart form data with image files (png, jpg, jpeg, gif, webp)\n- Validate file type and size (max 10MB per file)\n- Save files to `data/uploads/{projectId}/{nanoid}-{originalName}`\n- Return attachment metadata (id, fileName, filePath, mimeType)\n- Create `GET /api/projects/[projectId]/chat/uploads/[attachmentId]` to serve images\n\n### Phase 3 — Enhanced MessageInput Component\n- Add paste event handler on the textarea to intercept `clipboardData.items` with `type.startsWith('image/')`\n- Convert pasted image blobs to File objects and upload immediately\n- Add image upload button (paperclip/image icon) next to the send button\n- Hidden file input accepting image MIME types, triggered by the button\n- Display pending image thumbnails in a preview strip above the textarea\n- Allow removing individual thumbnails before sending\n- On send, include attachment IDs alongside the message content\n\n### Phase 4 — Message Rendering\n- Update MessageList / MarkdownContent to detect and render images associated with messages\n- Fetch attachments for each message and display them as inline images below the text\n- Support lightbox/modal view on image click for full-size viewing\n- Lazy-load images with placeholder skeleton\n\n### Phase 5 — Chat API Integration\n- Update `POST /api/projects/[projectId]/chat/messages` to accept an optional `attachmentIds` array\n- Link uploaded attachments to the created message\n- Update `GET /api/projects/[projectId]/chat/messages` to include attachment metadata in response\n- Ensure attachments are cleaned up when messages are deleted (cascade)",
-      "priority": 1,
+      "priority": 0,
       "status": "done",
-      "position": 4,
+      "position": 5,
       "branchName": null,
       "user_stories": [
         {
-          "id": "XAyCyI4cCMu9",
+          "id": "EIHCDvsUMuCI",
           "title": "As a user, I want a chatAttachments table so that uploaded images are persisted and linked to chat messages",
           "description": "Add a `chatAttachments` table to the Drizzle schema with fields: id (nanoid), chatMessageId (FK to chatMessages, nullable for pending uploads), fileName, filePath, mimeType, sizeBytes, createdAt. Set up cascade deletes from chatMessages. Ensure the `data/uploads/` directory is gitignored.",
           "acceptance_criteria": "- [ ] `chatAttachments` table added to `lib/db/schema.ts` with proper fields and types\n- [ ] Foreign key to `chatMessages` with cascade delete\n- [ ] `chatMessageId` is nullable to support pre-send uploads\n- [ ] Drizzle migration generated and pushed successfully\n- [ ] `data/uploads/` directory is gitignored\n- [ ] TypeScript types exported for chatAttachments",
@@ -262,7 +337,7 @@
           "position": 0
         },
         {
-          "id": "Pws5KRjPd1S1",
+          "id": "Z_h0L5J5kyJQ",
           "title": "As a user, I want an upload API endpoint so that images can be saved to the server and served back",
           "description": "Create `POST /api/projects/[projectId]/chat/upload` to accept multipart image uploads (png, jpg, jpeg, gif, webp). Validate MIME type and file size (max 10MB). Save to `data/uploads/{projectId}/{nanoid}-{originalName}`. Return attachment metadata. Create `GET /api/projects/[projectId]/chat/uploads/[attachmentId]` to serve the image file with correct Content-Type.",
           "acceptance_criteria": "- [ ] POST endpoint accepts multipart form data with image files\n- [ ] Only image MIME types accepted (png, jpg, jpeg, gif, webp)\n- [ ] File size validated (max 10MB per file)\n- [ ] Files saved to `data/uploads/{projectId}/{nanoid}-{originalName}`\n- [ ] Attachment record created in `chatAttachments` table with null chatMessageId\n- [ ] Response returns `{ data: { id, fileName, filePath, mimeType, sizeBytes } }`\n- [ ] GET endpoint serves the image file with correct Content-Type header\n- [ ] 404 returned for missing attachments",
@@ -270,7 +345,7 @@
           "position": 1
         },
         {
-          "id": "dgN9R1UxBScC",
+          "id": "rxFPi0Z67DeV",
           "title": "As a user, I want to paste images from my clipboard into the chat input so that I can quickly share screenshots",
           "description": "Add a paste event handler on the MessageInput textarea that intercepts `clipboardData.items` with image MIME types. Convert pasted blobs to File objects and immediately upload them via the upload API. Show the uploaded image as a thumbnail in a preview strip above the textarea. Support pasting multiple images.",
           "acceptance_criteria": "- [ ] Paste event handler on textarea intercepts image data from clipboard\n- [ ] Pasted image blobs converted to File objects with generated filenames\n- [ ] Images uploaded automatically via POST to the upload API\n- [ ] Upload progress/loading indicator shown during upload\n- [ ] Uploaded images appear as thumbnails in a preview strip above the textarea\n- [ ] Multiple pasted images supported (accumulate in preview strip)\n- [ ] Text paste behavior unaffected when clipboard contains no images",
@@ -278,7 +353,7 @@
           "position": 2
         },
         {
-          "id": "p_FdRPeD8qlL",
+          "id": "LyfCHYhzZWEN",
           "title": "As a user, I want an image upload button in the chat input so that I can attach images from my filesystem",
           "description": "Add an image/paperclip icon button next to the send button in MessageInput. Clicking it opens a hidden file input accepting image MIME types (png, jpg, jpeg, gif, webp). Selected files are uploaded via the upload API and displayed as thumbnails in the same preview strip used for pasted images. Allow removing individual thumbnails before sending.",
           "acceptance_criteria": "- [ ] Image upload button (paperclip or image icon) rendered next to the send button\n- [ ] Hidden file input triggered on button click, accepting image/* MIME types\n- [ ] Selected files uploaded via the upload API\n- [ ] Uploaded images displayed as thumbnails in preview strip above textarea\n- [ ] Each thumbnail has a remove/X button to discard before sending\n- [ ] Multiple files can be selected at once\n- [ ] Button disabled during active uploads with loading state",
@@ -286,7 +361,7 @@
           "position": 3
         },
         {
-          "id": "TFIPTEu3xRuv",
+          "id": "W-D318O-H6k2",
           "title": "As a user, I want chat messages to include attached images so that sent images are linked to my message",
           "description": "Update the chat message send flow and API to support attachments. The POST message endpoint accepts an optional `attachmentIds` array. On send, link pending attachments to the created message by updating their `chatMessageId`. The GET messages endpoint includes attachment metadata in the response. Clean up orphaned attachments periodically.",
           "acceptance_criteria": "- [ ] `POST /api/projects/[projectId]/chat/messages` accepts optional `attachmentIds` array\n- [ ] Pending attachments updated with the new message's ID on send\n- [ ] `GET /api/projects/[projectId]/chat/messages` includes `attachments` array in each message\n- [ ] Attachment metadata includes id, fileName, mimeType, and URL to serve the image\n- [ ] Orphaned attachments (never linked to a message) cleaned up after 24 hours\n- [ ] Cascade delete removes attachments when messages are deleted",
@@ -294,7 +369,7 @@
           "position": 4
         },
         {
-          "id": "Ea6w05NDIb-5",
+          "id": "ko-wf5dbnfgx",
           "title": "As a user, I want to see images rendered inline in chat messages so that shared screenshots are visible in the conversation",
           "description": "Update the MessageList and MarkdownContent components to render attached images inline below the message text. Images are loaded from the serve endpoint. Support click-to-enlarge with a lightbox/modal overlay for full-size viewing. Lazy-load images with a skeleton placeholder to avoid layout shift.",
           "acceptance_criteria": "- [ ] Images rendered inline below message text in the chat thread\n- [ ] Images loaded from the GET serve endpoint with correct aspect ratio\n- [ ] Clicking an image opens a lightbox/modal with the full-size image\n- [ ] Modal closes on click outside, Escape key, or close button\n- [ ] Images lazy-loaded with skeleton placeholder\n- [ ] Multiple images per message displayed in a grid or row layout\n- [ ] Alt text set to the original filename for accessibility",
@@ -304,16 +379,16 @@
       ]
     },
     {
-      "id": "yL14rOBoI3fZ",
+      "id": "c170Zvt1JTYW",
       "title": "Markdown Rendering",
       "description": "Render Markdown content as styled HTML in the document viewer and spec preview components.",
       "priority": 0,
       "status": "done",
-      "position": 5,
+      "position": 6,
       "branchName": null,
       "user_stories": [
         {
-          "id": "B_sWTw0mpHkG",
+          "id": "pkBUfMJKM5AM",
           "title": "Render Markdown in document viewer",
           "description": "As a developer, I want uploaded documents to be displayed as rendered Markdown with proper formatting, so that I can easily read the content.",
           "acceptance_criteria": "- [x] Markdown-to-HTML utility exists (lib/utils/markdown.ts)\n- [x] Dependencies installed (remark, rehype, sanitize)\n- [ ] DocumentViewer uses rendered HTML instead of raw text\n- [ ] Prose styling applied\n- [ ] Tests",
@@ -321,7 +396,7 @@
           "position": 0
         },
         {
-          "id": "I7lbxAt-6Trx",
+          "id": "aZPKOfA2mI6D",
           "title": "Render Markdown in spec preview",
           "description": "As a developer, I want the spec preview to show rendered Markdown, so that I can see formatted output while editing.",
           "acceptance_criteria": "- [x] Markdown-to-HTML utility exists\n- [ ] SpecPreview uses rendered HTML instead of raw text\n- [ ] Prose styling applied\n- [ ] Tests",
@@ -331,16 +406,16 @@
       ]
     },
     {
-      "id": "DVL31NKpWZhv",
+      "id": "BNRAJDy0oyhj",
       "title": "Tests & Preview Integration (V2)",
       "description": "Automatic test detection/execution and dev server preview within Arij, as planned for V2.",
       "priority": 0,
       "status": "done",
-      "position": 6,
-      "branchName": "feature/epic-DVL31NKpWZhv-tests-preview-integration-v2",
+      "position": 7,
+      "branchName": null,
       "user_stories": [
         {
-          "id": "0Xk-p03r6zqv",
+          "id": "xvVmjUedBcHX",
           "title": "Run project tests from Arij",
           "description": "As a developer, I want to run my project's tests from within Arij, so that I can verify Claude Code's work.",
           "acceptance_criteria": "- [ ] Framework detection (Next.js, Vite, etc.)\n- [ ] 'Run Tests' button\n- [ ] Test output display\n- [ ] Test report in epic view",
@@ -348,7 +423,7 @@
           "position": 0
         },
         {
-          "id": "mb3hX75mkkl4",
+          "id": "uV8sdzs4Z5qG",
           "title": "Preview project in iframe",
           "description": "As a developer, I want to preview my project's dev server in an iframe within Arij, so that I can see results without switching context.",
           "acceptance_criteria": "- [ ] Launch dev server\n- [ ] Iframe preview display\n- [ ] URL configuration",
@@ -358,16 +433,16 @@
       ]
     },
     {
-      "id": "Qvsj_DScOK1L",
+      "id": "ye5iGELailQl",
       "title": "Global Settings",
       "description": "Application-wide settings including a global prompt injected into all Claude Code sessions.",
       "priority": 0,
       "status": "done",
-      "position": 7,
+      "position": 8,
       "branchName": null,
       "user_stories": [
         {
-          "id": "cGD9iFYWODU8",
+          "id": "jUi5DrZpvlPY",
           "title": "Configure global prompt for Claude Code",
           "description": "As a developer, I want to set a global prompt that is injected into all Claude Code sessions, so that I can customize AI behavior across all projects.",
           "acceptance_criteria": "- [x] Settings page with global prompt textarea\n- [x] Save button with loading state\n- [x] Persisted in DB settings table\n- [x] Injected into all Claude Code prompts\n- [ ] Tests",
@@ -377,16 +452,16 @@
       ]
     },
     {
-      "id": "NWtIoTzlcPpQ",
+      "id": "nDCe40SC17-K",
       "title": "Chat Brainstorm with Claude Code",
       "description": "Chat panel integrated into project views, using Claude Code in plan mode for brainstorming, ideation, and project refinement.",
       "priority": 0,
       "status": "done",
-      "position": 8,
+      "position": 9,
       "branchName": null,
       "user_stories": [
         {
-          "id": "0Kl4bAdI5RBv",
+          "id": "Dgh62xQ3RtOU",
           "title": "Send and receive chat messages",
           "description": "As a developer, I want to chat with Claude Code about my project ideas, so that I can brainstorm and refine my project vision.",
           "acceptance_criteria": "- [x] Message input with enter-to-send\n- [x] Optimistic UI (message appears immediately)\n- [x] Claude Code responds in plan mode\n- [x] Message history persisted in DB\n- [x] Rollback on error\n- [ ] Streaming responses (currently waits for full response)\n- [ ] Tests",
@@ -394,7 +469,7 @@
           "position": 0
         },
         {
-          "id": "Tz-cRi3I6_Ly",
+          "id": "LN1XzpZ1tGhC",
           "title": "Context-aware chat with project documents",
           "description": "As a developer, I want the chat to include my project description, uploaded documents, and existing spec as context, so that Claude Code gives relevant answers.",
           "acceptance_criteria": "- [x] Project description injected\n- [x] All documents injected as markdown\n- [x] Existing spec injected\n- [x] Recent chat history (20 messages) included\n- [ ] Tests for prompt building",
@@ -402,7 +477,7 @@
           "position": 1
         },
         {
-          "id": "C6rSffy2_itP",
+          "id": "T7r1nesxfl13",
           "title": "Toggle chat panel in project view",
           "description": "As a developer, I want to show/hide the chat panel while working on my project, so that I can focus on the kanban or chat as needed.",
           "acceptance_criteria": "- [x] Toggle button in project header\n- [x] Chat panel appears on right side\n- [x] Panel collapses when toggled off\n- [ ] Tests",
@@ -412,16 +487,16 @@
       ]
     },
     {
-      "id": "IjbLmp9N0qU-",
+      "id": "-Qos9lRkRw16",
       "title": "Document Upload & Conversion",
       "description": "Upload project documents (PDF, DOCX, Markdown, plain text), convert them to Markdown, and store them as project context for Claude Code sessions.",
       "priority": 0,
       "status": "done",
-      "position": 9,
+      "position": 10,
       "branchName": null,
       "user_stories": [
         {
-          "id": "9cbHZFqclxTk",
+          "id": "GaLkK6WiXMSh",
           "title": "Upload documents via drag-and-drop",
           "description": "As a developer, I want to drag and drop files into a project to upload them, so that I can easily add context documents.",
           "acceptance_criteria": "- [x] Drag-and-drop zone with visual feedback\n- [x] File input accepts .pdf, .docx, .md, .txt\n- [x] Upload progress indicator\n- [x] Multiple file support\n- [x] API stores file with converted markdown\n- [ ] Tests",
@@ -429,7 +504,7 @@
           "position": 0
         },
         {
-          "id": "dyuBAeiObrec",
+          "id": "ynKMcLHRwvCi",
           "title": "Convert uploaded files to Markdown",
           "description": "As a developer, I want uploaded PDF and DOCX files to be automatically converted to Markdown, so that they can be used as context for Claude Code.",
           "acceptance_criteria": "- [x] PDF to Markdown conversion\n- [x] DOCX to Markdown conversion\n- [x] Markdown and plain text passthrough\n- [ ] Image OCR support (.png, .jpg)\n- [ ] Tests for converter functions",
@@ -437,7 +512,7 @@
           "position": 1
         },
         {
-          "id": "qdMIhdibizXd",
+          "id": "xLMe0scBKdH6",
           "title": "View uploaded documents",
           "description": "As a developer, I want to view the converted Markdown content of uploaded documents, so that I can verify the conversion quality.",
           "acceptance_criteria": "- [x] Document list sidebar\n- [x] Document selection with visual highlight\n- [x] Document content display\n- [ ] Rendered Markdown display (currently shows raw text)\n- [ ] Tests",
@@ -447,16 +522,16 @@
       ]
     },
     {
-      "id": "3rp9-gbb7cfz",
+      "id": "u66Q5mh6UFF1",
       "title": "Session Management & Monitoring",
       "description": "Track and monitor Claude Code agent sessions with real-time status updates, detailed logs, and session lifecycle management.",
       "priority": 0,
       "status": "done",
-      "position": 10,
+      "position": 11,
       "branchName": null,
       "user_stories": [
         {
-          "id": "BYL5TOjUIFwx",
+          "id": "FbHQtOuk6EVL",
           "title": "View session list with status indicators",
           "description": "As a developer, I want to see a list of all build sessions with their status, duration, and mode, so that I can track build history.",
           "acceptance_criteria": "- [x] Session cards with status icons and color coding\n- [x] Duration calculation\n- [x] Mode display (plan/code)\n- [x] Branch name display\n- [x] Error message truncation\n- [x] Running session count\n- [x] Link to session detail\n- [ ] Tests",
@@ -464,7 +539,7 @@
           "position": 0
         },
         {
-          "id": "q4-TyysTWrzJ",
+          "id": "OfjJFzoiPR5Y",
           "title": "View detailed session information and logs",
           "description": "As a developer, I want to view the full details of a build session including the prompt sent, response received, and raw logs, so that I can debug issues.",
           "acceptance_criteria": "- [x] Three-tab interface: Response, Prompt, Raw Logs\n- [x] Status badge and metadata display\n- [x] Auto-polling while session is running\n- [x] Cancel button for running sessions\n- [x] Export logs as JSON\n- [x] Filesystem log loading\n- [ ] Tests",
@@ -472,7 +547,7 @@
           "position": 1
         },
         {
-          "id": "jetnd9g8sYMR",
+          "id": "c5_ZTSXPr1Q3",
           "title": "Monitor active agents in real-time",
           "description": "As a developer, I want to see active Claude Code agents with elapsed time in a monitor bar, so that I know what's running.",
           "acceptance_criteria": "- [x] Collapsible panel showing active sessions\n- [x] Per-session elapsed time updating every second\n- [x] Stop/Cancel button per session\n- [x] Green indicator animation\n- [x] Auto-hide when no active sessions\n- [ ] Tests",
@@ -482,16 +557,16 @@
       ]
     },
     {
-      "id": "m1U434qC2Boc",
+      "id": "hxwJ1ko1tOt1",
       "title": "NPM Package & CLI Distribution",
       "description": "Publish Arij as an npm package with a CLI entry point so users can run it with `npx arij`.",
       "priority": 0,
       "status": "done",
-      "position": 11,
-      "branchName": "feature/epic-m1U434qC2Boc-npm-package-cli-distribution",
+      "position": 12,
+      "branchName": null,
       "user_stories": [
         {
-          "id": "Ai7_V7zy7r04",
+          "id": "GQ0ZJAYY0eVX",
           "title": "Create CLI entry point",
           "description": "As a developer, I want to run `npx arij` to start the application, so that setup is minimal.",
           "acceptance_criteria": "- [ ] bin field added to package.json\n- [ ] CLI entry script created\n- [ ] Package name set to 'arij'\n- [ ] Start command launches Next.js server",
@@ -501,16 +576,16 @@
       ]
     },
     {
-      "id": "J5WxV8FyAPyI",
+      "id": "V8iQZQTKaP4j",
       "title": "Testing Infrastructure",
       "description": "Unit tests with Vitest and E2E tests with Playwright as specified in the tech stack.",
       "priority": 0,
       "status": "done",
-      "position": 12,
-      "branchName": "feature/epic-J5WxV8FyAPyI-testing-infrastructure",
+      "position": 13,
+      "branchName": null,
       "user_stories": [
         {
-          "id": "qGYsi8LKxkHZ",
+          "id": "eU0fN58nLwRd",
           "title": "Set up Vitest for unit testing",
           "description": "As a developer, I want Vitest configured for unit testing, so that I can write and run tests for utilities, API routes, and hooks.",
           "acceptance_criteria": "- [ ] Vitest installed and configured\n- [ ] vitest.config.ts created\n- [ ] Test script added to package.json\n- [ ] Sample tests for critical utilities",
@@ -518,7 +593,7 @@
           "position": 0
         },
         {
-          "id": "7qYF_L69Hs3F",
+          "id": "0USKh3TzJPFt",
           "title": "Set up Playwright for E2E testing",
           "description": "As a developer, I want Playwright configured for end-to-end testing, so that I can test user workflows in the browser.",
           "acceptance_criteria": "- [ ] Playwright installed and configured\n- [ ] playwright.config.ts created\n- [ ] E2E test scripts added\n- [ ] Sample E2E test for core workflow",
@@ -528,16 +603,16 @@
       ]
     },
     {
-      "id": "anWPGL-4rDVV",
+      "id": "zCgJ2YUrZOeh",
       "title": "Project CRUD & Dashboard",
       "description": "Multi-project dashboard with project creation, listing, filtering, and detail views. Core project management lifecycle including archiving.",
       "priority": 0,
       "status": "done",
-      "position": 13,
+      "position": 14,
       "branchName": null,
       "user_stories": [
         {
-          "id": "8xlDEcZPsfH6",
+          "id": "WWqmNCZLHOuT",
           "title": "Create a new project",
           "description": "As a developer, I want to create a new project with a name, optional description, and optional git repo path, so that I can start organizing my work.",
           "acceptance_criteria": "- [x] Form with required name, optional description, optional git repo path\n- [x] Validation prevents empty name submission\n- [x] Project created in DB with nanoid ID and 'ideation' status\n- [x] Redirect to project detail page on success\n- [ ] Unit tests for project creation API",
@@ -545,7 +620,7 @@
           "position": 0
         },
         {
-          "id": "5tMjbabUT_Mm",
+          "id": "XJPv6N5se99e",
           "title": "View all projects on dashboard",
           "description": "As a developer, I want to see all my projects on a dashboard with progress indicators, so that I can track multi-project status at a glance.",
           "acceptance_criteria": "- [x] Grid layout with responsive columns (1-4)\n- [x] Each card shows name, description, progress bar, active agents, last activity\n- [x] Filter by All / Active / Archived\n- [x] Empty state with action buttons\n- [ ] Unit tests for project listing API\n- [ ] E2E test for dashboard rendering",
@@ -553,7 +628,7 @@
           "position": 1
         },
         {
-          "id": "kyJDoGPywjxL",
+          "id": "PuSpsfU-d3xl",
           "title": "Edit and delete projects",
           "description": "As a developer, I want to edit project details or delete a project, so that I can keep my workspace organized.",
           "acceptance_criteria": "- [x] PATCH endpoint updates name, description, status, gitRepoPath, spec\n- [x] DELETE endpoint removes project\n- [x] 404 handling for missing projects\n- [ ] Unit tests for update/delete API",
@@ -563,16 +638,16 @@
       ]
     },
     {
-      "id": "__rfC0iItR57",
+      "id": "khLBAcsZ0nY6",
       "title": "Database & ORM Layer",
       "description": "SQLite database with Drizzle ORM schema, migrations, and connection management.",
       "priority": 0,
       "status": "done",
-      "position": 14,
+      "position": 15,
       "branchName": null,
       "user_stories": [
         {
-          "id": "aNoG1zbZOso4",
+          "id": "xUPxrm4vky-G",
           "title": "Define database schema",
           "description": "As a developer, I want a well-structured database schema covering all project entities, so that the application can persist and query data efficiently.",
           "acceptance_criteria": "- [x] 8 tables: projects, documents, epics, userStories, chatMessages, agentSessions, releases, settings\n- [x] Proper field types and defaults\n- [x] Cascade deletes where appropriate\n- [x] Position fields for ordering\n- [x] Drizzle config for migrations\n- [ ] Generated migration files\n- [ ] Tests",
@@ -582,16 +657,16 @@
       ]
     },
     {
-      "id": "un2LSjEzDKbi",
+      "id": "MzPdBGtz4Rce",
       "title": "Spec Generation & Editing",
       "description": "Generate project specifications with epics and user stories using Claude Code in plan mode. Edit specs in a Markdown editor with preview.",
       "priority": 0,
       "status": "done",
-      "position": 15,
+      "position": 16,
       "branchName": null,
       "user_stories": [
         {
-          "id": "bZI8Lig13xUr",
+          "id": "Bosm0rMgspeL",
           "title": "Generate spec and plan from project context",
           "description": "As a developer, I want to generate a structured project spec with epics and user stories using Claude Code, so that I can quickly plan my project.",
           "acceptance_criteria": "- [x] 'Generate Spec & Plan' button in chat panel\n- [x] Claude Code spawned in plan mode with structured prompt\n- [x] JSON output parsed to extract spec, epics, and user stories\n- [x] Epics and user stories bulk-inserted into database\n- [x] Project status updated to 'specifying'\n- [x] Fallback to plain text spec if JSON parsing fails\n- [ ] Tests",
@@ -599,7 +674,7 @@
           "position": 0
         },
         {
-          "id": "bTiCaF8MLiFO",
+          "id": "TtUNrEGC9BwG",
           "title": "Edit project spec in Markdown editor",
           "description": "As a developer, I want to manually edit the generated spec in a Markdown editor, so that I can refine it to my needs.",
           "acceptance_criteria": "- [x] Tab interface for Edit and Preview modes\n- [x] Textarea editor with monospace font\n- [x] Save button with loading state\n- [x] API persistence\n- [ ] Rendered Markdown preview (currently raw text)\n- [ ] Tests",
@@ -609,16 +684,16 @@
       ]
     },
     {
-      "id": "TcGGgWl7yq1k",
+      "id": "ul3ekR8gDU5L",
       "title": "Claude Code Build Integration",
       "description": "Launch Claude Code in code mode to implement epics. Create git worktrees and branches per epic, compose structured prompts, manage build sessions.",
       "priority": 0,
       "status": "done",
-      "position": 16,
+      "position": 17,
       "branchName": null,
       "user_stories": [
         {
-          "id": "LETd_BbbQbGZ",
+          "id": "vOsq7c4JLt7k",
           "title": "Launch Claude Code build for selected epics",
           "description": "As a developer, I want to click 'Build with Claude Code' to launch code generation for selected epics, so that Claude implements my specs.",
           "acceptance_criteria": "- [x] Build button triggers API call with selected epic IDs\n- [x] Parallel and sequential build mode options\n- [x] Git worktree + branch created per epic\n- [x] Claude Code spawned in code mode with structured prompt\n- [x] Epic status moves to 'In Progress' automatically\n- [ ] Tests",
@@ -626,7 +701,7 @@
           "position": 0
         },
         {
-          "id": "7CVTqiL5DcWa",
+          "id": "--srpKufUNTw",
           "title": "Compose structured build prompts",
           "description": "As a developer, I want Claude Code to receive a prompt containing my project spec, documents, and epic details, so that it has full context for implementation.",
           "acceptance_criteria": "- [x] Global prompt from settings injected\n- [x] Project spec included\n- [x] All project documents included as markdown\n- [x] Target epic title, description, and user stories with acceptance criteria\n- [x] Build instructions appended\n- [ ] Tests for prompt composition",
@@ -634,7 +709,7 @@
           "position": 1
         },
         {
-          "id": "BxgrSnE99UZ6",
+          "id": "8Ey0khPFFVY3",
           "title": "Manage concurrent build sessions",
           "description": "As a developer, I want the system to track running Claude Code processes and allow me to cancel them, so that I have control over active builds.",
           "acceptance_criteria": "- [x] Singleton process manager tracks all sessions\n- [x] Start, cancel, status, listActive, listAll operations\n- [x] Graceful kill with SIGTERM→SIGKILL fallback (5s timeout)\n- [x] Session status updates (running → completed/failed/cancelled)\n- [ ] Tests",
@@ -644,16 +719,16 @@
       ]
     },
     {
-      "id": "1ANaYzbYy4Xj",
+      "id": "ugQ61H_Jcqrk",
       "title": "Kanban Board",
       "description": "Drag-and-drop kanban board for managing epics across workflow columns (Backlog, To Do, In Progress, Review, Done) with epic detail editing.",
       "priority": 0,
       "status": "done",
-      "position": 17,
+      "position": 18,
       "branchName": null,
       "user_stories": [
         {
-          "id": "oO9VnSxwN3pG",
+          "id": "yiUJ6vswqPNO",
           "title": "Display epics in kanban columns",
           "description": "As a developer, I want to see my epics organized in kanban columns by status, so that I can visualize my project workflow.",
           "acceptance_criteria": "- [x] Five columns: Backlog, To Do, In Progress, Review, Done\n- [x] Epic cards show title, priority badge, US count, branch name\n- [x] Cards sorted by position within columns\n- [x] Loading skeleton during data fetch\n- [ ] Tests",
@@ -661,7 +736,7 @@
           "position": 0
         },
         {
-          "id": "1w9TLLUR9S14",
+          "id": "Au1CN7-beoHi",
           "title": "Drag and drop epics between columns",
           "description": "As a developer, I want to drag epics between kanban columns to update their status, so that I can manage workflow progression.",
           "acceptance_criteria": "- [x] Drag-and-drop between columns updates status\n- [x] Drag-and-drop within column reorders position\n- [x] DragOverlay provides visual feedback\n- [x] Optimistic UI with rollback on API failure\n- [x] Batch reorder API with transactions\n- [ ] Tests",
@@ -669,7 +744,7 @@
           "position": 1
         },
         {
-          "id": "50tCjSKywSlz",
+          "id": "6h9POeAF7Cki",
           "title": "View and edit epic details",
           "description": "As a developer, I want to click an epic card to view and edit its details including user stories, so that I can manage epic content.",
           "acceptance_criteria": "- [x] Side sheet opens on epic click\n- [x] Inline editing for title and description\n- [x] Priority and status dropdowns\n- [x] User story list with add, update status, delete\n- [x] Branch name display\n- [ ] Tests",
@@ -677,7 +752,7 @@
           "position": 2
         },
         {
-          "id": "zE6-qmZ163NL",
+          "id": "MFyKT3Ce7Nf7",
           "title": "Select multiple epics for batch operations",
           "description": "As a developer, I want to select multiple epics with checkboxes, so that I can launch Claude Code builds for them.",
           "acceptance_criteria": "- [x] Checkbox on each epic card\n- [x] Selection state tracked in parent\n- [x] Build toolbar shows selected count\n- [x] 'Build with Claude Code' button enabled when epics selected\n- [ ] Tests",
@@ -687,77 +762,61 @@
       ]
     },
     {
-      "id": "NWKu2M0TgSzZ",
-      "title": "Agent Configuration Side Panel & Custom Review Agents",
-      "description": "Dedicated side panel for configuring agent prompts (global + per-project override), creating custom review agents, and setting the default AI provider per agent type.\n\n## Implementation Plan\n\n### Phase 1 — Schema & Data Layer\n\n**Agent Prompts Table:**\n- Add `agentPrompts` table: id, agentType (text: 'build', 'review_security', 'review_code', 'review_compliance', 'chat', 'spec_generation', 'team_build', 'ticket_build'), systemPrompt (text), scope ('global' | projectId), createdAt, updatedAt\n- Global prompts have scope='global', project overrides store the projectId\n- When resolving a prompt, project-scoped prompt takes precedence over global, which takes precedence over built-in defaults\n\n**Custom Review Agents Table:**\n- Add `customReviewAgents` table: id, name (text), systemPrompt (text), scope ('global' | projectId), position (integer), isEnabled (integer, default 1), createdAt, updatedAt\n- Custom review agents are user-defined and appear alongside the 3 built-in review types\n\n**Agent Provider Defaults Table:**\n- Add `agentProviderDefaults` table: id, agentType (text), provider ('claude-code' | 'codex'), scope ('global' | projectId), createdAt, updatedAt\n- Allows setting CC or Codex as default per agent type, with project override\n\n### Phase 2 — API Routes\n\n**Agent Prompts:**\n- `GET /api/agent-config/prompts` — list all global agent prompts\n- `GET /api/projects/[projectId]/agent-config/prompts` — list project-scoped prompts (merged with global defaults)\n- `PUT /api/agent-config/prompts/[agentType]` — upsert global prompt for an agent type\n- `PUT /api/projects/[projectId]/agent-config/prompts/[agentType]` — upsert project override\n- `DELETE /api/projects/[projectId]/agent-config/prompts/[agentType]` — remove project override (fall back to global)\n\n**Custom Review Agents:**\n- `GET /api/agent-config/review-agents` — list global custom review agents\n- `GET /api/projects/[projectId]/agent-config/review-agents` — list project-scoped + global review agents\n- `POST /api/agent-config/review-agents` — create a custom review agent (global)\n- `POST /api/projects/[projectId]/agent-config/review-agents` — create project-scoped review agent\n- `PATCH /api/agent-config/review-agents/[agentId]` — update name, prompt, enabled status\n- `DELETE /api/agent-config/review-agents/[agentId]` — delete a custom review agent\n\n**Agent Provider Defaults:**\n- `GET /api/agent-config/providers` — list global provider defaults per agent type\n- `PUT /api/agent-config/providers/[agentType]` — set global default provider for agent type\n- `PUT /api/projects/[projectId]/agent-config/providers/[agentType]` — set project override\n\n### Phase 3 — Prompt Builder Integration\n- Refactor all prompt builder functions to load custom prompts from DB before composing\n- Resolution order: project override → global custom → built-in default\n- Update `buildReviewPrompt` to accept custom review agent prompts in addition to built-in types\n- Update `buildBuildPrompt`, `buildChatPrompt`, `buildSpecPrompt`, `buildTeamBuildPrompt`, `buildTicketBuildPrompt` to use configurable prompts\n\n### Phase 4 — Side Panel UI\n- New `AgentConfigPanel` component accessible from the main sidebar\n- Three tabs: **Agent Prompts**, **Review Agents**, **Provider Defaults**\n- Agent Prompts tab: list of agent types with expandable prompt editors, toggle between global/project scope\n- Review Agents tab: list of built-in (read-only name) + custom review agents, each with name/prompt fields, add/delete actions\n- Provider Defaults tab: per-agent-type dropdown to select CC or Codex as default\n- Panel slides in from the left sidebar, can be toggled open/closed\n\n### Phase 5 — Review Dialog Integration\n- Update the Agent Review dialog on the story detail page to include custom review agents alongside the 3 built-in types\n- Custom agents displayed as additional checkboxes with their name\n- Each selected custom agent dispatches a plan-mode agent with the custom prompt\n- Agent output posted as a comment with the custom agent's name as label",
+      "id": "PLfVTmLsLqCr",
+      "title": "Unified Chat & Epic Creation Side Panel",
+      "description": "Rework the separate chat panel and epic creation flow into a single unified side panel component. The panel lives on the right side of the screen, collapsed by default (showing ~5% as a grayed-out edge). Clicking 'Chat' or 'New Epic' expands the panel, splitting the screen into a resizable two-pane layout (board + chat). The panel supports tabbed conversations with agent activity indicators and mandatory agent type selection on each new chat.\n\n## Implementation Plan\n\n### Phase 1 — Unified Panel Shell\n- Create a `UnifiedChatPanel` component that replaces the current separate chat panel and epic creation chat\n- Panel has three visual states: collapsed (5% visible, grayed overlay on the right edge), expanded (resizable split with the board), and hidden (0%)\n- Default state is collapsed — a thin vertical strip visible on the right side\n- Clicking the collapsed strip or toolbar buttons ('Chat', 'New Epic') transitions to expanded state\n- Use a resizable split layout (e.g. `react-resizable-panels` or custom CSS resize) so the user can drag the divider between the board and the chat panel\n- Persist the panel width in local state (or localStorage) so it remembers the user's preferred split\n\n### Phase 2 — Tabbed Conversations\n- The panel supports multiple open conversations as tabs (similar to browser tabs)\n- Each tab represents a chat conversation (brainstorm, epic creation, or general)\n- Tabs show the conversation title (truncated) and a close button\n- A '+' button creates a new tab\n- Active tab is visually highlighted\n- Tab state persisted in the existing `chatMessages` / `chatConversations` DB tables\n\n### Phase 3 — Agent Activity Indicator in Tabs\n- When an agent is actively working on a conversation (streaming response, building, etc.), display a small animated icon (spinner or pulsing dot) on the corresponding tab\n- The indicator is visible even when the panel is collapsed, appearing on the thin right-edge strip as a subtle glow or badge\n- Poll agent session status to determine which conversations have active agents\n\n### Phase 4 — Agent Type Selector on New Chat\n- When creating a new conversation ('+' tab or 'New Epic' / 'Chat' trigger), show a mandatory agent type selector before the first message\n- Agent types: 'Brainstorm' (plan mode), 'Epic Creation' (spec generation mode), or custom types from agent config\n- The selected type determines the prompt builder and Claude Code mode used\n- Selector displayed as a prominent dropdown or button group at the top of the empty chat\n- Once the first message is sent, the agent type is locked for that conversation\n\n### Phase 5 — Board Integration\n- Remove the old chat panel toggle from the project header\n- The kanban board occupies 100% width when the panel is collapsed\n- When expanded, the board flexes to fill the remaining space\n- 'New Epic' button in the board toolbar opens the panel with a new 'Epic Creation' tab pre-selected\n- 'Chat' button opens the panel with a new 'Brainstorm' tab or focuses the last active tab\n- Ensure the kanban board remains fully functional (drag-and-drop, selection, build toolbar) in the reduced width",
       "priority": 2,
       "status": "in_progress",
       "position": 0,
-      "branchName": "feature/epic-NWKu2M0TgSzZ-agent-configuration-side-panel-custom-re",
+      "branchName": "feature/epic-PLfVTmLsLqCr-unified-chat-epic-creation-side-panel",
       "user_stories": [
         {
-          "id": "Hm69DiHNVbiG",
-          "title": "As a developer, I want database tables for agent prompts, custom review agents, and provider defaults so that agent configuration is persisted",
-          "description": "Add three new tables to the Drizzle schema: `agentPrompts` (id, agentType, systemPrompt, scope, createdAt, updatedAt), `customReviewAgents` (id, name, systemPrompt, scope, position, isEnabled, createdAt, updatedAt), and `agentProviderDefaults` (id, agentType, provider, scope, createdAt, updatedAt). The `scope` field is 'global' for app-wide config or a projectId for project overrides. Generate and push the migration.",
-          "acceptance_criteria": "- [ ] `agentPrompts` table added to `lib/db/schema.ts` with agentType, systemPrompt, scope fields\n- [ ] `customReviewAgents` table added with name, systemPrompt, scope, position, isEnabled fields\n- [ ] `agentProviderDefaults` table added with agentType, provider, scope fields\n- [ ] Unique constraint on (agentType, scope) for agentPrompts and agentProviderDefaults\n- [ ] Unique constraint on (name, scope) for customReviewAgents\n- [ ] Drizzle migration generated and pushed successfully\n- [ ] TypeScript types exported for all new tables",
+          "id": "Lna7Crqsq1_n",
+          "title": "As a user, I want a collapsed chat strip on the right edge of the screen so that I know the chat panel exists without it taking up space",
+          "description": "Create the unified panel shell with a collapsed state showing approximately 5% of the screen width as a grayed-out vertical strip on the right side. The strip should have a subtle visual cue (e.g. a chat icon or vertical text) indicating it can be expanded. Clicking anywhere on the strip expands the panel.",
+          "acceptance_criteria": "- [ ] Collapsed panel renders as a thin vertical strip (~5% width) on the right edge\n- [ ] Strip has a muted/grayed appearance distinct from the main content\n- [ ] Subtle visual indicator (icon or label) on the strip hints at chat functionality\n- [ ] Clicking the strip transitions the panel to the expanded state\n- [ ] Panel defaults to collapsed state on page load\n- [ ] Smooth CSS transition between collapsed and expanded states",
           "status": "in_progress",
           "position": 0
         },
         {
-          "id": "wm79P9p_XK1u",
-          "title": "As a developer, I want API routes for managing agent prompts so that I can configure system prompts per agent type globally and per project",
-          "description": "Create CRUD API routes for agent prompts. `GET /api/agent-config/prompts` returns all global prompts. `PUT /api/agent-config/prompts/[agentType]` upserts a global prompt. `GET /api/projects/[projectId]/agent-config/prompts` returns merged prompts (project override > global > built-in). `PUT/DELETE` on project-scoped route manages overrides. Built-in defaults are returned when no custom prompt exists.",
-          "acceptance_criteria": "- [ ] `GET /api/agent-config/prompts` returns all global agent prompts with built-in defaults for missing types\n- [ ] `PUT /api/agent-config/prompts/[agentType]` upserts global prompt (validates agentType is known)\n- [ ] `GET /api/projects/[projectId]/agent-config/prompts` returns merged view with project overrides\n- [ ] `PUT /api/projects/[projectId]/agent-config/prompts/[agentType]` upserts project-scoped override\n- [ ] `DELETE /api/projects/[projectId]/agent-config/prompts/[agentType]` removes project override\n- [ ] Consistent `{ data }` / `{ error }` response shape\n- [ ] Known agent types: build, review_security, review_code, review_compliance, chat, spec_generation, team_build, ticket_build",
+          "id": "F5Scy6DPVLAN",
+          "title": "As a user, I want a resizable split layout between the kanban board and the chat panel so that I can adjust the space allocated to each",
+          "description": "When the chat panel is expanded, the screen splits into two resizable panes: the kanban board on the left and the chat panel on the right. A draggable divider allows resizing. The board and panel each have a minimum width to remain usable. The user's preferred width ratio persists across sessions via localStorage.",
+          "acceptance_criteria": "- [ ] Expanded panel creates a horizontal split layout with board (left) and chat (right)\n- [ ] Draggable divider between the two panes allows resizing\n- [ ] Minimum width constraint on both panes (e.g. 300px each) to prevent collapsing\n- [ ] Default split ratio is approximately 60% board / 40% chat\n- [ ] Split ratio persisted in localStorage and restored on next visit\n- [ ] Kanban board remains fully functional (DnD, selection, toolbar) in reduced width\n- [ ] Double-clicking the divider resets to default ratio",
           "status": "in_progress",
           "position": 1
         },
         {
-          "id": "18hBLXvGbqE1",
-          "title": "As a developer, I want API routes for custom review agents so that I can create, edit, and delete specialized review agents",
-          "description": "Create CRUD API routes for custom review agents. `POST /api/agent-config/review-agents` creates a global custom review agent with a name and system prompt. `PATCH` updates name/prompt/enabled. `DELETE` removes the agent. Project-scoped routes allow project-specific review agents. `GET` returns combined list of global + project-scoped agents.",
-          "acceptance_criteria": "- [ ] `GET /api/agent-config/review-agents` returns all global custom review agents\n- [ ] `POST /api/agent-config/review-agents` creates a custom review agent with name and systemPrompt\n- [ ] `PATCH /api/agent-config/review-agents/[agentId]` updates name, systemPrompt, or isEnabled\n- [ ] `DELETE /api/agent-config/review-agents/[agentId]` deletes a custom review agent\n- [ ] `GET /api/projects/[projectId]/agent-config/review-agents` returns global + project-scoped agents\n- [ ] `POST /api/projects/[projectId]/agent-config/review-agents` creates project-scoped agent\n- [ ] Name uniqueness validated within scope\n- [ ] Consistent `{ data }` / `{ error }` response shape",
+          "id": "1FZVFa5_0XVK",
+          "title": "As a user, I want tabbed conversations in the chat panel so that I can have multiple chats open simultaneously",
+          "description": "The chat panel displays a tab bar at the top with one tab per open conversation. Each tab shows a truncated title and a close button. A '+' button at the end of the tab bar creates a new conversation. The active tab is highlighted. Switching tabs loads the corresponding conversation history.",
+          "acceptance_criteria": "- [ ] Tab bar rendered at the top of the chat panel\n- [ ] Each tab shows conversation title (truncated to ~20 chars) and close (X) button\n- [ ] '+' button at the end of the tab bar creates a new conversation\n- [ ] Active tab visually highlighted with distinct background/border\n- [ ] Clicking a tab switches to that conversation and loads its message history\n- [ ] Closing a tab removes it from the bar (conversation persists in DB)\n- [ ] At least one tab always remains open (last tab cannot be closed)\n- [ ] Tab order matches creation order, newest on the right",
           "status": "in_progress",
           "position": 2
         },
         {
-          "id": "KvIPmH-qSabP",
-          "title": "As a developer, I want API routes for agent provider defaults so that I can set Claude Code or Codex as the default per agent type",
-          "description": "Create API routes for managing default provider per agent type. `GET /api/agent-config/providers` returns all global defaults. `PUT /api/agent-config/providers/[agentType]` sets the global default provider for an agent type. Project-scoped routes allow per-project overrides. Defaults to 'claude-code' when no configuration exists.",
-          "acceptance_criteria": "- [ ] `GET /api/agent-config/providers` returns provider defaults for all agent types\n- [ ] `PUT /api/agent-config/providers/[agentType]` sets global default provider ('claude-code' or 'codex')\n- [ ] `PUT /api/projects/[projectId]/agent-config/providers/[agentType]` sets project-scoped override\n- [ ] `GET /api/projects/[projectId]/agent-config/providers` returns merged defaults (project > global > 'claude-code')\n- [ ] Validates provider value is 'claude-code' or 'codex'\n- [ ] Consistent `{ data }` / `{ error }` response shape",
+          "id": "6RV-cqMOUEAK",
+          "title": "As a user, I want an animated indicator on tabs when an agent is working so that I can see which conversations have active agents",
+          "description": "When a Claude Code agent is actively processing a response for a conversation (streaming, building, reviewing), display a small animated indicator (spinning icon or pulsing dot) on that conversation's tab. The indicator is visible both in expanded and collapsed panel states. In collapsed state, show a subtle badge or glow on the right-edge strip.",
+          "acceptance_criteria": "- [ ] Animated spinner or pulsing dot appears on tabs with active agent sessions\n- [ ] Indicator polls agent session status at regular intervals (e.g. every 3 seconds)\n- [ ] Indicator disappears when the agent session completes, fails, or is cancelled\n- [ ] Multiple tabs can show indicators simultaneously\n- [ ] In collapsed panel state, a badge/glow on the strip indicates active agents\n- [ ] Indicator is visually distinct from static tab elements (color and animation)",
           "status": "in_progress",
           "position": 3
         },
         {
-          "id": "tV0Dx3g8pDQ3",
-          "title": "As a developer, I want the prompt builder to use configurable prompts so that custom agent prompts are injected into all Claude Code sessions",
-          "description": "Refactor all prompt builder functions (`buildBuildPrompt`, `buildChatPrompt`, `buildSpecPrompt`, `buildTeamBuildPrompt`, `buildTicketBuildPrompt`, `buildReviewPrompt`) to load custom prompts from the database before composing. Resolution order: project-scoped override → global custom prompt → existing built-in default. Update `buildReviewPrompt` to accept custom review agent prompts alongside built-in review types.",
-          "acceptance_criteria": "- [ ] All prompt builders accept an optional custom system prompt parameter\n- [ ] New `resolveAgentPrompt(agentType, projectId?)` helper queries DB and returns the resolved prompt\n- [ ] Resolution order: project override → global custom → built-in default\n- [ ] `buildReviewPrompt` supports custom review agent types with their own system prompts\n- [ ] Build, chat, spec, team build, and ticket build prompt builders all use `resolveAgentPrompt`\n- [ ] Built-in default prompts extracted as constants for fallback\n- [ ] No behavioral change when no custom prompts are configured (backwards compatible)",
+          "id": "Nu7AhjWRevWM",
+          "title": "As a user, I want to select the agent type when creating a new chat so that each conversation uses the appropriate Claude Code mode",
+          "description": "When a new conversation tab is created, show a mandatory agent type selector before allowing the first message. Options include 'Brainstorm' (plan mode), 'Epic Creation' (spec generation), and any custom agent types from agent config. The selector is displayed as a button group or dropdown at the top of the empty chat. Once the first message is sent, the agent type is locked and displayed as a badge in the tab.",
+          "acceptance_criteria": "- [ ] New conversation shows agent type selector before first message\n- [ ] Available types: 'Brainstorm', 'Epic Creation', plus custom types from agent config\n- [ ] Selector rendered as a prominent button group or dropdown in the empty chat area\n- [ ] First message cannot be sent until an agent type is selected\n- [ ] Selected type stored in the conversation record in the database\n- [ ] After first message, agent type is locked and selector becomes a read-only badge\n- [ ] Agent type badge displayed in the tab alongside the title\n- [ ] Agent type determines the prompt builder and Claude Code mode used",
           "status": "in_progress",
           "position": 4
         },
         {
-          "id": "sVlPhptLQ9im",
-          "title": "As a developer, I want an Agent Configuration side panel so that I can manage agent prompts, review agents, and provider defaults from a dedicated UI",
-          "description": "Create an `AgentConfigPanel` component that slides in from the main sidebar. The panel has three tabs: Agent Prompts (list of agent types with expandable textarea editors, global/project scope toggle), Review Agents (list of built-in + custom agents with add/edit/delete), and Provider Defaults (per-agent dropdown to select CC or Codex). Add a sidebar icon/button to toggle the panel. When inside a project view, show project-scoped config with option to fall back to global.",
-          "acceptance_criteria": "- [ ] `AgentConfigPanel` component renders as a slide-in panel from the sidebar\n- [ ] Sidebar button/icon to toggle the panel open/closed\n- [ ] Agent Prompts tab lists all agent types with expandable prompt editors\n- [ ] Each prompt editor shows built-in default as placeholder, custom prompt as value\n- [ ] Scope toggle (Global / Project) when inside a project view\n- [ ] Review Agents tab lists built-in agents (name read-only) and custom agents (editable)\n- [ ] Add button to create a new custom review agent with name and prompt fields\n- [ ] Delete button on custom review agents with confirmation\n- [ ] Provider Defaults tab shows dropdown per agent type with Claude Code / Codex options\n- [ ] All changes saved via API with loading states and success/error feedback\n- [ ] Panel uses shadcn/ui components consistent with existing UI",
+          "id": "ewewm47pu8Gj",
+          "title": "As a user, I want the 'Chat' and 'New Epic' buttons to open the unified panel so that all chat interactions happen in one place",
+          "description": "Replace the existing separate chat panel toggle and epic creation flow with actions that open the unified side panel. 'Chat' button in the project toolbar expands the panel and focuses the last active brainstorm tab (or creates a new one). 'New Epic' button expands the panel and creates a new tab with 'Epic Creation' agent type pre-selected. Remove the old standalone chat panel component and epic creation modal/route.",
+          "acceptance_criteria": "- [ ] 'Chat' button in project toolbar expands the unified panel\n- [ ] 'Chat' focuses the last active brainstorm tab or creates a new one if none exists\n- [ ] 'New Epic' button expands the panel and creates a new tab with 'Epic Creation' pre-selected\n- [ ] Old standalone chat panel component removed\n- [ ] Old epic creation modal/route replaced by the new panel flow\n- [ ] Panel can be collapsed back via a close/collapse button or clicking outside\n- [ ] Keyboard shortcut (e.g. Escape) collapses the panel",
           "status": "in_progress",
           "position": 5
-        },
-        {
-          "id": "rAfHjRtONi2K",
-          "title": "As a developer, I want custom review agents to appear in the Agent Review dialog so that I can trigger specialized reviews on tickets",
-          "description": "Update the Agent Review dialog on the story detail page to dynamically load custom review agents from the API alongside the 3 built-in review types (Security, Code Review, Compliance). Custom agents are displayed as additional checkboxes with their name. Each selected custom agent dispatches a plan-mode agent with its custom system prompt. Agent output is posted as a comment with the custom agent's name as label.",
-          "acceptance_criteria": "- [ ] Agent Review dialog fetches custom review agents from API on open\n- [ ] Custom agents displayed as checkboxes alongside built-in review types\n- [ ] Disabled custom agents (isEnabled=false) are hidden from the dialog\n- [ ] Review API route (`POST .../review`) accepts custom agent IDs in addition to built-in type strings\n- [ ] Each selected custom agent dispatches a plan-mode session with its system prompt\n- [ ] Agent output posted as comment with custom agent name as label (e.g., 'UI Review')\n- [ ] Built-in review types continue to work unchanged",
-          "status": "in_progress",
-          "position": 6
-        },
-        {
-          "id": "SJwsUPN562iX",
-          "title": "As a developer, I want provider defaults to be used automatically in build, review, and chat flows so that I don't have to select the provider each time",
-          "description": "Update all action flows (build toolbar, send-to-dev, agent review, chat) to read the configured default provider for the relevant agent type before dispatching. The provider selector UI should pre-select the configured default instead of always defaulting to Claude Code. Manual selection still overrides the default for that session.",
-          "acceptance_criteria": "- [ ] Build toolbar pre-selects the configured default provider for 'build' agent type\n- [ ] Send-to-dev dialog pre-selects the default provider for 'ticket_build' agent type\n- [ ] Agent Review dialog uses the default provider for each review agent type\n- [ ] Chat panel pre-selects the default provider for 'chat' agent type\n- [ ] Manual provider selection overrides the default for that action\n- [ ] Falls back to 'claude-code' when no default is configured\n- [ ] Provider defaults resolved with project > global > 'claude-code' precedence",
-          "status": "in_progress",
-          "position": 7
         }
       ]
     }
