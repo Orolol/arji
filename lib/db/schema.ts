@@ -13,6 +13,7 @@ export const projects = sqliteTable("projects", {
   description: text("description"),
   status: text("status").default("ideation"), // ideation | specifying | building | done | archived
   gitRepoPath: text("git_repo_path"),
+  githubOwnerRepo: text("github_owner_repo"),
   spec: text("spec"),
   imported: integer("imported").default(0),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),

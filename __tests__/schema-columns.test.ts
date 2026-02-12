@@ -27,6 +27,12 @@ describe("Schema: chatConversations columns", () => {
 });
 
 describe("Schema: existing columns preserved", () => {
+  it("projects has githubOwnerRepo column", () => {
+    const col = schema.projects.githubOwnerRepo;
+    expect(col).toBeDefined();
+    expect(col.name).toBe("github_owner_repo");
+  });
+
   it("agentSessions still has all original columns", () => {
     const cols = schema.agentSessions;
     expect(cols.id).toBeDefined();
