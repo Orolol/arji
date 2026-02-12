@@ -78,6 +78,16 @@ export const chatMessages = sqliteTable("chat_messages", {
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const chatAttachments = sqliteTable("chat_attachments", {
+  id: text("id").primaryKey(),
+  chatMessageId: text("chat_message_id").references(() => chatMessages.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  filePath: text("file_path").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const agentSessions = sqliteTable("agent_sessions", {
   id: text("id").primaryKey(),
   projectId: text("project_id")

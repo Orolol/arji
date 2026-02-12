@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { chatMessages, chatConversations, projects, documents, settings } from "@/lib/db/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { chatMessages, chatAttachments, chatConversations, projects, documents, settings } from "@/lib/db/schema";
+import { eq, desc, and, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { spawnClaudeStream, spawnClaude } from "@/lib/claude/spawn";
 import { buildChatPrompt, buildTitleGenerationPrompt } from "@/lib/claude/prompt-builder";
@@ -13,27 +13,37 @@ export async function POST(
   const { projectId } = await params;
   const body = await request.json();
 
-  if (!body.content) {
-    return new Response(JSON.stringify({ error: "content is required" }), {
+  if (!body.content && (!body.attachmentIds || body.attachmentIds.length === 0)) {
+    return new Response(JSON.stringify({ error: "content or attachments required" }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
   }
 
   const conversationId: string | null = body.conversationId || null;
+  const attachmentIds: string[] = body.attachmentIds || [];
 
   // Save user message
   const userMsgId = createId();
+  const userContent = body.content || (attachmentIds.length > 0 ? "[image]" : "");
   db.insert(chatMessages)
     .values({
       id: userMsgId,
       projectId,
       conversationId,
       role: "user",
-      content: body.content,
+      content: userContent,
       createdAt: new Date().toISOString(),
     })
     .run();
+
+  // Link pending attachments to this message
+  if (attachmentIds.length > 0) {
+    db.update(chatAttachments)
+      .set({ chatMessageId: userMsgId })
+      .where(inArray(chatAttachments.id, attachmentIds))
+      .run();
+  }
 
   // Load context
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get();

@@ -40,8 +40,8 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
   }, [sending, refreshConversations]);
 
   const sendMessage = useCallback(
-    async (content: string) => {
-      await rawSendMessage(content);
+    async (content: string, attachmentIds: string[]) => {
+      await rawSendMessage(content, attachmentIds);
     },
     [rawSendMessage]
   );
@@ -136,7 +136,7 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
           </div>
         )}
       </div>
-      <MessageInput onSend={sendMessage} disabled={sending} />
+      <MessageInput projectId={projectId} onSend={sendMessage} disabled={sending} />
     </div>
   );
 }
