@@ -1,4 +1,5 @@
 import { spawnClaude, type ClaudeOptions, type ClaudeResult } from "./spawn";
+import { getProvider, type ProviderType, type ProviderSession } from "@/lib/providers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -14,16 +15,20 @@ export type SessionStatus =
 export interface TrackedSession {
   sessionId: string;
   status: SessionStatus;
+  provider: ProviderType;
   options: ClaudeOptions;
   startedAt: Date;
   completedAt?: Date;
   result?: ClaudeResult;
   kill: () => void;
+  /** Provider session handle (PID-based for CC, thread-based for Codex). */
+  providerSession?: ProviderSession;
 }
 
 export interface SessionInfo {
   sessionId: string;
   status: SessionStatus;
+  provider: ProviderType;
   startedAt: Date;
   completedAt?: Date;
   duration?: number;
@@ -41,10 +46,16 @@ class ClaudeProcessManager {
    * Spawns a new Claude CLI process and tracks it under the given session ID.
    * If a session with the same ID is already running, it throws an error.
    *
+   * When provider is 'codex', delegates to the Codex provider instead.
+   *
    * Returns the session info immediately. The process runs in the background
    * and updates the session state on completion.
    */
-  start(sessionId: string, options: ClaudeOptions): SessionInfo {
+  start(
+    sessionId: string,
+    options: ClaudeOptions,
+    provider: ProviderType = "claude-code",
+  ): SessionInfo {
     const existing = this.sessions.get(sessionId);
     if (existing && existing.status === "running") {
       throw new Error(
@@ -52,14 +63,39 @@ class ClaudeProcessManager {
       );
     }
 
-    const { promise, kill } = spawnClaude(options);
+    let kill: () => void;
+    let promise: Promise<ClaudeResult>;
+    let providerSession: ProviderSession | undefined;
+
+    if (provider === "codex") {
+      // Delegate to Codex provider
+      const codexProvider = getProvider("codex");
+      const session = codexProvider.spawn({
+        sessionId,
+        prompt: options.prompt,
+        cwd: options.cwd || process.cwd(),
+        mode: options.mode,
+        allowedTools: options.allowedTools,
+        model: options.model,
+      });
+      kill = session.kill;
+      promise = session.promise;
+      providerSession = session;
+    } else {
+      // Default: Claude Code CLI
+      const spawned = spawnClaude(options);
+      kill = spawned.kill;
+      promise = spawned.promise;
+    }
 
     const session: TrackedSession = {
       sessionId,
       status: "running",
+      provider,
       options,
       startedAt: new Date(),
       kill,
+      providerSession,
     };
 
     this.sessions.set(sessionId, session);
@@ -98,6 +134,7 @@ class ClaudeProcessManager {
 
   /**
    * Cancels a running session by killing the underlying process.
+   * Works uniformly for both Claude Code (SIGTERM→SIGKILL) and Codex (AbortController).
    * Returns true if the session was running and has been cancelled,
    * false if the session was not found or not in a cancellable state.
    */
@@ -194,6 +231,7 @@ class ClaudeProcessManager {
     const info: SessionInfo = {
       sessionId: session.sessionId,
       status: session.status,
+      provider: session.provider,
       startedAt: session.startedAt,
     };
 
