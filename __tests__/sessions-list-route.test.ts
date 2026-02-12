@@ -21,6 +21,10 @@ vi.mock("@/lib/db/schema", () => ({
   },
 }));
 
+vi.mock("@/lib/agent-sessions/backfill", () => ({
+  runBackfillRecentSessionLastNonEmptyTextOnce: vi.fn(),
+}));
+
 describe("sessions list route", () => {
   beforeEach(() => {
     vi.clearAllMocks();

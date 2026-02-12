@@ -3,12 +3,14 @@ import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { getSessionStatusForApi } from "@/lib/agent-sessions/lifecycle";
+import { runBackfillRecentSessionLastNonEmptyTextOnce } from "@/lib/agent-sessions/backfill";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
+  runBackfillRecentSessionLastNonEmptyTextOnce(projectId);
 
   const sessions = db
     .select()

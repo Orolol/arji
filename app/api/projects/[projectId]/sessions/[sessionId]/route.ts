@@ -11,12 +11,14 @@ import {
   isSessionNotFoundError,
   markSessionCancelled,
 } from "@/lib/agent-sessions/lifecycle";
+import { runBackfillRecentSessionLastNonEmptyTextOnce } from "@/lib/agent-sessions/backfill";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ projectId: string; sessionId: string }> }
 ) {
-  const { sessionId } = await params;
+  const { projectId, sessionId } = await params;
+  runBackfillRecentSessionLastNonEmptyTextOnce(projectId);
 
   const session = db
     .select()

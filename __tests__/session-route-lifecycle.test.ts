@@ -34,6 +34,10 @@ vi.mock("@/lib/claude/process-manager", () => ({
   },
 }));
 
+vi.mock("@/lib/agent-sessions/backfill", () => ({
+  runBackfillRecentSessionLastNonEmptyTextOnce: vi.fn(),
+}));
+
 describe("sessions/[sessionId] DELETE lifecycle guard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
