@@ -7,9 +7,9 @@ describe("useCodexAvailable", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns true when codex_api_key is present in settings", async () => {
+  it("returns true when codex provider is available", async () => {
     global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ data: { codex_api_key: "sk-test-key" } }),
+      json: () => Promise.resolve({ data: { codex: true, codexInstalled: true } }),
     });
 
     const { result } = renderHook(() => useCodexAvailable());
@@ -19,11 +19,12 @@ describe("useCodexAvailable", () => {
     });
 
     expect(result.current.codexAvailable).toBe(true);
+    expect(result.current.codexInstalled).toBe(true);
   });
 
-  it("returns false when codex_api_key is empty string", async () => {
+  it("returns false when codex provider is unavailable", async () => {
     global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ data: { codex_api_key: "" } }),
+      json: () => Promise.resolve({ data: { codex: false, codexInstalled: true } }),
     });
 
     const { result } = renderHook(() => useCodexAvailable());
@@ -33,6 +34,7 @@ describe("useCodexAvailable", () => {
     });
 
     expect(result.current.codexAvailable).toBe(false);
+    expect(result.current.codexInstalled).toBe(true);
   });
 
   it("returns false when codex_api_key is missing", async () => {

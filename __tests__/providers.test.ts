@@ -23,9 +23,15 @@ vi.mock("@/lib/codex/spawn", () => ({
   })),
 }));
 
-vi.mock("child_process", () => ({
-  execSync: vi.fn(),
-}));
+vi.mock("child_process", () => {
+  const execSync = vi.fn();
+  return {
+    execSync,
+    default: {
+      execSync,
+    },
+  };
+});
 
 import { getProvider } from "@/lib/providers";
 import { ClaudeCodeProvider } from "@/lib/providers/claude-code";
