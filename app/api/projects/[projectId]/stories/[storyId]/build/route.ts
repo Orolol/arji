@@ -15,6 +15,7 @@ import { createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import { buildTicketBuildPrompt } from "@/lib/claude/prompt-builder";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
+import type { ProviderType } from "@/lib/providers";
 import fs from "fs";
 import path from "path";
 
@@ -42,6 +43,7 @@ function hasRunningBuildForEpic(epicId: string): boolean {
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
   const body = await request.json().catch(() => ({}));
+  const provider: ProviderType = body.provider || "claude-code";
 
   // Validate story exists
   const story = db
@@ -179,6 +181,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       userStoryId: storyId,
       status: "running",
       mode: "code",
+      provider,
       prompt,
       logsPath,
       branchName,
