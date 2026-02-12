@@ -397,6 +397,109 @@ export function buildTitleGenerationPrompt(
  * The prompt includes the full project context, the target epic, and its
  * user stories with acceptance criteria.
  */
+export interface TeamEpic {
+  title: string;
+  description?: string | null;
+  worktreePath: string;
+  userStories: PromptUserStory[];
+}
+
+/**
+ * Builds the prompt for team-mode builds where Claude Code acts as a team
+ * lead and delegates tickets to sub-agents via the Task tool.
+ *
+ * Each epic is listed with its worktree path so sub-agents know where to work.
+ * Claude Code decides team composition and task allocation.
+ */
+export function buildTeamBuildPrompt(
+  project: PromptProject,
+  documents: PromptDocument[],
+  teamEpics: TeamEpic[],
+  globalPrompt?: string | null,
+): string {
+  const parts: string[] = [];
+
+  parts.push(globalSection(globalPrompt));
+  parts.push(`# Project: ${project.name}\n`);
+  parts.push(section("Project Specification", project.spec));
+  parts.push(documentsSection(documents));
+
+  // Epics section
+  parts.push(`## Epics to Implement\n`);
+  parts.push(
+    `You have ${teamEpics.length} epics to implement. Each epic has its own git worktree.\n`,
+  );
+
+  for (let i = 0; i < teamEpics.length; i++) {
+    const epic = teamEpics[i];
+    parts.push(`### Epic ${i + 1}: ${epic.title}\n`);
+    parts.push(`**Worktree path:** \`${epic.worktreePath}\`\n`);
+
+    if (epic.description) {
+      parts.push(`${epic.description.trim()}\n`);
+    }
+
+    if (epic.userStories.length > 0) {
+      parts.push(`**User Stories:**\n`);
+      const storyLines = epic.userStories.map((us) => {
+        const lines: string[] = [];
+        lines.push(`- [ ] **${us.title}**`);
+        if (us.description) {
+          lines.push(`  ${us.description.trim()}`);
+        }
+        if (us.acceptanceCriteria) {
+          lines.push(`  **Acceptance criteria:**`);
+          const criteria = us.acceptanceCriteria
+            .trim()
+            .split("\n")
+            .map((line) => `  ${line}`)
+            .join("\n");
+          lines.push(criteria);
+        }
+        return lines.join("\n");
+      });
+      parts.push(storyLines.join("\n\n") + "\n");
+    }
+  }
+
+  parts.push(`## Instructions — Team Lead Mode
+
+You are the **team lead**. Your job is to coordinate the implementation of all ${teamEpics.length} epics listed above by delegating work to sub-agents.
+
+### How to Delegate
+
+Use the \`Task\` tool to spawn sub-agents for each epic (or group of related tickets). Each sub-agent should:
+
+1. Work inside the epic's worktree path (specified above).
+2. Implement the user stories and meet all acceptance criteria.
+3. Commit changes with clear, descriptive commit messages using conventional commit format.
+4. Write tests that verify the acceptance criteria.
+
+### Team Composition
+
+You decide how to organize the team:
+- You may assign one sub-agent per epic, or split an epic across multiple agents if it has many independent user stories.
+- You may run multiple sub-agents in parallel for independent work.
+- Coordinate dependencies — if one epic depends on another, sequence them.
+
+### Your Responsibilities
+
+1. **Plan**: Analyze the epics and decide task allocation.
+2. **Delegate**: Use the \`Task\` tool to dispatch sub-agents with clear, complete instructions. Include the worktree path and relevant context in each task prompt.
+3. **Monitor**: Review sub-agent results as they complete.
+4. **Report**: After all sub-agents finish, provide a summary of what was accomplished.
+
+### Important Rules
+
+- Do NOT implement code yourself — delegate ALL implementation to sub-agents via the Task tool.
+- Each sub-agent must work in its designated worktree path.
+- Pass the full project spec and relevant epic details to each sub-agent.
+- If a sub-agent fails, analyze the error and retry or reassign.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}
+
 export function buildBuildPrompt(
   project: PromptProject,
   documents: PromptDocument[],
