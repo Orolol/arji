@@ -75,13 +75,25 @@ vi.mock("@/hooks/useCodexAvailable", () => ({
   useCodexAvailable: () => ({ codexAvailable: true, codexInstalled: true }),
 }));
 
+let mockEpicCreateLoading = false;
+const mockCreateEpic = vi.fn(async () => "epic-1");
+
+vi.mock("@/hooks/useEpicCreate", () => ({
+  useEpicCreate: () => ({
+    createEpic: mockCreateEpic,
+    isLoading: mockEpicCreateLoading,
+    error: null,
+    createdEpic: null,
+  }),
+}));
+
 vi.mock("@/components/chat/MessageList", () => ({
   MessageList: () => <div data-testid="message-list" />,
 }));
 
 vi.mock("@/components/chat/MessageInput", () => ({
-  MessageInput: ({ disabled }: { disabled?: boolean }) => (
-    <button data-testid="message-input" disabled={disabled}>
+  MessageInput: ({ disabled, placeholder }: { disabled?: boolean; placeholder?: string }) => (
+    <button data-testid="message-input" data-placeholder={placeholder} disabled={disabled}>
       input
     </button>
   ),
@@ -118,12 +130,14 @@ describe("UnifiedChatPanel shell + tabs", () => {
     ];
     mockActiveId = "conv1";
     mockMessages = [];
+    mockEpicCreateLoading = false;
 
     mockSetActiveId.mockClear();
     mockCreateConversation.mockClear();
     mockUpdateConversation.mockClear();
     mockRefreshConversations.mockClear();
     mockDeleteConversation.mockClear();
+    mockCreateEpic.mockClear();
 
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -332,5 +346,249 @@ describe("UnifiedChatPanel shell + tabs", () => {
     await vi.advanceTimersByTimeAsync(9000);
 
     expect(mockRefreshConversations).toHaveBeenCalledTimes(3);
+  });
+
+  it("marks tabs with conversation type metadata", () => {
+    mockConversations = [
+      {
+        id: "conv1",
+        projectId: "proj1",
+        type: "epic_creation",
+        label: "Epic refinement",
+        status: "active",
+        epicId: null,
+        provider: "claude-code",
+        createdAt: "2024-01-01",
+      },
+    ];
+    mockActiveId = "conv1";
+
+    render(
+      <UnifiedChatPanel projectId="proj1">
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
+    fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
+    expect(screen.getByTestId("conversation-tab-conv1")).toHaveAttribute(
+      "data-agent-type",
+      "epic_creation",
+    );
+  });
+
+  it("shows epic creation empty-state hint for new epic tabs", () => {
+    mockConversations = [
+      {
+        id: "conv1",
+        projectId: "proj1",
+        type: "epic_creation",
+        label: "New Epic",
+        status: "active",
+        epicId: null,
+        provider: "claude-code",
+        createdAt: "2024-01-01",
+      },
+    ];
+    mockActiveId = "conv1";
+    mockMessages = [];
+
+    render(
+      <UnifiedChatPanel projectId="proj1">
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
+    fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
+    expect(
+      screen.getByText(
+        "Describe your epic idea and I'll help you structure it with user stories and acceptance criteria.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows create epic action for epic conversations and triggers onEpicCreated callback", async () => {
+    mockConversations = [
+      {
+        id: "conv1",
+        projectId: "proj1",
+        type: "epic_creation",
+        label: "Epic refinement",
+        status: "active",
+        epicId: null,
+        provider: "claude-code",
+        createdAt: "2024-01-01",
+      },
+    ];
+    mockActiveId = "conv1";
+    mockMessages = [
+      {
+        id: "m1",
+        projectId: "proj1",
+        role: "user",
+        content: "I want an auth epic",
+        createdAt: "2024-01-01",
+      },
+      {
+        id: "m2",
+        projectId: "proj1",
+        role: "assistant",
+        content: "Here is a refined epic proposal",
+        createdAt: "2024-01-01",
+      },
+    ];
+    const onEpicCreated = vi.fn();
+
+    render(
+      <UnifiedChatPanel projectId="proj1" onEpicCreated={onEpicCreated}>
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
+    fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
+    fireEvent.click(screen.getByText("Create Epic & Generate Stories"));
+
+    await waitFor(() => {
+      expect(mockCreateEpic).toHaveBeenCalledTimes(1);
+      expect(onEpicCreated).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("disables create epic action while epic creation is loading", () => {
+    mockConversations = [
+      {
+        id: "conv1",
+        projectId: "proj1",
+        type: "epic_creation",
+        label: "Epic refinement",
+        status: "active",
+        epicId: null,
+        provider: "claude-code",
+        createdAt: "2024-01-01",
+      },
+    ];
+    mockActiveId = "conv1";
+    mockMessages = [
+      {
+        id: "m1",
+        projectId: "proj1",
+        role: "user",
+        content: "I want an auth epic",
+        createdAt: "2024-01-01",
+      },
+      {
+        id: "m2",
+        projectId: "proj1",
+        role: "assistant",
+        content: "Here is a refined epic proposal",
+        createdAt: "2024-01-01",
+      },
+    ];
+    mockEpicCreateLoading = true;
+
+    render(
+      <UnifiedChatPanel projectId="proj1">
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
+    fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
+    expect(screen.getByText("Create Epic & Generate Stories")).toBeDisabled();
+  });
+
+  it("hides create epic action for brainstorm conversations", () => {
+    mockConversations = [
+      {
+        id: "conv1",
+        projectId: "proj1",
+        type: "brainstorm",
+        label: "Brainstorm",
+        status: "active",
+        epicId: null,
+        provider: "claude-code",
+        createdAt: "2024-01-01",
+      },
+    ];
+    mockActiveId = "conv1";
+    mockMessages = [
+      {
+        id: "m1",
+        projectId: "proj1",
+        role: "user",
+        content: "Hi",
+        createdAt: "2024-01-01",
+      },
+      {
+        id: "m2",
+        projectId: "proj1",
+        role: "assistant",
+        content: "Hello",
+        createdAt: "2024-01-01",
+      },
+    ];
+
+    render(
+      <UnifiedChatPanel projectId="proj1">
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
+    fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
+    expect(screen.queryByText("Create Epic & Generate Stories")).not.toBeInTheDocument();
+  });
+
+  it("passes brainstorm placeholder text to MessageInput", () => {
+    mockConversations = [
+      {
+        id: "conv1",
+        projectId: "proj1",
+        type: "brainstorm",
+        label: "Brainstorm",
+        status: "active",
+        epicId: null,
+        provider: "claude-code",
+        createdAt: "2024-01-01",
+      },
+    ];
+    mockActiveId = "conv1";
+
+    render(
+      <UnifiedChatPanel projectId="proj1">
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
+    fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
+    expect(screen.getByTestId("message-input")).toHaveAttribute(
+      "data-placeholder",
+      "Ask a question...",
+    );
+  });
+
+  it("passes epic placeholder text to MessageInput", () => {
+    mockConversations = [
+      {
+        id: "conv1",
+        projectId: "proj1",
+        type: "epic_creation",
+        label: "New Epic",
+        status: "active",
+        epicId: null,
+        provider: "claude-code",
+        createdAt: "2024-01-01",
+      },
+    ];
+    mockActiveId = "conv1";
+
+    render(
+      <UnifiedChatPanel projectId="proj1">
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
+    fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
+    expect(screen.getByTestId("message-input")).toHaveAttribute(
+      "data-placeholder",
+      "Describe your epic idea...",
+    );
   });
 });

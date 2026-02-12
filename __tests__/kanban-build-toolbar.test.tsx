@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { forwardRef, useImperativeHandle } from "react";
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
@@ -41,13 +42,21 @@ vi.mock("@/components/kanban/EpicDetail", () => ({
   EpicDetail: () => null,
 }));
 
-vi.mock("@/components/kanban/CreateEpicSheet", () => ({
-  CreateEpicSheet: () => null,
-}));
+const mockPanelOpenChat = vi.fn();
+const mockPanelOpenNewEpic = vi.fn();
 
 vi.mock("@/components/chat/UnifiedChatPanel", () => ({
-  UnifiedChatPanel: ({ children }: { children: unknown }) => (
-    <div data-testid="unified-chat-panel">{children}</div>
+  UnifiedChatPanel: forwardRef(
+    ({ children }: { children: unknown }, ref) => {
+      useImperativeHandle(ref, () => ({
+        openChat: mockPanelOpenChat,
+        openNewEpic: mockPanelOpenNewEpic,
+        collapse: vi.fn(),
+        hide: vi.fn(),
+      }));
+
+      return <div data-testid="unified-chat-panel">{children}</div>;
+    }
   ),
 }));
 
@@ -78,9 +87,23 @@ describe("Kanban Build Toolbar", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockCodexAvailable = false;
+    mockPanelOpenChat.mockClear();
+    mockPanelOpenNewEpic.mockClear();
     global.fetch = vi.fn().mockResolvedValue({
       json: () => Promise.resolve({ data: { count: 1 } }),
     });
+  });
+
+  it("chat toolbar button calls openChat on UnifiedChatPanel ref", () => {
+    render(<KanbanPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+    expect(mockPanelOpenChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("new epic toolbar button calls openNewEpic on UnifiedChatPanel ref", () => {
+    render(<KanbanPage />);
+    fireEvent.click(screen.getByRole("button", { name: "New Epic" }));
+    expect(mockPanelOpenNewEpic).toHaveBeenCalledTimes(1);
   });
 
   it("does not show build toolbar when no epics selected", () => {

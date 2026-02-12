@@ -32,15 +32,20 @@ describe("MessageInput", () => {
 
   it("renders textarea and buttons", () => {
     render(<MessageInput {...defaultProps} />);
-    expect(screen.getByPlaceholderText("Type a message...")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask a question...")).toBeInTheDocument();
     expect(screen.getByTitle("Attach image")).toBeInTheDocument();
+  });
+
+  it("supports a custom placeholder", () => {
+    render(<MessageInput {...defaultProps} placeholder="Describe your epic idea..." />);
+    expect(screen.getByPlaceholderText("Describe your epic idea...")).toBeInTheDocument();
   });
 
   it("sends message with text and no attachments", async () => {
     const onSend = vi.fn();
     render(<MessageInput {...defaultProps} onSend={onSend} />);
 
-    const textarea = screen.getByPlaceholderText("Type a message...");
+    const textarea = screen.getByPlaceholderText("Ask a question...");
     await userEvent.type(textarea, "Hello world");
 
     // Find the send button (the one without a title)
@@ -55,7 +60,7 @@ describe("MessageInput", () => {
 
   it("disables textarea and buttons when disabled prop is true", () => {
     render(<MessageInput {...defaultProps} disabled={true} />);
-    expect(screen.getByPlaceholderText("Type a message...")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Ask a question...")).toBeDisabled();
     expect(screen.getByTitle("Attach image")).toBeDisabled();
   });
 
@@ -92,7 +97,7 @@ describe("MessageInput", () => {
 
   it("uploads pasted image from clipboard", async () => {
     render(<MessageInput {...defaultProps} />);
-    const textarea = screen.getByPlaceholderText("Type a message...");
+    const textarea = screen.getByPlaceholderText("Ask a question...");
 
     const file = new File(["image-data"], "image.png", { type: "image/png" });
     const clipboardData = {
@@ -116,7 +121,7 @@ describe("MessageInput", () => {
 
   it("does not intercept text-only paste", () => {
     render(<MessageInput {...defaultProps} />);
-    const textarea = screen.getByPlaceholderText("Type a message...");
+    const textarea = screen.getByPlaceholderText("Ask a question...");
 
     const clipboardData = {
       items: [
@@ -147,7 +152,7 @@ describe("MessageInput", () => {
     });
 
     // Type some text and send
-    const textarea = screen.getByPlaceholderText("Type a message...");
+    const textarea = screen.getByPlaceholderText("Ask a question...");
     await userEvent.type(textarea, "Check this image");
 
     // Submit with Enter
@@ -168,7 +173,7 @@ describe("MessageInput", () => {
       expect(document.querySelector('img[alt="test.png"]')).toBeTruthy();
     });
 
-    const textarea = screen.getByPlaceholderText("Type a message...");
+    const textarea = screen.getByPlaceholderText("Ask a question...");
     await userEvent.type(textarea, "msg");
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
 

@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import { Board } from "@/components/kanban/Board";
 import { EpicDetail } from "@/components/kanban/EpicDetail";
-import { CreateEpicSheet } from "@/components/kanban/CreateEpicSheet";
 import { UnifiedChatPanel, type UnifiedChatPanelHandle } from "@/components/chat/UnifiedChatPanel";
 import { AgentMonitor } from "@/components/monitor/AgentMonitor";
 import { useAgentPolling } from "@/hooks/useAgentPolling";
@@ -43,7 +42,6 @@ export default function KanbanPage() {
   const [teamMode, setTeamMode] = useState(false);
   const [provider, setProvider] = useState<ProviderType>("claude-code");
   const [building, setBuilding] = useState(false);
-  const [showCreateEpic, setShowCreateEpic] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const { activeSessions } = useAgentPolling(projectId);
@@ -151,7 +149,11 @@ export default function KanbanPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-hidden">
-        <UnifiedChatPanel projectId={projectId} ref={panelRef}>
+        <UnifiedChatPanel
+          projectId={projectId}
+          ref={panelRef}
+          onEpicCreated={() => setRefreshTrigger((t) => t + 1)}
+        >
           <div className="flex h-full flex-col">
             {/* Header bar */}
             <div className="border-b border-border px-4 py-2 flex items-center gap-2">
@@ -167,7 +169,7 @@ export default function KanbanPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => setShowCreateEpic(true)}
+                onClick={() => panelRef.current?.openNewEpic()}
                 className="h-7 text-xs"
               >
                 <Plus className="h-3 w-3 mr-1" />
@@ -316,16 +318,6 @@ export default function KanbanPage() {
         }}
       />
 
-      <CreateEpicSheet
-        projectId={projectId}
-        open={showCreateEpic}
-        onClose={() => setShowCreateEpic(false)}
-        onCreated={(epicId) => {
-          setShowCreateEpic(false);
-          setRefreshTrigger((t) => t + 1);
-          addToast("success", `Epic created successfully`);
-        }}
-      />
     </div>
   );
 }

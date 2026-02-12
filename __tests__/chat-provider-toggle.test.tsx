@@ -36,6 +36,17 @@ let mockConversations = [
   },
 ];
 let mockActiveId: string | null = "conv1";
+const mockUpdateConversation = vi.fn(
+  async (conversationId: string, updates: { provider?: string }) => {
+    const res = await fetch(`/api/projects/proj1/conversations/${conversationId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    const json = await res.json();
+    return json.data;
+  }
+);
 
 vi.mock("@/hooks/useConversations", () => ({
   useConversations: () => ({
@@ -43,6 +54,7 @@ vi.mock("@/hooks/useConversations", () => ({
     activeId: mockActiveId,
     setActiveId: vi.fn(),
     createConversation: vi.fn(),
+    updateConversation: mockUpdateConversation,
     deleteConversation: vi.fn(),
     refresh: vi.fn(),
     loading: false,
@@ -115,6 +127,7 @@ describe("ChatPanel Provider Toggle", () => {
       },
     ];
     mockActiveId = "conv1";
+    mockUpdateConversation.mockClear();
     global.fetch = vi.fn().mockResolvedValue({
       json: () => Promise.resolve({ data: {} }),
     });

@@ -1,27 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import Home from "../page";
 
+vi.mock("@/components/dashboard/ProjectGrid", () => ({
+  ProjectGrid: () => <div data-testid="project-grid">Projects Grid</div>,
+}));
+
 describe("Home page", () => {
-  it("renders the heading", () => {
+  it("renders project grid shell", () => {
     render(<Home />);
-    expect(
-      screen.getByRole("heading", { level: 1 })
-    ).toHaveTextContent("To get started, edit the page.tsx file.");
-  });
-
-  it("renders the Deploy Now link", () => {
-    render(<Home />);
-    expect(screen.getByText("Deploy Now")).toBeInTheDocument();
-  });
-
-  it("renders the Documentation link", () => {
-    render(<Home />);
-    expect(screen.getByText("Documentation")).toBeInTheDocument();
-  });
-
-  it("renders the Next.js logo", () => {
-    render(<Home />);
-    expect(screen.getByAltText("Next.js logo")).toBeInTheDocument();
+    expect(screen.getByTestId("project-grid")).toBeInTheDocument();
+    expect(screen.getByText("Projects Grid")).toBeInTheDocument();
   });
 });

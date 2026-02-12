@@ -42,6 +42,33 @@ export async function POST(
 ) {
   const { projectId } = await params;
   const body = await request.json();
+  const now = new Date().toISOString();
+
+  const normalizedUserStories = Array.isArray(body.userStories)
+    ? body.userStories
+        .filter(
+          (story: { title?: string }) =>
+            typeof story?.title === "string" && story.title.trim().length > 0
+        )
+        .map(
+          (story: {
+            title: string;
+            description?: string | null;
+            acceptanceCriteria?: string | null;
+          }) => ({
+            title: story.title.trim(),
+            description:
+              typeof story.description === "string" && story.description.trim().length > 0
+                ? story.description.trim()
+                : null,
+            acceptanceCriteria:
+              typeof story.acceptanceCriteria === "string" &&
+              story.acceptanceCriteria.trim().length > 0
+                ? story.acceptanceCriteria.trim()
+                : null,
+          })
+        )
+    : [];
 
   if (!body.title) {
     return NextResponse.json({ error: "Title is required" }, { status: 400 });
@@ -54,7 +81,6 @@ export async function POST(
     .get();
 
   const id = createId();
-  const now = new Date().toISOString();
 
   db.insert(epics)
     .values({
@@ -73,7 +99,33 @@ export async function POST(
     })
     .run();
 
+  if (normalizedUserStories.length > 0) {
+    for (let index = 0; index < normalizedUserStories.length; index += 1) {
+      const story = normalizedUserStories[index];
+      db.insert(userStories)
+        .values({
+          id: createId(),
+          epicId: id,
+          title: story.title,
+          description: story.description,
+          acceptanceCriteria: story.acceptanceCriteria,
+          status: "todo",
+          position: index,
+          createdAt: now,
+        })
+        .run();
+    }
+  }
+
   const epic = db.select().from(epics).where(eq(epics.id, id)).get();
   tryExportArjiJson(projectId);
-  return NextResponse.json({ data: epic }, { status: 201 });
+  return NextResponse.json(
+    {
+      data: {
+        ...epic,
+        userStoriesCreated: normalizedUserStories.length,
+      },
+    },
+    { status: 201 },
+  );
 }

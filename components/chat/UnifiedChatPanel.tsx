@@ -29,7 +29,11 @@ import { QuestionCards } from "@/components/chat/QuestionCards";
 import { useConversations } from "@/hooks/useConversations";
 import { useChat } from "@/hooks/useChat";
 import { useCodexAvailable } from "@/hooks/useCodexAvailable";
-import { isBrainstormConversationAgentType } from "@/lib/chat/conversation-agent";
+import { useEpicCreate } from "@/hooks/useEpicCreate";
+import {
+  isBrainstormConversationAgentType,
+  isEpicCreationConversationAgentType,
+} from "@/lib/chat/conversation-agent";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_PANEL_RATIO = 0.4;
@@ -65,10 +69,11 @@ export interface UnifiedChatPanelHandle {
 interface UnifiedChatPanelProps {
   projectId: string;
   children: ReactNode;
+  onEpicCreated?: () => void;
 }
 
 export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPanelProps>(
-  function UnifiedChatPanel({ projectId, children }, ref) {
+  function UnifiedChatPanel({ projectId, children, onEpicCreated }, ref) {
     const router = useRouter();
     const containerRef = useRef<HTMLDivElement>(null);
     const [panelState, setPanelState] = useState<UnifiedPanelState>("collapsed");
@@ -116,9 +121,18 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       [openConversationIds, conversations],
     );
 
+    const { createEpic, isLoading: epicCreating } = useEpicCreate({
+      projectId,
+      conversationId: activeId,
+    });
+
     const activeProvider = (activeConversation?.provider || "claude-code") as ProviderType;
     const hasMessages = messages.length > 0;
     const isBrainstorm = isBrainstormConversationAgentType(activeConversation?.type);
+    const isEpicCreation = isEpicCreationConversationAgentType(activeConversation?.type);
+    const hasUserMessage = messages.some((message) => message.role === "user");
+    const hasAssistantMessage = messages.some((message) => message.role === "assistant");
+    const canCreateEpic = isEpicCreation && hasUserMessage && hasAssistantMessage;
     const hasActiveAgents = conversations.some(
       (conversation) => conversation.status === "generating",
     );
@@ -348,6 +362,14 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       setGeneratingSpec(false);
     }
 
+    async function handleCreateEpic() {
+      const epicId = await createEpic();
+      if (epicId) {
+        onEpicCreated?.();
+        router.refresh();
+      }
+    }
+
     function handleResetDivider() {
       setPanelRatio(DEFAULT_PANEL_RATIO);
     }
@@ -429,6 +451,11 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                       key={conversation.id}
                       type="button"
                       data-testid={`conversation-tab-${conversation.id}`}
+                      data-agent-type={
+                        isEpicCreationConversationAgentType(conversation.type)
+                          ? "epic_creation"
+                          : "brainstorm"
+                      }
                       onClick={() => setActiveId(conversation.id)}
                       className={cn(
                         "group flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors",
@@ -437,7 +464,11 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                           : "border-transparent text-muted-foreground hover:text-foreground",
                       )}
                     >
-                      <MessageSquare className="h-3 w-3" />
+                      {isEpicCreationConversationAgentType(conversation.type) ? (
+                        <Sparkles className="h-3 w-3" />
+                      ) : (
+                        <MessageSquare className="h-3 w-3" />
+                      )}
                       <span>{truncateLabel(conversation.label || "Conversation")}</span>
                       {conversation.status === "generating" && (
                         <span
@@ -502,10 +533,32 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                       Generate Spec & Plan
                     </Button>
                   )}
+                  {canCreateEpic && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="default"
+                      onClick={handleCreateEpic}
+                      disabled={epicCreating || sending}
+                      className="text-xs"
+                    >
+                      {epicCreating ? (
+                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      ) : (
+                        <Sparkles className="h-3 w-3 mr-1" />
+                      )}
+                      Create Epic & Generate Stories
+                    </Button>
+                  )}
                 </div>
               </div>
 
               <div className="flex-1 overflow-auto">
+                {isEpicCreation && !hasMessages && !loading && (
+                  <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    Describe your epic idea and I&apos;ll help you structure it with user stories and acceptance criteria.
+                  </div>
+                )}
                 <MessageList messages={messages} loading={loading} streamStatus={streamStatus} />
                 {pendingQuestions && (
                   <div className="px-3 pb-3">
@@ -514,7 +567,12 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                 )}
               </div>
 
-              <MessageInput projectId={projectId} onSend={sendMessage} disabled={sending || !activeConversation} />
+              <MessageInput
+                projectId={projectId}
+                onSend={sendMessage}
+                disabled={sending || !activeConversation}
+                placeholder={isEpicCreation ? "Describe your epic idea..." : "Ask a question..."}
+              />
             </div>
           </aside>
         </div>
