@@ -41,10 +41,6 @@ vi.mock("@/components/kanban/EpicDetail", () => ({
   EpicDetail: () => null,
 }));
 
-vi.mock("@/components/kanban/CreateEpicSheet", () => ({
-  CreateEpicSheet: () => null,
-}));
-
 vi.mock("@/components/chat/UnifiedChatPanel", () => ({
   UnifiedChatPanel: ({ children }: { children: unknown }) => (
     <div data-testid="unified-chat-panel">{children}</div>

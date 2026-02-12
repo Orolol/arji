@@ -16,9 +16,10 @@ interface MessageInputProps {
   projectId: string;
   onSend: (content: string, attachmentIds: string[]) => void;
   disabled?: boolean;
+  placeholder?: string;
 }
 
-export function MessageInput({ projectId, onSend, disabled }: MessageInputProps) {
+export function MessageInput({ projectId, onSend, disabled, placeholder = "Type a message..." }: MessageInputProps) {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -151,7 +152,7 @@ export function MessageInput({ projectId, onSend, disabled }: MessageInputProps)
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="Type a message..."
+          placeholder={placeholder}
           rows={2}
           className="resize-none text-sm"
           disabled={disabled}
