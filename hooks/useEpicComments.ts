@@ -1,26 +1,18 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import type { TicketComment } from "./useComments";
 
-export interface TicketComment {
-  id: string;
-  userStoryId?: string | null;
-  epicId?: string | null;
-  author: "user" | "agent";
-  content: string;
-  agentSessionId: string | null;
-  createdAt: string;
-}
-
-export function useComments(projectId: string, storyId: string) {
+export function useEpicComments(projectId: string, epicId: string | null) {
   const [comments, setComments] = useState<TicketComment[]>([]);
   const [loading, setLoading] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadComments = useCallback(async () => {
+    if (!epicId) return;
     try {
       const res = await fetch(
-        `/api/projects/${projectId}/stories/${storyId}/comments`
+        `/api/projects/${projectId}/epics/${epicId}/comments`
       );
       const data = await res.json();
       if (data.data) {
@@ -30,21 +22,26 @@ export function useComments(projectId: string, storyId: string) {
       // silently fail on poll
     }
     setLoading(false);
-  }, [projectId, storyId]);
+  }, [projectId, epicId]);
 
-  // Initial load + 5s polling
   useEffect(() => {
+    if (!epicId) {
+      setComments([]);
+      setLoading(false);
+      return;
+    }
     loadComments();
     intervalRef.current = setInterval(loadComments, 5000);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [loadComments]);
+  }, [loadComments, epicId]);
 
   const addComment = useCallback(
     async (content: string) => {
+      if (!epicId) return;
       const res = await fetch(
-        `/api/projects/${projectId}/stories/${storyId}/comments`,
+        `/api/projects/${projectId}/epics/${epicId}/comments`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -57,7 +54,7 @@ export function useComments(projectId: string, storyId: string) {
       }
       return data.data;
     },
-    [projectId, storyId]
+    [projectId, epicId]
   );
 
   return { comments, loading, addComment, refresh: loadComments };

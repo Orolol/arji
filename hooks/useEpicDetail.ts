@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 interface UserStory {
   id: string;
@@ -26,6 +26,7 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
   const [epic, setEpic] = useState<EpicDetail | null>(null);
   const [userStories, setUserStories] = useState<UserStory[]>([]);
   const [loading, setLoading] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadData = useCallback(async () => {
     if (!epicId) return;
@@ -49,6 +50,11 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
 
   useEffect(() => {
     loadData();
+    // Poll every 5s to keep US statuses fresh during agent runs
+    pollRef.current = setInterval(loadData, 5000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [loadData]);
 
   const updateEpic = useCallback(

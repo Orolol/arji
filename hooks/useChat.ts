@@ -3,12 +3,20 @@
 import { useState, useEffect, useCallback } from "react";
 import type { QuestionData } from "@/lib/claude/spawn";
 
-interface ChatMessage {
+export interface ChatAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  url: string;
+}
+
+export interface ChatMessage {
   id: string;
   projectId: string;
   role: "user" | "assistant";
   content: string;
   metadata?: string;
+  attachments?: ChatAttachment[];
   createdAt: string;
 }
 
@@ -41,7 +49,7 @@ export function useChat(projectId: string, conversationId: string | null) {
   }, [loadMessages]);
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, attachmentIds?: string[]) => {
       setSending(true);
       setPendingQuestions(null);
       setStreamStatus(null);
@@ -72,7 +80,7 @@ export function useChat(projectId: string, conversationId: string | null) {
         const res = await fetch(`/api/projects/${projectId}/chat/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, conversationId }),
+          body: JSON.stringify({ content, conversationId, attachmentIds }),
         });
 
         if (!res.ok || !res.body) {

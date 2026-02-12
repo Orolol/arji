@@ -767,3 +767,75 @@ Your response should be a well-formatted markdown report.
 
   return parts.filter(Boolean).join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// 10. Epic Review Prompt
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the prompt for an epic-level review agent (plan mode).
+ * Scoped to the entire epic and all its user stories.
+ */
+export function buildEpicReviewPrompt(
+  project: PromptProject,
+  documents: PromptDocument[],
+  epic: PromptEpic,
+  userStories: PromptUserStory[],
+  reviewType: ReviewType,
+  globalPrompt?: string | null,
+): string {
+  const parts: string[] = [];
+
+  parts.push(globalSection(globalPrompt));
+  parts.push(`# Project: ${project.name}\n`);
+  parts.push(section("Project Specification", project.spec));
+  parts.push(documentsSection(documents));
+
+  // Epic details
+  parts.push(`## Epic Under Review\n`);
+  parts.push(`### ${epic.title}\n`);
+  if (epic.description) {
+    parts.push(`${epic.description.trim()}\n`);
+  }
+
+  // All user stories in this epic
+  if (userStories.length > 0) {
+    parts.push(`### User Stories\n`);
+    const storyLines = userStories.map((us) => {
+      const lines: string[] = [];
+      lines.push(`- **${us.title}**`);
+      if (us.description) {
+        lines.push(`  ${us.description.trim()}`);
+      }
+      if (us.acceptanceCriteria) {
+        lines.push(`  **Acceptance criteria:**`);
+        const criteria = us.acceptanceCriteria
+          .trim()
+          .split("\n")
+          .map((line) => `  ${line}`)
+          .join("\n");
+        lines.push(criteria);
+      }
+      return lines.join("\n");
+    });
+    parts.push(storyLines.join("\n\n") + "\n");
+  }
+
+  // Review checklist
+  parts.push(REVIEW_CHECKLISTS[reviewType]);
+
+  parts.push(`\n## Instructions
+
+You are performing a **${reviewType.replace("_", " ")}** on the entire epic described above, covering all user stories.
+
+1. Read the relevant source files in the current working directory.
+2. Evaluate the code against every item in the checklist above.
+3. Produce a structured report with your findings.
+4. If no issues are found for a category, state "No issues found."
+5. End with a summary: total findings by severity, and an overall assessment (Approved / Approved with Minor Issues / Changes Requested).
+
+Your response should be a well-formatted markdown report.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}

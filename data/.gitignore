@@ -3,3 +3,4 @@ arij.db-wal
 arij.db-shm
 sessions/
 logs/
+uploads/

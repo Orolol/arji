@@ -79,6 +79,16 @@ export const chatMessages = sqliteTable("chat_messages", {
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const chatAttachments = sqliteTable("chat_attachments", {
+  id: text("id").primaryKey(),
+  chatMessageId: text("chat_message_id").references(() => chatMessages.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  filePath: text("file_path").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const agentSessions = sqliteTable("agent_sessions", {
   id: text("id").primaryKey(),
   projectId: text("project_id")
@@ -102,9 +112,10 @@ export const agentSessions = sqliteTable("agent_sessions", {
 
 export const ticketComments = sqliteTable("ticket_comments", {
   id: text("id").primaryKey(),
-  userStoryId: text("user_story_id")
-    .notNull()
-    .references(() => userStories.id, { onDelete: "cascade" }),
+  userStoryId: text("user_story_id").references(() => userStories.id, {
+    onDelete: "cascade",
+  }),
+  epicId: text("epic_id").references(() => epics.id, { onDelete: "cascade" }),
   author: text("author").notNull(), // user | agent
   content: text("content").notNull(),
   agentSessionId: text("agent_session_id").references(() => agentSessions.id),

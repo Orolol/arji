@@ -16,8 +16,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { InlineEdit } from "./InlineEdit";
 import { useEpicDetail } from "@/hooks/useEpicDetail";
+import { useEpicComments } from "@/hooks/useEpicComments";
+import { useEpicAgent } from "@/hooks/useEpicAgent";
+import { EpicActions } from "@/components/epic/EpicActions";
+import { UserStoryQuickActions } from "@/components/epic/UserStoryQuickActions";
+import { CommentThread } from "@/components/story/CommentThread";
 import { PRIORITY_LABELS, KANBAN_COLUMNS, COLUMN_LABELS } from "@/lib/types/kanban";
 import { Plus, Trash2, Check, Circle, Loader2, GitBranch, GitMerge } from "lucide-react";
 import { useState } from "react";
@@ -40,7 +46,23 @@ export function EpicDetail({ projectId, epicId, open, onClose, onMerged }: EpicD
     addUserStory,
     updateUserStory,
     deleteUserStory,
+    refresh,
   } = useEpicDetail(projectId, epicId);
+
+  const {
+    comments,
+    loading: commentsLoading,
+    addComment,
+  } = useEpicComments(projectId, epicId);
+
+  const {
+    activeSessions,
+    dispatching,
+    isRunning,
+    sendToDev,
+    sendToReview,
+    approve,
+  } = useEpicAgent(projectId, epicId);
 
   const [newUSTitle, setNewUSTitle] = useState("");
   const [merging, setMerging] = useState(false);
@@ -67,6 +89,21 @@ export function EpicDetail({ projectId, epicId, open, onClose, onMerged }: EpicD
     setMerging(false);
   }
 
+  async function handleApprove() {
+    await approve();
+    refresh();
+  }
+
+  async function handleSendToDev(comment?: string) {
+    await sendToDev(comment);
+    refresh();
+  }
+
+  async function handleSendToReview(types: string[]) {
+    await sendToReview(types);
+    refresh();
+  }
+
   function handleAddUS() {
     if (!newUSTitle.trim()) return;
     addUserStory(newUSTitle.trim());
@@ -86,7 +123,7 @@ export function EpicDetail({ projectId, epicId, open, onClose, onMerged }: EpicD
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-[450px] sm:max-w-[450px] overflow-y-auto">
+      <SheetContent className="w-[520px] sm:max-w-[520px] overflow-y-auto">
         {loading || !epic ? (
           <div className="py-8 text-center text-muted-foreground">
             Loading...
@@ -104,6 +141,17 @@ export function EpicDetail({ projectId, epicId, open, onClose, onMerged }: EpicD
             </SheetHeader>
 
             <div className="px-4 pb-4 space-y-4">
+              {/* Epic Actions Bar */}
+              <EpicActions
+                epic={epic}
+                dispatching={dispatching}
+                isRunning={isRunning}
+                activeSessions={activeSessions}
+                onSendToDev={handleSendToDev}
+                onSendToReview={handleSendToReview}
+                onApprove={handleApprove}
+              />
+
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">
                   Description
@@ -190,6 +238,7 @@ export function EpicDetail({ projectId, epicId, open, onClose, onMerged }: EpicD
 
               <Separator />
 
+              {/* User Stories */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="text-sm font-medium">
@@ -197,46 +246,53 @@ export function EpicDetail({ projectId, epicId, open, onClose, onMerged }: EpicD
                   </h4>
                 </div>
 
-                <div className="space-y-1">
-                  {userStories.map((us) => (
-                    <div
-                      key={us.id}
-                      className="flex items-center gap-2 p-2 rounded hover:bg-accent/50 group"
-                    >
-                      <button
-                        onClick={() => {
-                          const next =
+                <TooltipProvider>
+                  <div className="space-y-1">
+                    {userStories.map((us) => (
+                      <div
+                        key={us.id}
+                        className="flex items-center gap-2 p-2 rounded hover:bg-accent/50 group"
+                      >
+                        <button
+                          onClick={() => {
+                            const next =
+                              us.status === "done"
+                                ? "todo"
+                                : us.status === "todo"
+                                  ? "in_progress"
+                                  : "done";
+                            updateUserStory(us.id, { status: next });
+                          }}
+                        >
+                          {statusIcon(us.status)}
+                        </button>
+                        <Link
+                          href={`/projects/${projectId}/stories/${us.id}`}
+                          className={`flex-1 text-sm hover:underline ${
                             us.status === "done"
-                              ? "todo"
-                              : us.status === "todo"
-                                ? "in_progress"
-                                : "done";
-                          updateUserStory(us.id, { status: next });
-                        }}
-                      >
-                        {statusIcon(us.status)}
-                      </button>
-                      <Link
-                        href={`/projects/${projectId}/stories/${us.id}`}
-                        className={`flex-1 text-sm hover:underline ${
-                          us.status === "done"
-                            ? "line-through text-muted-foreground"
-                            : ""
-                        }`}
-                      >
-                        {us.title}
-                      </Link>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                        onClick={() => deleteUserStory(us.id)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
+                              ? "line-through text-muted-foreground"
+                              : ""
+                          }`}
+                        >
+                          {us.title}
+                        </Link>
+                        <UserStoryQuickActions
+                          projectId={projectId}
+                          story={us}
+                          onRefresh={refresh}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                          onClick={() => deleteUserStory(us.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </TooltipProvider>
 
                 <div className="flex gap-2 mt-2">
                   <Input
@@ -256,6 +312,17 @@ export function EpicDetail({ projectId, epicId, open, onClose, onMerged }: EpicD
                     <Plus className="h-3 w-3" />
                   </Button>
                 </div>
+              </div>
+
+              <Separator />
+
+              {/* Comment Thread */}
+              <div className="min-h-[200px]">
+                <CommentThread
+                  comments={comments}
+                  loading={commentsLoading}
+                  onAddComment={addComment}
+                />
               </div>
             </div>
           </>

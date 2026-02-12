@@ -15,6 +15,13 @@
       "when": 1770889670409,
       "tag": "0001_gorgeous_lockjaw",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1770900934735,
+      "tag": "0002_plain_exodus",
+      "breakpoints": true
     }
   ]
 }
