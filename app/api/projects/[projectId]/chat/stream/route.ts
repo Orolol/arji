@@ -26,6 +26,14 @@ export async function POST(
   const conversationId: string | null = body.conversationId || null;
   const attachmentIds: string[] = body.attachmentIds || [];
 
+  function setConversationStatus(status: "active" | "generating" | "error") {
+    if (!conversationId) return;
+    db.update(chatConversations)
+      .set({ status })
+      .where(eq(chatConversations.id, conversationId))
+      .run();
+  }
+
   // Save user message
   const userMsgId = createId();
   const userContent = body.content || (attachmentIds.length > 0 ? "[image]" : "");
@@ -91,6 +99,8 @@ export async function POST(
     }
   }
 
+  setConversationStatus("generating");
+
   const encoder = new TextEncoder();
 
   /**
@@ -98,7 +108,8 @@ export async function POST(
    */
   function saveAssistantAndTitle(
     controller: ReadableStreamDefaultController,
-    fullContent: string
+    fullContent: string,
+    finalStatus: "active" | "error" = "active",
   ) {
     const assistantMsgId = createId();
     db.insert(chatMessages)
@@ -147,6 +158,8 @@ export async function POST(
       }
     }
 
+    setConversationStatus(finalStatus);
+
     controller.enqueue(
       encoder.encode(
         `data: ${JSON.stringify({ done: true, messageId: assistantMsgId })}\n\n`
@@ -172,19 +185,30 @@ export async function POST(
           encoder.encode(`data: ${JSON.stringify({ status: "Codex processing..." })}\n\n`)
         );
 
-        const result = await session.promise;
-        const fullContent = result.success
-          ? result.result || "(empty response)"
-          : `Error: ${result.error || "Codex request failed"}`;
+        try {
+          const result = await session.promise;
+          const fullContent = result.success
+            ? result.result || "(empty response)"
+            : `Error: ${result.error || "Codex request failed"}`;
 
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ delta: fullContent })}\n\n`)
-        );
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ delta: fullContent })}\n\n`)
+          );
 
-        saveAssistantAndTitle(controller, fullContent);
+          saveAssistantAndTitle(controller, fullContent, result.success ? "active" : "error");
+        } catch (error) {
+          const failureMessage =
+            error instanceof Error ? `Error: ${error.message}` : "Error: Codex request failed";
+
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ delta: failureMessage })}\n\n`)
+          );
+          saveAssistantAndTitle(controller, failureMessage, "error");
+        }
       },
       cancel() {
         session.kill();
+        setConversationStatus("active");
       },
     });
 
@@ -206,6 +230,7 @@ export async function POST(
   });
 
   let fullContent = "";
+  let hasStreamError = false;
 
   const sseStream = new ReadableStream({
     async start(controller) {
@@ -233,12 +258,14 @@ export async function POST(
         }
       } catch (err) {
         console.error("[chat/stream] Stream error:", err);
+        hasStreamError = true;
       }
 
-      saveAssistantAndTitle(controller, fullContent);
+      saveAssistantAndTitle(controller, fullContent, hasStreamError ? "error" : "active");
     },
     cancel() {
       kill();
+      setConversationStatus("active");
     },
   });
 

@@ -100,6 +100,7 @@ import { UnifiedChatPanel } from "@/components/chat/UnifiedChatPanel";
 describe("UnifiedChatPanel shell + tabs", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
     window.localStorage.clear();
 
     conversationCounter = 2;
@@ -290,5 +291,46 @@ describe("UnifiedChatPanel shell + tabs", () => {
 
     expect(mockDeleteConversation).not.toHaveBeenCalled();
     expect(screen.queryByTestId("close-tab-conv1")).not.toBeInTheDocument();
+  });
+
+  it("shows active agent indicator on tabs and collapsed strip", () => {
+    mockConversations = [
+      {
+        id: "conv1",
+        projectId: "proj1",
+        type: "brainstorm",
+        label: "Brainstorm",
+        status: "generating",
+        epicId: null,
+        provider: "claude-code",
+        createdAt: "2024-01-01",
+      },
+    ];
+
+    render(
+      <UnifiedChatPanel projectId="proj1">
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
+    expect(screen.getByTestId("collapsed-active-badge")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
+
+    expect(screen.getByTestId("active-indicator-conv1")).toBeInTheDocument();
+  });
+
+  it("polls conversation status every 3 seconds", async () => {
+    vi.useFakeTimers();
+
+    render(
+      <UnifiedChatPanel projectId="proj1">
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
+    await vi.advanceTimersByTimeAsync(9000);
+
+    expect(mockRefreshConversations).toHaveBeenCalledTimes(3);
   });
 });

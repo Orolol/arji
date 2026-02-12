@@ -119,6 +119,9 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     const activeProvider = (activeConversation?.provider || "claude-code") as ProviderType;
     const hasMessages = messages.length > 0;
     const isBrainstorm = isBrainstormConversationAgentType(activeConversation?.type);
+    const hasActiveAgents = conversations.some(
+      (conversation) => conversation.status === "generating",
+    );
 
     const previousSending = useRef(sending);
     useEffect(() => {
@@ -128,6 +131,14 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       }
       previousSending.current = sending;
     }, [sending, refreshConversations]);
+
+    useEffect(() => {
+      const interval = setInterval(() => {
+        refreshConversations();
+      }, 3000);
+
+      return () => clearInterval(interval);
+    }, [refreshConversations]);
 
     useEffect(() => {
       setOpenConversationIds((previous) => {
@@ -428,6 +439,13 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                     >
                       <MessageSquare className="h-3 w-3" />
                       <span>{truncateLabel(conversation.label || "Conversation")}</span>
+                      {conversation.status === "generating" && (
+                        <span
+                          data-testid={`active-indicator-${conversation.id}`}
+                          className="h-2 w-2 rounded-full bg-primary animate-pulse"
+                          aria-label="Agent active"
+                        />
+                      )}
                       {openConversationIds.length > 1 && (
                         <span
                           role="button"
@@ -511,7 +529,10 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
           <button
             type="button"
             onClick={() => void openChatConversation()}
-            className="absolute inset-y-0 right-0 z-30 flex w-[max(56px,5vw)] items-center justify-center border-l border-border bg-muted/60 text-muted-foreground backdrop-blur transition-colors hover:bg-muted/80 hover:text-foreground"
+            className={cn(
+              "absolute inset-y-0 right-0 z-30 flex w-[max(56px,5vw)] items-center justify-center border-l border-border bg-muted/60 text-muted-foreground backdrop-blur transition-colors hover:bg-muted/80 hover:text-foreground",
+              hasActiveAgents && "bg-primary/10 shadow-[-6px_0_24px_rgba(59,130,246,0.25)]",
+            )}
             aria-label="Open chat panel"
             data-testid="collapsed-chat-strip"
           >
@@ -519,6 +540,12 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
               <MessageSquare className="h-4 w-4" />
               Chat
             </span>
+            {hasActiveAgents && (
+              <span
+                data-testid="collapsed-active-badge"
+                className="absolute top-2 right-2 h-2.5 w-2.5 rounded-full bg-primary animate-pulse"
+              />
+            )}
           </button>
         )}
 
