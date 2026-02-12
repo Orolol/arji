@@ -37,7 +37,8 @@ import {
 import { cn } from "@/lib/utils";
 
 const DEFAULT_PANEL_RATIO = 0.4;
-const MIN_PANE_WIDTH = 300;
+const MIN_PANEL_WIDTH = 300;
+const MIN_BOARD_WIDTH = 400;
 const DIVIDER_WIDTH = 6;
 
 function clamp(value: number, min: number, max: number) {
@@ -199,8 +200,8 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     const computePanelWidth = useCallback(
       (ratio: number) => {
         const totalWidth = getContainerWidth();
-        const minRatio = MIN_PANE_WIDTH / totalWidth;
-        const maxRatio = (totalWidth - MIN_PANE_WIDTH - DIVIDER_WIDTH) / totalWidth;
+        const minRatio = MIN_PANEL_WIDTH / totalWidth;
+        const maxRatio = (totalWidth - MIN_BOARD_WIDTH - DIVIDER_WIDTH) / totalWidth;
         const safeRatio = clamp(ratio, minRatio, maxRatio);
         return Math.round(totalWidth * safeRatio);
       },
@@ -219,10 +220,11 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     }, []);
 
     const createNewConversationTab = useCallback(
-      async (options?: { type?: string; label?: string }) => {
+      async (options?: { type?: string; label?: string; provider?: string }) => {
         const created = await createConversation({
           type: options?.type || "brainstorm",
           label: options?.label || "Brainstorm",
+          provider: options?.provider || activeProvider,
         });
 
         if (created) {
@@ -232,7 +234,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
 
         return created;
       },
-      [createConversation, ensureTabIsOpen, setActiveId],
+      [createConversation, ensureTabIsOpen, setActiveId, activeProvider],
     );
 
     const openChatConversation = useCallback(async () => {
@@ -304,8 +306,8 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
         const totalWidth = getContainerWidth();
         const nextPanelWidth = clamp(
           totalWidth - event.clientX,
-          MIN_PANE_WIDTH,
-          totalWidth - MIN_PANE_WIDTH - DIVIDER_WIDTH,
+          MIN_PANEL_WIDTH,
+          totalWidth - MIN_BOARD_WIDTH - DIVIDER_WIDTH,
         );
         setPanelRatio(nextPanelWidth / totalWidth);
       }
@@ -396,7 +398,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       return (
         <div ref={containerRef} className="flex h-full w-full overflow-hidden">
           <div
-            className="h-full min-w-[300px] overflow-hidden"
+            className="h-full min-w-[400px] overflow-hidden"
             style={{ width: `calc(100% - ${panelWidthPx}px - ${DIVIDER_WIDTH}px)` }}
           >
             {children}
