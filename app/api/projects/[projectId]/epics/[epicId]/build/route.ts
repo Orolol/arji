@@ -15,26 +15,12 @@ import { processManager } from "@/lib/claude/process-manager";
 import { buildBuildPrompt } from "@/lib/claude/prompt-builder";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
+import { checkSessionLock } from "@/lib/session-lock";
 import type { ProviderType } from "@/lib/providers";
 import fs from "fs";
 import path from "path";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
-
-function hasRunningBuildForEpic(epicId: string): boolean {
-  const running = db
-    .select()
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.epicId, epicId),
-        eq(agentSessions.mode, "code"),
-        eq(agentSessions.status, "running")
-      )
-    )
-    .all();
-  return running.length > 0;
-}
 
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, epicId } = await params;
@@ -56,9 +42,10 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // Concurrency guard
-  if (hasRunningBuildForEpic(epicId)) {
+  const lock = checkSessionLock({ epicId });
+  if (lock.locked) {
     return NextResponse.json(
-      { error: "Another build is already running for this epic. Wait for it to complete." },
+      { error: "conflict", message: "An agent is already running on this epic", sessionId: lock.sessionId },
       { status: 409 }
     );
   }

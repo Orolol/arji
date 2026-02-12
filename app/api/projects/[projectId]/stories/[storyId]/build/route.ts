@@ -15,30 +15,12 @@ import { processManager } from "@/lib/claude/process-manager";
 import { buildTicketBuildPrompt } from "@/lib/claude/prompt-builder";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
+import { checkSessionLock } from "@/lib/session-lock";
 import type { ProviderType } from "@/lib/providers";
 import fs from "fs";
 import path from "path";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
-
-/**
- * Concurrency guard: checks if there is already a running code-mode session
- * for the same epic. Prevents parallel code-mode builds on the same worktree.
- */
-function hasRunningBuildForEpic(epicId: string): boolean {
-  const running = db
-    .select()
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.epicId, epicId),
-        eq(agentSessions.mode, "code"),
-        eq(agentSessions.status, "running")
-      )
-    )
-    .all();
-  return running.length > 0;
-}
 
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
@@ -76,9 +58,10 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // Concurrency guard
-  if (hasRunningBuildForEpic(epic.id)) {
+  const lock = checkSessionLock({ userStoryId: storyId, epicId: epic.id });
+  if (lock.locked) {
     return NextResponse.json(
-      { error: "Another build is already running for this epic. Wait for it to complete." },
+      { error: "conflict", message: "An agent is already running", sessionId: lock.sessionId },
       { status: 409 }
     );
   }
