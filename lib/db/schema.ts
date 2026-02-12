@@ -1,4 +1,10 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const projects = sqliteTable("projects", {
@@ -140,3 +146,68 @@ export const settings = sqliteTable("settings", {
   value: text("value").notNull(), // JSON
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const agentPrompts = sqliteTable(
+  "agent_prompts",
+  {
+    id: text("id").primaryKey(),
+    agentType: text("agent_type").notNull(),
+    systemPrompt: text("system_prompt").notNull(),
+    scope: text("scope").notNull(), // 'global' | projectId
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    agentTypeScopeUnique: uniqueIndex("agent_prompts_agent_type_scope_unique").on(
+      table.agentType,
+      table.scope
+    ),
+  }),
+);
+
+export const customReviewAgents = sqliteTable(
+  "custom_review_agents",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    systemPrompt: text("system_prompt").notNull(),
+    scope: text("scope").notNull(), // 'global' | projectId
+    position: integer("position").notNull().default(0),
+    isEnabled: integer("is_enabled").notNull().default(1),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    nameScopeUnique: uniqueIndex("custom_review_agents_name_scope_unique").on(
+      table.name,
+      table.scope
+    ),
+  }),
+);
+
+export const agentProviderDefaults = sqliteTable(
+  "agent_provider_defaults",
+  {
+    id: text("id").primaryKey(),
+    agentType: text("agent_type").notNull(),
+    provider: text("provider").notNull(), // 'claude-code' | 'codex'
+    scope: text("scope").notNull(), // 'global' | projectId
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    agentTypeScopeUnique: uniqueIndex("agent_provider_defaults_agent_type_scope_unique").on(
+      table.agentType,
+      table.scope
+    ),
+  }),
+);
+
+export type AgentPrompt = typeof agentPrompts.$inferSelect;
+export type NewAgentPrompt = typeof agentPrompts.$inferInsert;
+
+export type CustomReviewAgent = typeof customReviewAgents.$inferSelect;
+export type NewCustomReviewAgent = typeof customReviewAgents.$inferInsert;
+
+export type AgentProviderDefault = typeof agentProviderDefaults.$inferSelect;
+export type NewAgentProviderDefault = typeof agentProviderDefaults.$inferInsert;

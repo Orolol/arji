@@ -56,3 +56,102 @@ describe("Schema: existing columns preserved", () => {
     expect(cols.createdAt).toBeDefined();
   });
 });
+
+describe("Schema: agentPrompts table", () => {
+  it("has required columns", () => {
+    const cols = schema.agentPrompts;
+    expect(cols.id).toBeDefined();
+    expect(cols.agentType).toBeDefined();
+    expect(cols.systemPrompt).toBeDefined();
+    expect(cols.scope).toBeDefined();
+    expect(cols.createdAt).toBeDefined();
+    expect(cols.updatedAt).toBeDefined();
+  });
+
+  it("has unique constraint on agentType + scope", () => {
+    const extraConfig = schema.agentPrompts[Symbol.for("drizzle:ExtraConfigBuilder")](
+      schema.agentPrompts
+    );
+    expect(extraConfig.agentTypeScopeUnique).toBeDefined();
+    expect(extraConfig.agentTypeScopeUnique.config.columns).toHaveLength(2);
+  });
+});
+
+describe("Schema: customReviewAgents table", () => {
+  it("has required columns", () => {
+    const cols = schema.customReviewAgents;
+    expect(cols.id).toBeDefined();
+    expect(cols.name).toBeDefined();
+    expect(cols.systemPrompt).toBeDefined();
+    expect(cols.scope).toBeDefined();
+    expect(cols.position).toBeDefined();
+    expect(cols.isEnabled).toBeDefined();
+    expect(cols.createdAt).toBeDefined();
+    expect(cols.updatedAt).toBeDefined();
+  });
+
+  it("has unique constraint on name + scope", () => {
+    const extraConfig =
+      schema.customReviewAgents[Symbol.for("drizzle:ExtraConfigBuilder")](
+        schema.customReviewAgents
+      );
+    expect(extraConfig.nameScopeUnique).toBeDefined();
+    expect(extraConfig.nameScopeUnique.config.columns).toHaveLength(2);
+  });
+});
+
+describe("Schema: agentProviderDefaults table", () => {
+  it("has required columns", () => {
+    const cols = schema.agentProviderDefaults;
+    expect(cols.id).toBeDefined();
+    expect(cols.agentType).toBeDefined();
+    expect(cols.provider).toBeDefined();
+    expect(cols.scope).toBeDefined();
+    expect(cols.createdAt).toBeDefined();
+    expect(cols.updatedAt).toBeDefined();
+  });
+
+  it("has unique constraint on agentType + scope", () => {
+    const extraConfig =
+      schema.agentProviderDefaults[Symbol.for("drizzle:ExtraConfigBuilder")](
+        schema.agentProviderDefaults
+      );
+    expect(extraConfig.agentTypeScopeUnique).toBeDefined();
+    expect(extraConfig.agentTypeScopeUnique.config.columns).toHaveLength(2);
+  });
+});
+
+describe("Schema: exported types", () => {
+  it("exports select and insert types for new tables", () => {
+    const agentPromptShape: schema.AgentPrompt = {
+      id: "ap_1",
+      agentType: "build",
+      systemPrompt: "Prompt",
+      scope: "global",
+      createdAt: null,
+      updatedAt: null,
+    };
+    const customReviewAgentShape: schema.CustomReviewAgent = {
+      id: "cra_1",
+      name: "UI Review",
+      systemPrompt: "Review UI details",
+      scope: "global",
+      position: 0,
+      isEnabled: 1,
+      createdAt: null,
+      updatedAt: null,
+    };
+    const agentProviderDefaultShape: schema.AgentProviderDefault = {
+      id: "apd_1",
+      agentType: "build",
+      provider: "claude-code",
+      scope: "global",
+      createdAt: null,
+      updatedAt: null,
+    };
+
+    expect(agentPromptShape.agentType).toBe("build");
+    expect(customReviewAgentShape.name).toBe("UI Review");
+    expect(agentProviderDefaultShape.provider).toBe("claude-code");
+  });
+});

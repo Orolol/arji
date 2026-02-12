@@ -22,6 +22,13 @@
       "when": 1770900934735,
       "tag": "0002_plain_exodus",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1770913774657,
+      "tag": "0003_conscious_jigsaw",
+      "breakpoints": true
     }
   ]
 }
