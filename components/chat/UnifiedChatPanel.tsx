@@ -571,7 +571,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                 projectId={projectId}
                 onSend={sendMessage}
                 disabled={sending || !activeConversation}
-                placeholder={isEpicCreation ? "Describe your epic idea..." : "Type a message..."}
+                placeholder={isEpicCreation ? "Describe your epic idea..." : "Ask a question..."}
               />
             </div>
           </aside>

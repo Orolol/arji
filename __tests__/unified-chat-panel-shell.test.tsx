@@ -92,8 +92,8 @@ vi.mock("@/components/chat/MessageList", () => ({
 }));
 
 vi.mock("@/components/chat/MessageInput", () => ({
-  MessageInput: ({ disabled }: { disabled?: boolean }) => (
-    <button data-testid="message-input" disabled={disabled}>
+  MessageInput: ({ disabled, placeholder }: { disabled?: boolean; placeholder?: string }) => (
+    <button data-testid="message-input" data-placeholder={placeholder} disabled={disabled}>
       input
     </button>
   ),
@@ -534,5 +534,61 @@ describe("UnifiedChatPanel shell + tabs", () => {
 
     fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
     expect(screen.queryByText("Create Epic & Generate Stories")).not.toBeInTheDocument();
+  });
+
+  it("passes brainstorm placeholder text to MessageInput", () => {
+    mockConversations = [
+      {
+        id: "conv1",
+        projectId: "proj1",
+        type: "brainstorm",
+        label: "Brainstorm",
+        status: "active",
+        epicId: null,
+        provider: "claude-code",
+        createdAt: "2024-01-01",
+      },
+    ];
+    mockActiveId = "conv1";
+
+    render(
+      <UnifiedChatPanel projectId="proj1">
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
+    fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
+    expect(screen.getByTestId("message-input")).toHaveAttribute(
+      "data-placeholder",
+      "Ask a question...",
+    );
+  });
+
+  it("passes epic placeholder text to MessageInput", () => {
+    mockConversations = [
+      {
+        id: "conv1",
+        projectId: "proj1",
+        type: "epic_creation",
+        label: "New Epic",
+        status: "active",
+        epicId: null,
+        provider: "claude-code",
+        createdAt: "2024-01-01",
+      },
+    ];
+    mockActiveId = "conv1";
+
+    render(
+      <UnifiedChatPanel projectId="proj1">
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
+    fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
+    expect(screen.getByTestId("message-input")).toHaveAttribute(
+      "data-placeholder",
+      "Describe your epic idea...",
+    );
   });
 });

@@ -19,7 +19,7 @@ interface MessageInputProps {
   placeholder?: string;
 }
 
-export function MessageInput({ projectId, onSend, disabled, placeholder = "Type a message..." }: MessageInputProps) {
+export function MessageInput({ projectId, onSend, disabled, placeholder = "Ask a question..." }: MessageInputProps) {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
