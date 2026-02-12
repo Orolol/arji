@@ -22,6 +22,10 @@ import fs from "fs";
 import path from "path";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { REVIEW_TYPE_TO_AGENT_TYPE } from "@/lib/agent-config/constants";
+import {
+  createAgentAlreadyRunningPayload,
+  insertRunningSessionWithGuard,
+} from "@/lib/agents/concurrency";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
 
@@ -123,7 +127,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const sessionsCreated: string[] = [];
 
-  for (const reviewType of reviewTypes) {
+  for (const [idx, reviewType] of reviewTypes.entries()) {
     const reviewSystemPrompt = await resolveAgentPrompt(
       REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
       projectId
@@ -143,28 +147,66 @@ export async function POST(request: NextRequest, { params }: Params) {
     fs.mkdirSync(logsDir, { recursive: true });
     const logsPath = path.join(logsDir, "logs.json");
 
-    db.insert(agentSessions)
-      .values({
-        id: sessionId,
-        projectId,
-        epicId,
-        status: "running",
-        mode: "plan",
-        provider,
-        prompt,
-        logsPath,
-        branchName,
-        worktreePath,
-        startedAt: now,
-        createdAt: now,
-      })
-      .run();
-
-    processManager.start(sessionId, {
+    const sessionValues = {
+      id: sessionId,
+      projectId,
+      epicId,
+      status: "running",
       mode: "plan",
+      provider,
       prompt,
-      cwd: worktreePath,
-    }, provider);
+      logsPath,
+      branchName,
+      worktreePath,
+      startedAt: now,
+      createdAt: now,
+    } as const;
+
+    if (idx === 0) {
+      const insertResult = insertRunningSessionWithGuard(
+        { scope: "epic", projectId, epicId },
+        sessionValues
+      );
+      if (!insertResult.inserted) {
+        return NextResponse.json(
+          createAgentAlreadyRunningPayload(
+            { scope: "epic", projectId, epicId },
+            insertResult.conflict,
+            "Another agent is already running for this epic."
+          ),
+          { status: 409 }
+        );
+      }
+    } else {
+      db.insert(agentSessions).values(sessionValues).run();
+    }
+
+    try {
+      processManager.start(
+        sessionId,
+        {
+          mode: "plan",
+          prompt,
+          cwd: worktreePath,
+        },
+        provider
+      );
+    } catch (error) {
+      const failedAt = new Date().toISOString();
+      db.update(agentSessions)
+        .set({
+          status: "failed",
+          completedAt: failedAt,
+          error: error instanceof Error ? error.message : "Failed to start agent session",
+        })
+        .where(eq(agentSessions.id, sessionId))
+        .run();
+
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Failed to start agent session" },
+        { status: 500 }
+      );
+    }
 
     // Background: wait for completion, post review as epic comment
     const label = REVIEW_LABELS[reviewType];

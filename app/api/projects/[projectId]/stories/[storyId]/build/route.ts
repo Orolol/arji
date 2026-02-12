@@ -16,29 +16,14 @@ import { buildTicketBuildPrompt } from "@/lib/claude/prompt-builder";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
 import type { ProviderType } from "@/lib/providers";
+import {
+  createAgentAlreadyRunningPayload,
+  insertRunningSessionWithGuard,
+} from "@/lib/agents/concurrency";
 import fs from "fs";
 import path from "path";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
-
-/**
- * Concurrency guard: checks if there is already a running code-mode session
- * for the same epic. Prevents parallel code-mode builds on the same worktree.
- */
-function hasRunningBuildForEpic(epicId: string): boolean {
-  const running = db
-    .select()
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.epicId, epicId),
-        eq(agentSessions.mode, "code"),
-        eq(agentSessions.status, "running")
-      )
-    )
-    .all();
-  return running.length > 0;
-}
 
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
@@ -73,14 +58,6 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   if (!epic) {
     return NextResponse.json({ error: "Parent epic not found" }, { status: 404 });
-  }
-
-  // Concurrency guard
-  if (hasRunningBuildForEpic(epic.id)) {
-    return NextResponse.json(
-      { error: "Another build is already running for this epic. Wait for it to complete." },
-      { status: 409 }
-    );
   }
 
   // Get project
@@ -171,8 +148,9 @@ export async function POST(request: NextRequest, { params }: Params) {
   fs.mkdirSync(logsDir, { recursive: true });
   const logsPath = path.join(logsDir, "logs.json");
 
-  db.insert(agentSessions)
-    .values({
+  const insertResult = insertRunningSessionWithGuard(
+    { scope: "story", projectId, storyId, epicId: epic.id },
+    {
       id: sessionId,
       projectId,
       epicId: epic.id,
@@ -186,8 +164,19 @@ export async function POST(request: NextRequest, { params }: Params) {
       worktreePath,
       startedAt: now,
       createdAt: now,
-    })
-    .run();
+    }
+  );
+
+  if (!insertResult.inserted) {
+    return NextResponse.json(
+      createAgentAlreadyRunningPayload(
+        { scope: "story", projectId, storyId, epicId: epic.id },
+        insertResult.conflict,
+        "Another agent is already running for this story."
+      ),
+      { status: 409 }
+    );
+  }
 
   // Move ticket to in_progress
   db.update(userStories)
@@ -202,12 +191,33 @@ export async function POST(request: NextRequest, { params }: Params) {
     .run();
 
   // Spawn agent
-  processManager.start(sessionId, {
-    mode: "code",
-    prompt,
-    cwd: worktreePath,
-    allowedTools: ["Edit", "Write", "Bash", "Read", "Glob", "Grep"],
-  }, provider);
+  try {
+    processManager.start(
+      sessionId,
+      {
+        mode: "code",
+        prompt,
+        cwd: worktreePath,
+        allowedTools: ["Edit", "Write", "Bash", "Read", "Glob", "Grep"],
+      },
+      provider
+    );
+  } catch (error) {
+    const failedAt = new Date().toISOString();
+    db.update(agentSessions)
+      .set({
+        status: "failed",
+        completedAt: failedAt,
+        error: error instanceof Error ? error.message : "Failed to start agent session",
+      })
+      .where(eq(agentSessions.id, sessionId))
+      .run();
+
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to start agent session" },
+      { status: 500 }
+    );
+  }
 
   // Background: wait for completion, update DB, post agent comment
   (async () => {
