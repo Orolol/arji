@@ -4,7 +4,6 @@ import {
   releases,
   projects,
   epics,
-  documents,
   settings,
 } from "@/lib/db/schema";
 import { eq, desc, inArray } from "drizzle-orm";
@@ -12,6 +11,9 @@ import { createId } from "@/lib/utils/nanoid";
 import { spawnClaude } from "@/lib/claude/spawn";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
 import simpleGit from "simple-git";
+import { createOctokit, parseOwnerRepo, getGitHubToken } from "@/lib/github/client";
+import { createDraftRelease } from "@/lib/github/releases";
+import { logSyncOperation } from "@/lib/github/sync-log";
 
 export async function GET(
   _request: NextRequest,
@@ -35,11 +37,18 @@ export async function POST(
 ) {
   const { projectId } = await params;
   const body = await request.json();
-  const { version, title, epicIds, generateChangelog = true } = body as {
+  const {
+    version,
+    title,
+    epicIds,
+    generateChangelog = true,
+    pushToGitHub = false,
+  } = body as {
     version: string;
     title?: string;
     epicIds: string[];
     generateChangelog?: boolean;
+    pushToGitHub?: boolean;
   };
 
   if (!version) {
@@ -137,6 +146,67 @@ ${epicSummaries}
     }
   }
 
+  // GitHub integration: push tag and create draft release
+  let githubReleaseId: number | null = null;
+  let githubReleaseUrl: string | null = null;
+  let pushedAt: string | null = null;
+
+  if (pushToGitHub && gitTag && project.gitRepoPath && project.githubOwnerRepo) {
+    const token = getGitHubToken();
+    if (!token) {
+      return NextResponse.json(
+        { error: "GitHub PAT not configured. Set it in Settings." },
+        { status: 400 }
+      );
+    }
+
+    const git = simpleGit(project.gitRepoPath);
+    const { owner, repo } = parseOwnerRepo(project.githubOwnerRepo);
+
+    // Push the tag to origin
+    try {
+      await git.push("origin", gitTag);
+      logSyncOperation(projectId, "tag_push", null, "success", {
+        tag: gitTag,
+      });
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : "Tag push failed";
+      logSyncOperation(projectId, "tag_push", null, "failure", {
+        tag: gitTag,
+        error: errMsg,
+      });
+      // Continue without GitHub release if tag push fails
+    }
+
+    // Create draft release on GitHub
+    try {
+      const octokit = createOctokit();
+      const ghRelease = await createDraftRelease(
+        octokit,
+        owner,
+        repo,
+        gitTag,
+        title || `Release ${version}`,
+        changelog
+      );
+      githubReleaseId = ghRelease.id;
+      githubReleaseUrl = ghRelease.htmlUrl;
+      pushedAt = new Date().toISOString();
+
+      logSyncOperation(projectId, "release_create", null, "success", {
+        releaseId: ghRelease.id,
+        url: ghRelease.htmlUrl,
+        draft: true,
+      });
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : "Draft release creation failed";
+      logSyncOperation(projectId, "release_create", null, "failure", {
+        error: errMsg,
+      });
+      // Continue — the local release is still saved
+    }
+  }
+
   // Save release
   const id = createId();
   db.insert(releases)
@@ -148,6 +218,9 @@ ${epicSummaries}
       changelog,
       epicIds: JSON.stringify(epicIds),
       gitTag,
+      githubReleaseId,
+      githubReleaseUrl,
+      pushedAt,
       createdAt: new Date().toISOString(),
     })
     .run();
