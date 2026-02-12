@@ -4,6 +4,7 @@ import { agentSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { processManager } from "@/lib/claude/process-manager";
 import fs from "fs";
+import { extractLastNonEmptyText } from "@/lib/utils/extract-last-text";
 
 export async function GET(
   _request: NextRequest,
@@ -30,7 +31,9 @@ export async function GET(
     }
   }
 
-  return NextResponse.json({ data: { ...session, logs } });
+  const lastNonEmptyText = extractLastNonEmptyText(session.logsPath);
+
+  return NextResponse.json({ data: { ...session, logs, lastNonEmptyText } });
 }
 
 export async function DELETE(
