@@ -111,6 +111,9 @@ export function useChat(projectId: string, conversationId: string | null) {
               }
               if (event.questions) {
                 setPendingQuestions(event.questions);
+                // Allow user to interact with question cards
+                setSending(false);
+                setStreamStatus(null);
               }
               if (event.done) {
                 // Reload to sync real IDs from DB

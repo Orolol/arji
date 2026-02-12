@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastSyncedAt": "2026-02-11T16:05:38.801Z",
+  "lastSyncedAt": "2026-02-12T09:43:39.172Z",
   "project": {
     "name": "Arij",
     "description": "A local, AI-first project orchestrator that provides a web interface for managing multi-project workflows with Claude Code as the execution engine. It covers the full project lifecycle: ideation, specification, kanban-based planning, automated code generation via Claude Code CLI, real-time agent monitoring, and release management.",
@@ -272,6 +272,81 @@
           "acceptance_criteria": "- [x] Checkbox on each epic card\n- [x] Selection state tracked in parent\n- [x] Build toolbar shows selected count\n- [x] 'Build with Claude Code' button enabled when epics selected\n- [ ] Tests",
           "status": "in_progress",
           "position": 3
+        }
+      ]
+    },
+    {
+      "id": "6lCNLmCL75wS",
+      "title": "Ticket Comments, Send-to-Dev & Agent Review",
+      "description": "Add a comment system to user stories (tickets), a dedicated story detail page replacing the sheet, and review workflows powered by Claude Code agents.\n\n## Implementation Plan\n\n### Phase 1 — Schema & Data Layer\n- Add `ticketComments` table (id, userStoryId, author: 'user'|'agent', content, agentSessionId?, createdAt)\n- Add `userStoryId` column to `agentSessions` to link agent work back to a specific ticket\n- Add `\"review\"` as a valid status for user stories (todo → in_progress → review → done)\n\n### Phase 2 — API Routes\n- `GET/PATCH /api/projects/[projectId]/stories/[storyId]` — fetch & update story detail\n- `GET/POST /api/projects/[projectId]/stories/[storyId]/comments` — list & add comments\n- `POST /api/projects/[projectId]/stories/[storyId]/build` — dispatch a code-mode agent for the ticket (send-to-dev)\n- `POST /api/projects/[projectId]/stories/[storyId]/review` — dispatch review agents (security, code-review, compliance/accessibility)\n\n### Phase 3 — Hooks\n- `useStoryDetail` — fetch story with epic context\n- `useComments` — fetch comments with 5s polling\n- `useTicketAgent` — dispatch agent + poll session status, auto-post final output as agent comment\n\n### Phase 4 — Story Detail Page\n- New route: `/projects/[projectId]/stories/[storyId]`\n- Two-column layout: left = story details (title, description, acceptance criteria, status, priority), right = comment thread\n- Navigate to this page by clicking story titles in the epic detail view\n\n### Phase 5 — Send to Dev\n- Available on tickets in `todo` or `in_progress` status\n- \"Send to Dev\" button opens a dialog with an optional comment field\n- On confirm: post comment (if provided), dispatch code-mode agent with ticket context + full comment history, move ticket to `in_progress`\n- Agent reuses the epic's existing git worktree/branch with concurrency guard\n\n### Phase 6 — Agent Review (Review status)\n- Available on tickets in `review` status\n- \"Send to Dev\" button (requires mandatory comment explaining what to fix) → dispatches code agent, moves ticket back to `in_progress`\n- \"Agent Review\" button opens dialog with 3 checkboxes: Security, Code Review, Compliance/Accessibility\n- Each selected review type dispatches a separate agent in plan mode with a specialized review checklist\n- Agent outputs are posted as comments on the ticket\n\n### Phase 7 — Approve & Merge\n- \"Approve\" action on review-status tickets marks the ticket as `done`\n- Triggers merge of the epic's worktree branch into the target branch\n\n### Prompt Builder\n- `buildTicketBuildPrompt` — code mode, includes project spec, epic context, ticket details, and full comment history\n- `buildReviewPrompt` — plan mode, 3 specialized checklists (security audit, code review best practices, compliance/accessibility standards)",
+      "priority": 2,
+      "status": "in_progress",
+      "position": 0,
+      "branchName": "feature/epic-6lCNLmCL75wS-ticket-comments-send-to-dev-agent-review",
+      "user_stories": [
+        {
+          "id": "UQgy3FzhIg5E",
+          "title": "As a developer, I want a comments table in the database so that ticket comments are persisted and queryable",
+          "description": "Add a `ticketComments` table to the Drizzle schema with fields: id, userStoryId (FK), author ('user'|'agent'), content, agentSessionId (nullable FK), createdAt. Add `userStoryId` column to `agentSessions`. Add 'review' as a valid user story status.",
+          "acceptance_criteria": "- [ ] `ticketComments` table created in `lib/db/schema.ts` with proper foreign keys and cascade deletes\n- [ ] `userStoryId` column added to `agentSessions` table referencing `userStories.id`\n- [ ] User story status now supports 'review' in addition to 'todo', 'in_progress', 'done'\n- [ ] Drizzle migration generated and pushed successfully\n- [ ] Types updated in `lib/types/kanban.ts` if needed",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "kILpXUjip3Ep",
+          "title": "As a developer, I want API routes for story detail and comments so that the frontend can fetch and manage ticket data",
+          "description": "Create API routes: GET/PATCH for story detail at `/api/projects/[projectId]/stories/[storyId]`, and GET/POST for comments at `/api/projects/[projectId]/stories/[storyId]/comments`. GET story returns story with epic context. POST comment accepts author and content fields.",
+          "acceptance_criteria": "- [ ] `GET /api/projects/[projectId]/stories/[storyId]` returns story with parent epic info\n- [ ] `PATCH /api/projects/[projectId]/stories/[storyId]` updates story fields (title, description, status, acceptance_criteria)\n- [ ] `GET /api/projects/[projectId]/stories/[storyId]/comments` returns comments ordered by createdAt ascending\n- [ ] `POST /api/projects/[projectId]/stories/[storyId]/comments` creates a comment with author and content\n- [ ] Consistent `{ data }` / `{ error }` response shape\n- [ ] 404 handling for missing stories",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "f9kCKxaW7mHF",
+          "title": "As a developer, I want a story detail page so that I can view and manage a ticket with its full comment thread",
+          "description": "Create a new page at `app/projects/[projectId]/stories/[storyId]/page.tsx` with a two-column layout. Left column shows story details (title, description, acceptance criteria, status badge, priority). Right column shows the comment thread with input field. Replace the current sheet-based story view with navigation to this page.",
+          "acceptance_criteria": "- [ ] Page route `/projects/[projectId]/stories/[storyId]` renders correctly\n- [ ] Left column displays editable story title, description, acceptance criteria\n- [ ] Status badge and priority displayed with color coding\n- [ ] Right column shows scrollable comment thread with author labels and timestamps\n- [ ] Comment input field with submit button at the bottom\n- [ ] User can add comments that appear immediately (optimistic UI)\n- [ ] Comments poll every 5 seconds for new entries\n- [ ] Clicking a story title in the epic detail view navigates to this page",
+          "status": "todo",
+          "position": 2
+        },
+        {
+          "id": "VYM9NWOuFvdY",
+          "title": "As a developer, I want hooks for story detail and comments so that the UI stays in sync with the backend",
+          "description": "Create `useStoryDetail` hook (fetches story with epic context, supports mutation), `useComments` hook (fetches comments with 5s polling interval, supports adding comments), and `useTicketAgent` hook (dispatches agent, polls session status, auto-posts agent output as comment when done).",
+          "acceptance_criteria": "- [ ] `useStoryDetail` hook fetches and caches story data, provides update function\n- [ ] `useComments` hook returns comments array, polls every 5s, provides addComment function\n- [ ] `useTicketAgent` hook dispatches build/review agents via API, tracks session status\n- [ ] Agent output is automatically posted as an 'agent' comment when session completes\n- [ ] Loading and error states handled in all hooks",
+          "status": "todo",
+          "position": 3
+        },
+        {
+          "id": "bMlE0DO5M10t",
+          "title": "As a developer, I want to send a ticket to dev so that Claude Code implements the ticket in the epic's worktree",
+          "description": "Add a 'Send to Dev' action for tickets in `todo` or `in_progress` status. Opens a dialog with an optional comment field. On confirm: posts comment if provided, dispatches a code-mode Claude Code agent with the ticket context and full comment history, and moves the ticket to `in_progress`. Reuses the epic's existing git worktree/branch with a concurrency guard preventing parallel code-mode builds on the same epic.",
+          "acceptance_criteria": "- [ ] 'Send to Dev' button visible on story detail page for todo/in_progress tickets\n- [ ] Dialog opens with optional comment textarea\n- [ ] Comment posted before agent dispatch if provided\n- [ ] `POST /api/projects/[projectId]/stories/[storyId]/build` dispatches code-mode agent\n- [ ] Agent prompt includes project spec, epic context, ticket details, and all comments\n- [ ] Ticket status moves to `in_progress` on dispatch\n- [ ] Agent reuses epic's existing worktree and branch\n- [ ] Concurrency guard prevents parallel code-mode builds on the same epic\n- [ ] Agent final output posted as 'agent' comment when session completes",
+          "status": "todo",
+          "position": 4
+        },
+        {
+          "id": "UZnVJwG5rBAP",
+          "title": "As a developer, I want to send a review-status ticket back to dev with a mandatory comment so that Claude Code can address my feedback",
+          "description": "For tickets in `review` status, add a 'Send to Dev' action that requires a mandatory comment explaining what needs to be fixed. On confirm: posts the comment, dispatches a code-mode agent with the full comment history (including the new feedback), and moves the ticket back to `in_progress`.",
+          "acceptance_criteria": "- [ ] 'Send to Dev' button visible on story detail page for review-status tickets\n- [ ] Dialog opens with mandatory comment textarea (submit disabled when empty)\n- [ ] Comment posted before agent dispatch\n- [ ] Code-mode agent dispatched with full comment history including the new feedback\n- [ ] Ticket status moves from `review` to `in_progress`\n- [ ] Same concurrency guard and worktree reuse as the standard send-to-dev flow",
+          "status": "todo",
+          "position": 5
+        },
+        {
+          "id": "iazmQjpHwwZi",
+          "title": "As a developer, I want to trigger agent reviews on review-status tickets so that Claude Code checks security, code quality, and compliance",
+          "description": "For tickets in `review` status, add an 'Agent Review' button that opens a dialog with 3 checkboxes: Security, Code Review, Compliance/Accessibility. Each selected review type dispatches a separate Claude Code agent in plan mode with a specialized review checklist. Each agent's output is posted as a separate 'agent' comment on the ticket.",
+          "acceptance_criteria": "- [ ] 'Agent Review' button visible on story detail page for review-status tickets\n- [ ] Dialog with 3 checkboxes: Security, Code Review, Compliance/Accessibility\n- [ ] At least one checkbox must be selected to submit\n- [ ] `POST /api/projects/[projectId]/stories/[storyId]/review` accepts array of review types\n- [ ] Each selected type dispatches a separate plan-mode agent with specialized prompt\n- [ ] Security review checks: OWASP top 10, input validation, auth/authz, secrets exposure\n- [ ] Code review checks: readability, DRY, error handling, performance, naming conventions\n- [ ] Compliance review checks: WCAG accessibility, i18n readiness, license compliance\n- [ ] Each agent's output posted as a separate 'agent' comment with review type label",
+          "status": "todo",
+          "position": 6
+        },
+        {
+          "id": "Ew-tasqNn0sZ",
+          "title": "As a developer, I want to approve a review-status ticket so that it is marked done and the branch is merged",
+          "description": "Add an 'Approve' action on review-status tickets that marks the ticket as `done`. Optionally triggers a merge of the epic's worktree branch into the target branch if all stories in the epic are done.",
+          "acceptance_criteria": "- [ ] 'Approve' button visible on story detail page for review-status tickets\n- [ ] Clicking 'Approve' moves ticket status from `review` to `done`\n- [ ] If all stories in the parent epic are now `done`, epic status is also updated\n- [ ] Branch merge triggered when epic is fully complete (all stories done)\n- [ ] Success/error feedback displayed to the user",
+          "status": "todo",
+          "position": 7
         }
       ]
     },

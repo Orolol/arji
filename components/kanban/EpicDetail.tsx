@@ -20,7 +20,8 @@ import { Separator } from "@/components/ui/separator";
 import { InlineEdit } from "./InlineEdit";
 import { useEpicDetail } from "@/hooks/useEpicDetail";
 import { PRIORITY_LABELS, KANBAN_COLUMNS, COLUMN_LABELS } from "@/lib/types/kanban";
-import { Plus, Trash2, Check, Circle, Loader2, GitBranch } from "lucide-react";
+import { MarkdownContent } from "@/components/chat/MarkdownContent";
+import { Plus, Trash2, Check, Circle, Loader2, GitBranch, ChevronRight, GitMerge } from "lucide-react";
 import { useState } from "react";
 
 interface EpicDetailProps {
@@ -28,9 +29,10 @@ interface EpicDetailProps {
   epicId: string | null;
   open: boolean;
   onClose: () => void;
+  onMerged?: () => void;
 }
 
-export function EpicDetail({ projectId, epicId, open, onClose }: EpicDetailProps) {
+export function EpicDetail({ projectId, epicId, open, onClose, onMerged }: EpicDetailProps) {
   const {
     epic,
     userStories,
@@ -42,6 +44,30 @@ export function EpicDetail({ projectId, epicId, open, onClose }: EpicDetailProps
   } = useEpicDetail(projectId, epicId);
 
   const [newUSTitle, setNewUSTitle] = useState("");
+  const [expandedUS, setExpandedUS] = useState<Set<string>>(new Set());
+  const [merging, setMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+
+  async function handleMerge() {
+    if (!epicId) return;
+    setMerging(true);
+    setMergeError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/epics/${epicId}/merge`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (data.error) {
+        setMergeError(data.error);
+      } else {
+        onMerged?.();
+        onClose();
+      }
+    } catch {
+      setMergeError("Failed to merge");
+    }
+    setMerging(false);
+  }
 
   function handleAddUS() {
     if (!newUSTitle.trim()) return;
@@ -88,6 +114,7 @@ export function EpicDetail({ projectId, epicId, open, onClose }: EpicDetailProps
                   value={epic.description || ""}
                   onSave={(v) => updateEpic({ description: v })}
                   multiline
+                  markdown
                   className="text-sm"
                 />
               </div>
@@ -136,9 +163,30 @@ export function EpicDetail({ projectId, epicId, open, onClose }: EpicDetailProps
               </div>
 
               {epic.branchName && (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
-                  <GitBranch className="h-3 w-3" />
-                  {epic.branchName}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
+                    <GitBranch className="h-3 w-3" />
+                    {epic.branchName}
+                  </div>
+                  {(epic.status === "review" || epic.status === "done") && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleMerge}
+                      disabled={merging}
+                      className="h-7 text-xs"
+                    >
+                      {merging ? (
+                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      ) : (
+                        <GitMerge className="h-3 w-3 mr-1" />
+                      )}
+                      Merge into main
+                    </Button>
+                  )}
+                  {mergeError && (
+                    <p className="text-xs text-destructive">{mergeError}</p>
+                  )}
                 </div>
               )}
 
@@ -152,43 +200,82 @@ export function EpicDetail({ projectId, epicId, open, onClose }: EpicDetailProps
                 </div>
 
                 <div className="space-y-1">
-                  {userStories.map((us) => (
-                    <div
-                      key={us.id}
-                      className="flex items-center gap-2 p-2 rounded hover:bg-accent/50 group"
-                    >
-                      <button
-                        onClick={() => {
-                          const next =
-                            us.status === "done"
-                              ? "todo"
-                              : us.status === "todo"
-                                ? "in_progress"
-                                : "done";
-                          updateUserStory(us.id, { status: next });
-                        }}
-                      >
-                        {statusIcon(us.status)}
-                      </button>
-                      <span
-                        className={`flex-1 text-sm ${
-                          us.status === "done"
-                            ? "line-through text-muted-foreground"
-                            : ""
-                        }`}
-                      >
-                        {us.title}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                        onClick={() => deleteUserStory(us.id)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
+                  {userStories.map((us) => {
+                    const hasDetails = us.description || us.acceptanceCriteria;
+                    const isExpanded = expandedUS.has(us.id);
+                    return (
+                      <div key={us.id} className="rounded hover:bg-accent/50 group">
+                        <div className="flex items-center gap-2 p-2">
+                          {hasDetails && (
+                            <button
+                              onClick={() =>
+                                setExpandedUS((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(us.id)) next.delete(us.id);
+                                  else next.add(us.id);
+                                  return next;
+                                })
+                              }
+                              className="shrink-0"
+                            >
+                              <ChevronRight
+                                className={`h-3 w-3 text-muted-foreground transition-transform ${
+                                  isExpanded ? "rotate-90" : ""
+                                }`}
+                              />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              const next =
+                                us.status === "done"
+                                  ? "todo"
+                                  : us.status === "todo"
+                                    ? "in_progress"
+                                    : "done";
+                              updateUserStory(us.id, { status: next });
+                            }}
+                          >
+                            {statusIcon(us.status)}
+                          </button>
+                          <span
+                            className={`flex-1 text-sm ${
+                              us.status === "done"
+                                ? "line-through text-muted-foreground"
+                                : ""
+                            }`}
+                          >
+                            {us.title}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                            onClick={() => deleteUserStory(us.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        {isExpanded && hasDetails && (
+                          <div className="pl-10 pr-2 pb-2 space-y-2 text-sm">
+                            {us.description && (
+                              <div>
+                                <MarkdownContent content={us.description} />
+                              </div>
+                            )}
+                            {us.acceptanceCriteria && (
+                              <div>
+                                <span className="text-xs font-medium text-muted-foreground">
+                                  Acceptance Criteria
+                                </span>
+                                <MarkdownContent content={us.acceptanceCriteria} />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div className="flex gap-2 mt-2">

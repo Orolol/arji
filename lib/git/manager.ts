@@ -78,6 +78,59 @@ export async function removeWorktree(
 }
 
 /**
+ * Merges an epic branch into the main branch, then removes the worktree.
+ * Returns the merge commit hash on success.
+ */
+export async function mergeWorktree(
+  repoPath: string,
+  branchName: string,
+  worktreePath?: string
+): Promise<{ merged: boolean; commitHash?: string; error?: string }> {
+  const git = getGit(repoPath);
+
+  try {
+    // Get the main branch name
+    const branches = await git.branchLocal();
+    const mainBranch = branches.all.includes("main") ? "main" : "master";
+
+    // Make sure the branch exists
+    if (!branches.all.includes(branchName)) {
+      return { merged: false, error: `Branch ${branchName} not found` };
+    }
+
+    // Remove the worktree first (git can't merge while worktree is active)
+    if (worktreePath && fs.existsSync(worktreePath)) {
+      await git.raw(["worktree", "remove", worktreePath, "--force"]);
+      await git.raw(["worktree", "prune"]);
+    }
+
+    // Checkout main
+    await git.checkout(mainBranch);
+
+    // Merge the epic branch
+    const result = await git.merge([branchName, "--no-ff", "-m", `Merge ${branchName}`]);
+
+    // Get the merge commit hash
+    const log = await git.log({ maxCount: 1 });
+    const commitHash = log.latest?.hash;
+
+    // Delete the merged branch
+    await git.deleteLocalBranch(branchName, true);
+
+    return { merged: true, commitHash };
+  } catch (e) {
+    const errorMsg = e instanceof Error ? e.message : "Merge failed";
+    // If merge failed with conflicts, abort it
+    try {
+      await git.merge(["--abort"]);
+    } catch {
+      // ignore abort errors
+    }
+    return { merged: false, error: errorMsg };
+  }
+}
+
+/**
  * Lists all local branches in the repo.
  */
 export async function listBranches(repoPath: string): Promise<string[]> {

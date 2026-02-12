@@ -38,11 +38,13 @@ export default function KanbanPage() {
   const { activeSessions } = useAgentPolling(projectId);
   const prevSessionIds = useRef<Set<string>>(new Set());
 
-  // Detect session completions for notifications
+  // Detect session completions for notifications + board refresh
   useEffect(() => {
     const currentIds = new Set(activeSessions.map((s) => s.id));
+    let hasCompleted = false;
     for (const prevId of prevSessionIds.current) {
       if (!currentIds.has(prevId)) {
+        hasCompleted = true;
         // Session disappeared — fetch its status
         fetch(`/api/projects/${projectId}/sessions/${prevId}`)
           .then((r) => r.json())
@@ -61,6 +63,10 @@ export default function KanbanPage() {
           })
           .catch(() => {});
       }
+    }
+    // Refresh the board when any session completes or fails
+    if (hasCompleted) {
+      setRefreshTrigger((t) => t + 1);
     }
     prevSessionIds.current = currentIds;
   }, [activeSessions, projectId]);
@@ -108,6 +114,7 @@ export default function KanbanPage() {
           `Launched ${data.data.count} build session${data.data.count > 1 ? "s" : ""}`
         );
         setSelectedEpics(new Set());
+        setRefreshTrigger((t) => t + 1);
       }
     } catch {
       addToast("error", "Failed to launch build");
@@ -222,6 +229,10 @@ export default function KanbanPage() {
         epicId={selectedEpicId}
         open={!!selectedEpicId}
         onClose={() => setSelectedEpicId(null)}
+        onMerged={() => {
+          setRefreshTrigger((t) => t + 1);
+          addToast("success", "Branch merged into main");
+        }}
       />
 
       <CreateEpicSheet

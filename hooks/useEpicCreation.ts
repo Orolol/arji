@@ -116,6 +116,9 @@ export function useEpicCreation(projectId: string, conversationId?: string | nul
               }
               if (event.questions) {
                 setPendingQuestions(event.questions);
+                // Allow user to interact with question cards
+                setSending(false);
+                setStreamStatus(null);
               }
               if (event.done && event.content) {
                 // Replace placeholder with final content
