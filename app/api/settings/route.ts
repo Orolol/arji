@@ -3,6 +3,16 @@ import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
+/**
+ * Redacts a GitHub PAT, keeping only the prefix and last 4 characters.
+ */
+function redactPat(pat: string): string {
+  if (pat.length <= 8) return "****";
+  const prefix = pat.slice(0, 4);
+  const suffix = pat.slice(-4);
+  return `${prefix}${"*".repeat(Math.min(pat.length - 8, 20))}${suffix}`;
+}
+
 export async function GET() {
   const rows = db.select().from(settings).all();
   const data: Record<string, unknown> = {};
@@ -13,6 +23,12 @@ export async function GET() {
       data[row.key] = row.value;
     }
   }
+
+  // Redact GitHub PAT if present
+  if (data.github_pat && typeof data.github_pat === "string") {
+    data.github_pat = redactPat(data.github_pat);
+  }
+
   return NextResponse.json({ data });
 }
 
