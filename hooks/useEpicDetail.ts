@@ -20,6 +20,9 @@ interface EpicDetail {
   priority: number;
   status: string;
   branchName: string | null;
+  prNumber: number | null;
+  prUrl: string | null;
+  prStatus: string | null;
 }
 
 export function useEpicDetail(projectId: string, epicId: string | null) {
