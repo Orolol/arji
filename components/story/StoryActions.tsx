@@ -13,6 +13,12 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Hammer,
   Search,
   CheckCircle2,
@@ -126,7 +132,12 @@ export function StoryActions({
     }
   }
 
+  const lockedTooltip = isRunning
+    ? "Agent is already running on this story"
+    : null;
+
   return (
+    <TooltipProvider>
     <div className="flex items-center gap-2">
       {/* Running indicator */}
       {isRunning && (
@@ -138,53 +149,80 @@ export function StoryActions({
 
       {/* Send to Dev button */}
       {(canSendToDev || canSendToDevFromReview) && (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setDevComment("");
-            setSendToDevOpen(true);
-          }}
-          disabled={dispatching || isRunning}
-          className="h-7 text-xs"
-        >
-          <Hammer className="h-3 w-3 mr-1" />
-          Send to Dev
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setDevComment("");
+                  setSendToDevOpen(true);
+                }}
+                disabled={dispatching || isRunning}
+                className="h-7 text-xs"
+              >
+                <Hammer className="h-3 w-3 mr-1" />
+                Send to Dev
+              </Button>
+            </span>
+          </TooltipTrigger>
+          {lockedTooltip && (
+            <TooltipContent>{lockedTooltip}</TooltipContent>
+          )}
+        </Tooltip>
       )}
 
       {/* Agent Review button */}
       {canReview && (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setReviewTypes(new Set());
-            setReviewOpen(true);
-          }}
-          disabled={dispatching || isRunning}
-          className="h-7 text-xs"
-        >
-          <Search className="h-3 w-3 mr-1" />
-          Agent Review
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setReviewTypes(new Set());
+                  setReviewOpen(true);
+                }}
+                disabled={dispatching || isRunning}
+                className="h-7 text-xs"
+              >
+                <Search className="h-3 w-3 mr-1" />
+                Agent Review
+              </Button>
+            </span>
+          </TooltipTrigger>
+          {lockedTooltip && (
+            <TooltipContent>{lockedTooltip}</TooltipContent>
+          )}
+        </Tooltip>
       )}
 
       {/* Approve button */}
       {canApprove && (
-        <Button
-          size="sm"
-          onClick={handleApprove}
-          disabled={approving || dispatching || isRunning}
-          className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white"
-        >
-          {approving ? (
-            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-          ) : (
-            <CheckCircle2 className="h-3 w-3 mr-1" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Button
+                size="sm"
+                onClick={handleApprove}
+                disabled={approving || dispatching || isRunning}
+                className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white"
+              >
+                {approving ? (
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                )}
+                Approve
+              </Button>
+            </span>
+          </TooltipTrigger>
+          {lockedTooltip && (
+            <TooltipContent>{lockedTooltip}</TooltipContent>
           )}
-          Approve
-        </Button>
+        </Tooltip>
       )}
 
       {/* Send to Dev Dialog */}
@@ -336,5 +374,6 @@ export function StoryActions({
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
   );
 }

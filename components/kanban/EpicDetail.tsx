@@ -32,15 +32,23 @@ import { Plus, Trash2, Check, Circle, Loader2, GitBranch, GitMerge, Wrench, Arro
 import { useState, useEffect } from "react";
 import Link from "next/link";
 
+interface ActiveSession {
+  id: string;
+  epicId: string | null;
+  userStoryId?: string | null;
+  status: string;
+}
+
 interface EpicDetailProps {
   projectId: string;
   epicId: string | null;
   open: boolean;
   onClose: () => void;
   onMerged?: () => void;
+  projectActiveSessions?: ActiveSession[];
 }
 
-export function EpicDetail({ projectId, epicId, open, onClose, onMerged }: EpicDetailProps) {
+export function EpicDetail({ projectId, epicId, open, onClose, onMerged, projectActiveSessions = [] }: EpicDetailProps) {
   const {
     epic,
     userStories,
@@ -398,6 +406,7 @@ export function EpicDetail({ projectId, epicId, open, onClose, onMerged }: EpicD
                           projectId={projectId}
                           story={us}
                           onRefresh={refresh}
+                          activeSessions={projectActiveSessions}
                         />
                         <Button
                           variant="ghost"

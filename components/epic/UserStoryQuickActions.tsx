@@ -9,6 +9,13 @@ import {
 } from "@/components/ui/tooltip";
 import { Hammer, Search, CheckCircle2, Loader2 } from "lucide-react";
 
+interface ActiveSession {
+  id: string;
+  epicId: string | null;
+  userStoryId?: string | null;
+  status: string;
+}
+
 interface UserStory {
   id: string;
   status: string;
@@ -18,18 +25,28 @@ interface UserStoryQuickActionsProps {
   projectId: string;
   story: UserStory;
   onRefresh: () => void;
+  activeSessions?: ActiveSession[];
 }
 
 export function UserStoryQuickActions({
   projectId,
   story,
   onRefresh,
+  activeSessions = [],
 }: UserStoryQuickActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
 
   const canSendToDev = ["todo", "in_progress"].includes(story.status);
   const canReview = story.status === "review";
   const canApprove = story.status === "review";
+
+  // Check if any active session targets this story
+  const isLocked = activeSessions.some(
+    (s) => s.userStoryId === story.id && (s.status === "running" || s.status === "pending")
+  );
+  const lockedTooltip = isLocked
+    ? "Agent is already running on this story"
+    : null;
 
   if (story.status === "done") return null;
 
@@ -97,72 +114,78 @@ export function UserStoryQuickActions({
       {canSendToDev && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={(e) => {
-                e.preventDefault();
-                handleSendToDev();
-              }}
-              disabled={loading !== null}
-            >
-              {loading === "dev" ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Hammer className="h-3 w-3" />
-              )}
-            </Button>
+            <span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSendToDev();
+                }}
+                disabled={loading !== null || isLocked}
+              >
+                {loading === "dev" ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Hammer className="h-3 w-3" />
+                )}
+              </Button>
+            </span>
           </TooltipTrigger>
-          <TooltipContent>Send to Dev</TooltipContent>
+          <TooltipContent>{lockedTooltip || "Send to Dev"}</TooltipContent>
         </Tooltip>
       )}
 
       {canReview && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={(e) => {
-                e.preventDefault();
-                handleReview();
-              }}
-              disabled={loading !== null}
-            >
-              {loading === "review" ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Search className="h-3 w-3" />
-              )}
-            </Button>
+            <span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleReview();
+                }}
+                disabled={loading !== null || isLocked}
+              >
+                {loading === "review" ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Search className="h-3 w-3" />
+                )}
+              </Button>
+            </span>
           </TooltipTrigger>
-          <TooltipContent>Code Review</TooltipContent>
+          <TooltipContent>{lockedTooltip || "Code Review"}</TooltipContent>
         </Tooltip>
       )}
 
       {canApprove && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-green-500 hover:text-green-600"
-              onClick={(e) => {
-                e.preventDefault();
-                handleApprove();
-              }}
-              disabled={loading !== null}
-            >
-              {loading === "approve" ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <CheckCircle2 className="h-3 w-3" />
-              )}
-            </Button>
+            <span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-green-500 hover:text-green-600"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleApprove();
+                }}
+                disabled={loading !== null || isLocked}
+              >
+                {loading === "approve" ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-3 w-3" />
+                )}
+              </Button>
+            </span>
           </TooltipTrigger>
-          <TooltipContent>Approve</TooltipContent>
+          <TooltipContent>{lockedTooltip || "Approve"}</TooltipContent>
         </Tooltip>
       )}
     </div>
