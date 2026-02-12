@@ -24,6 +24,14 @@ export async function POST(
 
   const conversationId: string | null = body.conversationId || null;
 
+  function setConversationStatus(status: "active" | "generating" | "error") {
+    if (!conversationId) return;
+    db.update(chatConversations)
+      .set({ status })
+      .where(eq(chatConversations.id, conversationId))
+      .run();
+  }
+
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
   if (!project) {
     return new Response(JSON.stringify({ error: "Project not found" }), {
@@ -46,6 +54,8 @@ export async function POST(
     })),
     globalPrompt,
   );
+
+  setConversationStatus("generating");
 
   // Persist user message if conversationId provided
   if (conversationId) {
@@ -191,6 +201,7 @@ export async function POST(
   });
 
   let fullContent = "";
+  let hasStreamError = false;
 
   const sseStream = new ReadableStream({
     async start(controller) {
@@ -218,12 +229,15 @@ export async function POST(
         }
       } catch (err) {
         console.error("[epic-chat/stream] Stream error:", err);
+        hasStreamError = true;
       }
 
+      setConversationStatus(hasStreamError ? "error" : "active");
       saveAssistantAndTitle(controller, fullContent);
     },
     cancel() {
       kill();
+      setConversationStatus("active");
     },
   });
 

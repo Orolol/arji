@@ -45,6 +45,12 @@ vi.mock("@/components/kanban/CreateEpicSheet", () => ({
   CreateEpicSheet: () => null,
 }));
 
+vi.mock("@/components/chat/UnifiedChatPanel", () => ({
+  UnifiedChatPanel: ({ children }: { children: unknown }) => (
+    <div data-testid="unified-chat-panel">{children}</div>
+  ),
+}));
+
 vi.mock("@/components/monitor/AgentMonitor", () => ({
   AgentMonitor: () => null,
 }));

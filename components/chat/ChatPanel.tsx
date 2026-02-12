@@ -23,6 +23,7 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
     setActiveId,
     createConversation,
     deleteConversation,
+    updateConversation,
     refresh: refreshConversations,
   } = useConversations(projectId);
 
@@ -58,17 +59,7 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
 
   async function handleProviderChange(newProvider: ProviderType) {
     if (!activeId || hasMessages) return;
-    // Update provider on the server
-    try {
-      await fetch(`/api/projects/${projectId}/conversations/${activeId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: newProvider }),
-      });
-      refreshConversations();
-    } catch {
-      // ignore
-    }
+    await updateConversation(activeId, { provider: newProvider });
   }
 
   async function handleGenerateSpec() {
@@ -85,7 +76,7 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
   }
 
   async function handleNewConversation() {
-    await createConversation("brainstorm", "Brainstorm");
+    await createConversation({ type: "brainstorm", label: "Brainstorm" });
   }
 
   return (

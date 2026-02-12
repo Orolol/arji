@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Board } from "@/components/kanban/Board";
 import { EpicDetail } from "@/components/kanban/EpicDetail";
 import { CreateEpicSheet } from "@/components/kanban/CreateEpicSheet";
+import { UnifiedChatPanel, type UnifiedChatPanelHandle } from "@/components/chat/UnifiedChatPanel";
 import { AgentMonitor } from "@/components/monitor/AgentMonitor";
 import { useAgentPolling } from "@/hooks/useAgentPolling";
 import { useCodexAvailable } from "@/hooks/useCodexAvailable";
@@ -23,7 +24,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Hammer, Loader2, X, CheckCircle2, XCircle, Plus, Users } from "lucide-react";
+import { Hammer, Loader2, X, CheckCircle2, XCircle, Plus, Users, MessageSquare } from "lucide-react";
 
 interface Toast {
   id: string;
@@ -48,6 +49,7 @@ export default function KanbanPage() {
   const { activeSessions } = useAgentPolling(projectId);
   const { codexAvailable, codexInstalled } = useCodexAvailable();
   const prevSessionIds = useRef<Set<string>>(new Set());
+  const panelRef = useRef<UnifiedChatPanelHandle>(null);
 
   // Reset team mode when selection drops below 2 or provider changes to codex
   useEffect(() => {
@@ -148,117 +150,132 @@ export default function KanbanPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header bar */}
-      <div className="border-b border-border px-4 py-2 flex items-center gap-3">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setShowCreateEpic(true)}
-          className="h-7 text-xs"
-        >
-          <Plus className="h-3 w-3 mr-1" />
-          New Epic
-        </Button>
-      </div>
-
-      {/* Build toolbar */}
-      {selectedEpics.size > 0 && (
-        <div className="border-b border-border px-4 py-2 bg-muted/30 flex items-center gap-3 flex-wrap">
-          <span className="text-sm">
-            {selectedEpics.size} epic{selectedEpics.size > 1 ? "s" : ""}{" "}
-            selected
-          </span>
-
-          <ProviderSelect
-            value={provider}
-            onChange={setProvider}
-            codexAvailable={codexAvailable}
-            codexInstalled={codexInstalled}
-          />
-
-          <Select
-            value={buildMode}
-            onValueChange={(v) =>
-              setBuildMode(v as "parallel" | "sequential")
-            }
-          >
-            <SelectTrigger className="w-32 h-7 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="parallel">Parallel</SelectItem>
-              <SelectItem value="sequential">Sequential</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* Team mode checkbox — visible when 2+ epics selected */}
-          {selectedEpics.size >= 2 && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <label
-                    className={`flex items-center gap-1.5 text-xs cursor-pointer ${
-                      !canTeamMode ? "opacity-50 cursor-not-allowed" : ""
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={teamMode}
-                      onChange={(e) => setTeamMode(e.target.checked)}
-                      disabled={!canTeamMode}
-                      className="h-3.5 w-3.5 rounded border-border"
-                    />
-                    <Users className="h-3 w-3" />
-                    Team mode
-                  </label>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {provider === "codex"
-                    ? "Team mode is only available with Claude Code"
-                    : "Launch a single CC session that coordinates sub-agents for each epic"}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-
-          <Button
-            size="sm"
-            onClick={handleBuild}
-            disabled={building}
-            className="h-7 text-xs"
-          >
-            {building ? (
-              <Loader2 className="h-3 w-3 animate-spin mr-1" />
-            ) : teamMode ? (
-              <Users className="h-3 w-3 mr-1" />
-            ) : (
-              <Hammer className="h-3 w-3 mr-1" />
-            )}
-            {teamMode ? "Build as Team" : `Build with ${provider === "codex" ? "Codex" : "Claude Code"}`}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setSelectedEpics(new Set())}
-            className="h-7 text-xs"
-          >
-            Clear
-          </Button>
-        </div>
-      )}
-
       <div className="flex-1 overflow-hidden">
-        <Board
-          projectId={projectId}
-          onEpicClick={(id) => setSelectedEpicId(id)}
-          selectedEpics={selectedEpics}
-          onToggleSelect={toggleEpicSelection}
-          refreshTrigger={refreshTrigger}
-        />
-      </div>
+        <UnifiedChatPanel projectId={projectId} ref={panelRef}>
+          <div className="flex h-full flex-col">
+            {/* Header bar */}
+            <div className="border-b border-border px-4 py-2 flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => panelRef.current?.openChat()}
+                className="h-7 text-xs"
+              >
+                <MessageSquare className="h-3 w-3 mr-1" />
+                Chat
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowCreateEpic(true)}
+                className="h-7 text-xs"
+              >
+                <Plus className="h-3 w-3 mr-1" />
+                New Epic
+              </Button>
+            </div>
 
-      {/* Agent monitor bar */}
-      <AgentMonitor projectId={projectId} sessions={activeSessions} />
+            {/* Build toolbar */}
+            {selectedEpics.size > 0 && (
+              <div className="border-b border-border px-4 py-2 bg-muted/30 flex items-center gap-3 flex-wrap">
+                <span className="text-sm">
+                  {selectedEpics.size} epic{selectedEpics.size > 1 ? "s" : ""}{" "}
+                  selected
+                </span>
+
+                <ProviderSelect
+                  value={provider}
+                  onChange={setProvider}
+                  codexAvailable={codexAvailable}
+                  codexInstalled={codexInstalled}
+                />
+
+                <Select
+                  value={buildMode}
+                  onValueChange={(v) =>
+                    setBuildMode(v as "parallel" | "sequential")
+                  }
+                >
+                  <SelectTrigger className="w-32 h-7 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="parallel">Parallel</SelectItem>
+                    <SelectItem value="sequential">Sequential</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {/* Team mode checkbox — visible when 2+ epics selected */}
+                {selectedEpics.size >= 2 && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <label
+                          className={`flex items-center gap-1.5 text-xs cursor-pointer ${
+                            !canTeamMode ? "opacity-50 cursor-not-allowed" : ""
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={teamMode}
+                            onChange={(e) => setTeamMode(e.target.checked)}
+                            disabled={!canTeamMode}
+                            className="h-3.5 w-3.5 rounded border-border"
+                          />
+                          <Users className="h-3 w-3" />
+                          Team mode
+                        </label>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {provider === "codex"
+                          ? "Team mode is only available with Claude Code"
+                          : "Launch a single CC session that coordinates sub-agents for each epic"}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+
+                <Button
+                  size="sm"
+                  onClick={handleBuild}
+                  disabled={building}
+                  className="h-7 text-xs"
+                >
+                  {building ? (
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                  ) : teamMode ? (
+                    <Users className="h-3 w-3 mr-1" />
+                  ) : (
+                    <Hammer className="h-3 w-3 mr-1" />
+                  )}
+                  {teamMode ? "Build as Team" : `Build with ${provider === "codex" ? "Codex" : "Claude Code"}`}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setSelectedEpics(new Set())}
+                  className="h-7 text-xs"
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-hidden">
+              <Board
+                projectId={projectId}
+                onEpicClick={(id) => setSelectedEpicId(id)}
+                selectedEpics={selectedEpics}
+                onToggleSelect={toggleEpicSelection}
+                refreshTrigger={refreshTrigger}
+              />
+            </div>
+
+            {/* Agent monitor bar */}
+            <AgentMonitor projectId={projectId} sessions={activeSessions} />
+          </div>
+        </UnifiedChatPanel>
+      </div>
 
       {/* Toast notifications */}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">

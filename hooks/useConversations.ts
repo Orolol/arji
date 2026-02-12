@@ -2,14 +2,28 @@
 
 import { useState, useEffect, useCallback } from "react";
 
-interface Conversation {
+export interface Conversation {
   id: string;
   projectId: string;
-  type: "brainstorm" | "epic";
+  type: string;
   label: string;
+  status?: string | null;
   epicId: string | null;
   provider: string;
   createdAt: string;
+}
+
+export interface CreateConversationInput {
+  type?: string;
+  label?: string;
+  epicId?: string | null;
+  provider?: string;
+}
+
+export interface UpdateConversationInput {
+  type?: string;
+  label?: string;
+  provider?: string;
 }
 
 export function useConversations(projectId: string) {
@@ -42,12 +56,12 @@ export function useConversations(projectId: string) {
   }, [refresh]);
 
   const createConversation = useCallback(
-    async (type: "brainstorm" | "epic", label: string) => {
+    async (input: CreateConversationInput = {}) => {
       try {
         const res = await fetch(`/api/projects/${projectId}/conversations`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type, label }),
+          body: JSON.stringify(input),
         });
         const json = await res.json();
         if (json.data) {
@@ -61,6 +75,31 @@ export function useConversations(projectId: string) {
       return null;
     },
     [projectId]
+  );
+
+  const updateConversation = useCallback(
+    async (conversationId: string, updates: UpdateConversationInput) => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/conversations/${conversationId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        });
+        const json = await res.json();
+        if (json.data) {
+          setConversations((prev) =>
+            prev.map((conv) =>
+              conv.id === conversationId ? (json.data as Conversation) : conv
+            ),
+          );
+          return json.data as Conversation;
+        }
+      } catch {
+        // ignore
+      }
+      return null;
+    },
+    [projectId],
   );
 
   const deleteConversation = useCallback(
@@ -89,5 +128,14 @@ export function useConversations(projectId: string) {
     [projectId]
   );
 
-  return { conversations, activeId, setActiveId, loading, createConversation, deleteConversation, refresh };
+  return {
+    conversations,
+    activeId,
+    setActiveId,
+    loading,
+    createConversation,
+    updateConversation,
+    deleteConversation,
+    refresh,
+  };
 }
