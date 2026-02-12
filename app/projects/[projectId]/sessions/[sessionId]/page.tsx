@@ -28,6 +28,7 @@ interface SessionDetail {
   startedAt?: string;
   endedAt?: string;
   completedAt?: string;
+  lastNonEmptyText?: string;
   createdAt: string;
   logs?: {
     success?: boolean;
@@ -126,6 +127,11 @@ export default function SessionDetailPage() {
               {getDuration()}
             </span>
           </div>
+          {session.lastNonEmptyText && (
+            <p className="text-sm text-muted-foreground mt-2 max-w-2xl truncate">
+              {session.lastNonEmptyText}
+            </p>
+          )}
         </div>
         <div className="flex gap-2">
           {session.status === "running" && (

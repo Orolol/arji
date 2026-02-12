@@ -114,6 +114,7 @@ export const agentSessions = sqliteTable("agent_sessions", {
   startedAt: text("started_at"),
   endedAt: text("ended_at"),
   completedAt: text("completed_at"),
+  lastNonEmptyText: text("last_non_empty_text"),
   error: text("error"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });

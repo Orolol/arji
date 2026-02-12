@@ -43,6 +43,13 @@
       "when": 1770970800000,
       "tag": "0005_codex_session_chunks",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1770972000000,
+      "tag": "0006_session_last_non_empty_text",
+      "breakpoints": true
     }
   ]
 }

@@ -42,6 +42,7 @@ describe("Schema: existing columns preserved", () => {
     expect(cols.startedAt).toBeDefined();
     expect(cols.endedAt).toBeDefined();
     expect(cols.completedAt).toBeDefined();
+    expect(cols.lastNonEmptyText).toBeDefined();
     expect(cols.error).toBeDefined();
     expect(cols.createdAt).toBeDefined();
   });

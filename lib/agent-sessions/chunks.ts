@@ -49,6 +49,17 @@ interface SequenceRow {
   sequence: number;
 }
 
+export function extractLastNonEmptyText(text: string): string | null {
+  const lines = text.split(/\r?\n/);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const trimmed = lines[index].trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
 export function createSessionChunkStore(
   database: Database.Database
 ): SessionChunkStore {
@@ -112,6 +123,12 @@ export function createSessionChunkStore(
     ORDER BY sequence ASC`
   );
 
+  const updateLastNonEmptyTextStmt = database.prepare<[string, string]>(
+    `UPDATE agent_sessions
+     SET last_non_empty_text = ?
+     WHERE id = ?`
+  );
+
   const appendChunkTx = database.transaction(
     (input: AppendSessionChunkInput): AppendSessionChunkResult => {
       const createdAt = input.createdAt ?? new Date().toISOString();
@@ -157,6 +174,16 @@ export function createSessionChunkStore(
         chunk.content,
         chunk.createdAt ?? createdAt
       );
+
+      if (
+        input.streamType === "output" ||
+        input.streamType === "response"
+      ) {
+        const lastNonEmptyText = extractLastNonEmptyText(input.content);
+        if (lastNonEmptyText) {
+          updateLastNonEmptyTextStmt.run(lastNonEmptyText, input.sessionId);
+        }
+      }
 
       return {
         inserted: true,

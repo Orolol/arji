@@ -10,7 +10,8 @@ function createTestDb(): Database.Database {
   db.pragma("foreign_keys = ON");
   db.exec(`
     CREATE TABLE agent_sessions (
-      id text PRIMARY KEY NOT NULL
+      id text PRIMARY KEY NOT NULL,
+      last_non_empty_text text
     );
 
     CREATE TABLE agent_session_sequences (
@@ -143,5 +144,36 @@ describe("session chunk persistence", () => {
     expect(duplicate.inserted).toBe(false);
     expect(duplicate.chunk.sequence).toBe(first.chunk.sequence);
     expect(store.listChunks("s4", "raw")).toHaveLength(1);
+  });
+
+  it("derives and stores lastNonEmptyText from output/response chunks", () => {
+    const db = createTestDb();
+    seedSession(db, "s5");
+    const store = createSessionChunkStore(db);
+
+    store.appendChunk({
+      sessionId: "s5",
+      streamType: "output",
+      content: "line one\n\n   final output line   \n",
+      chunkKey: "output:1",
+    });
+
+    const firstValue = db
+      .prepare("SELECT last_non_empty_text AS lastNonEmptyText FROM agent_sessions WHERE id = ?")
+      .get("s5") as { lastNonEmptyText: string | null };
+    expect(firstValue.lastNonEmptyText).toBe("final output line");
+
+    // Whitespace-only response must not overwrite existing value.
+    store.appendChunk({
+      sessionId: "s5",
+      streamType: "response",
+      content: "   \n\t  ",
+      chunkKey: "response:1",
+    });
+
+    const secondValue = db
+      .prepare("SELECT last_non_empty_text AS lastNonEmptyText FROM agent_sessions WHERE id = ?")
+      .get("s5") as { lastNonEmptyText: string | null };
+    expect(secondValue.lastNonEmptyText).toBe("final output line");
   });
 });

@@ -76,4 +76,28 @@ describe("sessions/[sessionId] DELETE lifecycle guard", () => {
       toStatus: "cancelled",
     });
   });
+
+  it("includes lastNonEmptyText in session detail payload", async () => {
+    dbChain.get.mockReturnValue({
+      id: "sess-2",
+      status: "running",
+      lastNonEmptyText: "Implementing API route",
+      logsPath: null,
+    });
+
+    const { GET } = await import(
+      "@/app/api/projects/[projectId]/sessions/[sessionId]/route"
+    );
+
+    const response = await GET({} as never, {
+      params: Promise.resolve({
+        projectId: "proj-1",
+        sessionId: "sess-2",
+      }),
+    });
+
+    const json = await response.json();
+    expect(response.status).toBe(200);
+    expect(json.data.lastNonEmptyText).toBe("Implementing API route");
+  });
 });

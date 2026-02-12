@@ -24,6 +24,7 @@ interface Session {
   startedAt?: string;
   endedAt?: string;
   completedAt?: string;
+  lastNonEmptyText?: string;
   error?: string;
   createdAt: string;
 }
@@ -137,6 +138,12 @@ export default function SessionsPage() {
                       <div className="text-xs text-muted-foreground">
                         {getDuration(session)}
                       </div>
+                      {session.status === "running" &&
+                        session.lastNonEmptyText && (
+                          <div className="text-xs text-muted-foreground max-w-56 truncate">
+                            {session.lastNonEmptyText}
+                          </div>
+                        )}
                       <div className="text-xs text-muted-foreground">
                         {new Date(session.createdAt).toLocaleDateString()}{" "}
                         {new Date(session.createdAt).toLocaleTimeString()}

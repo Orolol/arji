@@ -9,6 +9,7 @@ interface ActiveSession {
   mode: string;
   provider: string | null;
   startedAt: string | null;
+  lastNonEmptyText?: string | null;
 }
 
 export function useAgentPolling(projectId: string, intervalMs = 3000) {

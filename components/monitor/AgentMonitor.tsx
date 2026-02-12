@@ -11,6 +11,7 @@ interface ActiveSession {
   mode: string;
   provider: string | null;
   startedAt: string | null;
+  lastNonEmptyText?: string | null;
 }
 
 interface AgentMonitorProps {
@@ -96,6 +97,11 @@ export function AgentMonitor({ projectId, sessions }: AgentMonitorProps) {
               <span className="text-muted-foreground font-mono">
                 {elapsed[session.id] || "0s"}
               </span>
+              {session.lastNonEmptyText && (
+                <span className="text-muted-foreground truncate max-w-56">
+                  {session.lastNonEmptyText}
+                </span>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
