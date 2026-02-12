@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildBuildPrompt,
   buildChatPrompt,
+  buildEpicRefinementPrompt,
   buildReviewPrompt,
   buildSpecPrompt,
   buildTicketBuildPrompt,
@@ -102,5 +103,23 @@ describe("Prompt builders with agent-config system prompts", () => {
 
     expect(prompt).toContain("Security Audit Checklist");
     expect(prompt).toContain("Security-first review");
+  });
+
+  it("includes existing epic context and refinement targets for epic creation chat", () => {
+    const prompt = buildEpicRefinementPrompt(
+      project,
+      docs,
+      messages,
+      "Refine epic ideas",
+      [
+        { title: "Agent Configuration" },
+        { title: "Unified Chat Panel" },
+      ]
+    );
+
+    expect(prompt).toContain("## Existing Epics");
+    expect(prompt).toContain("- Agent Configuration");
+    expect(prompt).toContain("- Unified Chat Panel");
+    expect(prompt).toContain("epic title, epic description, user stories, and acceptance criteria");
   });
 });

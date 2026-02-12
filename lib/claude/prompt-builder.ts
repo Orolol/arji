@@ -61,6 +61,16 @@ function documentsSection(documents: PromptDocument[]): string {
   return `## Reference Documents\n\n${parts.join("\n\n---\n\n")}\n`;
 }
 
+function existingEpicsSection(existingEpics: PromptEpic[]): string {
+  if (existingEpics.length === 0) return "";
+
+  const list = existingEpics
+    .map((epic) => `- ${epic.title}`)
+    .join("\n");
+
+  return `## Existing Epics\n\n${list}\n`;
+}
+
 function chatHistorySection(messages: PromptMessage[]): string {
   if (messages.length === 0) return "";
 
@@ -279,6 +289,7 @@ export function buildEpicRefinementPrompt(
   documents: PromptDocument[],
   messages: PromptMessage[],
   systemPrompt?: string | null,
+  existingEpics: PromptEpic[] = [],
 ): string {
   const parts: string[] = [];
 
@@ -287,6 +298,7 @@ export function buildEpicRefinementPrompt(
   parts.push(section("Project Description", project.description));
   parts.push(section("Project Specification", project.spec));
   parts.push(documentsSection(documents));
+  parts.push(existingEpicsSection(existingEpics));
   parts.push(chatHistorySection(messages));
 
   parts.push(`## Instructions
@@ -295,6 +307,8 @@ You are helping define a new epic for this project. Based on the conversation so
 
 - If the description is vague or incomplete, ask 1-2 targeted clarifying questions.
 - If the scope seems too large, suggest how to break it down.
+- Guide the user toward a concrete epic title, epic description, user stories, and acceptance criteria.
+- Use the existing epics list above to avoid overlap and suggest clear differentiation.
 - Keep your responses concise (2-4 paragraphs max).
 - Reference the project's existing specification and documents when relevant.
 - Do NOT generate the final epic or user stories yet — just help refine the idea.

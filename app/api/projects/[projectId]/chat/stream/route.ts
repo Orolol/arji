@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { chatMessages, chatAttachments, chatConversations, projects, documents, settings } from "@/lib/db/schema";
+import { chatMessages, chatAttachments, chatConversations, projects, documents, settings, epics } from "@/lib/db/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { spawnClaudeStream, spawnClaude } from "@/lib/claude/spawn";
@@ -102,7 +102,23 @@ export async function POST(
   if (isEpicCreationConversationAgentType(conversationType)) {
     const settingsRow = db.select().from(settings).where(eq(settings.key, "global_prompt")).get();
     const globalPrompt = settingsRow ? JSON.parse(settingsRow.value) : "";
-    prompt = buildEpicRefinementPrompt(project, docs, messageHistory, globalPrompt);
+    const existingEpics = db
+      .select({
+        title: epics.title,
+        description: epics.description,
+      })
+      .from(epics)
+      .where(eq(epics.projectId, projectId))
+      .orderBy(epics.position)
+      .all();
+
+    prompt = buildEpicRefinementPrompt(
+      project,
+      docs,
+      messageHistory,
+      globalPrompt,
+      existingEpics,
+    );
   } else {
     const chatSystemPrompt = await resolveAgentPrompt("chat", projectId);
     prompt = buildChatPrompt(project, docs, messageHistory, chatSystemPrompt);
