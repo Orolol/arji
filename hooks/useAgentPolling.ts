@@ -9,7 +9,10 @@ interface ActiveSession {
   mode: string;
   provider: string | null;
   startedAt: string | null;
+  lastNonEmptyText: string | null;
 }
+
+export type { ActiveSession };
 
 export function useAgentPolling(projectId: string, intervalMs = 3000) {
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);

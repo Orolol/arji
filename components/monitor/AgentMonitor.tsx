@@ -3,19 +3,17 @@
 import { useState, useEffect } from "react";
 import { Loader2, StopCircle, ChevronUp, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
-interface ActiveSession {
-  id: string;
-  epicId: string | null;
-  status: string;
-  mode: string;
-  provider: string | null;
-  startedAt: string | null;
-}
+import { formatElapsed } from "@/lib/utils/format-elapsed";
+import type { ActiveSession } from "@/hooks/useAgentPolling";
 
 interface AgentMonitorProps {
   projectId: string;
   sessions: ActiveSession[];
+}
+
+function truncateText(text: string, maxLen = 60): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen) + "...";
 }
 
 export function AgentMonitor({ projectId, sessions }: AgentMonitorProps) {
@@ -27,17 +25,11 @@ export function AgentMonitor({ projectId, sessions }: AgentMonitorProps) {
     if (sessions.length === 0) return;
 
     function updateElapsed() {
-      const now = Date.now();
+      const now = new Date();
       const newElapsed: Record<string, string> = {};
       for (const s of sessions) {
         if (s.startedAt) {
-          const seconds = Math.floor(
-            (now - new Date(s.startedAt).getTime()) / 1000
-          );
-          const mins = Math.floor(seconds / 60);
-          const secs = seconds % 60;
-          newElapsed[s.id] =
-            mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+          newElapsed[s.id] = formatElapsed(s.startedAt, now);
         }
       }
       setElapsed(newElapsed);
@@ -93,8 +85,17 @@ export function AgentMonitor({ projectId, sessions }: AgentMonitorProps) {
                 </span>
                 {session.mode}
               </span>
-              <span className="text-muted-foreground font-mono">
+              <span className="text-muted-foreground font-mono" data-testid={`elapsed-${session.id}`}>
                 {elapsed[session.id] || "0s"}
+              </span>
+              <span
+                className="text-muted-foreground/70 truncate max-w-[200px]"
+                title={session.lastNonEmptyText || undefined}
+                data-testid={`activity-text-${session.id}`}
+              >
+                {session.lastNonEmptyText
+                  ? truncateText(session.lastNonEmptyText)
+                  : "Working..."}
               </span>
               <Button
                 variant="ghost"
