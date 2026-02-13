@@ -14,6 +14,7 @@ export const projects = sqliteTable("projects", {
   description: text("description"),
   status: text("status").default("ideation"), // ideation | specifying | building | done | archived
   gitRepoPath: text("git_repo_path"),
+  githubOwnerRepo: text("github_owner_repo"),
   spec: text("spec"),
   imported: integer("imported").default(0),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
@@ -176,6 +177,18 @@ export const releases = sqliteTable("releases", {
   changelog: text("changelog"), // markdown
   epicIds: text("epic_ids"), // JSON array of epic IDs
   gitTag: text("git_tag"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const gitSyncLog = sqliteTable("git_sync_log", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  operation: text("operation").notNull(),
+  status: text("status").notNull(),
+  branch: text("branch"),
+  detail: text("detail"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 

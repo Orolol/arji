@@ -4,8 +4,14 @@ import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 import { ArrowLeft, Kanban, FileText, Files, Activity, Tag, MessageSquare } from "lucide-react";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { GitHubConnectBanner } from "@/components/github/GitHubConnectBanner";
 import { useEffect, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
+
+interface ProjectSummary {
+  gitRepoPath: string | null;
+  githubOwnerRepo: string | null;
+}
 
 export default function ProjectLayout({
   children,
@@ -16,6 +22,10 @@ export default function ProjectLayout({
   const pathname = usePathname();
   const projectId = params.projectId as string;
   const [projectName, setProjectName] = useState("...");
+  const [projectSummary, setProjectSummary] = useState<ProjectSummary>({
+    gitRepoPath: null,
+    githubOwnerRepo: null,
+  });
   const [chatOpen, setChatOpen] = useState(false);
   const [conversationCount, setConversationCount] = useState(0);
 
@@ -32,7 +42,13 @@ export default function ProjectLayout({
     fetch(`/api/projects/${projectId}`)
       .then((r) => r.json())
       .then((d) => {
-        if (d.data) setProjectName(d.data.name);
+        if (d.data) {
+          setProjectName(d.data.name);
+          setProjectSummary({
+            gitRepoPath: d.data.gitRepoPath ?? null,
+            githubOwnerRepo: d.data.githubOwnerRepo ?? null,
+          });
+        }
       })
       .catch(() => {});
     fetchConversationCount();
@@ -114,6 +130,14 @@ export default function ProjectLayout({
           </button>
         </div>
       </header>
+      <GitHubConnectBanner
+        projectId={projectId}
+        gitRepoPath={projectSummary.gitRepoPath}
+        githubOwnerRepo={projectSummary.githubOwnerRepo}
+        onConnected={(ownerRepo) =>
+          setProjectSummary((prev) => ({ ...prev, githubOwnerRepo: ownerRepo }))
+        }
+      />
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 overflow-auto">{children}</div>
         {chatOpen && (
