@@ -13,6 +13,12 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Hammer,
   Search,
   CheckCircle2,
@@ -26,34 +32,30 @@ interface Story {
   title: string;
 }
 
-interface AgentSession {
-  id: string;
-  status: string;
-  mode: string;
-}
-
 interface StoryActionsProps {
   story: Story;
   dispatching: boolean;
   isRunning: boolean;
-  activeSessions: AgentSession[];
+  activeSessionId?: string | null;
   codexAvailable: boolean;
   codexInstalled?: boolean;
   onSendToDev: (comment?: string, provider?: ProviderType) => Promise<void>;
   onSendToReview: (types: string[], provider?: ProviderType) => Promise<void>;
   onApprove: () => Promise<void>;
+  onActionError?: (error: unknown) => void;
 }
 
 export function StoryActions({
   story,
   dispatching,
   isRunning,
-  activeSessions,
+  activeSessionId,
   codexAvailable,
   codexInstalled,
   onSendToDev,
   onSendToReview,
   onApprove,
+  onActionError,
 }: StoryActionsProps) {
   const [sendToDevOpen, setSendToDevOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -68,6 +70,13 @@ export function StoryActions({
   const canSendToDevFromReview = status === "review";
   const canReview = status === "review";
   const canApprove = status === "review";
+  const actionsLocked = dispatching || isRunning;
+  const lockMessage =
+    isRunning && activeSessionId
+      ? `Another agent is already running for this task (#${activeSessionId.slice(0, 6)}).`
+      : isRunning
+        ? "Another agent is already running for this task."
+        : null;
 
   // Send to Dev (from todo/in_progress — optional comment)
   async function handleSendToDev() {
@@ -75,8 +84,8 @@ export function StoryActions({
       await onSendToDev(devComment.trim() || undefined, devProvider);
       setSendToDevOpen(false);
       setDevComment("");
-    } catch {
-      // error handled by parent
+    } catch (error) {
+      onActionError?.(error);
     }
   }
 
@@ -87,8 +96,8 @@ export function StoryActions({
       await onSendToDev(devComment.trim(), devProvider);
       setSendToDevOpen(false);
       setDevComment("");
-    } catch {
-      // error handled by parent
+    } catch (error) {
+      onActionError?.(error);
     }
   }
 
@@ -111,8 +120,8 @@ export function StoryActions({
       await onSendToReview(Array.from(reviewTypes), reviewProvider);
       setReviewOpen(false);
       setReviewTypes(new Set());
-    } catch {
-      // error handled by parent
+    } catch (error) {
+      onActionError?.(error);
     }
   }
 
@@ -121,19 +130,29 @@ export function StoryActions({
     setApproving(true);
     try {
       await onApprove();
+    } catch (error) {
+      onActionError?.(error);
     } finally {
       setApproving(false);
     }
   }
 
+  const lockedTooltip = isRunning
+    ? "Agent is already running on this story"
+    : null;
+
   return (
-    <div className="flex items-center gap-2">
+    <TooltipProvider>
+    <div className="flex items-center gap-2 flex-wrap">
       {/* Running indicator */}
       {isRunning && (
         <Badge variant="outline" className="gap-1 text-yellow-500 border-yellow-500/30">
           <Loader2 className="h-3 w-3 animate-spin" />
           Agent running
         </Badge>
+      )}
+      {lockMessage && (
+        <span className="text-xs text-muted-foreground">{lockMessage}</span>
       )}
 
       {/* Send to Dev button */}
@@ -145,7 +164,7 @@ export function StoryActions({
             setDevComment("");
             setSendToDevOpen(true);
           }}
-          disabled={dispatching || isRunning}
+          disabled={actionsLocked}
           className="h-7 text-xs"
         >
           <Hammer className="h-3 w-3 mr-1" />
@@ -162,7 +181,7 @@ export function StoryActions({
             setReviewTypes(new Set());
             setReviewOpen(true);
           }}
-          disabled={dispatching || isRunning}
+          disabled={actionsLocked}
           className="h-7 text-xs"
         >
           <Search className="h-3 w-3 mr-1" />
@@ -175,7 +194,7 @@ export function StoryActions({
         <Button
           size="sm"
           onClick={handleApprove}
-          disabled={approving || dispatching || isRunning}
+          disabled={approving || actionsLocked}
           className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white"
         >
           {approving ? (
@@ -233,7 +252,7 @@ export function StoryActions({
                   : handleSendToDev
               }
               disabled={
-                dispatching ||
+                actionsLocked ||
                 (canSendToDevFromReview && !devComment.trim())
               }
             >
@@ -323,7 +342,7 @@ export function StoryActions({
             </Button>
             <Button
               onClick={handleReview}
-              disabled={dispatching || reviewTypes.size === 0}
+              disabled={actionsLocked || reviewTypes.size === 0}
             >
               {dispatching ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-1" />
@@ -336,5 +355,6 @@ export function StoryActions({
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
   );
 }

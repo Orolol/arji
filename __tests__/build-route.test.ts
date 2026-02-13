@@ -94,6 +94,13 @@ vi.mock("@/lib/sync/export", () => ({
   tryExportArjiJson: vi.fn(),
 }));
 
+vi.mock("@/lib/agent-sessions/lifecycle", () => ({
+  createQueuedSession: vi.fn(),
+  markSessionRunning: vi.fn(),
+  markSessionTerminal: vi.fn(),
+  isSessionLifecycleConflictError: vi.fn(() => false),
+}));
+
 vi.mock("fs", () => ({
   default: {
     mkdirSync: vi.fn(),

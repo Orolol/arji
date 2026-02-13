@@ -1,119 +1,94 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 
-interface GitStatusData {
+interface GitStatus {
   ahead: number;
   behind: number;
-  noRemote?: boolean;
-}
-
-interface UseGitStatusResult {
-  ahead: number;
-  behind: number;
-  noRemote: boolean;
   loading: boolean;
-  pushing: boolean;
   error: string | null;
-  push: () => Promise<{ success: boolean; error?: string }>;
   refresh: () => void;
+  push: () => Promise<void>;
+  pushing: boolean;
 }
 
 /**
- * Hook to fetch ahead/behind counts for a branch and provide push functionality.
- * Debounces duplicate requests using a ref guard.
+ * Fetches ahead/behind status for a branch relative to its remote tracking branch.
+ * Only active when GitHub is configured and a branch name is provided.
  */
 export function useGitStatus(
-  projectId: string | null,
-  branchName: string | null
-): UseGitStatusResult {
-  const [data, setData] = useState<GitStatusData>({ ahead: 0, behind: 0 });
+  projectId: string,
+  branchName: string | null,
+  githubConfigured: boolean
+): GitStatus {
+  const [ahead, setAhead] = useState(0);
+  const [behind, setBehind] = useState(0);
   const [loading, setLoading] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fetchingRef = useRef(false);
 
-  const fetchStatus = useCallback(async () => {
-    if (!projectId || !branchName || fetchingRef.current) return;
-    fetchingRef.current = true;
+  const refresh = useCallback(async () => {
+    if (!branchName || !githubConfigured) return;
+
     setLoading(true);
+    setError(null);
 
     try {
       const res = await fetch(
         `/api/projects/${projectId}/git/status?branch=${encodeURIComponent(branchName)}`
       );
-      const json = await res.json();
 
-      if (json.error) {
-        setError(json.error);
-        setData({ ahead: 0, behind: 0 });
-      } else {
-        setData({
-          ahead: json.data.ahead ?? 0,
-          behind: json.data.behind ?? 0,
-          noRemote: json.data.noRemote ?? false,
-        });
-        setError(null);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.message || "Failed to fetch status");
+        return;
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to fetch git status");
-      setData({ ahead: 0, behind: 0 });
+
+      setAhead(data.data?.ahead ?? 0);
+      setBehind(data.data?.behind ?? 0);
+    } catch {
+      setError("Failed to fetch git status");
     } finally {
       setLoading(false);
-      fetchingRef.current = false;
     }
-  }, [projectId, branchName]);
+  }, [projectId, branchName, githubConfigured]);
 
-  useEffect(() => {
-    if (projectId && branchName) {
-      fetchStatus();
-    }
-  }, [fetchStatus, projectId, branchName]);
-
-  const push = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
-    if (!projectId || !branchName) {
-      return { success: false, error: "Missing project or branch" };
-    }
+  const push = useCallback(async () => {
+    if (!branchName || !githubConfigured) return;
 
     setPushing(true);
+    setError(null);
+
     try {
       const res = await fetch(`/api/projects/${projectId}/git/push`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch: branchName }),
       });
-      const json = await res.json();
 
-      if (json.error) {
-        setError(json.error);
-        return { success: false, error: json.error };
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.message || "Push failed");
+        return;
       }
 
-      // Refresh status after successful push
-      setError(null);
-      await fetchStatus();
-      return { success: true };
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Push failed";
-      setError(msg);
-      return { success: false, error: msg };
+      // Refresh status after push
+      await refresh();
+    } catch {
+      setError("Push failed");
     } finally {
       setPushing(false);
     }
-  }, [projectId, branchName, fetchStatus]);
+  }, [projectId, branchName, githubConfigured, refresh]);
 
-  const refresh = useCallback(() => {
-    fetchStatus();
-  }, [fetchStatus]);
+  // Auto-fetch on mount when conditions are met
+  useEffect(() => {
+    if (branchName && githubConfigured) {
+      refresh();
+    }
+  }, [branchName, githubConfigured, refresh]);
 
-  return {
-    ahead: data.ahead,
-    behind: data.behind,
-    noRemote: data.noRemote ?? false,
-    loading,
-    pushing,
-    error,
-    push,
-    refresh,
-  };
+  return { ahead, behind, loading, error, refresh, push, pushing };
 }

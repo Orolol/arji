@@ -1,75 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import simpleGit from "simple-git";
+import { getBranchSyncStatus, getCurrentGitBranch } from "@/lib/git/remote";
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ projectId: string }> }
-) {
+type Params = { params: Promise<{ projectId: string }> };
+
+export async function GET(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
-  const { searchParams } = new URL(request.url);
-  const branch = searchParams.get("branch");
+  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
 
-  if (!branch) {
+  if (!project) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+  if (!project.gitRepoPath) {
     return NextResponse.json(
-      { error: "branch query parameter is required" },
+      { error: "Project has no git repository path configured." },
       { status: 400 }
     );
   }
 
-  const project = db
-    .select()
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .get();
-
-  if (!project || !project.gitRepoPath) {
-    return NextResponse.json(
-      { error: "Project not found or no git repo configured" },
-      { status: 404 }
-    );
-  }
+  const remote = request.nextUrl.searchParams.get("remote") || "origin";
+  const requestedBranch = request.nextUrl.searchParams.get("branch")?.trim() || "";
+  const branch = requestedBranch || (await getCurrentGitBranch(project.gitRepoPath));
 
   try {
-    const git = simpleGit(project.gitRepoPath);
-
-    // Fetch from remote to get up-to-date tracking info
-    try {
-      await git.fetch();
-    } catch {
-      // Fetch may fail if no remote is configured — continue with local data
-    }
-
-    // Use rev-list to count ahead/behind vs remote tracking branch
-    const raw = await git.raw([
-      "rev-list",
-      "--count",
-      "--left-right",
-      `${branch}...origin/${branch}`,
-    ]);
-
-    // Output format: "ahead\tbehind\n"
-    const parts = raw.trim().split(/\s+/);
-    const ahead = parseInt(parts[0] || "0", 10);
-    const behind = parseInt(parts[1] || "0", 10);
-
+    const status = await getBranchSyncStatus(project.gitRepoPath, branch, remote);
     return NextResponse.json({
-      data: { ahead, behind },
+      data: {
+        action: "status",
+        projectId,
+        remote: status.remote,
+        branch: status.branch,
+        remoteBranch: status.remoteBranch,
+        ahead: status.ahead,
+        behind: status.behind,
+        hasRemoteBranch: status.hasRemoteBranch,
+      },
     });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Failed to get git status";
-
-    // If the remote tracking branch doesn't exist, return 0/0
-    if (message.includes("unknown revision") || message.includes("bad revision")) {
-      return NextResponse.json({
-        data: { ahead: 0, behind: 0, noRemote: true },
-      });
-    }
-
+  } catch (error) {
     return NextResponse.json(
-      { error: message },
+      {
+        error: error instanceof Error ? error.message : "Failed to read branch status.",
+        data: { action: "status", projectId, remote, branch },
+      },
       { status: 500 }
     );
   }

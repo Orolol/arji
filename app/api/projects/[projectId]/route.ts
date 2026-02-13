@@ -35,6 +35,7 @@ export async function PATCH(
   if (body.description !== undefined) updates.description = body.description;
   if (body.status !== undefined) updates.status = body.status;
   if (body.gitRepoPath !== undefined) updates.gitRepoPath = body.gitRepoPath;
+  if (body.githubOwnerRepo !== undefined) updates.githubOwnerRepo = body.githubOwnerRepo;
   if (body.spec !== undefined) updates.spec = body.spec;
 
   db.update(projects).set(updates).where(eq(projects.id, projectId)).run();

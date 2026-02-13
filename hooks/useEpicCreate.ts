@@ -28,6 +28,7 @@ interface ParsedEpic {
 interface UseEpicCreateOptions {
   projectId: string;
   conversationId: string | null;
+  sendMessage?: (content: string, attachmentIds?: string[], options?: { finalize?: boolean }) => Promise<void>;
   onEpicCreated?: (result: EpicCreateResult) => void;
 }
 
@@ -300,7 +301,7 @@ function parseEpicFromConversation(messages: ConversationMessage[]): ParsedEpic 
   };
 }
 
-export function useEpicCreate({ projectId, conversationId, onEpicCreated }: UseEpicCreateOptions) {
+export function useEpicCreate({ projectId, conversationId, sendMessage, onEpicCreated }: UseEpicCreateOptions) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdEpic, setCreatedEpic] = useState<EpicCreateResult | null>(null);
@@ -325,7 +326,7 @@ export function useEpicCreate({ projectId, conversationId, onEpicCreated }: UseE
           return null;
         }
         const messagesJson = await messagesRes.json();
-        const messages: Array<{ role: string; content: string }> =
+        let messages: Array<{ role: string; content: string }> =
           messagesJson.data || [];
 
         if (messages.length === 0) {
@@ -333,6 +334,29 @@ export function useEpicCreate({ projectId, conversationId, onEpicCreated }: UseE
           return null;
         }
 
+        // Phase 1: Send finalization prompt to get structured JSON from AI
+        if (sendMessage) {
+          await sendMessage(
+            "Generate the final epic with user stories based on our discussion.",
+            [],
+            { finalize: true },
+          );
+
+          // Phase 2: Re-fetch messages (now includes the structured AI response)
+          const updatedRes = await fetch(
+            `/api/projects/${projectId}/chat?conversationId=${conversationId}`
+          );
+          if (updatedRes.ok) {
+            const updatedJson = await updatedRes.json();
+            const updatedMessages: Array<{ role: string; content: string }> =
+              updatedJson.data || [];
+            if (updatedMessages.length > 0) {
+              messages = updatedMessages;
+            }
+          }
+        }
+
+        // Phase 3: Parse structured epic from conversation
         const parsedEpic = parseEpicFromConversation(messages);
         if (!parsedEpic) {
           setError(
@@ -385,7 +409,7 @@ export function useEpicCreate({ projectId, conversationId, onEpicCreated }: UseE
         setIsLoading(false);
       }
     },
-    [projectId, conversationId, onEpicCreated]
+    [projectId, conversationId, sendMessage, onEpicCreated]
   );
 
   return { createEpic, isLoading, error, createdEpic };

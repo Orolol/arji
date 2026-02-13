@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `github_owner_repo` text;

@@ -4,11 +4,12 @@ import { chatMessages, chatAttachments, chatConversations, projects, documents, 
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { spawnClaudeStream, spawnClaude } from "@/lib/claude/spawn";
-import { buildChatPrompt, buildEpicRefinementPrompt, buildTitleGenerationPrompt } from "@/lib/claude/prompt-builder";
+import { buildChatPrompt, buildEpicRefinementPrompt, buildEpicFinalizationPrompt, buildTitleGenerationPrompt } from "@/lib/claude/prompt-builder";
 import { getProvider } from "@/lib/providers";
 import type { ProviderType } from "@/lib/providers";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { isEpicCreationConversationAgentType } from "@/lib/chat/conversation-agent";
+import { activityRegistry } from "@/lib/activity-registry";
 
 export async function POST(
   request: NextRequest,
@@ -26,6 +27,7 @@ export async function POST(
 
   const conversationId: string | null = body.conversationId || null;
   const attachmentIds: string[] = body.attachmentIds || [];
+  const finalize: boolean = body.finalize === true;
 
   function setConversationStatus(status: "active" | "generating" | "error") {
     if (!conversationId) return;
@@ -112,19 +114,35 @@ export async function POST(
       .orderBy(epics.position)
       .all();
 
-    prompt = buildEpicRefinementPrompt(
-      project,
-      docs,
-      messageHistory,
-      globalPrompt,
-      existingEpics,
-    );
+    prompt = finalize
+      ? buildEpicFinalizationPrompt(
+          project,
+          docs,
+          messageHistory,
+          globalPrompt,
+          existingEpics,
+        )
+      : buildEpicRefinementPrompt(
+          project,
+          docs,
+          messageHistory,
+          globalPrompt,
+          existingEpics,
+        );
   } else {
     const chatSystemPrompt = await resolveAgentPrompt("chat", projectId);
     prompt = buildChatPrompt(project, docs, messageHistory, chatSystemPrompt);
   }
 
   setConversationStatus("generating");
+
+  // Determine conversation label for activity registry
+  let activityLabel = "Chat";
+  if (conversationId) {
+    const conv = db.select().from(chatConversations).where(eq(chatConversations.id, conversationId)).get();
+    if (conv?.label) activityLabel = `Chat: ${conv.label}`;
+  }
+  const activityId = `chat-${createId()}`;
 
   const encoder = new TextEncoder();
 
@@ -202,6 +220,17 @@ export async function POST(
       prompt,
       cwd: project.gitRepoPath || process.cwd(),
       mode: "plan",
+      logIdentifier: conversationId || `chat-${projectId}`,
+    });
+
+    activityRegistry.register({
+      id: activityId,
+      projectId,
+      type: "chat",
+      label: activityLabel,
+      provider: "codex",
+      startedAt: new Date().toISOString(),
+      kill: () => session.kill(),
     });
 
     const sseStream = new ReadableStream({
@@ -220,6 +249,7 @@ export async function POST(
             encoder.encode(`data: ${JSON.stringify({ delta: fullContent })}\n\n`)
           );
 
+          activityRegistry.unregister(activityId);
           saveAssistantAndTitle(controller, fullContent, result.success ? "active" : "error");
         } catch (error) {
           const failureMessage =
@@ -228,10 +258,12 @@ export async function POST(
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ delta: failureMessage })}\n\n`)
           );
+          activityRegistry.unregister(activityId);
           saveAssistantAndTitle(controller, failureMessage, "error");
         }
       },
       cancel() {
+        activityRegistry.unregister(activityId);
         session.kill();
         setConversationStatus("active");
       },
@@ -252,6 +284,16 @@ export async function POST(
     prompt,
     cwd: project.gitRepoPath || undefined,
     logIdentifier: conversationId || `chat-${projectId}`,
+  });
+
+  activityRegistry.register({
+    id: activityId,
+    projectId,
+    type: "chat",
+    label: activityLabel,
+    provider: "claude-code",
+    startedAt: new Date().toISOString(),
+    kill,
   });
 
   let fullContent = "";
@@ -286,9 +328,11 @@ export async function POST(
         hasStreamError = true;
       }
 
+      activityRegistry.unregister(activityId);
       saveAssistantAndTitle(controller, fullContent, hasStreamError ? "error" : "active");
     },
     cancel() {
+      activityRegistry.unregister(activityId);
       kill();
       setConversationStatus("active");
     },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams } from "next/navigation";
 import { Board } from "@/components/kanban/Board";
 import { EpicDetail } from "@/components/kanban/EpicDetail";
@@ -29,6 +29,8 @@ interface Toast {
   id: string;
   type: "success" | "error";
   message: string;
+  href?: string;
+  actionLabel?: string;
 }
 
 export default function KanbanPage() {
@@ -44,10 +46,40 @@ export default function KanbanPage() {
   const [building, setBuilding] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const { activeSessions } = useAgentPolling(projectId);
+  const { activities } = useAgentPolling(projectId);
   const { codexAvailable, codexInstalled } = useCodexAvailable();
   const prevSessionIds = useRef<Set<string>>(new Set());
   const panelRef = useRef<UnifiedChatPanelHandle>(null);
+  const runningEpicIds = useMemo(
+    () =>
+      new Set(
+        activities
+          .filter((session) => session.status === "running" && session.epicId)
+          .map((session) => session.epicId as string)
+      ),
+    [activities]
+  );
+
+  function addToast(
+    type: "success" | "error",
+    message: string,
+    action?: { href: string; label?: string }
+  ) {
+    const id = Date.now().toString();
+    setToasts((t) => [
+      ...t,
+      {
+        id,
+        type,
+        message,
+        href: action?.href,
+        actionLabel: action?.label || "Open session",
+      },
+    ]);
+    setTimeout(() => {
+      setToasts((t) => t.filter((toast) => toast.id !== id));
+    }, 5000);
+  }
 
   // Reset team mode when selection drops below 2 or provider changes to codex
   useEffect(() => {
@@ -58,7 +90,7 @@ export default function KanbanPage() {
 
   // Detect session completions for notifications + board refresh
   useEffect(() => {
-    const currentIds = new Set(activeSessions.map((s) => s.id));
+    const currentIds = new Set(activities.map((a) => a.id));
     let hasCompleted = false;
     for (const prevId of prevSessionIds.current) {
       if (!currentIds.has(prevId)) {
@@ -85,15 +117,7 @@ export default function KanbanPage() {
       setRefreshTrigger((t) => t + 1);
     }
     prevSessionIds.current = currentIds;
-  }, [activeSessions, projectId]);
-
-  function addToast(type: "success" | "error", message: string) {
-    const id = Date.now().toString();
-    setToasts((t) => [...t, { id, type, message }]);
-    setTimeout(() => {
-      setToasts((t) => t.filter((toast) => toast.id !== id));
-    }, 5000);
-  }
+  }, [activities, projectId]);
 
   function toggleEpicSelection(epicId: string) {
     setSelectedEpics((prev) => {
@@ -124,10 +148,22 @@ export default function KanbanPage() {
       });
 
       const data = await res.json();
-      if (data.error) {
-        addToast("error", data.error);
+      if (!res.ok || data.error) {
+        if (
+          res.status === 409 &&
+          data.code === "AGENT_ALREADY_RUNNING" &&
+          data.data?.activeSessionId
+        ) {
+          addToast("error", data.error, {
+            href:
+              data.data.sessionUrl ||
+              `/projects/${projectId}/sessions/${data.data.activeSessionId}`,
+            label: "Open active session",
+          });
+        } else {
+          addToast("error", data.error || "Failed to launch build");
+        }
       } else {
-        const modeLabel = teamMode ? "team" : data.data.count > 1 ? "" : "";
         addToast(
           "success",
           teamMode
@@ -270,11 +306,12 @@ export default function KanbanPage() {
                 selectedEpics={selectedEpics}
                 onToggleSelect={toggleEpicSelection}
                 refreshTrigger={refreshTrigger}
+                runningEpicIds={runningEpicIds}
               />
             </div>
 
             {/* Agent monitor bar */}
-            <AgentMonitor projectId={projectId} sessions={activeSessions} />
+            <AgentMonitor projectId={projectId} activities={activities} />
           </div>
         </UnifiedChatPanel>
       </div>
@@ -296,6 +333,11 @@ export default function KanbanPage() {
               <XCircle className="h-4 w-4" />
             )}
             <span>{toast.message}</span>
+            {toast.href && (
+              <a href={toast.href} className="underline text-xs whitespace-nowrap">
+                {toast.actionLabel || "Open session"}
+              </a>
+            )}
             <button
               onClick={() =>
                 setToasts((t) => t.filter((x) => x.id !== toast.id))
@@ -312,10 +354,18 @@ export default function KanbanPage() {
         epicId={selectedEpicId}
         open={!!selectedEpicId}
         onClose={() => setSelectedEpicId(null)}
+        onAgentConflict={({ message, sessionUrl }) =>
+          addToast(
+            "error",
+            message,
+            sessionUrl ? { href: sessionUrl, label: "Open active session" } : undefined
+          )
+        }
         onMerged={() => {
           setRefreshTrigger((t) => t + 1);
           addToast("success", "Branch merged into main");
         }}
+
       />
 
     </div>

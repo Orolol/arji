@@ -8,12 +8,23 @@ import { buildSpecGenerationPrompt } from "@/lib/claude/prompt-builder";
 import { extractJsonFromOutput, parseClaudeOutput } from "@/lib/claude/json-parser";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
+import { getProvider } from "@/lib/providers";
+import type { ProviderType } from "@/lib/providers";
+import { activityRegistry } from "@/lib/activity-registry";
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
+
+  let provider: ProviderType = "claude-code";
+  try {
+    const body = await request.json();
+    if (body.provider === "codex") provider = "codex";
+  } catch {
+    // No body or invalid JSON — use default
+  }
 
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
   if (!project) {
@@ -42,14 +53,36 @@ export async function POST(
     specSystemPrompt
   );
 
-  try {
-    const { promise } = spawnClaude({
-      mode: "plan",
-      prompt,
-      cwd: project.gitRepoPath || undefined,
-    });
+  const specActivityId = `spec-${createId()}`;
+  activityRegistry.register({
+    id: specActivityId,
+    projectId,
+    type: "spec_generation",
+    label: "Generating Spec & Plan",
+    provider,
+    startedAt: new Date().toISOString(),
+  });
 
-    const result = await promise;
+  try {
+    let result;
+    if (provider === "codex") {
+      const codexProvider = getProvider("codex");
+      const session = codexProvider.spawn({
+        sessionId: `spec-${createId()}`,
+        prompt,
+        cwd: project.gitRepoPath || process.cwd(),
+        mode: "plan",
+        logIdentifier: `spec-${projectId}`,
+      });
+      result = await session.promise;
+    } else {
+      const { promise } = spawnClaude({
+        mode: "plan",
+        prompt,
+        cwd: project.gitRepoPath || undefined,
+      });
+      result = await promise;
+    }
 
     if (!result.success) {
       return NextResponse.json({ error: result.error || "Claude Code failed" }, { status: 500 });
@@ -147,5 +180,7 @@ export async function POST(
       { error: e instanceof Error ? e.message : "Unknown error" },
       { status: 500 }
     );
+  } finally {
+    activityRegistry.unregister(specActivityId);
   }
 }

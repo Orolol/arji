@@ -22,7 +22,9 @@ interface Session {
   epicId?: string;
   branchName?: string;
   startedAt?: string;
+  endedAt?: string;
   completedAt?: string;
+  lastNonEmptyText?: string;
   error?: string;
   createdAt: string;
 }
@@ -31,6 +33,7 @@ const STATUS_CONFIG: Record<
   string,
   { icon: typeof Clock; color: string; label: string }
 > = {
+  queued: { icon: Clock, color: "text-muted-foreground", label: "Queued" },
   pending: { icon: Clock, color: "text-muted-foreground", label: "Pending" },
   running: { icon: Loader2, color: "text-yellow-500", label: "Running" },
   completed: {
@@ -62,8 +65,9 @@ export default function SessionsPage() {
   function getDuration(session: Session): string {
     if (!session.startedAt) return "-";
     const start = new Date(session.startedAt).getTime();
-    const end = session.completedAt
-      ? new Date(session.completedAt).getTime()
+    const endAt = session.endedAt || session.completedAt;
+    const end = endAt
+      ? new Date(endAt).getTime()
       : Date.now();
     const seconds = Math.floor((end - start) / 1000);
     const mins = Math.floor(seconds / 60);
@@ -134,6 +138,12 @@ export default function SessionsPage() {
                       <div className="text-xs text-muted-foreground">
                         {getDuration(session)}
                       </div>
+                      {session.status === "running" &&
+                        session.lastNonEmptyText && (
+                          <div className="text-xs text-muted-foreground max-w-56 truncate">
+                            {session.lastNonEmptyText}
+                          </div>
+                        )}
                       <div className="text-xs text-muted-foreground">
                         {new Date(session.createdAt).toLocaleDateString()}{" "}
                         {new Date(session.createdAt).toLocaleTimeString()}

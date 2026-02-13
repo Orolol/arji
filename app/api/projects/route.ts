@@ -12,6 +12,7 @@ export async function GET() {
       description: projects.description,
       status: projects.status,
       gitRepoPath: projects.gitRepoPath,
+      githubOwnerRepo: projects.githubOwnerRepo,
       imported: projects.imported,
       createdAt: projects.createdAt,
       updatedAt: projects.updatedAt,
@@ -28,7 +29,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { name, description, gitRepoPath } = body;
+  const { name, description, gitRepoPath, githubOwnerRepo } = body;
 
   if (!name) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -43,6 +44,7 @@ export async function POST(request: NextRequest) {
       name,
       description: description || null,
       gitRepoPath: gitRepoPath || null,
+      githubOwnerRepo: githubOwnerRepo || null,
       status: "ideation",
       createdAt: now,
       updatedAt: now,

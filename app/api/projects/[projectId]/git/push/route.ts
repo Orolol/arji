@@ -1,60 +1,88 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import simpleGit from "simple-git";
+import { getCurrentGitBranch, pushGitBranch } from "@/lib/git/remote";
+import { writeGitSyncLog } from "@/lib/github/sync-log";
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ projectId: string }> }
-) {
+type Params = { params: Promise<{ projectId: string }> };
+
+export async function POST(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
-  const body = await request.json();
-  const { branch } = body;
+  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
 
-  if (!branch || typeof branch !== "string") {
+  if (!project) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+  if (!project.gitRepoPath) {
+    writeGitSyncLog({
+      projectId,
+      operation: "push",
+      status: "failed",
+      branch: null,
+      detail: { reason: "missing_git_repo_path" },
+    });
+
     return NextResponse.json(
-      { error: "branch is required in request body" },
+      { error: "Project has no git repository path configured." },
       { status: 400 }
     );
   }
 
-  const project = db
-    .select()
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .get();
-
-  if (!project || !project.gitRepoPath) {
-    return NextResponse.json(
-      { error: "Project not found or no git repo configured" },
-      { status: 404 }
-    );
-  }
+  const body = await request.json().catch(() => ({}));
+  const remote = typeof body?.remote === "string" ? body.remote : "origin";
+  const setUpstream = typeof body?.setUpstream === "boolean" ? body.setUpstream : true;
+  const requestedBranch = typeof body?.branch === "string" ? body.branch : "";
+  const branch = requestedBranch.trim() || (await getCurrentGitBranch(project.gitRepoPath));
 
   try {
-    const git = simpleGit(project.gitRepoPath);
-
-    // Push the branch to origin
-    const result = await git.push("origin", branch);
-
-    console.log(
-      `[git-push] Pushed branch "${branch}" for project "${projectId}":`,
-      result.pushed
+    const result = await pushGitBranch(
+      project.gitRepoPath,
+      branch,
+      remote,
+      setUpstream
     );
+    const summary = {
+      pushed: result.pushed.length,
+      update: result.update ? 1 : 0,
+    };
+
+    writeGitSyncLog({
+      projectId,
+      operation: "push",
+      status: "success",
+      branch,
+      detail: { remote, setUpstream, ...summary },
+    });
 
     return NextResponse.json({
       data: {
-        pushed: true,
+        action: "push",
+        projectId,
+        remote,
         branch,
+        setUpstream,
+        summary,
       },
     });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Push failed";
-    console.error(`[git-push] Failed to push branch "${branch}":`, message);
+  } catch (error) {
+    writeGitSyncLog({
+      projectId,
+      operation: "push",
+      status: "failed",
+      branch,
+      detail: {
+        remote,
+        setUpstream,
+        error: error instanceof Error ? error.message : "unknown_error",
+      },
+    });
 
     return NextResponse.json(
-      { error: message },
+      {
+        error: error instanceof Error ? error.message : "Failed to push branch.",
+        data: { action: "push", projectId, remote, branch, setUpstream },
+      },
       { status: 500 }
     );
   }
