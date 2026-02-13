@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -16,7 +16,12 @@ import {
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { Column } from "./Column";
 import { EpicCard } from "./EpicCard";
-import { KANBAN_COLUMNS, type KanbanStatus, type KanbanEpic } from "@/lib/types/kanban";
+import {
+  KANBAN_COLUMNS,
+  type KanbanStatus,
+  type KanbanEpic,
+  type KanbanEpicAgentActivity,
+} from "@/lib/types/kanban";
 import { useKanban } from "@/hooks/useKanban";
 import { BoardSkeleton } from "./BoardSkeleton";
 
@@ -27,6 +32,13 @@ interface BoardProps {
   onToggleSelect?: (epicId: string) => void;
   refreshTrigger?: number;
   runningEpicIds?: Set<string>;
+  activeAgentActivities?: Record<string, KanbanEpicAgentActivity>;
+  onLinkedAgentHoverChange?: (activityId: string | null) => void;
+}
+
+function isAiCommentAuthor(author: string | null | undefined) {
+  if (!author) return false;
+  return author.toLowerCase() !== "user";
 }
 
 export function Board({
@@ -36,13 +48,40 @@ export function Board({
   onToggleSelect,
   refreshTrigger,
   runningEpicIds,
+  activeAgentActivities,
+  onLinkedAgentHoverChange,
 }: BoardProps) {
   const { board, loading, moveEpic, refresh } = useKanban(projectId);
+  const [seenAiCommentIdsByEpic, setSeenAiCommentIdsByEpic] = useState<
+    Record<string, string>
+  >({});
+  const seenStorageKey = useMemo(
+    () => `arij:kanban:seen-ai-comments:${projectId}`,
+    [projectId]
+  );
 
   useEffect(() => {
     if (refreshTrigger) refresh();
   }, [refreshTrigger, refresh]);
   const [activeEpic, setActiveEpic] = useState<KanbanEpic | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(seenStorageKey);
+      if (!raw) {
+        setSeenAiCommentIdsByEpic({});
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        setSeenAiCommentIdsByEpic(parsed as Record<string, string>);
+      } else {
+        setSeenAiCommentIdsByEpic({});
+      }
+    } catch {
+      setSeenAiCommentIdsByEpic({});
+    }
+  }, [seenStorageKey]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -53,13 +92,67 @@ export function Board({
 
   if (loading) return <BoardSkeleton />;
 
-  function findEpicById(id: string): { epic: KanbanEpic; column: KanbanStatus } | null {
-    for (const col of KANBAN_COLUMNS) {
-      const epic = board.columns[col].find((e) => e.id === id);
-      if (epic) return { epic, column: col };
+  const findEpicById = useCallback(
+    (id: string): { epic: KanbanEpic; column: KanbanStatus } | null => {
+      for (const col of KANBAN_COLUMNS) {
+        const epic = board.columns[col].find((e) => e.id === id);
+        if (epic) return { epic, column: col };
+      }
+      return null;
+    },
+    [board]
+  );
+
+  const unreadAiByEpicId = useMemo(() => {
+    const unread: Record<string, boolean> = {};
+
+    for (const status of KANBAN_COLUMNS) {
+      for (const epic of board.columns[status]) {
+        const latestCommentId = epic.latestCommentId;
+        const latestCommentAuthor = epic.latestCommentAuthor;
+
+        if (!latestCommentId || !isAiCommentAuthor(latestCommentAuthor)) {
+          unread[epic.id] = false;
+          continue;
+        }
+
+        unread[epic.id] = seenAiCommentIdsByEpic[epic.id] !== latestCommentId;
+      }
     }
-    return null;
-  }
+
+    return unread;
+  }, [board, seenAiCommentIdsByEpic]);
+
+  const markEpicAiCommentSeen = useCallback(
+    (epicId: string) => {
+      const found = findEpicById(epicId);
+      if (!found) return;
+
+      const latestCommentId = found.epic.latestCommentId;
+      const latestCommentAuthor = found.epic.latestCommentAuthor;
+      if (!latestCommentId || !isAiCommentAuthor(latestCommentAuthor)) return;
+
+      setSeenAiCommentIdsByEpic((prev) => {
+        if (prev[epicId] === latestCommentId) return prev;
+        const next = { ...prev, [epicId]: latestCommentId };
+        try {
+          sessionStorage.setItem(seenStorageKey, JSON.stringify(next));
+        } catch {
+          // ignore storage write failures
+        }
+        return next;
+      });
+    },
+    [findEpicById, seenStorageKey]
+  );
+
+  const handleEpicClick = useCallback(
+    (epicId: string) => {
+      markEpicAiCommentSeen(epicId);
+      onEpicClick(epicId);
+    },
+    [markEpicAiCommentSeen, onEpicClick]
+  );
 
   function handleDragStart(event: DragStartEvent) {
     const found = findEpicById(event.active.id as string);
@@ -123,10 +216,13 @@ export function Board({
             key={status}
             status={status}
             epics={board.columns[status]}
-            onEpicClick={onEpicClick}
+            onEpicClick={handleEpicClick}
             selectedEpics={selectedEpics}
             onToggleSelect={onToggleSelect}
             runningEpicIds={runningEpicIds}
+            activeAgentActivities={activeAgentActivities}
+            onLinkedAgentHoverChange={onLinkedAgentHoverChange}
+            unreadAiByEpicId={unreadAiByEpicId}
           />
         ))}
       </div>
@@ -137,6 +233,9 @@ export function Board({
               epic={activeEpic}
               isOverlay
               isRunning={runningEpicIds?.has(activeEpic.id) || false}
+              activeAgentActivity={activeAgentActivities?.[activeEpic.id]}
+              onLinkedAgentHoverChange={onLinkedAgentHoverChange}
+              hasUnreadAiUpdate={unreadAiByEpicId[activeEpic.id]}
             />
           </div>
         )}

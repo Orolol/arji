@@ -11,9 +11,9 @@ export interface UnifiedActivity {
   userStoryId: string | null;
   type: "build" | "review" | "merge" | "chat" | "spec_generation" | "release";
   label: string;
-  provider: string;
   status: string;
   mode: string;
+  provider: string;
   startedAt: string;
   source: "db" | "registry";
   cancellable: boolean;
@@ -114,9 +114,9 @@ export async function GET(
       userStoryId: row.userStoryId ?? null,
       type,
       label,
-      provider: row.provider || "claude-code",
       status: getSessionStatusForApi(row.status),
       mode: row.mode || "code",
+      provider: row.provider || "claude-code",
       startedAt: row.startedAt || new Date().toISOString(),
       source: "db" as const,
       cancellable: true,
@@ -132,9 +132,9 @@ export async function GET(
       userStoryId: null,
       type: a.type,
       label: a.label,
-      provider: a.provider,
       status: "running",
       mode: "plan",
+      provider: a.provider,
       startedAt: a.startedAt,
       source: "registry" as const,
       cancellable: !!a.kill,

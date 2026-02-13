@@ -198,6 +198,21 @@ function parseSingleObject(
   // Extract content
   const content = extractTextFromBlock(record as ClaudeJsonBlock);
 
+  // If this is a Claude CLI result envelope (type: "result") with no textual
+  // content, produce a human-readable fallback instead of dumping raw JSON.
+  if (!content && record.type === "result") {
+    const subtype = record.subtype as string | undefined;
+    const fallback = subtype === "success"
+      ? "Agent completed successfully (no textual output)."
+      : subtype === "error"
+        ? `Agent finished with an error.${record.error ? ` ${record.error}` : ""}`
+        : "Agent session completed without output.";
+    return {
+      content: fallback,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+    };
+  }
+
   return {
     content: content || JSON.stringify(obj, null, 2),
     metadata: Object.keys(metadata).length > 0 ? metadata : undefined,

@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ProviderSelect, type ProviderType } from "@/components/shared/ProviderSelect";
 import { MessageList } from "@/components/chat/MessageList";
 import { MessageInput } from "@/components/chat/MessageInput";
@@ -34,23 +35,22 @@ import {
   isBrainstormConversationAgentType,
   isEpicCreationConversationAgentType,
 } from "@/lib/chat/conversation-agent";
+import {
+  applyLegacyConversationFilter,
+  isLegacyConversationGenerating,
+  resolveLegacyConversationLabel,
+  sortConversationsForLegacyParity,
+} from "@/lib/chat/parity-contract";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_PANEL_RATIO = 0.4;
 const MIN_PANEL_WIDTH = 300;
 const MIN_BOARD_WIDTH = 400;
 const DIVIDER_WIDTH = 6;
+const MOBILE_BREAKPOINT = 768;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
-}
-
-function arraysEqual(a: string[], b: string[]) {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
 }
 
 function truncateLabel(label: string) {
@@ -80,15 +80,17 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     const [panelState, setPanelState] = useState<UnifiedPanelState>("collapsed");
     const [panelRatio, setPanelRatio] = useState(DEFAULT_PANEL_RATIO);
     const [isDragging, setIsDragging] = useState(false);
-    const [openConversationIds, setOpenConversationIds] = useState<string[]>([]);
     const [generatingSpec, setGeneratingSpec] = useState(false);
     const [specError, setSpecError] = useState<string | null>(null);
+    const [isMobile, setIsMobile] = useState(false);
+    const [, forceConversationRefresh] = useState(0);
 
     const {
       conversations,
       activeId,
       setActiveId,
       createConversation,
+      deleteConversation,
       updateConversation,
       refresh: refreshConversations,
     } = useConversations(projectId);
@@ -115,11 +117,6 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       [projectId],
     );
 
-    const tabsStorageKey = useMemo(
-      () => `arij.unified-chat-panel.tabs.${projectId}`,
-      [projectId],
-    );
-
     const activeStorageKey = useMemo(
       () => `arij.unified-chat-panel.active.${projectId}`,
       [projectId],
@@ -132,10 +129,11 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
 
     const tabConversations = useMemo(
       () =>
-        openConversationIds
-          .map((id) => conversations.find((conversation) => conversation.id === id) || null)
-          .filter((conversation): conversation is NonNullable<typeof conversation> => Boolean(conversation)),
-      [openConversationIds, conversations],
+        applyLegacyConversationFilter(
+          sortConversationsForLegacyParity(conversations),
+          "all",
+        ),
+      [conversations],
     );
 
     const { createEpic, isLoading: epicCreating, error: epicError } = useEpicCreate({
@@ -152,7 +150,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     const hasAssistantMessage = messages.some((message) => message.role === "assistant");
     const canCreateEpic = isEpicCreation && hasUserMessage && hasAssistantMessage;
     const hasActiveAgents = conversations.some(
-      (conversation) => conversation.status === "generating",
+      (conversation) => isLegacyConversationGenerating(conversation.status),
     );
 
     const previousSending = useRef(sending);
@@ -173,39 +171,31 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     }, [refreshConversations]);
 
     useEffect(() => {
-      setOpenConversationIds((previous) => {
-        const availableIds = new Set(conversations.map((conversation) => conversation.id));
-        let next = previous.filter((id) => availableIds.has(id));
-
-        if (next.length === 0 && conversations.length > 0) {
-          const preferredActiveId = activeId && availableIds.has(activeId) ? activeId : conversations[0].id;
-          next = [preferredActiveId];
-        }
-
-        if (activeId && availableIds.has(activeId) && !next.includes(activeId)) {
-          next = [...next, activeId];
-        }
-
-        if (arraysEqual(previous, next)) {
-          return previous;
-        }
-
-        return next;
-      });
-    }, [conversations, activeId]);
-
-    useEffect(() => {
-      if (!openConversationIds.length) return;
-
-      if (!activeId) {
-        setActiveId(openConversationIds[0]);
+      if (typeof window === "undefined") {
         return;
       }
 
-      if (!openConversationIds.includes(activeId)) {
-        setActiveId(openConversationIds[0]);
+      function updateIsMobile() {
+        setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
       }
-    }, [activeId, openConversationIds, setActiveId]);
+
+      updateIsMobile();
+      window.addEventListener("resize", updateIsMobile);
+      return () => window.removeEventListener("resize", updateIsMobile);
+    }, []);
+
+    useEffect(() => {
+      if (!tabConversations.length) return;
+
+      if (!activeId) {
+        setActiveId(tabConversations[0].id);
+        return;
+      }
+
+      if (!tabConversations.some((conversation) => conversation.id === activeId)) {
+        setActiveId(tabConversations[0].id);
+      }
+    }, [activeId, setActiveId, tabConversations]);
 
     const getContainerWidth = useCallback(() => {
       if (typeof window === "undefined") {
@@ -227,15 +217,6 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
 
     const panelWidthPx = computePanelWidth(panelRatio);
 
-    const ensureTabIsOpen = useCallback((conversationId: string) => {
-      setOpenConversationIds((previous) => {
-        if (previous.includes(conversationId)) {
-          return previous;
-        }
-        return [...previous, conversationId];
-      });
-    }, []);
-
     const createNewConversationTab = useCallback(
       async (options?: { type?: string; label?: string; provider?: string }) => {
         const created = await createConversation({
@@ -245,32 +226,30 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
         });
 
         if (created) {
-          ensureTabIsOpen(created.id);
           setActiveId(created.id);
+          forceConversationRefresh((value) => value + 1);
         }
 
         return created;
       },
-      [createConversation, ensureTabIsOpen, setActiveId, activeProvider],
+      [createConversation, setActiveId, activeProvider],
     );
 
     const openChatConversation = useCallback(async () => {
       setPanelState("expanded");
 
       if (activeId) {
-        ensureTabIsOpen(activeId);
         return;
       }
 
-      if (conversations.length > 0) {
-        const fallbackId = conversations[0].id;
-        ensureTabIsOpen(fallbackId);
+      if (tabConversations.length > 0) {
+        const fallbackId = tabConversations[0].id;
         setActiveId(fallbackId);
         return;
       }
 
       await createNewConversationTab({ type: "brainstorm", label: "Brainstorm" });
-    }, [activeId, conversations, ensureTabIsOpen, setActiveId, createNewConversationTab]);
+    }, [activeId, tabConversations, setActiveId, createNewConversationTab]);
 
     useImperativeHandle(
       ref,
@@ -328,27 +307,6 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       if (typeof window === "undefined") return;
       window.localStorage.setItem(stateStorageKey, panelState);
     }, [panelState, stateStorageKey]);
-
-    // Persist open tabs — read on mount
-    useEffect(() => {
-      if (typeof window === "undefined") return;
-      const raw = window.localStorage.getItem(tabsStorageKey);
-      if (!raw) return;
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.every((id: unknown) => typeof id === "string")) {
-          setOpenConversationIds(parsed);
-        }
-      } catch {
-        // ignore malformed
-      }
-    }, [tabsStorageKey]);
-
-    // Persist open tabs — write on change
-    useEffect(() => {
-      if (typeof window === "undefined") return;
-      window.localStorage.setItem(tabsStorageKey, JSON.stringify(openConversationIds));
-    }, [openConversationIds, tabsStorageKey]);
 
     // Persist activeId — read on mount (with guard to avoid overriding user switches)
     const activeIdRestoredRef = useRef(false);
@@ -457,25 +415,206 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       setPanelRatio(DEFAULT_PANEL_RATIO);
     }
 
-    function closeTab(conversationId: string) {
-      setOpenConversationIds((previous) => {
-        if (previous.length <= 1 || !previous.includes(conversationId)) {
-          return previous;
-        }
-
-        const next = previous.filter((id) => id !== conversationId);
-
-        if (activeId === conversationId) {
-          const closedIndex = previous.indexOf(conversationId);
-          const fallbackId = next[Math.max(0, closedIndex - 1)] || next[0] || null;
-          setActiveId(fallbackId);
-        }
-
-        return next;
-      });
+    async function closeTab(conversationId: string) {
+      if (tabConversations.length <= 1) {
+        return;
+      }
+      await deleteConversation(conversationId);
+      forceConversationRefresh((value) => value + 1);
     }
 
+    const chatWorkspace = (
+      <div className="flex h-full flex-col">
+        <div
+          className="border-b border-border flex items-center gap-0 overflow-x-auto"
+          data-testid="chat-tab-bar"
+        >
+          {tabConversations.map((conversation) => {
+            const isActive = conversation.id === activeId;
+            return (
+              <button
+                key={conversation.id}
+                type="button"
+                data-testid={`conversation-tab-${conversation.id}`}
+                data-agent-type={
+                  isEpicCreationConversationAgentType(conversation.type)
+                    ? "epic_creation"
+                    : "brainstorm"
+                }
+                onClick={() => setActiveId(conversation.id)}
+                className={cn(
+                  "group flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors",
+                  isActive
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {isEpicCreationConversationAgentType(conversation.type) ? (
+                  <Sparkles className="h-3 w-3" />
+                ) : (
+                  <MessageSquare className="h-3 w-3" />
+                )}
+                <span>
+                  {truncateLabel(
+                    resolveLegacyConversationLabel(
+                      conversation.type,
+                      conversation.label,
+                    ),
+                  )}
+                </span>
+                {isLegacyConversationGenerating(conversation.status) && (
+                  <Loader2
+                    data-testid={`active-indicator-${conversation.id}`}
+                    className="h-3 w-3 animate-spin text-primary"
+                    aria-label="Agent active"
+                  />
+                )}
+                {tabConversations.length > 1 && (
+                  <span
+                    role="button"
+                    data-testid={`close-tab-${conversation.id}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void closeTab(conversation.id);
+                    }}
+                    className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
+                  >
+                    <X className="h-3 w-3" />
+                  </span>
+                )}
+              </button>
+            );
+          })}
+
+          <button
+            type="button"
+            data-testid="new-conversation-tab"
+            onClick={() =>
+              void createNewConversationTab({ type: "brainstorm", label: "Brainstorm" })
+            }
+            className="flex items-center justify-center w-7 h-7 mx-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            title="New conversation"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <div className="p-3 border-b border-border flex items-center justify-between gap-2">
+          <h3 className="font-medium text-sm">
+            {resolveLegacyConversationLabel(
+              activeConversation?.type,
+              activeConversation?.label,
+            )}
+          </h3>
+          <div className="flex items-center gap-2">
+            <ProviderSelect
+              value={activeProvider}
+              onChange={handleProviderChange}
+              codexAvailable={codexAvailable}
+              codexInstalled={codexInstalled}
+              disabled={!activeConversation || hasMessages || sending}
+              className="w-36 h-7 text-xs"
+            />
+            {isBrainstorm && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleGenerateSpec}
+                disabled={generatingSpec}
+                className="text-xs"
+              >
+                {generatingSpec ? (
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <Sparkles className="h-3 w-3 mr-1" />
+                )}
+                Generate Spec & Plan
+              </Button>
+            )}
+            {canCreateEpic && (
+              <Button
+                type="button"
+                size="sm"
+                variant="default"
+                onClick={handleCreateEpic}
+                disabled={epicCreating || sending}
+                className="text-xs"
+              >
+                {epicCreating ? (
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <Sparkles className="h-3 w-3 mr-1" />
+                )}
+                Create Epic & Generate Stories
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {(epicError || specError) && (
+          <div className="mx-3 mt-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {epicError || specError}
+          </div>
+        )}
+
+        <div className="flex-1 overflow-auto">
+          {isEpicCreation && !hasMessages && !loading && (
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+              Describe your epic idea and I&apos;ll help you structure it with user stories and acceptance criteria.
+            </div>
+          )}
+          <MessageList
+            messages={messages}
+            loading={loading}
+            streamStatus={streamStatus}
+          />
+          {pendingQuestions && (
+            <div className="px-3 pb-3">
+              <QuestionCards
+                questions={pendingQuestions}
+                onSubmit={answerQuestions}
+                disabled={sending}
+              />
+            </div>
+          )}
+        </div>
+
+        <MessageInput
+          projectId={projectId}
+          onSend={sendMessage}
+          disabled={sending || !activeConversation}
+          placeholder={isEpicCreation ? "Describe your epic idea..." : "Ask a question..."}
+        />
+      </div>
+    );
+
     if (panelState === "expanded") {
+      if (isMobile) {
+        return (
+          <div ref={containerRef} className="relative h-full w-full overflow-hidden">
+            <div className="h-full w-full">{children}</div>
+            <Sheet
+              open
+              onOpenChange={(open) => {
+                if (!open) {
+                  setPanelState("collapsed");
+                }
+              }}
+            >
+              <SheetContent
+                side="right"
+                showCloseButton={false}
+                className="w-full max-w-none p-0 sm:max-w-none"
+                data-testid="unified-panel-mobile-sheet"
+              >
+                {chatWorkspace}
+              </SheetContent>
+            </Sheet>
+          </div>
+        );
+      }
+
       return (
         <div ref={containerRef} className="flex h-full w-full overflow-hidden">
           <div
@@ -525,144 +664,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
               </Button>
             </div>
 
-            <div className="flex h-[calc(100%-2.5rem)] flex-col">
-              <div className="border-b border-border flex items-center gap-0 overflow-x-auto" data-testid="chat-tab-bar">
-                {tabConversations.map((conversation) => {
-                  const isActive = conversation.id === activeId;
-                  return (
-                    <button
-                      key={conversation.id}
-                      type="button"
-                      data-testid={`conversation-tab-${conversation.id}`}
-                      data-agent-type={
-                        isEpicCreationConversationAgentType(conversation.type)
-                          ? "epic_creation"
-                          : "brainstorm"
-                      }
-                      onClick={() => setActiveId(conversation.id)}
-                      className={cn(
-                        "group flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors",
-                        isActive
-                          ? "border-primary text-foreground"
-                          : "border-transparent text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {isEpicCreationConversationAgentType(conversation.type) ? (
-                        <Sparkles className="h-3 w-3" />
-                      ) : (
-                        <MessageSquare className="h-3 w-3" />
-                      )}
-                      <span>{truncateLabel(conversation.label || "Conversation")}</span>
-                      {conversation.status === "generating" && (
-                        <Loader2
-                          data-testid={`active-indicator-${conversation.id}`}
-                          className="h-3 w-3 animate-spin text-primary"
-                          aria-label="Agent running"
-                        />
-                      )}
-                      {openConversationIds.length > 1 && (
-                        <span
-                          role="button"
-                          data-testid={`close-tab-${conversation.id}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            closeTab(conversation.id);
-                          }}
-                          className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
-                        >
-                          <X className="h-3 w-3" />
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-
-                <button
-                  type="button"
-                  data-testid="new-conversation-tab"
-                  onClick={() => void createNewConversationTab({ type: "brainstorm", label: "Brainstorm" })}
-                  className="flex items-center justify-center w-7 h-7 mx-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                  title="New conversation"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              </div>
-
-              <div className="p-3 border-b border-border flex items-center justify-between gap-2">
-                <h3 className="font-medium text-sm">{activeConversation?.label || "Chat"}</h3>
-                <div className="flex items-center gap-2">
-                  <ProviderSelect
-                    value={activeProvider}
-                    onChange={handleProviderChange}
-                    codexAvailable={codexAvailable}
-                    codexInstalled={codexInstalled}
-                    disabled={!activeConversation || hasMessages || sending}
-                    className="w-36 h-7 text-xs"
-                  />
-                  {isBrainstorm && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={handleGenerateSpec}
-                      disabled={generatingSpec}
-                      className="text-xs"
-                    >
-                      {generatingSpec ? (
-                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                      ) : (
-                        <Sparkles className="h-3 w-3 mr-1" />
-                      )}
-                      Generate Spec & Plan
-                    </Button>
-                  )}
-                  {canCreateEpic && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="default"
-                      onClick={handleCreateEpic}
-                      disabled={epicCreating || sending}
-                      className="text-xs"
-                    >
-                      {epicCreating ? (
-                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                      ) : (
-                        <Sparkles className="h-3 w-3 mr-1" />
-                      )}
-                      Create Epic & Generate Stories
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {(epicError || specError) && (
-                <div className="mx-3 mt-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                  {epicError || specError}
-                </div>
-              )}
-
-              <div className="flex-1 overflow-auto">
-                {isEpicCreation && !hasMessages && !loading && (
-                  <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                    Describe your epic idea and I&apos;ll help you structure it with user stories and acceptance criteria.
-                  </div>
-                )}
-                <MessageList messages={messages} loading={loading} streamStatus={streamStatus} />
-                {pendingQuestions && (
-                  <div className="px-3 pb-3">
-                    <QuestionCards questions={pendingQuestions} onSubmit={answerQuestions} disabled={sending} />
-                  </div>
-                )}
-              </div>
-
-              <MessageInput
-                projectId={projectId}
-                onSend={sendMessage}
-                disabled={sending || !activeConversation}
-                placeholder={isEpicCreation ? "Describe your epic idea..." : "Ask a question..."}
-              />
-            </div>
+            <div className="h-[calc(100%-2.5rem)]">{chatWorkspace}</div>
           </aside>
         </div>
       );

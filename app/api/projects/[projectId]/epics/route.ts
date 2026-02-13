@@ -26,9 +26,6 @@ export async function GET(
       prStatus: epics.prStatus,
       confidence: epics.confidence,
       evidence: epics.evidence,
-      prNumber: epics.prNumber,
-      prUrl: epics.prUrl,
-      prStatus: epics.prStatus,
       createdAt: epics.createdAt,
       updatedAt: epics.updatedAt,
       type: epics.type,
@@ -36,6 +33,27 @@ export async function GET(
       images: epics.images,
       usCount: sql<number>`(SELECT COUNT(*) FROM user_stories WHERE user_stories.epic_id = "epics"."id")`,
       usDone: sql<number>`(SELECT COUNT(*) FROM user_stories WHERE user_stories.epic_id = "epics"."id" AND user_stories.status = 'done')`,
+      latestCommentId: sql<string | null>`(
+        SELECT ticket_comments.id
+        FROM ticket_comments
+        WHERE ticket_comments.epic_id = "epics"."id"
+        ORDER BY ticket_comments.created_at DESC, ticket_comments.id DESC
+        LIMIT 1
+      )`,
+      latestCommentAuthor: sql<string | null>`(
+        SELECT ticket_comments.author
+        FROM ticket_comments
+        WHERE ticket_comments.epic_id = "epics"."id"
+        ORDER BY ticket_comments.created_at DESC, ticket_comments.id DESC
+        LIMIT 1
+      )`,
+      latestCommentCreatedAt: sql<string | null>`(
+        SELECT ticket_comments.created_at
+        FROM ticket_comments
+        WHERE ticket_comments.epic_id = "epics"."id"
+        ORDER BY ticket_comments.created_at DESC, ticket_comments.id DESC
+        LIMIT 1
+      )`,
     })
     .from(epics)
     .where(eq(epics.projectId, projectId))

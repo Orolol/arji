@@ -1,6 +1,3 @@
-/**
- * Tests that EpicCard renders an active work indicator when isActive is true.
- */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
@@ -50,27 +47,36 @@ const baseEpic = {
 };
 
 describe("EpicCard", () => {
-  it("renders without active indicator by default", () => {
+  it("renders without activity indicator by default", () => {
     render(<EpicCard epic={baseEpic} />);
 
     expect(screen.getByText("Test Epic")).toBeInTheDocument();
-    expect(screen.queryByTitle("Agent running")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("epic-activity-epic-1")).not.toBeInTheDocument();
   });
 
-  it("renders active indicator when isActive is true", () => {
-    render(<EpicCard epic={baseEpic} isActive={true} />);
+  it("renders activity indicator metadata for build action", () => {
+    render(
+      <EpicCard
+        epic={baseEpic}
+        activeAgentActivity={{
+          sessionId: "sess-1",
+          actionType: "build",
+          agentName: "Claude Code agent 123abc",
+        }}
+      />
+    );
 
     expect(screen.getByText("Test Epic")).toBeInTheDocument();
-    const indicator = screen.getByTitle("Agent running");
+    const indicator = screen.getByTestId("epic-activity-epic-1");
     expect(indicator).toBeInTheDocument();
-    expect(indicator.className).toContain("animate-pulse");
-    expect(indicator.className).toContain("bg-yellow-500");
-  });
-
-  it("does not render active indicator when isActive is false", () => {
-    render(<EpicCard epic={baseEpic} isActive={false} />);
-
-    expect(screen.queryByTitle("Agent running")).not.toBeInTheDocument();
+    expect(indicator).toHaveAttribute(
+      "aria-label",
+      "Build active: Claude Code agent 123abc"
+    );
+    expect(indicator).toHaveAttribute(
+      "title",
+      "Build active: Claude Code agent 123abc"
+    );
   });
 
   it("renders user story count", () => {

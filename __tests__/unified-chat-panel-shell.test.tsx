@@ -41,7 +41,12 @@ const mockCreateConversation = vi.fn(async (input?: { type?: string; label?: str
 });
 const mockUpdateConversation = vi.fn();
 const mockRefreshConversations = vi.fn();
-const mockDeleteConversation = vi.fn();
+const mockDeleteConversation = vi.fn(async (conversationId: string) => {
+  mockConversations = mockConversations.filter((conversation) => conversation.id !== conversationId);
+  if (mockActiveId === conversationId) {
+    mockActiveId = mockConversations[0]?.id || null;
+  }
+});
 
 vi.mock("@/hooks/useConversations", () => ({
   useConversations: () => ({
@@ -282,8 +287,8 @@ describe("UnifiedChatPanel shell + tabs", () => {
     expect(mockSetActiveId).toHaveBeenCalledWith("conv1");
   });
 
-  it("closes tabs without deleting conversations and never allows closing the last tab", async () => {
-    render(
+  it("close tab deletes the conversation and keeps the last tab non-closable", async () => {
+    const { unmount } = render(
       <UnifiedChatPanel projectId="proj1">
         <div>board</div>
       </UnifiedChatPanel>,
@@ -300,10 +305,16 @@ describe("UnifiedChatPanel shell + tabs", () => {
     fireEvent.click(screen.getByTestId("close-tab-conv2"));
 
     await waitFor(() => {
-      expect(screen.queryByTestId("conversation-tab-conv2")).not.toBeInTheDocument();
+      expect(mockDeleteConversation).toHaveBeenCalledWith("conv2");
     });
 
-    expect(mockDeleteConversation).not.toHaveBeenCalled();
+    unmount();
+    render(
+      <UnifiedChatPanel projectId="proj1">
+        <div>board</div>
+      </UnifiedChatPanel>,
+    );
+
     expect(screen.queryByTestId("close-tab-conv1")).not.toBeInTheDocument();
   });
 

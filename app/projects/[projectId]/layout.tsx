@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
-import { ArrowLeft, Kanban, FileText, Files, Activity, Tag, MessageSquare } from "lucide-react";
-import { ChatPanel } from "@/components/chat/ChatPanel";
+import { ArrowLeft, Kanban, FileText, Files, Activity, Tag } from "lucide-react";
 import { GitHubConnectBanner } from "@/components/github/GitHubConnectBanner";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
 interface ProjectSummary {
@@ -26,17 +25,6 @@ export default function ProjectLayout({
     gitRepoPath: null,
     githubOwnerRepo: null,
   });
-  const [chatOpen, setChatOpen] = useState(false);
-  const [conversationCount, setConversationCount] = useState(0);
-
-  const fetchConversationCount = useCallback(() => {
-    fetch(`/api/projects/${projectId}/conversations`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.data) setConversationCount(d.data.length);
-      })
-      .catch(() => {});
-  }, [projectId]);
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}`)
@@ -51,15 +39,7 @@ export default function ProjectLayout({
         }
       })
       .catch(() => {});
-    fetchConversationCount();
-  }, [projectId, fetchConversationCount]);
-
-  // Refresh count when chat panel toggles
-  useEffect(() => {
-    if (!chatOpen) {
-      fetchConversationCount();
-    }
-  }, [chatOpen, fetchConversationCount]);
+  }, [projectId]);
 
   const navItems = [
     { href: `/projects/${projectId}`, label: "Kanban", icon: Kanban },
@@ -110,25 +90,6 @@ export default function ProjectLayout({
             );
           })}
         </nav>
-        <div className="ml-auto">
-          <button
-            onClick={() => setChatOpen(!chatOpen)}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors",
-              chatOpen
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-            )}
-          >
-            <MessageSquare className="h-4 w-4" />
-            Chat
-            {!chatOpen && conversationCount > 0 && (
-              <span className="min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-xs font-medium flex items-center justify-center">
-                {conversationCount}
-              </span>
-            )}
-          </button>
-        </div>
       </header>
       <GitHubConnectBanner
         projectId={projectId}
@@ -140,11 +101,6 @@ export default function ProjectLayout({
       />
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 overflow-auto">{children}</div>
-        {chatOpen && (
-          <div className="w-96 border-l border-border shrink-0">
-            <ChatPanel projectId={projectId} />
-          </div>
-        )}
       </div>
     </div>
   );

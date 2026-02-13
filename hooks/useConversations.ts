@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { sortConversationsForLegacyParity } from "@/lib/chat/parity-contract";
 
 export interface Conversation {
   id: string;
@@ -35,7 +36,7 @@ export function useConversations(projectId: string) {
     try {
       const res = await fetch(`/api/projects/${projectId}/conversations`);
       const json = await res.json();
-      const data: Conversation[] = json.data || [];
+      const data = sortConversationsForLegacyParity((json.data || []) as Conversation[]);
       setConversations(data);
 
       // Set active to first conversation if none selected or current is gone
@@ -65,7 +66,9 @@ export function useConversations(projectId: string) {
         });
         const json = await res.json();
         if (json.data) {
-          setConversations((prev) => [...prev, json.data]);
+          setConversations((prev) =>
+            sortConversationsForLegacyParity([...prev, json.data as Conversation]),
+          );
           setActiveId(json.data.id);
           return json.data as Conversation;
         }
@@ -88,8 +91,10 @@ export function useConversations(projectId: string) {
         const json = await res.json();
         if (json.data) {
           setConversations((prev) =>
-            prev.map((conv) =>
-              conv.id === conversationId ? (json.data as Conversation) : conv
+            sortConversationsForLegacyParity(
+              prev.map((conv) =>
+                conv.id === conversationId ? (json.data as Conversation) : conv
+              ),
             ),
           );
           return json.data as Conversation;
