@@ -56,9 +56,9 @@ export const BUILTIN_AGENT_PROMPTS: Record<AgentType, string> = {
   ticket_build: "",
 };
 
-export type AgentProvider = "claude-code" | "codex";
+export type AgentProvider = "claude-code" | "codex" | "gemini-cli";
 
-export const PROVIDER_OPTIONS: AgentProvider[] = ["claude-code", "codex"];
+export const PROVIDER_OPTIONS: AgentProvider[] = ["claude-code", "codex", "gemini-cli"];
 
 export function isAgentProvider(value: string): value is AgentProvider {
   return PROVIDER_OPTIONS.includes(value as AgentProvider);

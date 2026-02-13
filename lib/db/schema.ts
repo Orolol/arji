@@ -78,7 +78,7 @@ export const chatConversations = sqliteTable("chat_conversations", {
   label: text("label").notNull().default("Brainstorm"),
   status: text("status").default("active"), // active | generating | generated | error
   epicId: text("epic_id").references(() => epics.id),
-  provider: text("provider").default("claude-code"), // claude-code | codex
+  provider: text("provider").default("claude-code"), // claude-code | codex | gemini-cli
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -114,7 +114,7 @@ export const agentSessions = sqliteTable("agent_sessions", {
   status: text("status").default("queued"), // queued | running | completed | failed | cancelled
   mode: text("mode").default("code"), // plan | code
   orchestrationMode: text("orchestration_mode").default("solo"), // solo | team
-  provider: text("provider").default("claude-code"), // claude-code | codex
+  provider: text("provider").default("claude-code"), // claude-code | codex | gemini-cli
   prompt: text("prompt"),
   logsPath: text("logs_path"),
   branchName: text("branch_name"),
@@ -250,12 +250,27 @@ export const customReviewAgents = sqliteTable(
   }),
 );
 
+export const namedAgents = sqliteTable(
+  "named_agents",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    provider: text("provider").notNull(), // 'claude-code' | 'codex' | 'gemini-cli'
+    model: text("model").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    nameUnique: uniqueIndex("named_agents_name_unique").on(table.name),
+  }),
+);
+
 export const agentProviderDefaults = sqliteTable(
   "agent_provider_defaults",
   {
     id: text("id").primaryKey(),
     agentType: text("agent_type").notNull(),
-    provider: text("provider").notNull(), // 'claude-code' | 'codex'
+    provider: text("provider").notNull(), // 'claude-code' | 'codex' | 'gemini-cli'
+    namedAgentId: text("named_agent_id").references(() => namedAgents.id, { onDelete: "set null" }),
     scope: text("scope").notNull(), // 'global' | projectId
     createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
@@ -291,6 +306,9 @@ export type NewCustomReviewAgent = typeof customReviewAgents.$inferInsert;
 
 export type AgentProviderDefault = typeof agentProviderDefaults.$inferSelect;
 export type NewAgentProviderDefault = typeof agentProviderDefaults.$inferInsert;
+
+export type NamedAgent = typeof namedAgents.$inferSelect;
+export type NewNamedAgent = typeof namedAgents.$inferInsert;
 
 export type PullRequest = typeof pullRequests.$inferSelect;
 export type NewPullRequest = typeof pullRequests.$inferInsert;

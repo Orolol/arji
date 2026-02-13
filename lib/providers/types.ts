@@ -1,11 +1,11 @@
 /**
  * Provider abstraction types for AI agent backends.
  *
- * Both Claude Code and Codex implement this interface so that build routes,
- * review routes, and the process manager can work with either backend.
+ * Claude Code, Codex, and Gemini CLI implement this interface so that build
+ * routes, review routes, and the process manager can work with any backend.
  */
 
-export type ProviderType = "claude-code" | "codex";
+export type ProviderType = "claude-code" | "codex" | "gemini-cli";
 
 export type ProviderChunkStreamType = "response" | "raw" | "output";
 

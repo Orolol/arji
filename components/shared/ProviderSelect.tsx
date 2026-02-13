@@ -14,7 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-export type ProviderType = "claude-code" | "codex";
+export type ProviderType = "claude-code" | "codex" | "gemini-cli";
 
 interface ProviderSelectProps {
   value: ProviderType;

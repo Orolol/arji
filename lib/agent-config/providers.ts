@@ -15,7 +15,9 @@ export interface ResolvedAgentProvider {
 const FALLBACK_PROVIDER: AgentProvider = "claude-code";
 
 function normalizeProvider(value: string | null | undefined): AgentProvider {
-  return value === "codex" ? "codex" : "claude-code";
+  if (value === "codex") return "codex";
+  if (value === "gemini-cli") return "gemini-cli";
+  return "claude-code";
 }
 
 export async function resolveAgentProvider(
