@@ -37,16 +37,23 @@ export function BugCreateDialog({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("2");
-  const [submitting, setSubmitting] = useState(false);
+  const [submitMode, setSubmitMode] = useState<"create" | "create_and_fix" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const submitting = submitMode !== null;
 
-  async function handleSubmit() {
+  function resetForm() {
+    setTitle("");
+    setDescription("");
+    setPriority("2");
+  }
+
+  async function handleSubmit(mode: "create" | "create_and_fix" = "create") {
     if (!title.trim()) return;
-    setSubmitting(true);
+    setSubmitMode(mode);
     setError(null);
 
     try {
-      const res = await fetch(`/api/projects/${projectId}/bugs`, {
+      const createRes = await fetch(`/api/projects/${projectId}/bugs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -56,21 +63,51 @@ export function BugCreateDialog({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        setError(data.error || "Failed to create bug");
-      } else {
-        setTitle("");
-        setDescription("");
-        setPriority("2");
-        onOpenChange(false);
-        onCreated?.();
+      const createData = await createRes.json().catch(() => ({}));
+      if (!createRes.ok || createData.error) {
+        setError(createData.error || "Failed to create bug");
+        return;
       }
-    } catch {
-      setError("Failed to create bug");
-    }
 
-    setSubmitting(false);
+      const createdBugId = createData?.data?.id as string | undefined;
+      if (mode === "create_and_fix") {
+        if (!createdBugId) {
+          setError("Bug created, but failed to start fix agent: missing bug ID");
+          resetForm();
+          onCreated?.();
+          return;
+        }
+
+        const buildRes = await fetch(
+          `/api/projects/${projectId}/epics/${createdBugId}/build`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          }
+        );
+        const buildData = await buildRes.json().catch(() => ({}));
+        if (!buildRes.ok || buildData.error) {
+          const reason = buildData.error ? `: ${buildData.error}` : "";
+          setError(`Bug created, but failed to start fix agent${reason}`);
+          resetForm();
+          onCreated?.();
+          return;
+        }
+      }
+
+      resetForm();
+      onOpenChange(false);
+      onCreated?.();
+    } catch {
+      setError(
+        mode === "create_and_fix"
+          ? "Failed to create bug and start fix agent"
+          : "Failed to create bug"
+      );
+    } finally {
+      setSubmitMode(null);
+    }
   }
 
   return (
@@ -89,7 +126,7 @@ export function BugCreateDialog({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Bug title..."
-              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+              onKeyDown={(e) => e.key === "Enter" && handleSubmit("create")}
               autoFocus
             />
           </div>
@@ -138,12 +175,24 @@ export function BugCreateDialog({
             Cancel
           </Button>
           <Button
-            onClick={handleSubmit}
+            onClick={() => handleSubmit("create")}
             disabled={!title.trim() || submitting}
             variant="destructive"
           >
-            {submitting && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+            {submitMode === "create" && (
+              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+            )}
             Create Bug
+          </Button>
+          <Button
+            onClick={() => handleSubmit("create_and_fix")}
+            disabled={!title.trim() || submitting}
+            variant="destructive"
+          >
+            {submitMode === "create_and_fix" && (
+              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+            )}
+            Create And Fix
           </Button>
         </DialogFooter>
       </DialogContent>
