@@ -31,7 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { PRIORITY_LABELS, KANBAN_COLUMNS, COLUMN_LABELS } from "@/lib/types/kanban";
 import { useEpicPr } from "@/hooks/useEpicPr";
 import { PrBadge } from "@/components/github/PrBadge";
-import { Plus, Trash2, Check, Circle, Loader2, GitBranch, GitMerge, GitPullRequest, Wrench, ArrowUp, ArrowDown, Upload, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Check, Circle, Loader2, GitBranch, GitMerge, GitPullRequest, Wrench, ArrowUp, ArrowDown, Upload, RefreshCw, Bug } from "lucide-react";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { isAgentAlreadyRunningError } from "@/lib/agents/client-error";
@@ -211,6 +211,12 @@ export function EpicDetail({
                   className="text-lg font-bold"
                 />
               </SheetTitle>
+              {epic.type === "bug" && (
+                <Badge className="bg-red-500/10 text-red-400 text-xs w-fit">
+                  <Bug className="h-3 w-3 mr-1" />
+                  Bug
+                </Badge>
+              )}
             </SheetHeader>
 
             <div className="px-4 pb-4 space-y-4">
@@ -297,6 +303,12 @@ export function EpicDetail({
                   </Select>
                 </div>
               </div>
+
+              {epic.type === "bug" && epic.linkedEpicId && (
+                <div className="text-xs text-muted-foreground">
+                  Linked to epic: <span className="font-mono">{epic.linkedEpicId}</span>
+                </div>
+              )}
 
               {epic.branchName && (
                 <div className="space-y-2">
@@ -454,6 +466,7 @@ export function EpicDetail({
               <Separator />
 
               {/* User Stories */}
+              {epic.type !== "bug" && (
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="text-sm font-medium">
@@ -530,6 +543,7 @@ export function EpicDetail({
                   </Button>
                 </div>
               </div>
+              )}
 
               <Separator />
 
