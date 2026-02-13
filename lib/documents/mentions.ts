@@ -1,7 +1,7 @@
 import path from "path";
 import { listProjectDocuments, type ProjectDocumentRecord } from "@/lib/documents/query";
-
-const SIMPLE_FILENAME_MENTION = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export { formatDocumentMention } from "@/lib/documents/mention-format";
+import { formatDocumentMention } from "@/lib/documents/mention-format";
 
 // Supports @filename and @{filename with spaces.ext}
 const MENTION_PATTERN = /(^|\s)@(?:\{([^}\n]+)\}|([A-Za-z0-9][A-Za-z0-9._-]*))/g;
@@ -18,13 +18,6 @@ export class MentionResolutionError extends Error {
     this.name = "MentionResolutionError";
     this.missingFilenames = missingFilenames;
   }
-}
-
-export function formatDocumentMention(originalFilename: string): string {
-  if (SIMPLE_FILENAME_MENTION.test(originalFilename)) {
-    return `@${originalFilename}`;
-  }
-  return `@{${originalFilename}}`;
 }
 
 export function parseDocumentMentions(content: string): string[] {

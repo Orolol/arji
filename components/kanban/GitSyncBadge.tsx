@@ -20,6 +20,7 @@ import {
 interface GitSyncBadgeProps {
   projectId: string;
   branchName: string;
+  githubConfigured?: boolean;
   disabled?: boolean;
   onPushResult?: (result: { success: boolean; error?: string }) => void;
 }
@@ -31,23 +32,27 @@ interface GitSyncBadgeProps {
 export function GitSyncBadge({
   projectId,
   branchName,
+  githubConfigured = true,
   disabled = false,
   onPushResult,
 }: GitSyncBadgeProps) {
   const {
     ahead,
     behind,
-    noRemote,
     loading,
     pushing,
     error,
     push,
     refresh,
-  } = useGitStatus(projectId, branchName);
+  } = useGitStatus(projectId, branchName, githubConfigured);
 
   async function handlePush() {
-    const result = await push();
-    onPushResult?.(result);
+    try {
+      await push();
+      onPushResult?.({ success: true });
+    } catch (e) {
+      onPushResult?.({ success: false, error: e instanceof Error ? e.message : "Push failed" });
+    }
   }
 
   if (loading) {
@@ -59,7 +64,7 @@ export function GitSyncBadge({
     );
   }
 
-  if (error && !noRemote) {
+  if (error) {
     return (
       <div className="flex items-center gap-1.5 text-xs text-destructive">
         <AlertCircle className="h-3 w-3" />
@@ -109,13 +114,8 @@ export function GitSyncBadge({
       )}
 
       {/* In-sync indicator */}
-      {ahead === 0 && behind === 0 && !noRemote && (
+      {ahead === 0 && behind === 0 && (
         <span className="text-[10px] text-muted-foreground">in sync</span>
-      )}
-
-      {/* No remote indicator */}
-      {noRemote && (
-        <span className="text-[10px] text-muted-foreground">no remote</span>
       )}
 
       {/* Push button */}

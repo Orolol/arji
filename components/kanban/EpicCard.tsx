@@ -73,7 +73,7 @@ export function EpicCard({
     : null;
   const linkedActivityId = activeAgentActivity?.sessionId ?? null;
   const activityTooltip = activityConfig
-    ? `${activityConfig.label} active: ${activeAgentActivity.agentName}`
+    ? `${activityConfig.label} active: ${activeAgentActivity!.agentName}`
     : null;
 
   return (

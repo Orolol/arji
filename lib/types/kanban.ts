@@ -44,9 +44,6 @@ export interface KanbanEpic {
   prStatus: string | null;
   confidence: number | null;
   evidence: string | null;
-  prNumber: number | null;
-  prUrl: string | null;
-  prStatus: string | null;
   createdAt: string;
   updatedAt: string;
   type: string; // 'feature' | 'bug'

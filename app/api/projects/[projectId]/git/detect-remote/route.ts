@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { detectRemote } from "@/lib/git/remote";
+import { detectGitHubRemote as detectRemote } from "@/lib/git/remote";
 
 export async function POST(
   _request: NextRequest,

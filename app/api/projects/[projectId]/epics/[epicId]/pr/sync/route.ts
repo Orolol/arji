@@ -76,7 +76,7 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
 
     logSyncOperation({
       projectId,
-      operation: "pr",
+      operation: "pr_sync",
       branch: pr.headBranch,
       status: "success",
       detail: JSON.stringify({ action: "sync", prNumber: pr.number, newStatus: status }),
@@ -94,7 +94,7 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
 
     logSyncOperation({
       projectId,
-      operation: "pr",
+      operation: "pr_sync",
       branch: pr.headBranch,
       status: "failure",
       detail,

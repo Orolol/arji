@@ -1,0 +1,87 @@
+{
+  "migrationId": "2026-02-13T18-27-49-851Z",
+  "projectId": "cUfHlegssamR",
+  "capturedAt": "2026-02-13T18:27:49.851Z",
+  "snapshot": {
+    "conversations": [
+      {
+        "id": "7X-2_0Dj5geO",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "Delete Epic/Story Button",
+        "status": "active",
+        "epic_id": null,
+        "provider": "codex",
+        "created_at": "2026-02-13T14:38:06.805Z"
+      },
+      {
+        "id": "qgfrxJyLnSc5",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "New Epic",
+        "status": "active",
+        "epic_id": null,
+        "provider": "codex",
+        "created_at": "2026-02-13T15:00:25.874Z"
+      },
+      {
+        "id": "vYhnMwgh2TMq",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "New Epic",
+        "status": "generating",
+        "epic_id": null,
+        "provider": "codex",
+        "created_at": "2026-02-13T18:18:57.403Z"
+      }
+    ],
+    "messages": [
+      {
+        "id": "e74m51R_e0KM",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "7X-2_0Dj5geO",
+        "role": "user",
+        "content": "Add a button in epic detail and US detail to delete it (with a confirmation dialog)\nNo need to have any recovery mecanism",
+        "metadata": null,
+        "created_at": "2026-02-13T14:38:47.995Z"
+      },
+      {
+        "id": "7ipnHBWhrLqn",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "7X-2_0Dj5geO",
+        "role": "assistant",
+        "content": "This is a good, focused epic candidate, and it looks distinct from your current backlog: none of the listed epics explicitly cover destructive delete actions from the **Epic Detail** and **US (User Story) Detail** views. The closest related areas are `Project CRUD & Dashboard`, `Kanban Board`, and `Ticket Comments, Send-to-Dev & Agent Review`, but this would specifically target detail-page deletion UX + backend delete behavior.\n\nTo keep scope tight, I’d frame it as: add a visible `Delete` action on both detail pages, show a confirmation dialog, and perform immediate permanent deletion (no recovery/undo/trash), with consistent post-delete navigation and state refresh. That keeps it small and implementation-ready without drifting into broader lifecycle features.\n\nTwo clarifications before writing the epic/user stories:\n1. If an **Epic** has linked user stories/tickets/comments/sessions, should delete **cascade everything** automatically, or should it be blocked until children are removed?\n2. Should delete be available to anyone who can edit the project today, or restricted (for example, owner/admin only)?",
+        "metadata": null,
+        "created_at": "2026-02-13T14:39:41.458Z"
+      },
+      {
+        "id": "PIgPu6Zehwoz",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "7X-2_0Dj5geO",
+        "role": "user",
+        "content": "Generate the final epic with user stories based on our discussion.",
+        "metadata": null,
+        "created_at": "2026-02-13T14:57:13.554Z"
+      },
+      {
+        "id": "OjCuf7TYDNrR",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "7X-2_0Dj5geO",
+        "role": "assistant",
+        "content": "```json\n{\n  \"title\": \"Permanent Delete Actions for Epic and User Story Detail\",\n  \"description\": \"Add destructive delete actions directly in Epic Detail and User Story (US) Detail views, with explicit confirmation and immediate permanent deletion (no recovery, undo, or trash).\\n\\nImplementation plan:\\n1. Add a `Delete` action in the danger zone of Epic Detail and US Detail, visible only to users who already have edit/delete permissions.\\n2. Implement a shared confirmation dialog used by both pages with irreversible copy (`This action cannot be undone`), Cancel, and Confirm actions.\\n3. Wire/extend backend `DELETE` handlers for epics and user stories to perform transactional hard deletes only.\\n4. Ensure relationship handling is deterministic: deleting an epic removes its child user stories and dependent planning artifacts in the same transaction; deleting a US removes its dependent links/comments/tasks per FK rules with no partial writes.\\n5. On successful deletion, redirect to the correct parent list view (epics/backlog), invalidate cached queries, and refresh UI state so removed items disappear from detail, kanban, and lists immediately.\\n6. Add regression coverage for confirmation, successful deletion, authorization, and failure paths for both entity types.\",\n  \"userStories\": [\n    {\n      \"title\": \"As a project collaborator, I want to delete an epic from Epic Detail so that I can permanently remove obsolete initiatives without leaving the page\",\n      \"description\": \"Expose a destructive `Delete Epic` action on the Epic Detail screen. The action must require explicit confirmation and execute a hard delete immediately after confirmation.\",\n      \"acceptanceCriteria\": \"- [ ] Epic Detail displays a visible `Delete Epic` action in a danger-zone section for authorized users.\\n- [ ] Clicking `Delete Epic` opens a confirmation dialog with irreversible warning text.\\n- [ ] Confirm triggers exactly one delete request and shows a loading/disabled state until completion.\\n- [ ] After success, the epic is permanently removed and no longer appears in epic lists or detail views.\"\n    },\n    {\n      \"title\": \"As a project collaborator, I want to delete a user story from US Detail so that I can permanently remove invalid or duplicate work items quickly\",\n      \"description\": \"Expose a destructive `Delete User Story` action on the US Detail screen with the same confirmation and hard-delete behavior used for epics.\",\n      \"acceptanceCriteria\": \"- [ ] US Detail displays a visible `Delete User Story` action in a danger-zone section for authorized users.\\n- [ ] Clicking `Delete User Story` opens the confirmation dialog with irreversible warning text.\\n- [ ] Confirm performs a hard delete for that user story with in-flight protection against double submit.\\n- [ ] After success, the user story is removed from backlog/kanban/detail state.\"\n    },\n    {\n      \"title\": \"As a platform maintainer, I want epic and user story deletions to be transactional hard deletes so that data integrity is preserved without recovery mechanisms\",\n      \"description\": \"Implement backend deletion semantics that are fully permanent and atomic. There must be no soft-delete flag, no recycle bin, and no partial deletion outcomes.\",\n      \"acceptanceCriteria\": \"- [ ] `DELETE` endpoints for epics and user stories perform hard deletes only (no soft-delete behavior).\\n- [ ] Epic delete handles related records in one transaction (child user stories and dependent artifacts), with all-or-nothing behavior.\\n- [ ] If any constraint fails, the API returns a clear error and leaves data unchanged.\\n- [ ] Existing project authorization rules are enforced before deletion is allowed.\"\n    },\n    {\n      \"title\": \"As a project collaborator, I want consistent post-delete navigation and feedback so that I always land in a valid view with up-to-date data\",\n      \"description\": \"After delete operations, the UI should route users away from removed detail pages, refresh relevant state, and provide clear success/failure feedback.\",\n      \"acceptanceCriteria\": \"- [ ] After epic deletion, navigation redirects to the project epics/kanban context with a success message.\\n- [ ] After user story deletion, navigation redirects to the parent epic/backlog context with a success message.\\n- [ ] Client cache/query state is invalidated so deleted entities disappear without manual refresh.\\n- [ ] Automated tests cover confirm, success, authorization failure, and backend error scenarios for both delete flows.\"\n    }\n  ]\n}\n```",
+        "metadata": null,
+        "created_at": "2026-02-13T14:58:17.162Z"
+      },
+      {
+        "id": "B6b_fKVuTVCT",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "vYhnMwgh2TMq",
+        "role": "user",
+        "content": "We need to refactor the doc part. \n1) when you upload a text document, it's automatically converted to markdown.\n2) We store the markdown only, in the DB\n3) In the docs tab, you can see all markdon upload, with their nbame (we use original filename), and you can delete them\n4) If it's an image, we save it, we store the path in DB, and present it in the same way as text in the docs tab\n5) When writing anywhere in the app, we need to be able to @ the filenames of one doc. When doing this, when send to the Agent, we'll send the data to the agent. For text, we'll add a little text sayong \"After this here a document that the user pasted etc ...\" For images, we say \"the picture can be found at this path : \"\n@ will also be used in the future for linking other thing like tickets",
+        "metadata": null,
+        "created_at": "2026-02-13T18:27:16.371Z"
+      }
+    ],
+    "attachments": []
+  }
+}

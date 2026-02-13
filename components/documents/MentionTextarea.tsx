@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
-import { formatDocumentMention } from "@/lib/documents/mentions";
+import { formatDocumentMention } from "@/lib/documents/mention-format";
 
 interface MentionDocument {
   id: string;

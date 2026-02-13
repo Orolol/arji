@@ -50,25 +50,19 @@ export function EpicPrControls({
   isRunning,
   onPrUpdate,
 }: EpicPrControlsProps) {
-  const { creating, syncing, error, hint, createPr, syncPrStatus } = useEpicPr(
+  const { pr, loading, error, createPr, syncPr } = useEpicPr(
     projectId,
     epicId
   );
 
-  const busy = creating || syncing;
+  const busy = loading;
 
   async function handleCreatePr() {
-    const result = await createPr();
-    if (result) {
-      onPrUpdate(result);
-    }
+    await createPr();
   }
 
   async function handleSyncStatus() {
-    const result = await syncPrStatus();
-    if (result) {
-      onPrUpdate(result);
-    }
+    await syncPr();
   }
 
   // No branch = can't create PR
@@ -85,7 +79,7 @@ export function EpicPrControls({
           disabled={busy || isRunning}
           className="h-7 text-xs"
         >
-          {creating ? (
+          {loading ? (
             <Loader2 className="h-3 w-3 animate-spin mr-1" />
           ) : (
             <GitPullRequest className="h-3 w-3 mr-1" />
@@ -122,7 +116,7 @@ export function EpicPrControls({
             className="h-6 w-6 p-0"
             title="Sync PR status from GitHub"
           >
-            {syncing ? (
+            {loading ? (
               <Loader2 className="h-3 w-3 animate-spin" />
             ) : (
               <RefreshCw className="h-3 w-3" />
@@ -136,9 +130,6 @@ export function EpicPrControls({
           <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
           <div>
             <p className="text-destructive">{error}</p>
-            {hint && (
-              <p className="text-muted-foreground mt-0.5">{hint}</p>
-            )}
           </div>
         </div>
       )}
