@@ -63,13 +63,13 @@ export function useEpicAgent(projectId: string, epicId: string | null) {
   );
 
   const sendToDev = useCallback(
-    async (comment?: string) => {
+    async (comment?: string, provider?: string) => {
       if (!epicId) return;
       setDispatching(true);
       try {
         const data = await requestJson(
           `/api/projects/${projectId}/epics/${epicId}/build`,
-          { comment }
+          { comment, provider }
         );
         await pollSessions();
         return data;
@@ -81,13 +81,13 @@ export function useEpicAgent(projectId: string, epicId: string | null) {
   );
 
   const sendToReview = useCallback(
-    async (reviewTypes: string[]) => {
+    async (reviewTypes: string[], provider?: string) => {
       if (!epicId) return;
       setDispatching(true);
       try {
         const data = await requestJson(
           `/api/projects/${projectId}/epics/${epicId}/review`,
-          { reviewTypes }
+          { reviewTypes, provider }
         );
         await pollSessions();
         return data;
