@@ -11,23 +11,51 @@ import { useEffect, useState } from "react";
  * - `loading`: true while the check is in progress
  */
 export function useCodexAvailable() {
-  const [available, setAvailable] = useState(false);
-  const [installed, setInstalled] = useState(false);
+  const { codexAvailable, codexInstalled, loading } = useProvidersAvailable();
+  return { codexAvailable, codexInstalled, loading };
+}
+
+export interface ProvidersAvailability {
+  codexAvailable: boolean;
+  codexInstalled: boolean;
+  geminiAvailable: boolean;
+  geminiInstalled: boolean;
+  loading: boolean;
+}
+
+/**
+ * Checks availability of all external CLI providers (Codex, Gemini CLI).
+ */
+export function useProvidersAvailable(): ProvidersAvailability {
+  const [state, setState] = useState<Omit<ProvidersAvailability, "loading">>({
+    codexAvailable: false,
+    codexInstalled: false,
+    geminiAvailable: false,
+    geminiInstalled: false,
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch("/api/providers/available")
       .then((r) => r.json())
       .then((d) => {
-        setAvailable(!!d.data?.codex);
-        setInstalled(!!d.data?.codexInstalled);
+        setState({
+          codexAvailable: !!d.data?.codex,
+          codexInstalled: !!d.data?.codexInstalled,
+          geminiAvailable: !!d.data?.["gemini-cli"],
+          geminiInstalled: !!d.data?.geminiInstalled,
+        });
       })
       .catch(() => {
-        setAvailable(false);
-        setInstalled(false);
+        setState({
+          codexAvailable: false,
+          codexInstalled: false,
+          geminiAvailable: false,
+          geminiInstalled: false,
+        });
       })
       .finally(() => setLoading(false));
   }, []);
 
-  return { codexAvailable: available, codexInstalled: installed, loading };
+  return { ...state, loading };
 }

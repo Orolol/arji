@@ -191,6 +191,7 @@ describe("Schema: exported types", () => {
       id: "apd_1",
       agentType: "build",
       provider: "claude-code",
+      namedAgentId: null,
       scope: "global",
       createdAt: null,
       updatedAt: null,
