@@ -152,6 +152,10 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     const hasActiveAgents = conversations.some(
       (conversation) => isLegacyConversationGenerating(conversation.status),
     );
+    // The *current* conversation is busy when useChat is actively streaming
+    // OR when the DB status says "generating" (e.g. the user switched away and back).
+    const isCurrentConversationBusy =
+      sending || isLegacyConversationGenerating(activeConversation?.status);
 
     const previousSending = useRef(sending);
     useEffect(() => {
@@ -512,7 +516,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
               onChange={handleProviderChange}
               codexAvailable={codexAvailable}
               codexInstalled={codexInstalled}
-              disabled={!activeConversation || hasMessages || sending}
+              disabled={!activeConversation || hasMessages || isCurrentConversationBusy}
               className="w-36 h-7 text-xs"
             />
             {isBrainstorm && (
@@ -538,7 +542,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                 size="sm"
                 variant="default"
                 onClick={handleCreateEpic}
-                disabled={epicCreating || sending}
+                disabled={epicCreating || isCurrentConversationBusy}
                 className="text-xs"
               >
                 {epicCreating ? (
@@ -574,7 +578,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
               <QuestionCards
                 questions={pendingQuestions}
                 onSubmit={answerQuestions}
-                disabled={sending}
+                disabled={isCurrentConversationBusy}
               />
             </div>
           )}
@@ -583,7 +587,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
         <MessageInput
           projectId={projectId}
           onSend={sendMessage}
-          disabled={sending || !activeConversation}
+          disabled={isCurrentConversationBusy || !activeConversation}
           placeholder={isEpicCreation ? "Describe your epic idea..." : "Ask a question..."}
         />
       </div>

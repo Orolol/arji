@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { QuestionData } from "@/lib/claude/spawn";
 
 export interface ChatAttachment {
@@ -27,6 +27,22 @@ export function useChat(projectId: string, conversationId: string | null) {
   const [pendingQuestions, setPendingQuestions] = useState<QuestionData[] | null>(null);
   const [streamStatus, setStreamStatus] = useState<string | null>(null);
 
+  // Track the conversation that owns the current stream so state updates
+  // from a stale stream (after the user switches tabs) are ignored.
+  const activeConvRef = useRef(conversationId);
+  activeConvRef.current = conversationId;
+
+  // AbortController for the in-flight fetch so we can cancel on conversation switch.
+  const abortRef = useRef<AbortController | null>(null);
+
+  // When the active conversation changes, reset transient UI state so the new
+  // conversation starts with a clean slate (not blocked by the previous stream).
+  useEffect(() => {
+    setSending(false);
+    setPendingQuestions(null);
+    setStreamStatus(null);
+  }, [conversationId]);
+
   const loadMessages = useCallback(async () => {
     if (!conversationId) {
       setMessages([]);
@@ -50,6 +66,18 @@ export function useChat(projectId: string, conversationId: string | null) {
 
   const sendMessage = useCallback(
     async (content: string, attachmentIds?: string[], options?: { finalize?: boolean }) => {
+      // Capture the conversation this send belongs to so we can guard state updates.
+      const ownerConversationId = conversationId;
+
+      // Abort any previous in-flight stream for this hook instance.
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      // Helper: only update state if this conversation is still the active one.
+      // This prevents a slow-finishing stream from clobbering the new conversation.
+      const isStale = () => activeConvRef.current !== ownerConversationId;
+
       setSending(true);
       setPendingQuestions(null);
       setStreamStatus(null);
@@ -80,7 +108,8 @@ export function useChat(projectId: string, conversationId: string | null) {
         const res = await fetch(`/api/projects/${projectId}/chat/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, conversationId, attachmentIds, finalize: options?.finalize }),
+          body: JSON.stringify({ content, conversationId: ownerConversationId, attachmentIds, finalize: options?.finalize }),
+          signal: controller.signal,
         });
 
         if (!res.ok || !res.body) {
@@ -95,6 +124,9 @@ export function useChat(projectId: string, conversationId: string | null) {
           const { done, value } = await reader.read();
           if (done) break;
 
+          // If the user switched away, stop processing but let the server finish.
+          if (isStale()) break;
+
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
@@ -104,6 +136,8 @@ export function useChat(projectId: string, conversationId: string | null) {
             const payload = line.slice(6);
             try {
               const event = JSON.parse(payload);
+              if (isStale()) continue;
+
               if (event.status) {
                 setStreamStatus(event.status);
               }
@@ -132,14 +166,21 @@ export function useChat(projectId: string, conversationId: string | null) {
             }
           }
         }
-      } catch {
-        // Remove optimistic messages on error
-        setMessages((prev) =>
-          prev.filter((m) => m.id !== userTempId && m.id !== assistantTempId)
-        );
+      } catch (err) {
+        // Don't touch state if aborted due to conversation switch
+        if (err instanceof DOMException && err.name === "AbortError") return;
+
+        if (!isStale()) {
+          // Remove optimistic messages on error
+          setMessages((prev) =>
+            prev.filter((m) => m.id !== userTempId && m.id !== assistantTempId)
+          );
+        }
       }
-      setSending(false);
-      setStreamStatus(null);
+      if (!isStale()) {
+        setSending(false);
+        setStreamStatus(null);
+      }
     },
     [projectId, conversationId, loadMessages]
   );
