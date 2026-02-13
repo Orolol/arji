@@ -4,6 +4,10 @@ import { userStories } from "@/lib/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { tryExportArjiJson } from "@/lib/sync/export";
+import {
+  deleteUserStoryPermanently,
+  ScopedDeleteNotFoundError,
+} from "@/lib/planning/permanent-delete";
 
 export async function GET(
   request: NextRequest,
@@ -104,7 +108,19 @@ export async function DELETE(
     return NextResponse.json({ error: "id query param is required" }, { status: 400 });
   }
 
-  db.delete(userStories).where(eq(userStories.id, id)).run();
-  tryExportArjiJson(projectId);
-  return NextResponse.json({ data: { deleted: true } });
+  try {
+    const result = deleteUserStoryPermanently(projectId, id);
+    tryExportArjiJson(projectId);
+    return NextResponse.json({ data: { deleted: true, epicId: result.epicId } });
+  } catch (error) {
+    if (error instanceof ScopedDeleteNotFoundError) {
+      return NextResponse.json({ error: "User story not found" }, { status: 404 });
+    }
+
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json(
+      { error: `Failed to delete user story: ${message}` },
+      { status: 409 },
+    );
+  }
 }

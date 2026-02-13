@@ -32,11 +32,12 @@ import { PRIORITY_LABELS, KANBAN_COLUMNS, COLUMN_LABELS } from "@/lib/types/kanb
 import { useEpicPr } from "@/hooks/useEpicPr";
 import { PrBadge } from "@/components/github/PrBadge";
 import { Plus, Trash2, Check, Circle, Loader2, GitBranch, GitMerge, GitPullRequest, Wrench, ArrowUp, ArrowDown, Upload, RefreshCw, Bug } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { isAgentAlreadyRunningError } from "@/lib/agents/client-error";
 import { useCodexAvailable } from "@/hooks/useCodexAvailable";
 import type { ProviderType } from "@/components/shared/ProviderSelect";
+import { PermanentDeleteDialog } from "@/components/shared/PermanentDeleteDialog";
 
 interface EpicDetailProps {
   projectId: string;
@@ -44,6 +45,7 @@ interface EpicDetailProps {
   open: boolean;
   onClose: () => void;
   onMerged?: () => void;
+  onDeleted?: () => void;
   onAgentConflict?: (args: { message: string; sessionUrl?: string }) => void;
 }
 
@@ -53,6 +55,7 @@ export function EpicDetail({
   open,
   onClose,
   onMerged,
+  onDeleted,
   onAgentConflict,
 }: EpicDetailProps) {
   const {
@@ -112,6 +115,10 @@ export function EpicDetail({
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
   const [resolvingMerge, setResolvingMerge] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingEpic, setDeletingEpic] = useState(false);
+  const [deleteEpicError, setDeleteEpicError] = useState<string | null>(null);
+  const deleteInFlightRef = useRef(false);
 
   async function handleMerge() {
     if (!epicId) return;
@@ -173,6 +180,34 @@ export function EpicDetail({
   async function handleSendToReview(types: string[], provider?: ProviderType) {
     await sendToReview(types, provider);
     refresh();
+  }
+
+  async function handleDeleteEpic() {
+    if (!epicId || deleteInFlightRef.current) return;
+    deleteInFlightRef.current = true;
+    setDeletingEpic(true);
+    setDeleteEpicError(null);
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/epics/${epicId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || data.error) {
+        setDeleteEpicError(data.error || "Failed to delete epic");
+        return;
+      }
+
+      setDeleteDialogOpen(false);
+      onClose();
+      onDeleted?.();
+    } catch {
+      setDeleteEpicError("Failed to delete epic");
+    } finally {
+      deleteInFlightRef.current = false;
+      setDeletingEpic(false);
+    }
   }
 
   function handleAddUS() {
@@ -560,10 +595,42 @@ export function EpicDetail({
                   onAddComment={addComment}
                 />
               </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-destructive">Danger Zone</h4>
+                <p className="text-xs text-muted-foreground">
+                  Permanently delete this epic, all child stories, and dependent
+                  planning records.
+                </p>
+                {deleteEpicError && (
+                  <p className="text-xs text-destructive">{deleteEpicError}</p>
+                )}
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="h-8 text-xs"
+                  onClick={() => setDeleteDialogOpen(true)}
+                  disabled={deletingEpic}
+                >
+                  Delete Epic
+                </Button>
+              </div>
             </div>
           </>
         )}
       </SheetContent>
+
+      <PermanentDeleteDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title="Delete Epic"
+        description="Permanently delete this epic and all related user stories."
+        confirmLabel="Confirm Delete"
+        deleting={deletingEpic}
+        onConfirm={handleDeleteEpic}
+      />
     </Sheet>
   );
 }

@@ -133,9 +133,10 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
 
   const deleteUserStory = useCallback(
     async (usId: string) => {
-      await fetch(`/api/projects/${projectId}/user-stories?id=${usId}`, {
+      const res = await fetch(`/api/projects/${projectId}/stories/${usId}`, {
         method: "DELETE",
       });
+      if (!res.ok) return;
       setUserStories((prev) => prev.filter((us) => us.id !== usId));
     },
     [projectId]

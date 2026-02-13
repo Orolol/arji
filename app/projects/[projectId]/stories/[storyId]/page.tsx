@@ -1,7 +1,7 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useRef, useState } from "react";
 import { useStoryDetail } from "@/hooks/useStoryDetail";
 import { useComments } from "@/hooks/useComments";
 import { useTicketAgent } from "@/hooks/useTicketAgent";
@@ -9,6 +9,8 @@ import { useCodexAvailable } from "@/hooks/useCodexAvailable";
 import { StoryDetailPanel } from "@/components/story/StoryDetailPanel";
 import { CommentThread } from "@/components/story/CommentThread";
 import { StoryActions } from "@/components/story/StoryActions";
+import { Button } from "@/components/ui/button";
+import { PermanentDeleteDialog } from "@/components/shared/PermanentDeleteDialog";
 import { ArrowLeft, Loader2, XCircle, X } from "lucide-react";
 import Link from "next/link";
 import { isAgentAlreadyRunningError } from "@/lib/agents/client-error";
@@ -21,9 +23,13 @@ interface Toast {
 
 export default function StoryDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = params.projectId as string;
   const storyId = params.storyId as string;
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingStory, setDeletingStory] = useState(false);
+  const deleteInFlightRef = useRef(false);
 
   const {
     story,
@@ -66,6 +72,32 @@ export default function StoryDetailPage() {
       return;
     }
     addToast(error instanceof Error ? error.message : "Failed to run agent action");
+  }
+
+  async function handleDeleteStory() {
+    if (deleteInFlightRef.current) return;
+    deleteInFlightRef.current = true;
+    setDeletingStory(true);
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/stories/${storyId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || data.error) {
+        addToast(data.error || "Failed to delete story");
+        return;
+      }
+
+      setDeleteDialogOpen(false);
+      router.push(`/projects/${projectId}?deleted=story`);
+    } catch {
+      addToast("Failed to delete story");
+    } finally {
+      deleteInFlightRef.current = false;
+      setDeletingStory(false);
+    }
   }
 
   if (storyLoading) {
@@ -137,6 +169,21 @@ export default function StoryDetailPage() {
             story={story}
             onUpdate={updateStory}
           />
+          <div className="px-6 pb-6 space-y-2">
+            <h4 className="text-sm font-medium text-destructive">Danger Zone</h4>
+            <p className="text-xs text-muted-foreground">
+              Permanently delete this user story and all dependent records.
+            </p>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-8 text-xs"
+              onClick={() => setDeleteDialogOpen(true)}
+              disabled={deletingStory}
+            >
+              Delete User Story
+            </Button>
+          </div>
         </div>
 
         {/* Right: Comment thread */}
@@ -171,6 +218,16 @@ export default function StoryDetailPage() {
           </div>
         ))}
       </div>
+
+      <PermanentDeleteDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title="Delete User Story"
+        description="Permanently delete this user story and its linked planning data."
+        confirmLabel="Confirm Delete"
+        deleting={deletingStory}
+        onConfirm={handleDeleteStory}
+      />
     </div>
   );
 }
