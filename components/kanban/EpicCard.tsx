@@ -19,6 +19,7 @@ import {
   Search,
   GitMerge,
   Bug,
+  Bot,
   type LucideIcon,
 } from "lucide-react";
 
@@ -28,6 +29,7 @@ interface EpicCardProps {
   isRunning?: boolean;
   activeAgentActivity?: KanbanEpicAgentActivity;
   onLinkedAgentHoverChange?: (activityId: string | null) => void;
+  hasUnreadAiUpdate?: boolean;
   onClick?: () => void;
   selected?: boolean;
   onToggleSelect?: () => void;
@@ -47,6 +49,7 @@ export function EpicCard({
   isOverlay,
   activeAgentActivity,
   onLinkedAgentHoverChange,
+  hasUnreadAiUpdate = false,
   onClick,
   selected,
   onToggleSelect,
@@ -132,17 +135,29 @@ export function EpicCard({
           )}
           <h4 className="text-sm font-medium leading-tight truncate">{epic.title}</h4>
         </div>
-        <Badge
-          className={`text-xs shrink-0 ${PRIORITY_COLORS[epic.priority] || PRIORITY_COLORS[0]}`}
-        >
-          {PRIORITY_LABELS[epic.priority] || "Low"}
-        </Badge>
-        {epic.type === "bug" && (
-          <Badge className="text-xs shrink-0 bg-red-500/10 text-red-400">
-            <Bug className="h-3 w-3 mr-0.5" />
-            Bug
+        <div className="flex items-center gap-1 shrink-0">
+          {hasUnreadAiUpdate && (
+            <span
+              className="inline-flex items-center justify-center rounded-sm bg-sky-500/15 text-sky-600 p-0.5"
+              aria-label="Unread AI update"
+              title="Unread AI update"
+              data-testid={`epic-unread-ai-${epic.id}`}
+            >
+              <Bot className="h-3.5 w-3.5" />
+            </span>
+          )}
+          <Badge
+            className={`text-xs shrink-0 ${PRIORITY_COLORS[epic.priority] || PRIORITY_COLORS[0]}`}
+          >
+            {PRIORITY_LABELS[epic.priority] || "Low"}
           </Badge>
-        )}
+          {epic.type === "bug" && (
+            <Badge className="text-xs shrink-0 bg-red-500/10 text-red-400">
+              <Bug className="h-3 w-3 mr-0.5" />
+              Bug
+            </Badge>
+          )}
+        </div>
       </div>
       <div className="flex items-center justify-between mt-1">
         <span className="text-xs text-muted-foreground">

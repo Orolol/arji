@@ -22,6 +22,7 @@ interface ColumnProps {
   runningEpicIds?: Set<string>;
   activeAgentActivities?: Record<string, KanbanEpicAgentActivity>;
   onLinkedAgentHoverChange?: (activityId: string | null) => void;
+  unreadAiByEpicId?: Record<string, boolean>;
 }
 
 export function Column({
@@ -33,6 +34,7 @@ export function Column({
   runningEpicIds,
   activeAgentActivities,
   onLinkedAgentHoverChange,
+  unreadAiByEpicId,
 }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
@@ -64,6 +66,7 @@ export function Column({
                 isRunning={runningEpicIds?.has(epic.id) || false}
                 activeAgentActivity={activeAgentActivities?.[epic.id]}
                 onLinkedAgentHoverChange={onLinkedAgentHoverChange}
+                hasUnreadAiUpdate={unreadAiByEpicId?.[epic.id] || false}
                 onToggleSelect={
                   onToggleSelect
                     ? () => onToggleSelect(epic.id)
