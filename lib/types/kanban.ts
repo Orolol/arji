@@ -46,6 +46,9 @@ export interface KanbanEpic {
   evidence: string | null;
   createdAt: string;
   updatedAt: string;
+  type: string; // 'feature' | 'bug'
+  linkedEpicId: string | null;
+  images: string | null; // JSON array
   usCount: number;
   usDone: number;
 }

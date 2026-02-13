@@ -23,6 +23,9 @@ interface EpicDetail {
   prNumber: number | null;
   prUrl: string | null;
   prStatus: string | null;
+  type: string;
+  linkedEpicId: string | null;
+  images: string | null;
 }
 
 export function useEpicDetail(projectId: string, epicId: string | null) {
