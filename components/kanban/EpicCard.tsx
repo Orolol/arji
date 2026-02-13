@@ -9,7 +9,7 @@ import {
   PRIORITY_COLORS,
   type KanbanEpic,
 } from "@/lib/types/kanban";
-import { Square, CheckSquare, Loader2 } from "lucide-react";
+import { Square, CheckSquare, GitPullRequest, Loader2 } from "lucide-react";
 
 interface EpicCardProps {
   epic: KanbanEpic;
@@ -88,10 +88,22 @@ export function EpicCard({
           {PRIORITY_LABELS[epic.priority] || "Low"}
         </Badge>
       </div>
-      <div className="flex items-center gap-3 mt-1">
+      <div className="flex items-center justify-between mt-1">
         <span className="text-xs text-muted-foreground">
           {epic.usDone}/{epic.usCount} US
         </span>
+        {epic.prNumber && epic.prUrl && (
+          <a
+            href={epic.prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <GitPullRequest className="h-3 w-3" />
+            <span>#{epic.prNumber}</span>
+          </a>
+        )}
         {isRunning && (
           <span
             className="inline-flex items-center gap-1 text-xs text-yellow-600"

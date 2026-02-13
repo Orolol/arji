@@ -54,26 +54,33 @@
     {
       "idx": 7,
       "version": "6",
+      "when": 1770937218019,
+      "tag": "0005_glossy_spitfire",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
       "when": 1770937223060,
       "tag": "0005_oval_loners",
       "breakpoints": true
     },
     {
-      "idx": 8,
+      "idx": 9,
       "version": "6",
       "when": 1770969600000,
       "tag": "0004_session_lifecycle_guard",
       "breakpoints": true
     },
     {
-      "idx": 9,
+      "idx": 10,
       "version": "6",
       "when": 1770970800000,
       "tag": "0005_codex_session_chunks",
       "breakpoints": true
     },
     {
-      "idx": 10,
+      "idx": 11,
       "version": "6",
       "when": 1770972000000,
       "tag": "0006_session_last_non_empty_text",

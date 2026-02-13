@@ -43,6 +43,9 @@ export const epics = sqliteTable("epics", {
   status: text("status").default("backlog"), // backlog | todo | in_progress | review | done
   position: integer("position").default(0),
   branchName: text("branch_name"),
+  prNumber: integer("pr_number"),
+  prUrl: text("pr_url"),
+  prStatus: text("pr_status"), // draft | open | closed | merged
   confidence: real("confidence"),
   evidence: text("evidence"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
@@ -183,6 +186,22 @@ export const releases = sqliteTable("releases", {
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const pullRequests = sqliteTable("pull_requests", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  epicId: text("epic_id").references(() => epics.id, { onDelete: "set null" }),
+  number: integer("number").notNull(),
+  url: text("url").notNull(),
+  title: text("title").notNull(),
+  status: text("status").notNull().default("open"), // draft | open | closed | merged
+  headBranch: text("head_branch").notNull(),
+  baseBranch: text("base_branch").notNull().default("main"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(), // JSON
@@ -268,6 +287,9 @@ export type NewCustomReviewAgent = typeof customReviewAgents.$inferInsert;
 
 export type AgentProviderDefault = typeof agentProviderDefaults.$inferSelect;
 export type NewAgentProviderDefault = typeof agentProviderDefaults.$inferInsert;
+
+export type PullRequest = typeof pullRequests.$inferSelect;
+export type NewPullRequest = typeof pullRequests.$inferInsert;
 
 export type Release = typeof releases.$inferSelect;
 export type NewRelease = typeof releases.$inferInsert;
