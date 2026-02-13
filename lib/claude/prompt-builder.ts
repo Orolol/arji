@@ -905,7 +905,12 @@ You are performing a **feature completeness review** on the ticket described abo
 2. **Actively test the feature**: launch the app if needed, use the browser to navigate to relevant pages, run commands, execute tests.
 3. Go through each acceptance criterion and verify it with concrete evidence.
 4. Produce a structured report with PASS/FAIL/PARTIAL for each criterion.
-5. End with a summary: number of criteria passed/failed, and an overall assessment (Feature Complete / Partially Complete / Not Complete).
+5. End with a summary: number of criteria passed/failed, and an overall verdict.
+
+**IMPORTANT — Final Verdict:** Your report MUST end with exactly one of these lines:
+- \`**Overall Verdict: Feature Complete**\` — if all acceptance criteria pass
+- \`**Overall Verdict: Partially Complete**\` — if some criteria fail
+- \`**Overall Verdict: Not Complete**\` — if major criteria fail
 
 Your response should be a well-formatted markdown report. Do NOT just read the code — actually run and test the feature.
 `);
@@ -921,7 +926,12 @@ You are performing a **${reviewType.replace("_", " ")}** on the code changes for
 2. Evaluate the code against every item in the checklist above.
 3. Produce a structured report with your findings.
 4. If no issues are found for a category, state "No issues found."
-5. End with a summary: total findings by severity, and an overall assessment (Approved / Approved with Minor Issues / Changes Requested).
+5. End with a summary: total findings by severity, and an overall verdict.
+
+**IMPORTANT — Final Verdict:** Your report MUST end with exactly one of these lines:
+- \`**Overall Verdict: Approved**\` — no blocking issues found
+- \`**Overall Verdict: Approved with Minor Issues**\` — minor suggestions only
+- \`**Overall Verdict: Changes Requested**\` — blocking issues that must be fixed
 
 Your response should be a well-formatted markdown report.
 `);
@@ -1057,7 +1067,12 @@ You are performing a **feature completeness review** on the entire epic describe
 2. **Actively test the features**: launch the app if needed, use the browser to navigate to relevant pages, run commands, execute tests.
 3. Go through each user story and its acceptance criteria, verifying with concrete evidence.
 4. Produce a structured report with PASS/FAIL/PARTIAL for each user story and criterion.
-5. End with a summary: number of stories/criteria passed/failed, and an overall assessment (Feature Complete / Partially Complete / Not Complete).
+5. End with a summary: number of stories/criteria passed/failed, and an overall verdict.
+
+**IMPORTANT — Final Verdict:** Your report MUST end with exactly one of these lines:
+- \`**Overall Verdict: Feature Complete**\` — if all acceptance criteria pass
+- \`**Overall Verdict: Partially Complete**\` — if some criteria fail
+- \`**Overall Verdict: Not Complete**\` — if major criteria fail
 
 Your response should be a well-formatted markdown report. Do NOT just read the code — actually run and test the features.
 `);
@@ -1070,7 +1085,12 @@ You are performing a **${reviewType.replace("_", " ")}** on the entire epic desc
 2. Evaluate the code against every item in the checklist above.
 3. Produce a structured report with your findings.
 4. If no issues are found for a category, state "No issues found."
-5. End with a summary: total findings by severity, and an overall assessment (Approved / Approved with Minor Issues / Changes Requested).
+5. End with a summary: total findings by severity, and an overall verdict.
+
+**IMPORTANT — Final Verdict:** Your report MUST end with exactly one of these lines:
+- \`**Overall Verdict: Approved**\` — no blocking issues found
+- \`**Overall Verdict: Approved with Minor Issues**\` — minor suggestions only
+- \`**Overall Verdict: Changes Requested**\` — blocking issues that must be fixed
 
 Your response should be a well-formatted markdown report.
 `);

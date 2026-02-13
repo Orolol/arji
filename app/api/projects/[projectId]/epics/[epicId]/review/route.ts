@@ -7,7 +7,7 @@ import {
   documents,
   ticketComments,
 } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, notInArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
@@ -80,9 +80,9 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (!epic) {
     return NextResponse.json({ error: "Epic not found" }, { status: 404 });
   }
-  if (epic.status !== "review") {
+  if (epic.status !== "review" && epic.status !== "done") {
     return NextResponse.json(
-      { error: "Epic must be in review status for agent review" },
+      { error: "Epic must be in review or done status for agent review" },
       { status: 400 }
     );
   }
@@ -268,6 +268,39 @@ export async function POST(request: NextRequest, { params }: Params) {
             createdAt: completedAt,
           })
           .run();
+
+        // If the review verdict indicates work is not done, revert
+        // epic and user stories back to in_progress
+        const lowerOutput = output.toLowerCase();
+        const isNegativeVerdict =
+          lowerOutput.includes("changes requested") ||
+          lowerOutput.includes("not complete") ||
+          lowerOutput.includes("partially complete");
+
+        if (isNegativeVerdict) {
+          const currentEpic = db
+            .select()
+            .from(epics)
+            .where(eq(epics.id, epicId))
+            .get();
+
+          if (currentEpic && (currentEpic.status === "done" || currentEpic.status === "review")) {
+            db.update(epics)
+              .set({ status: "in_progress", updatedAt: completedAt })
+              .where(eq(epics.id, epicId))
+              .run();
+
+            db.update(userStories)
+              .set({ status: "in_progress" })
+              .where(
+                and(
+                  eq(userStories.epicId, epicId),
+                  notInArray(userStories.status, ["in_progress"])
+                )
+              )
+              .run();
+          }
+        }
       })();
     })(sessionId, label);
 

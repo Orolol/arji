@@ -33,10 +33,10 @@ export function UserStoryQuickActions({
   const actionsLocked = loading !== null || isLocked;
 
   const canSendToDev = ["todo", "in_progress"].includes(story.status);
-  const canReview = story.status === "review";
+  const canReview = story.status === "review" || story.status === "done";
   const canApprove = story.status === "review";
 
-  if (story.status === "done") return null;
+  if (!canSendToDev && !canReview && !canApprove) return null;
 
   async function handleSendToDev() {
     setLoading("dev");

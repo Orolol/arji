@@ -240,10 +240,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
 
-    // On success: move story to review
+    // On success: move story to done
     if (result?.success) {
       db.update(userStories)
-        .set({ status: "review" })
+        .set({ status: "done" })
         .where(
           and(
             eq(userStories.id, storyId),
@@ -251,6 +251,24 @@ export async function POST(request: NextRequest, { params }: Params) {
           )
         )
         .run();
+
+      // Check if all stories in the epic are now done
+      const allStories = db
+        .select()
+        .from(userStories)
+        .where(eq(userStories.epicId, epic.id))
+        .all();
+
+      const allDone = allStories.every(
+        (s) => s.id === storyId || s.status === "done"
+      );
+
+      if (allDone) {
+        db.update(epics)
+          .set({ status: "done", updatedAt: completedAt })
+          .where(eq(epics.id, epic.id))
+          .run();
+      }
     }
 
     // Post agent output as comment

@@ -68,7 +68,7 @@ export function EpicActions({
   const status = epic.status;
   const canSendToDev = ["backlog", "todo", "in_progress"].includes(status);
   const canSendToDevFromReview = status === "review";
-  const canReview = status === "review";
+  const canReview = status === "review" || status === "done";
   const canApprove = status === "review";
   const actionsLocked = dispatching || isRunning;
   const lockMessage =

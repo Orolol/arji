@@ -221,20 +221,20 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
 
-    // On success: in_progress US -> review, epic -> review
+    // On success: all non-done US -> done, epic -> done
     if (result?.success) {
       db.update(userStories)
-        .set({ status: "review" })
+        .set({ status: "done" })
         .where(
           and(
             eq(userStories.epicId, epicId),
-            eq(userStories.status, "in_progress")
+            notInArray(userStories.status, ["done"])
           )
         )
         .run();
 
       db.update(epics)
-        .set({ status: "review", updatedAt: completedAt })
+        .set({ status: "done", updatedAt: completedAt })
         .where(eq(epics.id, epicId))
         .run();
     }

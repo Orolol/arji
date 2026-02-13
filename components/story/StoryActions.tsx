@@ -68,7 +68,7 @@ export function StoryActions({
   const status = story.status;
   const canSendToDev = ["todo", "in_progress"].includes(status);
   const canSendToDevFromReview = status === "review";
-  const canReview = status === "review";
+  const canReview = status === "review" || status === "done";
   const canApprove = status === "review";
   const actionsLocked = dispatching || isRunning;
   const lockMessage =

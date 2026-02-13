@@ -91,9 +91,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Story not found" }, { status: 404 });
   }
 
-  if (story.status !== "review") {
+  if (story.status !== "review" && story.status !== "done") {
     return NextResponse.json(
-      { error: "Story must be in review status for agent review" },
+      { error: "Story must be in review or done status for agent review" },
       { status: 400 }
     );
   }
@@ -283,6 +283,43 @@ export async function POST(request: NextRequest, { params }: Params) {
             createdAt: completedAt,
           })
           .run();
+
+        // If the review verdict indicates work is not done, revert
+        // the story back to in_progress
+        const lowerOutput = output.toLowerCase();
+        const isNegativeVerdict =
+          lowerOutput.includes("changes requested") ||
+          lowerOutput.includes("not complete") ||
+          lowerOutput.includes("partially complete");
+
+        if (isNegativeVerdict) {
+          const currentStory = db
+            .select()
+            .from(userStories)
+            .where(eq(userStories.id, storyId))
+            .get();
+
+          if (currentStory && (currentStory.status === "done" || currentStory.status === "review")) {
+            db.update(userStories)
+              .set({ status: "in_progress" })
+              .where(eq(userStories.id, storyId))
+              .run();
+
+            // Also revert the parent epic if it's done/review
+            const parentEpic = db
+              .select()
+              .from(epics)
+              .where(eq(epics.id, currentStory.epicId))
+              .get();
+
+            if (parentEpic && (parentEpic.status === "done" || parentEpic.status === "review")) {
+              db.update(epics)
+                .set({ status: "in_progress", updatedAt: completedAt })
+                .where(eq(epics.id, currentStory.epicId))
+                .run();
+            }
+          }
+        }
       })();
     })(sessionId, reviewType, label);
 
