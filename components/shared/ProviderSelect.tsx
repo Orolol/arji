@@ -22,6 +22,8 @@ interface ProviderSelectProps {
   codexAvailable: boolean;
   /** Whether the codex binary is on PATH (even if not logged in). */
   codexInstalled?: boolean;
+  geminiAvailable?: boolean;
+  geminiInstalled?: boolean;
   disabled?: boolean;
   className?: string;
 }
@@ -31,13 +33,19 @@ export function ProviderSelect({
   onChange,
   codexAvailable,
   codexInstalled = false,
+  geminiAvailable = false,
+  geminiInstalled = false,
   disabled = false,
   className,
 }: ProviderSelectProps) {
-  const tooltipMessage =
+  const codexTooltip =
     codexInstalled && !codexAvailable
       ? "Codex CLI not authenticated. Run: codex login"
       : "Codex CLI not found. Install it with: npm i -g @openai/codex";
+
+  const geminiTooltip = !geminiInstalled
+    ? "Gemini CLI not found. Install it with: npm i -g @anthropic-ai/claude-code"
+    : "";
 
   return (
     <TooltipProvider>
@@ -64,7 +72,23 @@ export function ProviderSelect({
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                {tooltipMessage}
+                {codexTooltip}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {geminiAvailable ? (
+            <SelectItem value="gemini-cli">Gemini CLI</SelectItem>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div>
+                  <SelectItem value="gemini-cli" disabled>
+                    Gemini CLI
+                  </SelectItem>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                {geminiTooltip}
               </TooltipContent>
             </Tooltip>
           )}

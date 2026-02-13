@@ -296,3 +296,87 @@ export function useReviewAgents(
 
   return { data, loading, refresh: load, createAgent, updateAgent, deleteAgent };
 }
+
+// ---------------------------------------------------------------------------
+// Named Agents
+// ---------------------------------------------------------------------------
+
+export interface NamedAgent {
+  id: string;
+  name: string;
+  provider: AgentProvider;
+  model: string;
+  createdAt: string | null;
+}
+
+export function useNamedAgents() {
+  const [data, setData] = useState<NamedAgent[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/agent-config/named-agents");
+      const json = await res.json();
+      setData(json.data || []);
+    } catch {
+      // ignore
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const createNamedAgent = useCallback(
+    async (input: { name: string; provider: AgentProvider; model: string }) => {
+      const res = await fetch("/api/agent-config/named-agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (res.ok) await load();
+      const json = await res.json();
+      return { ok: res.ok, error: json.error };
+    },
+    [load],
+  );
+
+  const updateNamedAgent = useCallback(
+    async (
+      id: string,
+      updates: { name?: string; provider?: AgentProvider; model?: string },
+    ) => {
+      const res = await fetch(`/api/agent-config/named-agents/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) await load();
+      const json = await res.json();
+      return { ok: res.ok, error: json.error };
+    },
+    [load],
+  );
+
+  const deleteNamedAgent = useCallback(
+    async (id: string) => {
+      const res = await fetch(`/api/agent-config/named-agents/${id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) await load();
+      return res.ok;
+    },
+    [load],
+  );
+
+  return {
+    data,
+    loading,
+    refresh: load,
+    createNamedAgent,
+    updateNamedAgent,
+    deleteNamedAgent,
+  };
+}
