@@ -408,20 +408,20 @@ export async function POST(
         }
       }
 
-      // Move epic + US to review if successful
+      // Move epic + US to done if successful
       if (result?.success) {
         db.update(userStories)
-          .set({ status: "review" })
+          .set({ status: "done" })
           .where(
             and(
               eq(userStories.epicId, epicId),
-              eq(userStories.status, "in_progress")
+              notInArray(userStories.status, ["done"])
             )
           )
           .run();
 
         db.update(epics)
-          .set({ status: "review", updatedAt: completedAt })
+          .set({ status: "done", updatedAt: completedAt })
           .where(eq(epics.id, epicId))
           .run();
       }
