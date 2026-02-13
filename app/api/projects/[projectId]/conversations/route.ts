@@ -15,7 +15,7 @@ function normalizeConversationsForParity<T extends {
   id: string;
   type: string;
   status: string | null;
-  createdAt: string;
+  createdAt: string | null;
 }>(conversations: T[]): T[] {
   return sortConversationsForLegacyParity(
     conversations.map((conversation) => ({
