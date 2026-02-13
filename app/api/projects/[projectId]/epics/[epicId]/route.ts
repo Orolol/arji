@@ -3,6 +3,10 @@ import { db } from "@/lib/db";
 import { epics } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { tryExportArjiJson } from "@/lib/sync/export";
+import {
+  deleteEpicPermanently,
+  ScopedDeleteNotFoundError,
+} from "@/lib/planning/permanent-delete";
 
 export async function PATCH(
   request: NextRequest,
@@ -37,12 +41,19 @@ export async function DELETE(
 ) {
   const { projectId, epicId } = await params;
 
-  const existing = db.select().from(epics).where(eq(epics.id, epicId)).get();
-  if (!existing) {
-    return NextResponse.json({ error: "Epic not found" }, { status: 404 });
-  }
+  try {
+    deleteEpicPermanently(projectId, epicId);
+    tryExportArjiJson(projectId);
+    return NextResponse.json({ data: { deleted: true } });
+  } catch (error) {
+    if (error instanceof ScopedDeleteNotFoundError) {
+      return NextResponse.json({ error: "Epic not found" }, { status: 404 });
+    }
 
-  db.delete(epics).where(eq(epics.id, epicId)).run();
-  tryExportArjiJson(projectId);
-  return NextResponse.json({ data: { deleted: true } });
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json(
+      { error: `Failed to delete epic: ${message}` },
+      { status: 409 },
+    );
+  }
 }
