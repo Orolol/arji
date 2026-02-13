@@ -56,7 +56,7 @@ export async function PATCH(
   }
 
   const updates: Record<string, string> = {};
-  if (body.provider && ["claude-code", "codex"].includes(body.provider)) {
+  if (body.provider && ["claude-code", "codex", "gemini-cli"].includes(body.provider)) {
     updates.provider = body.provider;
   }
   if (body.label) {

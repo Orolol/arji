@@ -1,17 +1,19 @@
 "use client";
 
-import { Textarea } from "@/components/ui/textarea";
+import { MentionTextarea } from "@/components/documents/MentionTextarea";
 
 interface SpecEditorProps {
+  projectId: string;
   value: string;
   onChange: (value: string) => void;
 }
 
-export function SpecEditor({ value, onChange }: SpecEditorProps) {
+export function SpecEditor({ projectId, value, onChange }: SpecEditorProps) {
   return (
-    <Textarea
+    <MentionTextarea
+      projectId={projectId}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onValueChange={onChange}
       placeholder="Write your project specification in markdown..."
       className="min-h-[500px] font-mono text-sm"
     />

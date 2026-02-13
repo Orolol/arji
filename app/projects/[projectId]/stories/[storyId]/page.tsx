@@ -140,6 +140,7 @@ export default function StoryDetailPage() {
         )}
         <div className="flex-1" />
         <StoryActions
+          projectId={projectId}
           story={story}
           dispatching={dispatching}
           isRunning={isRunning}
@@ -189,6 +190,7 @@ export default function StoryDetailPage() {
         {/* Right: Comment thread */}
         <div className="w-1/2 flex flex-col overflow-hidden">
           <CommentThread
+            projectId={projectId}
             comments={comments}
             loading={commentsLoading}
             onAddComment={addComment}

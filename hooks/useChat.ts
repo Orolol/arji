@@ -24,6 +24,7 @@ export function useChat(projectId: string, conversationId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [pendingQuestions, setPendingQuestions] = useState<QuestionData[] | null>(null);
   const [streamStatus, setStreamStatus] = useState<string | null>(null);
 
@@ -41,6 +42,7 @@ export function useChat(projectId: string, conversationId: string | null) {
     setSending(false);
     setPendingQuestions(null);
     setStreamStatus(null);
+    setError(null);
   }, [conversationId]);
 
   const loadMessages = useCallback(async () => {
@@ -81,6 +83,7 @@ export function useChat(projectId: string, conversationId: string | null) {
       setSending(true);
       setPendingQuestions(null);
       setStreamStatus(null);
+      setError(null);
 
       // Optimistically add user message + empty assistant placeholder
       const userTempId = `temp-user-${Date.now()}`;
@@ -113,7 +116,8 @@ export function useChat(projectId: string, conversationId: string | null) {
         });
 
         if (!res.ok || !res.body) {
-          throw new Error("Stream request failed");
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(payload.error || "Stream request failed");
         }
 
         const reader = res.body.getReader();
@@ -175,6 +179,7 @@ export function useChat(projectId: string, conversationId: string | null) {
           setMessages((prev) =>
             prev.filter((m) => m.id !== userTempId && m.id !== assistantTempId)
           );
+          setError(err instanceof Error ? err.message : "Failed to send message");
         }
       }
       if (!isStale()) {
@@ -197,6 +202,7 @@ export function useChat(projectId: string, conversationId: string | null) {
     setMessages,
     loading,
     sending,
+    error,
     pendingQuestions,
     streamStatus,
     sendMessage,

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import { Send, ImagePlus, X, Loader2 } from "lucide-react";
 
 export interface PendingAttachment {
@@ -23,7 +23,6 @@ export function MessageInput({ projectId, onSend, disabled, placeholder = "Ask a
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const uploadFile = useCallback(
@@ -146,10 +145,10 @@ export function MessageInput({ projectId, onSend, disabled, placeholder = "Ask a
       )}
 
       <div className="flex gap-2">
-        <Textarea
-          ref={textareaRef}
+        <MentionTextarea
+          projectId={projectId}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onValueChange={setValue}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder={placeholder}

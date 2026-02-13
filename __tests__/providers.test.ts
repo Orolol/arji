@@ -23,6 +23,17 @@ vi.mock("@/lib/codex/spawn", () => ({
   })),
 }));
 
+vi.mock("@/lib/gemini/spawn", () => ({
+  spawnGemini: vi.fn(() => ({
+    promise: Promise.resolve({
+      success: true,
+      result: "Gemini output",
+      duration: 400,
+    }),
+    kill: vi.fn(),
+  })),
+}));
+
 vi.mock("child_process", () => {
   const execSync = vi.fn();
   return {
@@ -36,6 +47,7 @@ vi.mock("child_process", () => {
 import { getProvider } from "@/lib/providers";
 import { ClaudeCodeProvider } from "@/lib/providers/claude-code";
 import { CodexProvider } from "@/lib/providers/codex";
+import { GeminiCliProvider } from "@/lib/providers/gemini-cli";
 import type { ProviderSpawnOptions } from "@/lib/providers/types";
 
 const baseOptions: ProviderSpawnOptions = {
@@ -61,6 +73,12 @@ describe("Provider Factory", () => {
   it("defaults to claude-code when no type given", () => {
     const provider = getProvider();
     expect(provider.type).toBe("claude-code");
+  });
+
+  it("returns GeminiCliProvider for 'gemini-cli'", () => {
+    const provider = getProvider("gemini-cli");
+    expect(provider.type).toBe("gemini-cli");
+    expect(provider).toBeInstanceOf(GeminiCliProvider);
   });
 });
 
@@ -118,5 +136,27 @@ describe("CodexProvider", () => {
     const session = provider.spawn(baseOptions);
     const result = provider.cancel(session);
     expect(result).toBe(true);
+  });
+});
+
+describe("GeminiCliProvider", () => {
+  const provider = new GeminiCliProvider();
+
+  it("has type 'gemini-cli'", () => {
+    expect(provider.type).toBe("gemini-cli");
+  });
+
+  it("spawn returns a ProviderSession with handle, kill, and promise", () => {
+    const session = provider.spawn(baseOptions);
+    expect(session.handle).toMatch(/^gemini-/);
+    expect(typeof session.kill).toBe("function");
+    expect(session.promise).toBeInstanceOf(Promise);
+  });
+
+  it("spawn resolves with ProviderResult from Gemini CLI", async () => {
+    const session = provider.spawn(baseOptions);
+    const result = await session.promise;
+    expect(result.success).toBe(true);
+    expect(result.result).toContain("Gemini output");
   });
 });

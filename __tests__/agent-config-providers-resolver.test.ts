@@ -21,6 +21,13 @@ vi.mock("@/lib/db/schema", () => ({
     agentType: "agentType",
     provider: "provider",
     scope: "scope",
+    namedAgentId: "namedAgentId",
+  },
+  namedAgents: {
+    id: "id",
+    name: "name",
+    provider: "provider",
+    model: "model",
   },
 }));
 
@@ -75,5 +82,32 @@ describe("Agent provider resolver", () => {
     expect(chat?.source).toBe("global");
     expect(ticketBuild?.provider).toBe("claude-code");
     expect(ticketBuild?.source).toBe("builtin");
+  });
+
+  it("resolveAgent returns provider + model from named agent assignment", async () => {
+    const { resolveAgent } = await import("@/lib/agent-config/providers");
+    mockDb.getQueue = [
+      {
+        agentType: "build",
+        provider: "claude-code",
+        scope: "proj-1",
+        namedAgentId: "na-1",
+      },
+    ];
+    mockDb.allQueue = [
+      [
+        {
+          id: "na-1",
+          name: "Gemini Fast",
+          provider: "gemini-cli",
+          model: "gemini-2.0-flash",
+        },
+      ],
+    ];
+
+    const resolved = await resolveAgent("build", "proj-1");
+    expect(resolved.provider).toBe("gemini-cli");
+    expect(resolved.model).toBe("gemini-2.0-flash");
+    expect(resolved.namedAgentId).toBe("na-1");
   });
 });

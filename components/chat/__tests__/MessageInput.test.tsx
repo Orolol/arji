@@ -3,6 +3,25 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MessageInput } from "../MessageInput";
 
+vi.mock("@/components/documents/MentionTextarea", () => ({
+  MentionTextarea: ({
+    projectId: _projectId,
+    value,
+    onValueChange,
+    ...props
+  }: {
+    projectId?: string;
+    value: string;
+    onValueChange: (next: string) => void;
+  }) => (
+    <textarea
+      value={value}
+      onChange={(e) => onValueChange(e.target.value)}
+      {...props}
+    />
+  ),
+}));
+
 // Mock fetch globally
 const mockFetch = vi.fn();
 global.fetch = mockFetch;

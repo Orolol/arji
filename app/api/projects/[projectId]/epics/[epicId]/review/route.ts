@@ -4,7 +4,6 @@ import {
   projects,
   epics,
   userStories,
-  documents,
   ticketComments,
 } from "@/lib/db/schema";
 import { eq, and, notInArray } from "drizzle-orm";
@@ -22,6 +21,7 @@ import fs from "fs";
 import path from "path";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { REVIEW_TYPE_TO_AGENT_TYPE } from "@/lib/agent-config/constants";
+import { resolveAgent } from "@/lib/agent-config/providers";
 import {
   createAgentAlreadyRunningPayload,
   getRunningSessionForTarget,
@@ -32,6 +32,11 @@ import {
   markSessionRunning,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
+import {
+  MentionResolutionError,
+  enrichPromptWithDocumentMentions,
+} from "@/lib/documents/mentions";
+import { listProjectTextDocuments } from "@/lib/documents/query";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
 
@@ -122,11 +127,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // Load context
-  const docs = db
-    .select()
-    .from(documents)
-    .where(eq(documents.projectId, projectId))
-    .all();
+  const docs = listProjectTextDocuments(projectId);
 
   const us = db
     .select()
@@ -173,6 +174,26 @@ export async function POST(request: NextRequest, { params }: Params) {
       promptComments
     );
 
+    let enrichedPrompt = prompt;
+    try {
+      enrichedPrompt = enrichPromptWithDocumentMentions({
+        projectId,
+        prompt,
+        textSources: promptComments.map((c) => c.content),
+      }).prompt;
+    } catch (error) {
+      if (error instanceof MentionResolutionError) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
+
+    const resolvedAgent = await resolveAgent(
+      REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
+      projectId,
+      provider
+    );
+
     const sessionId = createId();
     const now = new Date().toISOString();
     const logsDir = path.join(process.cwd(), "data", "sessions", sessionId);
@@ -205,8 +226,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       projectId,
       epicId,
       mode: agentMode,
-      provider,
-      prompt,
+      provider: resolvedAgent.provider,
+      prompt: enrichedPrompt,
       logsPath,
       branchName,
       worktreePath,
@@ -216,9 +237,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     markSessionRunning(sessionId, now);
     processManager.start(sessionId, {
       mode: agentMode,
-      prompt,
+      prompt: enrichedPrompt,
       cwd: worktreePath,
-    }, provider);
+      model: resolvedAgent.model,
+    }, resolvedAgent.provider);
 
     // Background: wait for completion, post review as epic comment
     const label = REVIEW_LABELS[reviewType];

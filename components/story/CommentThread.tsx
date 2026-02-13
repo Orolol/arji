@@ -2,13 +2,14 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MarkdownContent } from "@/components/chat/MarkdownContent";
 import { Send, User, Bot, Loader2 } from "lucide-react";
 import type { TicketComment } from "@/hooks/useComments";
 
 interface CommentThreadProps {
+  projectId: string;
   comments: TicketComment[];
   loading: boolean;
   onAddComment: (content: string) => Promise<unknown>;
@@ -25,12 +26,14 @@ function formatTime(dateStr: string) {
 }
 
 export function CommentThread({
+  projectId,
   comments,
   loading,
   onAddComment,
 }: CommentThreadProps) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new comments arrive
@@ -43,9 +46,12 @@ export function CommentThread({
   async function handleSubmit() {
     if (!input.trim() || sending) return;
     setSending(true);
+    setError(null);
     try {
       await onAddComment(input.trim());
       setInput("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add comment");
     } finally {
       setSending(false);
     }
@@ -105,10 +111,12 @@ export function CommentThread({
 
       {/* Input */}
       <div className="p-4 border-t border-border">
+        {error && <p className="text-xs text-destructive mb-2">{error}</p>}
         <div className="flex gap-2">
-          <Textarea
+          <MentionTextarea
+            projectId={projectId}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onValueChange={setInput}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();

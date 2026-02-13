@@ -19,6 +19,7 @@ const mockSpawnHelpers = vi.hoisted(() => ({
 }));
 
 const mockResolveAgentPrompt = vi.hoisted(() => vi.fn());
+const mockDynamicProviderSpawn = vi.hoisted(() => vi.fn());
 
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn(() => ({})),
@@ -127,7 +128,7 @@ vi.mock("@/lib/claude/spawn", () => ({
 
 vi.mock("@/lib/providers", () => ({
   getProvider: vi.fn(() => ({
-    spawn: vi.fn(() => ({
+    spawn: mockDynamicProviderSpawn.mockImplementation(() => ({
       promise: Promise.resolve({ success: true, result: "Codex response" }),
       kill: vi.fn(),
     })),
@@ -147,6 +148,11 @@ function mockRequest(body: Record<string, unknown>) {
 describe("POST /api/projects/[projectId]/chat/stream", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDynamicProviderSpawn.mockReset();
+    mockDynamicProviderSpawn.mockReturnValue({
+      promise: Promise.resolve({ success: true, result: "Codex response" }),
+      kill: vi.fn(),
+    });
     mockDbState.getQueue = [];
     mockDbState.allQueue = [];
     mockDbState.insertedValues = [];
@@ -170,6 +176,140 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
       }),
       kill: vi.fn(),
     });
+  });
+
+  it("enriches Claude prompt with mentioned text and image document context", async () => {
+    mockDbState.getQueue = [
+      { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
+      { id: "conv1", type: "brainstorm", provider: "claude-code", label: "Brainstorm" },
+      { id: "conv1", type: "brainstorm", provider: "claude-code", label: "Brainstorm" },
+    ];
+
+    mockDbState.allQueue = [
+      [
+        {
+          id: "doc-text",
+          projectId: "proj1",
+          originalFilename: "spec.md",
+          kind: "text",
+          markdownContent: "# Spec Body",
+          imagePath: null,
+        },
+        {
+          id: "doc-image",
+          projectId: "proj1",
+          originalFilename: "diagram.png",
+          kind: "image",
+          markdownContent: null,
+          imagePath: "data/documents/proj1/diagram.png",
+        },
+      ],
+      [{ name: "README.md", contentMd: "Project docs" }],
+      [{ role: "user", content: "Previous message", createdAt: "2026-01-01T10:00:00.000Z" }],
+      [
+        {
+          id: "doc-text",
+          projectId: "proj1",
+          originalFilename: "spec.md",
+          kind: "text",
+          markdownContent: "# Spec Body",
+          imagePath: null,
+        },
+        {
+          id: "doc-image",
+          projectId: "proj1",
+          originalFilename: "diagram.png",
+          kind: "image",
+          markdownContent: null,
+          imagePath: "data/documents/proj1/diagram.png",
+        },
+      ],
+    ];
+
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockRequest({
+        content: "Please use @spec.md and @diagram.png",
+        conversationId: "conv1",
+      }),
+      { params: Promise.resolve({ projectId: "proj1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockSpawnHelpers.spawnClaudeStream).toHaveBeenCalledTimes(1);
+    const options = mockSpawnHelpers.spawnClaudeStream.mock.calls[0]?.[0] as { prompt: string };
+    expect(options.prompt).toContain("## Mentioned Project Documents");
+    expect(options.prompt).toContain("### @spec.md");
+    expect(options.prompt).toContain("# Spec Body");
+    expect(options.prompt).toContain("@diagram.png references an image available at filesystem path:");
+    expect(options.prompt).toContain("data/documents/proj1/diagram.png");
+  });
+
+  it("enriches Gemini prompt with mentioned text and image document context", async () => {
+    mockDbState.getQueue = [
+      { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
+      { id: "conv2", type: "brainstorm", provider: "gemini-cli", label: "Brainstorm" },
+      { id: "conv2", type: "brainstorm", provider: "gemini-cli", label: "Brainstorm" },
+    ];
+
+    mockDbState.allQueue = [
+      [
+        {
+          id: "doc-text",
+          projectId: "proj1",
+          originalFilename: "spec.md",
+          kind: "text",
+          markdownContent: "## Implementation Notes",
+          imagePath: null,
+        },
+        {
+          id: "doc-image",
+          projectId: "proj1",
+          originalFilename: "diagram.png",
+          kind: "image",
+          markdownContent: null,
+          imagePath: "data/documents/proj1/diagram.png",
+        },
+      ],
+      [{ name: "README.md", contentMd: "Project docs" }],
+      [{ role: "user", content: "Previous message", createdAt: "2026-01-01T10:00:00.000Z" }],
+      [
+        {
+          id: "doc-text",
+          projectId: "proj1",
+          originalFilename: "spec.md",
+          kind: "text",
+          markdownContent: "## Implementation Notes",
+          imagePath: null,
+        },
+        {
+          id: "doc-image",
+          projectId: "proj1",
+          originalFilename: "diagram.png",
+          kind: "image",
+          markdownContent: null,
+          imagePath: "data/documents/proj1/diagram.png",
+        },
+      ],
+    ];
+
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockRequest({
+        content: "Please use @spec.md and @diagram.png",
+        conversationId: "conv2",
+      }),
+      { params: Promise.resolve({ projectId: "proj1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockDynamicProviderSpawn).toHaveBeenCalledTimes(1);
+    const options = mockDynamicProviderSpawn.mock.calls[0]?.[0] as { prompt: string };
+    expect(options.prompt).toContain("## Mentioned Project Documents");
+    expect(options.prompt).toContain("### @spec.md");
+    expect(options.prompt).toContain("## Implementation Notes");
+    expect(options.prompt).toContain("@diagram.png references an image available at filesystem path:");
+    expect(options.prompt).toContain("data/documents/proj1/diagram.png");
   });
 
   it("uses epic refinement prompt with existing epic titles for epic_creation conversations", async () => {

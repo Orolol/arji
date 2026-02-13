@@ -4,7 +4,6 @@ import {
   projects,
   epics,
   userStories,
-  documents,
   ticketComments,
 } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -22,6 +21,7 @@ import fs from "fs";
 import path from "path";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { REVIEW_TYPE_TO_AGENT_TYPE } from "@/lib/agent-config/constants";
+import { resolveAgent } from "@/lib/agent-config/providers";
 import {
   createAgentAlreadyRunningPayload,
   getRunningSessionForTarget,
@@ -32,6 +32,11 @@ import {
   markSessionRunning,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
+import {
+  MentionResolutionError,
+  enrichPromptWithDocumentMentions,
+} from "@/lib/documents/mentions";
+import { listProjectTextDocuments } from "@/lib/documents/query";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
@@ -152,10 +157,12 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // Load context
-  const docs = db
+  const docs = listProjectTextDocuments(projectId);
+  const comments = db
     .select()
-    .from(documents)
-    .where(eq(documents.projectId, projectId))
+    .from(ticketComments)
+    .where(eq(ticketComments.userStoryId, storyId))
+    .orderBy(ticketComments.createdAt)
     .all();
 
   // Ensure worktree exists
@@ -180,6 +187,26 @@ export async function POST(request: NextRequest, { params }: Params) {
       story,
       reviewType,
       reviewSystemPrompt
+    );
+
+    let enrichedPrompt = prompt;
+    try {
+      enrichedPrompt = enrichPromptWithDocumentMentions({
+        projectId,
+        prompt,
+        textSources: comments.map((comment) => comment.content),
+      }).prompt;
+    } catch (error) {
+      if (error instanceof MentionResolutionError) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
+
+    const resolvedAgent = await resolveAgent(
+      REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
+      projectId,
+      provider
     );
 
     const sessionId = createId();
@@ -216,8 +243,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       epicId: epic.id,
       userStoryId: storyId,
       mode: agentMode,
-      provider,
-      prompt,
+      provider: resolvedAgent.provider,
+      prompt: enrichedPrompt,
       logsPath,
       branchName,
       worktreePath,
@@ -228,9 +255,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     markSessionRunning(sessionId, now);
     processManager.start(sessionId, {
       mode: agentMode,
-      prompt,
+      prompt: enrichedPrompt,
       cwd: worktreePath,
-    }, provider);
+      model: resolvedAgent.model,
+    }, resolvedAgent.provider);
 
     // Background: wait for completion, post review comment
     const label = REVIEW_LABELS[reviewType];

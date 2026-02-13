@@ -46,7 +46,7 @@ export default function SpecPage() {
           <TabsTrigger value="preview">Preview</TabsTrigger>
         </TabsList>
         <TabsContent value="edit">
-          <SpecEditor value={spec} onChange={setSpec} />
+          <SpecEditor projectId={projectId} value={spec} onChange={setSpec} />
         </TabsContent>
         <TabsContent value="preview">
           <SpecPreview markdown={spec} />

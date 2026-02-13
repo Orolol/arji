@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects, documents, chatMessages, epics, userStories } from "@/lib/db/schema";
+import { projects, chatMessages, epics, userStories } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { spawnClaude } from "@/lib/claude/spawn";
@@ -11,6 +11,12 @@ import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { getProvider } from "@/lib/providers";
 import type { ProviderType } from "@/lib/providers";
 import { activityRegistry } from "@/lib/activity-registry";
+import { resolveAgent } from "@/lib/agent-config/providers";
+import { listProjectTextDocuments } from "@/lib/documents/query";
+import {
+  enrichPromptWithDocumentMentions,
+  MentionResolutionError,
+} from "@/lib/documents/mentions";
 
 export async function POST(
   request: NextRequest,
@@ -18,10 +24,12 @@ export async function POST(
 ) {
   const { projectId } = await params;
 
-  let provider: ProviderType = "claude-code";
+  let providerOverride: ProviderType | undefined;
   try {
     const body = await request.json();
-    if (body.provider === "codex") provider = "codex";
+    if (body.provider === "codex" || body.provider === "gemini-cli" || body.provider === "claude-code") {
+      providerOverride = body.provider;
+    }
   } catch {
     // No body or invalid JSON — use default
   }
@@ -31,7 +39,7 @@ export async function POST(
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const docs = db.select().from(documents).where(eq(documents.projectId, projectId)).all();
+  const docs = listProjectTextDocuments(projectId);
   const chatHistory = db
     .select()
     .from(chatMessages)
@@ -52,6 +60,25 @@ export async function POST(
     chatHistory.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
     specSystemPrompt
   );
+  let enrichedPrompt = prompt;
+  try {
+    enrichedPrompt = enrichPromptWithDocumentMentions({
+      projectId,
+      prompt,
+      textSources: chatHistory.map((m) => m.content),
+    }).prompt;
+  } catch (error) {
+    if (error instanceof MentionResolutionError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
+
+  const resolvedAgent = await resolveAgent(
+    "spec_generation",
+    projectId,
+    providerOverride
+  );
 
   const specActivityId = `spec-${createId()}`;
   activityRegistry.register({
@@ -59,26 +86,28 @@ export async function POST(
     projectId,
     type: "spec_generation",
     label: "Generating Spec & Plan",
-    provider,
+    provider: resolvedAgent.provider,
     startedAt: new Date().toISOString(),
   });
 
   try {
     let result;
-    if (provider === "codex") {
-      const codexProvider = getProvider("codex");
-      const session = codexProvider.spawn({
+    if (resolvedAgent.provider === "codex" || resolvedAgent.provider === "gemini-cli") {
+      const dynamicProvider = getProvider(resolvedAgent.provider);
+      const session = dynamicProvider.spawn({
         sessionId: `spec-${createId()}`,
-        prompt,
+        prompt: enrichedPrompt,
         cwd: project.gitRepoPath || process.cwd(),
         mode: "plan",
+        model: resolvedAgent.model,
         logIdentifier: `spec-${projectId}`,
       });
       result = await session.promise;
     } else {
       const { promise } = spawnClaude({
         mode: "plan",
-        prompt,
+        prompt: enrichedPrompt,
+        model: resolvedAgent.model,
         cwd: project.gitRepoPath || undefined,
       });
       result = await promise;

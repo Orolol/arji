@@ -99,6 +99,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       messages,
       loading,
       sending,
+      error: chatError,
       pendingQuestions,
       streamStatus,
       sendMessage: rawSendMessage,
@@ -556,9 +557,9 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
           </div>
         </div>
 
-        {(epicError || specError) && (
+        {(epicError || specError || chatError) && (
           <div className="mx-3 mt-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {epicError || specError}
+            {epicError || specError || chatError}
           </div>
         )}
 

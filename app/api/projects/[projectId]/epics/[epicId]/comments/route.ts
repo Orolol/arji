@@ -3,6 +3,10 @@ import { db } from "@/lib/db";
 import { ticketComments, epics } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
+import {
+  MentionResolutionError,
+  validateMentionsExist,
+} from "@/lib/documents/mentions";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
 
@@ -25,7 +29,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const { epicId } = await params;
+  const { projectId, epicId } = await params;
   const body = await request.json();
 
   if (!body.content || !body.author) {
@@ -33,6 +37,18 @@ export async function POST(request: NextRequest, { params }: Params) {
       { error: "author and content are required" },
       { status: 400 }
     );
+  }
+
+  try {
+    validateMentionsExist({
+      projectId,
+      textSources: [body.content],
+    });
+  } catch (error) {
+    if (error instanceof MentionResolutionError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
   }
 
   const epic = db.select().from(epics).where(eq(epics.id, epicId)).get();

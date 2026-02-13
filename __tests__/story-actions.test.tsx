@@ -2,6 +2,25 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { StoryActions } from "@/components/story/StoryActions";
 
+vi.mock("@/components/documents/MentionTextarea", () => ({
+  MentionTextarea: ({
+    projectId: _projectId,
+    value,
+    onValueChange,
+    ...props
+  }: {
+    projectId?: string;
+    value: string;
+    onValueChange: (next: string) => void;
+  }) => (
+    <textarea
+      value={value}
+      onChange={(e) => onValueChange(e.target.value)}
+      {...props}
+    />
+  ),
+}));
+
 // Mock ProviderSelect to inspect props
 vi.mock("@/components/shared/ProviderSelect", () => ({
   ProviderSelect: ({ value, onChange, codexAvailable, className }: {
@@ -23,6 +42,7 @@ vi.mock("@/components/shared/ProviderSelect", () => ({
 }));
 
 const baseProps = {
+  projectId: "proj-1",
   story: { id: "s1", title: "Test Story", status: "todo" },
   dispatching: false,
   isRunning: false,
@@ -155,6 +175,10 @@ describe("StoryActions", () => {
     fireEvent.click(screen.getByText("Agent Review"));
 
     // Select security checkbox
+    const featureCheckbox = screen.getByRole("checkbox", {
+      name: /feature review/i,
+    });
+    fireEvent.click(featureCheckbox);
     const securityCheckbox = screen.getByRole("checkbox", { name: /security/i });
     fireEvent.click(securityCheckbox);
 

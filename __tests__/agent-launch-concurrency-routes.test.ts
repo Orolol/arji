@@ -13,6 +13,7 @@ vi.mock("drizzle-orm", () => ({
   and: vi.fn(() => ({})),
   or: vi.fn(() => ({})),
   desc: vi.fn(() => ({})),
+  inArray: vi.fn(() => ({})),
   notInArray: vi.fn(() => ({})),
 }));
 
@@ -121,6 +122,10 @@ vi.mock("@/lib/agent-config/prompts", () => ({
   resolveAgentPrompt: vi.fn().mockResolvedValue("system prompt"),
 }));
 
+vi.mock("@/lib/session-lock", () => ({
+  checkSessionLock: vi.fn(() => ({ locked: false })),
+}));
+
 vi.mock("@/lib/agent-config/constants", () => ({
   REVIEW_TYPE_TO_AGENT_TYPE: {
     security: "review_security",
@@ -147,6 +152,13 @@ vi.mock("@/lib/agents/concurrency", async () => {
     getRunningSessionForTarget: mockGetRunningForTarget,
   };
 });
+
+vi.mock("@/lib/agent-sessions/lifecycle", () => ({
+  createQueuedSession: vi.fn(),
+  markSessionRunning: vi.fn(),
+  markSessionTerminal: vi.fn(),
+  isSessionLifecycleConflictError: vi.fn(() => false),
+}));
 
 vi.mock("fs", () => ({
   default: {
@@ -193,7 +205,7 @@ describe("Agent launch routes concurrency conflicts", () => {
       { id: "proj-1", gitRepoPath: "/repo" },
     ];
     mockDbState.allQueue = [[], []];
-    mockInsertWithGuard.mockReturnValue({ inserted: false, conflict: CONFLICT });
+    mockGetRunningForTarget.mockReturnValue(CONFLICT);
 
     const { POST } = await import("@/app/api/projects/[projectId]/epics/[epicId]/build/route");
     const res = await POST(mockRequest({}), {
@@ -214,9 +226,9 @@ describe("Agent launch routes concurrency conflicts", () => {
       { id: "proj-1", gitRepoPath: "/repo" },
     ];
     mockDbState.allQueue = [[], []];
-    mockInsertWithGuard.mockReturnValue({
-      inserted: false,
-      conflict: { ...CONFLICT, userStoryId: "story-1" },
+    mockGetRunningForTarget.mockReturnValue({
+      ...CONFLICT,
+      userStoryId: "story-1",
     });
 
     const { POST } = await import("@/app/api/projects/[projectId]/stories/[storyId]/build/route");
@@ -238,7 +250,7 @@ describe("Agent launch routes concurrency conflicts", () => {
       { id: "proj-1", gitRepoPath: "/repo" },
     ];
     mockDbState.allQueue = [[], []];
-    mockInsertWithGuard.mockReturnValue({ inserted: false, conflict: CONFLICT });
+    mockGetRunningForTarget.mockReturnValue(CONFLICT);
 
     const { POST } = await import("@/app/api/projects/[projectId]/epics/[epicId]/review/route");
     const res = await POST(mockRequest({ reviewTypes: ["security"] }), {
@@ -258,9 +270,9 @@ describe("Agent launch routes concurrency conflicts", () => {
       { id: "proj-1", gitRepoPath: "/repo" },
     ];
     mockDbState.allQueue = [[]];
-    mockInsertWithGuard.mockReturnValue({
-      inserted: false,
-      conflict: { ...CONFLICT, userStoryId: "story-1" },
+    mockGetRunningForTarget.mockReturnValue({
+      ...CONFLICT,
+      userStoryId: "story-1",
     });
 
     const { POST } = await import("@/app/api/projects/[projectId]/stories/[storyId]/review/route");
@@ -282,7 +294,7 @@ describe("Agent launch routes concurrency conflicts", () => {
       { key: "global_prompt", value: JSON.stringify("global") },
     ];
     mockDbState.allQueue = [[]];
-    mockInsertWithGuard.mockReturnValue({ inserted: false, conflict: CONFLICT });
+    mockGetRunningForTarget.mockReturnValue(CONFLICT);
 
     const { POST } = await import("@/app/api/projects/[projectId]/epics/[epicId]/resolve-merge/route");
     const res = await POST(mockRequest({}), {

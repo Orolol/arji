@@ -12,19 +12,19 @@ vi.mock("@/lib/claude/spawn", () => ({
 }));
 
 vi.mock("@/lib/providers", () => {
-  const mockCodexSession = {
-    handle: "codex-test",
+  const createSession = (label: string) => ({
+    handle: `${label}-test`,
     kill: vi.fn(),
     promise: Promise.resolve({
       success: true,
-      result: "Codex output",
+      result: `${label} output`,
       duration: 300,
     }),
-  };
+  });
   return {
-    getProvider: vi.fn(() => ({
-      type: "codex",
-      spawn: vi.fn(() => mockCodexSession),
+    getProvider: vi.fn((provider: string) => ({
+      type: provider,
+      spawn: vi.fn(() => createSession(provider)),
       cancel: vi.fn(() => true),
       isAvailable: vi.fn().mockResolvedValue(true),
     })),
@@ -63,6 +63,17 @@ describe("Process Manager", () => {
       expect(info.sessionId).toBe("s2");
       expect(info.status).toBe("running");
       expect(info.provider).toBe("codex");
+    });
+
+    it("starts a Gemini session when provider is gemini-cli", () => {
+      const info = processManager.start(
+        "s2-gemini",
+        { mode: "code", prompt: "test" },
+        "gemini-cli",
+      );
+      expect(info.sessionId).toBe("s2-gemini");
+      expect(info.status).toBe("running");
+      expect(info.provider).toBe("gemini-cli");
     });
 
     it("throws if session is already running", () => {

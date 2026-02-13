@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { AgentPromptsTab } from "./AgentPromptsTab";
 import { ReviewAgentsTab } from "./ReviewAgentsTab";
 import { ProviderDefaultsTab } from "./ProviderDefaultsTab";
+import { NamedAgentsTab } from "./NamedAgentsTab";
 import { Globe, FolderOpen } from "lucide-react";
 
 interface AgentConfigPanelProps {
@@ -51,6 +52,7 @@ export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
         <TabsList variant="line" className="px-4 shrink-0">
           <TabsTrigger value="prompts">Prompts</TabsTrigger>
           <TabsTrigger value="review">Review Agents</TabsTrigger>
+          <TabsTrigger value="agents">Agents</TabsTrigger>
           <TabsTrigger value="providers">Providers</TabsTrigger>
         </TabsList>
 
@@ -66,6 +68,10 @@ export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
             scope={scope}
             projectId={scope === "project" ? projectId : undefined}
           />
+        </TabsContent>
+
+        <TabsContent value="agents" className="flex-1 min-h-0 px-3 pb-3">
+          <NamedAgentsTab />
         </TabsContent>
 
         <TabsContent value="providers" className="flex-1 min-h-0 px-3 pb-3">

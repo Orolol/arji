@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { agentProviderDefaults } from "@/lib/db/schema";
+import { agentProviderDefaults, namedAgents } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import {
   isAgentProvider,
@@ -17,10 +17,29 @@ export async function PUT(request: NextRequest, { params }: Params) {
   }
 
   const body = await request.json().catch(() => ({}));
-  const provider = typeof body.provider === "string" ? body.provider : "";
-  if (!isAgentProvider(provider)) {
+  const providerInput = typeof body.provider === "string" ? body.provider : "";
+  const namedAgentIdInput =
+    typeof body.namedAgentId === "string" ? body.namedAgentId.trim() : "";
+
+  let provider = providerInput;
+  let namedAgentId: string | null = null;
+
+  if (namedAgentIdInput) {
+    const namedAgent = db
+      .select({ id: namedAgents.id, provider: namedAgents.provider })
+      .from(namedAgents)
+      .where(eq(namedAgents.id, namedAgentIdInput))
+      .get();
+
+    if (!namedAgent) {
+      return NextResponse.json({ error: "namedAgentId not found" }, { status: 400 });
+    }
+
+    provider = namedAgent.provider;
+    namedAgentId = namedAgent.id;
+  } else if (!isAgentProvider(provider)) {
     return NextResponse.json(
-      { error: "provider must be 'claude-code' or 'codex'" },
+      { error: "provider must be 'claude-code', 'codex', or 'gemini-cli'" },
       { status: 400 }
     );
   }
@@ -39,7 +58,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   if (existing) {
     db.update(agentProviderDefaults)
-      .set({ provider, updatedAt: now })
+      .set({ provider, namedAgentId, updatedAt: now })
       .where(eq(agentProviderDefaults.id, existing.id))
       .run();
   } else {
@@ -48,6 +67,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
         id: createId(),
         agentType,
         provider,
+        namedAgentId,
         scope: "global",
         createdAt: now,
         updatedAt: now,

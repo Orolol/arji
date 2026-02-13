@@ -51,6 +51,7 @@ export function ProviderSelect({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="claude-code">Claude Code</SelectItem>
+          <SelectItem value="gemini-cli">Gemini CLI</SelectItem>
           {codexAvailable ? (
             <SelectItem value="codex">Codex</SelectItem>
           ) : (

@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { chatMessages, chatAttachments, projects, documents } from "@/lib/db/schema";
+import { chatMessages, chatAttachments, projects } from "@/lib/db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { spawnClaude } from "@/lib/claude/spawn";
 import { buildChatPrompt } from "@/lib/claude/prompt-builder";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
+import {
+  enrichPromptWithDocumentMentions,
+  MentionResolutionError,
+  validateMentionsExist,
+} from "@/lib/documents/mentions";
+import { resolveAgent } from "@/lib/agent-config/providers";
+import { getProvider } from "@/lib/providers";
+import { listProjectTextDocuments } from "@/lib/documents/query";
 
 export async function GET(
   request: NextRequest,
@@ -65,9 +73,22 @@ export async function POST(
 ) {
   const { projectId } = await params;
   const body = await request.json();
+  const providerOverride = body.provider as string | undefined;
 
   if (!body.content && (!body.attachmentIds || body.attachmentIds.length === 0)) {
     return NextResponse.json({ error: "content or attachments required" }, { status: 400 });
+  }
+
+  try {
+    validateMentionsExist({
+      projectId,
+      textSources: [body.content],
+    });
+  } catch (error) {
+    if (error instanceof MentionResolutionError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
   }
 
   const conversationId = body.conversationId || null;
@@ -101,7 +122,7 @@ export async function POST(
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const docs = db.select().from(documents).where(eq(documents.projectId, projectId)).all();
+  const docs = listProjectTextDocuments(projectId);
   const recentMessages = db
     .select()
     .from(chatMessages)
@@ -120,16 +141,43 @@ export async function POST(
     chatSystemPrompt
   );
 
+  const resolvedAgent = await resolveAgent("chat", projectId, providerOverride);
+  let enrichedPrompt = prompt;
   try {
-    console.log("[chat] Spawning Claude CLI, cwd:", project.gitRepoPath || "(none)");
-
-    const { promise } = spawnClaude({
-      mode: "plan",
+    enrichedPrompt = enrichPromptWithDocumentMentions({
+      projectId,
       prompt,
-      cwd: project.gitRepoPath || undefined,
-    });
+      textSources: [body.content, ...recentMessages.map((m) => m.content)],
+    }).prompt;
+  } catch (error) {
+    if (error instanceof MentionResolutionError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
 
-    const result = await promise;
+  try {
+    let result;
+    if (resolvedAgent.provider === "codex" || resolvedAgent.provider === "gemini-cli") {
+      const dynamicProvider = getProvider(resolvedAgent.provider);
+      const session = dynamicProvider.spawn({
+        sessionId: `chat-${createId()}`,
+        prompt: enrichedPrompt,
+        cwd: project.gitRepoPath || process.cwd(),
+        mode: "plan",
+        model: resolvedAgent.model,
+      });
+      result = await session.promise;
+    } else {
+      console.log("[chat] Spawning Claude CLI, cwd:", project.gitRepoPath || "(none)");
+      const { promise } = spawnClaude({
+        mode: "plan",
+        prompt: enrichedPrompt,
+        model: resolvedAgent.model,
+        cwd: project.gitRepoPath || undefined,
+      });
+      result = await promise;
+    }
 
     console.log("[chat] Claude CLI result:", {
       success: result.success,

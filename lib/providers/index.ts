@@ -5,10 +5,12 @@
 import type { AgentProvider, ProviderType } from "./types";
 import { ClaudeCodeProvider } from "./claude-code";
 import { CodexProvider } from "./codex";
+import { GeminiCliProvider } from "./gemini-cli";
 
 const providers: Record<ProviderType, AgentProvider> = {
   "claude-code": new ClaudeCodeProvider(),
   codex: new CodexProvider(),
+  "gemini-cli": new GeminiCliProvider(),
 };
 
 /**

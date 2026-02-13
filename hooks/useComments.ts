@@ -51,7 +51,10 @@ export function useComments(projectId: string, storyId: string) {
           body: JSON.stringify({ author: "user", content }),
         }
       );
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Failed to add comment");
+      }
       if (data.data) {
         setComments((prev) => [...prev, data.data]);
       }

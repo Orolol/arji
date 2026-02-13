@@ -9,6 +9,25 @@ import { render, screen } from "@testing-library/react";
 import { EpicActions } from "@/components/epic/EpicActions";
 import { StoryActions } from "@/components/story/StoryActions";
 
+vi.mock("@/components/documents/MentionTextarea", () => ({
+  MentionTextarea: ({
+    projectId: _projectId,
+    value,
+    onValueChange,
+    ...props
+  }: {
+    projectId?: string;
+    value: string;
+    onValueChange: (next: string) => void;
+  }) => (
+    <textarea
+      value={value}
+      onChange={(e) => onValueChange(e.target.value)}
+      {...props}
+    />
+  ),
+}));
+
 vi.mock("@/components/shared/ProviderSelect", () => ({
   ProviderSelect: ({
     value,
@@ -31,6 +50,7 @@ const noop = vi.fn().mockResolvedValue(undefined);
 
 describe("EpicActions — done status", () => {
   const baseProps = {
+    projectId: "proj-1",
     epic: { id: "e1", title: "Epic", status: "done" },
     dispatching: false,
     isRunning: false,
@@ -58,6 +78,7 @@ describe("EpicActions — done status", () => {
 
 describe("StoryActions — done status", () => {
   const baseProps = {
+    projectId: "proj-1",
     story: { id: "s1", title: "Story", status: "done" },
     dispatching: false,
     isRunning: false,

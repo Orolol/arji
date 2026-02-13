@@ -11,17 +11,26 @@ interface UploadZoneProps {
 export function UploadZone({ projectId, onUploaded }: UploadZoneProps) {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleFiles = useCallback(
     async (files: FileList) => {
       setUploading(true);
+      setError(null);
       for (const file of Array.from(files)) {
         const formData = new FormData();
         formData.append("file", file);
-        await fetch(`/api/projects/${projectId}/documents`, {
+        const res = await fetch(`/api/projects/${projectId}/documents`, {
           method: "POST",
           body: formData,
         });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setError(
+            body.error || `Failed to upload "${file.name}" (HTTP ${res.status})`
+          );
+          break;
+        }
       }
       setUploading(false);
       onUploaded();
@@ -59,19 +68,20 @@ export function UploadZone({ projectId, onUploaded }: UploadZoneProps) {
             Drag & drop files here, or click to select
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            PDF, DOCX, MD, TXT
+            PDF, DOCX, MD, TXT, and images
           </p>
           <input
             type="file"
             className="hidden"
             multiple
-            accept=".pdf,.docx,.md,.txt"
+            accept=".pdf,.docx,.md,.txt,image/*"
             onChange={(e) => {
               if (e.target.files?.length) handleFiles(e.target.files);
             }}
           />
         </label>
       )}
+      {error && <p className="text-xs text-destructive mt-3">{error}</p>}
     </div>
   );
 }

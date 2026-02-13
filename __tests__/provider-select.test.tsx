@@ -27,6 +27,18 @@ describe("ProviderSelect", () => {
     expect(screen.getByText("Codex")).toBeInTheDocument();
   });
 
+  it("renders with gemini-cli value", () => {
+    const onChange = vi.fn();
+    render(
+      <ProviderSelect
+        value="gemini-cli"
+        onChange={onChange}
+        codexAvailable={true}
+      />
+    );
+    expect(screen.getByText("Gemini CLI")).toBeInTheDocument();
+  });
+
   it("applies custom className", () => {
     const onChange = vi.fn();
     const { container } = render(
@@ -60,5 +72,7 @@ describe("ProviderSelect", () => {
     expect(value).toBe("claude-code");
     const codex: ProviderType = "codex";
     expect(codex).toBe("codex");
+    const gemini: ProviderType = "gemini-cli";
+    expect(gemini).toBe("gemini-cli");
   });
 });

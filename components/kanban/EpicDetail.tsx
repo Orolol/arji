@@ -260,6 +260,7 @@ export function EpicDetail({
             <div className="px-4 pb-4 space-y-4">
               {/* Epic Actions Bar */}
               <EpicActions
+                projectId={projectId}
                 epic={epic}
                 dispatching={dispatching}
                 isRunning={isRunning}
@@ -589,10 +590,11 @@ export function EpicDetail({
 
               {/* Comment Thread */}
               <div className="min-h-[200px]">
-                <CommentThread
-                  comments={comments}
-                  loading={commentsLoading}
-                  onAddComment={addComment}
+                  <CommentThread
+                    projectId={projectId}
+                    comments={comments}
+                    loading={commentsLoading}
+                    onAddComment={addComment}
                 />
               </div>
 

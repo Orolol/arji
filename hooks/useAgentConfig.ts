@@ -18,6 +18,13 @@ export interface ResolvedAgentProvider {
   provider: AgentProvider;
   source: ProviderSource;
   scope: string;
+  namedAgentId: string | null;
+  namedAgent?: {
+    id: string;
+    name: string;
+    provider: AgentProvider;
+    model: string;
+  } | null;
 }
 
 export interface CustomReviewAgent {
@@ -30,6 +37,14 @@ export interface CustomReviewAgent {
   createdAt: string | null;
   updatedAt: string | null;
   source?: "global" | "project";
+}
+
+export interface NamedAgent {
+  id: string;
+  name: string;
+  provider: AgentProvider;
+  model: string;
+  createdAt: string | null;
 }
 
 function buildUrl(
@@ -124,7 +139,11 @@ export function useAgentProviders(
   }, [load]);
 
   const updateProvider = useCallback(
-    async (agentType: AgentType, provider: AgentProvider) => {
+    async (
+      agentType: AgentType,
+      provider: AgentProvider,
+      namedAgentId?: string | null
+    ) => {
       const url = buildUrl(
         `/agent-config/providers/${agentType}`,
         scope,
@@ -133,7 +152,10 @@ export function useAgentProviders(
       const res = await fetch(url, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider }),
+        body: JSON.stringify({
+          provider,
+          namedAgentId: namedAgentId || null,
+        }),
       });
       if (res.ok) await load();
       return res.ok;
@@ -142,6 +164,69 @@ export function useAgentProviders(
   );
 
   return { data, loading, refresh: load, updateProvider };
+}
+
+export function useNamedAgents() {
+  const [data, setData] = useState<NamedAgent[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/agent-config/named-agents");
+      const json = await res.json();
+      setData(json.data || []);
+    } catch {
+      // ignore
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const createAgent = useCallback(
+    async (payload: { name: string; provider: AgentProvider; model: string }) => {
+      const res = await fetch("/api/agent-config/named-agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) await load();
+      return res.ok;
+    },
+    [load]
+  );
+
+  const updateAgent = useCallback(
+    async (
+      agentId: string,
+      payload: { name?: string; provider?: AgentProvider; model?: string }
+    ) => {
+      const res = await fetch(`/api/agent-config/named-agents/${agentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) await load();
+      return res.ok;
+    },
+    [load]
+  );
+
+  const deleteAgent = useCallback(
+    async (agentId: string) => {
+      const res = await fetch(`/api/agent-config/named-agents/${agentId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) await load();
+      return res.ok;
+    },
+    [load]
+  );
+
+  return { data, loading, refresh: load, createAgent, updateAgent, deleteAgent };
 }
 
 export function useReviewAgents(

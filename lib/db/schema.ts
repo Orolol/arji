@@ -27,11 +27,26 @@ export const documents = sqliteTable("documents", {
   projectId: text("project_id")
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  contentMd: text("content_md").notNull(),
+  originalFilename: text("original_filename").notNull(),
+  kind: text("kind").notNull().default("text"), // text | image
+  markdownContent: text("markdown_content"),
+  imagePath: text("image_path"),
   mimeType: text("mime_type"),
+  sizeBytes: integer("size_bytes"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
-});
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+},
+(table) => ({
+  // Case-insensitive uniqueness is enforced in SQL migration via lower(original_filename).
+  projectFilenameUnique: uniqueIndex("documents_project_filename_unique").on(
+    table.projectId,
+    table.originalFilename
+  ),
+  projectCreatedAtIdx: index("documents_project_created_at_idx").on(
+    table.projectId,
+    table.createdAt
+  ),
+}));
 
 export const epics = sqliteTable("epics", {
   id: text("id").primaryKey(),

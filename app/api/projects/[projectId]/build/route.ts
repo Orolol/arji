@@ -4,7 +4,6 @@ import {
   projects,
   epics,
   userStories,
-  documents,
 } from "@/lib/db/schema";
 import { eq, and, notInArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
@@ -23,7 +22,6 @@ import { tryExportArjiJson } from "@/lib/sync/export";
 import {
   createAgentAlreadyRunningPayload,
   getRunningSessionForTarget,
-  insertRunningSessionWithGuard,
 } from "@/lib/agents/concurrency";
 import {
   createQueuedSession,
@@ -31,6 +29,29 @@ import {
   markSessionRunning,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
+import { resolveAgent } from "@/lib/agent-config/providers";
+import { listProjectTextDocuments } from "@/lib/documents/query";
+import {
+  enrichPromptWithDocumentMentions,
+  MentionResolutionError,
+} from "@/lib/documents/mentions";
+
+function collectEpicMentionSources(
+  epic: { title?: string | null; description?: string | null },
+  stories: Array<{
+    title?: string | null;
+    description?: string | null;
+    acceptanceCriteria?: string | null;
+  }>
+): Array<string | null | undefined> {
+  return [
+    epic.title,
+    epic.description,
+    ...stories.map((story) => story.title),
+    ...stories.map((story) => story.description),
+    ...stories.map((story) => story.acceptanceCriteria),
+  ];
+}
 
 export async function POST(
   request: NextRequest,
@@ -76,10 +97,10 @@ export async function POST(
     }
   }
 
-  // Team mode is Claude Code exclusive — Codex has no Task tool
-  if (team && provider === "codex") {
+  // Team mode is Claude Code exclusive — no sub-agent delegation outside Claude today.
+  if (team && provider !== "claude-code") {
     return NextResponse.json(
-      { error: "Team mode is only available with Claude Code. Codex does not support sub-agent delegation." },
+      { error: "Team mode is only available with Claude Code. Other providers do not support sub-agent delegation." },
       { status: 400 }
     );
   }
@@ -111,11 +132,7 @@ export async function POST(
   }
 
   // Load project context
-  const docs = db
-    .select()
-    .from(documents)
-    .where(eq(documents.projectId, projectId))
-    .all();
+  const docs = listProjectTextDocuments(projectId);
   const buildSystemPrompt = await resolveAgentPrompt("build", projectId);
   const teamBuildSystemPrompt = await resolveAgentPrompt(
     "team_build",
@@ -175,6 +192,36 @@ export async function POST(
         teamEpics,
         teamBuildSystemPrompt
       );
+      let enrichedTeamPrompt = prompt;
+      try {
+        enrichedTeamPrompt = enrichPromptWithDocumentMentions({
+          projectId,
+          prompt,
+          textSources: teamEpics.flatMap((teamEpic) => [
+            teamEpic.title,
+            teamEpic.description,
+            ...teamEpic.userStories.map((story) => story.title),
+            ...teamEpic.userStories.map((story) => story.description),
+            ...teamEpic.userStories.map((story) => story.acceptanceCriteria),
+          ]),
+        }).prompt;
+      } catch (error) {
+        if (error instanceof MentionResolutionError) {
+          return NextResponse.json({ error: error.message }, { status: 400 });
+        }
+        throw error;
+      }
+      const resolvedTeamAgent = await resolveAgent(
+        "team_build",
+        projectId,
+        provider
+      );
+      if (resolvedTeamAgent.provider !== "claude-code") {
+        return NextResponse.json(
+          { error: "Team mode is only available with Claude Code." },
+          { status: 400 }
+        );
+      }
 
       // Create single team session
       const sessionId = createId();
@@ -188,8 +235,8 @@ export async function POST(
         projectId,
         mode: "code",
         orchestrationMode: "team",
-        provider: "claude-code",
-        prompt,
+        provider: resolvedTeamAgent.provider,
+        prompt: enrichedTeamPrompt,
         logsPath,
         createdAt: now,
       });
@@ -204,7 +251,7 @@ export async function POST(
       markSessionRunning(sessionId, now);
       processManager.start(sessionId, {
         mode: "code",
-        prompt,
+        prompt: enrichedTeamPrompt,
         cwd: gitRepoPath,
         allowedTools: [
           "Edit",
@@ -215,7 +262,8 @@ export async function POST(
           "Grep",
           "Task",
         ],
-      });
+        model: resolvedTeamAgent.model,
+      }, resolvedTeamAgent.provider);
 
       // Background: wait for completion, update all epic statuses
       const allEpicIds = epicRecords.map((e) => e.id);
@@ -308,6 +356,20 @@ export async function POST(
       us,
       buildSystemPrompt
     );
+    let enrichedPrompt = prompt;
+    try {
+      enrichedPrompt = enrichPromptWithDocumentMentions({
+        projectId,
+        prompt,
+        textSources: collectEpicMentionSources(epic, us),
+      }).prompt;
+    } catch (error) {
+      if (error instanceof MentionResolutionError) {
+        throw error;
+      }
+      throw error;
+    }
+    const resolvedBuildAgent = await resolveAgent("build", projectId, provider);
 
     // Create session in DB
     const sessionId = createId();
@@ -336,8 +398,8 @@ export async function POST(
       epicId,
       mode: "code",
       orchestrationMode: "solo",
-      provider,
-      prompt,
+      provider: resolvedBuildAgent.provider,
+      prompt: enrichedPrompt,
       logsPath,
       branchName,
       worktreePath,
@@ -371,10 +433,11 @@ export async function POST(
     markSessionRunning(sessionId, now);
     processManager.start(sessionId, {
       mode: "code",
-      prompt,
+      prompt: enrichedPrompt,
       cwd: worktreePath,
       allowedTools: ["Edit", "Write", "Bash", "Read", "Glob", "Grep"],
-    }, provider);
+      model: resolvedBuildAgent.model,
+    }, resolvedBuildAgent.provider);
 
     // Background: wait for completion and update DB
     (async () => {
@@ -448,6 +511,9 @@ export async function POST(
       },
     });
   } catch (e) {
+    if (e instanceof MentionResolutionError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
     if (
       e &&
       typeof e === "object" &&

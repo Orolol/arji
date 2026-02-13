@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { chatMessages, chatAttachments, chatConversations, projects, documents, settings, epics } from "@/lib/db/schema";
+import { chatMessages, chatAttachments, chatConversations, projects, settings, epics } from "@/lib/db/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { spawnClaudeStream, spawnClaude } from "@/lib/claude/spawn";
@@ -8,8 +8,15 @@ import { buildChatPrompt, buildEpicRefinementPrompt, buildEpicFinalizationPrompt
 import { getProvider } from "@/lib/providers";
 import type { ProviderType } from "@/lib/providers";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
+import { resolveAgent } from "@/lib/agent-config/providers";
 import { isEpicCreationConversationAgentType } from "@/lib/chat/conversation-agent";
 import { activityRegistry } from "@/lib/activity-registry";
+import {
+  enrichPromptWithDocumentMentions,
+  MentionResolutionError,
+  validateMentionsExist,
+} from "@/lib/documents/mentions";
+import { listProjectTextDocuments } from "@/lib/documents/query";
 
 export async function POST(
   request: NextRequest,
@@ -23,6 +30,21 @@ export async function POST(
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  try {
+    validateMentionsExist({
+      projectId,
+      textSources: [body.content],
+    });
+  } catch (error) {
+    if (error instanceof MentionResolutionError) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw error;
   }
 
   const conversationId: string | null = body.conversationId || null;
@@ -68,7 +90,7 @@ export async function POST(
     });
   }
 
-  const docs = db.select().from(documents).where(eq(documents.projectId, projectId)).all();
+  const docs = listProjectTextDocuments(projectId);
 
   const conditions = [eq(chatMessages.projectId, projectId)];
   if (conversationId) {
@@ -89,8 +111,8 @@ export async function POST(
   let conversationType: string | null = null;
   if (conversationId) {
     const conv = db.select().from(chatConversations).where(eq(chatConversations.id, conversationId)).get();
-    if (conv?.provider === "codex") {
-      provider = "codex";
+    if (conv?.provider === "codex" || conv?.provider === "gemini-cli") {
+      provider = conv.provider;
     }
     conversationType = conv?.type ?? null;
   }
@@ -132,6 +154,24 @@ export async function POST(
   } else {
     const chatSystemPrompt = await resolveAgentPrompt("chat", projectId);
     prompt = buildChatPrompt(project, docs, messageHistory, chatSystemPrompt);
+  }
+
+  const resolvedAgent = await resolveAgent("chat", projectId, provider);
+
+  try {
+    prompt = enrichPromptWithDocumentMentions({
+      projectId,
+      prompt,
+      textSources: [body.content, ...messageHistory.map((m) => m.content)],
+    }).prompt;
+  } catch (error) {
+    if (error instanceof MentionResolutionError) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw error;
   }
 
   setConversationStatus("generating");
@@ -212,14 +252,15 @@ export async function POST(
   }
 
   // Branch on provider
-  if (provider === "codex") {
-    // Codex: non-streaming — run the full prompt, return result as single SSE event
-    const codexProvider = getProvider("codex");
-    const session = codexProvider.spawn({
+  if (resolvedAgent.provider === "codex" || resolvedAgent.provider === "gemini-cli") {
+    // Non-streaming providers: run full prompt, emit a single SSE delta event.
+    const dynamicProvider = getProvider(resolvedAgent.provider);
+    const session = dynamicProvider.spawn({
       sessionId: `chat-${createId()}`,
       prompt,
       cwd: project.gitRepoPath || process.cwd(),
       mode: "plan",
+      model: resolvedAgent.model,
       logIdentifier: conversationId || `chat-${projectId}`,
     });
 
@@ -228,7 +269,7 @@ export async function POST(
       projectId,
       type: "chat",
       label: activityLabel,
-      provider: "codex",
+      provider: resolvedAgent.provider,
       startedAt: new Date().toISOString(),
       kill: () => session.kill(),
     });
@@ -236,14 +277,21 @@ export async function POST(
     const sseStream = new ReadableStream({
       async start(controller) {
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ status: "Codex processing..." })}\n\n`)
+          encoder.encode(
+            `data: ${JSON.stringify({
+              status:
+                resolvedAgent.provider === "codex"
+                  ? "Codex processing..."
+                  : "Gemini processing...",
+            })}\n\n`
+          )
         );
 
         try {
           const result = await session.promise;
           const fullContent = result.success
             ? result.result || "(empty response)"
-            : `Error: ${result.error || "Codex request failed"}`;
+            : `Error: ${result.error || "Provider request failed"}`;
 
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ delta: fullContent })}\n\n`)
@@ -253,7 +301,7 @@ export async function POST(
           saveAssistantAndTitle(controller, fullContent, result.success ? "active" : "error");
         } catch (error) {
           const failureMessage =
-            error instanceof Error ? `Error: ${error.message}` : "Error: Codex request failed";
+            error instanceof Error ? `Error: ${error.message}` : "Error: Provider request failed";
 
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ delta: failureMessage })}\n\n`)
@@ -282,6 +330,7 @@ export async function POST(
   const { stream: claudeStream, kill } = spawnClaudeStream({
     mode: "plan",
     prompt,
+    model: resolvedAgent.model,
     cwd: project.gitRepoPath || undefined,
     logIdentifier: conversationId || `chat-${projectId}`,
   });

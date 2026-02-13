@@ -44,10 +44,10 @@ class ClaudeProcessManager {
   private sessions: Map<string, TrackedSession> = new Map();
 
   /**
-   * Spawns a new Claude CLI process and tracks it under the given session ID.
+   * Spawns a new provider session and tracks it under the given session ID.
    * If a session with the same ID is already running, it throws an error.
    *
-   * When provider is 'codex', delegates to the Codex provider instead.
+   * When provider is not 'claude-code', dispatches via the provider abstraction.
    *
    * Returns the session info immediately. The process runs in the background
    * and updates the session state on completion.
@@ -68,10 +68,9 @@ class ClaudeProcessManager {
     let promise: Promise<ClaudeResult>;
     let providerSession: ProviderSession | undefined;
 
-    if (provider === "codex") {
-      // Delegate to Codex provider
-      const codexProvider = getProvider("codex");
-      const session = codexProvider.spawn({
+    if (provider !== "claude-code") {
+      const dynamicProvider = getProvider(provider);
+      const session = dynamicProvider.spawn({
         sessionId,
         prompt: options.prompt,
         cwd: options.cwd || process.cwd(),

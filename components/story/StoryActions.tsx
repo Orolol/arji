@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +33,7 @@ interface Story {
 }
 
 interface StoryActionsProps {
+  projectId: string;
   story: Story;
   dispatching: boolean;
   isRunning: boolean;
@@ -46,6 +47,7 @@ interface StoryActionsProps {
 }
 
 export function StoryActions({
+  projectId,
   story,
   dispatching,
   isRunning,
@@ -227,9 +229,10 @@ export function StoryActions({
               className="w-40 h-8 text-xs"
             />
           </div>
-          <Textarea
+          <MentionTextarea
+            projectId={projectId}
             value={devComment}
-            onChange={(e) => setDevComment(e.target.value)}
+            onValueChange={setDevComment}
             placeholder={
               canSendToDevFromReview
                 ? "Describe what needs to be fixed..."

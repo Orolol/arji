@@ -4,7 +4,6 @@ import {
   projects,
   epics,
   userStories,
-  documents,
   ticketComments,
 } from "@/lib/db/schema";
 import { eq, and, notInArray } from "drizzle-orm";
@@ -15,6 +14,7 @@ import { buildBuildPrompt } from "@/lib/claude/prompt-builder";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
 import type { ProviderType } from "@/lib/providers";
+import { resolveAgent } from "@/lib/agent-config/providers";
 import {
   createAgentAlreadyRunningPayload,
   getRunningSessionForTarget,
@@ -27,6 +27,12 @@ import {
   markSessionRunning,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
+import {
+  MentionResolutionError,
+  enrichPromptWithDocumentMentions,
+  validateMentionsExist,
+} from "@/lib/documents/mentions";
+import { listProjectTextDocuments } from "@/lib/documents/query";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
 
@@ -34,6 +40,18 @@ export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, epicId } = await params;
   const body = await request.json().catch(() => ({}));
   const provider: ProviderType = body.provider || "claude-code";
+
+  try {
+    validateMentionsExist({
+      projectId,
+      textSources: [body.comment],
+    });
+  } catch (error) {
+    if (error instanceof MentionResolutionError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
 
   // Validate epic exists
   const epic = db.select().from(epics).where(eq(epics.id, epicId)).get();
@@ -88,11 +106,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // Load context
-  const docs = db
-    .select()
-    .from(documents)
-    .where(eq(documents.projectId, projectId))
-    .all();
+  const docs = listProjectTextDocuments(projectId);
 
   const us = db
     .select()
@@ -127,6 +141,22 @@ export async function POST(request: NextRequest, { params }: Params) {
   // Build prompt
   const prompt = buildBuildPrompt(project, docs, epic, us, buildSystemPrompt, promptComments);
 
+  let enrichedPrompt = prompt;
+  try {
+    enrichedPrompt = enrichPromptWithDocumentMentions({
+      projectId,
+      prompt,
+      textSources: [body.comment, ...promptComments.map((c) => c.content)],
+    }).prompt;
+  } catch (error) {
+    if (error instanceof MentionResolutionError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
+
+  const resolvedAgent = await resolveAgent("build", projectId, provider);
+
   // Create session
   const sessionId = createId();
   const now = new Date().toISOString();
@@ -156,8 +186,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     projectId,
     epicId,
     mode: "code",
-    provider,
-    prompt,
+    provider: resolvedAgent.provider,
+    prompt: enrichedPrompt,
     logsPath,
     branchName,
     worktreePath,
@@ -184,10 +214,11 @@ export async function POST(request: NextRequest, { params }: Params) {
   markSessionRunning(sessionId, now);
   processManager.start(sessionId, {
     mode: "code",
-    prompt,
+    prompt: enrichedPrompt,
     cwd: worktreePath,
     allowedTools: ["Edit", "Write", "Bash", "Read", "Glob", "Grep"],
-  }, provider);
+    model: resolvedAgent.model,
+  }, resolvedAgent.provider);
 
   // Background: wait for completion, sync statuses, post agent comment
   (async () => {
