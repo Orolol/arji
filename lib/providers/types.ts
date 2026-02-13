@@ -31,6 +31,8 @@ export interface ProviderSpawnOptions {
   model?: string;
   /** Optional chunk callback (used by Codex session persistence). */
   onChunk?: (chunk: ProviderChunk) => void;
+  /** Optional identifier for NDJSON session logging. */
+  logIdentifier?: string;
 }
 
 export interface ProviderResult {

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { processManager } from "@/lib/claude/process-manager";
+import { activityRegistry } from "@/lib/activity-registry";
 import fs from "fs";
 import { listSessionChunks } from "@/lib/agent-sessions/chunks";
 import {
@@ -71,6 +72,24 @@ export async function DELETE(
 ) {
   const { sessionId } = await params;
 
+  // Try activity registry as fallback for ephemeral activities
+  {
+    const session = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .get();
+
+    if (!session) {
+      const cancelled = activityRegistry.cancel(sessionId);
+      if (cancelled) {
+        return NextResponse.json({ data: { cancelled: true } });
+      }
+      // Fall through to markSessionCancelled which will throw SessionNotFoundError
+    }
+  }
+
+  // Cancel in process manager
   processManager.cancel(sessionId);
   const now = new Date().toISOString();
 

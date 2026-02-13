@@ -12,6 +12,7 @@ import { createId } from "@/lib/utils/nanoid";
 import { spawnClaude } from "@/lib/claude/spawn";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
 import simpleGit from "simple-git";
+import { activityRegistry } from "@/lib/activity-registry";
 
 export async function GET(
   _request: NextRequest,
@@ -74,7 +75,19 @@ export async function POST(
 
   let changelog = "";
 
+  let releaseActivityId: string | null = null;
+
   if (generateChangelog) {
+    releaseActivityId = `release-${createId()}`;
+    activityRegistry.register({
+      id: releaseActivityId,
+      projectId,
+      type: "release",
+      label: `Generating Changelog: v${version}`,
+      provider: "claude-code",
+      startedAt: new Date().toISOString(),
+    });
+
     // Generate changelog via CC plan mode
     const settingsRow = db
       .select()
@@ -116,6 +129,8 @@ ${epicSummaries}
       }
     } catch {
       // Fall back to auto-generated changelog
+    } finally {
+      if (releaseActivityId) activityRegistry.unregister(releaseActivityId);
     }
   }
 
