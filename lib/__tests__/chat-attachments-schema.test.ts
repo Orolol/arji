@@ -24,6 +24,7 @@ describe("chatAttachments schema", () => {
         github_owner_repo TEXT,
         spec TEXT,
         imported INTEGER DEFAULT 0,
+        github_owner_repo TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
