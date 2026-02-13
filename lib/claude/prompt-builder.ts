@@ -587,6 +587,7 @@ export function buildBuildPrompt(
   epic: PromptEpic,
   userStories: PromptUserStory[],
   systemPrompt?: string | null,
+  comments?: PromptComment[],
 ): string {
   const parts: string[] = [];
 
@@ -633,6 +634,16 @@ export function buildBuildPrompt(
     parts.push(storyLines.join("\n\n") + "\n");
   }
 
+  // Comment history
+  if (comments && comments.length > 0) {
+    parts.push(`## Comment History\n`);
+    const formatted = comments.map((c) => {
+      const prefix = c.author === "user" ? "**User:**" : "**Agent:**";
+      return `${prefix}\n${c.content.trim()}`;
+    });
+    parts.push(formatted.join("\n\n") + "\n");
+  }
+
   parts.push(`## Instructions
 
 Implement this epic following the specification above. For each user story:
@@ -640,6 +651,8 @@ Implement this epic following the specification above. For each user story:
 1. Create or modify the necessary files.
 2. Write tests that verify the acceptance criteria.
 3. Ensure all acceptance criteria are met before moving to the next story.
+
+Consider all comments in the history — they may contain clarifications, feedback, or specific instructions.
 
 Commit your changes with clear, descriptive commit messages that reference the epic and user story titles. Use conventional commit format when possible.
 
@@ -723,7 +736,7 @@ Implement this ticket following the specification and acceptance criteria above.
 // 9. Review Prompt (Agent Review)
 // ---------------------------------------------------------------------------
 
-export type ReviewType = "security" | "code_review" | "compliance";
+export type ReviewType = "security" | "code_review" | "compliance" | "feature_review";
 
 export interface CustomReviewAgentPrompt {
   name: string;
@@ -795,6 +808,38 @@ For each finding, specify:
 - **Location**: File path and line number
 - **Description**: What the issue is
 - **Recommendation**: How to fix it`,
+
+  feature_review: `## Feature Completeness Checklist
+
+Verify that the implementation fully satisfies the ticket's acceptance criteria and delivers a complete, working feature. Use ALL available tools — browser, shell commands, test runners, etc. — to validate each point.
+
+1. **Acceptance Criteria Verification**:
+   - Go through each acceptance criterion one by one
+   - For UI features: launch the app and use the browser to verify the feature works as described
+   - For API features: make actual HTTP requests to verify endpoints behave correctly
+   - For CLI/backend features: run the relevant commands and verify output
+   - Document PASS/FAIL for each criterion with evidence (screenshots, command output, etc.)
+
+2. **Functional Completeness**:
+   - All user-facing flows described in the ticket are implemented end-to-end
+   - Edge cases mentioned in the description or acceptance criteria are handled
+   - No placeholder or TODO code left for critical paths
+   - Error states are handled and display meaningful feedback to the user
+
+3. **Integration**:
+   - The feature integrates correctly with existing functionality (no regressions in adjacent features)
+   - Data flows correctly between frontend and backend
+   - Navigation and routing work as expected
+
+4. **Tests**:
+   - Tests exist that cover the acceptance criteria
+   - Run the test suite and verify tests pass
+   - Report any failing tests with details
+
+For each criterion, specify:
+- **Status**: PASS / FAIL / PARTIAL
+- **Evidence**: What you did to verify (command run, URL visited, screenshot taken)
+- **Details**: Description of what works or what's missing`,
 };
 
 /**
@@ -847,6 +892,22 @@ You are performing a **${reviewType.name}** review on the code changes for the t
 2. Follow the custom review instructions above exactly.
 3. Produce a structured markdown report with findings and recommendations.
 4. If no issues are found, state "No issues found."
+`);
+  } else if (reviewType === "feature_review") {
+    // Feature review — code mode with full tool access
+    parts.push(REVIEW_CHECKLISTS[reviewType]);
+
+    parts.push(`\n## Instructions
+
+You are performing a **feature completeness review** on the ticket described above. You have full access to all tools — browser, shell, file system, test runners, etc.
+
+1. Read the relevant source files to understand the implementation.
+2. **Actively test the feature**: launch the app if needed, use the browser to navigate to relevant pages, run commands, execute tests.
+3. Go through each acceptance criterion and verify it with concrete evidence.
+4. Produce a structured report with PASS/FAIL/PARTIAL for each criterion.
+5. End with a summary: number of criteria passed/failed, and an overall assessment (Feature Complete / Partially Complete / Not Complete).
+
+Your response should be a well-formatted markdown report. Do NOT just read the code — actually run and test the feature.
 `);
   } else {
     // Built-in review checklist
@@ -935,6 +996,7 @@ export function buildEpicReviewPrompt(
   userStories: PromptUserStory[],
   reviewType: ReviewType,
   systemPrompt?: string | null,
+  comments?: PromptComment[],
 ): string {
   const parts: string[] = [];
 
@@ -973,10 +1035,34 @@ export function buildEpicReviewPrompt(
     parts.push(storyLines.join("\n\n") + "\n");
   }
 
+  // Comment history
+  if (comments && comments.length > 0) {
+    parts.push(`## Comment History\n`);
+    const formatted = comments.map((c) => {
+      const prefix = c.author === "user" ? "**User:**" : "**Agent:**";
+      return `${prefix}\n${c.content.trim()}`;
+    });
+    parts.push(formatted.join("\n\n") + "\n");
+  }
+
   // Review checklist
   parts.push(REVIEW_CHECKLISTS[reviewType]);
 
-  parts.push(`\n## Instructions
+  if (reviewType === "feature_review") {
+    parts.push(`\n## Instructions
+
+You are performing a **feature completeness review** on the entire epic described above, covering all user stories. You have full access to all tools — browser, shell, file system, test runners, etc.
+
+1. Read the relevant source files to understand the implementation.
+2. **Actively test the features**: launch the app if needed, use the browser to navigate to relevant pages, run commands, execute tests.
+3. Go through each user story and its acceptance criteria, verifying with concrete evidence.
+4. Produce a structured report with PASS/FAIL/PARTIAL for each user story and criterion.
+5. End with a summary: number of stories/criteria passed/failed, and an overall assessment (Feature Complete / Partially Complete / Not Complete).
+
+Your response should be a well-formatted markdown report. Do NOT just read the code — actually run and test the features.
+`);
+  } else {
+    parts.push(`\n## Instructions
 
 You are performing a **${reviewType.replace("_", " ")}** on the entire epic described above, covering all user stories.
 
@@ -988,6 +1074,7 @@ You are performing a **${reviewType.replace("_", " ")}** on the entire epic desc
 
 Your response should be a well-formatted markdown report.
 `);
+  }
 
   return parts.filter(Boolean).join("\n");
 }

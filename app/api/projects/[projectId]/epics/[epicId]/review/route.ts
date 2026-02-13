@@ -39,12 +39,14 @@ const VALID_REVIEW_TYPES: ReviewType[] = [
   "security",
   "code_review",
   "compliance",
+  "feature_review",
 ];
 
 const REVIEW_LABELS: Record<ReviewType, string> = {
   security: "Security Review",
   code_review: "Code Review",
   compliance: "Compliance & Accessibility Review",
+  feature_review: "Feature Review",
 };
 
 export async function POST(request: NextRequest, { params }: Params) {
@@ -133,6 +135,20 @@ export async function POST(request: NextRequest, { params }: Params) {
     .orderBy(userStories.position)
     .all();
 
+  // Load epic comments
+  const comments = db
+    .select()
+    .from(ticketComments)
+    .where(eq(ticketComments.epicId, epicId))
+    .orderBy(ticketComments.createdAt)
+    .all();
+
+  const promptComments = comments.map((c) => ({
+    author: c.author as "user" | "agent",
+    content: c.content,
+    createdAt: c.createdAt ?? "",
+  }));
+
   // Ensure worktree exists
   const { worktreePath, branchName } = await createWorktree(
     gitRepoPath,
@@ -153,7 +169,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       epic,
       us,
       reviewType,
-      reviewSystemPrompt
+      reviewSystemPrompt,
+      promptComments
     );
 
     const sessionId = createId();
@@ -181,11 +198,13 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
 
+    const agentMode = reviewType === "feature_review" ? "code" : "plan";
+
     createQueuedSession({
       id: sessionId,
       projectId,
       epicId,
-      mode: "plan",
+      mode: agentMode,
       provider,
       prompt,
       logsPath,
@@ -196,7 +215,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     markSessionRunning(sessionId, now);
     processManager.start(sessionId, {
-      mode: "plan",
+      mode: agentMode,
       prompt,
       cwd: worktreePath,
     }, provider);

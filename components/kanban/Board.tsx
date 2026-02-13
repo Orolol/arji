@@ -90,8 +90,6 @@ export function Board({
     })
   );
 
-  if (loading) return <BoardSkeleton />;
-
   const findEpicById = useCallback(
     (id: string): { epic: KanbanEpic; column: KanbanStatus } | null => {
       for (const col of KANBAN_COLUMNS) {
@@ -153,6 +151,8 @@ export function Board({
     },
     [markEpicAiCommentSeen, onEpicClick]
   );
+
+  if (loading) return <BoardSkeleton />;
 
   function handleDragStart(event: DragStartEvent) {
     const found = findEpicById(event.active.id as string);

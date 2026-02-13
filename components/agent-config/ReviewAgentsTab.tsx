@@ -15,6 +15,7 @@ import {
   Shield,
   Code2,
   Scale,
+  ListChecks,
 } from "lucide-react";
 
 interface ReviewAgentsTabProps {
@@ -37,6 +38,11 @@ const BUILTIN_REVIEWS = [
     agentType: "review_compliance" as const,
     label: AGENT_TYPE_LABELS.review_compliance,
     icon: Scale,
+  },
+  {
+    agentType: "review_feature" as const,
+    label: AGENT_TYPE_LABELS.review_feature,
+    icon: ListChecks,
   },
 ];
 

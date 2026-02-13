@@ -101,6 +101,20 @@ export async function POST(request: NextRequest, { params }: Params) {
     .orderBy(userStories.position)
     .all();
 
+  // Load epic comments
+  const comments = db
+    .select()
+    .from(ticketComments)
+    .where(eq(ticketComments.epicId, epicId))
+    .orderBy(ticketComments.createdAt)
+    .all();
+
+  const promptComments = comments.map((c) => ({
+    author: c.author as "user" | "agent",
+    content: c.content,
+    createdAt: c.createdAt ?? "",
+  }));
+
   const buildSystemPrompt = await resolveAgentPrompt("build", projectId);
 
   // Create worktree
@@ -111,7 +125,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   );
 
   // Build prompt
-  const prompt = buildBuildPrompt(project, docs, epic, us, buildSystemPrompt);
+  const prompt = buildBuildPrompt(project, docs, epic, us, buildSystemPrompt, promptComments);
 
   // Create session
   const sessionId = createId();

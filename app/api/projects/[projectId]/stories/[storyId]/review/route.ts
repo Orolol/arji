@@ -39,12 +39,14 @@ const VALID_REVIEW_TYPES: ReviewType[] = [
   "security",
   "code_review",
   "compliance",
+  "feature_review",
 ];
 
 const REVIEW_LABELS: Record<ReviewType, string> = {
   security: "Security Review",
   code_review: "Code Review",
   compliance: "Compliance & Accessibility Review",
+  feature_review: "Feature Review",
 };
 
 export async function POST(request: NextRequest, { params }: Params) {
@@ -206,12 +208,14 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
 
+    const agentMode = reviewType === "feature_review" ? "code" : "plan";
+
     createQueuedSession({
       id: sessionId,
       projectId,
       epicId: epic.id,
       userStoryId: storyId,
-      mode: "plan",
+      mode: agentMode,
       provider,
       prompt,
       logsPath,
@@ -220,10 +224,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       createdAt: now,
     });
 
-    // Spawn agent in plan mode (read-only)
+    // Spawn agent — feature_review runs in code mode, others in plan mode (read-only)
     markSessionRunning(sessionId, now);
     processManager.start(sessionId, {
-      mode: "plan",
+      mode: agentMode,
       prompt,
       cwd: worktreePath,
     }, provider);

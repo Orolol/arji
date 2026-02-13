@@ -1,0 +1,216 @@
+{
+  "migrationId": "2026-02-13T13-37-37-539Z",
+  "projectId": "cUfHlegssamR",
+  "capturedAt": "2026-02-13T13:37:37.539Z",
+  "snapshot": {
+    "conversations": [
+      {
+        "id": "LgJqUgJiol8o",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "Feature Review Agent Implementation",
+        "status": "active",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-13T10:16:09.097Z"
+      },
+      {
+        "id": "P1mGV6zeAYN5",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "New Epic",
+        "status": "active",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-13T10:44:32.036Z"
+      },
+      {
+        "id": "yrR4ZkR_rs-o",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "New Epic",
+        "status": "active",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-13T11:04:32.099Z"
+      },
+      {
+        "id": "2MOTfCDPvVt3",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "Agent Status Card UI",
+        "status": "active",
+        "epic_id": null,
+        "provider": "codex",
+        "created_at": "2026-02-13T11:07:14.866Z"
+      },
+      {
+        "id": "zeCDX3Busx4_",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "New Epic",
+        "status": "active",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-13T13:06:34.356Z"
+      },
+      {
+        "id": "PTGXcQDmtYQh",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "New Epic",
+        "status": "active",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-13T13:35:35.259Z"
+      }
+    ],
+    "messages": [
+      {
+        "id": "REp9hqkV_L7c",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "LgJqUgJiol8o",
+        "role": "user",
+        "content": "On va ajouter un nouveau type de review de base : feature review, qui est de base cochée. C'est un agent qui vérifie que le ticket est feature complete, et qui n'hésite pas a utilsier tout les outils pour ça (browser, etc ...)",
+        "metadata": null,
+        "created_at": "2026-02-13T10:17:08.783Z"
+      },
+      {
+        "id": "jlv2ZM031lDM",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "LgJqUgJiol8o",
+        "role": "assistant",
+        "content": "Deux points à clarifier avant de formaliser l'epic :\n\n1. **Mode de l'agent** — Les 3 reviews existants tournent en mode `plan` (read-only). Si le feature review doit utiliser le browser et tous les outils, il faudrait qu'il tourne en mode normal. C'est un changement significatif dans le pipeline.\n\n2. **\"Coché par défaut\"** — Est-ce qu'on hardcode ça juste pour le feature review, ou on rend le mécanisme configurable pour tous les review types ?",
+        "metadata": null,
+        "created_at": "2026-02-13T10:19:27.311Z"
+      },
+      {
+        "id": "kkFiMtOVXjhd",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "LgJqUgJiol8o",
+        "role": "user",
+        "content": "**Mode agent**: Mode normal (Recommanded)\n**Default check**: Juste feature_review en dur",
+        "metadata": null,
+        "created_at": "2026-02-13T10:23:18.680Z"
+      },
+      {
+        "id": "ZPY66-fOE_qZ",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "LgJqUgJiol8o",
+        "role": "assistant",
+        "content": "The plan covers 7 files with a clear implementation order:\n\n1. **Constants** — new `review_feature` agent type + `REVIEW_TYPE_MODE` mapping (`plan` vs `code` per review type)\n2. **Prompt builder** — feature review checklist focused on actually testing the feature (run app, use browser, verify acceptance criteria), with code-mode-specific instructions\n3. **Both API routes** — add `feature_review` to valid types and replace hardcoded `mode: \"plan\"` with `REVIEW_TYPE_MODE[reviewType]`\n4. **Both UI components** — checkbox checked by default (`new Set([\"feature_review\"])`), placed at top of the list\n5. **ReviewAgentsTab** — show in settings with FlaskConical icon\n\nThe key architectural change is the `REVIEW_TYPE_MODE` constant that makes mode per-review-type instead of globally hardcoded to `\"plan\"`.",
+        "metadata": null,
+        "created_at": "2026-02-13T10:27:53.527Z"
+      },
+      {
+        "id": "Sout_-woCxic",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "LgJqUgJiol8o",
+        "role": "user",
+        "content": "Generate the final epic with user stories based on our discussion.",
+        "metadata": null,
+        "created_at": "2026-02-13T10:37:58.983Z"
+      },
+      {
+        "id": "mtIe9HxkhJda",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "LgJqUgJiol8o",
+        "role": "assistant",
+        "content": "The plan covers 7 files across 6 user stories, with the key architectural change being the `REVIEW_TYPE_MODE` constant that makes agent mode per-review-type instead of globally hardcoded to `\"plan\"`. The feature review agent runs in `code` mode and is pre-checked by default in both epic and story review dialogs.",
+        "metadata": null,
+        "created_at": "2026-02-13T10:40:46.999Z"
+      },
+      {
+        "id": "zbyZliK0hkYS",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "LgJqUgJiol8o",
+        "role": "user",
+        "content": "Generate the final epic with user stories based on our discussion.",
+        "metadata": null,
+        "created_at": "2026-02-13T10:43:21.157Z"
+      },
+      {
+        "id": "Ylie6s_SixBa",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "LgJqUgJiol8o",
+        "role": "assistant",
+        "content": "The epic is ready with 6 user stories covering:\n\n1. **Constants foundation** — `REVIEW_TYPE_MODE` mapping + new agent type\n2. **Prompt builder** — hands-on feature review checklist (run app, use browser, test criteria)\n3. **Epic review API** — accept `feature_review`, use mode mapping instead of hardcoded `\"plan\"`\n4. **Story review API** — same changes mirrored\n5. **UI dialogs** — pre-checked checkbox at top of both EpicActions and StoryActions\n6. **Settings tab** — FlaskConical icon in ReviewAgentsTab",
+        "metadata": null,
+        "created_at": "2026-02-13T10:46:04.434Z"
+      },
+      {
+        "id": "8utuA7nB3af4",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "2MOTfCDPvVt3",
+        "role": "user",
+        "content": "On va enrichir les card des ticket :\n1) QUand un agent travaille sur le ticket (build, merge, review), il faut une icone qui l'indique\n2) quand je survol un ticket à la souris, ça highlight l'agent en question dans la partie du bas de l'UI\n3) QUand sur un ticket le dernier commentaire est de l'IA et que l'utilisateur ne 'la pas vu, on l'indique par une icone",
+        "metadata": null,
+        "created_at": "2026-02-13T11:09:06.962Z"
+      },
+      {
+        "id": "BC5zIld18Nyr",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "2MOTfCDPvVt3",
+        "role": "assistant",
+        "content": "Bonne direction. Pour éviter le chevauchement avec les epics existants (`When asking review or merge...`, `Agent Busy Guards & Visual Feedback`, `Ticket Comments, Send-to-Dev & Agent Review`), je te conseille de cadrer cet epic comme un epic **UI des cards ticket uniquement**: signaux visuels d’activité agent, interaction hover card↔panel agents, et état “réponse IA non lue”.\n\nPour bien le spécifier, il manque 2 décisions produit:\n1. Pour l’icône d’agent en cours (`build/review/merge`), tu veux **une icône unique + type en tooltip** ou **une icône différente par type d’action** ?  \n2. “Dernier commentaire IA non vu” doit être calculé **par utilisateur** (read-receipt) ou juste “non vu dans la session courante” ? Et quand l’icône disparaît exactement (ouverture du ticket, focus du commentaire, scroll en bas) ?\n\nSi tu veux un scope livrable rapidement, on peut le découper en 2 lots: (A) activité agent + hover highlight (100% front/UI + état runtime), puis (B) badge “IA non lue” (souvent backend/state plus sensible). Ça restera aligné avec les specs `Kanban Board` et `Ticket Comments` sans rouvrir le périmètre “chat global”.",
+        "metadata": null,
+        "created_at": "2026-02-13T11:09:33.731Z"
+      },
+      {
+        "id": "vEsiFgJU1t_6",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "2MOTfCDPvVt3",
+        "role": "user",
+        "content": "1) Une icone apr type\n2) Par session, ça suffit. Ca disparait des que l'on ouvre le ticket\nOn fait ça en un seule epic",
+        "metadata": null,
+        "created_at": "2026-02-13T11:10:59.333Z"
+      },
+      {
+        "id": "bMAgj2AAxHD8",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "2MOTfCDPvVt3",
+        "role": "assistant",
+        "content": "Le périmètre peut tenir dans un seul epic centré **ticket cards (Kanban)** :  \n- icône par type d’action agent (`build`, `review`, `merge`) quand un agent travaille sur le ticket,  \n- survol d’une card => highlight de l’agent lié dans le panneau bas,  \n- icône “dernier commentaire IA non lu” **par session**, retirée dès l’ouverture du ticket.\n\nPour éviter le chevauchement avec les epics existants (`Agent Busy Guards & Visual Feedback`, `Ticket Comments, Send-to-Dev & Agent Review`, `When asking review or merge...`), je le cadrerais explicitement comme **UI + wiring d’état frontend** uniquement, sans modifier l’orchestration agent ni les règles de dispatch. C’est aligné avec les specs `Kanban Board` et `Ticket Comments`.\n\nIl reste 2 décisions pour verrouiller le scope avant de rédiger le titre/US/AC :  \n1. Si plusieurs actions sont actives sur un ticket (ex. `build` + `review`), la card affiche une seule icône prioritaire ou plusieurs icônes ?  \n2. Le badge “IA non lue” couvre seulement les commentaires IA “métier” du ticket, ou aussi les messages système (statuts review/merge) ?",
+        "metadata": null,
+        "created_at": "2026-02-13T11:11:27.013Z"
+      },
+      {
+        "id": "W47AOgwUAHOq",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "2MOTfCDPvVt3",
+        "role": "user",
+        "content": "1) c'est un cas qui ne se produira jamais\n2) Tout les messages",
+        "metadata": null,
+        "created_at": "2026-02-13T11:11:59.190Z"
+      },
+      {
+        "id": "hfCA8QlUznnK",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "2MOTfCDPvVt3",
+        "role": "assistant",
+        "content": "Le scope est maintenant cohérent pour **un seul epic**: uniquement UI des cards ticket dans le Kanban, aligné avec `Kanban Board` et `Ticket Comments`, et explicitement **hors** orchestration agent/dispatch (pour ne pas chevaucher `Agent Busy Guards & Visual Feedback`, `Ticket Comments, Send-to-Dev & Agent Review`, et `When asking review or merge...`).  \nLe différenciateur à écrire noir sur blanc: *signaux visuels de card + interaction hover card↔panel agents + indicateur IA non lue par session*.\n\nPour préparer un epic propre (sans encore le rédiger), je te conseille de cadrer 4 blocs:  \n1) source d’état “agent en cours” (`build/review/merge`) et mapping icône par type,  \n2) comportement hover (entrée/sortie, cible exacte de highlight dans le panneau bas),  \n3) logique “IA non lue” (tous messages IA + système, scope session, clear à l’ouverture du ticket),  \n4) règles UI de cohabitation des icônes sur la card (placement/priorité/accessibilité tooltip).\n\nIl reste 2 points à verrouiller avant rédaction finale:  \n- “Par session” = session navigateur (reset au refresh/fermeture) ou session utilisateur (persistée au moins pendant reload via `sessionStorage`) ?  \n- “Dès qu’on ouvre le ticket” = au clic d’ouverture de la vue ticket (immédiat) ou seulement quand le contenu des commentaires est réellement affiché ?",
+        "metadata": null,
+        "created_at": "2026-02-13T11:12:28.241Z"
+      },
+      {
+        "id": "P7yRCI1Z-a9R",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "2MOTfCDPvVt3",
+        "role": "user",
+        "content": "Generate the final epic with user stories based on our discussion.",
+        "metadata": null,
+        "created_at": "2026-02-13T11:12:46.802Z"
+      },
+      {
+        "id": "WkylqabEvTF6",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "2MOTfCDPvVt3",
+        "role": "assistant",
+        "content": "```json\n{\n  \"title\": \"Kanban Ticket Cards: Agent Activity, Hover Link, and Unread AI Indicator\",\n  \"description\": \"Implement a focused Kanban ticket-card UX epic that adds visual agent signals and card-to-agent interaction without changing agent orchestration/dispatch logic.\\n\\nImplementation plan:\\n1. Scope and boundaries\\n- Limit changes to Kanban ticket cards, shared frontend state wiring, and bottom agent panel highlighting.\\n- Reuse existing runtime ticket/agent state; do not change backend workflows for build/review/merge.\\n\\n2. Agent activity icon on ticket cards\\n- Add a single activity icon slot on each ticket card for active agent work.\\n- Map action type to icon: `build`, `review`, `merge`.\\n- Render only when the ticket has an active agent action; hide otherwise.\\n- Add tooltip and aria-label with action type and agent name.\\n\\n3. Hover link between ticket card and bottom agent panel\\n- On ticket-card hover/focus, emit selected agent context to bottom panel.\\n- Bottom panel highlights only the linked agent card/row; remove highlight on unhover/blur.\\n- Safely no-op if ticket has no linked active agent.\\n\\n4. Unread AI last-message indicator (session-scoped)\\n- Show an unread indicator on ticket card when the latest ticket comment is AI-originated (including system/status messages) and has not been seen in the current browser session.\\n- Persist seen state in `sessionStorage` (project+ticket scoped), not user-global persistence.\\n- Clear unread indicator immediately when ticket is opened.\\n\\n5. UI cohabitation and accessibility\\n- Define deterministic placement when both activity and unread indicators are present.\\n- Ensure contrast, tooltip text, keyboard focus behavior, and aria labels are compliant.\\n\\n6. Validation and regression safety\\n- Add component tests for icon mapping/visibility and unread logic.\\n- Add integration/E2E tests for hover highlight lifecycle and unread-clearing-on-open.\\n- Verify no regressions in Kanban drag-and-drop, ticket open flow, or bottom panel rendering.\",\n  \"userStories\": [\n    {\n      \"title\": \"As a project manager, I want a distinct icon for build/review/merge activity on each ticket card so that I can instantly see what kind of agent work is running\",\n      \"description\": \"Add one action-specific activity icon to each Kanban ticket card when an agent is actively working on that ticket. The icon must reflect the action type (`build`, `review`, `merge`) and be sourced from existing frontend runtime state. This is a visual layer only and must not alter orchestration rules.\",\n      \"acceptanceCriteria\": \"- [ ] A ticket with active `build` work shows the build icon; active `review` shows review icon; active `merge` shows merge icon.\\n- [ ] Tickets without active agent work show no activity icon.\\n- [ ] The activity icon has a tooltip and aria-label including action type and agent identity.\\n- [ ] Rendering logic is frontend-only and does not modify dispatch/orchestration behavior.\"\n    },\n    {\n      \"title\": \"As a project manager, I want hovering a ticket card to highlight its linked agent in the bottom panel so that I can quickly connect work items to active agents\",\n      \"description\": \"Create a hover/focus interaction bridge between Kanban ticket cards and the bottom agent panel. Hovering (or keyboard focusing) a card should highlight the corresponding agent entry; leaving hover/focus should remove the highlight cleanly.\",\n      \"acceptanceCriteria\": \"- [ ] Mouse enter on a ticket card highlights the linked agent in the bottom panel.\\n- [ ] Mouse leave removes the highlight immediately.\\n- [ ] Keyboard focus/blur on the ticket card triggers the same highlight behavior.\\n- [ ] If no linked agent exists for the card, no highlight is applied and no error is thrown.\\n- [ ] At most one agent is highlighted per hovered/focused card.\"\n    },\n    {\n      \"title\": \"As a project manager, I want an unread AI indicator on ticket cards when the latest AI message has not been seen in my session so that I do not miss agent feedback\",\n      \"description\": \"Show an unread badge/icon on a ticket card when the most recent ticket comment was posted by AI (including system/status messages) and has not been viewed in the current browser session. The indicator must clear as soon as the ticket is opened.\",\n      \"acceptanceCriteria\": \"- [ ] If the latest comment is AI-originated (including system/status messages) and unseen in session, the ticket card shows an unread AI indicator.\\n- [ ] If the latest comment is user-originated, no unread AI indicator is shown.\\n- [ ] Opening the ticket clears the unread AI indicator immediately.\\n- [ ] Seen/unseen state is tracked per browser session (session-scoped), not persisted as a global user read receipt.\\n- [ ] After clearing, the indicator reappears only when a newer AI/system message becomes the latest comment.\"\n    },\n    {\n      \"title\": \"As a maintainer, I want consistent indicator layout and automated test coverage so that these UI signals remain reliable as the Kanban evolves\",\n      \"description\": \"Finalize placement, priority, and accessibility for ticket-card indicators and validate the full behavior with automated tests. This ensures visual clarity and protects against regressions in Kanban and agent panel interactions.\",\n      \"acceptanceCriteria\": \"- [ ] Activity and unread indicators can co-exist on the same card with deterministic placement and no overlap.\\n- [ ] Indicator visuals meet baseline accessibility requirements (contrast, aria labels, focus behavior).\\n- [ ] Component tests cover icon mapping, conditional rendering, and unread state transitions.\\n- [ ] Integration/E2E tests cover hover-highlight enter/leave and unread-clear-on-open flows.\\n- [ ] Existing Kanban card interactions (including opening tickets) continue to function without regression.\"\n    }\n  ]\n}\n```",
+        "metadata": null,
+        "created_at": "2026-02-13T11:13:36.956Z"
+      }
+    ],
+    "attachments": []
+  }
+}

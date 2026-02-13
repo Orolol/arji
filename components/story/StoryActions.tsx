@@ -62,7 +62,7 @@ export function StoryActions({
   const [devComment, setDevComment] = useState("");
   const [devProvider, setDevProvider] = useState<ProviderType>("claude-code");
   const [reviewProvider, setReviewProvider] = useState<ProviderType>("claude-code");
-  const [reviewTypes, setReviewTypes] = useState<Set<string>>(new Set());
+  const [reviewTypes, setReviewTypes] = useState<Set<string>>(new Set(["feature_review"]));
   const [approving, setApproving] = useState(false);
 
   const status = story.status;
@@ -178,7 +178,7 @@ export function StoryActions({
           size="sm"
           variant="outline"
           onClick={() => {
-            setReviewTypes(new Set());
+            setReviewTypes(new Set(["feature_review"]));
             setReviewOpen(true);
           }}
           disabled={actionsLocked}
@@ -288,6 +288,20 @@ export function StoryActions({
             />
           </div>
           <div className="space-y-3">
+            <label className="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={reviewTypes.has("feature_review")}
+                onChange={() => toggleReviewType("feature_review")}
+                className="mt-0.5 h-4 w-4 rounded border-border"
+              />
+              <div>
+                <p className="text-sm font-medium">Feature Review</p>
+                <p className="text-xs text-muted-foreground">
+                  Verifies feature completeness against acceptance criteria using all available tools
+                </p>
+              </div>
+            </label>
             <label className="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 cursor-pointer">
               <input
                 type="checkbox"
