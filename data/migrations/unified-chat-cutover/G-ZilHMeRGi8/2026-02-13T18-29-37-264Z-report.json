@@ -1,0 +1,33 @@
+{
+  "migrationId": "2026-02-13T18-29-37-264Z",
+  "projectId": "G-ZilHMeRGi8",
+  "startedAt": "2026-02-13T18:29:37.264Z",
+  "completedAt": "2026-02-13T18:29:37.267Z",
+  "backupPath": "/home/gmartin/worspace/arji/data/migrations/unified-chat-cutover/G-ZilHMeRGi8/2026-02-13T18-29-37-264Z-backup.json",
+  "reportPath": "/home/gmartin/worspace/arji/data/migrations/unified-chat-cutover/G-ZilHMeRGi8/2026-02-13T18-29-37-264Z-report.json",
+  "before": {
+    "conversations": 4,
+    "messages": 6,
+    "attachments": 0,
+    "orphanMessages": 0
+  },
+  "actions": {
+    "createdFallbackConversation": false,
+    "fallbackConversationId": null,
+    "messagesReassigned": 0
+  },
+  "after": {
+    "conversations": 4,
+    "messages": 6,
+    "attachments": 0,
+    "orphanMessages": 0
+  },
+  "integrity": {
+    "missingConversationReferences": 0,
+    "duplicateConversationIds": 0,
+    "duplicateMessageIds": 0,
+    "zeroMissingConversations": true,
+    "zeroDuplicateConversations": true,
+    "zeroDuplicateMessages": true
+  }
+}

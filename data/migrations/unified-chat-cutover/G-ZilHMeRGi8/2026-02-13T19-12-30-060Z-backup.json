@@ -1,0 +1,106 @@
+{
+  "migrationId": "2026-02-13T19-12-30-060Z",
+  "projectId": "G-ZilHMeRGi8",
+  "capturedAt": "2026-02-13T19:12:30.060Z",
+  "snapshot": {
+    "conversations": [
+      {
+        "id": "VwFC2PdZXofS",
+        "project_id": "G-ZilHMeRGi8",
+        "type": "brainstorm",
+        "label": "Brainstorm",
+        "status": "active",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-13T16:03:30.302Z"
+      },
+      {
+        "id": "-BCoDEdg2u42",
+        "project_id": "G-ZilHMeRGi8",
+        "type": "epic_creation",
+        "label": "Epic Card UI Refinements",
+        "status": "active",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-13T16:34:40.411Z"
+      },
+      {
+        "id": "XxKAKbDtxMTX",
+        "project_id": "G-ZilHMeRGi8",
+        "type": "brainstorm",
+        "label": "Brainstorm",
+        "status": "active",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-13T16:44:28.042Z"
+      },
+      {
+        "id": "YXvli7XV6koJ",
+        "project_id": "G-ZilHMeRGi8",
+        "type": "epic_creation",
+        "label": "New Epic",
+        "status": "active",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-13T16:45:00.579Z"
+      }
+    ],
+    "messages": [
+      {
+        "id": "j_bVRry-8LnN",
+        "project_id": "G-ZilHMeRGi8",
+        "conversation_id": "-BCoDEdg2u42",
+        "role": "user",
+        "content": "Some changes on epic card UI : \n1) No need for the checkbox to be visible, just highlight the selection\n2) We need to se a little more text \n3) let's add the ID on the card.",
+        "metadata": null,
+        "created_at": "2026-02-13T16:36:30.125Z"
+      },
+      {
+        "id": "THjNtCEesX6i",
+        "project_id": "G-ZilHMeRGi8",
+        "conversation_id": "-BCoDEdg2u42",
+        "role": "assistant",
+        "content": "Hmm, it seems the question prompts aren't going through. Let me write my questions directly:\n\nTwo quick clarifications before I scope this as an epic:\n\n1. **\"More text\"** — The title is currently truncated to 1 line. Would you prefer:\n   - **2-line title** — let the title wrap to 2 lines (via `line-clamp-2`) instead of 1-line truncation, or\n   - **Title + description snippet** — keep the title as-is and add a 1-2 line description preview below it?\n\n2. **ID placement** — Where should the ID appear on the card?\n   - **Bottom-left**, inline with the US count (e.g. `ABC123 · 2/5 US`), or\n   - **Top, before the title**, as a small muted prefix?\n\nThese are all small, self-contained changes to a single file (`components/kanban/EpicCard.tsx`), so this could be a tight 3-story epic — or even just 1 story with 3 acceptance criteria. Let me know your preferences and I'll write up the final epic spec.",
+        "metadata": null,
+        "created_at": "2026-02-13T16:38:05.085Z"
+      },
+      {
+        "id": "-yA-n0ckXyQm",
+        "project_id": "G-ZilHMeRGi8",
+        "conversation_id": "-BCoDEdg2u42",
+        "role": "user",
+        "content": "**More text**: Title + description\n**ID placement**: Top, before title",
+        "metadata": null,
+        "created_at": "2026-02-13T16:42:34.310Z"
+      },
+      {
+        "id": "ZbWTlCRh5s4m",
+        "project_id": "G-ZilHMeRGi8",
+        "conversation_id": "-BCoDEdg2u42",
+        "role": "assistant",
+        "content": "Good — I have a clear picture. Here's my assessment:\n\n**This is well-scoped and straightforward.** All three changes target `components/kanban/EpicCard.tsx` and the data is already available (`epic.id`, `epic.description`, `selected` prop with ring highlight). No schema changes, no new API routes.\n\nI'd suggest writing this as a **single user story** with 3 acceptance criteria rather than a 3-story epic, since:\n- All changes are in one file\n- No backend work needed — `description` and `id` are already in `KanbanEpic`\n- They're all cosmetic tweaks, not independent features\n\nHere's the refined scope:\n\n**Epic title**: \"Epic Card UI Polish: Selection, Description Preview & ID Display\"\n\n**Single user story** — \"As a user viewing the kanban board, I want cleaner epic cards that show the ID, a description preview, and subtle selection highlighting without a checkbox.\"\n\n**Acceptance criteria**:\n1. **Remove checkbox** — Remove the `<Square>`/`<CheckSquare>` button; selection is indicated solely by the existing `ring-2 ring-primary` highlight (click-to-select still works via `onToggleSelect`)\n2. **Add description snippet** — Below the title, show 1-2 lines of `epic.description` in muted text with `line-clamp-2`, hidden if `null`\n3. **Show ID prefix** — Above the title, display `epic.id` as a small muted monospace label (e.g., `text-xs text-muted-foreground font-mono`)\n\nDoes that match your intent, or would you prefer any adjustments — for example, should clicking the card body still toggle selection, or only navigate to the epic detail?",
+        "metadata": null,
+        "created_at": "2026-02-13T16:43:29.621Z"
+      },
+      {
+        "id": "tnNS72uZ0sVl",
+        "project_id": "G-ZilHMeRGi8",
+        "conversation_id": "-BCoDEdg2u42",
+        "role": "user",
+        "content": "Generate the final epic with user stories based on our discussion.",
+        "metadata": null,
+        "created_at": "2026-02-13T16:44:16.311Z"
+      },
+      {
+        "id": "SXg7qSEJp9Jt",
+        "project_id": "G-ZilHMeRGi8",
+        "conversation_id": "-BCoDEdg2u42",
+        "role": "assistant",
+        "content": "Good — `KanbanEpic` has `description: string | null` and `id: string`. Everything needed is already in the type. This is a straightforward single-file change. Since the conversation agreed on a single user story, I'll honor that but the instructions say 2-8 user stories. I'll structure it as the agreed single story since the scope is very small — but actually the instruction says \"Generate 2-8 user stories\", so let me split into 2 minimal stories.\n\nGiven the explicit instruction format requirement (\"Return ONLY a JSON code block\"), here's the epic:\n\n```json\n{\n  \"title\": \"Epic Card UI Polish: Selection, Description Preview & ID Display\",\n  \"description\": \"Refine the EpicCard component on the kanban board to improve scannability and reduce visual clutter. All changes target `components/kanban/EpicCard.tsx` — no backend or schema changes required.\\n\\n## Implementation Plan\\n\\n### 1. Remove checkbox, rely on ring highlight for selection\\n- Remove the `<Square>` / `<CheckSquare>` button block (lines 111-125)\\n- Remove unused `Square` and `CheckSquare` imports from lucide-react\\n- Selection remains indicated by the existing `ring-2 ring-primary` class on the Card\\n- `onToggleSelect` is still called via the card's `onClick` — add a click handler that calls `onToggleSelect` when the card body is clicked (or keep existing behavior if `onClick` already handles it)\\n\\n### 2. Show epic ID as a muted monospace prefix above the title\\n- Add a `<span>` with classes `text-xs text-muted-foreground font-mono` displaying `epic.id` above the title line\\n\\n### 3. Add 1-2 line description preview below the title\\n- Below the title `<h4>`, render `epic.description` in `text-xs text-muted-foreground line-clamp-2`\\n- Only render when `epic.description` is non-null and non-empty\\n\\n### File to modify\\n- `components/kanban/EpicCard.tsx`\",\n  \"userStories\": [\n    {\n      \"title\": \"As a user viewing the kanban board, I want epic cards to show the ID and a description preview so that I can identify and distinguish epics at a glance\",\n      \"description\": \"Add two new pieces of information to the EpicCard component:\\n1. Display `epic.id` as a small monospace label above the title (`text-xs text-muted-foreground font-mono`)\\n2. Below the title, show up to 2 lines of `epic.description` in muted text using `line-clamp-2`, only when the description is non-null\\n\\nFile: `components/kanban/EpicCard.tsx`\",\n      \"acceptanceCriteria\": \"- [ ] Epic ID is displayed above the title in muted monospace text (`text-xs text-muted-foreground font-mono`)\\n- [ ] Description preview appears below the title, limited to 2 lines via `line-clamp-2`\\n- [ ] Description preview is hidden when `epic.description` is null or empty\\n- [ ] Card layout remains compact and readable\"\n    },\n    {\n      \"title\": \"As a user selecting epics on the kanban board, I want selection indicated by a highlight ring without a checkbox so that the card is visually cleaner\",\n      \"description\": \"Remove the checkbox (`<Square>` / `<CheckSquare>`) from EpicCard. Selection is already indicated by the `ring-2 ring-primary` class applied to the Card when `selected` is true. The `onToggleSelect` callback continues to work — it is triggered by the existing card click handler.\\n\\nAlso remove the now-unused `Square` and `CheckSquare` imports from lucide-react.\\n\\nFile: `components/kanban/EpicCard.tsx`\",\n      \"acceptanceCriteria\": \"- [ ] Checkbox (`Square` / `CheckSquare`) is removed from the epic card\\n- [ ] Unused `Square` and `CheckSquare` imports are removed\\n- [ ] Selected cards still show `ring-2 ring-primary` highlight\\n- [ ] Clicking the card still toggles selection via `onToggleSelect`\"\n    }\n  ]\n}\n```",
+        "metadata": null,
+        "created_at": "2026-02-13T16:44:55.956Z"
+      }
+    ],
+    "attachments": []
+  }
+}
