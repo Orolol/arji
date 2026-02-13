@@ -6,13 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   StopCircle,
   Download,
   RefreshCw,
   Clock,
-  CheckCircle2,
   XCircle,
 } from "lucide-react";
 
@@ -20,6 +18,7 @@ interface SessionDetail {
   id: string;
   status: string;
   mode: string;
+  provider?: string;
   prompt?: string;
   error?: string;
   branchName?: string;
@@ -28,14 +27,34 @@ interface SessionDetail {
   startedAt?: string;
   endedAt?: string;
   completedAt?: string;
-  lastNonEmptyText?: string;
   createdAt: string;
+  lastNonEmptyText?: string | null;
   logs?: {
     success?: boolean;
     result?: string;
     error?: string;
     duration?: number;
   };
+}
+
+/**
+ * Contained scroll pane for monospace output content.
+ * Fixed height, no horizontal spillover, preserves whitespace.
+ */
+function ScrollPane({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`max-h-[500px] overflow-y-auto overflow-x-hidden font-mono text-xs whitespace-pre-wrap break-words ${className}`}
+    >
+      {children}
+    </div>
+  );
 }
 
 export default function SessionDetailPage() {
@@ -122,13 +141,18 @@ export default function SessionDetailPage() {
               {session.status}
             </Badge>
             <Badge variant="outline">{session.mode}</Badge>
+            {session.provider && (
+              <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                {session.provider === "codex" ? "Codex" : "CC"}
+              </Badge>
+            )}
             <span className="text-sm text-muted-foreground flex items-center gap-1">
               <Clock className="h-3 w-3" />
               {getDuration()}
             </span>
           </div>
           {session.lastNonEmptyText && (
-            <p className="text-sm text-muted-foreground mt-2 max-w-2xl truncate">
+            <p className="mt-1 text-xs text-muted-foreground/70 font-mono truncate max-w-lg">
               {session.lastNonEmptyText}
             </p>
           )}
@@ -200,11 +224,13 @@ export default function SessionDetailPage() {
             <XCircle className="h-4 w-4 text-destructive" />
             <h3 className="text-sm font-medium text-destructive">Error</h3>
           </div>
-          <pre className="text-xs whitespace-pre-wrap">{session.error}</pre>
+          <ScrollPane className="max-h-[200px] text-destructive/80">
+            {session.error}
+          </ScrollPane>
         </Card>
       )}
 
-      {/* Tabs: Prompt / Response / Raw Logs */}
+      {/* Tabs: Response / Prompt / Raw Logs */}
       <Tabs defaultValue="response">
         <TabsList>
           <TabsTrigger value="response">Response</TabsTrigger>
@@ -213,16 +239,14 @@ export default function SessionDetailPage() {
         </TabsList>
 
         <TabsContent value="response">
-          <Card className="p-4">
+          <Card className="p-4 overflow-hidden">
             {session.logs?.result ? (
-              <ScrollArea className="max-h-[500px]">
-                <pre className="text-xs whitespace-pre-wrap text-muted-foreground">
-                  {session.logs.result}
-                </pre>
-              </ScrollArea>
+              <ScrollPane className="text-muted-foreground">
+                {session.logs.result}
+              </ScrollPane>
             ) : session.status === "running" ? (
               <p className="text-sm text-muted-foreground">
-                Waiting for Claude Code to respond...
+                Waiting for agent to respond...
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">
@@ -233,13 +257,11 @@ export default function SessionDetailPage() {
         </TabsContent>
 
         <TabsContent value="prompt">
-          <Card className="p-4">
+          <Card className="p-4 overflow-hidden">
             {session.prompt ? (
-              <ScrollArea className="max-h-[500px]">
-                <pre className="text-xs whitespace-pre-wrap text-muted-foreground">
-                  {session.prompt}
-                </pre>
-              </ScrollArea>
+              <ScrollPane className="text-muted-foreground">
+                {session.prompt}
+              </ScrollPane>
             ) : (
               <p className="text-sm text-muted-foreground">
                 No prompt available
@@ -249,13 +271,11 @@ export default function SessionDetailPage() {
         </TabsContent>
 
         <TabsContent value="raw">
-          <Card className="p-4">
+          <Card className="p-4 overflow-hidden">
             {session.logs ? (
-              <ScrollArea className="max-h-[500px]">
-                <pre className="text-xs whitespace-pre-wrap text-muted-foreground">
-                  {JSON.stringify(session.logs, null, 2)}
-                </pre>
-              </ScrollArea>
+              <ScrollPane className="text-muted-foreground">
+                {JSON.stringify(session.logs, null, 2)}
+              </ScrollPane>
             ) : (
               <p className="text-sm text-muted-foreground">
                 No logs available
