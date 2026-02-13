@@ -16,6 +16,9 @@ export interface ResolvedAgentPrompt {
 export interface ResolvedAgentProvider {
   agentType: AgentType;
   provider: AgentProvider;
+  namedAgentId: string | null;
+  namedAgentName: string | null;
+  namedAgentModel: string | null;
   source: ProviderSource;
   scope: string;
   namedAgentId: string | null;
@@ -163,7 +166,25 @@ export function useAgentProviders(
     [scope, projectId, load]
   );
 
-  return { data, loading, refresh: load, updateProvider };
+  const assignNamedAgent = useCallback(
+    async (agentType: AgentType, namedAgentId: string) => {
+      const url = buildUrl(
+        `/agent-config/providers/${agentType}`,
+        scope,
+        projectId
+      );
+      const res = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ namedAgentId }),
+      });
+      if (res.ok) await load();
+      return res.ok;
+    },
+    [scope, projectId, load]
+  );
+
+  return { data, loading, refresh: load, updateProvider, assignNamedAgent };
 }
 
 export function useNamedAgents() {
