@@ -1,72 +1,81 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { projects, settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { fetchRemote } from "@/lib/git/remote";
-import { logSyncOperation } from "@/lib/github/sync-log";
+import { db } from "@/lib/db";
+import { projects } from "@/lib/db/schema";
+import { fetchGitRemote } from "@/lib/git/remote";
+import { writeGitSyncLog } from "@/lib/github/sync-log";
 
-export async function POST(
-  _request: NextRequest,
-  { params }: { params: Promise<{ projectId: string }> }
-) {
+type Params = { params: Promise<{ projectId: string }> };
+
+export async function POST(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
-
-  const project = db
-    .select()
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .get();
+  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
 
   if (!project) {
-    return NextResponse.json(
-      { error: "not_found", message: "Project not found." },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-
   if (!project.gitRepoPath) {
+    writeGitSyncLog({
+      projectId,
+      operation: "fetch",
+      status: "failed",
+      branch: null,
+      detail: { reason: "missing_git_repo_path" },
+    });
+
     return NextResponse.json(
-      { error: "not_configured", message: "No git repository path configured for this project." },
+      { error: "Project has no git repository path configured." },
       { status: 400 }
     );
   }
 
-  // Check that GitHub config exists
-  const pat = db
-    .select()
-    .from(settings)
-    .where(eq(settings.key, "github_pat"))
-    .get();
-
-  if (!pat) {
-    return NextResponse.json(
-      { error: "not_configured", message: "GitHub PAT not configured. Set it in Settings." },
-      { status: 400 }
-    );
-  }
+  const body = await request.json().catch(() => ({}));
+  const remote = typeof body?.remote === "string" ? body.remote : "origin";
+  const branch = typeof body?.branch === "string" ? body.branch : null;
 
   try {
-    await fetchRemote(project.gitRepoPath);
+    const result = await fetchGitRemote(project.gitRepoPath, remote);
+    const summary = {
+      branches: result.branches.length,
+      tags: result.tags.length,
+      updates: result.updated.length,
+      deleted: result.deleted.length,
+    };
 
-    logSyncOperation({
+    writeGitSyncLog({
       projectId,
       operation: "fetch",
       status: "success",
+      branch,
+      detail: { remote, ...summary },
     });
 
-    return NextResponse.json({ data: { success: true } });
-  } catch (e) {
-    const detail = e instanceof Error ? e.message : "Fetch failed";
-
-    logSyncOperation({
+    return NextResponse.json({
+      data: {
+        action: "fetch",
+        projectId,
+        remote,
+        branch,
+        summary,
+      },
+    });
+  } catch (error) {
+    writeGitSyncLog({
       projectId,
       operation: "fetch",
-      status: "failure",
-      detail,
+      status: "failed",
+      branch,
+      detail: {
+        remote,
+        error: error instanceof Error ? error.message : "unknown_error",
+      },
     });
 
     return NextResponse.json(
-      { error: "fetch_failed", message: detail },
+      {
+        error: error instanceof Error ? error.message : "Failed to fetch remote.",
+        data: { action: "fetch", projectId, remote, branch },
+      },
       { status: 500 }
     );
   }

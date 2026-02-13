@@ -26,9 +26,17 @@ interface BoardProps {
   selectedEpics?: Set<string>;
   onToggleSelect?: (epicId: string) => void;
   refreshTrigger?: number;
+  runningEpicIds?: Set<string>;
 }
 
-export function Board({ projectId, onEpicClick, selectedEpics, onToggleSelect, refreshTrigger }: BoardProps) {
+export function Board({
+  projectId,
+  onEpicClick,
+  selectedEpics,
+  onToggleSelect,
+  refreshTrigger,
+  runningEpicIds,
+}: BoardProps) {
   const { board, loading, moveEpic, refresh } = useKanban(projectId);
 
   useEffect(() => {
@@ -118,13 +126,18 @@ export function Board({ projectId, onEpicClick, selectedEpics, onToggleSelect, r
             onEpicClick={onEpicClick}
             selectedEpics={selectedEpics}
             onToggleSelect={onToggleSelect}
+            runningEpicIds={runningEpicIds}
           />
         ))}
       </div>
       <DragOverlay>
         {activeEpic && (
           <div className="w-[272px]">
-            <EpicCard epic={activeEpic} isOverlay />
+            <EpicCard
+              epic={activeEpic}
+              isOverlay
+              isRunning={runningEpicIds?.has(activeEpic.id) || false}
+            />
           </div>
         )}
       </DragOverlay>

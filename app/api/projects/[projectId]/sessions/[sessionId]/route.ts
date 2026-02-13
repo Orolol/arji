@@ -3,13 +3,23 @@ import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { processManager } from "@/lib/claude/process-manager";
+import { activityRegistry } from "@/lib/activity-registry";
 import fs from "fs";
+import { listSessionChunks } from "@/lib/agent-sessions/chunks";
+import {
+  getSessionStatusForApi,
+  isSessionLifecycleConflictError,
+  isSessionNotFoundError,
+  markSessionCancelled,
+} from "@/lib/agent-sessions/lifecycle";
+import { runBackfillRecentSessionLastNonEmptyTextOnce } from "@/lib/agent-sessions/backfill";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ projectId: string; sessionId: string }> }
 ) {
-  const { sessionId } = await params;
+  const { projectId, sessionId } = await params;
+  runBackfillRecentSessionLastNonEmptyTextOnce(projectId);
 
   const session = db
     .select()
@@ -30,7 +40,30 @@ export async function GET(
     }
   }
 
-  return NextResponse.json({ data: { ...session, logs } });
+  let chunkStreams: {
+    raw: ReturnType<typeof listSessionChunks>;
+    output: ReturnType<typeof listSessionChunks>;
+    response: ReturnType<typeof listSessionChunks>;
+  } | null = null;
+
+  try {
+    chunkStreams = {
+      raw: listSessionChunks(sessionId, "raw"),
+      output: listSessionChunks(sessionId, "output"),
+      response: listSessionChunks(sessionId, "response"),
+    };
+  } catch {
+    chunkStreams = null;
+  }
+
+  return NextResponse.json({
+    data: {
+      ...session,
+      status: getSessionStatusForApi(session.status),
+      logs,
+      chunkStreams,
+    },
+  });
 }
 
 export async function DELETE(
@@ -39,32 +72,45 @@ export async function DELETE(
 ) {
   const { sessionId } = await params;
 
-  const session = db
-    .select()
-    .from(agentSessions)
-    .where(eq(agentSessions.id, sessionId))
-    .get();
+  // Try activity registry as fallback for ephemeral activities
+  {
+    const session = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .get();
 
-  if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  }
-
-  if (session.status !== "running") {
-    return NextResponse.json(
-      { error: "Session is not running" },
-      { status: 400 }
-    );
+    if (!session) {
+      const cancelled = activityRegistry.cancel(sessionId);
+      if (cancelled) {
+        return NextResponse.json({ data: { cancelled: true } });
+      }
+      // Fall through to markSessionCancelled which will throw SessionNotFoundError
+    }
   }
 
   // Cancel in process manager
   processManager.cancel(sessionId);
-
-  // Update DB
   const now = new Date().toISOString();
-  db.update(agentSessions)
-    .set({ status: "cancelled", completedAt: now, error: "Cancelled by user" })
-    .where(eq(agentSessions.id, sessionId))
-    .run();
+
+  try {
+    markSessionCancelled(sessionId, "Cancelled by user", now);
+  } catch (error) {
+    if (isSessionNotFoundError(error)) {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+    if (isSessionLifecycleConflictError(error)) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code,
+          details: error.details,
+        },
+        { status: 409 }
+      );
+    }
+    throw error;
+  }
 
   return NextResponse.json({ data: { cancelled: true } });
 }

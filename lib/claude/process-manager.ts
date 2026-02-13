@@ -1,5 +1,6 @@
 import { spawnClaude, type ClaudeOptions, type ClaudeResult } from "./spawn";
 import { getProvider, type ProviderType, type ProviderSession } from "@/lib/providers";
+import { appendSessionChunk } from "@/lib/agent-sessions/chunks";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,6 +78,22 @@ class ClaudeProcessManager {
         mode: options.mode,
         allowedTools: options.allowedTools,
         model: options.model,
+        onChunk: (chunk) => {
+          try {
+            appendSessionChunk({
+              sessionId,
+              streamType: chunk.streamType,
+              content: chunk.text,
+              chunkKey: chunk.chunkKey ?? null,
+              createdAt: chunk.emittedAt,
+            });
+          } catch (error) {
+            console.error(
+              `[process-manager] Failed to persist Codex chunk for session ${sessionId}`,
+              error
+            );
+          }
+        },
       });
       kill = session.kill;
       promise = session.promise;

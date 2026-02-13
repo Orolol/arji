@@ -81,6 +81,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     const [isDragging, setIsDragging] = useState(false);
     const [openConversationIds, setOpenConversationIds] = useState<string[]>([]);
     const [generatingSpec, setGeneratingSpec] = useState(false);
+    const [specError, setSpecError] = useState<string | null>(null);
 
     const {
       conversations,
@@ -108,6 +109,21 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       [projectId],
     );
 
+    const stateStorageKey = useMemo(
+      () => `arij.unified-chat-panel.state.${projectId}`,
+      [projectId],
+    );
+
+    const tabsStorageKey = useMemo(
+      () => `arij.unified-chat-panel.tabs.${projectId}`,
+      [projectId],
+    );
+
+    const activeStorageKey = useMemo(
+      () => `arij.unified-chat-panel.active.${projectId}`,
+      [projectId],
+    );
+
     const activeConversation = useMemo(
       () => conversations.find((conversation) => conversation.id === activeId) || null,
       [conversations, activeId],
@@ -121,9 +137,10 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       [openConversationIds, conversations],
     );
 
-    const { createEpic, isLoading: epicCreating } = useEpicCreate({
+    const { createEpic, isLoading: epicCreating, error: epicError } = useEpicCreate({
       projectId,
       conversationId: activeId,
+      sendMessage: rawSendMessage,
     });
 
     const activeProvider = (activeConversation?.provider || "claude-code") as ProviderType;
@@ -295,6 +312,62 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       window.localStorage.setItem(storageKey, panelRatio.toFixed(4));
     }, [panelRatio, storageKey]);
 
+    // Persist panelState — read on mount
+    useEffect(() => {
+      if (typeof window === "undefined") return;
+      const raw = window.localStorage.getItem(stateStorageKey);
+      if (raw === "expanded" || raw === "collapsed" || raw === "hidden") {
+        setPanelState(raw);
+      }
+    }, [stateStorageKey]);
+
+    // Persist panelState — write on change
+    useEffect(() => {
+      if (typeof window === "undefined") return;
+      window.localStorage.setItem(stateStorageKey, panelState);
+    }, [panelState, stateStorageKey]);
+
+    // Persist open tabs — read on mount
+    useEffect(() => {
+      if (typeof window === "undefined") return;
+      const raw = window.localStorage.getItem(tabsStorageKey);
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.every((id: unknown) => typeof id === "string")) {
+          setOpenConversationIds(parsed);
+        }
+      } catch {
+        // ignore malformed
+      }
+    }, [tabsStorageKey]);
+
+    // Persist open tabs — write on change
+    useEffect(() => {
+      if (typeof window === "undefined") return;
+      window.localStorage.setItem(tabsStorageKey, JSON.stringify(openConversationIds));
+    }, [openConversationIds, tabsStorageKey]);
+
+    // Persist activeId — read on mount (with guard to avoid overriding user switches)
+    const activeIdRestoredRef = useRef(false);
+    useEffect(() => {
+      if (typeof window === "undefined") return;
+      if (activeIdRestoredRef.current) return;
+      activeIdRestoredRef.current = true;
+      const saved = window.localStorage.getItem(activeStorageKey);
+      if (saved && conversations.some((c) => c.id === saved)) {
+        setActiveId(saved);
+      }
+    }, [activeStorageKey, conversations, setActiveId]);
+
+    // Persist activeId — write on change
+    useEffect(() => {
+      if (typeof window === "undefined") return;
+      if (activeId) {
+        window.localStorage.setItem(activeStorageKey, activeId);
+      }
+    }, [activeId, activeStorageKey]);
+
     useEffect(() => {
       if (!isDragging || panelState !== "expanded") {
         return;
@@ -351,13 +424,21 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
 
     async function handleGenerateSpec() {
       setGeneratingSpec(true);
+      setSpecError(null);
       try {
-        await fetch(`/api/projects/${projectId}/generate-spec`, {
+        const res = await fetch(`/api/projects/${projectId}/generate-spec`, {
           method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: activeProvider }),
         });
-        router.refresh();
-      } catch {
-        // ignore
+        const json = await res.json();
+        if (!res.ok || json.error) {
+          setSpecError(json.error || `Spec generation failed (HTTP ${res.status})`);
+        } else {
+          router.refresh();
+        }
+      } catch (err) {
+        setSpecError(err instanceof Error ? err.message : "Spec generation request failed");
       }
       setGeneratingSpec(false);
     }
@@ -471,10 +552,10 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                       )}
                       <span>{truncateLabel(conversation.label || "Conversation")}</span>
                       {conversation.status === "generating" && (
-                        <span
+                        <Loader2
                           data-testid={`active-indicator-${conversation.id}`}
-                          className="h-2 w-2 rounded-full bg-primary animate-pulse"
-                          aria-label="Agent active"
+                          className="h-3 w-3 animate-spin text-primary"
+                          aria-label="Agent running"
                         />
                       )}
                       {openConversationIds.length > 1 && (
@@ -553,6 +634,12 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                 </div>
               </div>
 
+              {(epicError || specError) && (
+                <div className="mx-3 mt-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  {epicError || specError}
+                </div>
+              )}
+
               <div className="flex-1 overflow-auto">
                 {isEpicCreation && !hasMessages && !loading && (
                   <div className="px-4 py-8 text-center text-sm text-muted-foreground">
@@ -579,16 +666,16 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       );
     }
 
-    return (
-      <div ref={containerRef} className="relative h-full w-full overflow-hidden">
-        <div className="h-full w-full">{children}</div>
+    if (panelState === "collapsed") {
+      return (
+        <div ref={containerRef} className="flex h-full w-full overflow-hidden">
+          <div className="h-full min-w-0 flex-1 overflow-hidden">{children}</div>
 
-        {panelState === "collapsed" && (
           <button
             type="button"
             onClick={() => void openChatConversation()}
             className={cn(
-              "absolute inset-y-0 right-0 z-30 flex w-[max(56px,5vw)] items-center justify-center border-l border-border bg-muted/60 text-muted-foreground backdrop-blur transition-colors hover:bg-muted/80 hover:text-foreground",
+              "relative h-full w-14 shrink-0 flex items-center justify-center border-l border-border bg-muted/60 text-muted-foreground backdrop-blur transition-colors hover:bg-muted/80 hover:text-foreground",
               hasActiveAgents && "bg-primary/10 shadow-[-6px_0_24px_rgba(59,130,246,0.25)]",
             )}
             aria-label="Open chat panel"
@@ -605,18 +692,22 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
               />
             )}
           </button>
-        )}
+        </div>
+      );
+    }
 
-        {panelState === "hidden" && (
-          <button
-            type="button"
-            onClick={() => setPanelState("collapsed")}
-            className="absolute right-2 top-2 z-30 rounded-full border border-border bg-background/95 p-1.5 text-muted-foreground shadow-sm hover:text-foreground"
-            aria-label="Show chat strip"
-          >
-            <PanelRightOpen className="h-4 w-4" />
-          </button>
-        )}
+    return (
+      <div ref={containerRef} className="relative h-full w-full overflow-hidden">
+        <div className="h-full w-full">{children}</div>
+
+        <button
+          type="button"
+          onClick={() => setPanelState("collapsed")}
+          className="absolute right-2 top-2 z-30 rounded-full border border-border bg-background/95 p-1.5 text-muted-foreground shadow-sm hover:text-foreground"
+          aria-label="Show chat strip"
+        >
+          <PanelRightOpen className="h-4 w-4" />
+        </button>
       </div>
     );
   },

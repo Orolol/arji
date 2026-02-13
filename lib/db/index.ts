@@ -10,7 +10,7 @@ if (!fs.existsSync(dataDir)) {
 }
 
 const dbPath = path.join(dataDir, "arij.db");
-const sqlite = new Database(dbPath);
+export const sqlite = new Database(dbPath);
 
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");

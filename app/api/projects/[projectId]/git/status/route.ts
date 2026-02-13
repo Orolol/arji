@@ -1,85 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { projects, settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { fetchRemote, getBranchStatus } from "@/lib/git/remote";
-import { logSyncOperation } from "@/lib/github/sync-log";
+import { db } from "@/lib/db";
+import { projects } from "@/lib/db/schema";
+import { getBranchSyncStatus, getCurrentGitBranch } from "@/lib/git/remote";
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ projectId: string }> }
-) {
+type Params = { params: Promise<{ projectId: string }> };
+
+export async function GET(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
-  const body = await request.json();
-  const { branch } = body as { branch?: string };
-
-  if (!branch || typeof branch !== "string") {
-    return NextResponse.json(
-      { error: "missing_branch", message: "A branch name is required." },
-      { status: 400 }
-    );
-  }
-
-  const project = db
-    .select()
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .get();
+  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
 
   if (!project) {
-    return NextResponse.json(
-      { error: "not_found", message: "Project not found." },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-
   if (!project.gitRepoPath) {
     return NextResponse.json(
-      { error: "not_configured", message: "No git repository path configured for this project." },
+      { error: "Project has no git repository path configured." },
       { status: 400 }
     );
   }
 
-  const pat = db
-    .select()
-    .from(settings)
-    .where(eq(settings.key, "github_pat"))
-    .get();
-
-  if (!pat) {
-    return NextResponse.json(
-      { error: "not_configured", message: "GitHub PAT not configured. Set it in Settings." },
-      { status: 400 }
-    );
-  }
+  const remote = request.nextUrl.searchParams.get("remote") || "origin";
+  const requestedBranch = request.nextUrl.searchParams.get("branch")?.trim() || "";
+  const branch = requestedBranch || (await getCurrentGitBranch(project.gitRepoPath));
 
   try {
-    // Fetch first to get up-to-date status
-    await fetchRemote(project.gitRepoPath);
-
-    logSyncOperation({
-      projectId,
-      operation: "fetch",
-      branch,
-      status: "success",
+    const status = await getBranchSyncStatus(project.gitRepoPath, branch, remote);
+    return NextResponse.json({
+      data: {
+        action: "status",
+        projectId,
+        remote: status.remote,
+        branch: status.branch,
+        remoteBranch: status.remoteBranch,
+        ahead: status.ahead,
+        behind: status.behind,
+        hasRemoteBranch: status.hasRemoteBranch,
+      },
     });
-
-    const status = await getBranchStatus(project.gitRepoPath, branch);
-
-    return NextResponse.json({ data: status });
-  } catch (e) {
-    const detail = e instanceof Error ? e.message : "Status check failed";
-
-    logSyncOperation({
-      projectId,
-      operation: "fetch",
-      branch,
-      status: "failure",
-      detail,
-    });
-
+  } catch (error) {
     return NextResponse.json(
-      { error: "status_failed", message: detail },
+      {
+        error: error instanceof Error ? error.message : "Failed to read branch status.",
+        data: { action: "status", projectId, remote, branch },
+      },
       { status: 500 }
     );
   }

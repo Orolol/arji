@@ -1,82 +1,88 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { projects, settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { pushRemote } from "@/lib/git/remote";
-import { logSyncOperation } from "@/lib/github/sync-log";
+import { db } from "@/lib/db";
+import { projects } from "@/lib/db/schema";
+import { getCurrentGitBranch, pushGitBranch } from "@/lib/git/remote";
+import { writeGitSyncLog } from "@/lib/github/sync-log";
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ projectId: string }> }
-) {
+type Params = { params: Promise<{ projectId: string }> };
+
+export async function POST(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
-  const body = await request.json();
-  const { branch } = body as { branch?: string };
-
-  if (!branch || typeof branch !== "string") {
-    return NextResponse.json(
-      { error: "missing_branch", message: "A branch name is required." },
-      { status: 400 }
-    );
-  }
-
-  const project = db
-    .select()
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .get();
+  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
 
   if (!project) {
-    return NextResponse.json(
-      { error: "not_found", message: "Project not found." },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-
   if (!project.gitRepoPath) {
+    writeGitSyncLog({
+      projectId,
+      operation: "push",
+      status: "failed",
+      branch: null,
+      detail: { reason: "missing_git_repo_path" },
+    });
+
     return NextResponse.json(
-      { error: "not_configured", message: "No git repository path configured for this project." },
+      { error: "Project has no git repository path configured." },
       { status: 400 }
     );
   }
 
-  const pat = db
-    .select()
-    .from(settings)
-    .where(eq(settings.key, "github_pat"))
-    .get();
-
-  if (!pat) {
-    return NextResponse.json(
-      { error: "not_configured", message: "GitHub PAT not configured. Set it in Settings." },
-      { status: 400 }
-    );
-  }
+  const body = await request.json().catch(() => ({}));
+  const remote = typeof body?.remote === "string" ? body.remote : "origin";
+  const setUpstream = typeof body?.setUpstream === "boolean" ? body.setUpstream : true;
+  const requestedBranch = typeof body?.branch === "string" ? body.branch : "";
+  const branch = requestedBranch.trim() || (await getCurrentGitBranch(project.gitRepoPath));
 
   try {
-    await pushRemote(project.gitRepoPath, branch);
+    const result = await pushGitBranch(
+      project.gitRepoPath,
+      branch,
+      remote,
+      setUpstream
+    );
+    const summary = {
+      pushed: result.pushed.length,
+      update: result.update ? 1 : 0,
+    };
 
-    logSyncOperation({
+    writeGitSyncLog({
       projectId,
       operation: "push",
-      branch,
       status: "success",
+      branch,
+      detail: { remote, setUpstream, ...summary },
     });
 
-    return NextResponse.json({ data: { success: true } });
-  } catch (e) {
-    const detail = e instanceof Error ? e.message : "Push failed";
-
-    logSyncOperation({
+    return NextResponse.json({
+      data: {
+        action: "push",
+        projectId,
+        remote,
+        branch,
+        setUpstream,
+        summary,
+      },
+    });
+  } catch (error) {
+    writeGitSyncLog({
       projectId,
       operation: "push",
+      status: "failed",
       branch,
-      status: "failure",
-      detail,
+      detail: {
+        remote,
+        setUpstream,
+        error: error instanceof Error ? error.message : "unknown_error",
+      },
     });
 
     return NextResponse.json(
-      { error: "push_failed", message: detail },
+      {
+        error: error instanceof Error ? error.message : "Failed to push branch.",
+        data: { action: "push", projectId, remote, branch, setUpstream },
+      },
       { status: 500 }
     );
   }

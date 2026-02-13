@@ -4,18 +4,21 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
+
+interface GitHubPatSetting {
+  hasToken?: boolean;
+}
 
 export default function SettingsPage() {
   const [globalPrompt, setGlobalPrompt] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  // GitHub PAT state
-  const [githubPat, setGithubPat] = useState("");
-  const [storedPatMask, setStoredPatMask] = useState<string | null>(null);
-  const [validating, setValidating] = useState(false);
-  const [githubLogin, setGithubLogin] = useState<string | null>(null);
-  const [githubError, setGithubError] = useState<string | null>(null);
+  const [savingPrompt, setSavingPrompt] = useState(false);
+  const [githubPat, setGitHubPat] = useState("");
+  const [hasSavedGitHubPat, setHasSavedGitHubPat] = useState(false);
+  const [savingGitHubPat, setSavingGitHubPat] = useState(false);
+  const [validatingGitHubPat, setValidatingGitHubPat] = useState(false);
+  const [globalMessage, setGlobalMessage] = useState<string | null>(null);
+  const [gitHubMessage, setGitHubMessage] = useState<string | null>(null);
+  const [gitHubError, setGitHubError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -24,136 +27,198 @@ export default function SettingsPage() {
         if (d.data?.global_prompt) {
           setGlobalPrompt(d.data.global_prompt);
         }
-        if (d.data?.github_pat) {
-          setStoredPatMask(d.data.github_pat);
-        }
+        const githubSetting = d.data?.github_pat as GitHubPatSetting | undefined;
+        setHasSavedGitHubPat(Boolean(githubSetting?.hasToken));
       })
       .catch(() => {});
   }, []);
 
-  async function handleSave() {
-    setSaving(true);
-    await fetch("/api/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        global_prompt: globalPrompt,
-      }),
-    });
-    setSaving(false);
-  }
-
-  async function handleValidateGitHub() {
-    if (!githubPat.trim()) return;
-
-    setValidating(true);
-    setGithubError(null);
-    setGithubLogin(null);
+  async function handleSaveGlobalPrompt() {
+    setSavingPrompt(true);
+    setGlobalMessage(null);
 
     try {
-      const res = await fetch("/api/settings/github/validate", {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          global_prompt: globalPrompt,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setGlobalMessage(
+          payload?.error ??
+            "Failed to save global prompt. Check the server response and try again."
+        );
+        return;
+      }
+
+      setGlobalMessage("Global prompt saved.");
+    } catch {
+      setGlobalMessage(
+        "Failed to save global prompt. Check your connection and try again."
+      );
+    } finally {
+      setSavingPrompt(false);
+    }
+  }
+
+  async function handleValidateGitHubPat() {
+    setGitHubMessage(null);
+    setGitHubError(null);
+
+    if (!githubPat.trim()) {
+      setGitHubError("Enter a GitHub personal access token before validating.");
+      return;
+    }
+
+    setValidatingGitHubPat(true);
+    try {
+      const response = await fetch("/api/settings/github/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: githubPat }),
       });
+      const payload = await response.json().catch(() => ({}));
 
-      const data = await res.json();
-
-      if (res.ok && data.data?.valid) {
-        setGithubLogin(data.data.login);
-        setGithubPat("");
-        // Refresh stored mask
-        const settingsRes = await fetch("/api/settings");
-        const settingsData = await settingsRes.json();
-        if (settingsData.data?.github_pat) {
-          setStoredPatMask(settingsData.data.github_pat);
-        }
-      } else {
-        setGithubError(data.message || "Invalid token");
+      if (!response.ok || !payload?.data?.valid) {
+        setGitHubError(
+          payload?.error ??
+            "Token validation failed. Verify the token and retry."
+        );
+        return;
       }
+
+      const login = payload?.data?.login;
+      setGitHubMessage(
+        login
+          ? `Token is valid for GitHub account: ${login}.`
+          : "Token is valid."
+      );
     } catch {
-      setGithubError("Failed to validate token");
+      setGitHubError(
+        "Could not validate token right now. Check your network and try again."
+      );
     } finally {
-      setValidating(false);
+      setValidatingGitHubPat(false);
+    }
+  }
+
+  async function handleSaveGitHubPat() {
+    setGitHubMessage(null);
+    setGitHubError(null);
+
+    if (!githubPat.trim()) {
+      setGitHubError("Enter a GitHub personal access token before saving.");
+      return;
+    }
+
+    setSavingGitHubPat(true);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          github_pat: githubPat.trim(),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setGitHubError(
+          payload?.error ??
+            "Failed to save GitHub token. Check the error details and retry."
+        );
+        return;
+      }
+
+      setHasSavedGitHubPat(true);
+      setGitHubPat("");
+      setGitHubMessage("GitHub token saved.");
+    } catch {
+      setGitHubError(
+        "Failed to save GitHub token. Check your connection and retry."
+      );
+    } finally {
+      setSavingGitHubPat(false);
     }
   }
 
   return (
-    <div className="p-6 max-w-2xl">
+    <div className="p-6 max-w-2xl space-y-8">
       <h1 className="text-2xl font-bold mb-6">Settings</h1>
-      <div className="space-y-8">
-        {/* Global Prompt Section */}
+      <section className="space-y-6">
         <div>
-          <label className="block text-sm font-medium mb-2">
+          <label htmlFor="global-prompt" className="block text-sm font-medium mb-2">
             Global Prompt
           </label>
           <p className="text-sm text-muted-foreground mb-2">
-            This prompt is injected into all Claude Code sessions across all
-            projects.
+            This prompt is injected into all Claude Code sessions across all projects.
           </p>
           <Textarea
+            id="global-prompt"
             value={globalPrompt}
             onChange={(e) => setGlobalPrompt(e.target.value)}
             rows={10}
             placeholder="Enter global instructions for Claude Code..."
           />
-          <div className="mt-3">
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : "Save Settings"}
-            </Button>
-          </div>
+          {globalMessage && <p className="mt-2 text-sm text-muted-foreground">{globalMessage}</p>}
         </div>
 
-        {/* GitHub PAT Section */}
-        <div className="border-t pt-6">
-          <label className="block text-sm font-medium mb-2">
-            GitHub Personal Access Token
-          </label>
-          <p className="text-sm text-muted-foreground mb-3">
-            Required for remote git operations (push, pull, fetch). The token
-            needs <code className="text-xs bg-muted px-1 py-0.5 rounded">repo</code> scope.
+        <Button onClick={handleSaveGlobalPrompt} disabled={savingPrompt}>
+          {savingPrompt ? "Saving..." : "Save Settings"}
+        </Button>
+      </section>
+
+      <section className="space-y-4 rounded-md border border-border p-4">
+        <div>
+          <h2 className="text-lg font-semibold">GitHub</h2>
+          <p className="text-sm text-muted-foreground">
+            Configure a personal access token for pull requests and release APIs.
           </p>
-
-          {storedPatMask && (
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-sm text-muted-foreground">Current token:</span>
-              <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
-                {storedPatMask}
-              </code>
-              {githubLogin && (
-                <Badge variant="secondary">{githubLogin}</Badge>
-              )}
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <Input
-              type="password"
-              value={githubPat}
-              onChange={(e) => setGithubPat(e.target.value)}
-              placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-              className="font-mono"
-            />
-            <Button
-              onClick={handleValidateGitHub}
-              disabled={validating || !githubPat.trim()}
-              variant="secondary"
-            >
-              {validating ? "Validating..." : "Validate & Save"}
-            </Button>
-          </div>
-
-          {githubError && (
-            <p className="text-sm text-destructive mt-2">{githubError}</p>
-          )}
-
-          {githubLogin && !githubError && (
-            <p className="text-sm text-green-600 dark:text-green-400 mt-2">
-              Token validated. Authenticated as <strong>{githubLogin}</strong>.
+          {hasSavedGitHubPat && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              A GitHub token is already saved for this workspace.
             </p>
           )}
         </div>
-      </div>
+
+        <div className="space-y-2">
+          <label htmlFor="github-pat" className="block text-sm font-medium">
+            GitHub PAT
+          </label>
+          <Input
+            id="github-pat"
+            type="password"
+            value={githubPat}
+            onChange={(e) => setGitHubPat(e.target.value)}
+            placeholder="ghp_..."
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleValidateGitHubPat}
+            disabled={validatingGitHubPat}
+          >
+            {validatingGitHubPat ? "Validating..." : "Validate Token"}
+          </Button>
+          <Button
+            type="button"
+            onClick={handleSaveGitHubPat}
+            disabled={savingGitHubPat}
+          >
+            {savingGitHubPat ? "Saving..." : "Save Token"}
+          </Button>
+        </div>
+
+        {gitHubMessage && <p className="text-sm text-muted-foreground">{gitHubMessage}</p>}
+        {gitHubError && <p className="text-sm text-destructive">{gitHubError}</p>}
+      </section>
     </div>
   );
 }

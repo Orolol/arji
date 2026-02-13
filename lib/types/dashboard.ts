@@ -4,6 +4,7 @@ export interface DashboardProject {
   description: string | null;
   status: string;
   gitRepoPath: string | null;
+  githubOwnerRepo: string | null;
   imported: number;
   createdAt: string;
   updatedAt: string;
