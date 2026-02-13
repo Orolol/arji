@@ -16,6 +16,7 @@ import {
   type ReviewType,
 } from "@/lib/claude/prompt-builder";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
+import { checkSessionLock } from "@/lib/session-lock";
 import type { ProviderType } from "@/lib/providers";
 import fs from "fs";
 import path from "path";
@@ -81,6 +82,15 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json(
       { error: "Epic must be in review status for agent review" },
       { status: 400 }
+    );
+  }
+
+  // Concurrency guard
+  const lock = checkSessionLock({ epicId });
+  if (lock.locked) {
+    return NextResponse.json(
+      { error: "conflict", message: "An agent is already running on this epic", sessionId: lock.sessionId },
+      { status: 409 }
     );
   }
 

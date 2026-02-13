@@ -365,6 +365,7 @@ export default function KanbanPage() {
           setRefreshTrigger((t) => t + 1);
           addToast("success", "Branch merged into main");
         }}
+
       />
 
     </div>

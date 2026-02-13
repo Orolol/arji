@@ -180,18 +180,6 @@ export const releases = sqliteTable("releases", {
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const gitSyncLog = sqliteTable("git_sync_log", {
-  id: text("id").primaryKey(),
-  projectId: text("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
-  operation: text("operation").notNull(),
-  status: text("status").notNull(),
-  branch: text("branch"),
-  detail: text("detail"),
-  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
-});
-
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(), // JSON
@@ -253,6 +241,21 @@ export const agentProviderDefaults = sqliteTable(
     ),
   }),
 );
+
+export const gitSyncLog = sqliteTable("git_sync_log", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  operation: text("operation").notNull(), // push | pull | fetch | tag | pr | release
+  branch: text("branch"),
+  status: text("status").notNull(), // success | failure
+  detail: text("detail"), // JSON payload for error info
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type GitSyncLog = typeof gitSyncLog.$inferSelect;
+export type NewGitSyncLog = typeof gitSyncLog.$inferInsert;
 
 export type AgentPrompt = typeof agentPrompts.$inferSelect;
 export type NewAgentPrompt = typeof agentPrompts.$inferInsert;

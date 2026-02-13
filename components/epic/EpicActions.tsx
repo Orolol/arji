@@ -13,6 +13,12 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Hammer,
   Search,
   CheckCircle2,
@@ -120,7 +126,12 @@ export function EpicActions({
     }
   }
 
+  const lockedTooltip = isRunning
+    ? "Agent is already running on this epic"
+    : null;
+
   return (
+    <TooltipProvider>
     <div className="flex items-center gap-2 flex-wrap">
       {isRunning && (
         <Badge variant="outline" className="gap-1 text-yellow-500 border-yellow-500/30">
@@ -300,5 +311,6 @@ export function EpicActions({
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
   );
 }

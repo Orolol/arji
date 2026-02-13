@@ -13,6 +13,12 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Hammer,
   Search,
   CheckCircle2,
@@ -131,7 +137,12 @@ export function StoryActions({
     }
   }
 
+  const lockedTooltip = isRunning
+    ? "Agent is already running on this story"
+    : null;
+
   return (
+    <TooltipProvider>
     <div className="flex items-center gap-2 flex-wrap">
       {/* Running indicator */}
       {isRunning && (
@@ -344,5 +355,6 @@ export function StoryActions({
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
   );
 }

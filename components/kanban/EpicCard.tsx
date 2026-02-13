@@ -74,6 +74,12 @@ export function EpicCard({
               )}
             </button>
           )}
+          {isRunning && (
+            <span
+              className="shrink-0 mt-1.5 h-2 w-2 rounded-full bg-yellow-500 animate-pulse"
+              title="Agent running"
+            />
+          )}
           <h4 className="text-sm font-medium leading-tight truncate">{epic.title}</h4>
         </div>
         <Badge
