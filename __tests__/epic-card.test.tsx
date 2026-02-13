@@ -85,4 +85,27 @@ describe("EpicCard", () => {
     render(<EpicCard epic={baseEpic} />);
     expect(screen.queryByTestId("epic-activity-epic-1")).not.toBeInTheDocument();
   });
+
+  it("renders unread AI indicator with accessibility label", () => {
+    render(<EpicCard epic={baseEpic} hasUnreadAiUpdate />);
+    expect(screen.getByTestId("epic-unread-ai-epic-1")).toBeInTheDocument();
+    expect(screen.getByLabelText("Unread AI update")).toBeInTheDocument();
+  });
+
+  it("supports activity and unread indicators together with deterministic slots", () => {
+    render(
+      <EpicCard
+        epic={baseEpic}
+        hasUnreadAiUpdate
+        activeAgentActivity={{
+          sessionId: "sess-123",
+          actionType: "review",
+          agentName: "Claude Code agent abc123",
+        }}
+      />
+    );
+
+    expect(screen.getByTestId("epic-activity-epic-1")).toBeInTheDocument();
+    expect(screen.getByTestId("epic-unread-ai-epic-1")).toBeInTheDocument();
+  });
 });
