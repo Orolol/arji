@@ -28,11 +28,25 @@ import { EpicCard } from "@/components/kanban/EpicCard";
 
 const baseEpic = {
   id: "epic-1",
+  projectId: "proj-1",
   title: "Test Epic",
+  description: null,
   priority: 1,
+  status: "todo",
+  position: 0,
+  branchName: null,
+  prNumber: null,
+  prUrl: null,
+  prStatus: null,
+  confidence: null,
+  evidence: null,
+  createdAt: "2026-02-12T00:00:00.000Z",
+  updatedAt: "2026-02-12T00:00:00.000Z",
   usCount: 3,
   usDone: 1,
-  position: 0,
+  type: "feature",
+  linkedEpicId: null,
+  images: null,
 };
 
 describe("EpicCard", () => {

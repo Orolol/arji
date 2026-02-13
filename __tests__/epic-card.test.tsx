@@ -30,12 +30,18 @@ const baseEpic = {
   status: "todo",
   position: 0,
   branchName: null,
+  prNumber: null,
+  prUrl: null,
+  prStatus: null,
   confidence: null,
   evidence: null,
   createdAt: "2026-02-12T00:00:00.000Z",
   updatedAt: "2026-02-12T00:00:00.000Z",
   usCount: 3,
   usDone: 1,
+  type: "feature",
+  linkedEpicId: null,
+  images: null,
 };
 
 describe("EpicCard", () => {
