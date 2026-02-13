@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
-import { useParams } from "next/navigation";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Board } from "@/components/kanban/Board";
 import { EpicDetail } from "@/components/kanban/EpicDetail";
 import { UnifiedChatPanel, type UnifiedChatPanelHandle } from "@/components/chat/UnifiedChatPanel";
@@ -37,6 +37,8 @@ interface Toast {
 
 export default function KanbanPage() {
   const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const projectId = params.projectId as string;
   const [selectedEpicId, setSelectedEpicId] = useState<string | null>(null);
   const [selectedEpics, setSelectedEpics] = useState<Set<string>>(new Set());
@@ -98,11 +100,11 @@ export default function KanbanPage() {
     }
   }, [activities, highlightedActivityId]);
 
-  function addToast(
+  const addToast = useCallback((
     type: "success" | "error",
     message: string,
     action?: { href: string; label?: string }
-  ) {
+  ) => {
     const id = Date.now().toString();
     setToasts((t) => [
       ...t,
@@ -117,7 +119,23 @@ export default function KanbanPage() {
     setTimeout(() => {
       setToasts((t) => t.filter((toast) => toast.id !== id));
     }, 5000);
-  }
+  }, []);
+
+  useEffect(() => {
+    const deleted = searchParams.get("deleted");
+    if (!deleted) return;
+
+    if (deleted === "story") {
+      addToast("success", "User story deleted permanently");
+    } else if (deleted === "epic") {
+      addToast("success", "Epic deleted permanently");
+    }
+
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("deleted");
+    const query = next.toString();
+    router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
+  }, [addToast, projectId, router, searchParams]);
 
   // Reset team mode when selection drops below 2 or provider changes to codex
   useEffect(() => {
@@ -424,6 +442,10 @@ export default function KanbanPage() {
         onMerged={() => {
           setRefreshTrigger((t) => t + 1);
           addToast("success", "Branch merged into main");
+        }}
+        onDeleted={() => {
+          setRefreshTrigger((t) => t + 1);
+          addToast("success", "Epic deleted permanently");
         }}
 
       />

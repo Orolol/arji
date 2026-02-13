@@ -5,6 +5,8 @@ import { forwardRef, useImperativeHandle } from "react";
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "proj1" }),
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 // Mock hooks
