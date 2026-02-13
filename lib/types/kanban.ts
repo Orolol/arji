@@ -54,6 +54,17 @@ export interface KanbanEpic {
   images: string | null; // JSON array
   usCount: number;
   usDone: number;
+  latestCommentId?: string | null;
+  latestCommentAuthor?: string | null;
+  latestCommentCreatedAt?: string | null;
+}
+
+export type KanbanAgentActionType = "build" | "review" | "merge";
+
+export interface KanbanEpicAgentActivity {
+  sessionId: string;
+  actionType: KanbanAgentActionType;
+  agentName: string;
 }
 
 export interface BoardState {

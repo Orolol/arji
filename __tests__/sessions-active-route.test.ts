@@ -101,6 +101,8 @@ describe("sessions active route", () => {
     const dbActivity = json.data.find((activity: { id: string }) => activity.id === "sess-1");
     expect(dbActivity).toMatchObject({
       id: "sess-1",
+      epicId: "epic-1",
+      userStoryId: null,
       type: "build",
       label: "Building: Authentication",
       status: "running",

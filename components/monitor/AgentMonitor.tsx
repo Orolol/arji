@@ -20,6 +20,7 @@ import type { UnifiedActivity } from "@/hooks/useAgentPolling";
 interface AgentMonitorProps {
   projectId: string;
   activities: UnifiedActivity[];
+  highlightedActivityId?: string | null;
 }
 
 const typeIcons: Record<UnifiedActivity["type"], typeof Hammer> = {
@@ -31,7 +32,11 @@ const typeIcons: Record<UnifiedActivity["type"], typeof Hammer> = {
   release: FileText,
 };
 
-export function AgentMonitor({ projectId, activities }: AgentMonitorProps) {
+export function AgentMonitor({
+  projectId,
+  activities,
+  highlightedActivityId = null,
+}: AgentMonitorProps) {
   const [expanded, setExpanded] = useState(true);
   const [elapsed, setElapsed] = useState<Record<string, string>>({});
 
@@ -86,10 +91,14 @@ export function AgentMonitor({ projectId, activities }: AgentMonitorProps) {
         <div className="px-4 pb-2 space-y-1">
           {activities.map((activity) => {
             const Icon = typeIcons[activity.type] || Loader2;
+            const isHighlighted = activity.id === highlightedActivityId;
             return (
               <div
                 key={activity.id}
-                className="flex items-center gap-2 text-xs py-1"
+                data-testid={`agent-monitor-activity-${activity.id}`}
+                className={`flex items-center gap-2 text-xs py-1 px-1 rounded-sm transition-colors ${
+                  isHighlighted ? "bg-primary/10 ring-1 ring-primary/40" : ""
+                }`}
               >
                 <Icon className="h-3 w-3 text-green-500 shrink-0" />
                 <span className="truncate">{activity.label}</span>

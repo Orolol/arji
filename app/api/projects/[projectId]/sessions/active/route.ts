@@ -7,6 +7,8 @@ import { activityRegistry } from "@/lib/activity-registry";
 
 export interface UnifiedActivity {
   id: string;
+  epicId?: string | null;
+  userStoryId?: string | null;
   type: "build" | "review" | "merge" | "chat" | "spec_generation" | "release";
   label: string;
   status: string;
@@ -70,6 +72,8 @@ export async function GET(
 
     return {
       id: row.id,
+      epicId: row.epicId,
+      userStoryId: row.userStoryId,
       type,
       label,
       status: getSessionStatusForApi(row.status),
