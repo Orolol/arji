@@ -1,47 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { settings } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import { validateToken } from "@/lib/github/client";
+import { validateGitHubToken } from "@/lib/github/client";
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { token } = body as { token?: string };
+  const body = await request.json().catch(() => null);
+  const token =
+    body && typeof body === "object" && "token" in body
+      ? String((body as { token?: unknown }).token ?? "")
+      : "";
 
-  if (!token || typeof token !== "string") {
+  if (!token.trim()) {
     return NextResponse.json(
-      { error: "missing_token", message: "A GitHub token is required." },
+      {
+        data: { valid: false },
+        error: "Enter a GitHub personal access token to validate.",
+      },
       { status: 400 }
     );
   }
 
-  const result = await validateToken(token);
-
+  const result = await validateGitHubToken(token);
   if (!result.valid) {
     return NextResponse.json(
-      { error: "invalid_token", message: "The provided GitHub token is invalid." },
-      { status: 400 }
+      {
+        data: { valid: false },
+        error: result.error ?? "GitHub token validation failed.",
+      },
+      { status: 401 }
     );
-  }
-
-  // Save the validated token
-  const now = new Date().toISOString();
-  const jsonValue = JSON.stringify(token);
-  const existing = db
-    .select()
-    .from(settings)
-    .where(eq(settings.key, "github_pat"))
-    .get();
-
-  if (existing) {
-    db.update(settings)
-      .set({ value: jsonValue, updatedAt: now })
-      .where(eq(settings.key, "github_pat"))
-      .run();
-  } else {
-    db.insert(settings)
-      .values({ key: "github_pat", value: jsonValue, updatedAt: now })
-      .run();
   }
 
   return NextResponse.json({

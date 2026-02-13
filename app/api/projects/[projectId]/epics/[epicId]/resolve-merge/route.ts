@@ -3,12 +3,10 @@ import { db } from "@/lib/db";
 import {
   projects,
   epics,
-  agentSessions,
   ticketComments,
   settings,
-  documents,
 } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import {
   createWorktree,
@@ -21,24 +19,20 @@ import { buildMergeResolutionPrompt } from "@/lib/claude/prompt-builder";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
 import type { ProviderType } from "@/lib/providers";
 import { tryExportArjiJson } from "@/lib/sync/export";
+import {
+  createAgentAlreadyRunningPayload,
+  getRunningSessionForTarget,
+} from "@/lib/agents/concurrency";
 import fs from "fs";
 import path from "path";
+import {
+  createQueuedSession,
+  isSessionLifecycleConflictError,
+  markSessionRunning,
+  markSessionTerminal,
+} from "@/lib/agent-sessions/lifecycle";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
-
-function hasRunningSessionForEpic(epicId: string): boolean {
-  const running = db
-    .select()
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.epicId, epicId),
-        eq(agentSessions.status, "running")
-      )
-    )
-    .all();
-  return running.length > 0;
-}
 
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, epicId } = await params;
@@ -76,14 +70,6 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json(
       { error: "Epic has no branch" },
       { status: 400 }
-    );
-  }
-
-  // Concurrency guard
-  if (hasRunningSessionForEpic(epicId)) {
-    return NextResponse.json(
-      { error: "An agent session is already running for this epic." },
-      { status: 409 }
     );
   }
 
@@ -132,13 +118,6 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   // Conflicts exist — spawn an agent to resolve them
 
-  // Load context for prompt
-  const docs = db
-    .select()
-    .from(documents)
-    .where(eq(documents.projectId, projectId))
-    .all();
-
   const settingsRow = db
     .select()
     .from(settings)
@@ -161,24 +140,38 @@ export async function POST(request: NextRequest, { params }: Params) {
   fs.mkdirSync(logsDir, { recursive: true });
   const logsPath = path.join(logsDir, "logs.json");
 
-  db.insert(agentSessions)
-    .values({
-      id: sessionId,
-      projectId,
-      epicId,
-      status: "running",
-      mode: "code",
-      provider,
-      prompt,
-      logsPath,
-      branchName,
-      worktreePath,
-      startedAt: now,
-      createdAt: now,
-    })
-    .run();
+  // Check concurrency guard
+  const conflict = getRunningSessionForTarget({
+    scope: "epic",
+    projectId,
+    epicId,
+  });
+  if (conflict) {
+    return NextResponse.json(
+      createAgentAlreadyRunningPayload(
+        { scope: "epic", projectId, epicId },
+        conflict,
+        "Another agent is already running for this epic."
+      ),
+      { status: 409 }
+    );
+  }
+
+  createQueuedSession({
+    id: sessionId,
+    projectId,
+    epicId,
+    mode: "code",
+    provider,
+    prompt,
+    logsPath,
+    branchName,
+    worktreePath,
+    createdAt: now,
+  });
 
   // Spawn agent in the worktree
+  markSessionRunning(sessionId, now);
   processManager.start(sessionId, {
     mode: "code",
     prompt,
@@ -203,14 +196,20 @@ export async function POST(request: NextRequest, { params }: Params) {
       // ignore
     }
 
-    db.update(agentSessions)
-      .set({
-        status: result?.success ? "completed" : "failed",
-        completedAt,
-        error: result?.error || null,
-      })
-      .where(eq(agentSessions.id, sessionId))
-      .run();
+    try {
+      markSessionTerminal(
+        sessionId,
+        {
+          success: !!result?.success,
+          error: result?.error || null,
+        },
+        completedAt
+      );
+    } catch (error) {
+      if (!isSessionLifecycleConflictError(error)) {
+        console.error("[resolve merge] Failed to finalize session", error);
+      }
+    }
 
     // On success: attempt the final merge into main
     if (result?.success) {

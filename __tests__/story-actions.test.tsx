@@ -26,7 +26,6 @@ const baseProps = {
   story: { id: "s1", title: "Test Story", status: "todo" },
   dispatching: false,
   isRunning: false,
-  activeSessions: [],
   codexAvailable: true,
   onSendToDev: vi.fn().mockResolvedValue(undefined),
   onSendToReview: vi.fn().mockResolvedValue(undefined),
@@ -50,6 +49,33 @@ describe("StoryActions", () => {
   it("shows running indicator when isRunning", () => {
     render(<StoryActions {...baseProps} isRunning={true} />);
     expect(screen.getByText("Agent running")).toBeInTheDocument();
+  });
+
+  it("shows lock helper text with active session id when running", () => {
+    render(
+      <StoryActions
+        {...baseProps}
+        story={{ ...baseProps.story, status: "review" }}
+        isRunning={true}
+        activeSessionId="abc123xyz"
+      />
+    );
+    expect(
+      screen.getByText("Another agent is already running for this task (#abc123).")
+    ).toBeInTheDocument();
+  });
+
+  it("disables action buttons when running lock is active", () => {
+    render(
+      <StoryActions
+        {...baseProps}
+        story={{ ...baseProps.story, status: "review" }}
+        isRunning={true}
+      />
+    );
+    expect(screen.getByText("Send to Dev").closest("button")).toBeDisabled();
+    expect(screen.getByText("Agent Review").closest("button")).toBeDisabled();
+    expect(screen.getByText("Approve").closest("button")).toBeDisabled();
   });
 
   it("disables Send to Dev when dispatching", () => {

@@ -26,7 +26,9 @@ interface SessionDetail {
   worktreePath?: string;
   epicId?: string;
   startedAt?: string;
+  endedAt?: string;
   completedAt?: string;
+  lastNonEmptyText?: string;
   createdAt: string;
   logs?: {
     success?: boolean;
@@ -85,8 +87,9 @@ export default function SessionDetailPage() {
   function getDuration(): string {
     if (!session?.startedAt) return "-";
     const start = new Date(session.startedAt).getTime();
-    const end = session.completedAt
-      ? new Date(session.completedAt).getTime()
+    const endAt = session.endedAt || session.completedAt;
+    const end = endAt
+      ? new Date(endAt).getTime()
       : Date.now();
     const seconds = Math.floor((end - start) / 1000);
     const mins = Math.floor(seconds / 60);
@@ -124,6 +127,11 @@ export default function SessionDetailPage() {
               {getDuration()}
             </span>
           </div>
+          {session.lastNonEmptyText && (
+            <p className="text-sm text-muted-foreground mt-2 max-w-2xl truncate">
+              {session.lastNonEmptyText}
+            </p>
+          )}
         </div>
         <div className="flex gap-2">
           {session.status === "running" && (
@@ -176,8 +184,8 @@ export default function SessionDetailPage() {
         <Card className="p-3">
           <div className="text-xs text-muted-foreground">Completed</div>
           <div className="text-sm">
-            {session.completedAt
-              ? new Date(session.completedAt).toLocaleString()
+            {session.endedAt || session.completedAt
+              ? new Date(session.endedAt || session.completedAt || "").toLocaleString()
               : session.status === "running"
                 ? "In progress..."
                 : "-"}

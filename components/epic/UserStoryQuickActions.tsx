@@ -18,14 +18,19 @@ interface UserStoryQuickActionsProps {
   projectId: string;
   story: UserStory;
   onRefresh: () => void;
+  isLocked?: boolean;
+  lockReason?: string;
 }
 
 export function UserStoryQuickActions({
   projectId,
   story,
   onRefresh,
+  isLocked = false,
+  lockReason = "Another agent is already running for this task.",
 }: UserStoryQuickActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
+  const actionsLocked = loading !== null || isLocked;
 
   const canSendToDev = ["todo", "in_progress"].includes(story.status);
   const canReview = story.status === "review";
@@ -105,7 +110,7 @@ export function UserStoryQuickActions({
                 e.preventDefault();
                 handleSendToDev();
               }}
-              disabled={loading !== null}
+              disabled={actionsLocked}
             >
               {loading === "dev" ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -114,7 +119,7 @@ export function UserStoryQuickActions({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Send to Dev</TooltipContent>
+          <TooltipContent>{isLocked ? lockReason : "Send to Dev"}</TooltipContent>
         </Tooltip>
       )}
 
@@ -129,7 +134,7 @@ export function UserStoryQuickActions({
                 e.preventDefault();
                 handleReview();
               }}
-              disabled={loading !== null}
+              disabled={actionsLocked}
             >
               {loading === "review" ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -138,7 +143,7 @@ export function UserStoryQuickActions({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Code Review</TooltipContent>
+          <TooltipContent>{isLocked ? lockReason : "Code Review"}</TooltipContent>
         </Tooltip>
       )}
 
@@ -153,7 +158,7 @@ export function UserStoryQuickActions({
                 e.preventDefault();
                 handleApprove();
               }}
-              disabled={loading !== null}
+              disabled={actionsLocked}
             >
               {loading === "approve" ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -162,7 +167,7 @@ export function UserStoryQuickActions({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Approve</TooltipContent>
+          <TooltipContent>{isLocked ? lockReason : "Approve"}</TooltipContent>
         </Tooltip>
       )}
     </div>

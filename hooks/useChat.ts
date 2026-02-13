@@ -49,7 +49,7 @@ export function useChat(projectId: string, conversationId: string | null) {
   }, [loadMessages]);
 
   const sendMessage = useCallback(
-    async (content: string, attachmentIds?: string[]) => {
+    async (content: string, attachmentIds?: string[], options?: { finalize?: boolean }) => {
       setSending(true);
       setPendingQuestions(null);
       setStreamStatus(null);
@@ -80,7 +80,7 @@ export function useChat(projectId: string, conversationId: string | null) {
         const res = await fetch(`/api/projects/${projectId}/chat/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, conversationId, attachmentIds }),
+          body: JSON.stringify({ content, conversationId, attachmentIds, finalize: options?.finalize }),
         });
 
         if (!res.ok || !res.body) {

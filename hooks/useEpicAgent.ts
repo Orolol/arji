@@ -1,11 +1,15 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { toAgentRequestError } from "@/lib/agents/client-error";
 
 interface AgentSession {
   id: string;
+  epicId: string | null;
+  userStoryId: string | null;
   status: string;
   mode: string;
+  provider: string | null;
   startedAt?: string;
   completedAt?: string;
   error?: string;
@@ -15,64 +19,65 @@ export function useEpicAgent(projectId: string, epicId: string | null) {
   const [activeSessions, setActiveSessions] = useState<AgentSession[]>([]);
   const [dispatching, setDispatching] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const sessionIdsRef = useRef<Set<string>>(new Set());
 
   const pollSessions = useCallback(async () => {
-    if (sessionIdsRef.current.size === 0) return;
-
-    const updated: AgentSession[] = [];
-    for (const sid of sessionIdsRef.current) {
-      try {
-        const res = await fetch(
-          `/api/projects/${projectId}/sessions/${sid}`
-        );
-        const data = await res.json();
-        if (data.data) {
-          updated.push(data.data);
-          if (["completed", "failed", "cancelled"].includes(data.data.status)) {
-            sessionIdsRef.current.delete(sid);
-          }
-        }
-      } catch {
-        // ignore
-      }
+    if (!epicId) {
+      setActiveSessions([]);
+      return;
     }
-    setActiveSessions(updated);
-  }, [projectId]);
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/sessions/active`);
+      const data = await res.json();
+      const sessions = ((data.data || []) as AgentSession[]).filter(
+        (session) => session.status === "running" && session.epicId === epicId
+      );
+      setActiveSessions(sessions);
+    } catch {
+      // ignore
+    }
+  }, [projectId, epicId]);
 
   useEffect(() => {
+    void pollSessions();
     pollRef.current = setInterval(pollSessions, 3000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [pollSessions]);
 
+  const requestJson = useCallback(
+    async (url: string, body?: Record<string, unknown>) => {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        throw toAgentRequestError(data);
+      }
+      return data.data;
+    },
+    []
+  );
+
   const sendToDev = useCallback(
     async (comment?: string) => {
       if (!epicId) return;
       setDispatching(true);
       try {
-        const res = await fetch(
+        const data = await requestJson(
           `/api/projects/${projectId}/epics/${epicId}/build`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ comment }),
-          }
+          { comment }
         );
-        const data = await res.json();
-        if (data.error) {
-          throw new Error(data.error);
-        }
-        if (data.data?.sessionId) {
-          sessionIdsRef.current.add(data.data.sessionId);
-        }
-        return data.data;
+        await pollSessions();
+        return data;
       } finally {
         setDispatching(false);
       }
     },
-    [projectId, epicId]
+    [projectId, epicId, requestJson, pollSessions]
   );
 
   const sendToReview = useCallback(
@@ -80,83 +85,58 @@ export function useEpicAgent(projectId: string, epicId: string | null) {
       if (!epicId) return;
       setDispatching(true);
       try {
-        const res = await fetch(
+        const data = await requestJson(
           `/api/projects/${projectId}/epics/${epicId}/review`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ reviewTypes }),
-          }
+          { reviewTypes }
         );
-        const data = await res.json();
-        if (data.error) {
-          throw new Error(data.error);
-        }
-        if (data.data?.sessions) {
-          for (const sid of data.data.sessions) {
-            sessionIdsRef.current.add(sid);
-          }
-        }
-        return data.data;
+        await pollSessions();
+        return data;
       } finally {
         setDispatching(false);
       }
     },
-    [projectId, epicId]
+    [projectId, epicId, requestJson, pollSessions]
   );
 
-  const resolveMerge = useCallback(
-    async () => {
-      if (!epicId) return;
-      setDispatching(true);
-      try {
-        const res = await fetch(
-          `/api/projects/${projectId}/epics/${epicId}/resolve-merge`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-        const data = await res.json();
-        if (data.error) {
-          throw new Error(data.error);
-        }
-        if (data.data?.sessionId) {
-          sessionIdsRef.current.add(data.data.sessionId);
-        }
-        return data.data;
-      } finally {
-        setDispatching(false);
-      }
-    },
-    [projectId, epicId]
-  );
+  const resolveMerge = useCallback(async () => {
+    if (!epicId) return;
+    setDispatching(true);
+    try {
+      const data = await requestJson(
+        `/api/projects/${projectId}/epics/${epicId}/resolve-merge`
+      );
+      await pollSessions();
+      return data;
+    } finally {
+      setDispatching(false);
+    }
+  }, [projectId, epicId, requestJson, pollSessions]);
 
   const approve = useCallback(async () => {
     if (!epicId) return;
-    const res = await fetch(
-      `/api/projects/${projectId}/epics/${epicId}/approve`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      }
-    );
-    const data = await res.json();
-    if (data.error) {
-      throw new Error(data.error);
+    const res = await fetch(`/api/projects/${projectId}/epics/${epicId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw toAgentRequestError(data);
     }
     return data.data;
   }, [projectId, epicId]);
 
   const isRunning = activeSessions.some((s) => s.status === "running");
+  const activeSession = activeSessions[0] ?? null;
 
   return {
     activeSessions,
+    activeSession,
     dispatching,
     isRunning,
     sendToDev,
     sendToReview,
     resolveMerge,
     approve,
+    refreshSessions: pollSessions,
   };
 }

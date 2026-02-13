@@ -3,6 +3,7 @@ import {
   text,
   integer,
   real,
+  index,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
@@ -13,7 +14,7 @@ export const projects = sqliteTable("projects", {
   description: text("description"),
   status: text("status").default("ideation"), // ideation | specifying | building | done | archived
   gitRepoPath: text("git_repo_path"),
-  githubOwnerRepo: text("github_owner_repo"), // e.g. "owner/repo"
+  githubOwnerRepo: text("github_owner_repo"),
   spec: text("spec"),
   imported: integer("imported").default(0),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
@@ -103,7 +104,7 @@ export const agentSessions = sqliteTable("agent_sessions", {
     .references(() => projects.id, { onDelete: "cascade" }),
   epicId: text("epic_id").references(() => epics.id),
   userStoryId: text("user_story_id").references(() => userStories.id),
-  status: text("status").default("pending"), // pending | running | completed | failed | cancelled
+  status: text("status").default("queued"), // queued | running | completed | failed | cancelled
   mode: text("mode").default("code"), // plan | code
   orchestrationMode: text("orchestration_mode").default("solo"), // solo | team
   provider: text("provider").default("claude-code"), // claude-code | codex
@@ -112,10 +113,47 @@ export const agentSessions = sqliteTable("agent_sessions", {
   branchName: text("branch_name"),
   worktreePath: text("worktree_path"),
   startedAt: text("started_at"),
+  endedAt: text("ended_at"),
   completedAt: text("completed_at"),
+  lastNonEmptyText: text("last_non_empty_text"),
   error: text("error"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const agentSessionSequences = sqliteTable("agent_session_sequences", {
+  sessionId: text("session_id")
+    .primaryKey()
+    .notNull()
+    .references(() => agentSessions.id, { onDelete: "cascade" }),
+  nextSequence: integer("next_sequence").notNull().default(1),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const agentSessionChunks = sqliteTable(
+  "agent_session_chunks",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    streamType: text("stream_type").notNull(), // raw | output | response
+    sequence: integer("sequence").notNull(),
+    chunkKey: text("chunk_key"),
+    content: text("content").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    sessionSequenceUnique: uniqueIndex(
+      "agent_session_chunks_session_sequence_unique"
+    ).on(table.sessionId, table.sequence),
+    sessionStreamKeyUnique: uniqueIndex(
+      "agent_session_chunks_session_stream_key_unique"
+    ).on(table.sessionId, table.streamType, table.chunkKey),
+    sessionStreamSequenceIdx: index(
+      "agent_session_chunks_session_stream_sequence_idx"
+    ).on(table.sessionId, table.streamType, table.sequence),
+  })
+);
 
 export const ticketComments = sqliteTable("ticket_comments", {
   id: text("id").primaryKey(),

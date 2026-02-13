@@ -1,92 +1,115 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { projects, settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { pullRemote } from "@/lib/git/remote";
-import { logSyncOperation } from "@/lib/github/sync-log";
+import { db } from "@/lib/db";
+import { projects } from "@/lib/db/schema";
+import {
+  FastForwardOnlyPullError,
+  getCurrentGitBranch,
+  pullGitBranchFfOnly,
+} from "@/lib/git/remote";
+import { writeGitSyncLog } from "@/lib/github/sync-log";
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ projectId: string }> }
-) {
+type Params = { params: Promise<{ projectId: string }> };
+
+export async function POST(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
-  const body = await request.json();
-  const { branch } = body as { branch?: string };
-
-  if (!branch || typeof branch !== "string") {
-    return NextResponse.json(
-      { error: "missing_branch", message: "A branch name is required." },
-      { status: 400 }
-    );
-  }
-
-  const project = db
-    .select()
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .get();
+  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
 
   if (!project) {
-    return NextResponse.json(
-      { error: "not_found", message: "Project not found." },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-
   if (!project.gitRepoPath) {
-    return NextResponse.json(
-      { error: "not_configured", message: "No git repository path configured for this project." },
-      { status: 400 }
-    );
-  }
-
-  const pat = db
-    .select()
-    .from(settings)
-    .where(eq(settings.key, "github_pat"))
-    .get();
-
-  if (!pat) {
-    return NextResponse.json(
-      { error: "not_configured", message: "GitHub PAT not configured. Set it in Settings." },
-      { status: 400 }
-    );
-  }
-
-  try {
-    await pullRemote(project.gitRepoPath, branch);
-
-    logSyncOperation({
+    writeGitSyncLog({
       projectId,
       operation: "pull",
-      branch,
-      status: "success",
+      status: "failed",
+      branch: null,
+      detail: { reason: "missing_git_repo_path" },
     });
 
-    return NextResponse.json({ data: { success: true } });
-  } catch (e) {
-    const detail = e instanceof Error ? e.message : "Pull failed";
-    const isConflict =
-      detail.includes("not possible to fast-forward") ||
-      detail.includes("CONFLICT") ||
-      detail.includes("non-fast-forward");
+    return NextResponse.json(
+      { error: "Project has no git repository path configured." },
+      { status: 400 }
+    );
+  }
 
-    logSyncOperation({
+  const body = await request.json().catch(() => ({}));
+  const remote = typeof body?.remote === "string" ? body.remote : "origin";
+  const requestedBranch = typeof body?.branch === "string" ? body.branch : "";
+  const branch = requestedBranch.trim() || (await getCurrentGitBranch(project.gitRepoPath));
+
+  try {
+    const result = await pullGitBranchFfOnly(project.gitRepoPath, branch, remote);
+    writeGitSyncLog({
       projectId,
       operation: "pull",
+      status: "success",
       branch,
-      status: "failure",
-      detail,
+      detail: {
+        remote,
+        ffOnly: true,
+        summary: result.summary,
+      },
+    });
+
+    return NextResponse.json({
+      data: {
+        action: "pull",
+        projectId,
+        remote,
+        branch,
+        ffOnly: true,
+        summary: result.summary,
+      },
+    });
+  } catch (error) {
+    if (error instanceof FastForwardOnlyPullError) {
+      writeGitSyncLog({
+        projectId,
+        operation: "pull",
+        status: "failed",
+        branch,
+        detail: {
+          remote,
+          ffOnly: true,
+          code: "ff_only_conflict",
+          error: error.message,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          error: error.message,
+          data: {
+            action: "pull",
+            projectId,
+            remote,
+            branch,
+            ffOnly: true,
+          },
+        },
+        { status: 409 }
+      );
+    }
+
+    writeGitSyncLog({
+      projectId,
+      operation: "pull",
+      status: "failed",
+      branch,
+      detail: {
+        remote,
+        ffOnly: true,
+        error: error instanceof Error ? error.message : "unknown_error",
+      },
     });
 
     return NextResponse.json(
       {
-        error: isConflict ? "non_fast_forward" : "pull_failed",
-        message: isConflict
-          ? "Pull failed: non-fast-forward. Please resolve conflicts manually."
-          : detail,
+        error: error instanceof Error ? error.message : "Failed to pull branch.",
+        data: { action: "pull", projectId, remote, branch, ffOnly: true },
       },
-      { status: isConflict ? 409 : 500 }
+      { status: 500 }
     );
   }
 }

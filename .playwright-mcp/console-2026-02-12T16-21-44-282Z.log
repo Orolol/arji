@@ -7,3 +7,3382 @@
 [ 1715590ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr?id=cU7wmYGJUiZtvwIKVITxX' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_b9591ae0._.js:10878
 [ 1718415ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
 [ 1720592ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr?id=cU7wmYGJUiZtvwIKVITxX' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_b9591ae0._.js:10878
+[16640036ms] [ERROR] ./workspace/arji/hooks/useEpicCreate.ts:354:15
+Ecmascript file had an error
+  352 |               updatedJson.data || [];
+  353 |             if (updatedMessages.length > 0) {
+> 354 |               messages = updatedMessages;
+      |               ^^^^^^^^
+  355 |             }
+  356 |           }
+  357 |         }
+
+cannot reassign to a variable declared with `const`
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component Browser]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component SSR]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component] @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[16640781ms] [ERROR] ./workspace/arji/hooks/useEpicCreate.ts:354:15
+Ecmascript file had an error
+  352 |               updatedJson.data || [];
+  353 |             if (updatedMessages.length > 0) {
+> 354 |               messages = updatedMessages;
+      |               ^^^^^^^^
+  355 |             }
+  356 |           }
+  357 |         }
+
+cannot reassign to a variable declared with `const`
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component Browser]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component SSR]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component] @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[16641370ms] [ERROR] ./workspace/arji/hooks/useEpicCreate.ts:354:15
+Ecmascript file had an error
+  352 |               updatedJson.data || [];
+  353 |             if (updatedMessages.length > 0) {
+> 354 |               messages = updatedMessages;
+      |               ^^^^^^^^
+  355 |             }
+  356 |           }
+  357 |         }
+
+cannot reassign to a variable declared with `const`
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component Browser]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component SSR]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component] @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[16641537ms] [ERROR] ./workspace/arji/hooks/useEpicCreate.ts:354:15
+Ecmascript file had an error
+  352 |               updatedJson.data || [];
+  353 |             if (updatedMessages.length > 0) {
+> 354 |               messages = updatedMessages;
+      |               ^^^^^^^^
+  355 |             }
+  356 |           }
+  357 |         }
+
+cannot reassign to a variable declared with `const`
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component Browser]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component SSR]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component] @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[16641844ms] [ERROR] ./workspace/arji/hooks/useEpicCreate.ts:354:15
+Ecmascript file had an error
+  352 |               updatedJson.data || [];
+  353 |             if (updatedMessages.length > 0) {
+> 354 |               messages = updatedMessages;
+      |               ^^^^^^^^
+  355 |             }
+  356 |           }
+  357 |         }
+
+cannot reassign to a variable declared with `const`
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component Browser]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component SSR]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component] @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[16641975ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[16642000ms] [ERROR] ./workspace/arji/hooks/useEpicCreate.ts:354:15
+Ecmascript file had an error
+  352 |               updatedJson.data || [];
+  353 |             if (updatedMessages.length > 0) {
+> 354 |               messages = updatedMessages;
+      |               ^^^^^^^^
+  355 |             }
+  356 |           }
+  357 |         }
+
+cannot reassign to a variable declared with `const`
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component Browser]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component SSR]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component] @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[16642692ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[16642720ms] [ERROR] ./workspace/arji/hooks/useEpicCreate.ts:354:15
+Ecmascript file had an error
+  352 |               updatedJson.data || [];
+  353 |             if (updatedMessages.length > 0) {
+> 354 |               messages = updatedMessages;
+      |               ^^^^^^^^
+  355 |             }
+  356 |           }
+  357 |         }
+
+cannot reassign to a variable declared with `const`
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component Browser]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component SSR]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component] @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[16643086ms] [ERROR] ./workspace/arji/hooks/useEpicCreate.ts:354:15
+Ecmascript file had an error
+  352 |               updatedJson.data || [];
+  353 |             if (updatedMessages.length > 0) {
+> 354 |               messages = updatedMessages;
+      |               ^^^^^^^^
+  355 |             }
+  356 |           }
+  357 |         }
+
+cannot reassign to a variable declared with `const`
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component Browser]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component SSR]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component] @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[16644130ms] [ERROR] ./workspace/arji/hooks/useEpicCreate.ts:354:15
+Ecmascript file had an error
+  352 |               updatedJson.data || [];
+  353 |             if (updatedMessages.length > 0) {
+> 354 |               messages = updatedMessages;
+      |               ^^^^^^^^
+  355 |             }
+  356 |           }
+  357 |         }
+
+cannot reassign to a variable declared with `const`
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component Browser]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component SSR]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component] @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[16644901ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[16644927ms] [ERROR] ./workspace/arji/hooks/useEpicCreate.ts:354:15
+Ecmascript file had an error
+  352 |               updatedJson.data || [];
+  353 |             if (updatedMessages.length > 0) {
+> 354 |               messages = updatedMessages;
+      |               ^^^^^^^^
+  355 |             }
+  356 |           }
+  357 |         }
+
+cannot reassign to a variable declared with `const`
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component Browser]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/hooks/useEpicCreate.ts [Client Component SSR]
+    ./workspace/arji/components/chat/UnifiedChatPanel.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component] @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[22655826ms] TypeError: Cannot read properties of undefined (reading 'length')
+    at AgentMonitor (http://localhost:3001/_next/static/chunks/workspace_arji_2b42a07a._.js:4211:18)
+    at Object.react_stack_bottom_frame (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:14826:24)
+    at renderWithHooks (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:4651:24)
+    at updateFunctionComponent (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6112:21)
+    at beginWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6708:24)
+    at runWithFiberInDEV (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:965:74)
+    at performUnitOfWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9562:97)
+    at workLoopSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9456:40)
+    at renderRootSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9440:13)
+    at performWorkOnRoot (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9105:47)
+    at performSyncWorkOnRoot (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:10238:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:10154:316)
+    at flushSyncWork$1 (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9237:86)
+    at Object.scheduleRefresh (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:299:13)
+    at http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:391:33
+    at Set.forEach (<anonymous>)
+    at Object.performReactRefresh (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:384:38)
+    at applyUpdate (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:878:31)
+    at http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:886:13
+[22669482ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:2297
+[22669541ms] TypeError: Cannot read properties of undefined (reading 'length')
+    at AgentMonitor (http://localhost:3001/_next/static/chunks/workspace_arji_a6df74a5._.js?id=%255Bproject%255D%252Fworkspace%252Farji%252Fcomponents%252Fmonitor%252FAgentMonitor.tsx+%255Bapp-client%255D+%2528ecmascript%2529:64:20)
+    at Object.react_stack_bottom_frame (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:14826:24)
+    at renderWithHooks (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:4651:24)
+    at updateFunctionComponent (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6112:21)
+    at beginWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6708:24)
+    at runWithFiberInDEV (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:965:74)
+    at performUnitOfWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9562:97)
+    at workLoopSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9456:40)
+    at renderRootSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9440:13)
+    at performWorkOnRoot (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9105:47)
+    at performSyncWorkOnRoot (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:10238:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:10154:316)
+    at flushSyncWork$1 (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9237:86)
+    at Object.scheduleRefresh (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:299:13)
+    at http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:391:33
+    at Set.forEach (<anonymous>)
+    at Object.performReactRefresh (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:384:38)
+    at applyUpdate (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:878:31)
+    at http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:886:13
+[22670276ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/projects/cUfHlegssamR:0
+[22670621ms] TypeError: Cannot read properties of undefined (reading 'length')
+    at AgentMonitor (http://localhost:3001/_next/static/chunks/workspace_arji_a6df74a5._.js:4783:20)
+    at Object.react_stack_bottom_frame (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:14826:24)
+    at renderWithHooks (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:4651:24)
+    at updateFunctionComponent (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6112:21)
+    at beginWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6708:24)
+    at runWithFiberInDEV (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:965:74)
+    at performUnitOfWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9562:97)
+    at workLoopSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9456:40)
+    at renderRootSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9440:13)
+    at performWorkOnRoot (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9105:47)
+    at performWorkOnRootViaSchedulerTask (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:10230:9)
+    at MessagePort.performWorkUntilDeadline (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:2647:64)
+[22673643ms] [WARNING] The resource http://localhost:3001/_next/static/chunks/workspace_arji_app_102e5390._.css was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally. @ http://localhost:3001/projects/cUfHlegssamR:0
+[22721100ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:2297
+[22721830ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/projects/cUfHlegssamR:0
+[22722018ms] ReferenceError: activeSessions is not defined
+    at KanbanPage (http://localhost:3001/_next/static/chunks/workspace_arji_a6df74a5._.js:5088:9)
+    at Object.react_stack_bottom_frame (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:14826:24)
+    at renderWithHooks (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:4651:24)
+    at updateFunctionComponent (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6112:21)
+    at beginWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6708:24)
+    at runWithFiberInDEV (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:965:74)
+    at performUnitOfWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9562:97)
+    at workLoopSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9456:40)
+    at renderRootSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9440:13)
+    at performWorkOnRoot (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9105:47)
+    at performWorkOnRootViaSchedulerTask (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:10230:9)
+    at MessagePort.performWorkUntilDeadline (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:2647:64)
+[22725058ms] [WARNING] The resource http://localhost:3001/_next/static/chunks/workspace_arji_app_102e5390._.css was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally. @ http://localhost:3001/projects/cUfHlegssamR:0
+[22728604ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:2297
+[22729280ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/projects/cUfHlegssamR:0
+[22729598ms] ReferenceError: activeSessions is not defined
+    at KanbanPage (http://localhost:3001/_next/static/chunks/workspace_arji_a6df74a5._.js:5406:43)
+    at Object.react_stack_bottom_frame (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:14826:24)
+    at renderWithHooks (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:4651:24)
+    at updateFunctionComponent (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6112:21)
+    at beginWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6708:24)
+    at runWithFiberInDEV (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:965:74)
+    at performUnitOfWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9562:97)
+    at workLoopSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9456:40)
+    at renderRootSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9440:13)
+    at performWorkOnRoot (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9105:47)
+    at performWorkOnRootViaSchedulerTask (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:10230:9)
+    at MessagePort.performWorkUntilDeadline (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:2647:64)
+[22729902ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:2297
+[56928174ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/qGctwWPjJ1Xi:0
+[57273600ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR:0
+[57657215ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657215ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657215ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657215ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657288ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657289ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657289ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657289ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657312ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657313ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657313ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657313ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57657973ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[57657974ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[57658001ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57658001ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57658001ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57658002ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57658893ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57658894ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57658894ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57658894ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57659138ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57659138ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57659138ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57659138ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57659686ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57659687ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57659687ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57659687ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57660206ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57660207ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57660207ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57660207ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57660969ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[57660977ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[57660994ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57660995ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57660995ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57660995ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57662680ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57662680ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57662680ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57662680ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57663214ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57663215ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57663215ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57663215ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57663966ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[57663974ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[57664000ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57664000ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57664000ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57664000ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57665694ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57665695ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57665695ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57665695ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57666220ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57666221ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57666221ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57666221ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57666965ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[57666972ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[57666991ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57666991ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57666991ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57666991ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57668708ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57668708ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57668708ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57668708ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57669230ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57669231ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57669231ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57669231ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57669967ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[57669973ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[57669993ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57669993ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57669993ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57669994ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57671719ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57671720ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57671720ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57671720ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57672243ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57672243ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57672243ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57672244ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57672962ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[57672966ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[57672990ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57672990ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57672990ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57672990ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57674720ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57674721ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57674721ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57674721ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57675244ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57675244ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57675244ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57675244ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57675974ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[57675975ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[57675997ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57675997ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57675997ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57675997ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:3127
+[57677623ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr?id=ZBl43B2RwjCD2QBXIX4Ez' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_b9591ae0._.js:10878
+[57678625ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr?id=ZBl43B2RwjCD2QBXIX4Ez' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_b9591ae0._.js:10878
+[57678944ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[57678944ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[57679626ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr?id=ZBl43B2RwjCD2QBXIX4Ez' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_b9591ae0._.js:10878
+[57680627ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr?id=ZBl43B2RwjCD2QBXIX4Ez' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_b9591ae0._.js:10878
+[57681631ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr?id=ZBl43B2RwjCD2QBXIX4Ez' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_b9591ae0._.js:10878
+[57681944ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[57681944ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[57684943ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[57684944ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[57686633ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr?id=ZBl43B2RwjCD2QBXIX4Ez' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_b9591ae0._.js:10878
+[57687943ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/api/projects/cUfHlegssamR/conversations:0
+[57687944ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/active:0
+[57692503ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/projects/cUfHlegssamR:0
+[57692797ms] Error: ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+    at <unknown> (Error: ./workspace/arji/lib/db/index.ts:5:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at Object.getCompilationErrors (file:///home/orolol/workspace/arji/node_modules/next/dist/server/dev/hot-reloader-turbopack.js:1008:59)
+    at DevBundlerService.getCompilationError (file:///home/orolol/workspace/arji/node_modules/next/dist/server/lib/dev-bundler-service.js:44:55)
+    at DevServer.getCompilationError (file:///home/orolol/workspace/arji/node_modules/next/dist/server/dev/next-dev-server.js:706:42)
+    at DevServer.findPageComponents (file:///home/orolol/workspace/arji/node_modules/next/dist/server/dev/next-dev-server.js:676:43)
+    at async DevServer.renderErrorToResponseImpl (file:///home/orolol/workspace/arji/node_modules/next/dist/server/base-server.js:1733:26)
+[57692787ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57692788ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57692788ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57692788ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57692882ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57692882ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57692882ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57692882ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57698463ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_380ed3c4._.js:2266
+[57699464ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_380ed3c4._.js:2266
+[57700465ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_380ed3c4._.js:2266
+[57701466ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_380ed3c4._.js:2266
+[57702467ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/79f76_next_dist_client_380ed3c4._.js:2266
+[57707870ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/projects/cUfHlegssamR:0
+[57708014ms] Error: ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+    at <unknown> (Error: ./workspace/arji/lib/db/index.ts:5:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at Object.getCompilationErrors (file:///home/orolol/workspace/arji/node_modules/next/dist/server/dev/hot-reloader-turbopack.js:1008:59)
+    at DevBundlerService.getCompilationError (file:///home/orolol/workspace/arji/node_modules/next/dist/server/lib/dev-bundler-service.js:44:55)
+    at DevServer.getCompilationError (file:///home/orolol/workspace/arji/node_modules/next/dist/server/dev/next-dev-server.js:706:42)
+    at DevServer.findPageComponents (file:///home/orolol/workspace/arji/node_modules/next/dist/server/dev/next-dev-server.js:676:43)
+    at async DevServer.renderErrorToResponseImpl (file:///home/orolol/workspace/arji/node_modules/next/dist/server/base-server.js:1733:26)
+[57708026ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57708026ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57708026ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57708026ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57708069ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57708069ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57708069ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57708069ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57708130ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57708130ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57708130ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57708130ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57718033ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57718034ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57718034ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57718034ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57840466ms] [ERROR] ./workspace/arji/lib/db/index.ts:5:1
+Module not found: Can't resolve 'fs'
+  3 | import * as schema from "./schema";
+  4 | import path from "path";
+> 5 | import fs from "fs";
+    | ^^^^^^^^^^^^^^^^^^^^
+  6 |
+  7 | const dataDir = path.join(process.cwd(), "data");
+  8 | if (!fs.existsSync(dataDir)) {
+
+Import traces:
+  Client Component Browser:
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./workspace/arji/lib/db/index.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component SSR]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component SSR]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component SSR]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57840467ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/database.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const util = require('./util');
+  5 | const SqliteError = require('./sqlite-error');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57840467ms] [ERROR] ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js:2:12
+Module not found: Can't resolve 'fs'
+  1 | 'use strict';
+> 2 | const fs = require('fs');
+    |            ^^^^^^^^^^^^^
+  3 | const path = require('path');
+  4 | const { promisify } = require('util');
+  5 | const { cppdb } = require('../util');
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/better-sqlite3/lib/methods/backup.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57840467ms] [ERROR] ./workspace/arji/node_modules/bindings/bindings.js:5:10
+Module not found: Can't resolve 'fs'
+  3 |  */
+  4 |
+> 5 | var fs = require('fs'),
+    |          ^^^^^^^^^^^^^
+  6 |   path = require('path'),
+  7 |   fileURLToPath = require('file-uri-to-path'),
+  8 |   join = path.join,
+
+Import trace:
+  Client Component Browser:
+    ./workspace/arji/node_modules/bindings/bindings.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/database.js [Client Component Browser]
+    ./workspace/arji/node_modules/better-sqlite3/lib/index.js [Client Component Browser]
+    ./workspace/arji/lib/db/index.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/concurrency.ts [Client Component Browser]
+    ./workspace/arji/lib/agents/client-error.ts [Client Component Browser]
+    ./workspace/arji/components/kanban/EpicDetail.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Client Component Browser]
+    ./workspace/arji/app/projects/[projectId]/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found @ http://localhost:3001/_next/static/chunks/79f76_next_dist_b3090ce8._.js:1920
+[57845235ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3001/projects/cUfHlegssamR:0
+[57845478ms] ReferenceError: activeSessions is not defined
+    at KanbanPage (http://localhost:3001/_next/static/chunks/workspace_arji_16846996._.js:5147:9)
+    at Object.react_stack_bottom_frame (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:14826:24)
+    at renderWithHooks (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:4651:24)
+    at updateFunctionComponent (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6112:21)
+    at beginWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:6708:24)
+    at runWithFiberInDEV (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:965:74)
+    at performUnitOfWork (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9562:97)
+    at workLoopSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9456:40)
+    at renderRootSync (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9440:13)
+    at performWorkOnRoot (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:9105:47)
+    at performWorkOnRootViaSchedulerTask (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_react-dom_268189ee._.js:10230:9)
+    at MessagePort.performWorkUntilDeadline (http://localhost:3001/_next/static/chunks/79f76_next_dist_compiled_30f71efc._.js:2647:64)
+[57848503ms] [WARNING] The resource http://localhost:3001/_next/static/chunks/workspace_arji_app_102e5390._.css was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally. @ http://localhost:3001/projects/cUfHlegssamR:0
+[57848503ms] [WARNING] The resource http://localhost:3001/_next/static/media/GeistVF-s.p.92592eb2.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally. @ http://localhost:3001/projects/cUfHlegssamR:0
+[57848503ms] [WARNING] The resource http://localhost:3001/_next/static/media/GeistMonoVF-s.p.2f937313.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally. @ http://localhost:3001/projects/cUfHlegssamR:0
+[57925157ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ http://localhost:3001/_next/static/chunks/79f76_next_dist_6c9e684e._.js:2297
+[58106512ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3001/api/projects/cUfHlegssamR/sessions/spec-wJ9C_oMOncX0:0

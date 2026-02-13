@@ -8,7 +8,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 // Mock hooks
-const mockAgentPolling = { activeSessions: [] };
+const mockAgentPolling = { activities: [] };
 vi.mock("@/hooks/useAgentPolling", () => ({
   useAgentPolling: () => mockAgentPolling,
 }));

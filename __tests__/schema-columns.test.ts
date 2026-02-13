@@ -27,6 +27,21 @@ describe("Schema: chatConversations columns", () => {
 });
 
 describe("Schema: existing columns preserved", () => {
+  it("projects has githubOwnerRepo column", () => {
+    const col = schema.projects.githubOwnerRepo;
+    expect(col).toBeDefined();
+    expect(col.name).toBe("github_owner_repo");
+  });
+
+  it("gitSyncLog has operation/status/detail columns", () => {
+    const cols = schema.gitSyncLog;
+    expect(cols.projectId).toBeDefined();
+    expect(cols.operation.name).toBe("operation");
+    expect(cols.status.name).toBe("status");
+    expect(cols.detail.name).toBe("detail");
+    expect(cols.branch.name).toBe("branch");
+  });
+
   it("agentSessions still has all original columns", () => {
     const cols = schema.agentSessions;
     expect(cols.id).toBeDefined();
@@ -40,7 +55,9 @@ describe("Schema: existing columns preserved", () => {
     expect(cols.branchName).toBeDefined();
     expect(cols.worktreePath).toBeDefined();
     expect(cols.startedAt).toBeDefined();
+    expect(cols.endedAt).toBeDefined();
     expect(cols.completedAt).toBeDefined();
+    expect(cols.lastNonEmptyText).toBeDefined();
     expect(cols.error).toBeDefined();
     expect(cols.createdAt).toBeDefined();
   });
@@ -54,6 +71,35 @@ describe("Schema: existing columns preserved", () => {
     expect(cols.status).toBeDefined();
     expect(cols.epicId).toBeDefined();
     expect(cols.createdAt).toBeDefined();
+  });
+});
+
+describe("Schema: session chunk tables", () => {
+  it("has agentSessionSequences table columns", () => {
+    const cols = schema.agentSessionSequences;
+    expect(cols.sessionId).toBeDefined();
+    expect(cols.nextSequence).toBeDefined();
+    expect(cols.updatedAt).toBeDefined();
+  });
+
+  it("has agentSessionChunks table columns", () => {
+    const cols = schema.agentSessionChunks;
+    expect(cols.id).toBeDefined();
+    expect(cols.sessionId).toBeDefined();
+    expect(cols.streamType).toBeDefined();
+    expect(cols.sequence).toBeDefined();
+    expect(cols.chunkKey).toBeDefined();
+    expect(cols.content).toBeDefined();
+    expect(cols.createdAt).toBeDefined();
+  });
+
+  it("has uniqueness constraints for session+sequence and stream+key", () => {
+    const extraConfig =
+      schema.agentSessionChunks[Symbol.for("drizzle:ExtraConfigBuilder")](
+        schema.agentSessionChunks
+      );
+    expect(extraConfig.sessionSequenceUnique).toBeDefined();
+    expect(extraConfig.sessionStreamKeyUnique).toBeDefined();
   });
 });
 

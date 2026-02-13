@@ -1,133 +1,126 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { toAgentRequestError } from "@/lib/agents/client-error";
 
 interface AgentSession {
   id: string;
+  epicId: string | null;
+  userStoryId: string | null;
   status: string;
   mode: string;
+  provider: string | null;
   startedAt?: string;
   completedAt?: string;
   error?: string;
 }
 
-export function useTicketAgent(projectId: string, storyId: string) {
+export function useTicketAgent(
+  projectId: string,
+  storyId: string,
+  epicId?: string | null
+) {
   const [activeSessions, setActiveSessions] = useState<AgentSession[]>([]);
   const [dispatching, setDispatching] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const sessionIdsRef = useRef<Set<string>>(new Set());
 
-  // Poll tracked sessions for completion
   const pollSessions = useCallback(async () => {
-    if (sessionIdsRef.current.size === 0) return;
-
-    const updated: AgentSession[] = [];
-    for (const sid of sessionIdsRef.current) {
-      try {
-        const res = await fetch(
-          `/api/projects/${projectId}/sessions/${sid}`
-        );
-        const data = await res.json();
-        if (data.data) {
-          updated.push(data.data);
-          // Remove completed sessions from tracking
-          if (["completed", "failed", "cancelled"].includes(data.data.status)) {
-            sessionIdsRef.current.delete(sid);
-          }
-        }
-      } catch {
-        // ignore
-      }
+    try {
+      const res = await fetch(`/api/projects/${projectId}/sessions/active`);
+      const data = await res.json();
+      const sessions = ((data.data || []) as AgentSession[]).filter((session) => {
+        if (session.status !== "running") return false;
+        if (session.userStoryId === storyId) return true;
+        if (epicId && session.epicId === epicId) return true;
+        return false;
+      });
+      setActiveSessions(sessions);
+    } catch {
+      // ignore
     }
-    setActiveSessions(updated);
-  }, [projectId]);
+  }, [projectId, storyId, epicId]);
 
   useEffect(() => {
+    void pollSessions();
     pollRef.current = setInterval(pollSessions, 3000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [pollSessions]);
 
+  const requestJson = useCallback(
+    async (url: string, body: Record<string, unknown>) => {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        throw toAgentRequestError(data);
+      }
+      return data.data;
+    },
+    []
+  );
+
   const sendToDev = useCallback(
     async (comment?: string, provider?: string) => {
       setDispatching(true);
       try {
-        const res = await fetch(
+        const data = await requestJson(
           `/api/projects/${projectId}/stories/${storyId}/build`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ comment, provider }),
-          }
+          { comment, provider }
         );
-        const data = await res.json();
-        if (data.error) {
-          throw new Error(data.error);
-        }
-        if (data.data?.sessionId) {
-          sessionIdsRef.current.add(data.data.sessionId);
-        }
-        return data.data;
+        await pollSessions();
+        return data;
       } finally {
         setDispatching(false);
       }
     },
-    [projectId, storyId]
+    [projectId, storyId, requestJson, pollSessions]
   );
 
   const sendToReview = useCallback(
     async (reviewTypes: string[], provider?: string) => {
       setDispatching(true);
       try {
-        const res = await fetch(
+        const data = await requestJson(
           `/api/projects/${projectId}/stories/${storyId}/review`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ reviewTypes, provider }),
-          }
+          { reviewTypes, provider }
         );
-        const data = await res.json();
-        if (data.error) {
-          throw new Error(data.error);
-        }
-        if (data.data?.sessions) {
-          for (const sid of data.data.sessions) {
-            sessionIdsRef.current.add(sid);
-          }
-        }
-        return data.data;
+        await pollSessions();
+        return data;
       } finally {
         setDispatching(false);
       }
     },
-    [projectId, storyId]
+    [projectId, storyId, requestJson, pollSessions]
   );
 
   const approve = useCallback(async () => {
-    const res = await fetch(
-      `/api/projects/${projectId}/stories/${storyId}/approve`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      }
-    );
-    const data = await res.json();
-    if (data.error) {
-      throw new Error(data.error);
+    const res = await fetch(`/api/projects/${projectId}/stories/${storyId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw toAgentRequestError(data);
     }
     return data.data;
   }, [projectId, storyId]);
 
   const isRunning = activeSessions.some((s) => s.status === "running");
+  const activeSession = activeSessions[0] ?? null;
 
   return {
     activeSessions,
+    activeSession,
     dispatching,
     isRunning,
     sendToDev,
     sendToReview,
     approve,
+    refreshSessions: pollSessions,
   };
 }
