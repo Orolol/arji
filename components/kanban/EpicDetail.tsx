@@ -35,6 +35,8 @@ import { Plus, Trash2, Check, Circle, Loader2, GitBranch, GitMerge, GitPullReque
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { isAgentAlreadyRunningError } from "@/lib/agents/client-error";
+import { useCodexAvailable } from "@/hooks/useCodexAvailable";
+import type { ProviderType } from "@/components/shared/ProviderSelect";
 
 interface EpicDetailProps {
   projectId: string;
@@ -89,6 +91,7 @@ export function EpicDetail({
     syncPr,
   } = useEpicPr(projectId, epicId);
 
+  const { codexAvailable, codexInstalled } = useCodexAvailable();
   const { isConfigured: githubConfigured } = useGitHubConfig(projectId);
   const {
     ahead,
@@ -162,13 +165,13 @@ export function EpicDetail({
     refresh();
   }
 
-  async function handleSendToDev(comment?: string) {
-    await sendToDev(comment);
+  async function handleSendToDev(comment?: string, provider?: ProviderType) {
+    await sendToDev(comment, provider);
     refresh();
   }
 
-  async function handleSendToReview(types: string[]) {
-    await sendToReview(types);
+  async function handleSendToReview(types: string[], provider?: ProviderType) {
+    await sendToReview(types, provider);
     refresh();
   }
 
@@ -226,6 +229,8 @@ export function EpicDetail({
                 dispatching={dispatching}
                 isRunning={isRunning}
                 activeSessionId={activeSession?.id || null}
+                codexAvailable={codexAvailable}
+                codexInstalled={codexInstalled}
                 onSendToDev={handleSendToDev}
                 onSendToReview={handleSendToReview}
                 onApprove={handleApprove}

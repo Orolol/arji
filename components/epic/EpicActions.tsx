@@ -24,6 +24,7 @@ import {
   CheckCircle2,
   Loader2,
 } from "lucide-react";
+import { ProviderSelect, type ProviderType } from "@/components/shared/ProviderSelect";
 
 interface EpicActions_Epic {
   id: string;
@@ -36,8 +37,10 @@ interface EpicActionsProps {
   dispatching: boolean;
   isRunning: boolean;
   activeSessionId?: string | null;
-  onSendToDev: (comment?: string) => Promise<unknown>;
-  onSendToReview: (types: string[]) => Promise<unknown>;
+  codexAvailable: boolean;
+  codexInstalled?: boolean;
+  onSendToDev: (comment?: string, provider?: ProviderType) => Promise<unknown>;
+  onSendToReview: (types: string[], provider?: ProviderType) => Promise<unknown>;
   onApprove: () => Promise<unknown>;
   onActionError?: (error: unknown) => void;
 }
@@ -47,6 +50,8 @@ export function EpicActions({
   dispatching,
   isRunning,
   activeSessionId,
+  codexAvailable,
+  codexInstalled,
   onSendToDev,
   onSendToReview,
   onApprove,
@@ -55,6 +60,8 @@ export function EpicActions({
   const [sendToDevOpen, setSendToDevOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [devComment, setDevComment] = useState("");
+  const [devProvider, setDevProvider] = useState<ProviderType>("claude-code");
+  const [reviewProvider, setReviewProvider] = useState<ProviderType>("claude-code");
   const [reviewTypes, setReviewTypes] = useState<Set<string>>(new Set(["feature_review"]));
   const [approving, setApproving] = useState(false);
 
@@ -73,7 +80,7 @@ export function EpicActions({
 
   async function handleSendToDev() {
     try {
-      await onSendToDev(devComment.trim() || undefined);
+      await onSendToDev(devComment.trim() || undefined, devProvider);
       setSendToDevOpen(false);
       setDevComment("");
     } catch (error) {
@@ -84,7 +91,7 @@ export function EpicActions({
   async function handleSendToDevFromReview() {
     if (!devComment.trim()) return;
     try {
-      await onSendToDev(devComment.trim());
+      await onSendToDev(devComment.trim(), devProvider);
       setSendToDevOpen(false);
       setDevComment("");
     } catch (error) {
@@ -107,7 +114,7 @@ export function EpicActions({
   async function handleReview() {
     if (reviewTypes.size === 0) return;
     try {
-      await onSendToReview(Array.from(reviewTypes));
+      await onSendToReview(Array.from(reviewTypes), reviewProvider);
       setReviewOpen(false);
       setReviewTypes(new Set());
     } catch (error) {
@@ -202,6 +209,16 @@ export function EpicActions({
                 : "Optionally add a comment for the agent before dispatching."}
             </DialogDescription>
           </DialogHeader>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-sm text-muted-foreground">Provider:</span>
+            <ProviderSelect
+              value={devProvider}
+              onChange={setDevProvider}
+              codexAvailable={codexAvailable}
+              codexInstalled={codexInstalled}
+              className="w-40 h-8 text-xs"
+            />
+          </div>
           <Textarea
             value={devComment}
             onChange={(e) => setDevComment(e.target.value)}
@@ -248,6 +265,16 @@ export function EpicActions({
               Select the review types to run on this epic. Each selected type dispatches a separate agent.
             </DialogDescription>
           </DialogHeader>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-sm text-muted-foreground">Provider:</span>
+            <ProviderSelect
+              value={reviewProvider}
+              onChange={setReviewProvider}
+              codexAvailable={codexAvailable}
+              codexInstalled={codexInstalled}
+              className="w-40 h-8 text-xs"
+            />
+          </div>
           <div className="space-y-3">
             <label className="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 cursor-pointer">
               <input
