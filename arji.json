@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastSyncedAt": "2026-02-13T15:15:51.921Z",
+  "lastSyncedAt": "2026-02-13T16:57:01.784Z",
   "project": {
     "name": "Arij",
     "description": "A local, AI-first project orchestrator that provides a web interface for managing multi-project workflows with Claude Code as the execution engine. It covers the full project lifecycle: ideation, specification, kanban-based planning, automated code generation via Claude Code CLI, real-time agent monitoring, and release management.",
@@ -8,6 +8,16 @@
     "spec": "The plan covers 5 phases across 8 new files and 14 modified files:\n\n1. **Foundation** — Extend `ProviderType` with `\"gemini-cli\"`, add `named_agents` table, add `namedAgentId` FK to `agentProviderDefaults`\n2. **Gemini CLI** — `lib/gemini/spawn.ts` + `lib/providers/gemini-cli.ts` following the codex pattern, generalize process manager dispatch\n3. **Named Agents Backend** — CRUD module + API routes + `resolveAgent()` returning `{ provider, model }` tuple\n4. **Dispatch Integration** — All build/review routes use `resolveAgent()` to pass the correct model to the CLI\n5. **UI** — New \"Agents\" tab for CRUD, update \"Assignments\" tab with named agent dropdown, add gemini-cli to ProviderSelect"
   },
   "epics": [
+    {
+      "id": "KA5at0X7NfO_",
+      "title": "When an agent finish to implement an EPIC, all US should be mark \"Done\". Then if during review, the review say it s not done, it revert the status",
+      "description": null,
+      "priority": 2,
+      "status": "backlog",
+      "position": 0,
+      "branchName": null,
+      "user_stories": []
+    },
     {
       "id": "7FFiclGUqPE-",
       "title": "GitHub Release Lifecycle",
@@ -91,6 +101,43 @@
           "acceptance_criteria": "- [ ] After epic deletion, navigation redirects to the project epics/kanban context with a success message.\n- [ ] After user story deletion, navigation redirects to the parent epic/backlog context with a success message.\n- [ ] Client cache/query state is invalidated so deleted entities disappear without manual refresh.\n- [ ] Automated tests cover confirm, success, authorization failure, and backend error scenarios for both delete flows.",
           "status": "review",
           "position": 3
+        }
+      ]
+    },
+    {
+      "id": "9Hwnsbt7X-lr",
+      "title": "QUand on discute avec un agent ça bloque OTUT les autres chat, ca ne devrait bloquer que la discussion en cour",
+      "description": null,
+      "priority": 2,
+      "status": "done",
+      "position": 0,
+      "branchName": null,
+      "user_stories": []
+    },
+    {
+      "id": "uG1xkjdYKZgz",
+      "title": "Epic Card UI Polish: Selection, Description Preview & ID Display",
+      "description": "Refine the EpicCard component on the kanban board to improve scannability and reduce visual clutter. All changes target `components/kanban/EpicCard.tsx` — no backend or schema changes required.\n\n## Implementation Plan\n\n### 1. Remove checkbox, rely on ring highlight for selection\n- Remove the `<Square>` / `<CheckSquare>` button block (lines 111-125)\n- Remove unused `Square` and `CheckSquare` imports from lucide-react\n- Selection remains indicated by the existing `ring-2 ring-primary` class on the Card\n- `onToggleSelect` is still called via the card's `onClick` — add a click handler that calls `onToggleSelect` when the card body is clicked (or keep existing behavior if `onClick` already handles it)\n\n### 2. Show epic ID as a muted monospace prefix above the title\n- Add a `<span>` with classes `text-xs text-muted-foreground font-mono` displaying `epic.id` above the title line\n\n### 3. Add 1-2 line description preview below the title\n- Below the title `<h4>`, render `epic.description` in `text-xs text-muted-foreground line-clamp-2`\n- Only render when `epic.description` is non-null and non-empty\n\n### File to modify\n- `components/kanban/EpicCard.tsx",
+      "priority": 0,
+      "status": "done",
+      "position": 0,
+      "branchName": null,
+      "user_stories": [
+        {
+          "id": "be3zX54UlFxU",
+          "title": "As a user viewing the kanban board, I want epic cards to show the ID and a description preview so that I can identify and distinguish epics at a glance",
+          "description": "Add two new pieces of information to the EpicCard component:\n1. Display `epic.id` as a small monospace label above the title (`text-xs text-muted-foreground font-mono`)\n2. Below the title, show up to 2 lines of `epic.description` in muted text using `line-clamp-2`, only when the description is non-null\n\nFile: `components/kanban/EpicCard.tsx",
+          "acceptance_criteria": "- [ ] Epic ID is displayed above the title in muted monospace text (`text-xs text-muted-foreground font-mono`)\n- [ ] Description preview appears below the title, limited to 2 lines via `line-clamp-2`\n- [ ] Description preview is hidden when `epic.description` is null or empty\n- [ ] Card layout remains compact and readable",
+          "status": "review",
+          "position": 0
+        },
+        {
+          "id": "cBuyjkSphDjk",
+          "title": "As a user selecting epics on the kanban board, I want selection indicated by a highlight ring without a checkbox so that the card is visually cleaner",
+          "description": "Remove the checkbox (`<Square>` / `<CheckSquare>`) from EpicCard. Selection is already indicated by the `ring-2 ring-primary` class applied to the Card when `selected` is true. The `onToggleSelect` callback continues to work — it is triggered by the existing card click handler.\n\nAlso remove the now-unused `Square` and `CheckSquare` imports from lucide-react.\n\nFile: `components/kanban/EpicCard.tsx",
+          "acceptance_criteria": "- [ ] Checkbox (`Square` / `CheckSquare`) is removed from the epic card\n- [ ] Unused `Square` and `CheckSquare` imports are removed\n- [ ] Selected cards still show `ring-2 ring-primary` highlight\n- [ ] Clicking the card still toggles selection via `onToggleSelect",
+          "status": "review",
+          "position": 1
         }
       ]
     },

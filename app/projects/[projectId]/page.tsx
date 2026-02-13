@@ -100,6 +100,13 @@ export default function KanbanPage() {
     }
   }, [activities, highlightedActivityId]);
 
+  // Refresh board when layout triggers a sync from arji.json
+  useEffect(() => {
+    const onSynced = () => setRefreshTrigger((t) => t + 1);
+    window.addEventListener("arji:synced", onSynced);
+    return () => window.removeEventListener("arji:synced", onSynced);
+  }, []);
+
   const addToast = useCallback((
     type: "success" | "error",
     message: string,

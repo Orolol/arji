@@ -2,10 +2,17 @@
 
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
-import { ArrowLeft, Kanban, FileText, Files, Activity, Tag } from "lucide-react";
+import { ArrowLeft, Kanban, FileText, Files, Activity, Tag, RefreshCw } from "lucide-react";
 import { GitHubConnectBanner } from "@/components/github/GitHubConnectBanner";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface ProjectSummary {
   gitRepoPath: string | null;
@@ -25,6 +32,7 @@ export default function ProjectLayout({
     gitRepoPath: null,
     githubOwnerRepo: null,
   });
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}`)
@@ -39,6 +47,29 @@ export default function ProjectLayout({
         }
       })
       .catch(() => {});
+  }, [projectId]);
+
+  const syncFromJson = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "import" }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Sync failed");
+      // Re-fetch project metadata in case name/status changed
+      const projRes = await fetch(`/api/projects/${projectId}`);
+      const projJson = await projRes.json();
+      if (projJson.data) setProjectName(projJson.data.name);
+      // Notify child pages to reload data
+      window.dispatchEvent(new CustomEvent("arji:synced"));
+    } catch (err) {
+      console.error("[sync] import failed:", err);
+    } finally {
+      setSyncing(false);
+    }
   }, [projectId]);
 
   const navItems = [
@@ -90,6 +121,33 @@ export default function ProjectLayout({
             );
           })}
         </nav>
+
+        {/* Right-side actions */}
+        {projectSummary.gitRepoPath && (
+          <div className="ml-auto flex items-center gap-2">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={syncFromJson}
+                    disabled={syncing}
+                    className="gap-1.5 text-muted-foreground"
+                  >
+                    <RefreshCw
+                      className={cn("h-3.5 w-3.5", syncing && "animate-spin")}
+                    />
+                    <span className="text-xs">Sync</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Import from arji.json (overrides DB)</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        )}
       </header>
       <GitHubConnectBanner
         projectId={projectId}

@@ -1,0 +1,86 @@
+{
+  "migrationId": "2026-02-13T16-01-40-133Z",
+  "projectId": "KojcRXyOpAbH",
+  "capturedAt": "2026-02-13T16:01:40.133Z",
+  "snapshot": {
+    "conversations": [
+      {
+        "id": "3rm3FftxhMaA",
+        "project_id": "KojcRXyOpAbH",
+        "type": "brainstorm",
+        "label": "Brainstorm",
+        "status": "active",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-11T15:49:03.554Z"
+      },
+      {
+        "id": "FjS-O0JFyQuV",
+        "project_id": "KojcRXyOpAbH",
+        "type": "epic",
+        "label": "New Epic",
+        "status": "error",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-12T14:27:50.156Z"
+      }
+    ],
+    "messages": [
+      {
+        "id": "0ev2-TR5KjlB",
+        "project_id": "KojcRXyOpAbH",
+        "conversation_id": "FjS-O0JFyQuV",
+        "role": "user",
+        "content": "On va rework la partie chat / chat de création d'epic en une seul composant, qui va de base être replié sur la droite de l'écran (mais on va en voir genre 5% en grisé sur le côté). Quand on clique sur Chat, ou New epic, on va déplier ce composant. PLut^ot que d'être au dessus du board, on va partagé l'écran en 2 avec une partie chat et une partie board, et la taille respective des deux resizable. \nQUand un agent travail sur un chat, on a une icone qui indique ça dans les onglets. \nEt il faut que la sélection du type d'agent soit bien rpésente sur chaque nouveau chat",
+        "metadata": null,
+        "created_at": "2026-02-12T14:31:49.766Z"
+      },
+      {
+        "id": "RM7RJlhiD5vK",
+        "project_id": "KojcRXyOpAbH",
+        "conversation_id": "FjS-O0JFyQuV",
+        "role": "assistant",
+        "content": "(empty response)",
+        "metadata": null,
+        "created_at": "2026-02-12T14:36:42.948Z"
+      },
+      {
+        "id": "bgl6408IeJBy",
+        "project_id": "KojcRXyOpAbH",
+        "conversation_id": "FjS-O0JFyQuV",
+        "role": "user",
+        "content": "Continue",
+        "metadata": null,
+        "created_at": "2026-02-12T15:06:45.595Z"
+      },
+      {
+        "id": "k0h0L6v14CWV",
+        "project_id": "KojcRXyOpAbH",
+        "conversation_id": "FjS-O0JFyQuV",
+        "role": "assistant",
+        "content": "(empty response)",
+        "metadata": null,
+        "created_at": "2026-02-12T15:14:20.665Z"
+      },
+      {
+        "id": "gP9ES2QYJHtj",
+        "project_id": "KojcRXyOpAbH",
+        "conversation_id": "FjS-O0JFyQuV",
+        "role": "user",
+        "content": "**Collapsed UI**: Bar with activity pulse\n**New Epic flow**: Yes, auto-create epic tab",
+        "metadata": null,
+        "created_at": "2026-02-12T15:20:48.060Z"
+      },
+      {
+        "id": "r68ShaAYE_Ks",
+        "project_id": "KojcRXyOpAbH",
+        "conversation_id": "FjS-O0JFyQuV",
+        "role": "assistant",
+        "content": "(empty response)",
+        "metadata": null,
+        "created_at": "2026-02-12T15:26:17.561Z"
+      }
+    ],
+    "attachments": []
+  }
+}
