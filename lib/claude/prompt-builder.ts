@@ -358,6 +358,12 @@ Return ONLY a JSON code block with the following structure — no extra text, no
       "description": "Detailed description of the user story",
       "acceptanceCriteria": "- [ ] Criterion 1\\n- [ ] Criterion 2"
     }
+  ],
+  "dependencies": [
+    {
+      "ticketId": "$self",
+      "dependsOnTicketId": "<existing-epic-id>"
+    }
   ]
 }
 \`\`\`
@@ -370,6 +376,7 @@ Rules:
 - Acceptance criteria must be a markdown checklist.
 - Be specific and actionable — avoid vague descriptions.
 - Incorporate relevant details from the project spec and reference documents.
+- If this epic depends on existing epics (listed above), include dependency edges in the "dependencies" array. Use "$self" for the current epic's ID. Only reference epics from the same project. If there are no dependencies, omit the "dependencies" field or use an empty array.
 `);
 
   return parts.filter(Boolean).join("\n");

@@ -298,6 +298,36 @@ export const agentProviderDefaults = sqliteTable(
   }),
 );
 
+export const ticketDependencies = sqliteTable(
+  "ticket_dependencies",
+  {
+    id: text("id").primaryKey(),
+    ticketId: text("ticket_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "cascade" }),
+    dependsOnTicketId: text("depends_on_ticket_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    scopeType: text("scope_type").notNull().default("project"), // project | (future: cross-project)
+    scopeId: text("scope_id").notNull(), // projectId for now; future: org/workspace id
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    dependencyUnique: uniqueIndex("ticket_dependencies_edge_unique").on(
+      table.ticketId,
+      table.dependsOnTicketId
+    ),
+    ticketIdx: index("ticket_dependencies_ticket_idx").on(table.ticketId),
+    dependsOnIdx: index("ticket_dependencies_depends_on_idx").on(
+      table.dependsOnTicketId
+    ),
+    projectIdx: index("ticket_dependencies_project_idx").on(table.projectId),
+  })
+);
+
 export const gitSyncLog = sqliteTable("git_sync_log", {
   id: text("id").primaryKey(),
   projectId: text("project_id")
@@ -330,3 +360,6 @@ export type NewPullRequest = typeof pullRequests.$inferInsert;
 
 export type Release = typeof releases.$inferSelect;
 export type NewRelease = typeof releases.$inferInsert;
+
+export type TicketDependency = typeof ticketDependencies.$inferSelect;
+export type NewTicketDependency = typeof ticketDependencies.$inferInsert;

@@ -4,6 +4,8 @@ import { epics, userStories } from "@/lib/db/schema";
 import { eq, sql, and } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { tryExportArjiJson } from "@/lib/sync/export";
+import { createDependencies } from "@/lib/dependencies/crud";
+import { CycleError, CrossProjectError } from "@/lib/dependencies/validation";
 
 export async function GET(
   _request: NextRequest,
@@ -147,6 +149,44 @@ export async function POST(
     }
   }
 
+  // Persist dependency edges if provided by the generation agent
+  let dependenciesCreated = 0;
+  const dependencyEdges = Array.isArray(body.dependencies) ? body.dependencies : [];
+  if (dependencyEdges.length > 0) {
+    const edges = dependencyEdges
+      .filter(
+        (dep: { ticketId?: string; dependsOnTicketId?: string }) =>
+          typeof dep?.ticketId === "string" &&
+          typeof dep?.dependsOnTicketId === "string"
+      )
+      .map((dep: { ticketId: string; dependsOnTicketId: string }) => ({
+        // Replace placeholder "self" references with the newly created epic ID
+        ticketId: dep.ticketId === "$self" ? id : dep.ticketId,
+        dependsOnTicketId:
+          dep.dependsOnTicketId === "$self" ? id : dep.dependsOnTicketId,
+      }));
+
+    try {
+      const created = createDependencies(projectId, edges);
+      dependenciesCreated = created.length;
+    } catch (error) {
+      if (error instanceof CycleError) {
+        return NextResponse.json(
+          { error: error.message, code: "CYCLE_DETECTED", cycle: error.cycle },
+          { status: 422 }
+        );
+      }
+      if (error instanceof CrossProjectError) {
+        return NextResponse.json(
+          { error: error.message, code: "CROSS_PROJECT_DEPENDENCY" },
+          { status: 422 }
+        );
+      }
+      // Non-critical: log but don't fail the epic creation
+      console.error("[epics/POST] Failed to create dependencies:", error);
+    }
+  }
+
   const epic = db.select().from(epics).where(eq(epics.id, id)).get();
   tryExportArjiJson(projectId);
   return NextResponse.json(
@@ -154,6 +194,7 @@ export async function POST(
       data: {
         ...epic,
         userStoriesCreated: normalizedUserStories.length,
+        dependenciesCreated,
       },
     },
     { status: 201 },
