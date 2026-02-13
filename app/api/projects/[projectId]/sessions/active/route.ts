@@ -9,6 +9,8 @@ export interface UnifiedActivity {
   id: string;
   type: "build" | "review" | "merge" | "chat" | "spec_generation" | "release";
   label: string;
+  status: string;
+  mode: string;
   provider: string;
   startedAt: string;
   source: "db" | "registry";
@@ -70,6 +72,8 @@ export async function GET(
       id: row.id,
       type,
       label,
+      status: getSessionStatusForApi(row.status),
+      mode: row.mode || "plan",
       provider: row.provider || "claude-code",
       startedAt: row.startedAt || new Date().toISOString(),
       source: "db" as const,
@@ -84,6 +88,8 @@ export async function GET(
       id: a.id,
       type: a.type,
       label: a.label,
+      status: "running",
+      mode: "plan",
       provider: a.provider,
       startedAt: a.startedAt,
       source: "registry" as const,

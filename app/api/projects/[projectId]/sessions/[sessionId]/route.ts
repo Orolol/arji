@@ -57,7 +57,8 @@ export async function GET(
     chunkStreams = null;
   }
 
-  const lastNonEmptyText = extractLastNonEmptyText(session.logsPath);
+  const extractedLastNonEmptyText = extractLastNonEmptyText(session.logsPath);
+  const lastNonEmptyText = extractedLastNonEmptyText || session.lastNonEmptyText || null;
 
   return NextResponse.json({
     data: {
