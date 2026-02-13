@@ -18,6 +18,12 @@ import { parseClaudeOutput } from "@/lib/claude/json-parser";
 import type { ProviderType } from "@/lib/providers";
 import fs from "fs";
 import path from "path";
+import {
+  createQueuedSession,
+  isSessionLifecycleConflictError,
+  markSessionRunning,
+  markSessionTerminal,
+} from "@/lib/agent-sessions/lifecycle";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
 
@@ -134,22 +140,18 @@ export async function POST(request: NextRequest, { params }: Params) {
   fs.mkdirSync(logsDir, { recursive: true });
   const logsPath = path.join(logsDir, "logs.json");
 
-  db.insert(agentSessions)
-    .values({
-      id: sessionId,
-      projectId,
-      epicId,
-      status: "running",
-      mode: "code",
-      provider,
-      prompt,
-      logsPath,
-      branchName,
-      worktreePath,
-      startedAt: now,
-      createdAt: now,
-    })
-    .run();
+  createQueuedSession({
+    id: sessionId,
+    projectId,
+    epicId,
+    mode: "code",
+    provider,
+    prompt,
+    logsPath,
+    branchName,
+    worktreePath,
+    createdAt: now,
+  });
 
   // Status sync: epic -> in_progress, non-done US -> in_progress
   db.update(epics)
@@ -168,6 +170,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     .run();
 
   // Spawn agent
+  markSessionRunning(sessionId, now);
   processManager.start(sessionId, {
     mode: "code",
     prompt,
@@ -192,14 +195,20 @@ export async function POST(request: NextRequest, { params }: Params) {
       // ignore
     }
 
-    db.update(agentSessions)
-      .set({
-        status: result?.success ? "completed" : "failed",
-        completedAt,
-        error: result?.error || null,
-      })
-      .where(eq(agentSessions.id, sessionId))
-      .run();
+    try {
+      markSessionTerminal(
+        sessionId,
+        {
+          success: !!result?.success,
+          error: result?.error || null,
+        },
+        completedAt
+      );
+    } catch (error) {
+      if (!isSessionLifecycleConflictError(error)) {
+        console.error("[epic build] Failed to finalize session", error);
+      }
+    }
 
     // On success: in_progress US -> review, epic -> review
     if (result?.success) {

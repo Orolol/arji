@@ -44,7 +44,7 @@ export default function KanbanPage() {
   const [building, setBuilding] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const { activeSessions } = useAgentPolling(projectId);
+  const { activities } = useAgentPolling(projectId);
   const { codexAvailable, codexInstalled } = useCodexAvailable();
   const prevSessionIds = useRef<Set<string>>(new Set());
   const panelRef = useRef<UnifiedChatPanelHandle>(null);
@@ -58,7 +58,7 @@ export default function KanbanPage() {
 
   // Detect session completions for notifications + board refresh
   useEffect(() => {
-    const currentIds = new Set(activeSessions.map((s) => s.id));
+    const currentIds = new Set(activities.map((a) => a.id));
     let hasCompleted = false;
     for (const prevId of prevSessionIds.current) {
       if (!currentIds.has(prevId)) {
@@ -85,7 +85,7 @@ export default function KanbanPage() {
       setRefreshTrigger((t) => t + 1);
     }
     prevSessionIds.current = currentIds;
-  }, [activeSessions, projectId]);
+  }, [activities, projectId]);
 
   function addToast(type: "success" | "error", message: string) {
     const id = Date.now().toString();
@@ -274,7 +274,7 @@ export default function KanbanPage() {
             </div>
 
             {/* Agent monitor bar */}
-            <AgentMonitor projectId={projectId} sessions={activeSessions} />
+            <AgentMonitor projectId={projectId} activities={activities} />
           </div>
         </UnifiedChatPanel>
       </div>

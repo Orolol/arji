@@ -7,6 +7,15 @@
 
 export type ProviderType = "claude-code" | "codex";
 
+export type ProviderChunkStreamType = "response" | "raw" | "output";
+
+export interface ProviderChunk {
+  streamType: ProviderChunkStreamType;
+  text: string;
+  chunkKey?: string;
+  emittedAt?: string;
+}
+
 export interface ProviderSpawnOptions {
   /** Unique session identifier used for tracking. */
   sessionId: string;
@@ -20,6 +29,10 @@ export interface ProviderSpawnOptions {
   allowedTools?: string[];
   /** Model override. */
   model?: string;
+  /** Optional chunk callback (used by Codex session persistence). */
+  onChunk?: (chunk: ProviderChunk) => void;
+  /** Optional identifier for NDJSON session logging. */
+  logIdentifier?: string;
 }
 
 export interface ProviderResult {

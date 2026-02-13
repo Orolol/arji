@@ -1,42 +1,53 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, StopCircle, ChevronUp, ChevronDown } from "lucide-react";
+import {
+  Hammer,
+  Search,
+  GitMerge,
+  MessageSquare,
+  Sparkles,
+  FileText,
+  StopCircle,
+  ChevronUp,
+  ChevronDown,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-
-interface ActiveSession {
-  id: string;
-  epicId: string | null;
-  status: string;
-  mode: string;
-  provider: string | null;
-  startedAt: string | null;
-}
+import type { UnifiedActivity } from "@/hooks/useAgentPolling";
 
 interface AgentMonitorProps {
   projectId: string;
-  sessions: ActiveSession[];
+  activities: UnifiedActivity[];
 }
 
-export function AgentMonitor({ projectId, sessions }: AgentMonitorProps) {
+const typeIcons: Record<UnifiedActivity["type"], typeof Hammer> = {
+  build: Hammer,
+  review: Search,
+  merge: GitMerge,
+  chat: MessageSquare,
+  spec_generation: Sparkles,
+  release: FileText,
+};
+
+export function AgentMonitor({ projectId, activities }: AgentMonitorProps) {
   const [expanded, setExpanded] = useState(true);
   const [elapsed, setElapsed] = useState<Record<string, string>>({});
 
-  // Update elapsed time every second
   useEffect(() => {
-    if (sessions.length === 0) return;
+    if (activities.length === 0) return;
 
     function updateElapsed() {
       const now = Date.now();
       const newElapsed: Record<string, string> = {};
-      for (const s of sessions) {
-        if (s.startedAt) {
+      for (const a of activities) {
+        if (a.startedAt) {
           const seconds = Math.floor(
-            (now - new Date(s.startedAt).getTime()) / 1000
+            (now - new Date(a.startedAt).getTime()) / 1000
           );
           const mins = Math.floor(seconds / 60);
           const secs = seconds % 60;
-          newElapsed[s.id] =
+          newElapsed[a.id] =
             mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
         }
       }
@@ -46,12 +57,12 @@ export function AgentMonitor({ projectId, sessions }: AgentMonitorProps) {
     updateElapsed();
     const interval = setInterval(updateElapsed, 1000);
     return () => clearInterval(interval);
-  }, [sessions]);
+  }, [activities]);
 
-  if (sessions.length === 0) return null;
+  if (activities.length === 0) return null;
 
-  async function handleCancel(sessionId: string) {
-    await fetch(`/api/projects/${projectId}/sessions/${sessionId}`, {
+  async function handleCancel(activityId: string) {
+    await fetch(`/api/projects/${projectId}/sessions/${activityId}`, {
       method: "DELETE",
     });
   }
@@ -67,7 +78,7 @@ export function AgentMonitor({ projectId, sessions }: AgentMonitorProps) {
           <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
         </span>
         <span className="font-medium">
-          {sessions.length} active agent{sessions.length > 1 ? "s" : ""}
+          {activities.length} active agent{activities.length > 1 ? "s" : ""}
         </span>
         {expanded ? (
           <ChevronDown className="h-3 w-3 ml-auto" />
@@ -78,35 +89,35 @@ export function AgentMonitor({ projectId, sessions }: AgentMonitorProps) {
 
       {expanded && (
         <div className="px-4 pb-2 space-y-1">
-          {sessions.map((session) => (
-            <div
-              key={session.id}
-              className="flex items-center gap-2 text-xs py-1"
-            >
-              <Loader2 className="h-3 w-3 animate-spin text-green-500 shrink-0" />
-              <span className="text-muted-foreground">
-                #{session.id.slice(0, 6)}
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="text-muted-foreground text-[10px] font-medium uppercase tracking-wide">
-                  {session.provider === "codex" ? "Codex" : "CC"}
-                </span>
-                {session.mode}
-              </span>
-              <span className="text-muted-foreground font-mono">
-                {elapsed[session.id] || "0s"}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 ml-auto shrink-0 text-muted-foreground hover:text-destructive"
-                onClick={() => handleCancel(session.id)}
-                title="Cancel"
+          {activities.map((activity) => {
+            const Icon = typeIcons[activity.type] || Loader2;
+            return (
+              <div
+                key={activity.id}
+                className="flex items-center gap-2 text-xs py-1"
               >
-                <StopCircle className="h-3 w-3" />
-              </Button>
-            </div>
-          ))}
+                <Icon className="h-3 w-3 text-green-500 shrink-0" />
+                <span className="truncate">{activity.label}</span>
+                <span className="text-muted-foreground text-[10px] font-medium uppercase tracking-wide shrink-0">
+                  {activity.provider === "codex" ? "Codex" : "CC"}
+                </span>
+                <span className="text-muted-foreground font-mono shrink-0">
+                  {elapsed[activity.id] || "0s"}
+                </span>
+                {activity.cancellable && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 ml-auto shrink-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleCancel(activity.id)}
+                    title="Cancel"
+                  >
+                    <StopCircle className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

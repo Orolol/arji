@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "lastSyncedAt": "2026-02-12T19:34:47.542Z",
+  "lastSyncedAt": "2026-02-12T22:46:30.080Z",
   "project": {
     "name": "Arij",
     "description": "A local, AI-first project orchestrator that provides a web interface for managing multi-project workflows with Claude Code as the execution engine. It covers the full project lifecycle: ideation, specification, kanban-based planning, automated code generation via Claude Code CLI, real-time agent monitoring, and release management.",
     "status": "building",
-    "spec": "# Arij\n\nA local, AI-first project orchestrator that provides a web interface for managing multi-project workflows with Claude Code as the execution engine. It covers the full project lifecycle: ideation, specification, kanban-based planning, automated code generation via Claude Code CLI, real-time agent monitoring, and release management.\n\n## Stack\nNext.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS v4, shadcn/ui, SQLite via better-sqlite3, Drizzle ORM, dnd-kit (kanban drag-and-drop), Claude Code CLI (child_process spawn), simple-git (worktrees/branches), mammoth (DOCX→MD), pdf-parse (PDF→MD), unified/remark/rehype (Markdown processing), nanoid (ID generation)\n\n## Architecture\nFull-stack Next.js 16 application with App Router. Frontend uses React 19 with shadcn/ui components and dnd-kit for the kanban board. Backend is Next.js API routes that interact with a local SQLite database via Drizzle ORM. Claude Code integration spawns the `claude` CLI as child processes (plan mode for brainstorming/spec generation, code mode for epic implementation). Git worktrees provide isolated branches per epic. File converters transform uploaded documents (PDF, DOCX) to Markdown for context injection. Real-time monitoring uses polling. All data is local-first with no cloud dependencies."
+    "spec": "# Arij Specification and Implementation Plan\\n\\n## 1. Project Overview\\nArij is a local AI-first project orchestrator with a web UI for ideation, specification, kanban planning, agent execution, and release management. The platform already has strong local git workflows (worktrees, branching, merges, tags) but needs deeper remote GitHub integration and stronger agent monitoring UX.\\n\\n## 2. Objectives for This Iteration\\n1. Add full GitHub lifecycle support from inside Arij: remote sync, PR creation, and release publication.\\n2. Preserve local-only workflows as a first-class path when GitHub is not configured.\\n3. Improve agent execution safety with clear busy states and server-side duplicate-run protection.\\n4. Improve Codex session tracking reliability and make Sessions logs readable at production log volume.\\n5. Merge New Epic and Chat into one unified workspace with a resizable split layout.\\n\\n## 3. Scope\\n### In scope\\n- GitHub PAT validation and project-level repository connection.\\n- Remote git actions: fetch, pull, push branch, push tag, ahead or behind status.\\n- PR creation and status sync linked to epics.\\n- Draft and publish GitHub releases linked to release objects.\\n- Agent busy indicators and action lockouts for conflicting runs.\\n- Codex session linkage fixes, last non-empty output extraction, and sessions log viewer improvements.\\n- Unified chat panel for normal chat and epic creation tabs.\\n\\n### Out of scope\\n- Multi-user permission system.\\n- Cloud secret manager migration.\\n- CI or CD orchestration beyond GitHub PR and release metadata.\\n- Replacing existing provider stack; this iteration hardens existing Claude Code and Codex paths.\\n\\n## 4. Constraints and Assumptions\\n- Local-first single-user application; SQLite and local filesystem are primary stores.\\n- Existing Next.js App Router, React, and TypeScript architecture must be preserved.\\n- Existing local merge, build, and review flows must remain functional with zero GitHub configuration.\\n- GitHub PAT can be stored in settings for now, but read APIs must redact token values.\\n- All critical guards must exist server-side, not only in UI.\\n\\n## 5. Technical Stack Recommendations\\n- Keep `simple-git` for local repository operations.\\n- Add `@octokit/rest` for GitHub API actions (token validation, PRs, releases).\\n- Continue Drizzle plus SQLite for schema evolution and audit logging.\\n- Keep polling-based monitoring but expose lightweight derived fields for UI, including `lastNonEmptyText`.\\n- Use reusable hooks to centralize feature gating and sync state: `useGitHubConfig`, `useGitStatus`, `useEpicPr`.\\n\\n## 6. Architecture\\n### 6.1 Backend modules\\n- `lib/git/remote.ts`: fetch, pull ff-only, push branch, push tag, ahead or behind, remote parsing.\\n- `lib/github/client.ts`: PAT fetch, Octokit factory, token validation.\\n- `lib/github/pull-requests.ts`: PR body generation and status retrieval.\\n- `lib/github/releases.ts`: create draft release and publish release.\\n- `lib/github/sync-log.ts`: normalized operation logging.\\n\\n### 6.2 Data model changes\\n- `projects`: add `githubOwnerRepo`.\\n- New table `gitSyncLog` for push, pull, fetch, PR, and release audit entries.\\n- `epics`: add `prNumber`, `prUrl`, `prStatus`.\\n- New table `pullRequests` for persisted PR metadata.\\n- `releases`: add `githubReleaseId`, `githubReleaseUrl`, `pushedAt`.\\n- Session tracking tables: add or derive fields for stable response linkage and `lastNonEmptyText`.\\n\\n### 6.3 API surface\\n- Settings: GitHub token validation endpoint and redacted settings read.\\n- Project git endpoints: detect remote, push, fetch, pull, status.\\n- Epic PR endpoint: create PR and sync status.\\n- Release publish endpoint: publish existing draft GitHub release.\\n- Session endpoints: return readable, bounded log payloads and last non-empty output summary.\\n\\n### 6.4 Frontend architecture\\n- Add GitHub configuration UI in settings and project connect banner.\\n- Add sync and PR badges to Epic Detail and PR link cue on Epic Card.\\n- Update Releases page with push-to-GitHub option, draft badges, publish action, and external links.\\n- Replace modal New Epic flow with unified right-side chat panel containing tabbed conversations.\\n- Use fixed-height, scrollable viewers for raw logs, responses, and output.\\n\\n## 7. Key Design Decisions\\n1. Use `simple-git` for git transport and Octokit only for GitHub API calls.\\n2. Enforce opt-in per project via `githubOwnerRepo`; hide GitHub UI when not configured.\\n3. Default GitHub releases to draft for human validation before publish.\\n4. Journal every remote operation in `gitSyncLog` for debugging and auditability.\\n5. Extract `lastNonEmptyText` on the server side to avoid expensive client log parsing.\\n6. Block duplicate agent launches both in UI and API using task-level locks.\\n\\n## 8. Non-functional Requirements\\n- Reliability: duplicate run attempts must return deterministic conflict responses.\\n- Readability: no log view may overflow its container; all long payloads must be scrollable.\\n- Performance: status polling must not trigger heavy full-log parsing on each tick.\\n- Security: PAT is never returned unredacted from read APIs.\\n- Backward compatibility: local-only projects keep previous behavior.\\n\\n## 9. Implementation Plan\\n### Phase 1\\nGitHub foundation: dependency install, schema updates, token validation, remote detection, push or pull or fetch or status endpoints, sync logging, and feature gate hook.\\n\\n### Phase 2\\nAgent safety and sync feedback: badges, disabled actions, and server conflict guards for running agent tasks.\\n\\n### Phase 3\\nPR workflow: schema, service layer, create and sync endpoint, Epic Detail and Epic Card integration.\\n\\n### Phase 4\\nRelease workflow: push tag, draft release creation, publish endpoint, and releases UI updates.\\n\\n### Phase 5\\nCodex session hardening and sessions viewer: fix linkage and order, expose `lastNonEmptyText`, and add scrollable log renderers.\\n\\n### Phase 6\\nUnified chat workspace: fused New Epic and Chat tabs, right-collapsed panel, resizable split, per-tab agent type defaults, and activity icons.\\n\\n## 10. Verification Strategy\\n1. Configure and validate PAT, then verify settings read is redacted.\\n2. Detect origin remote and connect project repository in one click.\\n3. Push and pull an epic branch and verify ahead or behind counters update.\\n4. Attempt duplicate agent starts on same task and verify API returns conflict with UI lockout.\\n5. Create PR from epic, verify body content includes epic plus stories and badge updates.\\n6. Create release with push-to-GitHub enabled and verify draft release link is stored.\\n7. Publish draft release from Arij and verify remote status changes.\\n8. Open Sessions tab with large logs and verify no overflow, with independent scroll viewers.\\n9. Verify running session row shows elapsed time plus last non-empty output snippet.\\n10. Verify New Epic action opens unified chat panel with a new epic-creation tab and preserved agent type selection."
   },
   "epics": [
     {
@@ -44,12 +44,181 @@
       ]
     },
     {
+      "id": "PLfVTmLsLqCr",
+      "title": "Unified Chat & Epic Creation Side Panel",
+      "description": "Rework the separate chat panel and epic creation flow into a single unified side panel component. The panel lives on the right side of the screen, collapsed by default (showing ~5% as a grayed-out edge). Clicking 'Chat' or 'New Epic' expands the panel, splitting the screen into a resizable two-pane layout (board + chat). The panel supports tabbed conversations with agent activity indicators and mandatory agent type selection on each new chat.\n\n## Implementation Plan\n\n### Phase 1 — Unified Panel Shell\n- Create a `UnifiedChatPanel` component that replaces the current separate chat panel and epic creation chat\n- Panel has three visual states: collapsed (5% visible, grayed overlay on the right edge), expanded (resizable split with the board), and hidden (0%)\n- Default state is collapsed — a thin vertical strip visible on the right side\n- Clicking the collapsed strip or toolbar buttons ('Chat', 'New Epic') transitions to expanded state\n- Use a resizable split layout (e.g. `react-resizable-panels` or custom CSS resize) so the user can drag the divider between the board and the chat panel\n- Persist the panel width in local state (or localStorage) so it remembers the user's preferred split\n\n### Phase 2 — Tabbed Conversations\n- The panel supports multiple open conversations as tabs (similar to browser tabs)\n- Each tab represents a chat conversation (brainstorm, epic creation, or general)\n- Tabs show the conversation title (truncated) and a close button\n- A '+' button creates a new tab\n- Active tab is visually highlighted\n- Tab state persisted in the existing `chatMessages` / `chatConversations` DB tables\n\n### Phase 3 — Agent Activity Indicator in Tabs\n- When an agent is actively working on a conversation (streaming response, building, etc.), display a small animated icon (spinner or pulsing dot) on the corresponding tab\n- The indicator is visible even when the panel is collapsed, appearing on the thin right-edge strip as a subtle glow or badge\n- Poll agent session status to determine which conversations have active agents\n\n### Phase 4 — Agent Type Selector on New Chat\n- When creating a new conversation ('+' tab or 'New Epic' / 'Chat' trigger), show a mandatory agent type selector before the first message\n- Agent types: 'Brainstorm' (plan mode), 'Epic Creation' (spec generation mode), or custom types from agent config\n- The selected type determines the prompt builder and Claude Code mode used\n- Selector displayed as a prominent dropdown or button group at the top of the empty chat\n- Once the first message is sent, the agent type is locked for that conversation\n\n### Phase 5 — Board Integration\n- Remove the old chat panel toggle from the project header\n- The kanban board occupies 100% width when the panel is collapsed\n- When expanded, the board flexes to fill the remaining space\n- 'New Epic' button in the board toolbar opens the panel with a new 'Epic Creation' tab pre-selected\n- 'Chat' button opens the panel with a new 'Brainstorm' tab or focuses the last active tab\n- Ensure the kanban board remains fully functional (drag-and-drop, selection, build toolbar) in the reduced width",
+      "priority": 2,
+      "status": "done",
+      "position": 1,
+      "branchName": null,
+      "user_stories": [
+        {
+          "id": "Lna7Crqsq1_n",
+          "title": "As a user, I want a collapsed chat strip on the right edge of the screen so that I know the chat panel exists without it taking up space",
+          "description": "Create the unified panel shell with a collapsed state showing approximately 5% of the screen width as a grayed-out vertical strip on the right side. The strip should have a subtle visual cue (e.g. a chat icon or vertical text) indicating it can be expanded. Clicking anywhere on the strip expands the panel.",
+          "acceptance_criteria": "- [ ] Collapsed panel renders as a thin vertical strip (~5% width) on the right edge\n- [ ] Strip has a muted/grayed appearance distinct from the main content\n- [ ] Subtle visual indicator (icon or label) on the strip hints at chat functionality\n- [ ] Clicking the strip transitions the panel to the expanded state\n- [ ] Panel defaults to collapsed state on page load\n- [ ] Smooth CSS transition between collapsed and expanded states",
+          "status": "review",
+          "position": 0
+        },
+        {
+          "id": "F5Scy6DPVLAN",
+          "title": "As a user, I want a resizable split layout between the kanban board and the chat panel so that I can adjust the space allocated to each",
+          "description": "When the chat panel is expanded, the screen splits into two resizable panes: the kanban board on the left and the chat panel on the right. A draggable divider allows resizing. The board and panel each have a minimum width to remain usable. The user's preferred width ratio persists across sessions via localStorage.",
+          "acceptance_criteria": "- [ ] Expanded panel creates a horizontal split layout with board (left) and chat (right)\n- [ ] Draggable divider between the two panes allows resizing\n- [ ] Minimum width constraint on both panes (e.g. 300px each) to prevent collapsing\n- [ ] Default split ratio is approximately 60% board / 40% chat\n- [ ] Split ratio persisted in localStorage and restored on next visit\n- [ ] Kanban board remains fully functional (DnD, selection, toolbar) in reduced width\n- [ ] Double-clicking the divider resets to default ratio",
+          "status": "review",
+          "position": 1
+        },
+        {
+          "id": "1FZVFa5_0XVK",
+          "title": "As a user, I want tabbed conversations in the chat panel so that I can have multiple chats open simultaneously",
+          "description": "The chat panel displays a tab bar at the top with one tab per open conversation. Each tab shows a truncated title and a close button. A '+' button at the end of the tab bar creates a new conversation. The active tab is highlighted. Switching tabs loads the corresponding conversation history.",
+          "acceptance_criteria": "- [ ] Tab bar rendered at the top of the chat panel\n- [ ] Each tab shows conversation title (truncated to ~20 chars) and close (X) button\n- [ ] '+' button at the end of the tab bar creates a new conversation\n- [ ] Active tab visually highlighted with distinct background/border\n- [ ] Clicking a tab switches to that conversation and loads its message history\n- [ ] Closing a tab removes it from the bar (conversation persists in DB)\n- [ ] At least one tab always remains open (last tab cannot be closed)\n- [ ] Tab order matches creation order, newest on the right",
+          "status": "review",
+          "position": 2
+        },
+        {
+          "id": "6RV-cqMOUEAK",
+          "title": "As a user, I want an animated indicator on tabs when an agent is working so that I can see which conversations have active agents",
+          "description": "When a Claude Code agent is actively processing a response for a conversation (streaming, building, reviewing), display a small animated indicator (spinning icon or pulsing dot) on that conversation's tab. The indicator is visible both in expanded and collapsed panel states. In collapsed state, show a subtle badge or glow on the right-edge strip.",
+          "acceptance_criteria": "- [ ] Animated spinner or pulsing dot appears on tabs with active agent sessions\n- [ ] Indicator polls agent session status at regular intervals (e.g. every 3 seconds)\n- [ ] Indicator disappears when the agent session completes, fails, or is cancelled\n- [ ] Multiple tabs can show indicators simultaneously\n- [ ] In collapsed panel state, a badge/glow on the strip indicates active agents\n- [ ] Indicator is visually distinct from static tab elements (color and animation)",
+          "status": "review",
+          "position": 3
+        },
+        {
+          "id": "Nu7AhjWRevWM",
+          "title": "As a user, I want to select the agent type when creating a new chat so that each conversation uses the appropriate Claude Code mode",
+          "description": "When a new conversation tab is created, show a mandatory agent type selector before allowing the first message. Options include 'Brainstorm' (plan mode), 'Epic Creation' (spec generation), and any custom agent types from agent config. The selector is displayed as a button group or dropdown at the top of the empty chat. Once the first message is sent, the agent type is locked and displayed as a badge in the tab.",
+          "acceptance_criteria": "- [ ] New conversation shows agent type selector before first message\n- [ ] Available types: 'Brainstorm', 'Epic Creation', plus custom types from agent config\n- [ ] Selector rendered as a prominent button group or dropdown in the empty chat area\n- [ ] First message cannot be sent until an agent type is selected\n- [ ] Selected type stored in the conversation record in the database\n- [ ] After first message, agent type is locked and selector becomes a read-only badge\n- [ ] Agent type badge displayed in the tab alongside the title\n- [ ] Agent type determines the prompt builder and Claude Code mode used",
+          "status": "review",
+          "position": 4
+        },
+        {
+          "id": "ewewm47pu8Gj",
+          "title": "As a user, I want the 'Chat' and 'New Epic' buttons to open the unified panel so that all chat interactions happen in one place",
+          "description": "Replace the existing separate chat panel toggle and epic creation flow with actions that open the unified side panel. 'Chat' button in the project toolbar expands the panel and focuses the last active brainstorm tab (or creates a new one). 'New Epic' button expands the panel and creates a new tab with 'Epic Creation' agent type pre-selected. Remove the old standalone chat panel component and epic creation modal/route.",
+          "acceptance_criteria": "- [ ] 'Chat' button in project toolbar expands the unified panel\n- [ ] 'Chat' focuses the last active brainstorm tab or creates a new one if none exists\n- [ ] 'New Epic' button expands the panel and creates a new tab with 'Epic Creation' pre-selected\n- [ ] Old standalone chat panel component removed\n- [ ] Old epic creation modal/route replaced by the new panel flow\n- [ ] Panel can be collapsed back via a close/collapse button or clicking outside\n- [ ] Keyboard shortcut (e.g. Escape) collapses the panel",
+          "status": "review",
+          "position": 5
+        }
+      ]
+    },
+    {
+      "id": "YiedZi_VETKe",
+      "title": "Agent Busy Guards & Visual Feedback",
+      "description": "Prevent overlapping agent actions on epics and stories by enforcing busy guards across all action types, and provide clear visual feedback on kanban cards and story views when an agent is actively working.\n\n## Implementation Plan\n\n### Phase 1 — Unified Agent Busy State Detection\n- Create a shared utility/hook `useAgentBusyState(entityId, entityType)` that checks whether any agent session (build, review, chat) is currently running for a given epic or story\n- Query the `agentSessions` table for running sessions linked to the entity\n- Return `{ isBusy, sessionType, sessionId }` so the UI knows what kind of work is happening\n- This replaces the scattered `isRunning` checks with a single source of truth\n\n### Phase 2 — Backend Concurrency Guards\n- Add a generic `checkActiveSession(entityId, entityType)` helper in the API layer\n- Apply it to ALL agent dispatch endpoints: build, review, send-to-dev, team build, chat\n- Return HTTP 409 Conflict with a descriptive message when an agent is already working on the entity\n- Ensure the guard checks both epic-level and story-level sessions (e.g., a story build blocks epic-level actions on the same epic's worktree)\n\n### Phase 3 — Kanban Card Busy Indicators\n- Add a visual indicator (spinner, pulsing dot, or animated border) on kanban epic cards when an agent is actively working\n- Show the type of work in progress (e.g., 'Building...', 'Reviewing...') as a small badge on the card\n- The indicator should be visible without opening the epic detail panel\n- Poll or use existing session polling to keep the indicator in sync\n\n### Phase 4 — Greyed-Out Actions in Epic & Story Views\n- In `EpicActions`, disable ALL agent action buttons (Build, Review, Send to Dev) when any agent session is active for the epic — not just the same action type\n- In `StoryActions` and `UserStoryQuickActions`, disable agent action buttons when a session is running for that story or its parent epic's worktree\n- Show a tooltip on disabled buttons explaining why (e.g., 'Agent is currently building this epic')\n- Replace loading-only disabled state with session-aware disabled state\n\n### Phase 5 — Review Endpoint Concurrency Check\n- The review endpoint currently lacks the same concurrency guard as the build endpoint\n- Add `checkActiveSession` to the review dispatch route\n- Prevent launching multiple overlapping review agents for the same story\n- Allow multiple different review types to run in parallel (security + code review) but prevent duplicate types",
+      "priority": 2,
+      "status": "done",
+      "position": 2,
+      "branchName": null,
+      "user_stories": [
+        {
+          "id": "6IIR0Y2OaC0l",
+          "title": "As a user, I want a unified hook to detect agent busy state so that all UI components share a single source of truth for running sessions",
+          "description": "Create a `useAgentBusyState(entityId, entityType)` hook that queries agent sessions and returns whether any session is active for the given entity. The hook should support both epic and story entity types, return the session type (build/review/chat), and poll at regular intervals.",
+          "acceptance_criteria": "- [ ] `useAgentBusyState` hook created in `hooks/` directory\n- [ ] Accepts `entityId` and `entityType` ('epic' | 'story') parameters\n- [ ] Returns `{ isBusy: boolean, sessionType: string | null, sessionId: string | null }`\n- [ ] Queries running agent sessions linked to the entity\n- [ ] Polls at configurable interval (default 3 seconds)\n- [ ] Handles both epic-level and story-level sessions\n- [ ] Replaces scattered `isRunning` checks in existing components",
+          "status": "review",
+          "position": 0
+        },
+        {
+          "id": "-CiJ6ysfWvDF",
+          "title": "As a user, I want all agent dispatch endpoints to check for active sessions so that overlapping agents cannot be launched on the same entity",
+          "description": "Create a `checkActiveSession(entityId, entityType)` helper function and apply it to all agent dispatch API routes: build, review, send-to-dev, team build. Return HTTP 409 Conflict with a descriptive error message when an agent is already working. Ensure cross-entity awareness (e.g., a story build blocks actions on the parent epic's worktree).",
+          "acceptance_criteria": "- [ ] `checkActiveSession` helper created in `lib/claude/` or `lib/utils/`\n- [ ] Applied to `POST .../build` (batch build route)\n- [ ] Applied to `POST .../stories/[storyId]/build` (send-to-dev route)\n- [ ] Applied to `POST .../stories/[storyId]/review` (review route)\n- [ ] Returns HTTP 409 with `{ error: 'Agent already active on this entity' }` when busy\n- [ ] Story-level builds block epic-level actions on the same epic's worktree\n- [ ] Epic-level builds block story-level actions for stories in that epic\n- [ ] Error message includes the type of active session for debugging",
+          "status": "review",
+          "position": 1
+        },
+        {
+          "id": "wjSKHRf19ZaG",
+          "title": "As a user, I want to see a visual indicator on kanban cards when an agent is working so that I know the epic's status at a glance",
+          "description": "Add a visual busy indicator (animated spinner, pulsing dot, or glowing border) on kanban epic cards when an agent session is active for that epic. Display the work type as a small badge (e.g., 'Building...', 'Reviewing...'). The indicator should be visible without opening the epic detail panel and update via polling.",
+          "acceptance_criteria": "- [ ] Animated indicator (spinner or pulsing dot) displayed on epic cards with active agent sessions\n- [ ] Work type badge shown on the card (e.g., 'Building...', 'Reviewing...', 'Sending to dev...')\n- [ ] Indicator visible on the kanban board without opening the epic detail\n- [ ] Indicator updates in real-time via existing session polling\n- [ ] Indicator disappears when the session completes, fails, or is cancelled\n- [ ] Multiple active sessions on different epics show indicators on each card\n- [ ] Consistent styling with existing UI (dark mode, shadcn/ui)",
+          "status": "review",
+          "position": 2
+        },
+        {
+          "id": "-wl_MgfbGweq",
+          "title": "As a user, I want all agent action buttons greyed out when an agent is active so that I cannot accidentally launch overlapping agents",
+          "description": "Update `EpicActions`, `StoryActions`, and `UserStoryQuickActions` components to disable all agent action buttons when any agent session is running for the entity. Use the `useAgentBusyState` hook instead of local loading state. Show a tooltip on disabled buttons explaining the reason (e.g., 'Agent is currently building this epic').",
+          "acceptance_criteria": "- [ ] `EpicActions` disables Build, Review, and Send to Dev buttons when any session is active for the epic\n- [ ] `StoryActions` disables all agent buttons when a session is running for the story or its parent epic\n- [ ] `UserStoryQuickActions` disables agent icons when a session is running\n- [ ] Disabled buttons show a tooltip explaining why (e.g., 'Agent is currently building this epic')\n- [ ] Uses `useAgentBusyState` hook instead of local `isRunning` / `isLoading` state\n- [ ] Buttons re-enable automatically when the session completes\n- [ ] Non-agent actions (edit, delete, status change) remain enabled",
+          "status": "review",
+          "position": 3
+        },
+        {
+          "id": "L8Iti5hrqo57",
+          "title": "As a user, I want the review endpoint to prevent duplicate review agents so that I cannot accidentally launch the same review type twice",
+          "description": "Add concurrency checks to the review dispatch route. Prevent launching a review agent when a review of the same type is already running for the story. Allow different review types to run in parallel (e.g., security + code review simultaneously). Return a clear error message identifying which review type is already running.",
+          "acceptance_criteria": "- [ ] Review endpoint checks for active review sessions before dispatching\n- [ ] Duplicate review type for the same story is rejected with HTTP 409\n- [ ] Different review types can run in parallel (e.g., security + code review)\n- [ ] Error message specifies which review type is already running\n- [ ] Custom review agents also checked for duplicates\n- [ ] Existing review sessions that have completed or failed do not block new reviews",
+          "status": "review",
+          "position": 4
+        }
+      ]
+    },
+    {
+      "id": "RkXw-_aEGx0K",
+      "title": "Fuse New Epic into Chat Panel",
+      "description": "Remove the standalone 'New Epic' modal/flow and instead open epic creation as a new tab in the existing UnifiedChatPanel. When the user clicks 'New Epic', the chat panel opens with a new tab of type `epic_creation`. The chat stream API route checks the conversation type and uses the epic refinement prompt for `epic_creation` conversations. After the brainstorming chat converges, a 'Create Epic & Generate Stories' button triggers epic + user story creation from the conversation context.\n\n## Implementation Plan\n\n### Step 1 — Server-side routing in /api/chat/stream\n- Modify the chat stream endpoint to check the conversation's `type` field\n- When type is `epic_creation`, use the epic refinement prompt builder (existing `buildSpecPrompt` or a new `buildEpicCreationPrompt`) instead of the default brainstorm prompt\n- Ensure the prompt includes project context (spec, documents) and instructs Claude to help the user define an epic with user stories\n\n### Step 2 — New useEpicCreate hook\n- Create a small React hook (`useEpicCreate`) that takes the conversation context and calls the API to create an epic with generated user stories\n- The hook calls `POST /api/projects/[projectId]/epics` with the epic data extracted from the conversation\n- Returns loading/error/success states\n\n### Step 3 — UnifiedChatPanel UI updates\n- Add a 'Create Epic & Generate Stories' button that appears in `epic_creation` conversations once enough context has been discussed\n- Differentiate tab icons: sparkles icon for `epic_creation` tabs vs message icon for regular chat tabs\n- Add an empty-state hint in new `epic_creation` tabs explaining what the user can do\n- Wire `onEpicCreated` callback to refresh the kanban board and optionally close the tab\n\n### Step 4 — MessageInput placeholder\n- Add a `placeholder` prop to the MessageInput component\n- Set context-aware placeholder text: 'Describe your epic idea...' for epic_creation tabs, 'Ask a question...' for brainstorm tabs\n\n### Step 5 — Rewire page.tsx\n- Point the 'New Epic' button in the project page to `panelRef.current?.openNewEpic()` which creates a new `epic_creation` tab\n- Remove the old modal/sheet import and rendering\n\n### Step 6 — Delete dead code\n- Remove `CreateEpicSheet.tsx` component\n- Remove `useEpicCreation.ts` hook\n- Clean up any unused imports",
+      "priority": 2,
+      "status": "done",
+      "position": 3,
+      "branchName": null,
+      "user_stories": [
+        {
+          "id": "lt-A7OoL8MEH",
+          "title": "As a user, I want the chat stream API to use the epic refinement prompt for epic_creation conversations so that Claude guides me through epic definition",
+          "description": "Modify `/api/chat/stream` (or the relevant chat API route) to check the conversation's `type` field. When the type is `epic_creation`, compose the prompt using the epic refinement/spec prompt builder instead of the default brainstorm prompt. The prompt should include project context (spec, documents, existing epics) and instruct Claude to help the user define a well-structured epic with user stories and acceptance criteria.",
+          "acceptance_criteria": "- [ ] Chat stream route reads conversation `type` from DB or request\n- [ ] When type is `epic_creation`, epic refinement prompt builder is used\n- [ ] Epic refinement prompt includes project spec, documents, and existing epic titles for context\n- [ ] Prompt instructs Claude to guide the user through epic definition (title, description, user stories, acceptance criteria)\n- [ ] Default brainstorm prompt still used for non-epic_creation conversations\n- [ ] No breaking changes to existing chat functionality",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "IxpuH3fzMjG_",
+          "title": "As a user, I want a useEpicCreate hook so that epic creation from conversation context is handled cleanly",
+          "description": "Create a `useEpicCreate` React hook that takes the conversation ID and project ID, calls the API to create an epic with user stories derived from the conversation, and returns loading/error/success states. The hook calls `POST /api/projects/[projectId]/epics` with structured epic data. It should parse the conversation to extract the epic title, description, and user stories from Claude's responses.",
+          "acceptance_criteria": "- [ ] `useEpicCreate` hook created in `hooks/` directory\n- [ ] Hook accepts projectId and conversationId parameters\n- [ ] Calls POST endpoint to create epic with user stories\n- [ ] Returns `{ createEpic, isLoading, error, createdEpic }` interface\n- [ ] Handles API errors gracefully with user-friendly messages\n- [ ] Triggers kanban board refresh on successful creation",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "Yam7zSmWBG2w",
+          "title": "As a user, I want the UnifiedChatPanel to support epic creation tabs with a create button and distinct icons so that I can create epics directly from the chat",
+          "description": "Update the UnifiedChatPanel component to: (1) show a sparkles icon on `epic_creation` tabs vs a message icon on regular chat tabs, (2) display a 'Create Epic & Generate Stories' action button in `epic_creation` conversations once sufficient context exists, (3) show an empty-state hint in new epic_creation tabs explaining the workflow, (4) fire an `onEpicCreated` callback that refreshes the board.",
+          "acceptance_criteria": "- [ ] Epic creation tabs show a sparkles/star icon in the tab bar\n- [ ] Regular chat tabs show a message/chat icon in the tab bar\n- [ ] 'Create Epic & Generate Stories' button appears in epic_creation conversations\n- [ ] Button triggers the useEpicCreate hook and shows loading state\n- [ ] Empty-state hint displayed in new epic_creation tabs: e.g. 'Describe your epic idea and I'll help you structure it with user stories'\n- [ ] `onEpicCreated` callback fires on successful epic creation\n- [ ] Kanban board refreshes when a new epic is created from the panel",
+          "status": "todo",
+          "position": 2
+        },
+        {
+          "id": "hq1XPaVpz3IX",
+          "title": "As a user, I want context-aware placeholder text in the chat input so that I know what to type in each conversation type",
+          "description": "Add a `placeholder` prop to the MessageInput component. Set the placeholder based on the conversation type: 'Describe your epic idea...' for `epic_creation` tabs, 'Ask a question...' for brainstorm tabs. The placeholder should be visually clear but disappear on focus/input.",
+          "acceptance_criteria": "- [ ] MessageInput component accepts an optional `placeholder` prop\n- [ ] Default placeholder is 'Ask a question...' when no prop is provided\n- [ ] Epic creation conversations pass 'Describe your epic idea...' as placeholder\n- [ ] Placeholder text is visually muted (gray) and disappears on input\n- [ ] No breaking changes to existing MessageInput usage",
+          "status": "todo",
+          "position": 3
+        },
+        {
+          "id": "eK1L9Qptf1ie",
+          "title": "As a user, I want the 'New Epic' button to open an epic creation tab in the chat panel so that I don't need a separate modal",
+          "description": "Rewire the 'New Epic' button in the project page toolbar to call `panelRef.current?.openNewEpic()` which expands the chat panel and creates a new tab with `epic_creation` type pre-selected. Remove the old CreateEpicSheet modal import and rendering from the page. Ensure the panel opens in expanded state if it was collapsed.",
+          "acceptance_criteria": "- [ ] 'New Epic' button in project page calls `openNewEpic()` on the panel ref\n- [ ] Panel expands if currently collapsed when 'New Epic' is clicked\n- [ ] A new tab is created with conversation type `epic_creation`\n- [ ] The new tab is focused/active immediately\n- [ ] Old CreateEpicSheet modal no longer renders on the page\n- [ ] No regression in 'Chat' button behavior",
+          "status": "todo",
+          "position": 4
+        },
+        {
+          "id": "fpZHtET5OY8K",
+          "title": "As a developer, I want dead code from the old epic creation flow removed so that the codebase stays clean",
+          "description": "Delete the now-unused `CreateEpicSheet.tsx` component and `useEpicCreation.ts` hook. Remove any unused imports referencing these files from other components. Verify that no other part of the codebase depends on these files before deletion.",
+          "acceptance_criteria": "- [ ] `CreateEpicSheet.tsx` file deleted\n- [ ] `useEpicCreation.ts` file deleted\n- [ ] All imports of these files removed from other components\n- [ ] No TypeScript compilation errors after deletion\n- [ ] No runtime errors — verify the app builds successfully",
+          "status": "todo",
+          "position": 5
+        }
+      ]
+    },
+    {
       "id": "_iXuiyo_bsrs",
       "title": "Agent Configuration Side Panel & Custom Review Agents",
       "description": "Dedicated side panel for configuring agent prompts (global + per-project override), creating custom review agents, and setting the default AI provider per agent type.\n\n## Implementation Plan\n\n### Phase 1 — Schema & Data Layer\n\n**Agent Prompts Table:**\n- Add `agentPrompts` table: id, agentType (text: 'build', 'review_security', 'review_code', 'review_compliance', 'chat', 'spec_generation', 'team_build', 'ticket_build'), systemPrompt (text), scope ('global' | projectId), createdAt, updatedAt\n- Global prompts have scope='global', project overrides store the projectId\n- When resolving a prompt, project-scoped prompt takes precedence over global, which takes precedence over built-in defaults\n\n**Custom Review Agents Table:**\n- Add `customReviewAgents` table: id, name (text), systemPrompt (text), scope ('global' | projectId), position (integer), isEnabled (integer, default 1), createdAt, updatedAt\n- Custom review agents are user-defined and appear alongside the 3 built-in review types\n\n**Agent Provider Defaults Table:**\n- Add `agentProviderDefaults` table: id, agentType (text), provider ('claude-code' | 'codex'), scope ('global' | projectId), createdAt, updatedAt\n- Allows setting CC or Codex as default per agent type, with project override\n\n### Phase 2 — API Routes\n\n**Agent Prompts:**\n- `GET /api/agent-config/prompts` — list all global agent prompts\n- `GET /api/projects/[projectId]/agent-config/prompts` — list project-scoped prompts (merged with global defaults)\n- `PUT /api/agent-config/prompts/[agentType]` — upsert global prompt for an agent type\n- `PUT /api/projects/[projectId]/agent-config/prompts/[agentType]` — upsert project override\n- `DELETE /api/projects/[projectId]/agent-config/prompts/[agentType]` — remove project override (fall back to global)\n\n**Custom Review Agents:**\n- `GET /api/agent-config/review-agents` — list global custom review agents\n- `GET /api/projects/[projectId]/agent-config/review-agents` — list project-scoped + global review agents\n- `POST /api/agent-config/review-agents` — create a custom review agent (global)\n- `POST /api/projects/[projectId]/agent-config/review-agents` — create project-scoped review agent\n- `PATCH /api/agent-config/review-agents/[agentId]` — update name, prompt, enabled status\n- `DELETE /api/agent-config/review-agents/[agentId]` — delete a custom review agent\n\n**Agent Provider Defaults:**\n- `GET /api/agent-config/providers` — list global provider defaults per agent type\n- `PUT /api/agent-config/providers/[agentType]` — set global default provider for agent type\n- `PUT /api/projects/[projectId]/agent-config/providers/[agentType]` — set project override\n\n### Phase 3 — Prompt Builder Integration\n- Refactor all prompt builder functions to load custom prompts from DB before composing\n- Resolution order: project override → global custom → built-in default\n- Update `buildReviewPrompt` to accept custom review agent prompts in addition to built-in types\n- Update `buildBuildPrompt`, `buildChatPrompt`, `buildSpecPrompt`, `buildTeamBuildPrompt`, `buildTicketBuildPrompt` to use configurable prompts\n\n### Phase 4 — Side Panel UI\n- New `AgentConfigPanel` component accessible from the main sidebar\n- Three tabs: **Agent Prompts**, **Review Agents**, **Provider Defaults**\n- Agent Prompts tab: list of agent types with expandable prompt editors, toggle between global/project scope\n- Review Agents tab: list of built-in (read-only name) + custom review agents, each with name/prompt fields, add/delete actions\n- Provider Defaults tab: per-agent-type dropdown to select CC or Codex as default\n- Panel slides in from the left sidebar, can be toggled open/closed\n\n### Phase 5 — Review Dialog Integration\n- Update the Agent Review dialog on the story detail page to include custom review agents alongside the 3 built-in types\n- Custom agents displayed as additional checkboxes with their name\n- Each selected custom agent dispatches a plan-mode agent with the custom prompt\n- Agent output posted as a comment with the custom agent's name as label",
       "priority": 0,
       "status": "done",
-      "position": 1,
+      "position": 4,
       "branchName": null,
       "user_stories": [
         {
@@ -119,12 +288,71 @@
       ]
     },
     {
+      "id": "r4WR9sYAiFJV",
+      "title": "Fuse New Epic into Chat Panel",
+      "description": "Remove the standalone 'New Epic' modal/flow and instead open epic creation as a new tab in the existing UnifiedChatPanel. When the user clicks 'New Epic', the chat panel opens with a new tab of type `epic_creation`. The chat stream API route checks the conversation type and uses the epic refinement prompt for `epic_creation` conversations. After the brainstorming chat converges, a 'Create Epic & Generate Stories' button triggers epic + user story creation from the conversation context.\n\n## Implementation Plan\n\n### Step 1 — Server-side routing in /api/chat/stream\n- Modify the chat stream endpoint to check the conversation's `type` field\n- When type is `epic_creation`, use the epic refinement prompt builder (existing `buildSpecPrompt` or a new `buildEpicCreationPrompt`) instead of the default brainstorm prompt\n- Ensure the prompt includes project context (spec, documents) and instructs Claude to help the user define an epic with user stories\n\n### Step 2 — New useEpicCreate hook\n- Create a small React hook (`useEpicCreate`) that takes the conversation context and calls the API to create an epic with generated user stories\n- The hook calls `POST /api/projects/[projectId]/epics` with the epic data extracted from the conversation\n- Returns loading/error/success states\n\n### Step 3 — UnifiedChatPanel UI updates\n- Add a 'Create Epic & Generate Stories' button that appears in `epic_creation` conversations once enough context has been discussed\n- Differentiate tab icons: sparkles icon for `epic_creation` tabs vs message icon for regular chat tabs\n- Add an empty-state hint in new `epic_creation` tabs explaining what the user can do\n- Wire `onEpicCreated` callback to refresh the kanban board and optionally close the tab\n\n### Step 4 — MessageInput placeholder\n- Add a `placeholder` prop to the MessageInput component\n- Set context-aware placeholder text: 'Describe your epic idea...' for epic_creation tabs, 'Ask a question...' for brainstorm tabs\n\n### Step 5 — Rewire page.tsx\n- Point the 'New Epic' button in the project page to `panelRef.current?.openNewEpic()` which creates a new `epic_creation` tab\n- Remove the old modal/sheet import and rendering\n\n### Step 6 — Delete dead code\n- Remove `CreateEpicSheet.tsx` component\n- Remove `useEpicCreation.ts` hook\n- Clean up any unused imports",
+      "priority": 2,
+      "status": "done",
+      "position": 5,
+      "branchName": null,
+      "user_stories": [
+        {
+          "id": "XnIfb-vCspr5",
+          "title": "As a user, I want the chat stream API to use the epic refinement prompt for epic_creation conversations so that Claude guides me through epic definition",
+          "description": "Modify `/api/chat/stream` (or the relevant chat API route) to check the conversation's `type` field. When the type is `epic_creation`, compose the prompt using the epic refinement/spec prompt builder instead of the default brainstorm prompt. The prompt should include project context (spec, documents, existing epics) and instruct Claude to help the user define a well-structured epic with user stories and acceptance criteria.",
+          "acceptance_criteria": "- [ ] Chat stream route reads conversation `type` from DB or request\n- [ ] When type is `epic_creation`, epic refinement prompt builder is used\n- [ ] Epic refinement prompt includes project spec, documents, and existing epic titles for context\n- [ ] Prompt instructs Claude to guide the user through epic definition (title, description, user stories, acceptance criteria)\n- [ ] Default brainstorm prompt still used for non-epic_creation conversations\n- [ ] No breaking changes to existing chat functionality",
+          "status": "review",
+          "position": 0
+        },
+        {
+          "id": "ZJ0Uj0Y19Zgm",
+          "title": "As a user, I want a useEpicCreate hook so that epic creation from conversation context is handled cleanly",
+          "description": "Create a `useEpicCreate` React hook that takes the conversation ID and project ID, calls the API to create an epic with user stories derived from the conversation, and returns loading/error/success states. The hook calls `POST /api/projects/[projectId]/epics` with structured epic data. It should parse the conversation to extract the epic title, description, and user stories from Claude's responses.",
+          "acceptance_criteria": "- [ ] `useEpicCreate` hook created in `hooks/` directory\n- [ ] Hook accepts projectId and conversationId parameters\n- [ ] Calls POST endpoint to create epic with user stories\n- [ ] Returns `{ createEpic, isLoading, error, createdEpic }` interface\n- [ ] Handles API errors gracefully with user-friendly messages\n- [ ] Triggers kanban board refresh on successful creation",
+          "status": "review",
+          "position": 1
+        },
+        {
+          "id": "O_hfiEgecQ9D",
+          "title": "As a user, I want the UnifiedChatPanel to support epic creation tabs with a create button and distinct icons so that I can create epics directly from the chat",
+          "description": "Update the UnifiedChatPanel component to: (1) show a sparkles icon on `epic_creation` tabs vs a message icon on regular chat tabs, (2) display a 'Create Epic & Generate Stories' action button in `epic_creation` conversations once sufficient context exists, (3) show an empty-state hint in new epic_creation tabs explaining the workflow, (4) fire an `onEpicCreated` callback that refreshes the board.",
+          "acceptance_criteria": "- [ ] Epic creation tabs show a sparkles/star icon in the tab bar\n- [ ] Regular chat tabs show a message/chat icon in the tab bar\n- [ ] 'Create Epic & Generate Stories' button appears in epic_creation conversations\n- [ ] Button triggers the useEpicCreate hook and shows loading state\n- [ ] Empty-state hint displayed in new epic_creation tabs: e.g. 'Describe your epic idea and I'll help you structure it with user stories'\n- [ ] `onEpicCreated` callback fires on successful epic creation\n- [ ] Kanban board refreshes when a new epic is created from the panel",
+          "status": "review",
+          "position": 2
+        },
+        {
+          "id": "fGs9ZIm9AN2r",
+          "title": "As a user, I want context-aware placeholder text in the chat input so that I know what to type in each conversation type",
+          "description": "Add a `placeholder` prop to the MessageInput component. Set the placeholder based on the conversation type: 'Describe your epic idea...' for `epic_creation` tabs, 'Ask a question...' for brainstorm tabs. The placeholder should be visually clear but disappear on focus/input.",
+          "acceptance_criteria": "- [ ] MessageInput component accepts an optional `placeholder` prop\n- [ ] Default placeholder is 'Ask a question...' when no prop is provided\n- [ ] Epic creation conversations pass 'Describe your epic idea...' as placeholder\n- [ ] Placeholder text is visually muted (gray) and disappears on input\n- [ ] No breaking changes to existing MessageInput usage",
+          "status": "review",
+          "position": 3
+        },
+        {
+          "id": "2Ti8YYRok3Cz",
+          "title": "As a user, I want the 'New Epic' button to open an epic creation tab in the chat panel so that I don't need a separate modal",
+          "description": "Rewire the 'New Epic' button in the project page toolbar to call `panelRef.current?.openNewEpic()` which expands the chat panel and creates a new tab with `epic_creation` type pre-selected. Remove the old CreateEpicSheet modal import and rendering from the page. Ensure the panel opens in expanded state if it was collapsed.",
+          "acceptance_criteria": "- [ ] 'New Epic' button in project page calls `openNewEpic()` on the panel ref\n- [ ] Panel expands if currently collapsed when 'New Epic' is clicked\n- [ ] A new tab is created with conversation type `epic_creation`\n- [ ] The new tab is focused/active immediately\n- [ ] Old CreateEpicSheet modal no longer renders on the page\n- [ ] No regression in 'Chat' button behavior",
+          "status": "review",
+          "position": 4
+        },
+        {
+          "id": "JpWx4WRK1fbA",
+          "title": "As a developer, I want dead code from the old epic creation flow removed so that the codebase stays clean",
+          "description": "Delete the now-unused `CreateEpicSheet.tsx` component and `useEpicCreation.ts` hook. Remove any unused imports referencing these files from other components. Verify that no other part of the codebase depends on these files before deletion.",
+          "acceptance_criteria": "- [ ] `CreateEpicSheet.tsx` file deleted\n- [ ] `useEpicCreation.ts` file deleted\n- [ ] All imports of these files removed from other components\n- [ ] No TypeScript compilation errors after deletion\n- [ ] No runtime errors — verify the app builds successfully",
+          "status": "review",
+          "position": 5
+        }
+      ]
+    },
+    {
       "id": "4wJJ42xg9gz3",
       "title": "Agent Teams & Codex Provider Integration",
       "description": "Two-part feature: (1) Agent Teams mode that leverages Claude Code's native Task tool to delegate multiple tickets to sub-agents in a single session, and (2) OpenAI Codex integration as an alternative AI provider alongside Claude Code.\n\n## Implementation Plan\n\n### Part A — Agent Teams (Claude Code Only)\n\n**Schema & Data Layer:**\n- Add `orchestrationMode` column to `agentSessions` table (`'solo' | 'team'`, default `'solo'`)\n- Team mode is exclusive to Claude Code (Codex has no equivalent sub-agent delegation)\n\n**Prompt Builder:**\n- New `buildTeamBuildPrompt()` function that describes all selected epics with their worktree paths\n- Instructs Claude Code to act as a team lead and use the `Task` tool to spawn sub-agents per ticket\n- Lets CC decide team composition and size\n\n**Build Route Changes:**\n- When `team=true` in the batch build request, pre-create all git worktrees for selected epics\n- Spawn a single CC session from the main repo root (not inside a worktree)\n- Add `Task` to the `--allowedTools` list for team mode\n- Track as a single `agentSession` with `orchestrationMode: 'team'`\n- On completion, update all associated epics' statuses\n\n**UI — Build Toolbar:**\n- Add 'Team mode' checkbox in the build toolbar, visible when 2+ epics are selected\n- Checkbox disabled when fewer than 2 epics selected or when provider is Codex\n- Tooltip explains team mode behavior\n\n### Part B — Codex Provider Integration\n\n**Provider Abstraction Layer:**\n- New `lib/providers/` directory with provider interface (`AgentProvider`)\n- `lib/providers/claude-code.ts` — wraps existing CC spawn logic\n- `lib/providers/codex.ts` — wraps `@openai/codex-sdk` using `Codex` class, `startThread()`, `runStreamed()` for streaming events\n- `lib/providers/index.ts` — factory function `getProvider(type: 'claude-code' | 'codex')`\n- Codex provider uses `workingDirectory` option on `startThread()` for worktree paths\n\n**Schema Changes:**\n- Add `provider` column to `agentSessions` (`'claude-code' | 'codex'`, default `'claude-code'`)\n- Add `provider` column to `chatConversations` (if table exists) or chat messages\n\n**Process Manager Generalization:**\n- Refactor `lib/claude/process-manager.ts` to accept provider-agnostic session handles\n- Codex sessions tracked via thread ID, CC sessions tracked via PID\n- Unified start/cancel/status interface\n\n**Build & Review Routes:**\n- Build route accepts `provider` parameter, dispatches via provider factory\n- Review route accepts `provider` parameter\n- Send-to-dev route accepts `provider` parameter\n\n**UI — Provider Selector:**\n- Dropdown in build toolbar to choose between Claude Code and Codex\n- Provider selector in Send to Dev dialog\n- Provider selector in Agent Review dialog\n- Provider toggle in chat header (locked/disabled after first message in conversation)\n- Codex option disabled with tooltip if no API key configured\n\n**Settings:**\n- Add Codex API key field to Settings page\n- Stored in `settings` table with key `codex_api_key`\n- Validated on save (non-empty string check)\n\n**Codex SDK Integration Details:**\n- Install `@openai/codex-sdk` dependency\n- Use `new Codex({ env: { CODEX_API_KEY: ... } })` with API key from settings\n- `startThread({ workingDirectory })` for worktree-scoped execution\n- `runStreamed()` for streaming events, map to unified event format\n- Thread IDs stored in session metadata for resumption support",
       "priority": 0,
       "status": "done",
-      "position": 2,
+      "position": 6,
       "branchName": null,
       "user_stories": [
         {
@@ -215,7 +443,7 @@
       "description": "Add a comment system to user stories (tickets), a dedicated story detail page replacing the sheet, and review workflows powered by Claude Code agents.\n\n## Implementation Plan\n\n### Phase 1 — Schema & Data Layer\n- Add `ticketComments` table (id, userStoryId, author: 'user'|'agent', content, agentSessionId?, createdAt)\n- Add `userStoryId` column to `agentSessions` to link agent work back to a specific ticket\n- Add `\"review\"` as a valid status for user stories (todo → in_progress → review → done)\n\n### Phase 2 — API Routes\n- `GET/PATCH /api/projects/[projectId]/stories/[storyId]` — fetch & update story detail\n- `GET/POST /api/projects/[projectId]/stories/[storyId]/comments` — list & add comments\n- `POST /api/projects/[projectId]/stories/[storyId]/build` — dispatch a code-mode agent for the ticket (send-to-dev)\n- `POST /api/projects/[projectId]/stories/[storyId]/review` — dispatch review agents (security, code-review, compliance/accessibility)\n\n### Phase 3 — Hooks\n- `useStoryDetail` — fetch story with epic context\n- `useComments` — fetch comments with 5s polling\n- `useTicketAgent` — dispatch agent + poll session status, auto-post final output as agent comment\n\n### Phase 4 — Story Detail Page\n- New route: `/projects/[projectId]/stories/[storyId]`\n- Two-column layout: left = story details (title, description, acceptance criteria, status, priority), right = comment thread\n- Navigate to this page by clicking story titles in the epic detail view\n\n### Phase 5 — Send to Dev\n- Available on tickets in `todo` or `in_progress` status\n- \"Send to Dev\" button opens a dialog with an optional comment field\n- On confirm: post comment (if provided), dispatch code-mode agent with ticket context + full comment history, move ticket to `in_progress`\n- Agent reuses the epic's existing git worktree/branch with concurrency guard\n\n### Phase 6 — Agent Review (Review status)\n- Available on tickets in `review` status\n- \"Send to Dev\" button (requires mandatory comment explaining what to fix) → dispatches code agent, moves ticket back to `in_progress`\n- \"Agent Review\" button opens dialog with 3 checkboxes: Security, Code Review, Compliance/Accessibility\n- Each selected review type dispatches a separate agent in plan mode with a specialized review checklist\n- Agent outputs are posted as comments on the ticket\n\n### Phase 7 — Approve & Merge\n- \"Approve\" action on review-status tickets marks the ticket as `done`\n- Triggers merge of the epic's worktree branch into the target branch\n\n### Prompt Builder\n- `buildTicketBuildPrompt` — code mode, includes project spec, epic context, ticket details, and full comment history\n- `buildReviewPrompt` — plan mode, 3 specialized checklists (security audit, code review best practices, compliance/accessibility standards)",
       "priority": 0,
       "status": "done",
-      "position": 3,
+      "position": 7,
       "branchName": null,
       "user_stories": [
         {
@@ -290,7 +518,7 @@
       "description": "Create releases by selecting completed epics, generate changelogs via Claude Code, create git tags, and maintain release history.",
       "priority": 0,
       "status": "done",
-      "position": 4,
+      "position": 8,
       "branchName": null,
       "user_stories": [
         {
@@ -325,7 +553,7 @@
       "description": "Add image support to chat panels — users can upload images via a file picker or paste them from the clipboard. Images are saved locally, displayed as thumbnails before sending, and rendered inline in chat messages.\n\n## Implementation Plan\n\n### Phase 1 — Storage & Schema\n- Create `data/uploads/` directory for storing chat image files (gitignored)\n- Add `chatAttachments` table to Drizzle schema (id, chatMessageId FK, fileName, filePath, mimeType, sizeBytes, createdAt)\n- Add cascade delete from chatMessages to chatAttachments\n- Generate and push migration\n\n### Phase 2 — Upload API\n- Create `POST /api/projects/[projectId]/chat/upload` route\n- Accept multipart form data with image files (png, jpg, jpeg, gif, webp)\n- Validate file type and size (max 10MB per file)\n- Save files to `data/uploads/{projectId}/{nanoid}-{originalName}`\n- Return attachment metadata (id, fileName, filePath, mimeType)\n- Create `GET /api/projects/[projectId]/chat/uploads/[attachmentId]` to serve images\n\n### Phase 3 — Enhanced MessageInput Component\n- Add paste event handler on the textarea to intercept `clipboardData.items` with `type.startsWith('image/')`\n- Convert pasted image blobs to File objects and upload immediately\n- Add image upload button (paperclip/image icon) next to the send button\n- Hidden file input accepting image MIME types, triggered by the button\n- Display pending image thumbnails in a preview strip above the textarea\n- Allow removing individual thumbnails before sending\n- On send, include attachment IDs alongside the message content\n\n### Phase 4 — Message Rendering\n- Update MessageList / MarkdownContent to detect and render images associated with messages\n- Fetch attachments for each message and display them as inline images below the text\n- Support lightbox/modal view on image click for full-size viewing\n- Lazy-load images with placeholder skeleton\n\n### Phase 5 — Chat API Integration\n- Update `POST /api/projects/[projectId]/chat/messages` to accept an optional `attachmentIds` array\n- Link uploaded attachments to the created message\n- Update `GET /api/projects/[projectId]/chat/messages` to include attachment metadata in response\n- Ensure attachments are cleaned up when messages are deleted (cascade)",
       "priority": 0,
       "status": "done",
-      "position": 5,
+      "position": 9,
       "branchName": null,
       "user_stories": [
         {
@@ -384,7 +612,7 @@
       "description": "Render Markdown content as styled HTML in the document viewer and spec preview components.",
       "priority": 0,
       "status": "done",
-      "position": 6,
+      "position": 10,
       "branchName": null,
       "user_stories": [
         {
@@ -411,7 +639,7 @@
       "description": "Automatic test detection/execution and dev server preview within Arij, as planned for V2.",
       "priority": 0,
       "status": "done",
-      "position": 7,
+      "position": 11,
       "branchName": null,
       "user_stories": [
         {
@@ -438,7 +666,7 @@
       "description": "Application-wide settings including a global prompt injected into all Claude Code sessions.",
       "priority": 0,
       "status": "done",
-      "position": 8,
+      "position": 12,
       "branchName": null,
       "user_stories": [
         {
@@ -457,7 +685,7 @@
       "description": "Chat panel integrated into project views, using Claude Code in plan mode for brainstorming, ideation, and project refinement.",
       "priority": 0,
       "status": "done",
-      "position": 9,
+      "position": 13,
       "branchName": null,
       "user_stories": [
         {
@@ -492,7 +720,7 @@
       "description": "Upload project documents (PDF, DOCX, Markdown, plain text), convert them to Markdown, and store them as project context for Claude Code sessions.",
       "priority": 0,
       "status": "done",
-      "position": 10,
+      "position": 14,
       "branchName": null,
       "user_stories": [
         {
@@ -527,7 +755,7 @@
       "description": "Track and monitor Claude Code agent sessions with real-time status updates, detailed logs, and session lifecycle management.",
       "priority": 0,
       "status": "done",
-      "position": 11,
+      "position": 15,
       "branchName": null,
       "user_stories": [
         {
@@ -562,7 +790,7 @@
       "description": "Publish Arij as an npm package with a CLI entry point so users can run it with `npx arij`.",
       "priority": 0,
       "status": "done",
-      "position": 12,
+      "position": 16,
       "branchName": null,
       "user_stories": [
         {
@@ -581,7 +809,7 @@
       "description": "Unit tests with Vitest and E2E tests with Playwright as specified in the tech stack.",
       "priority": 0,
       "status": "done",
-      "position": 13,
+      "position": 17,
       "branchName": null,
       "user_stories": [
         {
@@ -608,7 +836,7 @@
       "description": "Multi-project dashboard with project creation, listing, filtering, and detail views. Core project management lifecycle including archiving.",
       "priority": 0,
       "status": "done",
-      "position": 14,
+      "position": 18,
       "branchName": null,
       "user_stories": [
         {
@@ -643,7 +871,7 @@
       "description": "SQLite database with Drizzle ORM schema, migrations, and connection management.",
       "priority": 0,
       "status": "done",
-      "position": 15,
+      "position": 19,
       "branchName": null,
       "user_stories": [
         {
@@ -662,7 +890,7 @@
       "description": "Generate project specifications with epics and user stories using Claude Code in plan mode. Edit specs in a Markdown editor with preview.",
       "priority": 0,
       "status": "done",
-      "position": 16,
+      "position": 20,
       "branchName": null,
       "user_stories": [
         {
@@ -689,7 +917,7 @@
       "description": "Launch Claude Code in code mode to implement epics. Create git worktrees and branches per epic, compose structured prompts, manage build sessions.",
       "priority": 0,
       "status": "done",
-      "position": 17,
+      "position": 21,
       "branchName": null,
       "user_stories": [
         {
@@ -724,7 +952,7 @@
       "description": "Drag-and-drop kanban board for managing epics across workflow columns (Backlog, To Do, In Progress, Review, Done) with epic detail editing.",
       "priority": 0,
       "status": "done",
-      "position": 18,
+      "position": 22,
       "branchName": null,
       "user_stories": [
         {
@@ -762,61 +990,580 @@
       ]
     },
     {
-      "id": "PLfVTmLsLqCr",
-      "title": "Unified Chat & Epic Creation Side Panel",
-      "description": "Rework the separate chat panel and epic creation flow into a single unified side panel component. The panel lives on the right side of the screen, collapsed by default (showing ~5% as a grayed-out edge). Clicking 'Chat' or 'New Epic' expands the panel, splitting the screen into a resizable two-pane layout (board + chat). The panel supports tabbed conversations with agent activity indicators and mandatory agent type selection on each new chat.\n\n## Implementation Plan\n\n### Phase 1 — Unified Panel Shell\n- Create a `UnifiedChatPanel` component that replaces the current separate chat panel and epic creation chat\n- Panel has three visual states: collapsed (5% visible, grayed overlay on the right edge), expanded (resizable split with the board), and hidden (0%)\n- Default state is collapsed — a thin vertical strip visible on the right side\n- Clicking the collapsed strip or toolbar buttons ('Chat', 'New Epic') transitions to expanded state\n- Use a resizable split layout (e.g. `react-resizable-panels` or custom CSS resize) so the user can drag the divider between the board and the chat panel\n- Persist the panel width in local state (or localStorage) so it remembers the user's preferred split\n\n### Phase 2 — Tabbed Conversations\n- The panel supports multiple open conversations as tabs (similar to browser tabs)\n- Each tab represents a chat conversation (brainstorm, epic creation, or general)\n- Tabs show the conversation title (truncated) and a close button\n- A '+' button creates a new tab\n- Active tab is visually highlighted\n- Tab state persisted in the existing `chatMessages` / `chatConversations` DB tables\n\n### Phase 3 — Agent Activity Indicator in Tabs\n- When an agent is actively working on a conversation (streaming response, building, etc.), display a small animated icon (spinner or pulsing dot) on the corresponding tab\n- The indicator is visible even when the panel is collapsed, appearing on the thin right-edge strip as a subtle glow or badge\n- Poll agent session status to determine which conversations have active agents\n\n### Phase 4 — Agent Type Selector on New Chat\n- When creating a new conversation ('+' tab or 'New Epic' / 'Chat' trigger), show a mandatory agent type selector before the first message\n- Agent types: 'Brainstorm' (plan mode), 'Epic Creation' (spec generation mode), or custom types from agent config\n- The selected type determines the prompt builder and Claude Code mode used\n- Selector displayed as a prominent dropdown or button group at the top of the empty chat\n- Once the first message is sent, the agent type is locked for that conversation\n\n### Phase 5 — Board Integration\n- Remove the old chat panel toggle from the project header\n- The kanban board occupies 100% width when the panel is collapsed\n- When expanded, the board flexes to fill the remaining space\n- 'New Epic' button in the board toolbar opens the panel with a new 'Epic Creation' tab pre-selected\n- 'Chat' button opens the panel with a new 'Brainstorm' tab or focuses the last active tab\n- Ensure the kanban board remains fully functional (drag-and-drop, selection, build toolbar) in the reduced width",
-      "priority": 2,
+      "id": "3yyClgy0zxHo",
+      "title": "Codex Session Tracking Hardening",
+      "description": "Stabilize Codex session lifecycle, event ordering, and derived activity summary so monitoring and lock logic are reliable. This epic is foundational for action blocking and sessions UI improvements.",
+      "priority": 3,
       "status": "in_progress",
       "position": 0,
-      "branchName": "feature/epic-PLfVTmLsLqCr-unified-chat-epic-creation-side-panel",
+      "branchName": "feature/epic-3yyClgy0zxHo-codex-session-tracking-hardening",
       "user_stories": [
         {
-          "id": "Lna7Crqsq1_n",
-          "title": "As a user, I want a collapsed chat strip on the right edge of the screen so that I know the chat panel exists without it taking up space",
-          "description": "Create the unified panel shell with a collapsed state showing approximately 5% of the screen width as a grayed-out vertical strip on the right side. The strip should have a subtle visual cue (e.g. a chat icon or vertical text) indicating it can be expanded. Clicking anywhere on the strip expands the panel.",
-          "acceptance_criteria": "- [ ] Collapsed panel renders as a thin vertical strip (~5% width) on the right edge\n- [ ] Strip has a muted/grayed appearance distinct from the main content\n- [ ] Subtle visual indicator (icon or label) on the strip hints at chat functionality\n- [ ] Clicking the strip transitions the panel to the expanded state\n- [ ] Panel defaults to collapsed state on page load\n- [ ] Smooth CSS transition between collapsed and expanded states",
+          "id": "lme9sddL6uFm",
+          "title": "As a project maintainer, I want strict session lifecycle transitions so that running and terminal states are always trustworthy",
+          "description": "Implement a server-side lifecycle guard used by all session update paths to prevent invalid status changes and timestamp regressions.",
+          "acceptance_criteria": "- [ ] Session transitions are limited to `queued -> running -> completed|failed|cancelled`\n- [ ] Invalid transitions return HTTP 409 with a machine-readable error code\n- [ ] `startedAt` and `endedAt` are set once and are not overwritten by later events\n- [ ] Session list/detail endpoints return the same terminal status for a session once it is completed",
           "status": "in_progress",
           "position": 0
         },
         {
-          "id": "F5Scy6DPVLAN",
-          "title": "As a user, I want a resizable split layout between the kanban board and the chat panel so that I can adjust the space allocated to each",
-          "description": "When the chat panel is expanded, the screen splits into two resizable panes: the kanban board on the left and the chat panel on the right. A draggable divider allows resizing. The board and panel each have a minimum width to remain usable. The user's preferred width ratio persists across sessions via localStorage.",
-          "acceptance_criteria": "- [ ] Expanded panel creates a horizontal split layout with board (left) and chat (right)\n- [ ] Draggable divider between the two panes allows resizing\n- [ ] Minimum width constraint on both panes (e.g. 300px each) to prevent collapsing\n- [ ] Default split ratio is approximately 60% board / 40% chat\n- [ ] Split ratio persisted in localStorage and restored on next visit\n- [ ] Kanban board remains fully functional (DnD, selection, toolbar) in reduced width\n- [ ] Double-clicking the divider resets to default ratio",
+          "id": "JIROShSTCAC0",
+          "title": "As a project maintainer, I want ordered Codex chunk persistence so that logs and outputs are always readable in sequence",
+          "description": "Persist response, raw log, and output chunks with deterministic per-session sequence metadata and fetch ordering guarantees.",
+          "acceptance_criteria": "- [ ] Every chunk written for Codex contains `sessionId`, `streamType`, `sequence`, and timestamp metadata\n- [ ] Sequence numbers are monotonic per session even under concurrent writes\n- [ ] Reads for response/raw/output are sorted by `sequence` ascending\n- [ ] Duplicate chunk inserts with the same unique key are handled idempotently",
           "status": "in_progress",
           "position": 1
         },
         {
-          "id": "1FZVFa5_0XVK",
-          "title": "As a user, I want tabbed conversations in the chat panel so that I can have multiple chats open simultaneously",
-          "description": "The chat panel displays a tab bar at the top with one tab per open conversation. Each tab shows a truncated title and a close button. A '+' button at the end of the tab bar creates a new conversation. The active tab is highlighted. Switching tabs loads the corresponding conversation history.",
-          "acceptance_criteria": "- [ ] Tab bar rendered at the top of the chat panel\n- [ ] Each tab shows conversation title (truncated to ~20 chars) and close (X) button\n- [ ] '+' button at the end of the tab bar creates a new conversation\n- [ ] Active tab visually highlighted with distinct background/border\n- [ ] Clicking a tab switches to that conversation and loads its message history\n- [ ] Closing a tab removes it from the bar (conversation persists in DB)\n- [ ] At least one tab always remains open (last tab cannot be closed)\n- [ ] Tab order matches creation order, newest on the right",
+          "id": "cKvtDq-q0BRk",
+          "title": "As a project maintainer, I want a derived `lastNonEmptyText` so that users can quickly understand active agent progress",
+          "description": "Compute and store the last non-empty text from Codex output/response at write time and expose it in sessions APIs.",
+          "acceptance_criteria": "- [ ] The backend derives `lastNonEmptyText` from the last non-empty trimmed line of Codex output/response events\n- [ ] Whitespace-only chunks do not overwrite an existing `lastNonEmptyText`\n- [ ] `lastNonEmptyText` is exposed in session list and session detail API payloads\n- [ ] Running session rows render elapsed time and `lastNonEmptyText` together",
           "status": "in_progress",
           "position": 2
         },
         {
-          "id": "6RV-cqMOUEAK",
-          "title": "As a user, I want an animated indicator on tabs when an agent is working so that I can see which conversations have active agents",
-          "description": "When a Claude Code agent is actively processing a response for a conversation (streaming, building, reviewing), display a small animated indicator (spinning icon or pulsing dot) on that conversation's tab. The indicator is visible both in expanded and collapsed panel states. In collapsed state, show a subtle badge or glow on the right-edge strip.",
-          "acceptance_criteria": "- [ ] Animated spinner or pulsing dot appears on tabs with active agent sessions\n- [ ] Indicator polls agent session status at regular intervals (e.g. every 3 seconds)\n- [ ] Indicator disappears when the agent session completes, fails, or is cancelled\n- [ ] Multiple tabs can show indicators simultaneously\n- [ ] In collapsed panel state, a badge/glow on the strip indicates active agents\n- [ ] Indicator is visually distinct from static tab elements (color and animation)",
+          "id": "t8BlUPFVaSRn",
+          "title": "As an operator, I want migration and backfill coverage so that older sessions remain usable after schema changes",
+          "description": "Add migrations and backfill logic for newly introduced session fields and ensure backward-compatible reads.",
+          "acceptance_criteria": "- [ ] Database migration adds required fields and indexes without dropping existing session data\n- [ ] A backfill job populates `lastNonEmptyText` for recent historical sessions when source logs exist\n- [ ] Null-safe handling is in place for older sessions that cannot be backfilled",
           "status": "in_progress",
+          "position": 3
+        }
+      ]
+    },
+    {
+      "id": "D8bDg9BwJDoj",
+      "title": "GitHub Remote Foundation and Configuration",
+      "description": "Build the minimum GitHub integration layer that enables authenticated API usage and reliable remote git sync while preserving local-only behavior. This epic introduces project-level repository binding, token handling, remote operation endpoints, and operation journaling.",
+      "priority": 3,
+      "status": "in_progress",
+      "position": 0,
+      "branchName": "feature/epic-D8bDg9BwJDoj-github-remote-foundation-and-configurati",
+      "user_stories": [
+        {
+          "id": "NoXZGLbI1O1E",
+          "title": "As a workspace admin, I want to configure and validate a GitHub PAT so that Arij can call GitHub APIs securely",
+          "description": "Add a GitHub section in settings with PAT input, token validation, and persistence in settings storage. Ensure token values are never returned unredacted in read APIs.",
+          "acceptance_criteria": "- [ ] Settings page exposes GitHub PAT input with Validate and Save actions\\n- [ ] POST validate endpoint verifies token against GitHub and returns validity plus account login\\n- [ ] GET settings redacts PAT values while preserving indication that a token exists\\n- [ ] Validation and save failures show actionable error messages",
+          "status": "in_progress",
+          "position": 0
+        },
+        {
+          "id": "Wj_wjBAE-8nB",
+          "title": "As a project owner, I want GitHub remote auto-detection so that I can connect owner and repo in one click",
+          "description": "Detect owner and repo from git origin URL for projects with a local repository. Show a connect banner and patch project metadata when accepted.",
+          "acceptance_criteria": "- [ ] Detect endpoint parses SSH and HTTPS remote formats into owner and repo\\n- [ ] Banner appears only when project has gitRepoPath and missing githubOwnerRepo\\n- [ ] Connect action stores githubOwnerRepo on project\\n- [ ] Dismiss action hides the banner without mutating repository metadata",
+          "status": "in_progress",
+          "position": 1
+        },
+        {
+          "id": "ovCeDQ0UO5qR",
+          "title": "As a developer, I want push, pull, fetch, and branch status endpoints so that I can sync local branches safely",
+          "description": "Implement git sync APIs using simple-git with explicit error handling and ff-only pull behavior. Return ahead or behind counters for branch-level status.",
+          "acceptance_criteria": "- [ ] Endpoints exist for push, pull, fetch, and status and return structured data payloads\\n- [ ] Pull uses ff-only semantics and returns explicit conflict guidance when not possible\\n- [ ] Status endpoint returns ahead and behind values for requested branch\\n- [ ] All sync actions include project and branch context in API responses",
+          "status": "in_progress",
+          "position": 2
+        },
+        {
+          "id": "jGZU8SuIiOVF",
+          "title": "As an operator, I want every remote operation logged so that sync failures are auditable and debuggable",
+          "description": "Create a dedicated git sync log table and utility to capture operation type, status, branch, and details for all GitHub-related operations.",
+          "acceptance_criteria": "- [ ] `gitSyncLog` table exists with operation, status, detail, and timestamps\\n- [ ] Push, pull, fetch, and detect workflows write success and failure entries\\n- [ ] Log entries include projectId and optional branch context\\n- [ ] Failure logs include machine-readable detail payloads",
+          "status": "in_progress",
+          "position": 3
+        }
+      ]
+    },
+    {
+      "id": "YthO7n3qW2Bm",
+      "title": "Agent Concurrency Guards and Work Feedback",
+      "description": "Prevent launching overlapping agents on the same task and expose clear lock/running feedback across board, detail views, and chat tabs.",
+      "priority": 3,
+      "status": "in_progress",
+      "position": 1,
+      "branchName": "feature/epic-YthO7n3qW2Bm-agent-concurrency-guards-and-work-feedba",
+      "user_stories": [
+        {
+          "id": "so4RZBYfyrwY",
+          "title": "As a product user, I want backend checks that block starting another agent on the same task so that duplicate work cannot run in parallel",
+          "description": "Add task-level conflict checks to all agent launch endpoints, not only build, and return consistent conflict payloads.",
+          "acceptance_criteria": "- [ ] All agent launch endpoints check for an active running session on the same target task before dispatch\n- [ ] Conflicts return HTTP 409 with code `AGENT_ALREADY_RUNNING` and include active session id metadata\n- [ ] Concurrent double-submit attempts create at most one active session\n- [ ] Locks are released automatically when sessions enter terminal states",
+          "status": "in_progress",
+          "position": 0
+        },
+        {
+          "id": "vEjvtFcFMAm_",
+          "title": "As a product user, I want locked actions greyed out so that I do not accidentally trigger forbidden operations",
+          "description": "Wire lock state to action buttons on epic and story surfaces with non-interactive disabled behavior.",
+          "acceptance_criteria": "- [ ] Agent-triggering buttons on locked epic/story targets are visually greyed and disabled\n- [ ] Disabled controls are non-interactive via mouse and keyboard\n- [ ] A tooltip or helper text explains that another agent is already running on this task\n- [ ] Local loading states and lock states are merged so UI cannot flicker enabled/disabled incorrectly",
+          "status": "in_progress",
+          "position": 1
+        },
+        {
+          "id": "WnRgNGr2vr-e",
+          "title": "As a product user, I want running indicators in cards and tabs so that I can see active work instantly",
+          "description": "Show real-time running status in kanban cards and unified chat tabs and provide navigation to active sessions from conflicts.",
+          "acceptance_criteria": "- [ ] Kanban epic cards display a running indicator when any session is active for that epic\n- [ ] Unified chat tabs show a running icon while their linked session is active\n- [ ] Indicator state updates within one polling interval after session start/stop\n- [ ] Conflict toast includes a link or shortcut to open the active session",
+          "status": "in_progress",
+          "position": 2
+        }
+      ]
+    },
+    {
+      "id": "eBiIVHhxzP4z",
+      "title": "Git Sync Feedback and Agent Concurrency Guardrails",
+      "description": "Provide clear in-product feedback for active agent work and prevent duplicate execution on the same epic or story. This epic combines UI lockouts with strict backend conflict checks.",
+      "priority": 3,
+      "status": "in_progress",
+      "position": 1,
+      "branchName": "feature/epic-eBiIVHhxzP4z-git-sync-feedback-and-agent-concurrency-",
+      "user_stories": [
+        {
+          "id": "hbA5sP7xzHbr",
+          "title": "As a developer, I want ahead and behind badges in epic details so that I know when to push or pull",
+          "description": "Display Git sync status for epic branches with refresh and push controls where GitHub is configured.",
+          "acceptance_criteria": "- [ ] Epic detail shows ahead and behind counters when branch exists and GitHub is configured\\n- [ ] Push button triggers remote push endpoint and refreshes status after completion\\n- [ ] Loading and error states are displayed inline without breaking panel layout\\n- [ ] Git sync section is hidden when GitHub is not configured",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "ljND2PgCD4wi",
+          "title": "As a user, I want actions greyed out when an agent is already running on the same task so that I cannot launch duplicate runs",
+          "description": "Disable conflicting actions across epic, story, and chat contexts while an active session targets the same entity.",
+          "acceptance_criteria": "- [ ] Build, review, and story execution actions are disabled for entities with active sessions\\n- [ ] Disabled controls include a tooltip or label explaining why the action is blocked\\n- [ ] Controls re-enable automatically after session completion or failure\\n- [ ] Non-conflicting actions on other entities remain available",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "QPGIdh8iozoq",
+          "title": "As a platform engineer, I want server-side duplicate-run protection so that bypassing the UI cannot start parallel conflicting agents",
+          "description": "Add session lock checks to relevant endpoints and return deterministic conflict responses containing the running session reference.",
+          "acceptance_criteria": "- [ ] Build, review, and story-related execution endpoints check for active sessions on target entity\\n- [ ] Conflicting attempts return HTTP 409 with running session id and task context\\n- [ ] Locking logic is centralized in reusable server utility code\\n- [ ] Existing successful flows remain unaffected when no lock exists",
+          "status": "todo",
+          "position": 2
+        },
+        {
+          "id": "Ey1a9YAvbX3a",
+          "title": "As a product manager, I want active-work indicators on cards and tabs so that I can see running agents without opening details",
+          "description": "Show a compact activity icon on epic cards and chat tabs when an agent is running for that scope.",
+          "acceptance_criteria": "- [ ] Epic card displays running indicator when associated session is active\\n- [ ] Chat tabs display running indicator while tab session is active\\n- [ ] Indicators update on polling cycles without full-page reload\\n- [ ] Indicator styling is visible but does not break dense kanban layouts",
+          "status": "todo",
+          "position": 3
+        }
+      ]
+    },
+    {
+      "id": "joNsPcIP6FFP",
+      "title": "GitHub Remote Foundation",
+      "description": "Introduce project-level GitHub configuration, token validation, remote detection, core remote git routes, and audit logging while preserving local-only workflows.",
+      "priority": 3,
+      "status": "in_progress",
+      "position": 2,
+      "branchName": "feature/epic-joNsPcIP6FFP-github-remote-foundation",
+      "user_stories": [
+        {
+          "id": "aLVOkjaCuSJs",
+          "title": "As a project owner, I want GitHub PAT configuration and validation so that API-based GitHub operations are secure and reliable",
+          "description": "Add settings UI and API for PAT validation and enforce redaction in all settings reads.",
+          "acceptance_criteria": "- [ ] Settings page includes a GitHub PAT section with masked value, validate action, and save action\n- [ ] `POST /api/settings/github/validate` returns `valid` and GitHub login on success\n- [ ] `GET /api/settings` never returns the raw PAT and only returns a redacted mask\n- [ ] Token read/write paths are covered by tests for invalid token and missing token cases",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "_WteDpt9nI81",
+          "title": "As a project owner, I want remote detection and one-click connection so that enabling GitHub per project is fast",
+          "description": "Auto-detect GitHub origin from local git remotes and let users persist `githubOwnerRepo` directly from a contextual banner.",
+          "acceptance_criteria": "- [ ] `POST /api/projects/[projectId]/git/detect-remote` parses `origin` and returns detected `owner/repo` when present\n- [ ] Projects with git repo path and missing `githubOwnerRepo` show a connect banner\n- [ ] Clicking connect persists `githubOwnerRepo` on the project\n- [ ] Dismiss state prevents repeated prompts in the same project context",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "n0-fSPElG6Ez",
+          "title": "As a developer, I want push/pull/fetch/status API routes so that remote synchronization can be done from Arij",
+          "description": "Create git remote routes backed by `simple-git` with consistent request validation and error contracts.",
+          "acceptance_criteria": "- [ ] `push`, `pull`, `fetch`, and `status` routes are implemented and validated for required parameters\n- [ ] Pull uses fast-forward-only behavior and returns explicit conflict/non-ff errors\n- [ ] Status endpoint returns ahead/behind counts for a requested branch\n- [ ] Routes fail with clear `not_configured` errors when GitHub integration is absent",
+          "status": "todo",
+          "position": 2
+        },
+        {
+          "id": "AqECg-dxu69i",
+          "title": "As an operator, I want remote operations journaled so that debugging and auditability are straightforward",
+          "description": "Add `git_sync_log` persistence for all remote actions and expose a retrieval path for project troubleshooting.",
+          "acceptance_criteria": "- [ ] `git_sync_log` table records operation, branch, status, detail, and timestamp per remote action\n- [ ] Push/pull/fetch/tag/pr/release operations all write success/failure audit entries\n- [ ] Failure logs include sanitized error payloads sufficient for troubleshooting\n- [ ] A project-level query path exists to retrieve recent sync log rows",
+          "status": "todo",
+          "position": 3
+        }
+      ]
+    },
+    {
+      "id": "waYcvnu1h03w",
+      "title": "Pull Request Workflow from Epics",
+      "description": "Enable one-click push and PR creation from epic context, persist PR metadata, and synchronize status back into Arij UI. This epic extends git sync into full review workflow support.",
+      "priority": 2,
+      "status": "in_progress",
+      "position": 2,
+      "branchName": "feature/epic-waYcvnu1h03w-pull-request-workflow-from-epics",
+      "user_stories": [
+        {
+          "id": "um1kPVKISA5V",
+          "title": "As a developer, I want epic records to store PR metadata so that PR state is visible in Arij",
+          "description": "Extend schema with PR fields and create a pull request table for normalized PR tracking.",
+          "acceptance_criteria": "- [ ] `epics` includes `prNumber`, `prUrl`, and `prStatus` fields\\n- [ ] `pullRequests` table exists with project and epic linkage and PR lifecycle fields\\n- [ ] Drizzle migrations are generated and applied cleanly\\n- [ ] Existing epic queries continue to work after schema changes",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "GG9aKOHJ_PCU",
+          "title": "As a developer, I want Push and Create PR in one action so that I can open review requests quickly",
+          "description": "Create an API route that pushes the branch and creates a GitHub PR with generated body content from epic and story data.",
+          "acceptance_criteria": "- [ ] PR create endpoint validates GitHub config, branch existence, and token availability\\n- [ ] Endpoint pushes branch before creating PR and handles push errors explicitly\\n- [ ] PR body includes epic summary and story checklist generated from current data\\n- [ ] On success, PR metadata is persisted and linked back to epic",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "YGXI73SG-kiQ",
+          "title": "As a reviewer, I want PR status badges and sync controls so that I can track open, draft, closed, and merged states",
+          "description": "Expose PR status in Epic Detail and allow manual sync from GitHub to refresh current state.",
+          "acceptance_criteria": "- [ ] Epic Detail shows create action when no PR exists and status badge when PR exists\\n- [ ] Status sync action updates local PR status from GitHub\\n- [ ] Badge variants cover draft, open, closed, and merged\\n- [ ] Errors during sync are shown non-destructively to the user",
+          "status": "todo",
+          "position": 2
+        },
+        {
+          "id": "nZtQLYQ8anqc",
+          "title": "As a stakeholder, I want PR references on epic cards so that board-level progress includes review status",
+          "description": "Show compact PR number and link indicator on epic cards whenever PR metadata exists.",
+          "acceptance_criteria": "- [ ] Epic card shows PR icon plus number when `prNumber` is present\\n- [ ] PR indicator links to `prUrl` in a new browser tab\\n- [ ] Card layout remains stable across board columns\\n- [ ] No PR indicator appears for epics without PR metadata",
+          "status": "todo",
+          "position": 3
+        }
+      ]
+    },
+    {
+      "id": "LiSlsRifJqo-",
+      "title": "Unified Chat and Epic Creation Split Workspace",
+      "description": "Fuse New Epic into the chat system and move to a right-docked, resizable split layout where board and chat coexist. Preserve strong context controls including agent type per tab.",
+      "priority": 2,
+      "status": "in_progress",
+      "position": 3,
+      "branchName": "feature/epic-LiSlsRifJqo--unified-chat-and-epic-creation-split-wor",
+      "user_stories": [
+        {
+          "id": "hsBcMrOWMgM9",
+          "title": "As a product user, I want a collapsed right-side chat rail so that the board stays focused while chat remains quickly accessible",
+          "description": "Implement a default collapsed panel with a visible grey sliver and expand/collapse interactions from header actions.",
+          "acceptance_criteria": "- [ ] The right-side chat panel is collapsed by default and leaves an always-visible grey rail near 5% of viewport width\n- [ ] Clicking `Chat` or `New Epic` expands the panel\n- [ ] Users can manually collapse the panel again\n- [ ] Expanded/collapsed state persists per project and reload",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "rtq_iadUW0w3",
+          "title": "As a product user, I want New Epic fused with chat tabs so that epic ideation and creation happen in one place",
+          "description": "Remove separate New Epic modal and open `epic_creation` chat tabs that use epic-specific prompting and in-panel create action.",
+          "acceptance_criteria": "- [ ] `New Epic` no longer opens a separate modal and instead opens a new `epic_creation` chat tab\n- [ ] Chat streaming route selects epic-creation prompt logic when conversation type is `epic_creation`\n- [ ] The epic creation tab exposes `Create Epic and Generate Stories` action inside the panel\n- [ ] On success, board data refreshes and the created epic is selectable from kanban",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "RCBX0i7SMehp",
+          "title": "As a product user, I want board and chat in a resizable split so that I can choose the best work context",
+          "description": "Add a draggable divider with bounds and persisted width for desktop, plus robust mobile fallback behavior.",
+          "acceptance_criteria": "- [ ] Board and chat panel render in a two-pane layout when panel is expanded\n- [ ] Divider is draggable with min/max widths to prevent unusable layout\n- [ ] Pane width is persisted and restored on reload\n- [ ] On mobile, panel falls back to full-screen drawer behavior without breaking board actions",
+          "status": "todo",
+          "position": 2
+        },
+        {
+          "id": "lpkCJCiECTNv",
+          "title": "As a product user, I want agent type selection present on every new chat so that execution context is explicit",
+          "description": "Ensure newly created chat tabs always include an initialized agent type selector and persist this value at conversation level.",
+          "acceptance_criteria": "- [ ] Agent type selector is visible on every newly created chat tab, including `epic_creation`\n- [ ] New tabs initialize with configured default agent type\n- [ ] Changing agent type updates only the active tab unless user explicitly changes global default\n- [ ] Selected agent type is saved in conversation metadata and used for execution",
+          "status": "todo",
+          "position": 3
+        }
+      ]
+    },
+    {
+      "id": "7FFiclGUqPE-",
+      "title": "GitHub Release Lifecycle",
+      "description": "Extend release creation flow to support tag push and GitHub draft release creation, then allow publishing drafts directly from Arij. Keep explicit user control with draft-first strategy.",
+      "priority": 2,
+      "status": "in_progress",
+      "position": 3,
+      "branchName": "feature/epic-7FFiclGUqPE--github-release-lifecycle",
+      "user_stories": [
+        {
+          "id": "K6_IUHc-yGnX",
+          "title": "As a release manager, I want an option to push release tags to GitHub so that releases can be prepared remotely at creation time",
+          "description": "Enhance release creation endpoint to accept push-to-GitHub flag and execute tag push plus draft release creation when enabled.",
+          "acceptance_criteria": "- [ ] Release create API accepts `pushToGitHub` boolean input\\n- [ ] When enabled, API pushes the tag before creating GitHub draft release\\n- [ ] Release record stores `githubReleaseId`, `githubReleaseUrl`, and `pushedAt`\\n- [ ] If GitHub push fails, local release creation behavior is deterministic and error is explicit",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "ZYmhbo0QGHZF",
+          "title": "As a release manager, I want to publish a draft GitHub release from Arij so that I can finalize releases without leaving the app",
+          "description": "Add publish endpoint and UI action to publish previously created draft GitHub releases.",
+          "acceptance_criteria": "- [ ] Publish endpoint exists for release id and validates GitHub configuration\\n- [ ] Publish action updates local release metadata after remote success\\n- [ ] UI disables publish while request is in progress to prevent duplicate submits\\n- [ ] Publish failures are surfaced with actionable messages",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "_4nrauNQA62P",
+          "title": "As a product lead, I want release cards to display GitHub state so that release readiness is visible at a glance",
+          "description": "Update releases page with draft badge, publish button, and external GitHub link visibility rules.",
+          "acceptance_criteria": "- [ ] Draft releases show explicit draft badge\\n- [ ] Publish button appears only for draft releases with valid GitHub mapping\\n- [ ] View on GitHub link appears when `githubReleaseUrl` exists\\n- [ ] Push-to-GitHub checkbox appears only when project GitHub config is complete",
+          "status": "todo",
+          "position": 2
+        },
+        {
+          "id": "f-cAL6j1bTgd",
+          "title": "As an operator, I want release operations logged in sync logs so that release incidents can be traced",
+          "description": "Record push tag, release create, and release publish operations in `gitSyncLog` with success or failure details.",
+          "acceptance_criteria": "- [ ] Tag push, release create, and release publish write `gitSyncLog` records\\n- [ ] Log entries include operation type, project id, status, and detail payload\\n- [ ] Failures include remote error identifiers when available\\n- [ ] Logs can be queried by release workflow for debugging",
+          "status": "todo",
+          "position": 3
+        }
+      ]
+    },
+    {
+      "id": "o6pppVoehWCp",
+      "title": "Sessions Tab Readability and Activity Summary UX",
+      "description": "Make the Sessions tab readable under real-world payload sizes and surface concise live progress text for running sessions.",
+      "priority": 2,
+      "status": "in_progress",
+      "position": 4,
+      "branchName": "feature/epic-o6pppVoehWCp-sessions-tab-readability-and-activity-su",
+      "user_stories": [
+        {
+          "id": "DV_P9gjppaaz",
+          "title": "As a product user, I want scrollable log viewers so that long responses and logs stay contained and readable",
+          "description": "Wrap responses/raw/output in bounded scroll containers to prevent overflow and preserve layout integrity.",
+          "acceptance_criteria": "- [ ] `Responses`, `Raw log`, and `Output` each render inside contained scrollable viewers with fixed max height\n- [ ] No log content spills outside the session tab container at any viewport size\n- [ ] Very long entries remain accessible through vertical scrolling\n- [ ] Viewer layout is responsive on desktop and mobile widths",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "BUvrycgTj3OQ",
+          "title": "As a product user, I want improved text formatting so that raw logs and outputs are easier to inspect",
+          "description": "Use monospace rendering, safe wrapping, and lightweight formatting for JSON payloads with copy support.",
+          "acceptance_criteria": "- [ ] Raw logs render in monospace with preserved line breaks\n- [ ] Long lines wrap safely or provide horizontal scrolling without overlapping sibling UI\n- [ ] JSON-like payloads are pretty-printed when valid JSON is detected\n- [ ] Copy-to-clipboard action copies full underlying content",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "aL5DqzKJrClH",
+          "title": "As a product user, I want to see elapsed time with the latest meaningful text so that I can understand active progress quickly",
+          "description": "Consume `lastNonEmptyText` from session APIs and render a concise line beside elapsed time in running rows.",
+          "acceptance_criteria": "- [ ] Session rows display elapsed time plus truncated `lastNonEmptyText` while running\n- [ ] Empty summary gracefully falls back to a neutral placeholder\n- [ ] Summary updates live during polling without full page refresh",
+          "status": "todo",
+          "position": 2
+        }
+      ]
+    },
+    {
+      "id": "wHh9OkV7DiqR",
+      "title": "Codex Session Tracking Hardening and Sessions Viewer Upgrade",
+      "description": "Fix Codex telemetry correctness and improve sessions UI readability for long logs. Provide server-derived status text and contained scrollable viewers for responses, raw logs, and output.",
+      "priority": 2,
+      "status": "in_progress",
+      "position": 4,
+      "branchName": "feature/epic-wHh9OkV7DiqR-codex-session-tracking-hardening-and-ses",
+      "user_stories": [
+        {
+          "id": "rsEIf2Wm4sWL",
+          "title": "As an engineer, I want stable Codex session and response linkage so that each log chunk is attached to the correct run",
+          "description": "Harden session lifecycle transitions and append ordering in backend ingestion paths.",
+          "acceptance_criteria": "- [ ] Session status transitions are consistent across running, completed, and failed states\\n- [ ] Response and raw log chunks retain deterministic ordering\\n- [ ] No log chunk is attached to the wrong session under concurrent activity\\n- [ ] Regression tests cover parallel session ingestion scenarios",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "SNvOWnLuNW3D",
+          "title": "As a user, I want last non-empty output text displayed for active sessions so that I can track progress quickly",
+          "description": "Derive and expose a concise last non-empty text field from Codex output and display it next to elapsed time for running sessions.",
+          "acceptance_criteria": "- [ ] Backend exposes `lastNonEmptyText` for active and completed sessions\\n- [ ] Extraction ignores blank and whitespace-only lines\\n- [ ] Sessions list shows elapsed time plus last non-empty text when available\\n- [ ] Field updates incrementally as new output arrives",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "wao0PDgUsa6l",
+          "title": "As a user, I want response, raw log, and output displayed in scrollable viewers so that long content does not break layout",
+          "description": "Refactor sessions tab content areas into fixed-height, monospace, scrollable panes with wrapping behavior tuned for readability.",
+          "acceptance_criteria": "- [ ] Responses, raw logs, and output each render inside contained scroll areas\\n- [ ] No horizontal spillover outside card or panel boundaries\\n- [ ] Monospace rendering with pre-wrap preserves readability for mixed long lines and JSON\\n- [ ] Large payload rendering remains responsive on typical local machines",
+          "status": "todo",
+          "position": 2
+        },
+        {
+          "id": "8Q1fhsVBbcUn",
+          "title": "As QA, I want automated checks for session rendering and overflow behavior so that regressions are caught early",
+          "description": "Add unit and integration tests for session parsing, last text extraction, and visual containment constraints.",
+          "acceptance_criteria": "- [ ] Unit tests validate last non-empty text extraction edge cases\\n- [ ] Integration tests validate session list updates during active runs\\n- [ ] UI tests cover overflow and scroll behavior for long response and log content\\n- [ ] Test suite passes in CI or local verification pipeline",
+          "status": "todo",
+          "position": 3
+        }
+      ]
+    },
+    {
+      "id": "U36Sur6N5moa",
+      "title": "Git Sync UX in Epic Detail",
+      "description": "Expose branch ahead/behind state and push controls directly in epic detail, gated by project GitHub configuration.",
+      "priority": 2,
+      "status": "in_progress",
+      "position": 5,
+      "branchName": "feature/epic-U36Sur6N5moa-git-sync-ux-in-epic-detail",
+      "user_stories": [
+        {
+          "id": "Q6KzqDwPWEKq",
+          "title": "As a frontend developer, I want dedicated GitHub and git-status hooks so that sync state is reusable and consistent",
+          "description": "Create `useGitHubConfig` and `useGitStatus` hooks with clear loading/error semantics and branch-aware caching.",
+          "acceptance_criteria": "- [ ] `useGitHubConfig(projectId)` returns `configured`, `ownerRepo`, `tokenSet`, and `loading`\n- [ ] `useGitStatus(projectId, branchName)` returns `ahead`, `behind`, `loading`, `pushing`, `push()`, and `refresh()`\n- [ ] Hooks debounce duplicate requests and expose normalized error states\n- [ ] Hooks are unit-tested with success and failure scenarios",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "pSwu4YMaxpyv",
+          "title": "As a product user, I want a Git sync badge so that I can push branches from the epic detail view",
+          "description": "Build `GitSyncBadge` with ahead/behind counters, push action, and manual refresh affordance.",
+          "acceptance_criteria": "- [ ] `GitSyncBadge` displays ahead/behind badges for the epic branch\n- [ ] `Push to Remote` is disabled when `ahead` is zero or task lock is active\n- [ ] Manual refresh updates counts and loading visuals\n- [ ] Push success/failure produces clear toast feedback",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "B_-Berqglykg",
+          "title": "As a product user, I want conditional epic integration so that GitHub controls appear only when relevant",
+          "description": "Render sync controls only for configured projects with valid branch context and keep local-only workflow unchanged.",
+          "acceptance_criteria": "- [ ] Epic detail shows `GitSyncBadge` next to branch metadata only when GitHub is configured and branch exists\n- [ ] UI remains hidden for projects without GitHub configuration\n- [ ] Existing local build/review actions continue to work unchanged",
+          "status": "todo",
+          "position": 2
+        }
+      ]
+    },
+    {
+      "id": "uU4p42bLNWzo",
+      "title": "Unified Chat and Epic Creation Workspace",
+      "description": "Fuse New Epic creation and chat into a single right-side workspace that can be partially collapsed, expanded on demand, and resized against the kanban board. Ensure each new chat tab preserves explicit agent type selection.",
+      "priority": 1,
+      "status": "in_progress",
+      "position": 5,
+      "branchName": "feature/epic-uU4p42bLNWzo-unified-chat-and-epic-creation-workspace",
+      "user_stories": [
+        {
+          "id": "ZhXPgacV0mg3",
+          "title": "As a product manager, I want New Epic and Chat merged into one panel so that ideation and discussion happen in a single workflow",
+          "description": "Replace separate New Epic modal or sheet with creation-specific chat tabs in the unified panel.",
+          "acceptance_criteria": "- [ ] Clicking New Epic opens chat panel with a new epic-creation tab\\n- [ ] Normal Chat opens standard conversation tab in same panel\\n- [ ] Legacy CreateEpic sheet or modal entry points are removed\\n- [ ] Epic creation route uses the same message stream endpoint with conversation type routing",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "gP1rF7rqCIYT",
+          "title": "As a user, I want the chat workspace collapsed on the right by default so that board space is preserved until needed",
+          "description": "Implement right-edge collapsed state with a visible sliver and open behavior from chat actions.",
+          "acceptance_criteria": "- [ ] Default state shows a subtle right-side collapsed rail segment\\n- [ ] Chat and New Epic actions expand the panel reliably\\n- [ ] Panel can be collapsed again without losing current tabs\\n- [ ] Collapsed and expanded states are visually distinct and accessible",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "p4NRabThQZ6U",
+          "title": "As a user, I want a resizable split between board and chat so that I can adapt layout to my current task",
+          "description": "Introduce adjustable pane ratio with sensible minimum widths for both board and chat.",
+          "acceptance_criteria": "- [ ] Board and chat render side by side in expanded state\\n- [ ] User can drag splitter to resize panel widths\\n- [ ] Minimum widths prevent either pane from becoming unusable\\n- [ ] Layout works on desktop and degrades safely on narrower screens",
+          "status": "todo",
+          "position": 2
+        },
+        {
+          "id": "fDxgJIxx1Njd",
+          "title": "As a user, I want agent type selection pre-populated on every new chat tab so that runs start with explicit provider choice",
+          "description": "Ensure each new tab, including epic-creation tabs, initializes with current agent type defaults and allows per-tab changes.",
+          "acceptance_criteria": "- [ ] New chat tabs initialize with selected agent type\\n- [ ] New epic-creation tabs also initialize with selected agent type\\n- [ ] Changing agent type in one tab does not corrupt existing run metadata in other tabs\\n- [ ] Agent type state persists during panel collapse and expand transitions",
+          "status": "todo",
           "position": 3
         },
         {
-          "id": "Nu7AhjWRevWM",
-          "title": "As a user, I want to select the agent type when creating a new chat so that each conversation uses the appropriate Claude Code mode",
-          "description": "When a new conversation tab is created, show a mandatory agent type selector before allowing the first message. Options include 'Brainstorm' (plan mode), 'Epic Creation' (spec generation), and any custom agent types from agent config. The selector is displayed as a button group or dropdown at the top of the empty chat. Once the first message is sent, the agent type is locked and displayed as a badge in the tab.",
-          "acceptance_criteria": "- [ ] New conversation shows agent type selector before first message\n- [ ] Available types: 'Brainstorm', 'Epic Creation', plus custom types from agent config\n- [ ] Selector rendered as a prominent button group or dropdown in the empty chat area\n- [ ] First message cannot be sent until an agent type is selected\n- [ ] Selected type stored in the conversation record in the database\n- [ ] After first message, agent type is locked and selector becomes a read-only badge\n- [ ] Agent type badge displayed in the tab alongside the title\n- [ ] Agent type determines the prompt builder and Claude Code mode used",
-          "status": "in_progress",
+          "id": "C4HydnBOQxBE",
+          "title": "As a user, I want running indicators on chat tabs so that active agent work is visible immediately",
+          "description": "Show tab-level activity icon when an agent is executing in that conversation.",
+          "acceptance_criteria": "- [ ] Running tab shows activity icon while agent session is active\\n- [ ] Icon clears automatically when session ends\\n- [ ] Indicator state updates without manual refresh\\n- [ ] Tab labels remain readable with indicator present",
+          "status": "todo",
           "position": 4
+        }
+      ]
+    },
+    {
+      "id": "HMaIVdFQ0UQL",
+      "title": "Pull Request Workflow from Epics",
+      "description": "Enable push-and-create PR flow from epic context with generated PR descriptions and synchronized PR status.",
+      "priority": 2,
+      "status": "in_progress",
+      "position": 6,
+      "branchName": "feature/epic-HMaIVdFQ0UQL-pull-request-workflow-from-epics",
+      "user_stories": [
+        {
+          "id": "iLlXl8YtEPVi",
+          "title": "As a developer, I want PR metadata persisted in epics and dedicated PR records so that PR tracking is first-class",
+          "description": "Extend schema with epic PR fields and a `pull_requests` table linked to projects and epics.",
+          "acceptance_criteria": "- [ ] `epics` table includes `prNumber`, `prUrl`, and `prStatus`\n- [ ] `pull_requests` table is added with project/epic linkage and GitHub metadata\n- [ ] Migrations run without data loss and are reversible in development\n- [ ] Type-safe models are updated for new fields",
+          "status": "todo",
+          "position": 0
         },
         {
-          "id": "ewewm47pu8Gj",
-          "title": "As a user, I want the 'Chat' and 'New Epic' buttons to open the unified panel so that all chat interactions happen in one place",
-          "description": "Replace the existing separate chat panel toggle and epic creation flow with actions that open the unified side panel. 'Chat' button in the project toolbar expands the panel and focuses the last active brainstorm tab (or creates a new one). 'New Epic' button expands the panel and creates a new tab with 'Epic Creation' agent type pre-selected. Remove the old standalone chat panel component and epic creation modal/route.",
-          "acceptance_criteria": "- [ ] 'Chat' button in project toolbar expands the unified panel\n- [ ] 'Chat' focuses the last active brainstorm tab or creates a new one if none exists\n- [ ] 'New Epic' button expands the panel and creates a new tab with 'Epic Creation' pre-selected\n- [ ] Old standalone chat panel component removed\n- [ ] Old epic creation modal/route replaced by the new panel flow\n- [ ] Panel can be collapsed back via a close/collapse button or clicking outside\n- [ ] Keyboard shortcut (e.g. Escape) collapses the panel",
-          "status": "in_progress",
-          "position": 5
+          "id": "IUB1GX0eyiwO",
+          "title": "As a product user, I want a backend endpoint to push and create PR so that I can open PRs directly from Arij",
+          "description": "Implement PR route handlers that push branch, create PR via Octokit, and sync status back into local records.",
+          "acceptance_criteria": "- [ ] `POST /api/projects/[projectId]/epics/[epicId]/pr` pushes the branch and creates PR through Octokit\n- [ ] PR body is generated from epic description and story checklist content\n- [ ] `GET /api/projects/[projectId]/epics/[epicId]/pr` syncs current GitHub PR status back to local DB\n- [ ] PR create/sync operations are recorded in `git_sync_log`",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "OaFY1jQeiIvd",
+          "title": "As a product user, I want PR controls and status in epic detail so that I can manage PR lifecycle from one place",
+          "description": "Show create button before PR exists and status badge/link/sync controls afterward, with proper disabled states.",
+          "acceptance_criteria": "- [ ] Epic detail shows `Push and Create PR` when no PR exists\n- [ ] After creation, detail shows PR number, status badge, GitHub link, and sync action\n- [ ] Controls are disabled while requests are running or when task lock is active\n- [ ] Errors include remediation hints for missing branch, missing token, or GitHub API failure",
+          "status": "todo",
+          "position": 2
+        },
+        {
+          "id": "R155mOX4Gvhm",
+          "title": "As a product user, I want PR visibility on epic cards so that I can scan PR state from the board",
+          "description": "Add compact PR badge/icon rendering in kanban card headers with status-aware styles and direct link behavior.",
+          "acceptance_criteria": "- [ ] Epic cards show a PR icon and number when `prNumber` is present\n- [ ] Badge style reflects status (`open`, `draft`, `closed`, `merged`)\n- [ ] Clicking badge opens the PR URL in a new tab",
+          "status": "todo",
+          "position": 3
+        }
+      ]
+    },
+    {
+      "id": "fCWp3o1-jVCK",
+      "title": "Release Workflow with GitHub Draft and Publish",
+      "description": "Extend releases to support pushing tags, creating draft GitHub releases, and publishing from Arij UI.",
+      "priority": 2,
+      "status": "in_progress",
+      "position": 7,
+      "branchName": "feature/epic-fCWp3o1-jVCK-release-workflow-with-github-draft-and-p",
+      "user_stories": [
+        {
+          "id": "p5wy0YeiJLD9",
+          "title": "As a release manager, I want release records linked to GitHub releases so that local and remote release states stay aligned",
+          "description": "Add GitHub release metadata fields and extend release creation flow with optional push-and-draft behavior.",
+          "acceptance_criteria": "- [ ] `releases` table includes `githubReleaseId`, `githubReleaseUrl`, and `pushedAt`\n- [ ] Release creation endpoint accepts `pushToGitHub`\n- [ ] When enabled, release flow pushes tag and creates a draft GitHub release\n- [ ] Tag push and draft creation outcomes are logged in `git_sync_log`",
+          "status": "todo",
+          "position": 0
+        },
+        {
+          "id": "DKBk_lWG0wx3",
+          "title": "As a release manager, I want a publish endpoint for drafts so that final publication can happen directly from Arij",
+          "description": "Implement draft publish API behavior with robust edge-case handling and local status synchronization.",
+          "acceptance_criteria": "- [ ] `POST /api/projects/[projectId]/releases/[releaseId]/publish` publishes existing draft release on GitHub\n- [ ] Endpoint handles already-published and missing-release edge cases with explicit errors\n- [ ] Local release record is updated with published state and timestamps after success",
+          "status": "todo",
+          "position": 1
+        },
+        {
+          "id": "y92WbFNkfIcA",
+          "title": "As a release manager, I want GitHub-aware release UI so that I can create, publish, and navigate releases efficiently",
+          "description": "Add GitHub controls in release creation and release cards with proper gating and loading states.",
+          "acceptance_criteria": "- [ ] Release creation dialog shows `Push to GitHub` checkbox only when GitHub is configured\n- [ ] Release cards show Draft badge, Publish button, and View on GitHub link when applicable\n- [ ] Publish action shows loading/disabled states and prevents duplicate submission\n- [ ] Projects without GitHub config continue to use local release flow with no GitHub controls",
+          "status": "todo",
+          "position": 2
         }
       ]
     }
