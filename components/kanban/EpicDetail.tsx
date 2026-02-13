@@ -38,6 +38,7 @@ import { isAgentAlreadyRunningError } from "@/lib/agents/client-error";
 import { useCodexAvailable } from "@/hooks/useCodexAvailable";
 import type { ProviderType } from "@/components/shared/ProviderSelect";
 import { PermanentDeleteDialog } from "@/components/shared/PermanentDeleteDialog";
+import { DependencyEditor } from "@/components/dependencies/DependencyEditor";
 
 interface EpicDetailProps {
   projectId: string;
@@ -112,6 +113,21 @@ export function EpicDetail({
   }, [isRunning, setPolling]);
 
   const [newUSTitle, setNewUSTitle] = useState("");
+  const [projectEpics, setProjectEpics] = useState<
+    Array<{ id: string; title: string; status: string }>
+  >([]);
+
+  // Fetch all epics in the project for the dependency dropdown
+  useEffect(() => {
+    if (!epicId) return;
+    fetch(`/api/projects/${projectId}/epics`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data) setProjectEpics(d.data);
+      })
+      .catch(() => {});
+  }, [projectId, epicId]);
+
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
   const [resolvingMerge, setResolvingMerge] = useState(false);
@@ -584,6 +600,17 @@ export function EpicDetail({
                   </Button>
                 </div>
               </div>
+              )}
+
+              <Separator />
+
+              {/* Dependencies */}
+              {epicId && (
+                <DependencyEditor
+                  projectId={projectId}
+                  epicId={epicId}
+                  projectEpics={projectEpics}
+                />
               )}
 
               <Separator />
