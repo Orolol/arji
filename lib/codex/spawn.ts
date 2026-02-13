@@ -3,12 +3,21 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import type { ClaudeResult, SpawnedClaude } from "@/lib/claude/spawn";
+import {
+  createStreamLog,
+  appendStreamEvent,
+  appendStderrEvent,
+  endStreamLog,
+  type StreamLogContext,
+} from "@/lib/claude/logger";
 
 export interface CodexOptions {
   mode: "plan" | "code" | "analyze";
   prompt: string;
   cwd?: string;
   model?: string;
+  /** Optional identifier for NDJSON session logging (same format as Claude Code). */
+  logIdentifier?: string;
 }
 
 /**
@@ -22,7 +31,7 @@ export interface CodexOptions {
  * by the process manager.
  */
 export function spawnCodex(options: CodexOptions): SpawnedClaude {
-  const { mode, prompt, cwd, model } = options;
+  const { mode, prompt, cwd, model, logIdentifier } = options;
 
   // Temp file for -o (reliable output capture)
   const outputFile = path.join(
@@ -70,6 +79,16 @@ export function spawnCodex(options: CodexOptions): SpawnedClaude {
   );
   console.log("[spawn] cwd:", effectiveCwd);
 
+  // Optional NDJSON logging (same format as Claude Code)
+  let logCtx: StreamLogContext | null = null;
+  if (logIdentifier) {
+    try {
+      logCtx = createStreamLog(`codex-${logIdentifier}`, ["codex", ...args], prompt);
+    } catch {
+      // logging is best-effort
+    }
+  }
+
   let child: ChildProcess | null = null;
   let killed = false;
 
@@ -86,30 +105,35 @@ export function spawnCodex(options: CodexOptions): SpawnedClaude {
 
     child.stdout?.on("data", (chunk: Buffer) => {
       stdoutChunks.push(chunk);
+      if (logCtx) {
+        try { appendStreamEvent(logCtx, chunk.toString("utf-8")); } catch { /* best-effort */ }
+      }
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
       stderrChunks.push(chunk);
+      if (logCtx) {
+        try { appendStderrEvent(logCtx, chunk.toString("utf-8")); } catch { /* best-effort */ }
+      }
     });
 
     child.on("error", (err) => {
       const duration = Date.now() - startTime;
       cleanup();
 
-      if (err.message.includes("ENOENT")) {
-        resolve({
-          success: false,
-          error:
-            "Codex CLI not found. Install it with: npm i -g @openai/codex",
-          duration,
-        });
-      } else {
-        resolve({
-          success: false,
-          error: `Failed to spawn Codex CLI: ${err.message}`,
-          duration,
-        });
+      const errorMsg = err.message.includes("ENOENT")
+        ? "Codex CLI not found. Install it with: npm i -g @openai/codex"
+        : `Failed to spawn Codex CLI: ${err.message}`;
+
+      if (logCtx) {
+        try { endStreamLog(logCtx, { exitCode: null, error: errorMsg }); } catch { /* best-effort */ }
       }
+
+      resolve({
+        success: false,
+        error: errorMsg,
+        duration,
+      });
     });
 
     child.on("close", (code) => {
@@ -149,6 +173,14 @@ export function spawnCodex(options: CodexOptions): SpawnedClaude {
       }
       if (result) {
         console.log("[spawn] output preview:", result.slice(0, 300));
+      }
+
+      // Log the final output and end-of-session
+      if (logCtx) {
+        try {
+          if (result) appendStreamEvent(logCtx, result);
+          endStreamLog(logCtx, { exitCode: code, error: code !== 0 ? stderr.slice(0, 500) : undefined });
+        } catch { /* best-effort */ }
       }
 
       if (killed) {

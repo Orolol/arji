@@ -318,6 +318,64 @@ You are helping define a new epic for this project. Based on the conversation so
 }
 
 // ---------------------------------------------------------------------------
+// 4b. Epic Finalization Prompt
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the prompt that asks the AI to output the final structured epic
+ * with user stories as JSON, based on the refinement conversation so far.
+ */
+export function buildEpicFinalizationPrompt(
+  project: PromptProject,
+  documents: PromptDocument[],
+  messages: PromptMessage[],
+  systemPrompt?: string | null,
+  existingEpics: PromptEpic[] = [],
+): string {
+  const parts: string[] = [];
+
+  parts.push(systemSection(systemPrompt));
+  parts.push(`# Project: ${project.name}\n`);
+  parts.push(section("Project Description", project.description));
+  parts.push(section("Project Specification", project.spec));
+  parts.push(documentsSection(documents));
+  parts.push(existingEpicsSection(existingEpics));
+  parts.push(chatHistorySection(messages));
+
+  parts.push(`## Instructions
+
+Based on the conversation above, generate the final epic with user stories.
+
+Return ONLY a JSON code block with the following structure — no extra text, no explanation, just the fenced JSON:
+
+\`\`\`json
+{
+  "title": "Epic title",
+  "description": "Detailed epic description including implementation plan",
+  "userStories": [
+    {
+      "title": "As a [role], I want [feature] so that [benefit]",
+      "description": "Detailed description of the user story",
+      "acceptanceCriteria": "- [ ] Criterion 1\\n- [ ] Criterion 2"
+    }
+  ]
+}
+\`\`\`
+
+Rules:
+- The title should be concise and descriptive.
+- The description should include a detailed implementation plan.
+- Generate 2-8 user stories that fully cover the epic scope.
+- User stories must follow the "As a [role], I want [feature] so that [benefit]" format.
+- Acceptance criteria must be a markdown checklist.
+- Be specific and actionable — avoid vague descriptions.
+- Incorporate relevant details from the project spec and reference documents.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // 5. Epic Creation Prompt
 // ---------------------------------------------------------------------------
 

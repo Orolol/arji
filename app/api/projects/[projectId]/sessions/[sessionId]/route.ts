@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { processManager } from "@/lib/claude/process-manager";
+import { activityRegistry } from "@/lib/activity-registry";
 import fs from "fs";
 
 export async function GET(
@@ -46,6 +47,11 @@ export async function DELETE(
     .get();
 
   if (!session) {
+    // Try activity registry as fallback for ephemeral activities
+    const cancelled = activityRegistry.cancel(sessionId);
+    if (cancelled) {
+      return NextResponse.json({ data: { cancelled: true } });
+    }
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 

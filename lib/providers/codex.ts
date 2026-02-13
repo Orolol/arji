@@ -17,13 +17,14 @@ export class CodexProvider implements AgentProvider {
   readonly type = "codex" as const;
 
   spawn(options: ProviderSpawnOptions): ProviderSession {
-    const { sessionId, prompt, cwd, mode, model } = options;
+    const { sessionId, prompt, cwd, mode, model, logIdentifier } = options;
 
     const spawned = spawnCodex({
       mode,
       prompt,
       cwd,
       model,
+      logIdentifier,
     });
 
     return {

@@ -20,6 +20,8 @@ export interface ProviderSpawnOptions {
   allowedTools?: string[];
   /** Model override. */
   model?: string;
+  /** Optional identifier for NDJSON session logging. */
+  logIdentifier?: string;
 }
 
 export interface ProviderResult {
