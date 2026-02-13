@@ -33,23 +33,70 @@ function extractGeminiResult(stdout: string): string {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line.startsWith("{") || !line.endsWith("}")) continue;
+  // Try structured JSON parsing first (handles stream-json and json formats)
+  const textParts: string[] = [];
+  for (const line of lines) {
+    if (!line.startsWith("{") && !line.startsWith("[")) continue;
     try {
-      const parsed = JSON.parse(line) as { result?: unknown; output?: unknown; text?: unknown };
-      if (typeof parsed.result === "string" && parsed.result.trim().length > 0) {
-        return parsed.result.trim();
+      const event = JSON.parse(line) as Record<string, unknown>;
+
+      // stream-json event formats
+      if (event.type === "text" && typeof event.text === "string") {
+        textParts.push(event.text);
+        continue;
       }
-      if (typeof parsed.output === "string" && parsed.output.trim().length > 0) {
-        return parsed.output.trim();
+      if (
+        event.type === "content_block_delta" &&
+        typeof event.delta === "object" &&
+        event.delta !== null &&
+        typeof (event.delta as Record<string, unknown>).text === "string"
+      ) {
+        textParts.push((event.delta as Record<string, unknown>).text as string);
+        continue;
       }
-      if (typeof parsed.text === "string" && parsed.text.trim().length > 0) {
-        return parsed.text.trim();
+      if (event.type === "result" && typeof event.result === "string") {
+        textParts.push(event.result);
+        continue;
+      }
+      if (typeof event.content === "string") {
+        textParts.push(event.content);
+        continue;
+      }
+      // Vertex/Gemini API candidates format
+      if (
+        Array.isArray(
+          (event as { candidates?: unknown[] }).candidates
+        )
+      ) {
+        const candidates = (event as { candidates: Array<{ content?: { parts?: Array<{ text?: string }> } }> }).candidates;
+        if (candidates[0]?.content?.parts) {
+          for (const part of candidates[0].content.parts) {
+            if (part.text) textParts.push(part.text);
+          }
+          continue;
+        }
+      }
+
+      // Simple result/output/text fields (json output format)
+      if (typeof event.result === "string" && (event.result as string).trim().length > 0) {
+        textParts.push((event.result as string).trim());
+        continue;
+      }
+      if (typeof event.output === "string" && (event.output as string).trim().length > 0) {
+        textParts.push((event.output as string).trim());
+        continue;
+      }
+      if (typeof event.text === "string" && (event.text as string).trim().length > 0) {
+        textParts.push((event.text as string).trim());
+        continue;
       }
     } catch {
       // ignore malformed JSON line
     }
+  }
+
+  if (textParts.length > 0) {
+    return textParts.join("");
   }
 
   return trimmed;
@@ -189,9 +236,22 @@ export function spawnGemini(options: GeminiOptions): SpawnedClaude {
       }
 
       if (code !== 0) {
+        const combinedOutput = stderr + "\n" + stdout;
+        let error: string;
+
+        if (/not authenticated|authentication|unauthorized|login/i.test(combinedOutput)) {
+          error =
+            "Gemini CLI is not authenticated. Run `gemini auth login` in your terminal.";
+        } else if (/model.*not found|invalid model/i.test(combinedOutput)) {
+          error =
+            "Invalid model name. Check available Gemini models with `gemini models list`.";
+        } else {
+          error = stderr.trim() || `Gemini CLI exited with code ${code}`;
+        }
+
         resolve({
           success: false,
-          error: stderr.trim() || `Gemini CLI exited with code ${code}`,
+          error,
           result: output || undefined,
           duration,
         });
@@ -200,7 +260,7 @@ export function spawnGemini(options: GeminiOptions): SpawnedClaude {
 
       resolve({
         success: true,
-        result: output,
+        result: output || stdout.trim(),
         duration,
       });
     });

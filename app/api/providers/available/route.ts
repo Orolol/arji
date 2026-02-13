@@ -31,6 +31,7 @@ export async function GET() {
       "claude-code": isOnPath("claude"),
       codex: codexOnPath && isCodexLoggedIn(),
       codexInstalled: codexOnPath,
+      "gemini-cli": isOnPath("gemini"),
     },
   });
 }

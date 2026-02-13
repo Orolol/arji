@@ -88,7 +88,7 @@ class ClaudeProcessManager {
             });
           } catch (error) {
             console.error(
-              `[process-manager] Failed to persist Codex chunk for session ${sessionId}`,
+              `[process-manager] Failed to persist ${provider} chunk for session ${sessionId}`,
               error
             );
           }
