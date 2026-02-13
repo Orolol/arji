@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { processManager } from "@/lib/claude/process-manager";
 import { activityRegistry } from "@/lib/activity-registry";
 import fs from "fs";
+import { extractLastNonEmptyText } from "@/lib/utils/extract-last-text";
 import { listSessionChunks } from "@/lib/agent-sessions/chunks";
 import {
   getSessionStatusForApi,
@@ -56,12 +57,15 @@ export async function GET(
     chunkStreams = null;
   }
 
+  const lastNonEmptyText = extractLastNonEmptyText(session.logsPath);
+
   return NextResponse.json({
     data: {
       ...session,
       status: getSessionStatusForApi(session.status),
       logs,
       chunkStreams,
+      lastNonEmptyText,
     },
   });
 }

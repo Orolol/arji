@@ -14,6 +14,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { formatElapsed } from "@/lib/utils/format-elapsed";
 import type { UnifiedActivity } from "@/hooks/useAgentPolling";
 
 interface AgentMonitorProps {
@@ -38,17 +39,11 @@ export function AgentMonitor({ projectId, activities }: AgentMonitorProps) {
     if (activities.length === 0) return;
 
     function updateElapsed() {
-      const now = Date.now();
+      const now = new Date();
       const newElapsed: Record<string, string> = {};
       for (const a of activities) {
         if (a.startedAt) {
-          const seconds = Math.floor(
-            (now - new Date(a.startedAt).getTime()) / 1000
-          );
-          const mins = Math.floor(seconds / 60);
-          const secs = seconds % 60;
-          newElapsed[a.id] =
-            mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+          newElapsed[a.id] = formatElapsed(a.startedAt, now);
         }
       }
       setElapsed(newElapsed);
