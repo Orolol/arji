@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
-import { ArrowLeft, Kanban, FileText, Files, Activity, Tag, RefreshCw } from "lucide-react";
+import { ArrowLeft, Kanban, FileText, Files, Activity, Tag, RefreshCw, ShieldCheck } from "lucide-react";
 import { GitHubConnectBanner } from "@/components/github/GitHubConnectBanner";
 import { useEffect, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
@@ -80,6 +80,11 @@ export default function ProjectLayout({
       href: `/projects/${projectId}/sessions`,
       label: "Sessions",
       icon: Activity,
+    },
+    {
+      href: `/projects/${projectId}/qa`,
+      label: "QA",
+      icon: ShieldCheck,
     },
     {
       href: `/projects/${projectId}/releases`,

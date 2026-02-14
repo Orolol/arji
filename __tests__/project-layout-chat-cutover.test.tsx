@@ -39,6 +39,7 @@ describe("project layout chat cutover", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Chat" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /QA/i })).toBeInTheDocument();
     expect(screen.getByTestId("project-content")).toBeInTheDocument();
     expect(screen.getByTestId("github-connect-banner")).toBeInTheDocument();
   });
