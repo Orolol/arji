@@ -24,6 +24,16 @@ interface GeneratedEpic {
   userStories: GeneratedStory[];
 }
 
+const RAW_SNIPPET_LIMIT = 1200;
+
+function toSnippet(value: string, limit = RAW_SNIPPET_LIMIT): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= limit) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, limit)}... [truncated]`;
+}
+
 function toGeneratedStories(value: unknown): GeneratedStory[] {
   if (!Array.isArray(value)) return [];
 
@@ -204,12 +214,32 @@ Rules:
   }
 
   const extracted = extractJsonFromOutput<unknown>(result.result);
-  const generatedEpics = toGeneratedEpics(extracted);
-  if (generatedEpics.length === 0) {
+  if (extracted === null || typeof extracted !== "object") {
+    const rawSnippet = toSnippet(result.result);
+    console.error("[qa/create-epics] Parsed non-object JSON from agent response", {
+      parsedType: extracted === null ? "null" : typeof extracted,
+      rawOutput: result.result,
+    });
     return NextResponse.json(
       {
         error: "Failed to parse epics JSON from agent response",
-        raw: result.result,
+        rawSnippet,
+      },
+      { status: 500 },
+    );
+  }
+
+  const generatedEpics = toGeneratedEpics(extracted);
+  if (generatedEpics.length === 0) {
+    const rawSnippet = toSnippet(result.result);
+    console.error("[qa/create-epics] JSON payload could not be normalized into epics", {
+      rawOutput: result.result,
+      extracted,
+    });
+    return NextResponse.json(
+      {
+        error: "Failed to parse epics JSON from agent response",
+        rawSnippet,
       },
       { status: 500 },
     );

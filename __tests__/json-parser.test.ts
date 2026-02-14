@@ -185,6 +185,22 @@ describe("extractJsonFromOutput", () => {
     expect(extractJsonFromOutput("")).toBeNull();
   });
 
+  it("extracts JSON from result envelope with content-array payload", () => {
+    const envelope = JSON.stringify({
+      type: "result",
+      result: {
+        content: [
+          {
+            type: "text",
+            text: '[{"title":"Epic A","userStories":[{"title":"Story A"}]}]',
+          },
+        ],
+      },
+    });
+    const result = extractJsonFromOutput<Array<{ title: string }>>(envelope);
+    expect(result).toEqual([{ title: "Epic A", userStories: [{ title: "Story A" }] }]);
+  });
+
   it("extracts JSON from result envelope", () => {
     const envelope = JSON.stringify({
       type: "result",
@@ -192,6 +208,15 @@ describe("extractJsonFromOutput", () => {
     });
     const result = extractJsonFromOutput<{ project: string }>(envelope);
     expect(result).toEqual({ project: "test", imports: [] });
+  });
+
+  it("returns null for result envelope with no JSON payload", () => {
+    const envelope = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      result: "",
+    });
+    expect(extractJsonFromOutput(envelope)).toBeNull();
   });
 
   it("extracts JSON from markdown code fence", () => {
@@ -204,6 +229,31 @@ describe("extractJsonFromOutput", () => {
     const text = 'Some preamble text\n{"key": "value"}\nMore text';
     const result = extractJsonFromOutput<{ key: string }>(text);
     expect(result).toEqual({ key: "value" });
+  });
+
+  it("extracts JSON from NDJSON output", () => {
+    const ndjson = [
+      JSON.stringify({ type: "init", session_id: "sess-1" }),
+      JSON.stringify({
+        type: "result",
+        result: {
+          content: [
+            {
+              type: "text",
+              text: "Some preamble\n```json\n{\"epics\":[{\"title\":\"NDJSON Epic\"}]}\n```",
+            },
+          ],
+        },
+      }),
+    ].join("\n");
+    const result = extractJsonFromOutput<{ epics: Array<{ title: string }> }>(ndjson);
+    expect(result).toEqual({ epics: [{ title: "NDJSON Epic" }] });
+  });
+
+  it("extracts direct JSON arrays of plain objects", () => {
+    const text = '[{"title":"Epic A","description":"From plain array"}]';
+    const result = extractJsonFromOutput<Array<{ title: string; description: string }>>(text);
+    expect(result).toEqual([{ title: "Epic A", description: "From plain array" }]);
   });
 });
 

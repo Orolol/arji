@@ -106,25 +106,59 @@ export function extractJsonFromOutput<T = unknown>(
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
-  // Step 1: If the raw output is the --output-format json envelope,
-  // extract the "result" field first
+  // Parse text content first so envelope/object-array formats are normalized.
+  const parsedContent = parseClaudeOutput(trimmed).content.trim();
+  const fromParsedContent = tryExtractJsonFromText<T>(parsedContent);
+  if (fromParsedContent !== null) {
+    return fromParsedContent;
+  }
+
+  // Fallback to raw output for cases where parseClaudeOutput cannot preserve
+  // the full JSON structure (for example direct arrays of plain objects).
+  if (parsedContent !== trimmed) {
+    return tryExtractJsonFromText<T>(trimmed);
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function tryParseJson(text: string): unknown | null {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function tryExtractJsonFromText<T = unknown>(value: string): T | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  // Step 1: If the output is a provider envelope, prefer its result payload.
   let contentToSearch = trimmed;
   const envelope = tryParseJson(trimmed);
-  if (
-    envelope &&
-    typeof envelope === "object" &&
-    !Array.isArray(envelope) &&
-    (envelope as Record<string, unknown>).type === "result"
-  ) {
-    const resultField = (envelope as Record<string, unknown>).result;
-    if (typeof resultField === "string") {
-      contentToSearch = resultField;
+  if (isRecord(envelope) && envelope.type === "result") {
+    if (typeof envelope.result === "string") {
+      contentToSearch = envelope.result;
+    } else if (envelope.result !== undefined && envelope.result !== null) {
+      const resultText = parseClaudeOutput(JSON.stringify(envelope.result)).content.trim();
+      contentToSearch = resultText || JSON.stringify(envelope.result);
     }
   }
 
   // Step 2: Try direct parse of the content (maybe it's already JSON)
   const direct = tryParseJson(contentToSearch);
-  if (direct !== null && typeof direct === "object") {
+  if (
+    direct !== null &&
+    typeof direct === "object" &&
+    !isCliResultEnvelope(direct)
+  ) {
     return direct as T;
   }
 
@@ -155,7 +189,11 @@ export function extractJsonFromOutput<T = unknown>(
   const objectMatch = jsonObjectPattern.exec(contentToSearch);
   if (objectMatch) {
     const result = tryParseJson(objectMatch[1]);
-    if (result !== null && typeof result === "object") {
+    if (
+      result !== null &&
+      typeof result === "object" &&
+      !isCliResultEnvelope(result)
+    ) {
       return result as T;
     }
   }
@@ -173,20 +211,23 @@ export function extractJsonFromOutput<T = unknown>(
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-function tryParseJson(text: string): unknown | null {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isCliResultEnvelope(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (value.type !== "result") {
+    return false;
+  }
+  return (
+    "result" in value ||
+    "subtype" in value ||
+    "session_id" in value ||
+    "is_error" in value
+  );
 }
 
 function findSessionIdInValue(value: unknown): string | null {

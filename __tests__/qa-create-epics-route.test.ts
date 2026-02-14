@@ -144,4 +144,86 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
       }),
     );
   });
+
+  it("returns parse error with raw snippet when extracted JSON is non-object", async () => {
+    const longOutput = "x".repeat(1301);
+    mockSpawnClaude.mockReturnValue({
+      promise: Promise.resolve({ success: true, result: longOutput }),
+    });
+    mockExtractJson.mockReturnValue("just text");
+    mockDb.getQueue = [
+      { id: "proj-1", gitRepoPath: "/tmp/repo" },
+      { id: "report-1", projectId: "proj-1", reportContent: "# Findings", namedAgentId: null },
+    ];
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/qa/reports/[reportId]/create-epics/route"
+    );
+    const res = await POST({} as never, {
+      params: Promise.resolve({ projectId: "proj-1", reportId: "report-1" }),
+    });
+    const json = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(json.error).toBe("Failed to parse epics JSON from agent response");
+    expect(json.rawSnippet).toContain("[truncated]");
+    expect(json.rawSnippet.length).toBeLessThan(longOutput.length);
+    expect(mockDb.insertedValues).toHaveLength(0);
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it("normalizes epics payload with aliases and defaults", async () => {
+    mockExtractJson.mockReturnValue({
+      epics: [
+        {
+          title: "  Session Resume Reliability  ",
+          description: "   ",
+          priority: "10",
+          type: "other",
+          user_stories: [
+            {
+              title: "  Handle expired resume sessions  ",
+              description: "  fallback to fresh prompt  ",
+              acceptance_criteria: "  - [ ] Retry with fresh prompt  ",
+            },
+            { title: "   " },
+          ],
+        },
+      ],
+    });
+    mockDb.getQueue = [
+      { id: "proj-1", gitRepoPath: "/tmp/repo" },
+      { id: "report-1", projectId: "proj-1", reportContent: "# Findings", namedAgentId: null },
+    ];
+    mockDb.allQueue = [[{ position: 0 }]];
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/qa/reports/[reportId]/create-epics/route"
+    );
+    const res = await POST({} as never, {
+      params: Promise.resolve({ projectId: "proj-1", reportId: "report-1" }),
+    });
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.epics).toEqual([{ id: "epic-1", title: "Session Resume Reliability" }]);
+    expect(mockDb.insertedValues[0]).toEqual(
+      expect.objectContaining({
+        id: "epic-1",
+        title: "Session Resume Reliability",
+        description: "Epic generated from QA report findings.",
+        priority: 3,
+        type: "feature",
+      }),
+    );
+    expect(mockDb.insertedValues[1]).toEqual(
+      expect.objectContaining({
+        id: "story-1",
+        title: "Handle expired resume sessions",
+        description: "fallback to fresh prompt",
+        acceptanceCriteria: "- [ ] Retry with fresh prompt",
+      }),
+    );
+  });
 });
