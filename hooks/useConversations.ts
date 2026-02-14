@@ -11,6 +11,7 @@ export interface Conversation {
   status?: string | null;
   epicId: string | null;
   provider: string;
+  claudeSessionId?: string | null;
   createdAt: string;
 }
 

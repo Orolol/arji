@@ -1,0 +1,40 @@
+{
+  "migrationId": "2026-02-14T09-26-58-901Z",
+  "projectId": "cUfHlegssamR",
+  "capturedAt": "2026-02-14T09:26:58.901Z",
+  "snapshot": {
+    "conversations": [
+      {
+        "id": "ntu0toHJGarE",
+        "project_id": "cUfHlegssamR",
+        "type": "brainstorm",
+        "label": "Brainstorm",
+        "status": "active",
+        "epic_id": null,
+        "provider": "claude-code",
+        "created_at": "2026-02-14T08:41:16.887Z"
+      }
+    ],
+    "messages": [
+      {
+        "id": "M6FracQdSXrW",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "ntu0toHJGarE",
+        "role": "user",
+        "content": "We need to use sessions and resume sessions when using agent : \n\n1) when chatting, we should always resume the session and only send new message\n2) When we create an agent to work on something, we store the session. When we start a new work (review, build, chat, etc ..) we have a little button \"use a previous session\" which let use select a previous session. Each session can only be slected if from the same agent, and will be named from the last work they did.",
+        "metadata": null,
+        "created_at": "2026-02-14T08:45:26.968Z"
+      },
+      {
+        "id": "9fcm31wuL7PS",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "ntu0toHJGarE",
+        "role": "assistant",
+        "content": "(empty response)",
+        "metadata": null,
+        "created_at": "2026-02-14T08:45:37.551Z"
+      }
+    ],
+    "attachments": []
+  }
+}

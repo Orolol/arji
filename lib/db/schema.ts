@@ -94,6 +94,7 @@ export const chatConversations = sqliteTable("chat_conversations", {
   status: text("status").default("active"), // active | generating | generated | error
   epicId: text("epic_id").references(() => epics.id),
   provider: text("provider").default("claude-code"), // claude-code | codex | gemini-cli
+  claudeSessionId: text("claude_session_id"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -139,6 +140,8 @@ export const agentSessions = sqliteTable("agent_sessions", {
   completedAt: text("completed_at"),
   lastNonEmptyText: text("last_non_empty_text"),
   error: text("error"),
+  claudeSessionId: text("claude_session_id"),
+  agentType: text("agent_type"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 

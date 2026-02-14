@@ -1,0 +1,150 @@
+{
+  "migrationId": "2026-02-14T08-12-44-707Z",
+  "projectId": "cUfHlegssamR",
+  "capturedAt": "2026-02-14T08:12:44.707Z",
+  "snapshot": {
+    "conversations": [
+      {
+        "id": "7X-2_0Dj5geO",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "Delete Epic/Story Button",
+        "status": "active",
+        "epic_id": null,
+        "provider": "codex",
+        "created_at": "2026-02-13T14:38:06.805Z"
+      },
+      {
+        "id": "qgfrxJyLnSc5",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "New Epic",
+        "status": "active",
+        "epic_id": null,
+        "provider": "codex",
+        "created_at": "2026-02-13T15:00:25.874Z"
+      },
+      {
+        "id": "vYhnMwgh2TMq",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "Document Reference System",
+        "status": "active",
+        "epic_id": null,
+        "provider": "codex",
+        "created_at": "2026-02-13T18:18:57.403Z"
+      }
+    ],
+    "messages": [
+      {
+        "id": "e74m51R_e0KM",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "7X-2_0Dj5geO",
+        "role": "user",
+        "content": "Add a button in epic detail and US detail to delete it (with a confirmation dialog)\nNo need to have any recovery mecanism",
+        "metadata": null,
+        "created_at": "2026-02-13T14:38:47.995Z"
+      },
+      {
+        "id": "7ipnHBWhrLqn",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "7X-2_0Dj5geO",
+        "role": "assistant",
+        "content": "This is a good, focused epic candidate, and it looks distinct from your current backlog: none of the listed epics explicitly cover destructive delete actions from the **Epic Detail** and **US (User Story) Detail** views. The closest related areas are `Project CRUD & Dashboard`, `Kanban Board`, and `Ticket Comments, Send-to-Dev & Agent Review`, but this would specifically target detail-page deletion UX + backend delete behavior.\n\nTo keep scope tight, I’d frame it as: add a visible `Delete` action on both detail pages, show a confirmation dialog, and perform immediate permanent deletion (no recovery/undo/trash), with consistent post-delete navigation and state refresh. That keeps it small and implementation-ready without drifting into broader lifecycle features.\n\nTwo clarifications before writing the epic/user stories:\n1. If an **Epic** has linked user stories/tickets/comments/sessions, should delete **cascade everything** automatically, or should it be blocked until children are removed?\n2. Should delete be available to anyone who can edit the project today, or restricted (for example, owner/admin only)?",
+        "metadata": null,
+        "created_at": "2026-02-13T14:39:41.458Z"
+      },
+      {
+        "id": "PIgPu6Zehwoz",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "7X-2_0Dj5geO",
+        "role": "user",
+        "content": "Generate the final epic with user stories based on our discussion.",
+        "metadata": null,
+        "created_at": "2026-02-13T14:57:13.554Z"
+      },
+      {
+        "id": "OjCuf7TYDNrR",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "7X-2_0Dj5geO",
+        "role": "assistant",
+        "content": "```json\n{\n  \"title\": \"Permanent Delete Actions for Epic and User Story Detail\",\n  \"description\": \"Add destructive delete actions directly in Epic Detail and User Story (US) Detail views, with explicit confirmation and immediate permanent deletion (no recovery, undo, or trash).\\n\\nImplementation plan:\\n1. Add a `Delete` action in the danger zone of Epic Detail and US Detail, visible only to users who already have edit/delete permissions.\\n2. Implement a shared confirmation dialog used by both pages with irreversible copy (`This action cannot be undone`), Cancel, and Confirm actions.\\n3. Wire/extend backend `DELETE` handlers for epics and user stories to perform transactional hard deletes only.\\n4. Ensure relationship handling is deterministic: deleting an epic removes its child user stories and dependent planning artifacts in the same transaction; deleting a US removes its dependent links/comments/tasks per FK rules with no partial writes.\\n5. On successful deletion, redirect to the correct parent list view (epics/backlog), invalidate cached queries, and refresh UI state so removed items disappear from detail, kanban, and lists immediately.\\n6. Add regression coverage for confirmation, successful deletion, authorization, and failure paths for both entity types.\",\n  \"userStories\": [\n    {\n      \"title\": \"As a project collaborator, I want to delete an epic from Epic Detail so that I can permanently remove obsolete initiatives without leaving the page\",\n      \"description\": \"Expose a destructive `Delete Epic` action on the Epic Detail screen. The action must require explicit confirmation and execute a hard delete immediately after confirmation.\",\n      \"acceptanceCriteria\": \"- [ ] Epic Detail displays a visible `Delete Epic` action in a danger-zone section for authorized users.\\n- [ ] Clicking `Delete Epic` opens a confirmation dialog with irreversible warning text.\\n- [ ] Confirm triggers exactly one delete request and shows a loading/disabled state until completion.\\n- [ ] After success, the epic is permanently removed and no longer appears in epic lists or detail views.\"\n    },\n    {\n      \"title\": \"As a project collaborator, I want to delete a user story from US Detail so that I can permanently remove invalid or duplicate work items quickly\",\n      \"description\": \"Expose a destructive `Delete User Story` action on the US Detail screen with the same confirmation and hard-delete behavior used for epics.\",\n      \"acceptanceCriteria\": \"- [ ] US Detail displays a visible `Delete User Story` action in a danger-zone section for authorized users.\\n- [ ] Clicking `Delete User Story` opens the confirmation dialog with irreversible warning text.\\n- [ ] Confirm performs a hard delete for that user story with in-flight protection against double submit.\\n- [ ] After success, the user story is removed from backlog/kanban/detail state.\"\n    },\n    {\n      \"title\": \"As a platform maintainer, I want epic and user story deletions to be transactional hard deletes so that data integrity is preserved without recovery mechanisms\",\n      \"description\": \"Implement backend deletion semantics that are fully permanent and atomic. There must be no soft-delete flag, no recycle bin, and no partial deletion outcomes.\",\n      \"acceptanceCriteria\": \"- [ ] `DELETE` endpoints for epics and user stories perform hard deletes only (no soft-delete behavior).\\n- [ ] Epic delete handles related records in one transaction (child user stories and dependent artifacts), with all-or-nothing behavior.\\n- [ ] If any constraint fails, the API returns a clear error and leaves data unchanged.\\n- [ ] Existing project authorization rules are enforced before deletion is allowed.\"\n    },\n    {\n      \"title\": \"As a project collaborator, I want consistent post-delete navigation and feedback so that I always land in a valid view with up-to-date data\",\n      \"description\": \"After delete operations, the UI should route users away from removed detail pages, refresh relevant state, and provide clear success/failure feedback.\",\n      \"acceptanceCriteria\": \"- [ ] After epic deletion, navigation redirects to the project epics/kanban context with a success message.\\n- [ ] After user story deletion, navigation redirects to the parent epic/backlog context with a success message.\\n- [ ] Client cache/query state is invalidated so deleted entities disappear without manual refresh.\\n- [ ] Automated tests cover confirm, success, authorization failure, and backend error scenarios for both delete flows.\"\n    }\n  ]\n}\n```",
+        "metadata": null,
+        "created_at": "2026-02-13T14:58:17.162Z"
+      },
+      {
+        "id": "B6b_fKVuTVCT",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "vYhnMwgh2TMq",
+        "role": "user",
+        "content": "We need to refactor the doc part. \n1) when you upload a text document, it's automatically converted to markdown.\n2) We store the markdown only, in the DB\n3) In the docs tab, you can see all markdon upload, with their nbame (we use original filename), and you can delete them\n4) If it's an image, we save it, we store the path in DB, and present it in the same way as text in the docs tab\n5) When writing anywhere in the app, we need to be able to @ the filenames of one doc. When doing this, when send to the Agent, we'll send the data to the agent. For text, we'll add a little text sayong \"After this here a document that the user pasted etc ...\" For images, we say \"the picture can be found at this path : \"\n@ will also be used in the future for linking other thing like tickets",
+        "metadata": null,
+        "created_at": "2026-02-13T18:27:16.371Z"
+      },
+      {
+        "id": "vssLBsEEr85X",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "vYhnMwgh2TMq",
+        "role": "assistant",
+        "content": "No specialized skill applies here (`skill-creator`/`skill-installer` are unrelated); this is product scoping.  \nYour idea is solid, but it currently spans both content management and agent-dispatch behavior. To avoid overlap with existing epics (`Document Upload & Conversion`, `Chat Image Upload & Clipboard Paste`), position this as a new epic focused on **document references and dispatch enrichment**: canonical storage (markdown/path), docs tab CRUD, and `@filename` resolution into agent input.\n\nTwo clarifications will make the scope tight:  \n1. For v1, where must `@filename` work: only chat composer, or also ticket comments/review prompts/other editors?  \n2. If two uploads share the same original filename, what is the expected mention behavior (first match, latest, forced disambiguation), and for images do we always send only a file path string (never inline bytes) to agents?\n\nSuggested split (still one epic, phased delivery):  \n- Phase A: ingestion/storage rules (text -> markdown-only in DB; image -> persisted file + DB path metadata).  \n- Phase B: Docs tab listing/deletion by original filename across text+image.  \n- Phase C: `@` picker/parser + dispatch-time prompt augmentation templates (text preamble vs image-path preamble), implemented provider-agnostically in the dispatch layer so it aligns with your existing dispatch integration pattern.",
+        "metadata": null,
+        "created_at": "2026-02-13T18:27:52.161Z"
+      },
+      {
+        "id": "zBNgNNqM7L4k",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "vYhnMwgh2TMq",
+        "role": "user",
+        "content": "1 All editors\n2 we can't have 2 same filename, we need to prevent it in the upload\n\nOk good plan, let's go",
+        "metadata": null,
+        "created_at": "2026-02-13T18:29:34.532Z"
+      },
+      {
+        "id": "yKiWmiCiH_s1",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "vYhnMwgh2TMq",
+        "role": "assistant",
+        "content": "Scope is now clear enough to frame as a distinct epic: **Document References & Agent Context Enrichment**.  \nTo avoid overlap with `Document Upload & Conversion` and `Chat Image Upload & Clipboard Paste`, this epic should be explicitly about: canonical document storage rules (text -> markdown in DB, image -> file path in DB), unified Docs tab CRUD for both types, and `@filename` resolution in **all editors** into agent-ready context payloads.\n\nA clean delivery split is:\n1. **Ingestion contract**: enforce unique original filenames, convert/store markdown-only for text, persist image path metadata.  \n2. **Docs registry UI**: list all uploaded docs (text + image) by original filename, delete support, shared across project context.  \n3. **Mention + dispatch layer**: `@filename` picker/parser in all editors, then provider-agnostic augmentation before agent dispatch (fits your existing dispatch integration pattern, including Claude/Gemini paths from the spec work).\n\nTwo decisions are still needed before writing the epic/stories:\n1. Filename uniqueness scope: per project only, or global across the whole workspace? Also case-sensitive or not (`Spec.md` vs `spec.md`)?  \n2. When multiple docs are mentioned in one prompt, do we inject full markdown bodies always, or apply a size/token cap with truncation rules?",
+        "metadata": null,
+        "created_at": "2026-02-13T18:29:55.417Z"
+      },
+      {
+        "id": "DPyYde8-l0Vh",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "vYhnMwgh2TMq",
+        "role": "user",
+        "content": "1) per project\n2) Full markdown",
+        "metadata": null,
+        "created_at": "2026-02-13T18:30:36.962Z"
+      },
+      {
+        "id": "m_iaKFhNwaBC",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "vYhnMwgh2TMq",
+        "role": "assistant",
+        "content": "No skill applied here (`skill-creator` / `skill-installer` don’t match this product-scoping task).\n\nA good boundary is: **“Project Document Registry + `@filename` Agent Context Injection”**. That clearly differs from existing epics (`Document Upload & Conversion`, `Chat Image Upload & Clipboard Paste`) by focusing on canonical storage rules, cross-editor mentions, and dispatch-time enrichment. It also aligns with your headless CLI reference doc: text is inlined as markdown context, images are passed as filesystem paths.\n\nTo keep scope deliverable, split into 4 implementation slices: ingestion contract (text->markdown only in DB, image->stored file + DB path, unique filename per project), Docs tab CRUD (single list for text+image using original filename), mention system in all editors (`@filename` picker + parser + validation), and provider-agnostic dispatch enrichment (resolve mentions, inject full markdown for text and path preamble for images before Claude/Gemini execution). Use acceptance buckets like storage invariants, mention resolution behavior, and end-to-end dispatch payload correctness.\n\nTwo targeted decisions before drafting the final epic/stories:\n1. Should filename uniqueness be **case-insensitive** per project (`Spec.md` conflicts with `spec.md`)?\n2. On delete, should image files be physically deleted from disk immediately (hard delete) and mentions fail fast afterward?",
+        "metadata": null,
+        "created_at": "2026-02-13T18:31:01.117Z"
+      },
+      {
+        "id": "HYaiXgx-_o_I",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "vYhnMwgh2TMq",
+        "role": "user",
+        "content": "Generate the final epic with user stories based on our discussion.",
+        "metadata": null,
+        "created_at": "2026-02-13T18:36:00.425Z"
+      },
+      {
+        "id": "o5f4U0jFbcDd",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "vYhnMwgh2TMq",
+        "role": "assistant",
+        "content": "```json\n{\n  \"title\": \"Project Document Registry & @Filename Agent Context Injection\",\n  \"description\": \"Implement a project-scoped document registry that standardizes storage and powers @filename mentions across the app. Phase 1: add a documents persistence model (projectId, originalFilename, kind=text|image, markdownContent, imagePath, mimeType, size, timestamps) with a case-insensitive unique constraint per project on filename. Phase 2: build ingestion rules—text files are converted to markdown at upload and only markdown is stored in DB; images are stored on disk and only their path/metadata is stored in DB. Phase 3: deliver a unified Docs tab listing all uploaded docs (text + image) by original filename with delete actions. Phase 4: add @mention autocomplete/parser in all editors and validate mentions at submit time. Phase 5: integrate mention resolution into dispatch so each send resolves docs and enriches the final prompt before CLI execution: full markdown for text, filesystem path sentence for images; keep this provider-agnostic and route through resolveAgent() to pass provider/model correctly for Claude Code and Gemini CLI headless flows. Phase 6: add migration, API, and integration coverage for upload/list/delete/mention/dispatch behavior, including deletion and cross-project isolation.\",\n  \"userStories\": [\n    {\n      \"title\": \"As a project contributor, I want uploads to enforce unique filenames per project and store documents by canonical type so that references are deterministic\",\n      \"description\": \"Create a single upload contract for documents. For text-like files, convert at ingest to markdown and store markdown in DB only. For images, persist the file in project storage and store path metadata in DB. Enforce filename uniqueness within a project to prevent ambiguous mentions.\",\n      \"acceptanceCriteria\": \"- [ ] Upload API rejects duplicate original filenames within the same project (case-insensitive) for both text and image uploads.\\n- [ ] Text uploads are converted to markdown during ingestion and only markdown is persisted in the database.\\n- [ ] Image uploads are persisted to filesystem storage and the database stores only path + metadata (no image binary in DB).\\n- [ ] The same filename is allowed in different projects.\"\n    },\n    {\n      \"title\": \"As a project contributor, I want a unified Docs tab with text and image documents so that I can manage all context assets in one place\",\n      \"description\": \"Add a Docs tab view that lists every uploaded document for the active project using the original filename as the primary label. Include document type and key metadata, and provide delete actions.\",\n      \"acceptanceCriteria\": \"- [ ] Docs tab lists both markdown-backed text documents and image documents in one table/list scoped to the active project.\\n- [ ] Each row shows the original filename and document type, with stable identifiers for mention resolution.\\n- [ ] Deleting a text document removes its DB record.\\n- [ ] Deleting an image document removes both its DB record and the stored file path target from disk.\"\n    },\n    {\n      \"title\": \"As a project contributor, I want to @mention documents in all editors so that I can attach existing project context without copy-pasting\",\n      \"description\": \"Implement @filename support in every editor surface (chat, epic/story/ticket inputs, review/build prompts, and other text-entry points). Provide autocomplete from the project document registry and parser support for multiple mentions.\",\n      \"acceptanceCriteria\": \"- [ ] Typing `@` in any supported editor opens a picker of project document filenames.\\n- [ ] Selecting a document inserts a mention token that preserves the original filename.\\n- [ ] Multiple document mentions are supported in a single message.\\n- [ ] Submitting with unknown/deleted mentions is blocked with a clear validation error.\"\n    },\n    {\n      \"title\": \"As the orchestration system, I want mention-aware prompt enrichment before agent execution so that providers receive complete and correct context\",\n      \"description\": \"At dispatch time, resolve all mentioned filenames to stored documents and append provider-agnostic context blocks to the outgoing prompt. For text documents, inject full markdown content. For images, inject a path-based instruction block. Integrate this into the shared dispatch path that uses resolveAgent() to select provider/model.\",\n      \"acceptanceCriteria\": \"- [ ] Dispatch resolves mentions to document records in the active project before CLI invocation.\\n- [ ] For text mentions, the full markdown content is injected (no truncation/token cap in v1).\\n- [ ] For image mentions, prompt enrichment includes a sentence with the filesystem path (no inline image bytes).\\n- [ ] Enrichment runs through the shared dispatch layer and works for both Claude Code and Gemini CLI flows using provider/model from `resolveAgent()`.\"\n    },\n    {\n      \"title\": \"As an engineer, I want migration and end-to-end coverage for document mentions and dispatch so that regressions are prevented\",\n      \"description\": \"Ship schema migration(s), API tests, and integration tests that validate ingestion, listing, deletion, mention parsing, and provider dispatch payload construction.\",\n      \"acceptanceCriteria\": \"- [ ] Migration adds required document schema and case-insensitive unique filename index per project.\\n- [ ] Tests cover upload conversion behavior, duplicate rejection, docs listing, and delete semantics for text and image.\\n- [ ] Tests verify mention resolution failure modes (missing/deleted docs, cross-project isolation).\\n- [ ] Integration tests verify enriched prompts sent to both Claude and Gemini providers contain expected markdown/path context blocks.\"\n    }\n  ]\n}\n```",
+        "metadata": null,
+        "created_at": "2026-02-13T18:37:02.152Z"
+      }
+    ],
+    "attachments": []
+  }
+}

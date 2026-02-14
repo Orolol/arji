@@ -15,7 +15,7 @@ export class ClaudeCodeProvider implements AgentProvider {
   readonly type = "claude-code" as const;
 
   spawn(options: ProviderSpawnOptions): ProviderSession {
-    const { prompt, cwd, mode, allowedTools, model } = options;
+    const { prompt, cwd, mode, allowedTools, model, claudeSessionId, resumeSession } = options;
 
     const { promise: rawPromise, kill } = spawnClaude({
       mode,
@@ -23,6 +23,8 @@ export class ClaudeCodeProvider implements AgentProvider {
       cwd,
       allowedTools,
       model,
+      claudeSessionId,
+      resumeSession,
     });
 
     // Map ClaudeResult → ProviderResult

@@ -230,6 +230,8 @@ export async function POST(
       fs.mkdirSync(logsDir, { recursive: true });
       const logsPath = path.join(logsDir, "logs.json");
 
+      const teamClaudeSessionId = resolvedTeamAgent.provider === "claude-code" ? crypto.randomUUID() : undefined;
+
       createQueuedSession({
         id: sessionId,
         projectId,
@@ -238,6 +240,8 @@ export async function POST(
         provider: resolvedTeamAgent.provider,
         prompt: enrichedTeamPrompt,
         logsPath,
+        claudeSessionId: teamClaudeSessionId,
+        agentType: "team_build",
         createdAt: now,
       });
 
@@ -263,6 +267,7 @@ export async function POST(
           "Task",
         ],
         model: resolvedTeamAgent.model,
+        claudeSessionId: teamClaudeSessionId,
       }, resolvedTeamAgent.provider);
 
       // Background: wait for completion, update all epic statuses
@@ -392,6 +397,8 @@ export async function POST(
       );
     }
 
+    const soloClaudeSessionId = resolvedBuildAgent.provider === "claude-code" ? crypto.randomUUID() : undefined;
+
     createQueuedSession({
       id: sessionId,
       projectId,
@@ -403,6 +410,8 @@ export async function POST(
       logsPath,
       branchName,
       worktreePath,
+      claudeSessionId: soloClaudeSessionId,
+      agentType: "build",
       createdAt: now,
     });
 
@@ -437,6 +446,7 @@ export async function POST(
       cwd: worktreePath,
       allowedTools: ["Edit", "Write", "Bash", "Read", "Glob", "Grep"],
       model: resolvedBuildAgent.model,
+      claudeSessionId: soloClaudeSessionId,
     }, resolvedBuildAgent.provider);
 
     // Background: wait for completion and update DB

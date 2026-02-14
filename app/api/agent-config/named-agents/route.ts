@@ -4,6 +4,7 @@ import {
   createNamedAgent,
 } from "@/lib/agent-config/named-agents";
 import { isAgentProvider } from "@/lib/agent-config/constants";
+import { createId } from "@/lib/utils/nanoid";
 
 export async function GET() {
   try {
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "model is required" }, { status: 400 });
     }
 
-    const result = await createNamedAgent({ name, provider, model });
+    const result = await createNamedAgent({ id: createId(), name, provider, model });
     if (result.error) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }

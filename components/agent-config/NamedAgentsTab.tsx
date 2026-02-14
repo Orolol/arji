@@ -32,7 +32,7 @@ function NamedAgentRow({
   onUpdate: (
     agentId: string,
     payload: { name?: string; provider?: AgentProvider; model?: string }
-  ) => Promise<boolean>;
+  ) => Promise<{ ok: boolean; error?: string }>;
   onDelete: (agentId: string) => Promise<boolean>;
 }) {
   const [name, setName] = useState(agent.name);
@@ -117,7 +117,7 @@ function NamedAgentRow({
 }
 
 export function NamedAgentsTab() {
-  const { data, loading, createAgent, updateAgent, deleteAgent } = useNamedAgents();
+  const { data, loading, createNamedAgent, updateNamedAgent, deleteNamedAgent } = useNamedAgents();
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<AgentProvider>("claude-code");
   const [model, setModel] = useState("");
@@ -126,7 +126,7 @@ export function NamedAgentsTab() {
   async function handleCreate() {
     if (!name.trim() || !model.trim()) return;
     setCreating(true);
-    const ok = await createAgent({
+    const { ok } = await createNamedAgent({
       name: name.trim(),
       provider,
       model: model.trim(),
@@ -206,8 +206,8 @@ export function NamedAgentsTab() {
             <NamedAgentRow
               key={agent.id}
               agent={agent}
-              onUpdate={updateAgent}
-              onDelete={deleteAgent}
+              onUpdate={updateNamedAgent}
+              onDelete={deleteNamedAgent}
             />
           ))}
         </div>

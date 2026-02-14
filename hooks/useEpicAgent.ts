@@ -63,13 +63,15 @@ export function useEpicAgent(projectId: string, epicId: string | null) {
   );
 
   const sendToDev = useCallback(
-    async (comment?: string, provider?: string) => {
+    async (comment?: string, provider?: string, resumeSessionId?: string) => {
       if (!epicId) return;
       setDispatching(true);
       try {
+        const body: Record<string, unknown> = { comment, provider };
+        if (resumeSessionId) body.resumeSessionId = resumeSessionId;
         const data = await requestJson(
           `/api/projects/${projectId}/epics/${epicId}/build`,
-          { comment, provider }
+          body
         );
         await pollSessions();
         return data;

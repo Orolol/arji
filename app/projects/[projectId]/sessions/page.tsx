@@ -26,8 +26,21 @@ interface Session {
   completedAt?: string;
   lastNonEmptyText?: string;
   error?: string;
+  agentType?: string;
+  claudeSessionId?: string;
   createdAt: string;
 }
+
+const AGENT_TYPE_LABELS: Record<string, string> = {
+  build: "Build",
+  ticket_build: "Ticket",
+  team_build: "Team",
+  review_security: "Security",
+  review_code: "Code Review",
+  review_compliance: "Compliance",
+  review_feature: "Feature Review",
+  merge: "Merge",
+};
 
 const STATUS_CONFIG: Record<
   string,
@@ -119,9 +132,19 @@ export default function SessionsPage() {
                         <span className="text-sm font-medium">
                           #{session.id.slice(0, 8)}
                         </span>
+                        {session.agentType && (
+                          <Badge variant="secondary" className="text-[10px]">
+                            {AGENT_TYPE_LABELS[session.agentType] || session.agentType}
+                          </Badge>
+                        )}
                         <Badge variant="outline" className="text-xs">
                           {session.mode}
                         </Badge>
+                        {session.claudeSessionId && (
+                          <Badge variant="outline" className="text-[10px] text-blue-400 border-blue-400/30">
+                            resumable
+                          </Badge>
+                        )}
                         {session.branchName && (
                           <span className="text-xs text-muted-foreground font-mono truncate">
                             {session.branchName}

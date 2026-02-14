@@ -14,6 +14,8 @@ export interface ClaudeOptions {
   allowedTools?: string[];
   model?: string;
   logIdentifier?: string;
+  claudeSessionId?: string;
+  resumeSession?: boolean;
 }
 
 export interface ClaudeResult {
@@ -57,7 +59,7 @@ export interface SpawnedClaudeStream {
  * The returned `kill` function can be called to abort the process early.
  */
 export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
-  const { mode, prompt, cwd, allowedTools, model } = options;
+  const { mode, prompt, cwd, allowedTools, model, claudeSessionId, resumeSession } = options;
 
   // --permission-mode: "plan" for read-only, "bypassPermissions" for code/analyze
   const permissionMode = mode === "plan" ? "plan" : "bypassPermissions";
@@ -73,10 +75,15 @@ export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
     permissionMode,
     "--output-format",
     "json",
-    "--print",
-    "-p",
-    prompt,
   ];
+
+  if (claudeSessionId && resumeSession) {
+    args.push("--resume", claudeSessionId);
+  } else if (claudeSessionId) {
+    args.push("--session-id", claudeSessionId);
+  }
+
+  args.push("--print", "-p", prompt);
 
   if (model) {
     args.push("--model", model);
@@ -230,7 +237,7 @@ function extractResultText(result: unknown): string {
  * The `assistant` event is always ignored (redundant).
  */
 export function spawnClaudeStream(options: ClaudeOptions): SpawnedClaudeStream {
-  const { mode, prompt, cwd, allowedTools, model, logIdentifier } = options;
+  const { mode, prompt, cwd, allowedTools, model, logIdentifier, claudeSessionId, resumeSession } = options;
 
   const permissionMode = mode === "plan" ? "plan" : "bypassPermissions";
 
@@ -245,10 +252,15 @@ export function spawnClaudeStream(options: ClaudeOptions): SpawnedClaudeStream {
     "--output-format",
     "stream-json",
     "--verbose",
-    "--print",
-    "-p",
-    prompt,
   ];
+
+  if (claudeSessionId && resumeSession) {
+    args.push("--resume", claudeSessionId);
+  } else if (claudeSessionId) {
+    args.push("--session-id", claudeSessionId);
+  }
+
+  args.push("--print", "-p", prompt);
 
   if (model) {
     args.push("--model", model);

@@ -221,6 +221,8 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const agentMode = reviewType === "feature_review" ? "code" : "plan";
 
+    const claudeSessionId = resolvedAgent.provider === "claude-code" ? crypto.randomUUID() : undefined;
+
     createQueuedSession({
       id: sessionId,
       projectId,
@@ -231,6 +233,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       logsPath,
       branchName,
       worktreePath,
+      claudeSessionId,
+      agentType: REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
       createdAt: now,
     });
 
@@ -240,6 +244,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       prompt: enrichedPrompt,
       cwd: worktreePath,
       model: resolvedAgent.model,
+      claudeSessionId,
     }, resolvedAgent.provider);
 
     // Background: wait for completion, post review as epic comment

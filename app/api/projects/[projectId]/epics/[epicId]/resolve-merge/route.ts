@@ -157,6 +157,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  const claudeSessionId = provider === "claude-code" ? crypto.randomUUID() : undefined;
+
   createQueuedSession({
     id: sessionId,
     projectId,
@@ -167,6 +169,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     logsPath,
     branchName,
     worktreePath,
+    claudeSessionId,
+    agentType: "merge",
     createdAt: now,
   });
 
@@ -178,6 +182,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     cwd: worktreePath,
     model,
     allowedTools: ["Edit", "Write", "Bash", "Read", "Glob", "Grep"],
+    claudeSessionId,
   }, provider);
 
   // Background completion handler

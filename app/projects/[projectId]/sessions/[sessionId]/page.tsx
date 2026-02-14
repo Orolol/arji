@@ -29,6 +29,8 @@ interface SessionDetail {
   completedAt?: string;
   createdAt: string;
   lastNonEmptyText?: string | null;
+  claudeSessionId?: string | null;
+  agentType?: string | null;
   logs?: {
     success?: boolean;
     result?: string;
@@ -36,6 +38,17 @@ interface SessionDetail {
     duration?: number;
   };
 }
+
+const AGENT_TYPE_LABELS: Record<string, string> = {
+  build: "Build",
+  ticket_build: "Ticket Build",
+  team_build: "Team Build",
+  review_security: "Security Review",
+  review_code: "Code Review",
+  review_compliance: "Compliance Review",
+  review_feature: "Feature Review",
+  merge: "Merge",
+};
 
 /**
  * Contained scroll pane for monospace output content.
@@ -141,9 +154,19 @@ export default function SessionDetailPage() {
               {session.status}
             </Badge>
             <Badge variant="outline">{session.mode}</Badge>
+            {session.agentType && (
+              <Badge variant="secondary" className="text-[10px]">
+                {AGENT_TYPE_LABELS[session.agentType] || session.agentType}
+              </Badge>
+            )}
             {session.provider && (
               <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
                 {session.provider === "codex" ? "Codex" : "CC"}
+              </Badge>
+            )}
+            {session.claudeSessionId && (
+              <Badge variant="outline" className="text-[10px] text-blue-400 border-blue-400/30">
+                resumable
               </Badge>
             )}
             <span className="text-sm text-muted-foreground flex items-center gap-1">
@@ -215,6 +238,14 @@ export default function SessionDetailPage() {
                 : "-"}
           </div>
         </Card>
+        {session.claudeSessionId && (
+          <Card className="p-3 col-span-2">
+            <div className="text-xs text-muted-foreground">CLI Session ID</div>
+            <div className="text-sm font-mono text-blue-400 truncate">
+              {session.claudeSessionId}
+            </div>
+          </Card>
+        )}
       </div>
 
       {/* Error */}

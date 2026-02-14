@@ -1,0 +1,33 @@
+{
+  "migrationId": "2026-02-14T09-26-58-901Z",
+  "projectId": "cUfHlegssamR",
+  "startedAt": "2026-02-14T09:26:58.901Z",
+  "completedAt": "2026-02-14T09:26:58.902Z",
+  "backupPath": "/home/orolol/workspace/arji/data/migrations/unified-chat-cutover/cUfHlegssamR/2026-02-14T09-26-58-901Z-backup.json",
+  "reportPath": "/home/orolol/workspace/arji/data/migrations/unified-chat-cutover/cUfHlegssamR/2026-02-14T09-26-58-901Z-report.json",
+  "before": {
+    "conversations": 1,
+    "messages": 2,
+    "attachments": 0,
+    "orphanMessages": 0
+  },
+  "actions": {
+    "createdFallbackConversation": false,
+    "fallbackConversationId": null,
+    "messagesReassigned": 0
+  },
+  "after": {
+    "conversations": 1,
+    "messages": 2,
+    "attachments": 0,
+    "orphanMessages": 0
+  },
+  "integrity": {
+    "missingConversationReferences": 0,
+    "duplicateConversationIds": 0,
+    "duplicateMessageIds": 0,
+    "zeroMissingConversations": true,
+    "zeroDuplicateConversations": true,
+    "zeroDuplicateMessages": true
+  }
+}

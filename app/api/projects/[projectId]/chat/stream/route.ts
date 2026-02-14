@@ -174,6 +174,26 @@ export async function POST(
     throw error;
   }
 
+  // Session resume for Claude Code
+  let claudeSessionId: string | undefined;
+  let resumeSession = false;
+  let effectivePrompt = prompt;
+
+  if (resolvedAgent.provider === "claude-code" && conversationId) {
+    const conv = db
+      .select()
+      .from(chatConversations)
+      .where(eq(chatConversations.id, conversationId))
+      .get();
+    if (conv?.claudeSessionId) {
+      claudeSessionId = conv.claudeSessionId;
+      resumeSession = true;
+      effectivePrompt = body.content; // just the new message, not full history
+    } else {
+      claudeSessionId = crypto.randomUUID();
+    }
+  }
+
   setConversationStatus("generating");
 
   // Determine conversation label for activity registry
@@ -329,10 +349,12 @@ export async function POST(
   // Claude Code: streaming via spawnClaudeStream
   const { stream: claudeStream, kill } = spawnClaudeStream({
     mode: "plan",
-    prompt,
+    prompt: effectivePrompt,
     model: resolvedAgent.model,
     cwd: project.gitRepoPath || undefined,
     logIdentifier: conversationId || `chat-${projectId}`,
+    claudeSessionId,
+    resumeSession,
   });
 
   activityRegistry.register({
@@ -378,6 +400,15 @@ export async function POST(
       }
 
       activityRegistry.unregister(activityId);
+
+      // Persist claudeSessionId for future resume (only on first message)
+      if (conversationId && claudeSessionId && !resumeSession && !hasStreamError) {
+        db.update(chatConversations)
+          .set({ claudeSessionId })
+          .where(eq(chatConversations.id, conversationId))
+          .run();
+      }
+
       saveAssistantAndTitle(controller, fullContent, hasStreamError ? "error" : "active");
     },
     cancel() {

@@ -147,8 +147,8 @@ export default function StoryDetailPage() {
           isRunning={isRunning}
           codexAvailable={codexAvailable}
           codexInstalled={codexInstalled}
-          onSendToDev={async (comment, provider) => {
-            await sendToDev(comment, provider);
+          onSendToDev={async (comment, provider, resumeSessionId) => {
+            await sendToDev(comment, provider, resumeSessionId);
             refreshStory();
           }}
           onSendToReview={async (types, customAgentIds, provider) => {

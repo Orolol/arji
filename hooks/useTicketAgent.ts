@@ -65,12 +65,14 @@ export function useTicketAgent(
   );
 
   const sendToDev = useCallback(
-    async (comment?: string, provider?: string) => {
+    async (comment?: string, provider?: string, resumeSessionId?: string) => {
       setDispatching(true);
       try {
+        const body: Record<string, unknown> = { comment, provider };
+        if (resumeSessionId) body.resumeSessionId = resumeSessionId;
         const data = await requestJson(
           `/api/projects/${projectId}/stories/${storyId}/build`,
-          { comment, provider }
+          body
         );
         await pollSessions();
         return data;

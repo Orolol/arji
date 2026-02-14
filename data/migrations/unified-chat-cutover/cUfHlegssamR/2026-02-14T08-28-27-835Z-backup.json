@@ -1,0 +1,94 @@
+{
+  "migrationId": "2026-02-14T08-28-27-835Z",
+  "projectId": "cUfHlegssamR",
+  "capturedAt": "2026-02-14T08:28:27.835Z",
+  "snapshot": {
+    "conversations": [
+      {
+        "id": "lbnIBfUXftum",
+        "project_id": "cUfHlegssamR",
+        "type": "epic_creation",
+        "label": "Mistral Vibe Agent Integration",
+        "status": "active",
+        "epic_id": null,
+        "provider": "codex",
+        "created_at": "2026-02-14T08:13:03.986Z"
+      }
+    ],
+    "messages": [
+      {
+        "id": "28NhF4YUbaZs",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "lbnIBfUXftum",
+        "role": "user",
+        "content": "I want to add a new agent CLI : Mistral Vibe",
+        "metadata": null,
+        "created_at": "2026-02-14T08:18:19.239Z"
+      },
+      {
+        "id": "VXGvqKZLN-Ma",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "lbnIBfUXftum",
+        "role": "assistant",
+        "content": "To avoid overlap with existing epics like `Named Agents with Model Selection & Gemini CLI Provider` and `Agent Teams & Codex Provider Integration`, this new epic should likely be framed as **Mistral Vibe provider integration** (new provider type + runner + dispatch wiring), reusing the current named-agent and assignment architecture rather than reworking it.\n\nTwo decisions will define scope quickly:\n1. Should MVP support only `build`/`review` dispatch, or also chat/brainstorm/release flows?\n2. From the reference doc, do you want only core headless invocation (`vibe --prompt`, provider/model/profile), or also advanced controls (`--agent` profiles, `--resume`, `--max-turns`, `--max-price`, JSON output/streaming)?\n\nIf you answer those, I can help you lock a concrete epic title and description, then shape clean story boundaries and acceptance criteria (schema/provider registration, process execution, route dispatch behavior, and UI/provider selection behavior) without duplicating existing Gemini/named-agent work.",
+        "metadata": null,
+        "created_at": "2026-02-14T08:18:46.618Z"
+      },
+      {
+        "id": "wcBeHegFqnDr",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "lbnIBfUXftum",
+        "role": "user",
+        "content": "1) As other agent CLI, same perimter\n2) Just what we need for current behavior",
+        "metadata": null,
+        "created_at": "2026-02-14T08:19:48.209Z"
+      },
+      {
+        "id": "RnU_x5wsV-xi",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "lbnIBfUXftum",
+        "role": "assistant",
+        "content": "Your direction is clear: this should be a **provider integration epic**, not a platform redesign. To avoid overlap with `Named Agents with Model Selection & Gemini CLI Provider` and `Agent Teams & Codex Provider Integration`, scope it to adding Mistral Vibe as one more execution backend across the **existing perimeter** (same flows and assignment logic as other CLIs), with no new agent concepts.\n\nA tight boundary based on your spec/reference doc would be: register `mistral-vibe` provider type, add a Vibe runner (headless prompt + model + non-interactive profile), wire dispatch so existing routes pass provider/model correctly, and expose provider selection in current settings/assignment UI. Keep out-of-scope: Vibe-specific advanced flags (`--max-turns`, `--max-price`, resume/session controls, streaming-specific UI), unless already required by current behavior.\n\nTwo clarifications will lock scope before drafting the epic:\n1. Should we treat the Vibe permission profile as fixed for MVP (for example always non-interactive `auto-approve`), or configurable per named agent?\n2. Do you want model selection exposed exactly like Gemini/Codex in current UI, or use a single default model for MVP and defer model picker changes?",
+        "metadata": null,
+        "created_at": "2026-02-14T08:20:11.774Z"
+      },
+      {
+        "id": "bXH-TAB_xaVm",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "lbnIBfUXftum",
+        "role": "user",
+        "content": "1 Both\n2 Yes",
+        "metadata": null,
+        "created_at": "2026-02-14T08:20:41.462Z"
+      },
+      {
+        "id": "ewSFLxti6hzL",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "lbnIBfUXftum",
+        "role": "assistant",
+        "content": "To keep this epic clean and non-overlapping with `Named Agents with Model Selection & Gemini CLI Provider`, frame it as **Mistral Vibe provider parity**: add Vibe as one more backend in the existing provider/named-agent/assignment architecture, without introducing new agent concepts. That means no new CRUD surfaces beyond what already exists, and no workflow redesign from `Agent Teams & Codex Provider Integration`.\n\nA tight scope is: provider enum + defaults wiring, a `vibe` process runner/provider module (headless invocation per the doc: `--prompt`, `--model`, non-interactive agent profile), dispatch integration across the same perimeter as other CLIs (build/review/chat/brainstorm/release), and UI parity in provider/model selection. Keep advanced Vibe-specific controls (`--max-turns`, `--max-price`, resume/session controls, streaming UX) explicitly out of scope unless current behavior already depends on them.\n\nTwo clarifications to lock sizing before writing the epic details: when you said “1) both,” do you want a global default profile (e.g. `auto-approve`) **plus** optional per-named-agent override (`plan`/`accept-edits`/`auto-approve`)? Also, should acceptance target parity tests on all flows, or only build/review as mandatory with smoke coverage for the rest?",
+        "metadata": null,
+        "created_at": "2026-02-14T08:21:11.713Z"
+      },
+      {
+        "id": "uw2eQzyK6N2d",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "lbnIBfUXftum",
+        "role": "user",
+        "content": "Generate the final epic with user stories based on our discussion.",
+        "metadata": null,
+        "created_at": "2026-02-14T08:21:58.744Z"
+      },
+      {
+        "id": "RiClJDk4c0lJ",
+        "project_id": "cUfHlegssamR",
+        "conversation_id": "lbnIBfUXftum",
+        "role": "assistant",
+        "content": "```json\n{\n  \"title\": \"Mistral Vibe CLI Provider Parity\",\n  \"description\": \"Implement Mistral Vibe as a first-class provider across the same perimeter as existing CLI agents (build, review, chat, brainstorm, and release) using the current named-agent and assignment architecture.\\n\\nImplementation plan:\\n1. Foundation: add `mistral-vibe` to provider enums/types/validation and provider registry wiring.\\n2. Runner: add a Vibe execution module following the Codex/Gemini pattern, using headless invocation with `--prompt`, `--model`, `--agent`, and JSON output for machine parsing.\\n3. Configuration: support both a global default Vibe profile and per-named-agent profile override (`plan`, `accept-edits`, `auto-approve`) while keeping existing model selection behavior.\\n4. Dispatch integration: route all existing agent execution flows through provider/model/profile resolution and provider-agnostic process dispatch.\\n5. UI parity: expose Mistral Vibe in existing provider selectors and add profile selection to current settings/agents/assignments surfaces with default-vs-override behavior.\\n6. Quality: add tests for command construction, profile precedence, and flow dispatch parity; update docs.\\n\\nOut of scope: advanced Vibe-only controls (`--max-turns`, `--max-price`, `--resume`) and streaming-specific UX.\",\n  \"userStories\": [\n    {\n      \"title\": \"As a platform engineer, I want `mistral-vibe` added as a provider type so that projects can configure Vibe like other CLI agents\",\n      \"description\": \"Extend shared provider definitions, API validation, and persistence mappings to recognize `mistral-vibe` end-to-end without changing current behavior for existing providers.\",\n      \"acceptanceCriteria\": \"- [ ] `mistral-vibe` is accepted by provider enums/types on backend and frontend.\\n- [ ] API payload validation and serialization support `mistral-vibe`.\\n- [ ] Provider registry/process dispatch can resolve `mistral-vibe` at runtime.\\n- [ ] Existing provider configurations continue to work unchanged after migration.\"\n    },\n    {\n      \"title\": \"As an orchestration service, I want a Mistral Vibe runner so that agent tasks execute headlessly and deterministically\",\n      \"description\": \"Create Vibe spawn/provider modules that build and execute CLI commands in non-interactive mode, parse structured output, and normalize error handling to match existing provider contracts.\",\n      \"acceptanceCriteria\": \"- [ ] A Vibe runner module is implemented following the existing provider pattern.\\n- [ ] Command generation includes prompt, model, profile (`--agent`), and JSON output mode.\\n- [ ] Final response text and usage/error metadata are parsed into the common provider result shape.\\n- [ ] Timeouts, non-zero exits, and malformed output are mapped to normalized platform errors.\"\n    },\n    {\n      \"title\": \"As a project admin, I want both global default and per-named-agent Vibe profiles so that autonomy can be controlled safely\",\n      \"description\": \"Add configuration support for a project/provider-level default Vibe profile and optional named-agent override, with deterministic precedence during agent resolution.\",\n      \"acceptanceCriteria\": \"- [ ] Global default Vibe profile is configurable and persisted.\\n- [ ] Named agents can optionally override profile with `plan`, `accept-edits`, or `auto-approve`.\\n- [ ] Resolution precedence is enforced: named-agent override > global provider default > system fallback.\\n- [ ] Invalid profile values are rejected by validation.\"\n    },\n    {\n      \"title\": \"As a product user, I want all existing agent flows to dispatch through Mistral Vibe when selected so that behavior matches other providers\",\n      \"description\": \"Wire build, review, chat, brainstorm, and release execution paths to resolve provider/model/profile and pass them to provider-agnostic dispatch.\",\n      \"acceptanceCriteria\": \"- [ ] Build flow executes with Mistral Vibe when provider is selected.\\n- [ ] Review flow executes with Mistral Vibe when provider is selected.\\n- [ ] Chat, brainstorm, and release flows execute with Mistral Vibe when provider is selected.\\n- [ ] Each flow passes resolved model/profile and records provider/model in execution metadata.\"\n    },\n    {\n      \"title\": \"As a project admin, I want UI parity for Mistral Vibe in provider, model, and profile selectors so that configuration is consistent\",\n      \"description\": \"Update existing UI surfaces (settings, agents, assignments) to include `mistral-vibe` and profile selection without adding new standalone configuration concepts.\",\n      \"acceptanceCriteria\": \"- [ ] Provider dropdowns include `mistral-vibe` wherever other CLI providers are selectable.\\n- [ ] Model selection for `mistral-vibe` is available with the same UX pattern used by existing providers.\\n- [ ] Profile selection supports default-vs-override behavior in existing forms.\\n- [ ] No new Vibe-specific advanced controls are exposed in this epic.\"\n    },\n    {\n      \"title\": \"As a maintainer, I want automated coverage for Vibe parity so that regressions are caught before release\",\n      \"description\": \"Add targeted tests and documentation updates validating command assembly, profile precedence, and dispatch behavior across supported flows.\",\n      \"acceptanceCriteria\": \"- [ ] Unit tests cover Vibe command construction and output parsing.\\n- [ ] Unit tests cover profile precedence resolution.\\n- [ ] Integration/smoke tests verify dispatch success for build/review and coverage for chat/brainstorm/release routing.\\n- [ ] Developer docs include setup, required CLI assumptions, and known out-of-scope constraints.\"\n    }\n  ],\n  \"dependencies\": [\n    {\n      \"ticketId\": \"$self\",\n      \"dependsOnTicketId\": \"Named Agents with Model Selection & Gemini CLI Provider\"\n    },\n    {\n      \"ticketId\": \"$self\",\n      \"dependsOnTicketId\": \"Agent Teams & Codex Provider Integration\"\n    }\n  ]\n}\n```",
+        "metadata": null,
+        "created_at": "2026-02-14T08:23:02.168Z"
+      }
+    ],
+    "attachments": []
+  }
+}

@@ -21,6 +21,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ProviderSelect, type ProviderType } from "@/components/shared/ProviderSelect";
@@ -505,12 +506,19 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
         </div>
 
         <div className="p-3 border-b border-border flex items-center justify-between gap-2">
-          <h3 className="font-medium text-sm">
-            {resolveLegacyConversationLabel(
-              activeConversation?.type,
-              activeConversation?.label,
+          <div className="flex items-center gap-2">
+            <h3 className="font-medium text-sm">
+              {resolveLegacyConversationLabel(
+                activeConversation?.type,
+                activeConversation?.label,
+              )}
+            </h3>
+            {activeConversation?.claudeSessionId && (
+              <Badge variant="outline" className="text-[10px] text-blue-400 border-blue-400/30">
+                session linked
+              </Badge>
             )}
-          </h3>
+          </div>
           <div className="flex items-center gap-2">
             <ProviderSelect
               value={activeProvider}

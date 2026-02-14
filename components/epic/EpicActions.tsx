@@ -25,6 +25,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { ProviderSelect, type ProviderType } from "@/components/shared/ProviderSelect";
+import { SessionPicker } from "@/components/shared/SessionPicker";
 
 interface EpicActions_Epic {
   id: string;
@@ -40,7 +41,7 @@ interface EpicActionsProps {
   activeSessionId?: string | null;
   codexAvailable: boolean;
   codexInstalled?: boolean;
-  onSendToDev: (comment?: string, provider?: ProviderType) => Promise<unknown>;
+  onSendToDev: (comment?: string, provider?: ProviderType, resumeSessionId?: string) => Promise<unknown>;
   onSendToReview: (types: string[], provider?: ProviderType) => Promise<unknown>;
   onApprove: () => Promise<unknown>;
   onActionError?: (error: unknown) => void;
@@ -66,6 +67,7 @@ export function EpicActions({
   const [reviewProvider, setReviewProvider] = useState<ProviderType>("claude-code");
   const [reviewTypes, setReviewTypes] = useState<Set<string>>(new Set(["feature_review"]));
   const [approving, setApproving] = useState(false);
+  const [resumeSessionId, setResumeSessionId] = useState<string | undefined>();
 
   const status = epic.status;
   const canSendToDev = ["backlog", "todo", "in_progress"].includes(status);
@@ -82,9 +84,10 @@ export function EpicActions({
 
   async function handleSendToDev() {
     try {
-      await onSendToDev(devComment.trim() || undefined, devProvider);
+      await onSendToDev(devComment.trim() || undefined, devProvider, resumeSessionId);
       setSendToDevOpen(false);
       setDevComment("");
+      setResumeSessionId(undefined);
     } catch (error) {
       onActionError?.(error);
     }
@@ -93,9 +96,10 @@ export function EpicActions({
   async function handleSendToDevFromReview() {
     if (!devComment.trim()) return;
     try {
-      await onSendToDev(devComment.trim(), devProvider);
+      await onSendToDev(devComment.trim(), devProvider, resumeSessionId);
       setSendToDevOpen(false);
       setDevComment("");
+      setResumeSessionId(undefined);
     } catch (error) {
       onActionError?.(error);
     }
@@ -201,7 +205,7 @@ export function EpicActions({
       )}
 
       {/* Send to Dev Dialog */}
-      <Dialog open={sendToDevOpen} onOpenChange={setSendToDevOpen}>
+      <Dialog open={sendToDevOpen} onOpenChange={(open) => { setSendToDevOpen(open); if (!open) setResumeSessionId(undefined); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Send Epic to Dev</DialogTitle>
@@ -221,6 +225,14 @@ export function EpicActions({
               className="w-40 h-8 text-xs"
             />
           </div>
+          <SessionPicker
+            projectId={projectId}
+            epicId={epic.id}
+            agentType="build"
+            provider={devProvider}
+            selectedSessionId={resumeSessionId}
+            onSelect={setResumeSessionId}
+          />
           <MentionTextarea
             projectId={projectId}
             value={devComment}
