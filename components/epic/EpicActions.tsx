@@ -42,7 +42,7 @@ interface EpicActionsProps {
   codexAvailable: boolean;
   codexInstalled?: boolean;
   onSendToDev: (comment?: string, provider?: ProviderType, resumeSessionId?: string) => Promise<unknown>;
-  onSendToReview: (types: string[], provider?: ProviderType) => Promise<unknown>;
+  onSendToReview: (types: string[], provider?: ProviderType, resumeSessionId?: string) => Promise<unknown>;
   onApprove: () => Promise<unknown>;
   onActionError?: (error: unknown) => void;
 }
@@ -68,6 +68,7 @@ export function EpicActions({
   const [reviewTypes, setReviewTypes] = useState<Set<string>>(new Set(["feature_review"]));
   const [approving, setApproving] = useState(false);
   const [resumeSessionId, setResumeSessionId] = useState<string | undefined>();
+  const [reviewResumeSessionId, setReviewResumeSessionId] = useState<string | undefined>();
 
   const status = epic.status;
   const canSendToDev = ["backlog", "todo", "in_progress"].includes(status);
@@ -120,9 +121,10 @@ export function EpicActions({
   async function handleReview() {
     if (reviewTypes.size === 0) return;
     try {
-      await onSendToReview(Array.from(reviewTypes), reviewProvider);
+      await onSendToReview(Array.from(reviewTypes), reviewProvider, reviewResumeSessionId);
       setReviewOpen(false);
       setReviewTypes(new Set());
+      setReviewResumeSessionId(undefined);
     } catch (error) {
       onActionError?.(error);
     }
@@ -272,7 +274,7 @@ export function EpicActions({
       </Dialog>
 
       {/* Agent Review Dialog */}
-      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
+      <Dialog open={reviewOpen} onOpenChange={(open) => { setReviewOpen(open); if (!open) setReviewResumeSessionId(undefined); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Epic Agent Review</DialogTitle>
@@ -290,6 +292,13 @@ export function EpicActions({
               className="w-40 h-8 text-xs"
             />
           </div>
+          <SessionPicker
+            projectId={projectId}
+            epicId={epic.id}
+            provider={reviewProvider}
+            selectedSessionId={reviewResumeSessionId}
+            onSelect={setReviewResumeSessionId}
+          />
           <div className="space-y-3">
             <label className="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 cursor-pointer">
               <input

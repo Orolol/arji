@@ -142,7 +142,6 @@ export default function StoryDetailPage() {
         <StoryActions
           projectId={projectId}
           story={story}
-          projectId={projectId}
           dispatching={dispatching}
           isRunning={isRunning}
           codexAvailable={codexAvailable}
@@ -151,8 +150,8 @@ export default function StoryDetailPage() {
             await sendToDev(comment, provider, resumeSessionId);
             refreshStory();
           }}
-          onSendToReview={async (types, customAgentIds, provider) => {
-            await sendToReview(types, customAgentIds, provider);
+          onSendToReview={async (types, provider, resumeSessionId) => {
+            await sendToReview(types, provider, resumeSessionId);
           }}
           onApprove={async () => {
             await approve();

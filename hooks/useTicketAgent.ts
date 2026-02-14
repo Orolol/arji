@@ -84,12 +84,14 @@ export function useTicketAgent(
   );
 
   const sendToReview = useCallback(
-    async (reviewTypes: string[], provider?: string) => {
+    async (reviewTypes: string[], provider?: string, resumeSessionId?: string) => {
       setDispatching(true);
       try {
+        const body: Record<string, unknown> = { reviewTypes, provider };
+        if (resumeSessionId) body.resumeSessionId = resumeSessionId;
         const data = await requestJson(
           `/api/projects/${projectId}/stories/${storyId}/review`,
-          { reviewTypes, provider }
+          body
         );
         await pollSessions();
         return data;

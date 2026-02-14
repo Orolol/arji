@@ -37,6 +37,7 @@ import {
   enrichPromptWithDocumentMentions,
 } from "@/lib/documents/mentions";
 import { listProjectTextDocuments } from "@/lib/documents/query";
+import { agentSessions } from "@/lib/db/schema";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
@@ -58,9 +59,10 @@ export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
   const body = await request.json();
 
-  const { reviewTypes, provider: providerParam } = body as {
+  const { reviewTypes, provider: providerParam, resumeSessionId: resumeSessionIdParam } = body as {
     reviewTypes: ReviewType[];
     provider?: ProviderType;
+    resumeSessionId?: string;
   };
   const provider: ProviderType = providerParam || "claude-code";
 
@@ -172,6 +174,19 @@ export async function POST(request: NextRequest, { params }: Params) {
     epic.title
   );
 
+  // Resume support: look up previous session's claudeSessionId
+  let resumeClaudeSessionId: string | undefined;
+  if (resumeSessionIdParam && provider === "claude-code") {
+    const prevSession = db
+      .select({ claudeSessionId: agentSessions.claudeSessionId })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, resumeSessionIdParam))
+      .get();
+    if (prevSession?.claudeSessionId) {
+      resumeClaudeSessionId = prevSession.claudeSessionId;
+    }
+  }
+
   const sessionsCreated: string[] = [];
 
   // Dispatch one agent per review type
@@ -237,6 +252,14 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const agentMode = reviewType === "feature_review" ? "code" : "plan";
 
+    // First review session can resume; subsequent ones start fresh
+    const useResume = idx === 0 && !!resumeClaudeSessionId;
+    const claudeSessionId = useResume
+      ? resumeClaudeSessionId
+      : resolvedAgent.provider === "claude-code"
+        ? crypto.randomUUID()
+        : undefined;
+
     createQueuedSession({
       id: sessionId,
       projectId,
@@ -248,6 +271,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       logsPath,
       branchName,
       worktreePath,
+      claudeSessionId,
       createdAt: now,
     });
 
@@ -258,6 +282,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       prompt: enrichedPrompt,
       cwd: worktreePath,
       model: resolvedAgent.model,
+      claudeSessionId,
+      resumeSession: useResume,
     }, resolvedAgent.provider);
 
     // Background: wait for completion, post review comment

@@ -83,13 +83,15 @@ export function useEpicAgent(projectId: string, epicId: string | null) {
   );
 
   const sendToReview = useCallback(
-    async (reviewTypes: string[], provider?: string) => {
+    async (reviewTypes: string[], provider?: string, resumeSessionId?: string) => {
       if (!epicId) return;
       setDispatching(true);
       try {
+        const body: Record<string, unknown> = { reviewTypes, provider };
+        if (resumeSessionId) body.resumeSessionId = resumeSessionId;
         const data = await requestJson(
           `/api/projects/${projectId}/epics/${epicId}/review`,
-          { reviewTypes, provider }
+          body
         );
         await pollSessions();
         return data;
@@ -100,12 +102,16 @@ export function useEpicAgent(projectId: string, epicId: string | null) {
     [projectId, epicId, requestJson, pollSessions]
   );
 
-  const resolveMerge = useCallback(async () => {
+  const resolveMerge = useCallback(async (provider?: string, resumeSessionId?: string) => {
     if (!epicId) return;
     setDispatching(true);
     try {
+      const body: Record<string, unknown> = {};
+      if (provider) body.provider = provider;
+      if (resumeSessionId) body.resumeSessionId = resumeSessionId;
       const data = await requestJson(
-        `/api/projects/${projectId}/epics/${epicId}/resolve-merge`
+        `/api/projects/${projectId}/epics/${epicId}/resolve-merge`,
+        body
       );
       await pollSessions();
       return data;
