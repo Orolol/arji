@@ -1,11 +1,41 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const mockDbState = vi.hoisted(() => ({
+  updateSetCalls: [] as Array<Record<string, unknown>>,
+}));
+
+vi.mock("drizzle-orm", () => ({
+  eq: vi.fn(() => ({})),
+}));
+
+vi.mock("@/lib/db/schema", () => ({
+  agentSessions: {
+    id: "id",
+  },
+}));
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    update: vi.fn(() => ({
+      set: vi.fn((payload: Record<string, unknown>) => {
+        mockDbState.updateSetCalls.push(payload);
+        return {
+          where: vi.fn(() => ({
+            run: vi.fn(),
+          })),
+        };
+      }),
+    })),
+  },
+}));
+
 vi.mock("@/lib/claude/spawn", () => ({
   spawnClaude: vi.fn(() => ({
     promise: Promise.resolve({
       success: true,
       result: "CC output",
       duration: 500,
+      cliSessionId: "cc-cli-1",
     }),
     kill: vi.fn(),
   })),
@@ -19,6 +49,7 @@ vi.mock("@/lib/providers", () => {
       success: true,
       result: `${label} output`,
       duration: 300,
+      cliSessionId: `${label}-cli-1`,
     }),
   });
   return {
@@ -37,6 +68,7 @@ let processManager: typeof import("@/lib/claude/process-manager").processManager
 describe("Process Manager", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockDbState.updateSetCalls = [];
     // Force reimport to get a fresh singleton
     vi.resetModules();
     const mod = await import("@/lib/claude/process-manager");
@@ -124,6 +156,15 @@ describe("Process Manager", () => {
       expect(info).not.toBeNull();
       expect(info!.provider).toBe("claude-code");
       expect(info!.startedAt).toBeInstanceOf(Date);
+    });
+
+    it("persists cliSessionId on completion", async () => {
+      processManager.start("s7-cli", { mode: "code", prompt: "test" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(mockDbState.updateSetCalls).toContainEqual({
+        cliSessionId: "cc-cli-1",
+      });
     });
   });
 

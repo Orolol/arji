@@ -1,5 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("drizzle-orm", () => ({
+  eq: vi.fn(() => ({})),
+}));
+
+vi.mock("@/lib/db/schema", () => ({
+  agentSessions: {
+    id: "id",
+  },
+}));
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({
+        where: vi.fn(() => ({
+          run: vi.fn(),
+        })),
+      })),
+    })),
+  },
+}));
+
+vi.mock("@/lib/agent-sessions/chunks", () => ({
+  appendSessionChunk: vi.fn(),
+}));
+
 vi.mock("@/lib/claude/spawn", () => ({
   spawnClaude: vi.fn(() => ({
     promise: Promise.resolve({
