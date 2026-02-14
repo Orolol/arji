@@ -82,6 +82,65 @@ function chatHistorySection(messages: PromptMessage[]): string {
   return `## Conversation History\n\n${formatted.join("\n\n")}\n`;
 }
 
+function projectContext(
+  project: PromptProject,
+  documents: PromptDocument[] = [],
+  options: { includeDescription?: boolean; specHeading?: string } = {},
+): string[] {
+  const { includeDescription = false, specHeading = "Project Specification" } =
+    options;
+  const parts: string[] = [];
+
+  parts.push(`# Project: ${project.name}\n`);
+
+  if (includeDescription) {
+    parts.push(section("Project Description", project.description));
+  }
+
+  parts.push(section(specHeading, project.spec));
+  parts.push(documentsSection(documents));
+
+  return parts;
+}
+
+function userStoriesSection(
+  userStories: PromptUserStory[],
+  options: { heading?: string; checkmark?: boolean } = {},
+): string {
+  if (userStories.length === 0) return "";
+
+  const { heading = "User Stories", checkmark = true } = options;
+  const parts: string[] = [];
+
+  parts.push(`### ${heading}\n`);
+
+  const storyLines = userStories.map((us) => {
+    const lines: string[] = [];
+    const prefix = checkmark ? "- [ ] " : "- ";
+    lines.push(`${prefix}**${us.title}**`);
+
+    if (us.description) {
+      lines.push(`  ${us.description.trim()}`);
+    }
+
+    if (us.acceptanceCriteria) {
+      lines.push(`  **Acceptance criteria:**`);
+      // Indent each line of the acceptance criteria
+      const criteria = us.acceptanceCriteria
+        .trim()
+        .split("\n")
+        .map((line) => `  ${line}`)
+        .join("\n");
+      lines.push(criteria);
+    }
+
+    return lines.join("\n");
+  });
+
+  parts.push(storyLines.join("\n\n") + "\n");
+  return parts.join("");
+}
+
 // ---------------------------------------------------------------------------
 // 1. Chat Brainstorm Prompt
 // ---------------------------------------------------------------------------
@@ -100,11 +159,9 @@ export function buildChatPrompt(
 
   parts.push(systemSection(systemPrompt));
 
-  parts.push(`# Project: ${project.name}\n`);
-
-  parts.push(section("Project Description", project.description));
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(
+    ...projectContext(project, documents, { includeDescription: true }),
+  );
   parts.push(chatHistorySection(messages));
 
   parts.push(`## Instructions
@@ -136,11 +193,12 @@ export function buildSpecGenerationPrompt(
 
   parts.push(systemSection(systemPrompt));
 
-  parts.push(`# Project: ${project.name}\n`);
-
-  parts.push(section("Project Description", project.description));
-  parts.push(section("Current Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(
+    ...projectContext(project, documents, {
+      includeDescription: true,
+      specHeading: "Current Specification",
+    }),
+  );
   parts.push(chatHistorySection(chatHistory));
 
   parts.push(`## Task: Generate Project Specification & Plan
@@ -216,9 +274,7 @@ export function buildTechCheckPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
-  parts.push(`# Project: ${project.name}\n`);
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(...projectContext(project, documents));
 
   if (customPrompt && customPrompt.trim()) {
     parts.push(`## Additional Instructions\n\n${customPrompt.trim()}\n`);
@@ -374,10 +430,9 @@ export function buildEpicRefinementPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
-  parts.push(`# Project: ${project.name}\n`);
-  parts.push(section("Project Description", project.description));
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(
+    ...projectContext(project, documents, { includeDescription: true }),
+  );
   parts.push(existingEpicsSection(existingEpics));
   parts.push(chatHistorySection(messages));
 
@@ -415,10 +470,9 @@ export function buildEpicFinalizationPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
-  parts.push(`# Project: ${project.name}\n`);
-  parts.push(section("Project Description", project.description));
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(
+    ...projectContext(project, documents, { includeDescription: true }),
+  );
   parts.push(existingEpicsSection(existingEpics));
   parts.push(chatHistorySection(messages));
 
@@ -479,10 +533,9 @@ export function buildEpicCreationPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
-  parts.push(`# Project: ${project.name}\n`);
-  parts.push(section("Project Description", project.description));
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(
+    ...projectContext(project, documents, { includeDescription: true }),
+  );
   parts.push(chatHistorySection(messages));
 
   parts.push(`## Task: Generate Epic with User Stories
@@ -588,9 +641,7 @@ export function buildTeamBuildPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
-  parts.push(`# Project: ${project.name}\n`);
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(...projectContext(project, documents));
 
   // Epics section
   parts.push(`## Epics to Implement\n`);
@@ -607,27 +658,7 @@ export function buildTeamBuildPrompt(
       parts.push(`${epic.description.trim()}\n`);
     }
 
-    if (epic.userStories.length > 0) {
-      parts.push(`**User Stories:**\n`);
-      const storyLines = epic.userStories.map((us) => {
-        const lines: string[] = [];
-        lines.push(`- [ ] **${us.title}**`);
-        if (us.description) {
-          lines.push(`  ${us.description.trim()}`);
-        }
-        if (us.acceptanceCriteria) {
-          lines.push(`  **Acceptance criteria:**`);
-          const criteria = us.acceptanceCriteria
-            .trim()
-            .split("\n")
-            .map((line) => `  ${line}`)
-            .join("\n");
-          lines.push(criteria);
-        }
-        return lines.join("\n");
-      });
-      parts.push(storyLines.join("\n\n") + "\n");
-    }
+    parts.push(userStoriesSection(epic.userStories));
   }
 
   parts.push(`## Instructions — Team Lead Mode
@@ -679,11 +710,7 @@ export function buildBuildPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
-
-  parts.push(`# Project: ${project.name}\n`);
-
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(...projectContext(project, documents));
 
   // Epic section
   parts.push(`## Epic to Implement\n`);
@@ -693,33 +720,7 @@ export function buildBuildPrompt(
   }
 
   // User stories
-  if (userStories.length > 0) {
-    parts.push(`### User Stories\n`);
-
-    const storyLines = userStories.map((us) => {
-      const lines: string[] = [];
-      lines.push(`- [ ] **${us.title}**`);
-
-      if (us.description) {
-        lines.push(`  ${us.description.trim()}`);
-      }
-
-      if (us.acceptanceCriteria) {
-        lines.push(`  **Acceptance criteria:**`);
-        // Indent each line of the acceptance criteria
-        const criteria = us.acceptanceCriteria
-          .trim()
-          .split("\n")
-          .map((line) => `  ${line}`)
-          .join("\n");
-        lines.push(criteria);
-      }
-
-      return lines.join("\n");
-    });
-
-    parts.push(storyLines.join("\n\n") + "\n");
-  }
+  parts.push(userStoriesSection(userStories));
 
   // Comment history
   if (comments && comments.length > 0) {
@@ -775,9 +776,7 @@ export function buildTicketBuildPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
-  parts.push(`# Project: ${project.name}\n`);
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(...projectContext(project, documents));
 
   // Epic context
   parts.push(`## Epic Context\n`);
@@ -945,9 +944,7 @@ export function buildReviewPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
-  parts.push(`# Project: ${project.name}\n`);
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(...projectContext(project, documents));
 
   // Epic context
   parts.push(`## Epic Context\n`);
@@ -1043,9 +1040,7 @@ export function buildCustomReviewPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(globalPrompt));
-  parts.push(`# Project: ${project.name}\n`);
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(...projectContext(project, documents));
 
   // Epic context
   parts.push(`## Epic Context\n`);
@@ -1100,9 +1095,7 @@ export function buildCustomEpicReviewPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(globalPrompt));
-  parts.push(`# Project: ${project.name}\n`);
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(...projectContext(project, documents));
 
   // Epic details
   parts.push(`## Epic Under Review\n`);
@@ -1112,27 +1105,7 @@ export function buildCustomEpicReviewPrompt(
   }
 
   // All user stories
-  if (userStories.length > 0) {
-    parts.push(`### User Stories\n`);
-    const storyLines = userStories.map((us) => {
-      const lines: string[] = [];
-      lines.push(`- **${us.title}**`);
-      if (us.description) {
-        lines.push(`  ${us.description.trim()}`);
-      }
-      if (us.acceptanceCriteria) {
-        lines.push(`  **Acceptance criteria:**`);
-        const criteria = us.acceptanceCriteria
-          .trim()
-          .split("\n")
-          .map((line) => `  ${line}`)
-          .join("\n");
-        lines.push(criteria);
-      }
-      return lines.join("\n");
-    });
-    parts.push(storyLines.join("\n\n") + "\n");
-  }
+  parts.push(userStoriesSection(userStories, { checkmark: false }));
 
   // Custom review instructions
   parts.push(`## ${customAgentName} Review Criteria\n`);
@@ -1173,8 +1146,7 @@ export function buildMergeResolutionPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
-  parts.push(`# Project: ${project.name}\n`);
-  parts.push(section("Project Specification", project.spec));
+  parts.push(...projectContext(project));
 
   parts.push(`## Epic Context\n`);
   parts.push(`### ${epic.title}\n`);
@@ -1225,9 +1197,7 @@ export function buildEpicReviewPrompt(
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
-  parts.push(`# Project: ${project.name}\n`);
-  parts.push(section("Project Specification", project.spec));
-  parts.push(documentsSection(documents));
+  parts.push(...projectContext(project, documents));
 
   // Epic details
   parts.push(`## Epic Under Review\n`);
@@ -1237,27 +1207,7 @@ export function buildEpicReviewPrompt(
   }
 
   // All user stories in this epic
-  if (userStories.length > 0) {
-    parts.push(`### User Stories\n`);
-    const storyLines = userStories.map((us) => {
-      const lines: string[] = [];
-      lines.push(`- **${us.title}**`);
-      if (us.description) {
-        lines.push(`  ${us.description.trim()}`);
-      }
-      if (us.acceptanceCriteria) {
-        lines.push(`  **Acceptance criteria:**`);
-        const criteria = us.acceptanceCriteria
-          .trim()
-          .split("\n")
-          .map((line) => `  ${line}`)
-          .join("\n");
-        lines.push(criteria);
-      }
-      return lines.join("\n");
-    });
-    parts.push(storyLines.join("\n\n") + "\n");
-  }
+  parts.push(userStoriesSection(userStories, { checkmark: false }));
 
   // Comment history
   if (comments && comments.length > 0) {

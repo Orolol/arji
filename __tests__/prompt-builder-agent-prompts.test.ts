@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildBuildPrompt,
   buildChatPrompt,
+  buildCustomEpicReviewPrompt,
+  buildEpicReviewPrompt,
   buildReviewPrompt,
   buildSpecPrompt,
   buildTechCheckPrompt,
@@ -107,5 +109,41 @@ describe("Prompt builders with resolved system prompts", () => {
     expect(custom).toContain("Custom Review Agent Instructions");
     expect(custom).toContain("UI Review");
     expect(custom).toContain("layout consistency");
+  });
+
+  it("reuses shared project/doc/story sections in epic-level review prompts", () => {
+    const epic = {
+      title: "Epic 1",
+      description: "Cross-cutting improvements",
+    };
+
+    const customEpicReview = buildCustomEpicReviewPrompt(
+      project,
+      docs,
+      epic,
+      [story],
+      "Architecture Review",
+      "Focus on boundaries and coupling.",
+      "Custom global prompt"
+    );
+
+    const epicReview = buildEpicReviewPrompt(
+      project,
+      docs,
+      epic,
+      [story],
+      "feature_review",
+      "Built-in global prompt"
+    );
+
+    expect(customEpicReview).toContain("# Project: Arij");
+    expect(customEpicReview).toContain("## Project Specification");
+    expect(customEpicReview).toContain("## Reference Documents");
+    expect(customEpicReview).toContain("- **As a dev I want tests**");
+
+    expect(epicReview).toContain("# Project: Arij");
+    expect(epicReview).toContain("## Project Specification");
+    expect(epicReview).toContain("## Reference Documents");
+    expect(epicReview).toContain("- **As a dev I want tests**");
   });
 });
