@@ -35,7 +35,7 @@ import {
   MentionResolutionError,
   enrichPromptWithDocumentMentions,
 } from "@/lib/documents/mentions";
-import { agentSessions } from "@/lib/db/schema";
+import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
@@ -171,21 +171,16 @@ export async function POST(request: NextRequest, { params }: Params) {
     epic.title
   );
 
-  // Resume support: look up previous session's cliSessionId
+  // Resume support — scope-guarded
   let resumeCliSessionId: string | undefined;
   if (resumeSessionIdParam) {
-    const prevSession = db
-      .select({
-        cliSessionId: agentSessions.cliSessionId,
-        claudeSessionId: agentSessions.claudeSessionId,
-      })
-      .from(agentSessions)
-      .where(eq(agentSessions.id, resumeSessionIdParam))
-      .get();
-    const previousCliSessionId =
-      prevSession?.cliSessionId ?? prevSession?.claudeSessionId ?? null;
-    if (previousCliSessionId) {
-      resumeCliSessionId = previousCliSessionId;
+    const validated = validateResumeSession({
+      resumeSessionId: resumeSessionIdParam,
+      epicId: epic.id,
+      userStoryId: storyId,
+    });
+    if (validated) {
+      resumeCliSessionId = validated.cliSessionId;
     }
   }
 

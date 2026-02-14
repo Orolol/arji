@@ -31,7 +31,7 @@ import {
   enrichPromptWithDocumentMentions,
   validateMentionsExist,
 } from "@/lib/documents/mentions";
-import { agentSessions } from "@/lib/db/schema";
+import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
 
@@ -157,22 +157,16 @@ export async function POST(request: NextRequest, { params }: Params) {
   const providerSupportsResume =
     resolvedAgent.provider === "claude-code" || resolvedAgent.provider === "gemini-cli";
 
-  // Resume support: look up previous session's cliSessionId
+  // Resume support — scope-guarded
   let cliSessionId: string | undefined;
   let resumeSession = false;
   if (providerSupportsResume && body.resumeSessionId) {
-    const prevSession = db
-      .select({
-        cliSessionId: agentSessions.cliSessionId,
-        claudeSessionId: agentSessions.claudeSessionId,
-      })
-      .from(agentSessions)
-      .where(eq(agentSessions.id, body.resumeSessionId))
-      .get();
-    const previousCliSessionId =
-      prevSession?.cliSessionId ?? prevSession?.claudeSessionId ?? null;
-    if (previousCliSessionId) {
-      cliSessionId = previousCliSessionId;
+    const validated = validateResumeSession({
+      resumeSessionId: body.resumeSessionId,
+      epicId: epicId,
+    });
+    if (validated) {
+      cliSessionId = validated.cliSessionId;
       resumeSession = true;
     }
   }
