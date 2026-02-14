@@ -20,7 +20,7 @@ interface GeneratedEpic {
   title: string;
   description: string;
   priority: number;
-  type: "feature" | "bug";
+  type: "feature";
   userStories: GeneratedStory[];
 }
 
@@ -94,7 +94,6 @@ function toGeneratedEpics(value: unknown): GeneratedEpic[] {
         title?: unknown;
         description?: unknown;
         priority?: unknown;
-        type?: unknown;
         userStories?: unknown;
         user_stories?: unknown;
       };
@@ -112,7 +111,7 @@ function toGeneratedEpics(value: unknown): GeneratedEpic[] {
             ? row.description.trim()
             : "Epic generated from QA report findings.",
         priority: normalizePriority(row.priority),
-        type: row.type === "bug" ? "bug" : "feature",
+        type: "feature" as const,
         userStories: stories,
       } satisfies GeneratedEpic;
     })
@@ -159,7 +158,6 @@ Return ONLY a JSON array with the following structure:
     "title": "Epic title",
     "description": "Detailed description including specific findings and recommended changes",
     "priority": 2,
-    "type": "bug",
     "userStories": [
       {
         "title": "As a developer, I want [specific fix] so that [benefit]",
@@ -173,8 +171,8 @@ Return ONLY a JSON array with the following structure:
 
 Rules:
 - Priority: 0=low, 1=medium, 2=high, 3=critical
-- Type: "bug" for issues/fixes, "feature" for improvements/new capabilities
-- Group related findings into single epics
+- All items are epics (type "feature") — do NOT create bug tickets
+- Group related findings (including bug fixes) into cohesive epics with user stories
 - Each epic should have 1-5 user stories
 - Be specific and reference file paths and concrete changes
 `;

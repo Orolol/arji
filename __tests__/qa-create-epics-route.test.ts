@@ -84,7 +84,6 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
         title: "Stabilize Chat Resume Flow",
         description: "Fix resume failures and add fallback behavior.",
         priority: 2,
-        type: "bug",
         userStories: [
           {
             title: "As a user, I want chat resumes to recover gracefully",
@@ -134,7 +133,7 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
       expect.objectContaining({
         id: "epic-1",
         title: "Stabilize Chat Resume Flow",
-        type: "bug",
+        type: "feature",
       }),
     );
     expect(mockDb.insertedValues[1]).toEqual(
@@ -171,6 +170,45 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
     expect(json.rawSnippet.length).toBeLessThan(longOutput.length);
     expect(mockDb.insertedValues).toHaveLength(0);
     expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it("forces type to 'feature' even when AI returns 'bug'", async () => {
+    mockExtractJson.mockReturnValue([
+      {
+        title: "Fix Critical Security Issue",
+        description: "Address XSS vulnerability in input handling.",
+        priority: 3,
+        type: "bug",
+        userStories: [
+          {
+            title: "As a developer, I want inputs sanitized",
+            description: "Sanitize all user inputs.",
+            acceptanceCriteria: "- [ ] No XSS possible",
+          },
+        ],
+      },
+    ]);
+    mockDb.getQueue = [
+      { id: "proj-1", gitRepoPath: "/tmp/repo" },
+      { id: "report-1", projectId: "proj-1", reportContent: "# Findings", namedAgentId: null },
+    ];
+    mockDb.allQueue = [[{ position: 0 }]];
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/qa/reports/[reportId]/create-epics/route"
+    );
+    const res = await POST({} as never, {
+      params: Promise.resolve({ projectId: "proj-1", reportId: "report-1" }),
+    });
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.epics).toHaveLength(1);
+    expect(mockDb.insertedValues[0]).toEqual(
+      expect.objectContaining({
+        type: "feature",
+      }),
+    );
   });
 
   it("normalizes epics payload with aliases and defaults", async () => {
