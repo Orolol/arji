@@ -15,7 +15,7 @@ import {
   type TeamEpic,
 } from "@/lib/claude/prompt-builder";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
-import type { ProviderType } from "@/lib/providers";
+
 import fs from "fs";
 import path from "path";
 import { tryExportArjiJson } from "@/lib/sync/export";
@@ -29,7 +29,7 @@ import {
   markSessionRunning,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
-import { resolveAgent } from "@/lib/agent-config/providers";
+import { resolveAgentByNamedId } from "@/lib/agent-config/providers";
 import { listProjectTextDocuments } from "@/lib/documents/query";
 import {
   enrichPromptWithDocumentMentions,
@@ -63,12 +63,12 @@ export async function POST(
     epicIds,
     mode = "parallel",
     team = false,
-    provider = "claude-code",
+    namedAgentId = null,
   } = body as {
     epicIds: string[];
     mode?: "sequential" | "parallel";
     team?: boolean;
-    provider?: ProviderType;
+    namedAgentId?: string | null;
   };
 
   if (!epicIds || !Array.isArray(epicIds) || epicIds.length === 0) {
@@ -98,7 +98,8 @@ export async function POST(
   }
 
   // Team mode is Claude Code exclusive — no sub-agent delegation outside Claude today.
-  if (team && provider !== "claude-code") {
+  const resolvedTeamCheck = resolveAgentByNamedId("team_build", projectId, namedAgentId);
+  if (team && resolvedTeamCheck.provider !== "claude-code") {
     return NextResponse.json(
       { error: "Team mode is only available with Claude Code. Other providers do not support sub-agent delegation." },
       { status: 400 }
@@ -211,10 +212,10 @@ export async function POST(
         }
         throw error;
       }
-      const resolvedTeamAgent = await resolveAgent(
+      const resolvedTeamAgent = resolveAgentByNamedId(
         "team_build",
         projectId,
-        provider
+        namedAgentId
       );
       if (resolvedTeamAgent.provider !== "claude-code") {
         return NextResponse.json(
@@ -374,7 +375,7 @@ export async function POST(
       }
       throw error;
     }
-    const resolvedBuildAgent = await resolveAgent("build", projectId, provider);
+    const resolvedBuildAgent = resolveAgentByNamedId("build", projectId, namedAgentId);
 
     // Create session in DB
     const sessionId = createId();

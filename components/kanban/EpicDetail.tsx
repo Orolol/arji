@@ -35,8 +35,7 @@ import { Plus, Trash2, Check, Circle, Loader2, GitBranch, GitMerge, GitPullReque
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { isAgentAlreadyRunningError } from "@/lib/agents/client-error";
-import { useCodexAvailable } from "@/hooks/useCodexAvailable";
-import { ProviderSelect, type ProviderType } from "@/components/shared/ProviderSelect";
+import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
 import { SessionPicker } from "@/components/shared/SessionPicker";
 import { PermanentDeleteDialog } from "@/components/shared/PermanentDeleteDialog";
 import {
@@ -104,7 +103,6 @@ export function EpicDetail({
     syncPr,
   } = useEpicPr(projectId, epicId);
 
-  const { codexAvailable, codexInstalled } = useCodexAvailable();
   const { isConfigured: githubConfigured } = useGitHubConfig(projectId);
   const {
     ahead,
@@ -141,7 +139,7 @@ export function EpicDetail({
   const [mergeError, setMergeError] = useState<string | null>(null);
   const [resolvingMerge, setResolvingMerge] = useState(false);
   const [resolveMergeOpen, setResolveMergeOpen] = useState(false);
-  const [resolveMergeProvider, setResolveMergeProvider] = useState<ProviderType>("claude-code");
+  const [resolveMergeAgentId, setResolveMergeAgentId] = useState<string | null>(null);
   const [resolveMergeResumeSessionId, setResolveMergeResumeSessionId] = useState<string | undefined>();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingEpic, setDeletingEpic] = useState(false);
@@ -200,13 +198,13 @@ export function EpicDetail({
     refresh();
   }
 
-  async function handleSendToDev(comment?: string, provider?: ProviderType, resumeSessionId?: string) {
-    await sendToDev(comment, provider, resumeSessionId);
+  async function handleSendToDev(comment?: string, namedAgentId?: string | null, resumeSessionId?: string) {
+    await sendToDev(comment, namedAgentId, resumeSessionId);
     refresh();
   }
 
-  async function handleSendToReview(types: string[], provider?: ProviderType, resumeSessionId?: string) {
-    await sendToReview(types, provider, resumeSessionId);
+  async function handleSendToReview(types: string[], namedAgentId?: string | null, resumeSessionId?: string) {
+    await sendToReview(types, namedAgentId, resumeSessionId);
     refresh();
   }
 
@@ -293,8 +291,6 @@ export function EpicDetail({
                 dispatching={dispatching}
                 isRunning={isRunning}
                 activeSessionId={activeSession?.id || null}
-                codexAvailable={codexAvailable}
-                codexInstalled={codexInstalled}
                 onSendToDev={handleSendToDev}
                 onSendToReview={handleSendToReview}
                 onApprove={handleApprove}
@@ -672,13 +668,11 @@ export function EpicDetail({
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-sm text-muted-foreground">Provider:</span>
-            <ProviderSelect
-              value={resolveMergeProvider}
-              onChange={setResolveMergeProvider}
-              codexAvailable={codexAvailable}
-              codexInstalled={codexInstalled}
-              className="w-40 h-8 text-xs"
+            <span className="text-sm text-muted-foreground">Agent:</span>
+            <NamedAgentSelect
+              value={resolveMergeAgentId}
+              onChange={setResolveMergeAgentId}
+              className="w-44 h-8 text-xs"
             />
           </div>
           {epicId && (
@@ -686,7 +680,7 @@ export function EpicDetail({
               projectId={projectId}
               epicId={epicId}
               agentType="merge"
-              provider={resolveMergeProvider}
+              provider="claude-code"
               selectedSessionId={resolveMergeResumeSessionId}
               onSelect={setResolveMergeResumeSessionId}
             />
@@ -696,7 +690,7 @@ export function EpicDetail({
               Cancel
             </Button>
             <Button
-              onClick={() => handleResolveMerge(resolveMergeProvider, resolveMergeResumeSessionId)}
+              onClick={() => handleResolveMerge(undefined, resolveMergeResumeSessionId)}
               disabled={resolvingMerge || isRunning}
             >
               {resolvingMerge ? (

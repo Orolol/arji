@@ -16,12 +16,11 @@ import {
 } from "@/lib/claude/prompt-builder";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
 import { checkSessionLock } from "@/lib/session-lock";
-import type { ProviderType } from "@/lib/providers";
 import fs from "fs";
 import path from "path";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { REVIEW_TYPE_TO_AGENT_TYPE } from "@/lib/agent-config/constants";
-import { resolveAgent } from "@/lib/agent-config/providers";
+import { resolveAgentByNamedId } from "@/lib/agent-config/providers";
 import {
   createAgentAlreadyRunningPayload,
   getRunningSessionForTarget,
@@ -59,12 +58,11 @@ export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
   const body = await request.json();
 
-  const { reviewTypes, provider: providerParam, resumeSessionId: resumeSessionIdParam } = body as {
+  const { reviewTypes, namedAgentId = null, resumeSessionId: resumeSessionIdParam } = body as {
     reviewTypes: ReviewType[];
-    provider?: ProviderType;
+    namedAgentId?: string | null;
     resumeSessionId?: string;
   };
-  const provider: ProviderType = providerParam || "claude-code";
 
   if (
     !reviewTypes ||
@@ -176,7 +174,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   // Resume support: look up previous session's claudeSessionId
   let resumeClaudeSessionId: string | undefined;
-  if (resumeSessionIdParam && provider === "claude-code") {
+  if (resumeSessionIdParam) {
     const prevSession = db
       .select({ claudeSessionId: agentSessions.claudeSessionId })
       .from(agentSessions)
@@ -218,10 +216,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       throw error;
     }
 
-    const resolvedAgent = await resolveAgent(
+    const resolvedAgent = resolveAgentByNamedId(
       REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
       projectId,
-      provider
+      namedAgentId,
     );
 
     const sessionId = createId();

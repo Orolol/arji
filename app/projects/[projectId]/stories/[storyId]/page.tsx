@@ -5,7 +5,6 @@ import { useRef, useState } from "react";
 import { useStoryDetail } from "@/hooks/useStoryDetail";
 import { useComments } from "@/hooks/useComments";
 import { useTicketAgent } from "@/hooks/useTicketAgent";
-import { useCodexAvailable } from "@/hooks/useCodexAvailable";
 import { StoryDetailPanel } from "@/components/story/StoryDetailPanel";
 import { CommentThread } from "@/components/story/CommentThread";
 import { StoryActions } from "@/components/story/StoryActions";
@@ -52,8 +51,6 @@ export default function StoryDetailPage() {
     sendToReview,
     approve,
   } = useTicketAgent(projectId, storyId, story?.epicId);
-
-  const { codexAvailable, codexInstalled } = useCodexAvailable();
 
   function addToast(message: string, href?: string) {
     const id = Date.now().toString();
@@ -144,14 +141,12 @@ export default function StoryDetailPage() {
           story={story}
           dispatching={dispatching}
           isRunning={isRunning}
-          codexAvailable={codexAvailable}
-          codexInstalled={codexInstalled}
-          onSendToDev={async (comment, provider, resumeSessionId) => {
-            await sendToDev(comment, provider, resumeSessionId);
+          onSendToDev={async (comment, namedAgentId, resumeSessionId) => {
+            await sendToDev(comment, namedAgentId, resumeSessionId);
             refreshStory();
           }}
-          onSendToReview={async (types, provider, resumeSessionId) => {
-            await sendToReview(types, provider, resumeSessionId);
+          onSendToReview={async (types, namedAgentId, resumeSessionId) => {
+            await sendToReview(types, namedAgentId, resumeSessionId);
           }}
           onApprove={async () => {
             await approve();

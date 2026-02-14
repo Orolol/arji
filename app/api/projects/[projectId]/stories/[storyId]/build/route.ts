@@ -13,8 +13,7 @@ import { processManager } from "@/lib/claude/process-manager";
 import { buildTicketBuildPrompt } from "@/lib/claude/prompt-builder";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
-import type { ProviderType } from "@/lib/providers";
-import { resolveAgent } from "@/lib/agent-config/providers";
+import { resolveAgentByNamedId } from "@/lib/agent-config/providers";
 import {
   createAgentAlreadyRunningPayload,
   getRunningSessionForTarget,
@@ -40,7 +39,7 @@ type Params = { params: Promise<{ projectId: string; storyId: string }> };
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
   const body = await request.json().catch(() => ({}));
-  const provider: ProviderType = body.provider || "claude-code";
+  const namedAgentId: string | null = body.namedAgentId || null;
 
   try {
     validateMentionsExist({
@@ -175,7 +174,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     throw error;
   }
 
-  const resolvedAgent = await resolveAgent("ticket_build", projectId, provider);
+  const resolvedAgent = resolveAgentByNamedId("ticket_build", projectId, namedAgentId);
 
   // Resume support
   let claudeSessionId: string | undefined;

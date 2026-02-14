@@ -13,8 +13,7 @@ import { processManager } from "@/lib/claude/process-manager";
 import { buildBuildPrompt } from "@/lib/claude/prompt-builder";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
-import type { ProviderType } from "@/lib/providers";
-import { resolveAgent } from "@/lib/agent-config/providers";
+import { resolveAgentByNamedId } from "@/lib/agent-config/providers";
 import {
   createAgentAlreadyRunningPayload,
   getRunningSessionForTarget,
@@ -40,7 +39,7 @@ type Params = { params: Promise<{ projectId: string; epicId: string }> };
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, epicId } = await params;
   const body = await request.json().catch(() => ({}));
-  const provider: ProviderType = body.provider || "claude-code";
+  const namedAgentId: string | null = body.namedAgentId || null;
 
   try {
     validateMentionsExist({
@@ -156,7 +155,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     throw error;
   }
 
-  const resolvedAgent = await resolveAgent("build", projectId, provider);
+  const resolvedAgent = resolveAgentByNamedId("build", projectId, namedAgentId);
 
   // Resume support: look up previous session's claudeSessionId
   let claudeSessionId: string | undefined;

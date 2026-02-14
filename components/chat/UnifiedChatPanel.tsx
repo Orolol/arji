@@ -24,13 +24,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { ProviderSelect, type ProviderType } from "@/components/shared/ProviderSelect";
+import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
 import { MessageList } from "@/components/chat/MessageList";
 import { MessageInput } from "@/components/chat/MessageInput";
 import { QuestionCards } from "@/components/chat/QuestionCards";
 import { useConversations } from "@/hooks/useConversations";
 import { useChat } from "@/hooks/useChat";
-import { useCodexAvailable } from "@/hooks/useCodexAvailable";
 import { useEpicCreate } from "@/hooks/useEpicCreate";
 import {
   isBrainstormConversationAgentType,
@@ -107,8 +106,6 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       answerQuestions,
     } = useChat(projectId, activeId);
 
-    const { codexAvailable, codexInstalled } = useCodexAvailable();
-
     const storageKey = useMemo(
       () => `arij.unified-chat-panel.ratio.${projectId}`,
       [projectId],
@@ -144,7 +141,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       sendMessage: rawSendMessage,
     });
 
-    const activeProvider = (activeConversation?.provider || "claude-code") as ProviderType;
+    const activeProvider = activeConversation?.provider || "claude-code";
     const hasMessages = messages.length > 0;
     const isBrainstorm = isBrainstormConversationAgentType(activeConversation?.type);
     const isEpicCreation = isEpicCreationConversationAgentType(activeConversation?.type);
@@ -381,11 +378,12 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       [activeId, rawSendMessage],
     );
 
-    async function handleProviderChange(nextProvider: ProviderType) {
+    async function handleAgentChange(namedAgentId: string) {
       if (!activeId || hasMessages) {
         return;
       }
-      await updateConversation(activeId, { provider: nextProvider });
+      // For now, store the namedAgentId as provider — conversations track agent selection
+      await updateConversation(activeId, { provider: namedAgentId });
     }
 
     async function handleGenerateSpec() {
@@ -520,13 +518,11 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
             )}
           </div>
           <div className="flex items-center gap-2">
-            <ProviderSelect
-              value={activeProvider}
-              onChange={handleProviderChange}
-              codexAvailable={codexAvailable}
-              codexInstalled={codexInstalled}
+            <NamedAgentSelect
+              value={null}
+              onChange={handleAgentChange}
               disabled={!activeConversation || hasMessages || isCurrentConversationBusy}
-              className="w-36 h-7 text-xs"
+              className="w-44 h-7 text-xs"
             />
             {isBrainstorm && (
               <Button

@@ -65,10 +65,10 @@ export function useTicketAgent(
   );
 
   const sendToDev = useCallback(
-    async (comment?: string, provider?: string, resumeSessionId?: string) => {
+    async (comment?: string, namedAgentId?: string | null, resumeSessionId?: string) => {
       setDispatching(true);
       try {
-        const body: Record<string, unknown> = { comment, provider };
+        const body: Record<string, unknown> = { comment, namedAgentId };
         if (resumeSessionId) body.resumeSessionId = resumeSessionId;
         const data = await requestJson(
           `/api/projects/${projectId}/stories/${storyId}/build`,
@@ -84,10 +84,10 @@ export function useTicketAgent(
   );
 
   const sendToReview = useCallback(
-    async (reviewTypes: string[], provider?: string, resumeSessionId?: string) => {
+    async (reviewTypes: string[], namedAgentId?: string | null, resumeSessionId?: string) => {
       setDispatching(true);
       try {
-        const body: Record<string, unknown> = { reviewTypes, provider };
+        const body: Record<string, unknown> = { reviewTypes, namedAgentId };
         if (resumeSessionId) body.resumeSessionId = resumeSessionId;
         const data = await requestJson(
           `/api/projects/${projectId}/stories/${storyId}/review`,

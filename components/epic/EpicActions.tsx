@@ -24,7 +24,7 @@ import {
   CheckCircle2,
   Loader2,
 } from "lucide-react";
-import { ProviderSelect, type ProviderType } from "@/components/shared/ProviderSelect";
+import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
 import { SessionPicker } from "@/components/shared/SessionPicker";
 
 interface EpicActions_Epic {
@@ -39,10 +39,8 @@ interface EpicActionsProps {
   dispatching: boolean;
   isRunning: boolean;
   activeSessionId?: string | null;
-  codexAvailable: boolean;
-  codexInstalled?: boolean;
-  onSendToDev: (comment?: string, provider?: ProviderType, resumeSessionId?: string) => Promise<unknown>;
-  onSendToReview: (types: string[], provider?: ProviderType, resumeSessionId?: string) => Promise<unknown>;
+  onSendToDev: (comment?: string, namedAgentId?: string | null, resumeSessionId?: string) => Promise<unknown>;
+  onSendToReview: (types: string[], namedAgentId?: string | null, resumeSessionId?: string) => Promise<unknown>;
   onApprove: () => Promise<unknown>;
   onActionError?: (error: unknown) => void;
 }
@@ -53,8 +51,6 @@ export function EpicActions({
   dispatching,
   isRunning,
   activeSessionId,
-  codexAvailable,
-  codexInstalled,
   onSendToDev,
   onSendToReview,
   onApprove,
@@ -63,8 +59,8 @@ export function EpicActions({
   const [sendToDevOpen, setSendToDevOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [devComment, setDevComment] = useState("");
-  const [devProvider, setDevProvider] = useState<ProviderType>("claude-code");
-  const [reviewProvider, setReviewProvider] = useState<ProviderType>("claude-code");
+  const [devAgentId, setDevAgentId] = useState<string | null>(null);
+  const [reviewAgentId, setReviewAgentId] = useState<string | null>(null);
   const [reviewTypes, setReviewTypes] = useState<Set<string>>(new Set(["feature_review"]));
   const [approving, setApproving] = useState(false);
   const [resumeSessionId, setResumeSessionId] = useState<string | undefined>();
@@ -85,7 +81,7 @@ export function EpicActions({
 
   async function handleSendToDev() {
     try {
-      await onSendToDev(devComment.trim() || undefined, devProvider, resumeSessionId);
+      await onSendToDev(devComment.trim() || undefined, devAgentId, resumeSessionId);
       setSendToDevOpen(false);
       setDevComment("");
       setResumeSessionId(undefined);
@@ -97,7 +93,7 @@ export function EpicActions({
   async function handleSendToDevFromReview() {
     if (!devComment.trim()) return;
     try {
-      await onSendToDev(devComment.trim(), devProvider, resumeSessionId);
+      await onSendToDev(devComment.trim(), devAgentId, resumeSessionId);
       setSendToDevOpen(false);
       setDevComment("");
       setResumeSessionId(undefined);
@@ -121,7 +117,7 @@ export function EpicActions({
   async function handleReview() {
     if (reviewTypes.size === 0) return;
     try {
-      await onSendToReview(Array.from(reviewTypes), reviewProvider, reviewResumeSessionId);
+      await onSendToReview(Array.from(reviewTypes), reviewAgentId, reviewResumeSessionId);
       setReviewOpen(false);
       setReviewTypes(new Set());
       setReviewResumeSessionId(undefined);
@@ -218,20 +214,18 @@ export function EpicActions({
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-sm text-muted-foreground">Provider:</span>
-            <ProviderSelect
-              value={devProvider}
-              onChange={setDevProvider}
-              codexAvailable={codexAvailable}
-              codexInstalled={codexInstalled}
-              className="w-40 h-8 text-xs"
+            <span className="text-sm text-muted-foreground">Agent:</span>
+            <NamedAgentSelect
+              value={devAgentId}
+              onChange={setDevAgentId}
+              className="w-44 h-8 text-xs"
             />
           </div>
           <SessionPicker
             projectId={projectId}
             epicId={epic.id}
             agentType="build"
-            provider={devProvider}
+            provider="claude-code"
             selectedSessionId={resumeSessionId}
             onSelect={setResumeSessionId}
           />
@@ -283,19 +277,17 @@ export function EpicActions({
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-sm text-muted-foreground">Provider:</span>
-            <ProviderSelect
-              value={reviewProvider}
-              onChange={setReviewProvider}
-              codexAvailable={codexAvailable}
-              codexInstalled={codexInstalled}
-              className="w-40 h-8 text-xs"
+            <span className="text-sm text-muted-foreground">Agent:</span>
+            <NamedAgentSelect
+              value={reviewAgentId}
+              onChange={setReviewAgentId}
+              className="w-44 h-8 text-xs"
             />
           </div>
           <SessionPicker
             projectId={projectId}
             epicId={epic.id}
-            provider={reviewProvider}
+            provider="claude-code"
             selectedSessionId={reviewResumeSessionId}
             onSelect={setReviewResumeSessionId}
           />

@@ -7,9 +7,8 @@ import { EpicDetail } from "@/components/kanban/EpicDetail";
 import { UnifiedChatPanel, type UnifiedChatPanelHandle } from "@/components/chat/UnifiedChatPanel";
 import { AgentMonitor } from "@/components/monitor/AgentMonitor";
 import { useAgentPolling } from "@/hooks/useAgentPolling";
-import { useCodexAvailable } from "@/hooks/useCodexAvailable";
 import { useBatchSelection } from "@/hooks/useBatchSelection";
-import { ProviderSelect, type ProviderType } from "@/components/shared/ProviderSelect";
+import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -48,7 +47,7 @@ export default function KanbanPage() {
   );
   const [teamMode, setTeamMode] = useState(false);
   const [autoMergeAgent, setAutoMergeAgent] = useState(false);
-  const [provider, setProvider] = useState<ProviderType>("claude-code");
+  const [namedAgentId, setNamedAgentId] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [batchMerging, setBatchMerging] = useState(false);
@@ -57,7 +56,6 @@ export default function KanbanPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [highlightedActivityId, setHighlightedActivityId] = useState<string | null>(null);
   const { activities } = useAgentPolling(projectId);
-  const { codexAvailable, codexInstalled } = useCodexAvailable();
   const prevSessionIds = useRef<Set<string>>(new Set());
   const panelRef = useRef<UnifiedChatPanelHandle>(null);
   const activeAgentActivities = useMemo<Record<string, KanbanEpicAgentActivity>>(
@@ -71,10 +69,7 @@ export default function KanbanPage() {
         map[activity.epicId] = {
           sessionId: activity.id,
           actionType: activity.type as KanbanEpicAgentActivity["actionType"],
-          agentName:
-            activity.provider === "codex"
-              ? `Codex agent ${activity.id.slice(0, 6)}`
-              : `Claude Code agent ${activity.id.slice(0, 6)}`,
+          agentName: `Agent ${activity.id.slice(0, 6)}`,
         };
       }
 
@@ -148,12 +143,12 @@ export default function KanbanPage() {
     router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
   }, [addToast, projectId, router, searchParams]);
 
-  // Reset team mode when selection drops below 2 or provider changes to codex
+  // Reset team mode when selection drops below 2
   useEffect(() => {
-    if (batch.allSelected.size < 2 || provider === "codex") {
+    if (batch.allSelected.size < 2) {
       setTeamMode(false);
     }
-  }, [batch.allSelected.size, provider]);
+  }, [batch.allSelected.size]);
 
   // Detect session completions for notifications + board refresh
   useEffect(() => {
@@ -198,7 +193,7 @@ export default function KanbanPage() {
           epicIds: Array.from(batch.allSelected),
           mode: buildMode,
           team: teamMode,
-          provider,
+          namedAgentId,
         }),
       });
 
@@ -249,7 +244,7 @@ export default function KanbanPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               reviewTypes: ["code_review"],
-              provider,
+              namedAgentId,
             }),
           }
         );
@@ -320,7 +315,7 @@ export default function KanbanPage() {
 
   const totalSelected = batch.allSelected.size;
   const autoCount = batch.autoIncluded.size;
-  const canTeamMode = totalSelected >= 2 && provider === "claude-code";
+  const canTeamMode = totalSelected >= 2;
 
   return (
     <div className="flex flex-col h-full">
@@ -375,11 +370,9 @@ export default function KanbanPage() {
                   )}
                 </span>
 
-                <ProviderSelect
-                  value={provider}
-                  onChange={setProvider}
-                  codexAvailable={codexAvailable}
-                  codexInstalled={codexInstalled}
+                <NamedAgentSelect
+                  value={namedAgentId}
+                  onChange={setNamedAgentId}
                 />
 
                 <Select
@@ -419,9 +412,7 @@ export default function KanbanPage() {
                         </label>
                       </TooltipTrigger>
                       <TooltipContent>
-                        {provider === "codex"
-                          ? "Team mode is only available with Claude Code"
-                          : "Launch a single CC session that coordinates sub-agents for each epic"}
+                        {"Launch a single CC session that coordinates sub-agents for each epic"}
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>

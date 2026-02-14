@@ -63,11 +63,11 @@ export function useEpicAgent(projectId: string, epicId: string | null) {
   );
 
   const sendToDev = useCallback(
-    async (comment?: string, provider?: string, resumeSessionId?: string) => {
+    async (comment?: string, namedAgentId?: string | null, resumeSessionId?: string) => {
       if (!epicId) return;
       setDispatching(true);
       try {
-        const body: Record<string, unknown> = { comment, provider };
+        const body: Record<string, unknown> = { comment, namedAgentId };
         if (resumeSessionId) body.resumeSessionId = resumeSessionId;
         const data = await requestJson(
           `/api/projects/${projectId}/epics/${epicId}/build`,
@@ -83,11 +83,11 @@ export function useEpicAgent(projectId: string, epicId: string | null) {
   );
 
   const sendToReview = useCallback(
-    async (reviewTypes: string[], provider?: string, resumeSessionId?: string) => {
+    async (reviewTypes: string[], namedAgentId?: string | null, resumeSessionId?: string) => {
       if (!epicId) return;
       setDispatching(true);
       try {
-        const body: Record<string, unknown> = { reviewTypes, provider };
+        const body: Record<string, unknown> = { reviewTypes, namedAgentId };
         if (resumeSessionId) body.resumeSessionId = resumeSessionId;
         const data = await requestJson(
           `/api/projects/${projectId}/epics/${epicId}/review`,

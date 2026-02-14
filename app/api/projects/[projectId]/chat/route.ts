@@ -12,7 +12,7 @@ import {
   MentionResolutionError,
   validateMentionsExist,
 } from "@/lib/documents/mentions";
-import { resolveAgent } from "@/lib/agent-config/providers";
+import { resolveAgentByNamedId } from "@/lib/agent-config/providers";
 import { getProvider } from "@/lib/providers";
 import { listProjectTextDocuments } from "@/lib/documents/query";
 
@@ -73,7 +73,7 @@ export async function POST(
 ) {
   const { projectId } = await params;
   const body = await request.json();
-  const providerOverride = body.provider as string | undefined;
+  const namedAgentId: string | null = body.namedAgentId || null;
 
   if (!body.content && (!body.attachmentIds || body.attachmentIds.length === 0)) {
     return NextResponse.json({ error: "content or attachments required" }, { status: 400 });
@@ -141,7 +141,7 @@ export async function POST(
     chatSystemPrompt
   );
 
-  const resolvedAgent = await resolveAgent("chat", projectId, providerOverride);
+  const resolvedAgent = resolveAgentByNamedId("chat", projectId, namedAgentId);
   let enrichedPrompt = prompt;
   try {
     enrichedPrompt = enrichPromptWithDocumentMentions({
