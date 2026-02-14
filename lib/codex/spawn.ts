@@ -26,9 +26,11 @@ export interface CodexOptions {
   onResponseChunk?: (chunk: { text: string; emittedAt: string }) => void;
   /** Optional identifier for NDJSON session logging (same format as Claude Code). */
   logIdentifier?: string;
-  /** Session UUID for resume support. */
+  /** Optional legacy thread/session ID (ignored in `codex exec` mode). */
   sessionId?: string;
-  /** When true, resume the session identified by sessionId. */
+  /** Optional CLI session ID for resume support (codex exec resume). */
+  cliSessionId?: string;
+  /** @deprecated `codex exec` is non-resumable; this flag is ignored. */
   resumeSession?: boolean;
 }
 
@@ -52,7 +54,7 @@ export function spawnCodex(options: CodexOptions): SpawnedClaude {
     onOutputChunk,
     onResponseChunk,
     logIdentifier,
-    sessionId: cliSessionId,
+    cliSessionId,
     resumeSession,
   } = options;
 

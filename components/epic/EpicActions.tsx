@@ -225,6 +225,7 @@ export function EpicActions({
             projectId={projectId}
             epicId={epic.id}
             agentType="build"
+            namedAgentId={devAgentId}
             provider="claude-code"
             selectedSessionId={resumeSessionId}
             onSelect={setResumeSessionId}
@@ -287,6 +288,8 @@ export function EpicActions({
           <SessionPicker
             projectId={projectId}
             epicId={epic.id}
+            agentType={Array.from(reviewTypes)[0]}
+            namedAgentId={reviewAgentId}
             provider="claude-code"
             selectedSessionId={reviewResumeSessionId}
             onSelect={setReviewResumeSessionId}

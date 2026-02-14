@@ -7,6 +7,7 @@ import {
   endStreamLog,
   type StreamLogContext,
 } from "@/lib/claude/logger";
+import { extractCliSessionIdFromOutput } from "@/lib/claude/json-parser";
 
 export interface GeminiOptions {
   mode: "plan" | "code" | "analyze";
@@ -218,6 +219,10 @@ export function spawnGemini(options: GeminiOptions): SpawnedClaude {
       const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
       const stderr = Buffer.concat(stderrChunks).toString("utf-8");
       const output = extractGeminiResult(stdout);
+      const extractedSessionId =
+        extractCliSessionIdFromOutput(stdout) ??
+        extractCliSessionIdFromOutput(stderr) ??
+        cliSessionId;
 
       if (output) {
         const emittedAt = new Date().toISOString();
@@ -265,6 +270,7 @@ export function spawnGemini(options: GeminiOptions): SpawnedClaude {
           error,
           result: output || undefined,
           duration,
+          cliSessionId: extractedSessionId,
         });
         return;
       }
@@ -273,6 +279,7 @@ export function spawnGemini(options: GeminiOptions): SpawnedClaude {
         success: true,
         result: output || stdout.trim(),
         duration,
+        cliSessionId: extractedSessionId,
       });
     });
   });

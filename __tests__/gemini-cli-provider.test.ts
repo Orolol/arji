@@ -126,6 +126,28 @@ describe("GeminiCliProvider", () => {
       })
     );
   });
+
+  it("passes cliSessionId and resumeSession to spawnGemini", async () => {
+    const { spawnGemini } = await import("@/lib/gemini/spawn");
+    const { GeminiCliProvider } = await import("@/lib/providers/gemini-cli");
+    const provider = new GeminiCliProvider();
+
+    provider.spawn({
+      sessionId: "resume-test",
+      prompt: "continue",
+      cwd: "/tmp",
+      mode: "plan",
+      cliSessionId: "gem-session-123",
+      resumeSession: true,
+    });
+
+    expect(spawnGemini).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "gem-session-123",
+        resumeSession: true,
+      })
+    );
+  });
 });
 
 describe("Provider Factory with Gemini CLI", () => {

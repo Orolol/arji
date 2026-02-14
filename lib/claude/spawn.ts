@@ -6,6 +6,7 @@ import {
   endStreamLog,
   type StreamLogContext,
 } from "./logger";
+import { extractCliSessionIdFromOutput } from "./json-parser";
 
 export interface ClaudeOptions {
   mode: "plan" | "code" | "analyze";
@@ -14,6 +15,8 @@ export interface ClaudeOptions {
   allowedTools?: string[];
   model?: string;
   logIdentifier?: string;
+  cliSessionId?: string;
+  /** @deprecated Use cliSessionId. */
   claudeSessionId?: string;
   resumeSession?: boolean;
 }
@@ -23,6 +26,7 @@ export interface ClaudeResult {
   result?: string;
   error?: string;
   duration: number;
+  cliSessionId?: string;
 }
 
 export interface SpawnedClaude {
@@ -60,7 +64,8 @@ export interface SpawnedClaudeStream {
  * The returned `kill` function can be called to abort the process early.
  */
 export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
-  const { mode, prompt, cwd, allowedTools, model, claudeSessionId, resumeSession } = options;
+  const { mode, prompt, cwd, allowedTools, model, resumeSession } = options;
+  const cliSessionId = options.cliSessionId ?? options.claudeSessionId;
 
   // --permission-mode: "plan" for read-only, "bypassPermissions" for code/analyze
   const permissionMode = mode === "plan" ? "plan" : "bypassPermissions";
@@ -78,10 +83,10 @@ export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
     "json",
   ];
 
-  if (claudeSessionId && resumeSession) {
-    args.push("--resume", claudeSessionId);
-  } else if (claudeSessionId) {
-    args.push("--session-id", claudeSessionId);
+  if (cliSessionId && resumeSession) {
+    args.push("--resume", cliSessionId);
+  } else if (cliSessionId) {
+    args.push("--session-id", cliSessionId);
   }
 
   args.push("--print", "-p", prompt);
@@ -144,6 +149,8 @@ export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
       const duration = Date.now() - startTime;
       const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
       const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+      const parsedCliSessionId =
+        extractCliSessionIdFromOutput(stdout) ?? cliSessionId;
 
       console.log("[spawn] Process exited, code:", code, "duration:", duration + "ms", "stdout:", stdout.length, "bytes, stderr:", stderr.length, "bytes");
       if (stderr.trim()) {
@@ -170,6 +177,7 @@ export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
             `Claude CLI exited with code ${code}`,
           result: stdout.trim() || undefined,
           duration,
+          cliSessionId: parsedCliSessionId,
         });
         return;
       }
@@ -178,6 +186,7 @@ export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
         success: true,
         result: stdout.trim(),
         duration,
+        cliSessionId: parsedCliSessionId,
       });
     });
   });
@@ -246,7 +255,8 @@ function extractResultText(result: unknown): string {
  * The `assistant` event is always ignored (redundant).
  */
 export function spawnClaudeStream(options: ClaudeOptions): SpawnedClaudeStream {
-  const { mode, prompt, cwd, allowedTools, model, logIdentifier, claudeSessionId, resumeSession } = options;
+  const { mode, prompt, cwd, allowedTools, model, logIdentifier, resumeSession } = options;
+  const cliSessionId = options.cliSessionId ?? options.claudeSessionId;
 
   const permissionMode = mode === "plan" ? "plan" : "bypassPermissions";
 
@@ -263,10 +273,10 @@ export function spawnClaudeStream(options: ClaudeOptions): SpawnedClaudeStream {
     "--verbose",
   ];
 
-  if (claudeSessionId && resumeSession) {
-    args.push("--resume", claudeSessionId);
-  } else if (claudeSessionId) {
-    args.push("--session-id", claudeSessionId);
+  if (cliSessionId && resumeSession) {
+    args.push("--resume", cliSessionId);
+  } else if (cliSessionId) {
+    args.push("--session-id", cliSessionId);
   }
 
   args.push("--print", "-p", prompt);

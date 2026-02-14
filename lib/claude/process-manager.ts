@@ -24,6 +24,7 @@ export interface TrackedSession {
   startedAt: Date;
   completedAt?: Date;
   result?: ClaudeResult;
+  cliSessionId?: string;
   kill: () => void;
   /** Provider session handle (PID-based for CC, thread-based for Codex). */
   providerSession?: ProviderSession;
@@ -37,6 +38,7 @@ export interface SessionInfo {
   completedAt?: Date;
   duration?: number;
   result?: ClaudeResult;
+  cliSessionId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -45,6 +47,24 @@ export interface SessionInfo {
 
 class ClaudeProcessManager {
   private sessions: Map<string, TrackedSession> = new Map();
+
+  private persistCliSessionId(sessionId: string, cliSessionId?: string): void {
+    if (!cliSessionId) {
+      return;
+    }
+
+    try {
+      db.update(agentSessions)
+        .set({ cliSessionId })
+        .where(eq(agentSessions.id, sessionId))
+        .run();
+    } catch (error) {
+      console.error(
+        `[process-manager] Failed to persist cliSessionId for session ${sessionId}`,
+        error
+      );
+    }
+  }
 
   /**
    * Spawns a new provider session and tracks it under the given session ID.
@@ -80,6 +100,7 @@ class ClaudeProcessManager {
         mode: options.mode,
         allowedTools: options.allowedTools,
         model: options.model,
+        cliSessionId: options.cliSessionId ?? options.claudeSessionId,
         claudeSessionId: options.claudeSessionId,
         resumeSession: options.resumeSession,
         onChunk: (chunk) => {
@@ -134,6 +155,7 @@ class ClaudeProcessManager {
       status: "running",
       provider,
       options,
+      cliSessionId: options.cliSessionId ?? options.claudeSessionId,
       startedAt: new Date(),
       kill,
       providerSession,
@@ -148,6 +170,16 @@ class ClaudeProcessManager {
         if (!tracked) return;
 
         const targetStatus: SessionStatus = result.success ? "completed" : "failed";
+        const resolvedCliSessionId =
+          result.cliSessionId ??
+          tracked.cliSessionId ??
+          tracked.options.cliSessionId ??
+          tracked.options.claudeSessionId;
+
+        if (resolvedCliSessionId) {
+          tracked.cliSessionId = resolvedCliSessionId;
+          this.persistCliSessionId(sessionId, resolvedCliSessionId);
+        }
 
         // Only transition if the move is valid (e.g. not already cancelled)
         if (isValidTransition(tracked.status, targetStatus)) {
@@ -292,6 +324,10 @@ class ClaudeProcessManager {
 
     if (session.result) {
       info.result = session.result;
+    }
+
+    if (session.cliSessionId) {
+      info.cliSessionId = session.cliSessionId;
     }
 
     return info;

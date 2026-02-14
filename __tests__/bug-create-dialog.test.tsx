@@ -7,7 +7,7 @@ describe("BugCreateDialog", () => {
     vi.restoreAllMocks();
   });
 
-  function renderDialog() {
+  function renderDialog(namedAgentId?: string | null) {
     const onOpenChange = vi.fn();
     const onCreated = vi.fn();
 
@@ -17,6 +17,7 @@ describe("BugCreateDialog", () => {
         open={true}
         onOpenChange={onOpenChange}
         onCreated={onCreated}
+        namedAgentId={namedAgentId}
       />
     );
 
@@ -109,5 +110,26 @@ describe("BugCreateDialog", () => {
     );
     expect(onCreated).toHaveBeenCalledTimes(1);
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("passes namedAgentId when creating and fixing a bug", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { id: "bug-1" } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { sessionId: "sess-1" } }) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    renderDialog("agent-gemini");
+
+    fireEvent.change(screen.getByPlaceholderText("Bug title..."), {
+      target: { value: "Settings save fails" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create And Fix" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const secondCall = fetchMock.mock.calls[1];
+    expect(secondCall?.[0]).toBe("/api/projects/proj-1/epics/bug-1/build");
+    const options = secondCall?.[1] as RequestInit;
+    const body = JSON.parse(String(options.body));
+    expect(body.namedAgentId).toBe("agent-gemini");
   });
 });

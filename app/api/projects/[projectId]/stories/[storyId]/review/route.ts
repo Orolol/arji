@@ -57,11 +57,12 @@ export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
   const body = await request.json();
 
-  const { reviewTypes, namedAgentId = null, resumeSessionId: resumeSessionIdParam } = body as {
+  const { reviewTypes, namedAgentId: namedAgentIdParam, resumeSessionId: resumeSessionIdParam } = body as {
     reviewTypes: ReviewType[];
     namedAgentId?: string | null;
     resumeSessionId?: string;
   };
+  const namedAgentId: string | null = namedAgentIdParam || null;
 
   if (
     !reviewTypes ||
@@ -170,16 +171,21 @@ export async function POST(request: NextRequest, { params }: Params) {
     epic.title
   );
 
-  // Resume support: look up previous session's claudeSessionId
-  let resumeClaudeSessionId: string | undefined;
+  // Resume support: look up previous session's cliSessionId
+  let resumeCliSessionId: string | undefined;
   if (resumeSessionIdParam) {
     const prevSession = db
-      .select({ claudeSessionId: agentSessions.claudeSessionId })
+      .select({
+        cliSessionId: agentSessions.cliSessionId,
+        claudeSessionId: agentSessions.claudeSessionId,
+      })
       .from(agentSessions)
       .where(eq(agentSessions.id, resumeSessionIdParam))
       .get();
-    if (prevSession?.claudeSessionId) {
-      resumeClaudeSessionId = prevSession.claudeSessionId;
+    const previousCliSessionId =
+      prevSession?.cliSessionId ?? prevSession?.claudeSessionId ?? null;
+    if (previousCliSessionId) {
+      resumeCliSessionId = previousCliSessionId;
     }
   }
 
@@ -247,12 +253,16 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     const agentMode = reviewType === "feature_review" ? "code" : "plan";
+    const providerSupportsResume =
+      resolvedAgent.provider === "claude-code" || resolvedAgent.provider === "gemini-cli";
 
-    // First review session can resume; subsequent ones start fresh
-    const useResume = idx === 0 && !!resumeClaudeSessionId;
-    const claudeSessionId = useResume
-      ? resumeClaudeSessionId
-      : crypto.randomUUID();
+    // First review session can resume (when provider supports it); subsequent ones start fresh
+    const useResume = idx === 0 && providerSupportsResume && !!resumeCliSessionId;
+    const cliSessionId = useResume
+      ? resumeCliSessionId
+      : providerSupportsResume
+        ? crypto.randomUUID()
+        : undefined;
 
     createQueuedSession({
       id: sessionId,
@@ -265,9 +275,12 @@ export async function POST(request: NextRequest, { params }: Params) {
       logsPath,
       branchName,
       worktreePath,
-      claudeSessionId,
+      claudeSessionId: cliSessionId,
+      cliSessionId,
+      namedAgentId: resolvedAgent.namedAgentId ?? null,
       namedAgentName: resolvedAgent.name || null,
       model: resolvedAgent.model || null,
+      agentType: REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
       createdAt: now,
     });
 
@@ -278,7 +291,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       prompt: enrichedPrompt,
       cwd: worktreePath,
       model: resolvedAgent.model,
-      claudeSessionId,
+      cliSessionId,
       resumeSession: useResume,
     }, resolvedAgent.provider);
 

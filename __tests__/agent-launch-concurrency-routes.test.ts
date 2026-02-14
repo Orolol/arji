@@ -122,6 +122,11 @@ vi.mock("@/lib/agent-config/prompts", () => ({
   resolveAgentPrompt: vi.fn().mockResolvedValue("system prompt"),
 }));
 
+vi.mock("@/lib/agent-config/providers", () => ({
+  resolveAgent: vi.fn(() => ({ provider: "claude-code", namedAgentId: null })),
+  resolveAgentByNamedId: vi.fn(() => ({ provider: "claude-code", namedAgentId: null })),
+}));
+
 vi.mock("@/lib/session-lock", () => ({
   checkSessionLock: vi.fn(() => ({ locked: false })),
 }));

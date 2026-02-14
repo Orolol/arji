@@ -154,22 +154,30 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const resolvedAgent = resolveAgentByNamedId("build", projectId, namedAgentId);
 
-  // Resume support: look up previous session's claudeSessionId
-  let claudeSessionId: string | undefined;
+  const providerSupportsResume =
+    resolvedAgent.provider === "claude-code" || resolvedAgent.provider === "gemini-cli";
+
+  // Resume support: look up previous session's cliSessionId
+  let cliSessionId: string | undefined;
   let resumeSession = false;
-  if (body.resumeSessionId) {
+  if (providerSupportsResume && body.resumeSessionId) {
     const prevSession = db
-      .select({ claudeSessionId: agentSessions.claudeSessionId })
+      .select({
+        cliSessionId: agentSessions.cliSessionId,
+        claudeSessionId: agentSessions.claudeSessionId,
+      })
       .from(agentSessions)
       .where(eq(agentSessions.id, body.resumeSessionId))
       .get();
-    if (prevSession?.claudeSessionId) {
-      claudeSessionId = prevSession.claudeSessionId;
+    const previousCliSessionId =
+      prevSession?.cliSessionId ?? prevSession?.claudeSessionId ?? null;
+    if (previousCliSessionId) {
+      cliSessionId = previousCliSessionId;
       resumeSession = true;
     }
   }
-  if (!claudeSessionId) {
-    claudeSessionId = crypto.randomUUID();
+  if (!cliSessionId && providerSupportsResume) {
+    cliSessionId = crypto.randomUUID();
   }
 
   // Create session
@@ -206,7 +214,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     logsPath,
     branchName,
     worktreePath,
-    claudeSessionId,
+    claudeSessionId: cliSessionId,
+    cliSessionId,
+    namedAgentId: resolvedAgent.namedAgentId ?? null,
     agentType: "build",
     namedAgentName: resolvedAgent.name || null,
     model: resolvedAgent.model || null,
@@ -237,7 +247,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     cwd: worktreePath,
     allowedTools: ["Edit", "Write", "Bash", "Read", "Glob", "Grep"],
     model: resolvedAgent.model,
-    claudeSessionId,
+    cliSessionId,
     resumeSession,
   }, resolvedAgent.provider);
 

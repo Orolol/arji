@@ -167,11 +167,11 @@ export function EpicDetail({
     setMerging(false);
   }
 
-  async function handleResolveMerge(provider?: string, resumeSessionId?: string) {
+  async function handleResolveMerge(namedAgentId?: string | null, resumeSessionId?: string) {
     if (!epicId) return;
     setResolvingMerge(true);
     try {
-      const result = await resolveMerge(provider, resumeSessionId);
+      const result = await resolveMerge(namedAgentId, resumeSessionId);
       if (result?.clean) {
         setMergeError(null);
         onMerged?.();
@@ -680,6 +680,7 @@ export function EpicDetail({
               projectId={projectId}
               epicId={epicId}
               agentType="merge"
+              namedAgentId={resolveMergeAgentId}
               provider="claude-code"
               selectedSessionId={resolveMergeResumeSessionId}
               onSelect={setResolveMergeResumeSessionId}
@@ -690,7 +691,7 @@ export function EpicDetail({
               Cancel
             </Button>
             <Button
-              onClick={() => handleResolveMerge(undefined, resolveMergeResumeSessionId)}
+              onClick={() => handleResolveMerge(resolveMergeAgentId, resolveMergeResumeSessionId)}
               disabled={resolvingMerge || isRunning}
             >
               {resolvingMerge ? (

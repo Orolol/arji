@@ -102,12 +102,12 @@ export function useEpicAgent(projectId: string, epicId: string | null) {
     [projectId, epicId, requestJson, pollSessions]
   );
 
-  const resolveMerge = useCallback(async (provider?: string, resumeSessionId?: string) => {
+  const resolveMerge = useCallback(async (namedAgentId?: string | null, resumeSessionId?: string) => {
     if (!epicId) return;
     setDispatching(true);
     try {
       const body: Record<string, unknown> = {};
-      if (provider) body.provider = provider;
+      if (namedAgentId) body.namedAgentId = namedAgentId;
       if (resumeSessionId) body.resumeSessionId = resumeSessionId;
       const data = await requestJson(
         `/api/projects/${projectId}/epics/${epicId}/resolve-merge`,

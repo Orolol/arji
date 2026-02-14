@@ -26,6 +26,7 @@ interface BugCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated?: () => void;
+  namedAgentId?: string | null;
 }
 
 export function BugCreateDialog({
@@ -33,6 +34,7 @@ export function BugCreateDialog({
   open,
   onOpenChange,
   onCreated,
+  namedAgentId = null,
 }: BugCreateDialogProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -83,7 +85,7 @@ export function BugCreateDialog({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
+            body: JSON.stringify({ namedAgentId }),
           }
         );
         const buildData = await buildRes.json().catch(() => ({}));

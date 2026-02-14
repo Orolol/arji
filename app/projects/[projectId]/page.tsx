@@ -565,6 +565,7 @@ export default function KanbanPage() {
         open={bugDialogOpen}
         onOpenChange={setBugDialogOpen}
         onCreated={() => setRefreshTrigger((t) => t + 1)}
+        namedAgentId={namedAgentId}
       />
 
       <EpicDetail

@@ -45,7 +45,7 @@ describe("resolveAgent", () => {
 
     const { resolveAgent } = await import("@/lib/agent-config/providers");
     const result = resolveAgent("build", "proj-1");
-    expect(result).toEqual({ provider: "claude-code" });
+    expect(result).toEqual({ provider: "claude-code", namedAgentId: null });
   });
 
   it("uses global default when no project default exists", async () => {
@@ -136,6 +136,6 @@ describe("resolveAgent", () => {
 
     const { resolveAgent } = await import("@/lib/agent-config/providers");
     const result = resolveAgent("chat");
-    expect(result).toEqual({ provider: "claude-code" });
+    expect(result).toEqual({ provider: "claude-code", namedAgentId: null });
   });
 });

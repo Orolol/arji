@@ -95,6 +95,8 @@ export const chatConversations = sqliteTable("chat_conversations", {
   epicId: text("epic_id").references(() => epics.id),
   provider: text("provider").default("claude-code"), // claude-code | codex | gemini-cli
   claudeSessionId: text("claude_session_id"),
+  cliSessionId: text("cli_session_id"),
+  namedAgentId: text("named_agent_id"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -141,6 +143,8 @@ export const agentSessions = sqliteTable("agent_sessions", {
   lastNonEmptyText: text("last_non_empty_text"),
   error: text("error"),
   claudeSessionId: text("claude_session_id"),
+  cliSessionId: text("cli_session_id"),
+  namedAgentId: text("named_agent_id"),
   agentType: text("agent_type"),
   namedAgentName: text("named_agent_name"),
   model: text("model"),

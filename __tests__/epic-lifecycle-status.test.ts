@@ -157,6 +157,11 @@ vi.mock("@/lib/agent-config/prompts", () => ({
   resolveAgentPrompt: vi.fn().mockResolvedValue("system prompt"),
 }));
 
+vi.mock("@/lib/agent-config/providers", () => ({
+  resolveAgent: vi.fn(() => ({ provider: "claude-code", namedAgentId: null })),
+  resolveAgentByNamedId: vi.fn(() => ({ provider: "claude-code", namedAgentId: null })),
+}));
+
 vi.mock("@/lib/agent-config/constants", () => ({
   REVIEW_TYPE_TO_AGENT_TYPE: {
     security: "security_reviewer",

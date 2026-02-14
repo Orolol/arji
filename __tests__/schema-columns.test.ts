@@ -15,6 +15,15 @@ describe("Schema: agentSessions columns", () => {
     expect(col.name).toBe("provider");
     expect(col.default).toBe("claude-code");
   });
+
+  it("has nullable cliSessionId and namedAgentId columns", () => {
+    const cliSessionId = schema.agentSessions.cliSessionId;
+    const namedAgentId = schema.agentSessions.namedAgentId;
+    expect(cliSessionId).toBeDefined();
+    expect(cliSessionId.name).toBe("cli_session_id");
+    expect(namedAgentId).toBeDefined();
+    expect(namedAgentId.name).toBe("named_agent_id");
+  });
 });
 
 describe("Schema: chatConversations columns", () => {
@@ -23,6 +32,15 @@ describe("Schema: chatConversations columns", () => {
     expect(col).toBeDefined();
     expect(col.name).toBe("provider");
     expect(col.default).toBe("claude-code");
+  });
+
+  it("has nullable cliSessionId and namedAgentId columns", () => {
+    const cliSessionId = schema.chatConversations.cliSessionId;
+    const namedAgentId = schema.chatConversations.namedAgentId;
+    expect(cliSessionId).toBeDefined();
+    expect(cliSessionId.name).toBe("cli_session_id");
+    expect(namedAgentId).toBeDefined();
+    expect(namedAgentId.name).toBe("named_agent_id");
   });
 });
 

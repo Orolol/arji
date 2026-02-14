@@ -130,7 +130,7 @@ describe("StoryActions", () => {
     fireEvent.click(screen.getByText("Dispatch Agent"));
 
     // Called with undefined comment and null namedAgentId (default)
-    expect(onSendToDev).toHaveBeenCalledWith(undefined, null);
+    expect(onSendToDev).toHaveBeenCalledWith(undefined, null, undefined);
   });
 
   it("calls onSendToDev with selected namedAgentId", async () => {
@@ -142,7 +142,7 @@ describe("StoryActions", () => {
     fireEvent.change(select, { target: { value: "agent-1" } });
     fireEvent.click(screen.getByText("Dispatch Agent"));
 
-    expect(onSendToDev).toHaveBeenCalledWith(undefined, "agent-1");
+    expect(onSendToDev).toHaveBeenCalledWith(undefined, "agent-1", undefined);
   });
 
   it("calls onSendToReview with selected types and namedAgentId", async () => {
@@ -167,7 +167,7 @@ describe("StoryActions", () => {
 
     fireEvent.click(screen.getByText("Run Review (1)"));
 
-    expect(onSendToReview).toHaveBeenCalledWith(["security"], null);
+    expect(onSendToReview).toHaveBeenCalledWith(["security"], null, undefined);
   });
 
   it("requires mandatory comment when sending to dev from review status", () => {

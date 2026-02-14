@@ -278,6 +278,7 @@ export interface ResolvedAgent {
   provider: AgentProvider;
   model?: string;
   name?: string;
+  namedAgentId?: string | null;
 }
 
 /**
@@ -345,10 +346,11 @@ export function resolveAgent(
       provider: normalizeProvider(defaultAgent.provider),
       model: defaultAgent.model,
       name: defaultAgent.name,
+      namedAgentId: defaultAgent.id,
     };
   }
 
-  return { provider: FALLBACK_PROVIDER };
+  return { provider: FALLBACK_PROVIDER, namedAgentId: null };
 }
 
 /**
@@ -373,6 +375,7 @@ export function resolveAgentByNamedId(
         provider: normalizeProvider(agent.provider),
         model: agent.model,
         name: agent.name,
+        namedAgentId: agent.id,
       };
     }
   }
@@ -397,6 +400,7 @@ function resolveFromRow(row: {
         provider: normalizeProvider(agent.provider),
         model: agent.model,
         name: agent.name,
+        namedAgentId: agent.id,
       };
     }
   }
@@ -404,5 +408,6 @@ function resolveFromRow(row: {
   // namedAgentId is null or agent was deleted — use raw provider
   return {
     provider: normalizeProvider(row.provider),
+    namedAgentId: null,
   };
 }

@@ -319,7 +319,7 @@ describe("resolveAgent fallback chain", () => {
     const { resolveAgent } = await import("@/lib/agent-config/providers");
     const result = resolveAgent("build", "proj-1");
 
-    expect(result).toEqual({ provider: "claude-code" });
+    expect(result).toEqual({ provider: "claude-code", namedAgentId: null });
   });
 
   it("returns FALLBACK_PROVIDER without projectId when nothing exists", async () => {
@@ -329,7 +329,7 @@ describe("resolveAgent fallback chain", () => {
     const { resolveAgent } = await import("@/lib/agent-config/providers");
     const result = resolveAgent("chat");
 
-    expect(result).toEqual({ provider: "claude-code" });
+    expect(result).toEqual({ provider: "claude-code", namedAgentId: null });
   });
 
   it("falls back to raw provider when project default has deleted named agent", async () => {
@@ -446,6 +446,6 @@ describe("seeded global default agent", () => {
       "nonexistent-id",
     );
 
-    expect(result).toEqual({ provider: "claude-code" });
+    expect(result).toEqual({ provider: "claude-code", namedAgentId: null });
   });
 });

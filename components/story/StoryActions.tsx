@@ -233,7 +233,9 @@ export function StoryActions({
           <SessionPicker
             projectId={projectId}
             epicId={story.epicId}
+            userStoryId={story.id}
             agentType="ticket_build"
+            namedAgentId={devAgentId}
             provider="claude-code"
             selectedSessionId={resumeSessionId}
             onSelect={setResumeSessionId}
@@ -300,6 +302,9 @@ export function StoryActions({
           <SessionPicker
             projectId={projectId}
             epicId={story.epicId}
+            userStoryId={story.id}
+            agentType={Array.from(reviewTypes)[0]}
+            namedAgentId={reviewAgentId}
             provider="claude-code"
             selectedSessionId={reviewResumeSessionId}
             onSelect={setReviewResumeSessionId}

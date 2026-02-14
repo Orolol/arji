@@ -17,8 +17,7 @@ import {
 import { processManager } from "@/lib/claude/process-manager";
 import { buildMergeResolutionPrompt } from "@/lib/claude/prompt-builder";
 import { parseClaudeOutput } from "@/lib/claude/json-parser";
-import { resolveAgent } from "@/lib/agent-config/providers";
-import type { ProviderType } from "@/lib/providers";
+import { resolveAgentByNamedId } from "@/lib/agent-config/providers";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import {
   createAgentAlreadyRunningPayload,
@@ -39,9 +38,9 @@ type Params = { params: Promise<{ projectId: string; epicId: string }> };
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, epicId } = await params;
   const body = await request.json().catch(() => ({}));
-  const providerOverride = body.provider as ProviderType | undefined;
-  const resolved = resolveAgent("build", projectId);
-  const provider = providerOverride || resolved.provider;
+  const namedAgentId: string | null = body.namedAgentId || null;
+  const resolved = resolveAgentByNamedId("merge", projectId, namedAgentId);
+  const provider = resolved.provider;
   const model = resolved.model;
 
   // Validate project
@@ -162,22 +161,29 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
-  // Resume support: look up previous session's claudeSessionId
-  let claudeSessionId: string | undefined;
+  const providerSupportsResume = provider === "claude-code" || provider === "gemini-cli";
+
+  // Resume support: look up previous session's cliSessionId
+  let cliSessionId: string | undefined;
   let resumeSession = false;
-  if (body.resumeSessionId) {
+  if (providerSupportsResume && body.resumeSessionId) {
     const prevSession = db
-      .select({ claudeSessionId: agentSessions.claudeSessionId })
+      .select({
+        cliSessionId: agentSessions.cliSessionId,
+        claudeSessionId: agentSessions.claudeSessionId,
+      })
       .from(agentSessions)
       .where(eq(agentSessions.id, body.resumeSessionId))
       .get();
-    if (prevSession?.claudeSessionId) {
-      claudeSessionId = prevSession.claudeSessionId;
+    const previousCliSessionId =
+      prevSession?.cliSessionId ?? prevSession?.claudeSessionId ?? null;
+    if (previousCliSessionId) {
+      cliSessionId = previousCliSessionId;
       resumeSession = true;
     }
   }
-  if (!claudeSessionId) {
-    claudeSessionId = crypto.randomUUID();
+  if (!cliSessionId && providerSupportsResume) {
+    cliSessionId = crypto.randomUUID();
   }
 
   createQueuedSession({
@@ -190,7 +196,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     logsPath,
     branchName,
     worktreePath,
-    claudeSessionId,
+    claudeSessionId: cliSessionId,
+    cliSessionId,
+    namedAgentId: resolved.namedAgentId ?? null,
     agentType: "merge",
     namedAgentName: resolved.name || null,
     model: resolved.model || null,
@@ -205,7 +213,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     cwd: worktreePath,
     model,
     allowedTools: ["Edit", "Write", "Bash", "Read", "Glob", "Grep"],
-    claudeSessionId,
+    cliSessionId,
     resumeSession,
   }, provider);
 

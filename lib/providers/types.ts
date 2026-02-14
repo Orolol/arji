@@ -33,7 +33,9 @@ export interface ProviderSpawnOptions {
   onChunk?: (chunk: ProviderChunk) => void;
   /** Optional identifier for NDJSON session logging. */
   logIdentifier?: string;
-  /** CLI session UUID for resume support (all providers). */
+  /** CLI session UUID for resume support (Claude/Gemini only). */
+  cliSessionId?: string;
+  /** @deprecated Use cliSessionId. Kept for compatibility while routes migrate. */
   claudeSessionId?: string;
   /** When true, use --resume instead of --session-id. */
   resumeSession?: boolean;
@@ -44,6 +46,8 @@ export interface ProviderResult {
   result?: string;
   error?: string;
   duration: number;
+  /** Provider CLI session ID extracted from output when available. */
+  cliSessionId?: string;
 }
 
 export interface ProviderSession {

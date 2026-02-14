@@ -15,7 +15,16 @@ export class ClaudeCodeProvider implements AgentProvider {
   readonly type = "claude-code" as const;
 
   spawn(options: ProviderSpawnOptions): ProviderSession {
-    const { prompt, cwd, mode, allowedTools, model, claudeSessionId, resumeSession } = options;
+    const {
+      prompt,
+      cwd,
+      mode,
+      allowedTools,
+      model,
+      cliSessionId,
+      claudeSessionId,
+      resumeSession,
+    } = options;
 
     const { promise: rawPromise, kill, command } = spawnClaude({
       mode,
@@ -23,7 +32,7 @@ export class ClaudeCodeProvider implements AgentProvider {
       cwd,
       allowedTools,
       model,
-      claudeSessionId,
+      cliSessionId: cliSessionId ?? claudeSessionId,
       resumeSession,
     });
 
@@ -33,6 +42,7 @@ export class ClaudeCodeProvider implements AgentProvider {
       result: r.result,
       error: r.error,
       duration: r.duration,
+      cliSessionId: r.cliSessionId,
     }));
 
     return {

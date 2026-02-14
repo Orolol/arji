@@ -49,6 +49,9 @@ import { ClaudeCodeProvider } from "@/lib/providers/claude-code";
 import { CodexProvider } from "@/lib/providers/codex";
 import { GeminiCliProvider } from "@/lib/providers/gemini-cli";
 import type { ProviderSpawnOptions } from "@/lib/providers/types";
+import { spawnClaude } from "@/lib/claude/spawn";
+import { spawnCodex } from "@/lib/codex/spawn";
+import { spawnGemini } from "@/lib/gemini/spawn";
 
 const baseOptions: ProviderSpawnOptions = {
   sessionId: "test-session-1",
@@ -109,6 +112,21 @@ describe("ClaudeCodeProvider", () => {
     const result = provider.cancel(session);
     expect(result).toBe(true);
   });
+
+  it("forwards cliSessionId and resumeSession to spawnClaude", () => {
+    provider.spawn({
+      ...baseOptions,
+      cliSessionId: "cli-cc-1",
+      resumeSession: true,
+    });
+
+    expect(spawnClaude).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cliSessionId: "cli-cc-1",
+        resumeSession: true,
+      })
+    );
+  });
 });
 
 describe("CodexProvider", () => {
@@ -137,6 +155,21 @@ describe("CodexProvider", () => {
     const result = provider.cancel(session);
     expect(result).toBe(true);
   });
+
+  it("does not forward resume fields to spawnCodex (exec is non-resumable)", () => {
+    provider.spawn({
+      ...baseOptions,
+      cliSessionId: "cli-codex-1",
+      resumeSession: true,
+    });
+
+    expect(spawnCodex).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        sessionId: expect.anything(),
+        resumeSession: expect.anything(),
+      })
+    );
+  });
 });
 
 describe("GeminiCliProvider", () => {
@@ -158,5 +191,20 @@ describe("GeminiCliProvider", () => {
     const result = await session.promise;
     expect(result.success).toBe(true);
     expect(result.result).toContain("Gemini output");
+  });
+
+  it("forwards cliSessionId and resumeSession to spawnGemini", () => {
+    provider.spawn({
+      ...baseOptions,
+      cliSessionId: "cli-gem-1",
+      resumeSession: true,
+    });
+
+    expect(spawnGemini).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "cli-gem-1",
+        resumeSession: true,
+      })
+    );
   });
 });

@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Track call counts to return different values for sequential .get() calls
 let getCallCount = 0;
 
-const mockResolveAgent = vi.hoisted(() =>
+const mockResolveAgentByNamedId = vi.hoisted(() =>
   vi.fn(() => ({ provider: "claude-code" })),
 );
 
@@ -95,7 +95,7 @@ vi.mock("@/lib/agent-config/prompts", () => ({
 }));
 
 vi.mock("@/lib/agent-config/providers", () => ({
-  resolveAgent: mockResolveAgent,
+  resolveAgentByNamedId: mockResolveAgentByNamedId,
 }));
 
 vi.mock("@/lib/sync/export", () => ({
@@ -131,11 +131,11 @@ function mockRequest(body: Record<string, unknown>) {
 describe("Build Route", () => {
   beforeEach(() => {
     getCallCount = 0;
-    mockResolveAgent.mockReturnValue({ provider: "claude-code" });
+    mockResolveAgentByNamedId.mockReturnValue({ provider: "claude-code" });
   });
 
   it("rejects team mode when resolved provider is not claude-code", async () => {
-    mockResolveAgent.mockReturnValue({ provider: "codex" });
+    mockResolveAgentByNamedId.mockReturnValue({ provider: "codex" });
 
     const { POST } = await import(
       "@/app/api/projects/[projectId]/build/route"
@@ -204,7 +204,7 @@ describe("Build Route", () => {
   });
 
   it("uses resolved provider for solo mode", async () => {
-    mockResolveAgent.mockReturnValue({ provider: "codex" });
+    mockResolveAgentByNamedId.mockReturnValue({ provider: "codex" });
 
     const { POST } = await import(
       "@/app/api/projects/[projectId]/build/route"
@@ -218,10 +218,10 @@ describe("Build Route", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.data.orchestrationMode).toBe("solo");
-    expect(mockResolveAgent).toHaveBeenCalledWith("build", "proj-1");
+    expect(mockResolveAgentByNamedId).toHaveBeenCalledWith("build", "proj-1", null);
   });
 
-  it("defaults provider to claude-code via resolveAgent", async () => {
+  it("defaults provider to claude-code via resolveAgentByNamedId", async () => {
     const { POST } = await import(
       "@/app/api/projects/[projectId]/build/route"
     );
@@ -233,6 +233,6 @@ describe("Build Route", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.data).toBeDefined();
-    expect(mockResolveAgent).toHaveBeenCalledWith("build", "proj-1");
+    expect(mockResolveAgentByNamedId).toHaveBeenCalledWith("build", "proj-1", null);
   });
 });

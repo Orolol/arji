@@ -23,6 +23,40 @@ export interface ParsedClaudeOutput {
 }
 
 /**
+ * Attempts to extract a CLI session ID from provider JSON output.
+ *
+ * Supports common field names used by CLI providers:
+ * - session_id
+ * - sessionId
+ * - session.id
+ */
+export function extractCliSessionIdFromOutput(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // Fast path for a plain JSON document
+  const parsed = tryParseJson(trimmed);
+  const fromParsed = findSessionIdInValue(parsed);
+  if (fromParsed) return fromParsed;
+
+  // Fallback: NDJSON / stream-json lines
+  const lines = trimmed.split(/\r?\n/);
+  for (const line of lines) {
+    const candidate = line.trim();
+    if (!candidate.startsWith("{") && !candidate.startsWith("[")) {
+      continue;
+    }
+    const parsedLine = tryParseJson(candidate);
+    const sessionId = findSessionIdInValue(parsedLine);
+    if (sessionId) {
+      return sessionId;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Parses the raw stdout from Claude Code CLI and extracts structured content.
  *
  * Handles the following formats:
@@ -144,6 +178,43 @@ function tryParseJson(text: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function findSessionIdInValue(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findSessionIdInValue(item);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (typeof value.session_id === "string" && value.session_id.trim().length > 0) {
+    return value.session_id.trim();
+  }
+  if (typeof value.sessionId === "string" && value.sessionId.trim().length > 0) {
+    return value.sessionId.trim();
+  }
+
+  const session = value.session;
+  if (isRecord(session) && typeof session.id === "string" && session.id.trim().length > 0) {
+    return session.id.trim();
+  }
+
+  for (const nested of Object.values(value)) {
+    const found = findSessionIdInValue(nested);
+    if (found) return found;
+  }
+
+  return null;
 }
 
 function parseBlockArray(

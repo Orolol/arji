@@ -5,9 +5,9 @@ import { eq, desc, and, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { spawnClaudeStream, spawnClaude } from "@/lib/claude/spawn";
 import { buildChatPrompt, buildEpicRefinementPrompt, buildEpicFinalizationPrompt, buildTitleGenerationPrompt } from "@/lib/claude/prompt-builder";
-import { getProvider } from "@/lib/providers";
+import { getProvider, type ProviderType } from "@/lib/providers";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
-import { resolveAgent } from "@/lib/agent-config/providers";
+import { resolveAgentByNamedId } from "@/lib/agent-config/providers";
 import { isEpicCreationConversationAgentType } from "@/lib/chat/conversation-agent";
 import { activityRegistry } from "@/lib/activity-registry";
 import {
@@ -15,6 +15,25 @@ import {
   MentionResolutionError,
   validateMentionsExist,
 } from "@/lib/documents/mentions";
+
+const RESUME_CAPABLE_PROVIDERS = new Set<ProviderType>([
+  "claude-code",
+  "gemini-cli",
+]);
+
+function normalizeProvider(value: string | null | undefined): ProviderType | null {
+  if (value === "claude-code" || value === "gemini-cli" || value === "codex") {
+    return value;
+  }
+  return null;
+}
+
+function isResumeSessionExpiredError(error: string | null | undefined): boolean {
+  if (!error) return false;
+  return /(session|resume).*(expired|not found|invalid|unknown|does not exist)|invalid.*(session|resume)/i.test(
+    error
+  );
+}
 
 export async function POST(
   request: NextRequest,
@@ -102,12 +121,14 @@ export async function POST(
     .all()
     .reverse();
 
-  // Determine conversation type
-  let conversationType: string | null = null;
-  if (conversationId) {
-    const conv = db.select().from(chatConversations).where(eq(chatConversations.id, conversationId)).get();
-    conversationType = conv?.type ?? null;
-  }
+  const conversation = conversationId
+    ? db
+        .select()
+        .from(chatConversations)
+        .where(eq(chatConversations.id, conversationId))
+        .get()
+    : null;
+  const conversationType = conversation?.type ?? null;
 
   const messageHistory = recentMessages.map((m) => ({
     role: m.role as "user" | "assistant",
@@ -148,7 +169,16 @@ export async function POST(
     prompt = buildChatPrompt(project, [], messageHistory, chatSystemPrompt);
   }
 
-  const resolvedAgent = resolveAgent("chat", projectId);
+  const resolvedByNamedAgent = resolveAgentByNamedId(
+    "chat",
+    projectId,
+    conversation?.namedAgentId ?? null
+  );
+  const conversationProvider = normalizeProvider(conversation?.provider);
+  const resolvedAgent =
+    conversationProvider && !conversation?.namedAgentId
+      ? { ...resolvedByNamedAgent, provider: conversationProvider }
+      : resolvedByNamedAgent;
 
   try {
     prompt = enrichPromptWithDocumentMentions({
@@ -166,37 +196,34 @@ export async function POST(
     throw error;
   }
 
-  // Session resume — works for all providers
-  let claudeSessionId: string | undefined;
-  let resumeSession = false;
-  let effectivePrompt = prompt;
-
-  if (conversationId) {
-    const conv = db
-      .select()
-      .from(chatConversations)
-      .where(eq(chatConversations.id, conversationId))
-      .get();
-    if (conv?.claudeSessionId) {
-      claudeSessionId = conv.claudeSessionId;
-      resumeSession = true;
-      effectivePrompt = body.content; // just the new message, not full history
-    } else {
-      claudeSessionId = crypto.randomUUID();
-    }
+  const providerSupportsResume = RESUME_CAPABLE_PROVIDERS.has(
+    resolvedAgent.provider as ProviderType
+  );
+  let cliSessionId =
+    conversation?.cliSessionId ?? conversation?.claudeSessionId ?? undefined;
+  const resumeSession = Boolean(conversationId && cliSessionId && providerSupportsResume);
+  if (!cliSessionId && providerSupportsResume) {
+    cliSessionId = crypto.randomUUID();
   }
-  if (!claudeSessionId) {
-    claudeSessionId = crypto.randomUUID();
+  let effectivePrompt = resumeSession ? userContent : prompt;
+
+  function persistConversationSessionId(nextCliSessionId?: string) {
+    if (!conversationId || !nextCliSessionId) return;
+    db.update(chatConversations)
+      .set({
+        cliSessionId: nextCliSessionId,
+        // Keep legacy column populated while callers migrate.
+        claudeSessionId: nextCliSessionId,
+      })
+      .where(eq(chatConversations.id, conversationId))
+      .run();
   }
 
   setConversationStatus("generating");
 
   // Determine conversation label for activity registry
-  let activityLabel = "Chat";
-  if (conversationId) {
-    const conv = db.select().from(chatConversations).where(eq(chatConversations.id, conversationId)).get();
-    if (conv?.label) activityLabel = `Chat: ${conv.label}`;
-  }
+  const activityLabel =
+    conversation?.label ? `Chat: ${conversation.label}` : "Chat";
   const activityId = `chat-${createId()}`;
 
   const encoder = new TextEncoder();
@@ -266,17 +293,18 @@ export async function POST(
     controller.close();
   }
 
-  // Branch on provider
-  if (resolvedAgent.provider === "codex" || resolvedAgent.provider === "gemini-cli") {
-    // Non-streaming providers: run full prompt, emit a single SSE delta event.
+  // Gemini/Codex: non-streaming providers
+  if (resolvedAgent.provider !== "claude-code") {
     const dynamicProvider = getProvider(resolvedAgent.provider);
-    const session = dynamicProvider.spawn({
+    let activeProviderSession = dynamicProvider.spawn({
       sessionId: `chat-${createId()}`,
-      prompt,
+      prompt: effectivePrompt,
       cwd: project.gitRepoPath || process.cwd(),
       mode: "plan",
       model: resolvedAgent.model,
       logIdentifier: conversationId || `chat-${projectId}`,
+      cliSessionId,
+      resumeSession,
     });
 
     activityRegistry.register({
@@ -286,7 +314,7 @@ export async function POST(
       label: activityLabel,
       provider: resolvedAgent.provider,
       startedAt: new Date().toISOString(),
-      kill: () => session.kill(),
+      kill: () => activeProviderSession.kill(),
     });
 
     const sseStream = new ReadableStream({
@@ -303,10 +331,36 @@ export async function POST(
         );
 
         try {
-          const result = await session.promise;
+          let result = await activeProviderSession.promise;
+
+          // Resume-first: if the remote session expired, retry once with a fresh session.
+          if (
+            resumeSession &&
+            !result.success &&
+            isResumeSessionExpiredError(result.error)
+          ) {
+            cliSessionId = providerSupportsResume ? crypto.randomUUID() : undefined;
+            activeProviderSession = dynamicProvider.spawn({
+              sessionId: `chat-${createId()}`,
+              prompt,
+              cwd: project.gitRepoPath || process.cwd(),
+              mode: "plan",
+              model: resolvedAgent.model,
+              logIdentifier: conversationId || `chat-${projectId}`,
+              cliSessionId,
+              resumeSession: false,
+            });
+            result = await activeProviderSession.promise;
+          }
+
           const fullContent = result.success
             ? result.result || "(empty response)"
             : `Error: ${result.error || "Provider request failed"}`;
+          const resolvedCliSessionId = result.cliSessionId ?? cliSessionId;
+
+          if (result.success) {
+            persistConversationSessionId(resolvedCliSessionId);
+          }
 
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ delta: fullContent })}\n\n`)
@@ -327,7 +381,7 @@ export async function POST(
       },
       cancel() {
         activityRegistry.unregister(activityId);
-        session.kill();
+        activeProviderSession.kill();
         setConversationStatus("active");
       },
     });
@@ -341,15 +395,103 @@ export async function POST(
     });
   }
 
-  // Claude Code: streaming via spawnClaudeStream
+  // Claude resume-first path: attempt resume non-streaming, fallback to fresh prompt.
+  if (resumeSession) {
+    let currentKill = () => {};
+
+    activityRegistry.register({
+      id: activityId,
+      projectId,
+      type: "chat",
+      label: activityLabel,
+      provider: "claude-code",
+      startedAt: new Date().toISOString(),
+      kill: () => currentKill(),
+    });
+
+    const sseStream = new ReadableStream({
+      async start(controller) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ status: "Resuming conversation..." })}\n\n`)
+        );
+
+        try {
+          let resultSessionId = cliSessionId;
+          let attempt = spawnClaude({
+            mode: "plan",
+            prompt: effectivePrompt,
+            model: resolvedAgent.model,
+            cwd: project.gitRepoPath || undefined,
+            logIdentifier: conversationId || `chat-${projectId}`,
+            cliSessionId: resultSessionId,
+            resumeSession: true,
+          });
+          currentKill = attempt.kill;
+          let result = await attempt.promise;
+
+          if (!result.success && isResumeSessionExpiredError(result.error)) {
+            resultSessionId = crypto.randomUUID();
+            attempt = spawnClaude({
+              mode: "plan",
+              prompt,
+              model: resolvedAgent.model,
+              cwd: project.gitRepoPath || undefined,
+              logIdentifier: conversationId || `chat-${projectId}`,
+              cliSessionId: resultSessionId,
+            });
+            currentKill = attempt.kill;
+            result = await attempt.promise;
+          }
+
+          const fullContent = result.success
+            ? result.result || "(empty response)"
+            : `Error: ${result.error || "Provider request failed"}`;
+          const resolvedCliSessionId = result.cliSessionId ?? resultSessionId;
+
+          if (result.success) {
+            persistConversationSessionId(resolvedCliSessionId);
+          }
+
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ delta: fullContent })}\n\n`)
+          );
+
+          activityRegistry.unregister(activityId);
+          saveAssistantAndTitle(controller, fullContent, result.success ? "active" : "error");
+        } catch (error) {
+          const failureMessage =
+            error instanceof Error ? `Error: ${error.message}` : "Error: Provider request failed";
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ delta: failureMessage })}\n\n`)
+          );
+          activityRegistry.unregister(activityId);
+          saveAssistantAndTitle(controller, failureMessage, "error");
+        }
+      },
+      cancel() {
+        activityRegistry.unregister(activityId);
+        currentKill();
+        setConversationStatus("active");
+      },
+    });
+
+    return new Response(sseStream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
+  // Claude Code fresh-session path: preserve stream-json UX.
   const { stream: claudeStream, kill } = spawnClaudeStream({
     mode: "plan",
     prompt: effectivePrompt,
     model: resolvedAgent.model,
     cwd: project.gitRepoPath || undefined,
     logIdentifier: conversationId || `chat-${projectId}`,
-    claudeSessionId,
-    resumeSession,
+    cliSessionId,
   });
 
   activityRegistry.register({
@@ -395,13 +537,8 @@ export async function POST(
       }
 
       activityRegistry.unregister(activityId);
-
-      // Persist claudeSessionId for future resume (only on first message)
-      if (conversationId && claudeSessionId && !resumeSession && !hasStreamError) {
-        db.update(chatConversations)
-          .set({ claudeSessionId })
-          .where(eq(chatConversations.id, conversationId))
-          .run();
+      if (!hasStreamError) {
+        persistConversationSessionId(cliSessionId);
       }
 
       saveAssistantAndTitle(controller, fullContent, hasStreamError ? "error" : "active");

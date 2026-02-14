@@ -11,7 +11,10 @@ import {
 
 interface ResumableSession {
   id: string;
-  claudeSessionId: string;
+  cliSessionId: string | null;
+  claudeSessionId: string | null;
+  provider: string | null;
+  namedAgentId: string | null;
   agentType: string | null;
   lastNonEmptyText: string | null;
   completedAt: string | null;
@@ -20,7 +23,9 @@ interface ResumableSession {
 interface SessionPickerProps {
   projectId: string;
   epicId?: string;
+  userStoryId?: string;
   agentType?: string;
+  namedAgentId?: string | null;
   provider: string;
   selectedSessionId: string | undefined;
   onSelect: (sessionId: string | undefined) => void;
@@ -47,7 +52,9 @@ function truncate(text: string, maxLen: number): string {
 export function SessionPicker({
   projectId,
   epicId,
+  userStoryId,
   agentType,
+  namedAgentId,
   provider,
   selectedSessionId,
   onSelect,
@@ -56,17 +63,34 @@ export function SessionPicker({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (provider === "codex") {
+      setSessions([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     const params = new URLSearchParams();
     if (epicId) params.set("epicId", epicId);
+    if (userStoryId) params.set("userStoryId", userStoryId);
     if (agentType) params.set("agentType", agentType);
+    if (namedAgentId) params.set("namedAgentId", namedAgentId);
+    if (provider) params.set("provider", provider);
 
     fetch(`/api/projects/${projectId}/sessions/resumable?${params}`)
       .then((r) => r.json())
       .then((data) => setSessions(data.data || []))
       .catch(() => setSessions([]))
       .finally(() => setLoading(false));
-  }, [projectId, epicId, agentType, provider]);
+  }, [projectId, epicId, userStoryId, agentType, namedAgentId, provider]);
+
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    if (sessions.some((session) => session.id === selectedSessionId)) {
+      return;
+    }
+    onSelect(undefined);
+  }, [selectedSessionId, sessions, onSelect]);
 
   if (!loading && sessions.length === 0) {
     return null;

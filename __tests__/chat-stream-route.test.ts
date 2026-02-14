@@ -20,6 +20,7 @@ const mockSpawnHelpers = vi.hoisted(() => ({
 
 const mockResolveAgentPrompt = vi.hoisted(() => vi.fn());
 const mockDynamicProviderSpawn = vi.hoisted(() => vi.fn());
+const mockResolveAgentByNamedId = vi.hoisted(() => vi.fn());
 
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn(() => ({})),
@@ -91,6 +92,9 @@ vi.mock("@/lib/db/schema", () => ({
     id: "id",
     type: "type",
     provider: "provider",
+    namedAgentId: "namedAgentId",
+    cliSessionId: "cliSessionId",
+    claudeSessionId: "claudeSessionId",
     status: "status",
     label: "label",
   },
@@ -139,10 +143,41 @@ vi.mock("@/lib/agent-config/prompts", () => ({
   resolveAgentPrompt: mockResolveAgentPrompt,
 }));
 
+vi.mock("@/lib/agent-config/providers", () => ({
+  resolveAgentByNamedId: mockResolveAgentByNamedId,
+}));
+
 function mockRequest(body: Record<string, unknown>) {
   return {
     json: () => Promise.resolve(body),
   } as unknown as import("next/server").NextRequest;
+}
+
+async function readSseEvents(response: Response): Promise<Array<Record<string, unknown>>> {
+  const body = response.body;
+  if (!body) return [];
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const events: Array<Record<string, unknown>> = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        events.push(JSON.parse(line.slice(6)));
+      } catch {
+        // ignore malformed data lines
+      }
+    }
+  }
+
+  return events;
 }
 
 describe("POST /api/projects/[projectId]/chat/stream", () => {
@@ -163,6 +198,11 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
     mockPromptBuilder.buildTitleGenerationPrompt.mockReturnValue("TITLE_PROMPT");
 
     mockResolveAgentPrompt.mockResolvedValue("Chat system prompt");
+    mockResolveAgentByNamedId.mockReturnValue({
+      provider: "claude-code",
+      model: undefined,
+      namedAgentId: null,
+    });
 
     mockSpawnHelpers.spawnClaude.mockReturnValue({
       promise: Promise.resolve({ success: true, result: "Generated title" }),
@@ -377,6 +417,75 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
     expect(mockPromptBuilder.buildEpicRefinementPrompt).not.toHaveBeenCalled();
     expect(mockSpawnHelpers.spawnClaudeStream).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: "CHAT_PROMPT" }),
+    );
+  });
+
+  it("falls back to fresh Gemini run when resume session is expired", async () => {
+    mockResolveAgentByNamedId.mockReturnValue({
+      provider: "gemini-cli",
+      model: "gemini-2.0-flash",
+      namedAgentId: "agent-gemini",
+    });
+
+    const firstSession = {
+      promise: Promise.resolve({
+        success: false,
+        error: "session not found",
+        cliSessionId: "expired-session",
+      }),
+      kill: vi.fn(),
+    };
+    const secondSession = {
+      promise: Promise.resolve({
+        success: true,
+        result: "Fresh fallback response",
+        cliSessionId: "new-session-123",
+      }),
+      kill: vi.fn(),
+    };
+
+    mockDynamicProviderSpawn
+      .mockReturnValueOnce(firstSession)
+      .mockReturnValueOnce(secondSession);
+
+    mockDbState.getQueue = [
+      { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
+      {
+        id: "conv2",
+        type: "brainstorm",
+        provider: "gemini-cli",
+        namedAgentId: "agent-gemini",
+        cliSessionId: "expired-session",
+        label: "Brainstorm",
+      },
+    ];
+    mockDbState.allQueue = [
+      [{ name: "README.md", contentMd: "Project docs" }],
+      [{ role: "user", content: "Previous", createdAt: "2026-01-01T10:00:00.000Z" }],
+    ];
+
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockRequest({ content: "New message", conversationId: "conv2" }),
+      { params: Promise.resolve({ projectId: "proj1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    const events = await readSseEvents(response as unknown as Response);
+    expect(events.some((event) => event.delta === "Fresh fallback response")).toBe(true);
+    expect(mockDynamicProviderSpawn).toHaveBeenCalledTimes(2);
+    expect(mockDynamicProviderSpawn.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        prompt: "New message",
+        cliSessionId: "expired-session",
+        resumeSession: true,
+      }),
+    );
+    expect(mockDynamicProviderSpawn.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        prompt: "CHAT_PROMPT",
+        resumeSession: false,
+      }),
     );
   });
 });

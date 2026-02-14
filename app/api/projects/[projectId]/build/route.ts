@@ -229,7 +229,7 @@ export async function POST(
       fs.mkdirSync(logsDir, { recursive: true });
       const logsPath = path.join(logsDir, "logs.json");
 
-      const teamClaudeSessionId = crypto.randomUUID();
+      const teamCliSessionId = crypto.randomUUID();
 
       createQueuedSession({
         id: sessionId,
@@ -239,7 +239,9 @@ export async function POST(
         provider: resolvedTeamAgent.provider,
         prompt: enrichedTeamPrompt,
         logsPath,
-        claudeSessionId: teamClaudeSessionId,
+        claudeSessionId: teamCliSessionId,
+        cliSessionId: teamCliSessionId,
+        namedAgentId: resolvedTeamAgent.namedAgentId ?? null,
         agentType: "team_build",
         namedAgentName: resolvedTeamAgent.name || null,
         model: resolvedTeamAgent.model || null,
@@ -268,7 +270,7 @@ export async function POST(
           "Task",
         ],
         model: resolvedTeamAgent.model,
-        claudeSessionId: teamClaudeSessionId,
+        cliSessionId: teamCliSessionId,
       }, resolvedTeamAgent.provider);
 
       // Background: wait for completion, update all epic statuses
@@ -398,7 +400,9 @@ export async function POST(
       );
     }
 
-    const soloClaudeSessionId = crypto.randomUUID();
+    const providerSupportsResume =
+      resolvedBuildAgent.provider === "claude-code" || resolvedBuildAgent.provider === "gemini-cli";
+    const soloCliSessionId = providerSupportsResume ? crypto.randomUUID() : undefined;
 
     createQueuedSession({
       id: sessionId,
@@ -411,7 +415,9 @@ export async function POST(
       logsPath,
       branchName,
       worktreePath,
-      claudeSessionId: soloClaudeSessionId,
+      claudeSessionId: soloCliSessionId,
+      cliSessionId: soloCliSessionId,
+      namedAgentId: resolvedBuildAgent.namedAgentId ?? null,
       agentType: "build",
       namedAgentName: resolvedBuildAgent.name || null,
       model: resolvedBuildAgent.model || null,
@@ -449,7 +455,7 @@ export async function POST(
       cwd: worktreePath,
       allowedTools: ["Edit", "Write", "Bash", "Read", "Glob", "Grep"],
       model: resolvedBuildAgent.model,
-      claudeSessionId: soloClaudeSessionId,
+      cliSessionId: soloCliSessionId,
     }, resolvedBuildAgent.provider);
 
     // Background: wait for completion and update DB

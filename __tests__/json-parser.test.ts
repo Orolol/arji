@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseClaudeOutput, extractJsonFromOutput } from "@/lib/claude/json-parser";
+import {
+  parseClaudeOutput,
+  extractJsonFromOutput,
+  extractCliSessionIdFromOutput,
+} from "@/lib/claude/json-parser";
 
 describe("parseClaudeOutput", () => {
   it("returns empty content for empty input", () => {
@@ -163,5 +167,29 @@ describe("extractJsonFromOutput", () => {
     const text = 'Some preamble text\n{"key": "value"}\nMore text';
     const result = extractJsonFromOutput<{ key: string }>(text);
     expect(result).toEqual({ key: "value" });
+  });
+});
+
+describe("extractCliSessionIdFromOutput", () => {
+  it("extracts session_id from result envelope", () => {
+    const output = JSON.stringify({
+      type: "result",
+      session_id: "sess-abc-123",
+      result: "done",
+    });
+    expect(extractCliSessionIdFromOutput(output)).toBe("sess-abc-123");
+  });
+
+  it("extracts nested session.id from NDJSON", () => {
+    const output = [
+      JSON.stringify({ type: "init", session: { id: "sess-nested-1" } }),
+      JSON.stringify({ type: "result", result: "done" }),
+    ].join("\n");
+    expect(extractCliSessionIdFromOutput(output)).toBe("sess-nested-1");
+  });
+
+  it("returns null when no session id is present", () => {
+    const output = JSON.stringify({ type: "result", result: "done" });
+    expect(extractCliSessionIdFromOutput(output)).toBeNull();
   });
 });
