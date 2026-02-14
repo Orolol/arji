@@ -33,7 +33,7 @@ export interface ProviderSpawnOptions {
   onChunk?: (chunk: ProviderChunk) => void;
   /** Optional identifier for NDJSON session logging. */
   logIdentifier?: string;
-  /** CLI session UUID for resume support (Claude Code only). */
+  /** CLI session UUID for resume support (all providers). */
   claudeSessionId?: string;
   /** When true, use --resume instead of --session-id. */
   resumeSession?: boolean;
