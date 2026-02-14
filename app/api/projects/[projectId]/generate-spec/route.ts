@@ -9,9 +9,9 @@ import { extractJsonFromOutput, parseClaudeOutput } from "@/lib/claude/json-pars
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { getProvider } from "@/lib/providers";
-import type { ProviderType } from "@/lib/providers";
+
 import { activityRegistry } from "@/lib/activity-registry";
-import { resolveAgent } from "@/lib/agent-config/providers";
+import { resolveAgentByNamedId } from "@/lib/agent-config/providers";
 import { listProjectTextDocuments } from "@/lib/documents/query";
 import {
   enrichPromptWithDocumentMentions,
@@ -24,11 +24,11 @@ export async function POST(
 ) {
   const { projectId } = await params;
 
-  let providerOverride: ProviderType | undefined;
+  let namedAgentId: string | null = null;
   try {
     const body = await request.json();
-    if (body.provider === "codex" || body.provider === "gemini-cli" || body.provider === "claude-code") {
-      providerOverride = body.provider;
+    if (body.namedAgentId) {
+      namedAgentId = body.namedAgentId;
     }
   } catch {
     // No body or invalid JSON — use default
@@ -74,10 +74,10 @@ export async function POST(
     throw error;
   }
 
-  const resolvedAgent = await resolveAgent(
+  const resolvedAgent = resolveAgentByNamedId(
     "spec_generation",
     projectId,
-    providerOverride
+    namedAgentId
   );
 
   const specActivityId = `spec-${createId()}`;

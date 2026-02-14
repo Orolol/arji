@@ -33,9 +33,8 @@ export interface ResolvedAgentConfig {
 
 const FALLBACK_PROVIDER: AgentProvider = "claude-code";
 
-function isKnownProvider(value: string): value is AgentProvider {
-  return value === "claude-code" || value === "codex" || value === "gemini-cli";
-}
+/** Name of the seeded global default agent (inserted by lib/db/index.ts). */
+export const GLOBAL_DEFAULT_AGENT_NAME = "Claude Code";
 
 function normalizeProvider(value: string | null | undefined): AgentProvider {
   if (value === "codex") return "codex";
@@ -291,13 +290,7 @@ export interface ResolvedAgent {
 export function resolveAgent(
   agentType: AgentType,
   projectId?: string,
-  providerOverride?: string,
 ): ResolvedAgent {
-  // Explicit provider override — skip DB lookup
-  if (providerOverride && isKnownProvider(providerOverride)) {
-    return { provider: providerOverride };
-  }
-
   // Try project-scoped default first
   if (projectId) {
     const row = db
@@ -340,8 +333,52 @@ export function resolveAgent(
     if (resolved) return resolved;
   }
 
-  // Builtin fallback
+  // Builtin fallback — resolve via global default named agent
+  const defaultAgent = db
+    .select()
+    .from(namedAgents)
+    .where(eq(namedAgents.name, GLOBAL_DEFAULT_AGENT_NAME))
+    .get();
+
+  if (defaultAgent) {
+    return {
+      provider: normalizeProvider(defaultAgent.provider),
+      model: defaultAgent.model,
+      name: defaultAgent.name,
+    };
+  }
+
   return { provider: FALLBACK_PROVIDER };
+}
+
+/**
+ * Resolves agent config from a named agent ID.
+ * If namedAgentId is provided and valid, returns its provider/model.
+ * Otherwise falls through to the standard resolveAgent chain.
+ */
+export function resolveAgentByNamedId(
+  agentType: AgentType,
+  projectId?: string,
+  namedAgentId?: string | null,
+): ResolvedAgent {
+  if (namedAgentId) {
+    const agent = db
+      .select()
+      .from(namedAgents)
+      .where(eq(namedAgents.id, namedAgentId))
+      .get();
+
+    if (agent) {
+      return {
+        provider: normalizeProvider(agent.provider),
+        model: agent.model,
+        name: agent.name,
+      };
+    }
+  }
+
+  // Fall through to standard resolution (no provider override)
+  return resolveAgent(agentType, projectId);
 }
 
 function resolveFromRow(row: {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { forwardRef, useImperativeHandle, useState, useCallback } from "react";
+import { forwardRef, useImperativeHandle, useState, useCallback, type ReactNode } from "react";
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
@@ -13,11 +13,6 @@ vi.mock("next/navigation", () => ({
 const mockAgentPolling = { activities: [] };
 vi.mock("@/hooks/useAgentPolling", () => ({
   useAgentPolling: () => mockAgentPolling,
-}));
-
-let mockCodexAvailable = false;
-vi.mock("@/hooks/useCodexAvailable", () => ({
-  useCodexAvailable: () => ({ codexAvailable: mockCodexAvailable, codexInstalled: false, loading: false }),
 }));
 
 // Mock useBatchSelection using React state so toggle/clear trigger re-renders
@@ -85,7 +80,7 @@ const mockPanelOpenNewEpic = vi.fn();
 
 vi.mock("@/components/chat/UnifiedChatPanel", () => ({
   UnifiedChatPanel: forwardRef(
-    ({ children }: { children: unknown }, ref) => {
+    ({ children }: { children: ReactNode }, ref) => {
       useImperativeHandle(ref, () => ({
         openChat: mockPanelOpenChat,
         openNewEpic: mockPanelOpenNewEpic,
@@ -102,19 +97,20 @@ vi.mock("@/components/monitor/AgentMonitor", () => ({
   AgentMonitor: () => null,
 }));
 
-vi.mock("@/components/shared/ProviderSelect", () => ({
-  ProviderSelect: ({ value, onChange, codexAvailable }: {
-    value: string;
+// Mock NamedAgentSelect (replaces old ProviderSelect)
+vi.mock("@/components/shared/NamedAgentSelect", () => ({
+  NamedAgentSelect: ({ value, onChange }: {
+    value: string | null;
     onChange: (v: string) => void;
-    codexAvailable: boolean;
   }) => (
     <select
-      data-testid="build-provider-select"
-      value={value}
+      data-testid="build-agent-select"
+      value={value ?? ""}
       onChange={(e) => onChange(e.target.value)}
     >
-      <option value="claude-code">Claude Code</option>
-      {codexAvailable && <option value="codex">Codex</option>}
+      <option value="">Default agent</option>
+      <option value="agent-1">Claude Code</option>
+      <option value="agent-2">Codex Agent</option>
     </select>
   ),
 }));
@@ -124,7 +120,6 @@ import KanbanPage from "@/app/projects/[projectId]/page";
 describe("Kanban Build Toolbar", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    mockCodexAvailable = false;
     mockPanelOpenChat.mockClear();
     mockPanelOpenNewEpic.mockClear();
     global.fetch = vi.fn().mockResolvedValue({
@@ -155,10 +150,10 @@ describe("Kanban Build Toolbar", () => {
     expect(screen.getByText("1 epic selected")).toBeInTheDocument();
   });
 
-  it("shows provider select in build toolbar", () => {
+  it("shows agent select in build toolbar", () => {
     render(<KanbanPage />);
     fireEvent.click(screen.getByTestId("toggle-epic1"));
-    expect(screen.getByTestId("build-provider-select")).toBeInTheDocument();
+    expect(screen.getByTestId("build-agent-select")).toBeInTheDocument();
   });
 
   it("does not show team mode checkbox with < 2 epics", () => {
@@ -174,7 +169,7 @@ describe("Kanban Build Toolbar", () => {
     expect(screen.getByText("Team mode")).toBeInTheDocument();
   });
 
-  it("team mode checkbox is enabled with claude-code provider", () => {
+  it("team mode checkbox is enabled by default", () => {
     render(<KanbanPage />);
     fireEvent.click(screen.getByTestId("toggle-epic1"));
     fireEvent.click(screen.getByTestId("toggle-epic2"));
@@ -184,22 +179,6 @@ describe("Kanban Build Toolbar", () => {
     );
     expect(teamCheckbox).toBeTruthy();
     expect(teamCheckbox).not.toBeDisabled();
-  });
-
-  it("team mode checkbox is disabled with codex provider", () => {
-    mockCodexAvailable = true;
-    render(<KanbanPage />);
-    fireEvent.click(screen.getByTestId("toggle-epic1"));
-    fireEvent.click(screen.getByTestId("toggle-epic2"));
-    // Switch to codex
-    const select = screen.getByTestId("build-provider-select");
-    fireEvent.change(select, { target: { value: "codex" } });
-    const checkboxes = screen.getAllByRole("checkbox");
-    const teamCheckbox = checkboxes.find(
-      (cb) => cb.closest("label")?.textContent?.includes("Team mode")
-    );
-    expect(teamCheckbox).toBeTruthy();
-    expect(teamCheckbox).toBeDisabled();
   });
 
   it("build button shows 'Build as Team' when team mode enabled", () => {
@@ -221,7 +200,7 @@ describe("Kanban Build Toolbar", () => {
     expect(screen.getByText("Build all")).toBeInTheDocument();
   });
 
-  it("sends team and provider in build request", async () => {
+  it("sends team and namedAgentId in build request", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       json: () => Promise.resolve({ data: { count: 1 } }),
     });
@@ -257,7 +236,7 @@ describe("Kanban Build Toolbar", () => {
     expect(call).toBeTruthy();
     const body = JSON.parse(call![1].body);
     expect(body.team).toBe(true);
-    expect(body.provider).toBe("claude-code");
+    expect(body.namedAgentId).toBe(null);
     expect(body.epicIds).toHaveLength(2);
   });
 

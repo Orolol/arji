@@ -21,22 +21,21 @@ vi.mock("@/components/documents/MentionTextarea", () => ({
   ),
 }));
 
-// Mock ProviderSelect to inspect props
-vi.mock("@/components/shared/ProviderSelect", () => ({
-  ProviderSelect: ({ value, onChange, codexAvailable, className }: {
-    value: string;
+// Mock NamedAgentSelect (replaces old ProviderSelect)
+vi.mock("@/components/shared/NamedAgentSelect", () => ({
+  NamedAgentSelect: ({ value, onChange, className }: {
+    value: string | null;
     onChange: (v: string) => void;
-    codexAvailable: boolean;
     className?: string;
   }) => (
     <select
-      data-testid="provider-select"
-      value={value}
+      data-testid="agent-select"
+      value={value ?? ""}
       onChange={(e) => onChange(e.target.value)}
-      data-codex-available={String(codexAvailable)}
     >
-      <option value="claude-code">Claude Code</option>
-      <option value="codex">Codex</option>
+      <option value="">Select agent</option>
+      <option value="agent-1">Claude Code</option>
+      <option value="agent-2">Codex Agent</option>
     </select>
   ),
 }));
@@ -44,10 +43,8 @@ vi.mock("@/components/shared/ProviderSelect", () => ({
 const baseProps = {
   projectId: "proj-1",
   story: { id: "s1", title: "Test Story", status: "todo" },
-  projectId: "proj1",
   dispatching: false,
   isRunning: false,
-  codexAvailable: true,
   onSendToDev: vi.fn().mockResolvedValue(undefined),
   onSendToReview: vi.fn().mockResolvedValue(undefined),
   onApprove: vi.fn().mockResolvedValue(undefined),
@@ -104,65 +101,51 @@ describe("StoryActions", () => {
     expect(screen.getByText("Send to Dev").closest("button")).toBeDisabled();
   });
 
-  it("opens Send to Dev dialog with provider select on click", () => {
+  it("opens Send to Dev dialog with agent select on click", () => {
     render(<StoryActions {...baseProps} />);
     fireEvent.click(screen.getByText("Send to Dev"));
-    // Dialog should be open with provider selector
     expect(screen.getByText("Dispatch Agent")).toBeInTheDocument();
-    expect(screen.getByText("Provider:")).toBeInTheDocument();
-    const selects = screen.getAllByTestId("provider-select");
+    expect(screen.getByText("Agent:")).toBeInTheDocument();
+    const selects = screen.getAllByTestId("agent-select");
     expect(selects.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("opens Agent Review dialog with provider select on click", () => {
+  it("opens Agent Review dialog with agent select on click", () => {
     render(
       <StoryActions {...baseProps} story={{ ...baseProps.story, status: "review" }} />
     );
     fireEvent.click(screen.getByText("Agent Review"));
-    // Dialog should be open with provider selector and review type checkboxes
     expect(screen.getByText("Security")).toBeInTheDocument();
     expect(screen.getByText("Code Review")).toBeInTheDocument();
     expect(screen.getByText("Compliance / Accessibility")).toBeInTheDocument();
-    const selects = screen.getAllByTestId("provider-select");
+    const selects = screen.getAllByTestId("agent-select");
     expect(selects.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("passes codexAvailable to ProviderSelect in Send to Dev dialog", () => {
-    render(<StoryActions {...baseProps} codexAvailable={false} />);
-    fireEvent.click(screen.getByText("Send to Dev"));
-    const select = screen.getAllByTestId("provider-select")[0];
-    expect(select.getAttribute("data-codex-available")).toBe("false");
-  });
-
-  it("calls onSendToDev with provider when dispatching from todo", async () => {
+  it("calls onSendToDev with null namedAgentId when no agent selected", async () => {
     const onSendToDev = vi.fn().mockResolvedValue(undefined);
     render(<StoryActions {...baseProps} onSendToDev={onSendToDev} />);
 
-    // Open dialog
     fireEvent.click(screen.getByText("Send to Dev"));
-    // Click dispatch
     fireEvent.click(screen.getByText("Dispatch Agent"));
 
-    // Should be called with undefined comment (empty) and "claude-code" default provider
-    expect(onSendToDev).toHaveBeenCalledWith(undefined, "claude-code");
+    // Called with undefined comment and null namedAgentId (default)
+    expect(onSendToDev).toHaveBeenCalledWith(undefined, null);
   });
 
-  it("calls onSendToDev with changed provider", async () => {
+  it("calls onSendToDev with selected namedAgentId", async () => {
     const onSendToDev = vi.fn().mockResolvedValue(undefined);
     render(<StoryActions {...baseProps} onSendToDev={onSendToDev} />);
 
-    // Open dialog
     fireEvent.click(screen.getByText("Send to Dev"));
-    // Change provider to codex
-    const select = screen.getAllByTestId("provider-select")[0];
-    fireEvent.change(select, { target: { value: "codex" } });
-    // Click dispatch
+    const select = screen.getAllByTestId("agent-select")[0];
+    fireEvent.change(select, { target: { value: "agent-1" } });
     fireEvent.click(screen.getByText("Dispatch Agent"));
 
-    expect(onSendToDev).toHaveBeenCalledWith(undefined, "codex");
+    expect(onSendToDev).toHaveBeenCalledWith(undefined, "agent-1");
   });
 
-  it("calls onSendToReview with selected types and provider", async () => {
+  it("calls onSendToReview with selected types and namedAgentId", async () => {
     const onSendToReview = vi.fn().mockResolvedValue(undefined);
     render(
       <StoryActions
@@ -172,10 +155,9 @@ describe("StoryActions", () => {
       />
     );
 
-    // Open Agent Review dialog
     fireEvent.click(screen.getByText("Agent Review"));
 
-    // Select security checkbox
+    // Uncheck feature_review (default checked), check security
     const featureCheckbox = screen.getByRole("checkbox", {
       name: /feature review/i,
     });
@@ -183,10 +165,9 @@ describe("StoryActions", () => {
     const securityCheckbox = screen.getByRole("checkbox", { name: /security/i });
     fireEvent.click(securityCheckbox);
 
-    // Click run review
     fireEvent.click(screen.getByText("Run Review (1)"));
 
-    expect(onSendToReview).toHaveBeenCalledWith(["security"], [], "claude-code");
+    expect(onSendToReview).toHaveBeenCalledWith(["security"], null);
   });
 
   it("requires mandatory comment when sending to dev from review status", () => {
@@ -194,10 +175,8 @@ describe("StoryActions", () => {
       <StoryActions {...baseProps} story={{ ...baseProps.story, status: "review" }} />
     );
 
-    // Open Send to Dev dialog
     fireEvent.click(screen.getByText("Send to Dev"));
 
-    // Dispatch should be disabled without comment
     const dispatchBtn = screen.getByText("Dispatch Agent").closest("button");
     expect(dispatchBtn).toBeDisabled();
   });

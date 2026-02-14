@@ -6,7 +6,6 @@ import { createId } from "@/lib/utils/nanoid";
 import { spawnClaudeStream, spawnClaude } from "@/lib/claude/spawn";
 import { buildChatPrompt, buildEpicRefinementPrompt, buildEpicFinalizationPrompt, buildTitleGenerationPrompt } from "@/lib/claude/prompt-builder";
 import { getProvider } from "@/lib/providers";
-import type { ProviderType } from "@/lib/providers";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { resolveAgent } from "@/lib/agent-config/providers";
 import { isEpicCreationConversationAgentType } from "@/lib/chat/conversation-agent";
@@ -106,14 +105,10 @@ export async function POST(
     .all()
     .reverse();
 
-  // Determine conversation type and provider
-  let provider: ProviderType = "claude-code";
+  // Determine conversation type
   let conversationType: string | null = null;
   if (conversationId) {
     const conv = db.select().from(chatConversations).where(eq(chatConversations.id, conversationId)).get();
-    if (conv?.provider === "codex" || conv?.provider === "gemini-cli") {
-      provider = conv.provider;
-    }
     conversationType = conv?.type ?? null;
   }
 
@@ -156,7 +151,7 @@ export async function POST(
     prompt = buildChatPrompt(project, docs, messageHistory, chatSystemPrompt);
   }
 
-  const resolvedAgent = await resolveAgent("chat", projectId, provider);
+  const resolvedAgent = resolveAgent("chat", projectId);
 
   try {
     prompt = enrichPromptWithDocumentMentions({

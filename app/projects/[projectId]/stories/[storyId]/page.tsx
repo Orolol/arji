@@ -5,7 +5,6 @@ import { useRef, useState } from "react";
 import { useStoryDetail } from "@/hooks/useStoryDetail";
 import { useComments } from "@/hooks/useComments";
 import { useTicketAgent } from "@/hooks/useTicketAgent";
-import { useCodexAvailable } from "@/hooks/useCodexAvailable";
 import { StoryDetailPanel } from "@/components/story/StoryDetailPanel";
 import { CommentThread } from "@/components/story/CommentThread";
 import { StoryActions } from "@/components/story/StoryActions";
@@ -52,8 +51,6 @@ export default function StoryDetailPage() {
     sendToReview,
     approve,
   } = useTicketAgent(projectId, storyId, story?.epicId);
-
-  const { codexAvailable, codexInstalled } = useCodexAvailable();
 
   function addToast(message: string, href?: string) {
     const id = Date.now().toString();
@@ -142,17 +139,14 @@ export default function StoryDetailPage() {
         <StoryActions
           projectId={projectId}
           story={story}
-          projectId={projectId}
           dispatching={dispatching}
           isRunning={isRunning}
-          codexAvailable={codexAvailable}
-          codexInstalled={codexInstalled}
-          onSendToDev={async (comment, provider) => {
-            await sendToDev(comment, provider);
+          onSendToDev={async (comment, namedAgentId) => {
+            await sendToDev(comment, namedAgentId);
             refreshStory();
           }}
-          onSendToReview={async (types, customAgentIds, provider) => {
-            await sendToReview(types, customAgentIds, provider);
+          onSendToReview={async (types, namedAgentId) => {
+            await sendToReview(types, namedAgentId);
           }}
           onApprove={async () => {
             await approve();
