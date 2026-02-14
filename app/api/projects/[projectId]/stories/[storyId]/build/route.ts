@@ -271,10 +271,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
 
-    // On success: move story to done
+    // On success: move story to review (not done — requires review/approval first)
     if (result?.success) {
       db.update(userStories)
-        .set({ status: "done" })
+        .set({ status: "review" })
         .where(
           and(
             eq(userStories.id, storyId),
@@ -283,20 +283,20 @@ export async function POST(request: NextRequest, { params }: Params) {
         )
         .run();
 
-      // Check if all stories in the epic are now done
+      // Check if all stories in the epic are now done or in review
       const allStories = db
         .select()
         .from(userStories)
         .where(eq(userStories.epicId, epic.id))
         .all();
 
-      const allDone = allStories.every(
-        (s) => s.id === storyId || s.status === "done"
+      const allReviewOrDone = allStories.every(
+        (s) => s.id === storyId || s.status === "done" || s.status === "review"
       );
 
-      if (allDone) {
+      if (allReviewOrDone) {
         db.update(epics)
-          .set({ status: "done", updatedAt: completedAt })
+          .set({ status: "review", updatedAt: completedAt })
           .where(eq(epics.id, epic.id))
           .run();
       }

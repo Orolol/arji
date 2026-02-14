@@ -1,6 +1,6 @@
 /**
  * Tests for epic lifecycle status transitions:
- * - Build completion marks US and epic as "done"
+ * - Build completion marks US and epic as "review" (not "done")
  * - Negative review reverts statuses to "in_progress"
  *
  * Each test uses vi.resetModules() + dynamic import to avoid
@@ -213,7 +213,7 @@ async function flushBackground() {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("Epic build — marks US & epic as done on success", () => {
+describe("Epic build — marks US & epic as review on success", () => {
   beforeEach(() => {
     vi.resetModules();
     dbUpdates = [];
@@ -231,7 +231,7 @@ describe("Epic build — marks US & epic as done on success", () => {
     ];
   });
 
-  it("sets US to done and epic to done on build success", async () => {
+  it("sets US to review and epic to review on build success", async () => {
     const { POST } = await import(
       "@/app/api/projects/[projectId]/epics/[epicId]/build/route"
     );
@@ -243,15 +243,15 @@ describe("Epic build — marks US & epic as done on success", () => {
     expect(res.status).toBe(200);
     await flushBackground();
 
-    const usDone = dbUpdates.find(
-      (u) => u.table === "userStories" && u.setValues.status === "done"
+    const usReview = dbUpdates.find(
+      (u) => u.table === "userStories" && u.setValues.status === "review"
     );
-    expect(usDone).toBeDefined();
+    expect(usReview).toBeDefined();
 
-    const epicDone = dbUpdates.find(
-      (u) => u.table === "epics" && u.setValues.status === "done"
+    const epicReview = dbUpdates.find(
+      (u) => u.table === "epics" && u.setValues.status === "review"
     );
-    expect(epicDone).toBeDefined();
+    expect(epicReview).toBeDefined();
   });
 });
 
@@ -276,7 +276,7 @@ describe("Epic build — failure does NOT mark done", () => {
     ];
   });
 
-  it("does NOT set status to done on failure", async () => {
+  it("does NOT set status to review on failure", async () => {
     const { POST } = await import(
       "@/app/api/projects/[projectId]/epics/[epicId]/build/route"
     );
@@ -288,10 +288,10 @@ describe("Epic build — failure does NOT mark done", () => {
     expect(res.status).toBe(200);
     await flushBackground();
 
-    const doneUpdates = dbUpdates.filter(
-      (u) => u.setValues.status === "done"
+    const reviewUpdates = dbUpdates.filter(
+      (u) => u.setValues.status === "review"
     );
-    expect(doneUpdates).toHaveLength(0);
+    expect(reviewUpdates).toHaveLength(0);
   });
 });
 
@@ -303,12 +303,12 @@ describe("Epic review — negative verdict reverts to in_progress", () => {
     mockEpic = {
       id: "epic-1",
       title: "Test Epic",
-      status: "done",
+      status: "review",
       branchName: "feature/epic-1-test",
     };
     mockStories = [
-      { id: "us-1", epicId: "epic-1", status: "done", title: "US 1" },
-      { id: "us-2", epicId: "epic-1", status: "done", title: "US 2" },
+      { id: "us-1", epicId: "epic-1", status: "review", title: "US 1" },
+      { id: "us-2", epicId: "epic-1", status: "review", title: "US 2" },
     ];
   });
 
@@ -343,7 +343,7 @@ describe("Epic review — negative verdict reverts to in_progress", () => {
   });
 });
 
-describe("Epic review — positive verdict keeps done status", () => {
+describe("Epic review — positive verdict keeps review status", () => {
   beforeEach(() => {
     vi.resetModules();
     dbUpdates = [];
@@ -351,11 +351,11 @@ describe("Epic review — positive verdict keeps done status", () => {
     mockEpic = {
       id: "epic-1",
       title: "Test Epic",
-      status: "done",
+      status: "review",
       branchName: "feature/epic-1-test",
     };
     mockStories = [
-      { id: "us-1", epicId: "epic-1", status: "done", title: "US 1" },
+      { id: "us-1", epicId: "epic-1", status: "review", title: "US 1" },
     ];
   });
 
@@ -393,11 +393,11 @@ describe("Epic review — status gate", () => {
     mockStories = [];
   });
 
-  it("allows review when epic is done", async () => {
+  it("allows review when epic is in review", async () => {
     mockEpic = {
       id: "epic-1",
       title: "Test Epic",
-      status: "done",
+      status: "review",
       branchName: "feature/epic-1-test",
     };
     processManagerResult = { success: true, result: "LGTM", duration: 500 };
@@ -437,7 +437,7 @@ describe("Epic review — status gate", () => {
   });
 });
 
-describe("Story build — marks story done on success", () => {
+describe("Story build — marks story as review on success", () => {
   beforeEach(() => {
     vi.resetModules();
     dbUpdates = [];
@@ -455,7 +455,7 @@ describe("Story build — marks story done on success", () => {
     ];
   });
 
-  it("sets story to done on build success", async () => {
+  it("sets story to review on build success", async () => {
     const { POST } = await import(
       "@/app/api/projects/[projectId]/stories/[storyId]/build/route"
     );
@@ -467,10 +467,10 @@ describe("Story build — marks story done on success", () => {
     expect(res.status).toBe(200);
     await flushBackground();
 
-    const storyDone = dbUpdates.find(
-      (u) => u.table === "userStories" && u.setValues.status === "done"
+    const storyReview = dbUpdates.find(
+      (u) => u.table === "userStories" && u.setValues.status === "review"
     );
-    expect(storyDone).toBeDefined();
+    expect(storyReview).toBeDefined();
   });
 });
 
@@ -482,11 +482,11 @@ describe("Story review — negative verdict reverts story and epic", () => {
     mockEpic = {
       id: "epic-1",
       title: "Test Epic",
-      status: "done",
+      status: "review",
       branchName: "feature/epic-1-test",
     };
     mockStories = [
-      { id: "us-1", epicId: "epic-1", status: "done", title: "US 1" },
+      { id: "us-1", epicId: "epic-1", status: "review", title: "US 1" },
     ];
   });
 
@@ -529,14 +529,14 @@ describe("Story review — status gate", () => {
     mockEpic = {
       id: "epic-1",
       title: "Test Epic",
-      status: "done",
+      status: "review",
       branchName: "feature/epic-1-test",
     };
   });
 
-  it("allows review when story is done", async () => {
+  it("allows review when story is in review", async () => {
     mockStories = [
-      { id: "us-1", epicId: "epic-1", status: "done", title: "US 1" },
+      { id: "us-1", epicId: "epic-1", status: "review", title: "US 1" },
     ];
     processManagerResult = { success: true, result: "LGTM", duration: 500 };
 

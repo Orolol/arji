@@ -252,10 +252,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
 
-    // On success: all non-done US -> done, epic -> done
+    // On success: all non-done US -> review, epic -> review
+    // The ticket should go through review before being moved to done/merged.
     if (result?.success) {
       db.update(userStories)
-        .set({ status: "done" })
+        .set({ status: "review" })
         .where(
           and(
             eq(userStories.epicId, epicId),
@@ -265,7 +266,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         .run();
 
       db.update(epics)
-        .set({ status: "done", updatedAt: completedAt })
+        .set({ status: "review", updatedAt: completedAt })
         .where(eq(epics.id, epicId))
         .run();
     }
