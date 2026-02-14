@@ -7,6 +7,8 @@ import {
   deleteUserStoryPermanently,
   ScopedDeleteNotFoundError,
 } from "@/lib/planning/permanent-delete";
+import { updateStorySchema } from "@/lib/validation/schemas";
+import { validateBody, isValidationError } from "@/lib/validation/validate";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
@@ -48,7 +50,11 @@ export async function GET(request: NextRequest, { params }: Params) {
 
 export async function PATCH(request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
-  const body = await request.json();
+
+  const validated = await validateBody(updateStorySchema, request);
+  if (isValidationError(validated)) return validated;
+
+  const body = validated.data;
 
   const existing = db
     .select()

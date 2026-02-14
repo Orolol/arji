@@ -6,6 +6,8 @@ import { createId } from "@/lib/utils/nanoid";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { createDependencies } from "@/lib/dependencies/crud";
 import { CycleError, CrossProjectError } from "@/lib/dependencies/validation";
+import { createEpicSchema } from "@/lib/validation/schemas";
+import { validateBody, isValidationError } from "@/lib/validation/validate";
 
 export async function GET(
   _request: NextRequest,
@@ -70,38 +72,32 @@ export async function POST(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
-  const body = await request.json();
+
+  const validated = await validateBody(createEpicSchema, request);
+  if (isValidationError(validated)) return validated;
+
+  const body = validated.data;
   const now = new Date().toISOString();
 
   const normalizedUserStories = Array.isArray(body.userStories)
     ? body.userStories
         .filter(
-          (story: { title?: string }) =>
+          (story) =>
             typeof story?.title === "string" && story.title.trim().length > 0
         )
-        .map(
-          (story: {
-            title: string;
-            description?: string | null;
-            acceptanceCriteria?: string | null;
-          }) => ({
-            title: story.title.trim(),
-            description:
-              typeof story.description === "string" && story.description.trim().length > 0
-                ? story.description.trim()
-                : null,
-            acceptanceCriteria:
-              typeof story.acceptanceCriteria === "string" &&
-              story.acceptanceCriteria.trim().length > 0
-                ? story.acceptanceCriteria.trim()
-                : null,
-          })
-        )
+        .map((story) => ({
+          title: story.title.trim(),
+          description:
+            typeof story.description === "string" && story.description.trim().length > 0
+              ? story.description.trim()
+              : null,
+          acceptanceCriteria:
+            typeof story.acceptanceCriteria === "string" &&
+            story.acceptanceCriteria.trim().length > 0
+              ? story.acceptanceCriteria.trim()
+              : null,
+        }))
     : [];
-
-  if (!body.title) {
-    return NextResponse.json({ error: "Title is required" }, { status: 400 });
-  }
 
   const maxPos = db
     .select({ max: sql<number>`COALESCE(MAX(position), -1)` })
@@ -155,11 +151,11 @@ export async function POST(
   if (dependencyEdges.length > 0) {
     const edges = dependencyEdges
       .filter(
-        (dep: { ticketId?: string; dependsOnTicketId?: string }) =>
+        (dep) =>
           typeof dep?.ticketId === "string" &&
           typeof dep?.dependsOnTicketId === "string"
       )
-      .map((dep: { ticketId: string; dependsOnTicketId: string }) => ({
+      .map((dep) => ({
         // Replace placeholder "self" references with the newly created epic ID
         ticketId: dep.ticketId === "$self" ? id : dep.ticketId,
         dependsOnTicketId:

@@ -8,6 +8,8 @@ import {
   deleteUserStoryPermanently,
   ScopedDeleteNotFoundError,
 } from "@/lib/planning/permanent-delete";
+import { createStorySchema, updateStoryByIdSchema } from "@/lib/validation/schemas";
+import { validateBody, isValidationError } from "@/lib/validation/validate";
 
 export async function GET(
   request: NextRequest,
@@ -35,11 +37,11 @@ export async function POST(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
-  const body = await request.json();
 
-  if (!body.epicId || !body.title) {
-    return NextResponse.json({ error: "epicId and title are required" }, { status: 400 });
-  }
+  const validated = await validateBody(createStorySchema, request);
+  if (isValidationError(validated)) return validated;
+
+  const body = validated.data;
 
   const maxPos = db
     .select({ max: sql<number>`COALESCE(MAX(position), -1)` })
@@ -72,11 +74,11 @@ export async function PATCH(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const { projectId } = await params;
-  const body = await request.json();
 
-  if (!body.id) {
-    return NextResponse.json({ error: "id is required" }, { status: 400 });
-  }
+  const validated = await validateBody(updateStoryByIdSchema, request);
+  if (isValidationError(validated)) return validated;
+
+  const body = validated.data;
 
   const existing = db.select().from(userStories).where(eq(userStories.id, body.id)).get();
   if (!existing) {

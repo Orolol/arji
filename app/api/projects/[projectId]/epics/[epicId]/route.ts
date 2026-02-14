@@ -7,13 +7,19 @@ import {
   deleteEpicPermanently,
   ScopedDeleteNotFoundError,
 } from "@/lib/planning/permanent-delete";
+import { updateEpicSchema } from "@/lib/validation/schemas";
+import { validateBody, isValidationError } from "@/lib/validation/validate";
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string; epicId: string }> }
 ) {
   const { projectId, epicId } = await params;
-  const body = await request.json();
+
+  const validated = await validateBody(updateEpicSchema, request);
+  if (isValidationError(validated)) return validated;
+
+  const body = validated.data;
 
   const existing = db.select().from(epics).where(eq(epics.id, epicId)).get();
   if (!existing) {
