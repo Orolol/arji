@@ -382,8 +382,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       if (!activeId || hasMessages) {
         return;
       }
-      // For now, store the namedAgentId as provider — conversations track agent selection
-      await updateConversation(activeId, { provider: namedAgentId });
+      await updateConversation(activeId, { namedAgentId });
     }
 
     async function handleGenerateSpec() {
@@ -511,7 +510,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                 activeConversation?.label,
               )}
             </h3>
-            {activeConversation?.claudeSessionId && (
+            {(activeConversation?.cliSessionId || activeConversation?.claudeSessionId) && (
               <Badge variant="outline" className="text-[10px] text-blue-400 border-blue-400/30">
                 session linked
               </Badge>
@@ -519,7 +518,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
           </div>
           <div className="flex items-center gap-2">
             <NamedAgentSelect
-              value={null}
+              value={activeConversation?.namedAgentId ?? null}
               onChange={handleAgentChange}
               disabled={!activeConversation || hasMessages || isCurrentConversationBusy}
               className="w-44 h-7 text-xs"

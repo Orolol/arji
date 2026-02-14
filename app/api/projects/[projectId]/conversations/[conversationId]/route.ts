@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { chatConversations } from "@/lib/db/schema";
+import { chatConversations, namedAgents } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import { resolveAgent } from "@/lib/agent-config/providers";
 
 export async function DELETE(
   _request: NextRequest,
@@ -55,12 +56,51 @@ export async function PATCH(
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
 
-  const updates: Record<string, string> = {};
-  if (body.provider && ["claude-code", "codex", "gemini-cli"].includes(body.provider)) {
+  const updates: Record<string, string | null> = {};
+
+  if (Object.prototype.hasOwnProperty.call(body, "namedAgentId")) {
+    const namedAgentIdInput =
+      typeof body.namedAgentId === "string" ? body.namedAgentId.trim() : "";
+
+    if (namedAgentIdInput) {
+      const namedAgent = db
+        .select({
+          id: namedAgents.id,
+          provider: namedAgents.provider,
+        })
+        .from(namedAgents)
+        .where(eq(namedAgents.id, namedAgentIdInput))
+        .get();
+
+      if (!namedAgent) {
+        return NextResponse.json({ error: "namedAgentId not found" }, { status: 400 });
+      }
+
+      updates.namedAgentId = namedAgent.id;
+      updates.provider = namedAgent.provider;
+      updates.cliSessionId = null;
+      updates.claudeSessionId = null;
+    } else {
+      // Clearing a conversation-specific named agent falls back to configured chat default.
+      const resolved = resolveAgent("chat", projectId);
+      updates.namedAgentId = null;
+      updates.provider = resolved.provider;
+      updates.cliSessionId = null;
+      updates.claudeSessionId = null;
+    }
+  } else if (
+    typeof body.provider === "string" &&
+    ["claude-code", "codex", "gemini-cli"].includes(body.provider)
+  ) {
+    // Legacy compatibility: provider patching clears named-agent linkage.
     updates.provider = body.provider;
+    updates.namedAgentId = null;
+    updates.cliSessionId = null;
+    updates.claudeSessionId = null;
   }
-  if (body.label) {
-    updates.label = body.label;
+
+  if (typeof body.label === "string" && body.label.trim().length > 0) {
+    updates.label = body.label.trim();
   }
 
   if (Object.keys(updates).length > 0) {

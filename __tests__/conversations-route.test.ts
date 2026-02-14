@@ -30,6 +30,10 @@ vi.mock("@/lib/db/schema", () => ({
     projectId: "projectId",
     conversationId: "conversationId",
   },
+  namedAgents: {
+    id: "id",
+    provider: "provider",
+  },
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -43,7 +47,10 @@ vi.mock("@/lib/utils/nanoid", () => ({
 }));
 
 vi.mock("@/lib/agent-config/providers", () => ({
-  resolveAgentProvider: vi.fn(async () => "claude-code"),
+  resolveAgent: vi.fn(() => ({
+    provider: "claude-code",
+    namedAgentId: null,
+  })),
 }));
 
 vi.mock("@/lib/chat/unified-cutover-migration", () => ({

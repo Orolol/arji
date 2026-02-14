@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { chatConversations, chatMessages } from "@/lib/db/schema";
+import { chatConversations, chatMessages, namedAgents } from "@/lib/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { resolveAgent } from "@/lib/agent-config/providers";
@@ -44,7 +44,7 @@ export async function GET(
   if (conversations.length === 0) {
     const id = createId();
     const now = new Date().toISOString();
-    const { provider: defaultProvider } = resolveAgent("chat", projectId);
+    const resolved = resolveAgent("chat", projectId);
 
     db.insert(chatConversations)
       .values({
@@ -52,7 +52,8 @@ export async function GET(
         projectId,
         type: "brainstorm",
         label: "Brainstorm",
-        provider: defaultProvider,
+        provider: resolved.provider,
+        namedAgentId: resolved.namedAgentId ?? null,
         createdAt: now,
       })
       .run();
@@ -89,10 +90,36 @@ export async function POST(
   const id = createId();
   const now = new Date().toISOString();
 
-  // Resolve default provider from agent-config if not explicitly provided
-  let provider = body.provider;
-  if (!provider) {
-    provider = resolveAgent("chat", projectId).provider;
+  const namedAgentIdInput =
+    typeof body.namedAgentId === "string" ? body.namedAgentId.trim() : "";
+  let namedAgentId: string | null = null;
+  let provider =
+    typeof body.provider === "string" ? body.provider.trim() : "";
+
+  if (namedAgentIdInput) {
+    const namedAgent = db
+      .select({
+        id: namedAgents.id,
+        provider: namedAgents.provider,
+      })
+      .from(namedAgents)
+      .where(eq(namedAgents.id, namedAgentIdInput))
+      .get();
+
+    if (!namedAgent) {
+      return NextResponse.json({ error: "namedAgentId not found" }, { status: 400 });
+    }
+
+    namedAgentId = namedAgent.id;
+    provider = namedAgent.provider;
+  }
+
+  if (!["claude-code", "codex", "gemini-cli"].includes(provider)) {
+    const resolved = resolveAgent("chat", projectId);
+    provider = resolved.provider;
+    if (!namedAgentId) {
+      namedAgentId = resolved.namedAgentId ?? null;
+    }
   }
 
   db.insert(chatConversations)
@@ -103,6 +130,7 @@ export async function POST(
       label: body.label || "Brainstorm",
       epicId: body.epicId || null,
       provider,
+      namedAgentId,
       createdAt: now,
     })
     .run();

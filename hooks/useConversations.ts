@@ -11,6 +11,8 @@ export interface Conversation {
   status?: string | null;
   epicId: string | null;
   provider: string;
+  namedAgentId?: string | null;
+  cliSessionId?: string | null;
   claudeSessionId?: string | null;
   createdAt: string;
 }
@@ -20,12 +22,14 @@ export interface CreateConversationInput {
   label?: string;
   epicId?: string | null;
   provider?: string;
+  namedAgentId?: string | null;
 }
 
 export interface UpdateConversationInput {
   type?: string;
   label?: string;
   provider?: string;
+  namedAgentId?: string | null;
 }
 
 export function useConversations(projectId: string) {
