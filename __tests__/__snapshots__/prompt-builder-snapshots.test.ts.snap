@@ -1,0 +1,1310 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Prompt builder snapshot regression > buildBuildPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epic to Implement
+
+### Agent Configuration
+
+Add agent config side panel
+
+### User Stories
+
+- [ ] **As a dev I can configure prompts**
+  Add prompt editors for agent types
+  **Acceptance criteria:**
+  - [ ] Editors are persisted
+  - [ ] Changes apply immediately
+
+## Comment History
+
+**User:**
+Please focus on security
+
+**Agent:**
+Will add input validation
+
+## Instructions
+
+Implement this epic following the specification above. For each user story:
+
+1. Create or modify the necessary files.
+2. Write tests that verify the acceptance criteria.
+3. Ensure all acceptance criteria are met before moving to the next story.
+
+Consider all comments in the history — they may contain clarifications, feedback, or specific instructions.
+
+Commit your changes with clear, descriptive commit messages that reference the epic and user story titles. Use conventional commit format when possible.
+
+Work through the user stories in order. If a story depends on another, implement the dependency first.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildChatPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Description
+
+A test project description
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Conversation History
+
+**User:**
+How should we structure this?
+
+**Assistant:**
+I suggest a modular approach.
+
+## Instructions
+
+You are helping brainstorm and refine this project. Answer the user's latest message considering the full project context above. Be specific, actionable, and reference the project's existing specification and documents when relevant.
+
+If the user asks about architecture, features, or implementation details, provide concrete suggestions grounded in the project's context.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildCustomEpicReviewPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epic Under Review
+
+### Agent Configuration
+
+Add agent config side panel
+
+### User Stories
+
+- **As a dev I can configure prompts**
+  Add prompt editors for agent types
+  **Acceptance criteria:**
+  - [ ] Editors are persisted
+  - [ ] Changes apply immediately
+
+## Code Review Review Criteria
+
+Follow team standards
+
+
+## Instructions
+
+You are performing a **Code Review** review on the entire epic described above, covering all user stories.
+
+1. Read the relevant source files in the current working directory.
+2. Evaluate the code against the review criteria above.
+3. Produce a structured report with your findings.
+4. If no issues are found for a category, state "No issues found."
+5. End with a summary: total findings by severity, and an overall assessment (Approved / Approved with Minor Issues / Changes Requested).
+
+Your response should be a well-formatted markdown report.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildCustomReviewPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epic Context
+
+### Agent Configuration
+
+Add agent config side panel
+
+## Ticket Under Review
+
+### As a dev I can configure prompts
+
+Add prompt editors for agent types
+
+**Acceptance Criteria:**
+
+- [ ] Editors are persisted
+- [ ] Changes apply immediately
+
+## Perf Review Review Criteria
+
+Check for N+1 queries
+
+
+## Instructions
+
+You are performing a **Perf Review** review on the code changes for the ticket described above.
+
+1. Read the relevant source files in the current working directory.
+2. Evaluate the code against the review criteria above.
+3. Produce a structured report with your findings.
+4. If no issues are found for a category, state "No issues found."
+5. End with a summary: total findings by severity, and an overall assessment (Approved / Approved with Minor Issues / Changes Requested).
+
+Your response should be a well-formatted markdown report.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildEpicCreationPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Description
+
+A test project description
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Conversation History
+
+**User:**
+How should we structure this?
+
+**Assistant:**
+I suggest a modular approach.
+
+## Task: Generate Epic with User Stories
+
+Based on the conversation above, generate a single epic with user stories and add it to the project's \`arji.json\` file.
+
+## Steps
+
+1. Read the existing \`./arji.json\` file in the current directory.
+2. Create a new epic object and append it to the \`epics\` array.
+3. Write the updated \`arji.json\` using the Write tool.
+
+## Epic Format
+
+Each epic in the \`epics\` array has this structure:
+
+\`\`\`json
+{
+  "id": "a_unique_12char_id",
+  "title": "Epic title",
+  "description": "Detailed description including the implementation plan",
+  "priority": 1,
+  "status": "backlog",
+  "position": 0,
+  "branchName": null,
+  "user_stories": [
+    {
+      "id": "another_12char_id",
+      "title": "As a [role], I want [feature] so that [benefit]",
+      "description": "Detailed description",
+      "acceptance_criteria": "- [ ] Criterion 1\\n- [ ] Criterion 2",
+      "status": "todo",
+      "position": 0
+    }
+  ]
+}
+\`\`\`
+
+## Rules
+
+- Generate a unique 12-character alphanumeric ID for the epic and each user story (e.g. "aB3xK9mR2pLq").
+- Set the epic's \`position\` to be one higher than the highest existing position in the epics array (or 0 if empty).
+- Include a detailed implementation plan in the epic's \`description\` field.
+- Generate 2-8 user stories that cover the epic scope.
+- User stories must follow the "As a [role], I want [feature] so that [benefit]" format.
+- Acceptance criteria must be a markdown checklist.
+- Priority values: 0 = low, 1 = medium, 2 = high, 3 = critical.
+- Be specific and actionable — avoid vague descriptions.
+- Incorporate relevant details from the project spec and reference documents.
+- Do NOT modify or remove any existing epics in the array.
+- Preserve the exact structure and content of the rest of the file.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildEpicFinalizationPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Description
+
+A test project description
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Existing Epics
+
+- Auth System
+- Dashboard
+
+## Conversation History
+
+**User:**
+How should we structure this?
+
+**Assistant:**
+I suggest a modular approach.
+
+## Instructions
+
+Based on the conversation above, generate the final epic with user stories.
+
+Return ONLY a JSON code block with the following structure — no extra text, no explanation, just the fenced JSON:
+
+\`\`\`json
+{
+  "title": "Epic title",
+  "description": "Detailed epic description including implementation plan",
+  "userStories": [
+    {
+      "title": "As a [role], I want [feature] so that [benefit]",
+      "description": "Detailed description of the user story",
+      "acceptanceCriteria": "- [ ] Criterion 1\\n- [ ] Criterion 2"
+    }
+  ],
+  "dependencies": [
+    {
+      "ticketId": "$self",
+      "dependsOnTicketId": "<existing-epic-id>"
+    }
+  ]
+}
+\`\`\`
+
+Rules:
+- The title should be concise and descriptive.
+- The description should include a detailed implementation plan.
+- Generate 2-8 user stories that fully cover the epic scope.
+- User stories must follow the "As a [role], I want [feature] so that [benefit]" format.
+- Acceptance criteria must be a markdown checklist.
+- Be specific and actionable — avoid vague descriptions.
+- Incorporate relevant details from the project spec and reference documents.
+- If this epic depends on existing epics (listed above), include dependency edges in the "dependencies" array. Use "$self" for the current epic's ID. Only reference epics from the same project. If there are no dependencies, omit the "dependencies" field or use an empty array.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildEpicRefinementPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Description
+
+A test project description
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Existing Epics
+
+- Auth System
+- Dashboard
+
+## Conversation History
+
+**User:**
+How should we structure this?
+
+**Assistant:**
+I suggest a modular approach.
+
+## Instructions
+
+You are helping define a new epic for this project. Based on the conversation so far, help the user refine their idea into a well-scoped epic.
+
+- If the description is vague or incomplete, ask 1-2 targeted clarifying questions.
+- If the scope seems too large, suggest how to break it down.
+- Guide the user toward a concrete epic title, epic description, user stories, and acceptance criteria.
+- Use the existing epics list above to avoid overlap and suggest clear differentiation.
+- Keep your responses concise (2-4 paragraphs max).
+- Reference the project's existing specification and documents when relevant.
+- Do NOT generate the final epic or user stories yet — just help refine the idea.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildEpicReviewPrompt - code_review 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epic Under Review
+
+### Agent Configuration
+
+Add agent config side panel
+
+### User Stories
+
+- **As a dev I can configure prompts**
+  Add prompt editors for agent types
+  **Acceptance criteria:**
+  - [ ] Editors are persisted
+  - [ ] Changes apply immediately
+
+## Comment History
+
+**User:**
+Please focus on security
+
+**Agent:**
+Will add input validation
+
+## Code Review Checklist
+
+Review the code changes for this ticket against the following quality criteria:
+
+1. **Readability**: Code is clear, well-structured, and easy to understand. Variable/function names are descriptive. Complex logic is commented.
+2. **DRY Principle**: No significant code duplication. Shared logic is properly abstracted.
+3. **Error Handling**: All error paths are handled gracefully. No unhandled promise rejections. Proper error messages for users.
+4. **Performance**: No obvious performance issues (N+1 queries, unnecessary re-renders, missing indexes, large payloads). Efficient algorithms for the data sizes involved.
+5. **Naming Conventions**: Consistent naming (camelCase for JS/TS, proper component naming for React). File names match conventions.
+6. **Type Safety**: Full TypeScript types, no \`any\` types. Proper interfaces for data structures.
+7. **Testing**: Adequate test coverage. Edge cases considered. Tests are maintainable and descriptive.
+8. **API Design**: Consistent REST conventions. Proper HTTP status codes. Clear request/response shapes.
+
+For each finding, specify:
+- **Severity**: Critical / Major / Minor / Suggestion
+- **Location**: File path and line number
+- **Description**: What the issue is
+- **Recommendation**: How to improve it
+
+## Instructions
+
+You are performing a **code review** on the entire epic described above, covering all user stories.
+
+1. Read the relevant source files in the current working directory.
+2. Evaluate the code against every item in the checklist above.
+3. Produce a structured report with your findings.
+4. If no issues are found for a category, state "No issues found."
+5. End with a summary: total findings by severity, and an overall verdict.
+
+**IMPORTANT — Final Verdict:** Your report MUST end with exactly one of these lines:
+- \`**Overall Verdict: Approved**\` — no blocking issues found
+- \`**Overall Verdict: Approved with Minor Issues**\` — minor suggestions only
+- \`**Overall Verdict: Changes Requested**\` — blocking issues that must be fixed
+
+Your response should be a well-formatted markdown report.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildEpicReviewPrompt - feature_review 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epic Under Review
+
+### Agent Configuration
+
+Add agent config side panel
+
+### User Stories
+
+- **As a dev I can configure prompts**
+  Add prompt editors for agent types
+  **Acceptance criteria:**
+  - [ ] Editors are persisted
+  - [ ] Changes apply immediately
+
+## Feature Completeness Checklist
+
+Verify that the implementation fully satisfies the ticket's acceptance criteria and delivers a complete, working feature. Use ALL available tools — browser, shell commands, test runners, etc. — to validate each point.
+
+1. **Acceptance Criteria Verification**:
+   - Go through each acceptance criterion one by one
+   - For UI features: launch the app and use the browser to verify the feature works as described
+   - For API features: make actual HTTP requests to verify endpoints behave correctly
+   - For CLI/backend features: run the relevant commands and verify output
+   - Document PASS/FAIL for each criterion with evidence (screenshots, command output, etc.)
+
+2. **Functional Completeness**:
+   - All user-facing flows described in the ticket are implemented end-to-end
+   - Edge cases mentioned in the description or acceptance criteria are handled
+   - No placeholder or TODO code left for critical paths
+   - Error states are handled and display meaningful feedback to the user
+
+3. **Integration**:
+   - The feature integrates correctly with existing functionality (no regressions in adjacent features)
+   - Data flows correctly between frontend and backend
+   - Navigation and routing work as expected
+
+4. **Tests**:
+   - Tests exist that cover the acceptance criteria
+   - Run the test suite and verify tests pass
+   - Report any failing tests with details
+
+For each criterion, specify:
+- **Status**: PASS / FAIL / PARTIAL
+- **Evidence**: What you did to verify (command run, URL visited, screenshot taken)
+- **Details**: Description of what works or what's missing
+
+## Instructions
+
+You are performing a **feature completeness review** on the entire epic described above, covering all user stories. You have full access to all tools — browser, shell, file system, test runners, etc.
+
+1. Read the relevant source files to understand the implementation.
+2. **Actively test the features**: launch the app if needed, use the browser to navigate to relevant pages, run commands, execute tests.
+3. Go through each user story and its acceptance criteria, verifying with concrete evidence.
+4. Produce a structured report with PASS/FAIL/PARTIAL for each user story and criterion.
+5. End with a summary: number of stories/criteria passed/failed, and an overall verdict.
+
+**IMPORTANT — Final Verdict:** Your report MUST end with exactly one of these lines:
+- \`**Overall Verdict: Feature Complete**\` — if all acceptance criteria pass
+- \`**Overall Verdict: Partially Complete**\` — if some criteria fail
+- \`**Overall Verdict: Not Complete**\` — if major criteria fail
+
+Your response should be a well-formatted markdown report. Do NOT just read the code — actually run and test the features.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildImportPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Task: Analyze Existing Project
+
+Analyze the codebase in the current directory and produce a structured assessment.
+
+## Analysis Steps
+
+1. **Scan the codebase**: file structure, README, package.json / pyproject.toml / Cargo.toml, CLAUDE.md, docs, tests.
+2. **Generate the spec**: produce a description of the project, detected stack, and architecture.
+3. **Decompose into epics and user stories**: identify existing modules/features and translate them into epics with user stories.
+4. **Assign statuses**: evaluate each epic/US based on the code found.
+
+## Rules
+
+- An epic is "done" if the code is functional AND has tests.
+- An epic is "in_progress" if code exists but is incomplete, has TODOs, or lacks tests.
+- An epic is "backlog" if mentioned in docs/README/issues but not yet implemented.
+- Include a confidence score (0.0 to 1.0) for each status assessment.
+- Be conservative: prefer "in_progress" over "done" when uncertain.
+- The \`evidence\` field should reference specific files, directories, or patterns found.
+
+## Output
+
+Write your analysis as a JSON file at \`./arji.json\` in the project root (the current working directory). Use the Write tool to create this file.
+
+The JSON must have the following structure:
+
+{
+  "project": {
+    "name": "detected project name",
+    "description": "what this project does",
+    "stack": "detected technologies",
+    "architecture": "high-level architecture description"
+  },
+  "epics": [
+    {
+      "title": "Epic name",
+      "description": "What this epic covers",
+      "status": "done | in_progress | backlog",
+      "confidence": 0.0,
+      "evidence": "why this status (files, tests, TODOs found)",
+      "user_stories": [
+        {
+          "title": "US title",
+          "description": "As a... I want... so that...",
+          "acceptance_criteria": "- [ ] Criterion 1",
+          "status": "done | in_progress | todo",
+          "evidence": "files/tests that support this status"
+        }
+      ]
+    }
+  ]
+}
+
+IMPORTANT: The file must contain only valid JSON — no markdown, no code fences, no comments. Just the raw JSON object.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildMergeResolutionPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Epic Context
+
+### Agent Configuration
+
+Add agent config side panel
+
+## Merge Conflict Resolution
+
+Branch: \`feature/epic-123\`
+
+### Git merge output
+
+\`\`\`
+CONFLICT (content): merge conflict in src/index.ts
+\`\`\`
+
+## Instructions
+
+A \`git merge main\` was started in this worktree and resulted in conflicts. The conflicted files are on disk with standard conflict markers.
+
+Your task:
+
+1. List all conflicted files using \`git diff --name-only --diff-filter=U\`.
+2. For each conflicted file, read it and resolve the conflict markers (\`<<<<<<<\`, \`=======\`, \`>>>>>>>\`) by preserving the intent of both sides. If in doubt, prefer the feature branch changes but ensure main's changes are not lost.
+3. After resolving each file, run \`git add <file>\` to mark it resolved.
+4. Once all conflicts are resolved, run \`git commit --no-edit\` to finalize the merge commit with the default message.
+5. Verify with \`git status\` that the working tree is clean.
+
+Do NOT abort the merge. Do NOT create a new branch. Work only in this worktree.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildReviewPrompt - custom 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epic Context
+
+### Agent Configuration
+
+Add agent config side panel
+
+## Ticket Under Review
+
+### As a dev I can configure prompts
+
+Add prompt editors for agent types
+
+**Acceptance Criteria:**
+
+- [ ] Editors are persisted
+- [ ] Changes apply immediately
+
+## Custom Review Agent Instructions
+
+Check visual hierarchy
+
+
+## Instructions
+
+You are performing a **UI Review** review on the code changes for the ticket described above.
+
+1. Read the relevant source files in the current working directory.
+2. Follow the custom review instructions above exactly.
+3. Produce a structured markdown report with findings and recommendations.
+4. If no issues are found, state "No issues found."
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildReviewPrompt - feature_review 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epic Context
+
+### Agent Configuration
+
+Add agent config side panel
+
+## Ticket Under Review
+
+### As a dev I can configure prompts
+
+Add prompt editors for agent types
+
+**Acceptance Criteria:**
+
+- [ ] Editors are persisted
+- [ ] Changes apply immediately
+
+## Feature Completeness Checklist
+
+Verify that the implementation fully satisfies the ticket's acceptance criteria and delivers a complete, working feature. Use ALL available tools — browser, shell commands, test runners, etc. — to validate each point.
+
+1. **Acceptance Criteria Verification**:
+   - Go through each acceptance criterion one by one
+   - For UI features: launch the app and use the browser to verify the feature works as described
+   - For API features: make actual HTTP requests to verify endpoints behave correctly
+   - For CLI/backend features: run the relevant commands and verify output
+   - Document PASS/FAIL for each criterion with evidence (screenshots, command output, etc.)
+
+2. **Functional Completeness**:
+   - All user-facing flows described in the ticket are implemented end-to-end
+   - Edge cases mentioned in the description or acceptance criteria are handled
+   - No placeholder or TODO code left for critical paths
+   - Error states are handled and display meaningful feedback to the user
+
+3. **Integration**:
+   - The feature integrates correctly with existing functionality (no regressions in adjacent features)
+   - Data flows correctly between frontend and backend
+   - Navigation and routing work as expected
+
+4. **Tests**:
+   - Tests exist that cover the acceptance criteria
+   - Run the test suite and verify tests pass
+   - Report any failing tests with details
+
+For each criterion, specify:
+- **Status**: PASS / FAIL / PARTIAL
+- **Evidence**: What you did to verify (command run, URL visited, screenshot taken)
+- **Details**: Description of what works or what's missing
+
+## Instructions
+
+You are performing a **feature completeness review** on the ticket described above. You have full access to all tools — browser, shell, file system, test runners, etc.
+
+1. Read the relevant source files to understand the implementation.
+2. **Actively test the feature**: launch the app if needed, use the browser to navigate to relevant pages, run commands, execute tests.
+3. Go through each acceptance criterion and verify it with concrete evidence.
+4. Produce a structured report with PASS/FAIL/PARTIAL for each criterion.
+5. End with a summary: number of criteria passed/failed, and an overall verdict.
+
+**IMPORTANT — Final Verdict:** Your report MUST end with exactly one of these lines:
+- \`**Overall Verdict: Feature Complete**\` — if all acceptance criteria pass
+- \`**Overall Verdict: Partially Complete**\` — if some criteria fail
+- \`**Overall Verdict: Not Complete**\` — if major criteria fail
+
+Your response should be a well-formatted markdown report. Do NOT just read the code — actually run and test the feature.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildReviewPrompt - security 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epic Context
+
+### Agent Configuration
+
+Add agent config side panel
+
+## Ticket Under Review
+
+### As a dev I can configure prompts
+
+Add prompt editors for agent types
+
+**Acceptance Criteria:**
+
+- [ ] Editors are persisted
+- [ ] Changes apply immediately
+
+## Security Audit Checklist
+
+Review the code changes for this ticket against the following security criteria:
+
+1. **OWASP Top 10**: Check for injection flaws (SQL, XSS, command injection), broken authentication, sensitive data exposure, XML external entities, broken access control, security misconfiguration, insecure deserialization, using components with known vulnerabilities, insufficient logging.
+2. **Input Validation**: All user inputs are validated and sanitized. No raw user input reaches SQL queries, shell commands, or HTML rendering.
+3. **Authentication & Authorization**: Auth checks are present where required. No privilege escalation paths. Session handling is secure.
+4. **Secrets Exposure**: No hardcoded API keys, passwords, tokens, or credentials in code. Secrets loaded from environment variables or secure config.
+5. **Data Protection**: Sensitive data encrypted at rest and in transit. No PII in logs. Proper error messages that don't leak internal details.
+6. **Dependencies**: No known vulnerable dependencies introduced. Lockfile is consistent.
+
+For each finding, specify:
+- **Severity**: Critical / High / Medium / Low / Info
+- **Location**: File path and line number
+- **Description**: What the issue is
+- **Recommendation**: How to fix it
+
+## Instructions
+
+You are performing a **security** on the code changes for the ticket described above.
+
+1. Read the relevant source files in the current working directory.
+2. Evaluate the code against every item in the checklist above.
+3. Produce a structured report with your findings.
+4. If no issues are found for a category, state "No issues found."
+5. End with a summary: total findings by severity, and an overall verdict.
+
+**IMPORTANT — Final Verdict:** Your report MUST end with exactly one of these lines:
+- \`**Overall Verdict: Approved**\` — no blocking issues found
+- \`**Overall Verdict: Approved with Minor Issues**\` — minor suggestions only
+- \`**Overall Verdict: Changes Requested**\` — blocking issues that must be fixed
+
+Your response should be a well-formatted markdown report.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildSpecGenerationPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Description
+
+A test project description
+
+## Current Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Conversation History
+
+**User:**
+How should we structure this?
+
+**Assistant:**
+I suggest a modular approach.
+
+## Task: Generate Project Specification & Plan
+
+Based on the project description, uploaded documents, and conversation history above, produce a comprehensive project specification with an implementation plan.
+
+## Output Format (JSON)
+
+Return a single JSON object with the following structure:
+
+\`\`\`json
+{
+  "spec": "Full project specification in markdown...",
+  "epics": [
+    {
+      "title": "Epic title",
+      "description": "Detailed description of the epic",
+      "priority": 0,
+      "user_stories": [
+        {
+          "title": "As a [role], I want [feature] so that [benefit]",
+          "description": "Detailed description",
+          "acceptance_criteria": "- [ ] Criterion 1\\n- [ ] Criterion 2"
+        }
+      ]
+    }
+  ]
+}
+\`\`\`
+
+## Rules
+
+- The \`spec\` field should be a detailed markdown document covering: project overview, objectives, constraints, technical stack recommendations, architecture, and key decisions.
+- Order epics by implementation priority (most foundational first).
+- Priority values: 0 = low, 1 = medium, 2 = high, 3 = critical.
+- Each epic should have 2-8 user stories with clear acceptance criteria.
+- User stories should follow the "As a [role], I want [feature] so that [benefit]" format.
+- Acceptance criteria should be a markdown checklist.
+- Be specific and actionable -- avoid vague descriptions.
+- If a current specification exists, refine and improve it rather than starting from scratch.
+- Incorporate any relevant details from the reference documents and conversation history.
+
+## CRITICAL OUTPUT RULES
+
+Your final response MUST be ONLY the raw JSON object. No markdown, no explanation, no summary, no code fences. Just the JSON starting with \`{\` and ending with \`}\`. Do not wrap it in \`\`\`json code blocks. Do not add any text before or after the JSON. The very first character of your response must be \`{\` and the very last must be \`}\`.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildTeamBuildPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epics to Implement
+
+You have 1 epics to implement. Each epic has its own git worktree.
+
+### Epic 1: Epic 1
+
+**Worktree path:** \`/tmp/worktree-1\`
+
+First epic
+
+**User Stories:**
+
+- [ ] **As a dev I can configure prompts**
+  Add prompt editors for agent types
+  **Acceptance criteria:**
+  - [ ] Editors are persisted
+  - [ ] Changes apply immediately
+
+## Instructions — Team Lead Mode
+
+You are the **team lead**. Your job is to coordinate the implementation of all 1 epics listed above by delegating work to sub-agents.
+
+### How to Delegate
+
+Use the \`Task\` tool to spawn sub-agents for each epic (or group of related tickets). Each sub-agent should:
+
+1. Work inside the epic's worktree path (specified above).
+2. Implement the user stories and meet all acceptance criteria.
+3. Commit changes with clear, descriptive commit messages using conventional commit format.
+4. Write tests that verify the acceptance criteria.
+
+### Team Composition
+
+You decide how to organize the team:
+- You may assign one sub-agent per epic, or split an epic across multiple agents if it has many independent user stories.
+- You may run multiple sub-agents in parallel for independent work.
+- Coordinate dependencies — if one epic depends on another, sequence them.
+
+### Your Responsibilities
+
+1. **Plan**: Analyze the epics and decide task allocation.
+2. **Delegate**: Use the \`Task\` tool to dispatch sub-agents with clear, complete instructions. Include the worktree path and relevant context in each task prompt.
+3. **Monitor**: Review sub-agent results as they complete.
+4. **Report**: After all sub-agents finish, provide a summary of what was accomplished.
+
+### Important Rules
+
+- Do NOT implement code yourself — delegate ALL implementation to sub-agents via the Task tool.
+- Each sub-agent must work in its designated worktree path.
+- Pass the full project spec and relevant epic details to each sub-agent.
+- If a sub-agent fails, analyze the error and retry or reassign.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildTechCheckPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Additional Instructions
+
+Check performance
+
+## Task: Comprehensive Tech Check
+
+Perform a thorough technical review of the entire project codebase. This is a full code health audit, not scoped to a single epic or ticket.
+
+### Review Areas
+
+1. **Architecture & Patterns**
+   - Overall architecture quality and consistency
+   - Design pattern usage and appropriateness
+   - Separation of concerns
+   - Module boundaries and dependencies
+
+2. **Code Quality**
+   - Code readability and naming conventions
+   - DRY violations and code duplication
+   - Dead code and unused imports
+   - Error handling patterns
+   - Type safety and proper TypeScript usage
+
+3. **Performance**
+   - Obvious performance bottlenecks
+   - Database query patterns (N+1, missing indexes)
+   - Frontend rendering inefficiencies
+   - Bundle size concerns
+
+4. **Security**
+   - Input validation gaps
+   - Authentication/authorization issues
+   - Secrets exposure risks
+   - Dependency vulnerabilities
+
+5. **Testing**
+   - Test coverage gaps
+   - Test quality and maintainability
+   - Missing edge case coverage
+
+6. **Technical Debt**
+   - TODOs and FIXMEs in code
+   - Outdated dependencies
+   - Deprecated API usage
+   - Migration/upgrade needs
+
+### Output Format
+
+Produce a detailed markdown report with:
+- An executive summary (2-3 paragraphs)
+- Findings organized by the categories above
+- Each finding should include: severity (Critical/High/Medium/Low), file location, description, and recommendation
+- A prioritized action items list at the end, suitable for creating epics
+
+Your response should be a well-formatted markdown report.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildTicketBuildPrompt 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epic Context
+
+### Agent Configuration
+
+Add agent config side panel
+
+## Ticket to Implement
+
+### As a dev I can configure prompts
+
+Add prompt editors for agent types
+
+**Acceptance Criteria:**
+
+- [ ] Editors are persisted
+- [ ] Changes apply immediately
+
+## Comment History
+
+**User:**
+Please focus on security
+
+**Agent:**
+Will add input validation
+
+## Instructions
+
+Implement this ticket following the specification and acceptance criteria above. Consider all comments in the history — they may contain clarifications, feedback, or specific instructions.
+
+1. Create or modify the necessary files.
+2. Ensure all acceptance criteria are met.
+3. Commit your changes with a clear, descriptive commit message referencing the ticket title.
+"
+`;
+
+exports[`Prompt builder snapshot regression > buildTitleGenerationPrompt 1`] = `
+"Generate a concise 2-4 word title for this conversation. Return ONLY the title text, nothing else.
+
+User: Hello
+
+Assistant: Hi there, how can I help?"
+`;
