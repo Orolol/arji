@@ -18,31 +18,31 @@ vi.mock("@/hooks/useAgentPolling", () => ({
 // Mock useBatchSelection using React state so toggle/clear trigger re-renders
 vi.mock("@/hooks/useBatchSelection", () => ({
   useBatchSelection: () => {
-    const [userSelected, setUserSelected] = useState<Set<string>>(new Set());
+    const [selectedTicketIds, setSelectedTicketIds] = useState<string[]>([]);
+    const userSelected = new Set(selectedTicketIds);
     const [autoIncluded] = useState<Set<string>>(new Set());
-    const allSelected = new Set([...userSelected, ...autoIncluded]);
+    const allSelected = new Set([...selectedTicketIds, ...autoIncluded]);
 
     const toggle = useCallback((epicId: string) => {
-      setUserSelected((prev) => {
-        const next = new Set(prev);
-        if (next.has(epicId)) {
-          next.delete(epicId);
-        } else {
-          next.add(epicId);
+      setSelectedTicketIds((prev) => {
+        if (prev.includes(epicId)) {
+          return prev.filter((id) => id !== epicId);
         }
-        return next;
+        return [...prev, epicId];
       });
     }, []);
 
     const clear = useCallback(() => {
-      setUserSelected(new Set());
+      setSelectedTicketIds([]);
     }, []);
 
     return {
       allSelected,
       userSelected,
       autoIncluded,
+      selectedTicketIds,
       loading: false,
+      setSelectedTicketIds,
       toggle,
       clear,
       isAutoIncluded: (id: string) => autoIncluded.has(id),

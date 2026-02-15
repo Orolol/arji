@@ -1,11 +1,5 @@
 "use client";
 
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -126,14 +120,14 @@ export function EpicDetail({
 
   // Fetch all epics in the project for the dependency dropdown
   useEffect(() => {
-    if (!epicId) return;
+    if (!open || !epicId) return;
     fetch(`/api/projects/${projectId}/epics`)
       .then((r) => r.json())
       .then((d) => {
         if (d.data) setProjectEpics(d.data);
       })
       .catch(() => {});
-  }, [projectId, epicId]);
+  }, [projectId, epicId, open]);
 
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState<string | null>(null);
@@ -253,411 +247,409 @@ export function EpicDetail({
     }
   };
 
+  if (!open) return null;
+
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-[520px] sm:max-w-[520px] overflow-y-auto">
-        {loading || !epic ? (
-          <>
-            <SheetHeader>
-              <SheetTitle>Epic</SheetTitle>
-            </SheetHeader>
-            <div className="py-8 text-center text-muted-foreground">
-              Loading...
-            </div>
-          </>
-        ) : (
-          <>
-            <SheetHeader>
-              <SheetTitle>
-                <InlineEdit
-                  value={epic.title}
-                  onSave={(v) => updateEpic({ title: v })}
-                  className="text-lg font-bold"
-                />
-              </SheetTitle>
-              {epic.type === "bug" && (
-                <Badge className="bg-red-500/10 text-red-400 text-xs w-fit">
-                  <Bug className="h-3 w-3 mr-1" />
-                  Bug
-                </Badge>
-              )}
-            </SheetHeader>
+    <div className="h-full overflow-y-auto" data-testid="epic-detail-panel">
+      {loading || !epic ? (
+        <>
+          <div className="border-b border-border px-4 py-3">
+            <h2 className="text-base font-semibold">Epic</h2>
+          </div>
+          <div className="py-8 text-center text-muted-foreground">
+            Loading...
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="border-b border-border px-4 py-3 space-y-2">
+            <InlineEdit
+              value={epic.title}
+              onSave={(v) => updateEpic({ title: v })}
+              className="text-lg font-bold"
+            />
+            {epic.type === "bug" && (
+              <Badge className="bg-red-500/10 text-red-400 text-xs w-fit">
+                <Bug className="h-3 w-3 mr-1" />
+                Bug
+              </Badge>
+            )}
+          </div>
 
-            <div className="px-4 pb-4 space-y-4">
-              {/* Epic Actions Bar */}
-              <EpicActions
-                projectId={projectId}
-                epic={epic}
-                dispatching={dispatching}
-                isRunning={isRunning}
-                activeSessionId={activeSession?.id || null}
-                onSendToDev={handleSendToDev}
-                onSendToReview={handleSendToReview}
-                onApprove={handleApprove}
-                onActionError={(error) => {
-                  if (isAgentAlreadyRunningError(error)) {
-                    onAgentConflict?.({
-                      message: error.message,
-                      sessionUrl:
-                        error.sessionUrl ||
-                        `/projects/${projectId}/sessions/${error.activeSessionId}`,
-                    });
-                    return;
-                  }
+          <div className="px-4 py-4 space-y-4">
+            {/* Epic Actions Bar */}
+            <EpicActions
+              projectId={projectId}
+              epic={epic}
+              dispatching={dispatching}
+              isRunning={isRunning}
+              activeSessionId={activeSession?.id || null}
+              onSendToDev={handleSendToDev}
+              onSendToReview={handleSendToReview}
+              onApprove={handleApprove}
+              onActionError={(error) => {
+                if (isAgentAlreadyRunningError(error)) {
                   onAgentConflict?.({
-                    message:
-                      error instanceof Error
-                        ? error.message
-                        : "Failed to run agent action",
+                    message: error.message,
+                    sessionUrl:
+                      error.sessionUrl ||
+                      `/projects/${projectId}/sessions/${error.activeSessionId}`,
                   });
-                }}
+                  return;
+                }
+                onAgentConflict?.({
+                  message:
+                    error instanceof Error
+                      ? error.message
+                      : "Failed to run agent action",
+                });
+              }}
+            />
+
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">
+                Description
+              </label>
+              <InlineEdit
+                value={epic.description || ""}
+                onSave={(v) => updateEpic({ description: v })}
+                multiline
+                markdown
+                className="text-sm"
               />
+            </div>
 
-              <div>
+            <div className="flex gap-4">
+              <div className="flex-1">
                 <label className="text-xs text-muted-foreground block mb-1">
-                  Description
+                  Priority
                 </label>
-                <InlineEdit
-                  value={epic.description || ""}
-                  onSave={(v) => updateEpic({ description: v })}
-                  multiline
-                  markdown
-                  className="text-sm"
-                />
+                <Select
+                  value={String(epic.priority)}
+                  onValueChange={(v) => updateEpic({ priority: Number(v) } as never)}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(PRIORITY_LABELS).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>
+                        {v}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Priority
-                  </label>
-                  <Select
-                    value={String(epic.priority)}
-                    onValueChange={(v) => updateEpic({ priority: Number(v) } as never)}
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(PRIORITY_LABELS).map(([k, v]) => (
-                        <SelectItem key={k} value={k}>
-                          {v}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex-1">
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Status
-                  </label>
-                  <Select
-                    value={epic.status}
-                    onValueChange={(v) => updateEpic({ status: v })}
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {KANBAN_COLUMNS.map((col) => (
-                        <SelectItem key={col} value={col}>
-                          {COLUMN_LABELS[col]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="flex-1">
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Status
+                </label>
+                <Select
+                  value={epic.status}
+                  onValueChange={(v) => updateEpic({ status: v })}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {KANBAN_COLUMNS.map((col) => (
+                      <SelectItem key={col} value={col}>
+                        {COLUMN_LABELS[col]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+            </div>
 
-              {epic.type === "bug" && epic.linkedEpicId && (
-                <div className="text-xs text-muted-foreground">
-                  Linked to epic: <span className="font-mono">{epic.linkedEpicId}</span>
-                </div>
-              )}
+            {epic.type === "bug" && epic.linkedEpicId && (
+              <div className="text-xs text-muted-foreground">
+                Linked to epic: <span className="font-mono">{epic.linkedEpicId}</span>
+              </div>
+            )}
 
-              {epic.branchName && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
-                    <GitBranch className="h-3 w-3" />
-                    <span className="flex-1 truncate">{epic.branchName}</span>
-                    {githubConfigured && (
-                      <GitSyncBadge
-                        projectId={projectId}
-                        branchName={epic.branchName}
-                        disabled={isRunning}
-                      />
-                    )}
-                  </div>
-
-                  {/* Git sync status — only shown when GitHub is configured */}
+            {epic.branchName && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
+                  <GitBranch className="h-3 w-3" />
+                  <span className="flex-1 truncate">{epic.branchName}</span>
                   {githubConfigured && (
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {gitStatusLoading ? (
+                    <GitSyncBadge
+                      projectId={projectId}
+                      branchName={epic.branchName}
+                      disabled={isRunning}
+                    />
+                  )}
+                </div>
+
+                {/* Git sync status — only shown when GitHub is configured */}
+                {githubConfigured && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {gitStatusLoading ? (
+                      <Badge variant="outline" className="gap-1 text-xs">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Checking...
+                      </Badge>
+                    ) : (
+                      <>
                         <Badge variant="outline" className="gap-1 text-xs">
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                          Checking...
+                          <ArrowUp className="h-3 w-3" />
+                          {ahead}
                         </Badge>
-                      ) : (
-                        <>
-                          <Badge variant="outline" className="gap-1 text-xs">
-                            <ArrowUp className="h-3 w-3" />
-                            {ahead}
-                          </Badge>
-                          <Badge variant="outline" className="gap-1 text-xs">
-                            <ArrowDown className="h-3 w-3" />
-                            {behind}
-                          </Badge>
-                        </>
-                      )}
+                        <Badge variant="outline" className="gap-1 text-xs">
+                          <ArrowDown className="h-3 w-3" />
+                          {behind}
+                        </Badge>
+                      </>
+                    )}
 
-                      {gitStatusError && (
-                        <span className="text-xs text-destructive">{gitStatusError}</span>
-                      )}
+                    {gitStatusError && (
+                      <span className="text-xs text-destructive">{gitStatusError}</span>
+                    )}
 
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={refreshGitStatus}
-                        disabled={gitStatusLoading}
-                        className="h-6 w-6 p-0"
-                      >
-                        <RefreshCw className={`h-3 w-3 ${gitStatusLoading ? "animate-spin" : ""}`} />
-                      </Button>
-
-                      {ahead > 0 && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={pushToRemote}
-                          disabled={pushing || gitStatusLoading}
-                          className="h-7 text-xs"
-                        >
-                          {pushing ? (
-                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                          ) : (
-                            <Upload className="h-3 w-3 mr-1" />
-                          )}
-                          Push
-                        </Button>
-                      )}
-                    </div>
-                  )}
-
-                  {/* PR Section */}
-                  {githubConfigured && (
-                    <div className="space-y-2">
-                      {pr ? (
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <PrBadge
-                            status={pr.status}
-                            number={pr.number}
-                            url={pr.url}
-                          />
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={syncPr}
-                            disabled={prLoading}
-                            className="h-6 text-xs px-2"
-                          >
-                            {prLoading ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <RefreshCw className="h-3 w-3" />
-                            )}
-                            <span className="ml-1">Sync</span>
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => createPr()}
-                          disabled={prLoading}
-                          className="h-7 text-xs"
-                        >
-                          {prLoading ? (
-                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                          ) : (
-                            <GitPullRequest className="h-3 w-3 mr-1" />
-                          )}
-                          Create PR
-                        </Button>
-                      )}
-                      {prError && (
-                        <p className="text-xs text-destructive">{prError}</p>
-                      )}
-                    </div>
-                  )}
-
-                  {(epic.status === "review" || epic.status === "done") && (
                     <Button
                       size="sm"
-                      variant="outline"
-                      onClick={handleMerge}
-                      disabled={merging}
-                      className="h-7 text-xs"
+                      variant="ghost"
+                      onClick={refreshGitStatus}
+                      disabled={gitStatusLoading}
+                      className="h-6 w-6 p-0"
                     >
-                      {merging ? (
-                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                      ) : (
-                        <GitMerge className="h-3 w-3 mr-1" />
-                      )}
-                      Merge into main
+                      <RefreshCw className={`h-3 w-3 ${gitStatusLoading ? "animate-spin" : ""}`} />
                     </Button>
-                  )}
-                  {mergeError && (
-                    <div className="flex items-center gap-2">
-                      <p className="text-xs text-destructive flex-1">{mergeError}</p>
+
+                    {ahead > 0 && (
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => setResolveMergeOpen(true)}
-                        disabled={resolvingMerge || isRunning}
-                        className="h-7 text-xs shrink-0"
+                        onClick={pushToRemote}
+                        disabled={pushing || gitStatusLoading}
+                        className="h-7 text-xs"
                       >
-                        {resolvingMerge ? (
+                        {pushing ? (
                           <Loader2 className="h-3 w-3 animate-spin mr-1" />
                         ) : (
-                          <Wrench className="h-3 w-3 mr-1" />
+                          <Upload className="h-3 w-3 mr-1" />
                         )}
-                        Resolve with Agent
+                        Push
                       </Button>
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
+                  </div>
+                )}
 
-              <Separator />
-
-              {/* User Stories */}
-              {epic.type !== "bug" && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-medium">
-                    User Stories ({userStories.length})
-                  </h4>
-                </div>
-
-                <TooltipProvider>
-                  <div className="space-y-1">
-                    {userStories.map((us) => (
-                      <div
-                        key={us.id}
-                        className="flex items-center gap-2 p-2 rounded hover:bg-accent/50 group"
-                      >
-                        <button
-                          onClick={() => {
-                            const next =
-                              us.status === "done"
-                                ? "todo"
-                                : us.status === "todo"
-                                  ? "in_progress"
-                                  : "done";
-                            updateUserStory(us.id, { status: next });
-                          }}
-                        >
-                          {statusIcon(us.status)}
-                        </button>
-                        <Link
-                          href={`/projects/${projectId}/stories/${us.id}`}
-                          className={`flex-1 text-sm hover:underline ${
-                            us.status === "done"
-                              ? "line-through text-muted-foreground"
-                              : ""
-                          }`}
-                        >
-                          {us.title}
-                        </Link>
-                        <UserStoryQuickActions
-                          projectId={projectId}
-                          story={us}
-                          onRefresh={refresh}
-                          isLocked={dispatching || isRunning}
-                          lockReason="Another agent is already running for this epic."
+                {/* PR Section */}
+                {githubConfigured && (
+                  <div className="space-y-2">
+                    {pr ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <PrBadge
+                          status={pr.status}
+                          number={pr.number}
+                          url={pr.url}
                         />
                         <Button
+                          size="sm"
                           variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                          onClick={() => deleteUserStory(us.id)}
+                          onClick={syncPr}
+                          disabled={prLoading}
+                          className="h-6 text-xs px-2"
                         >
-                          <Trash2 className="h-3 w-3" />
+                          {prLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3 w-3" />
+                          )}
+                          <span className="ml-1">Sync</span>
                         </Button>
                       </div>
-                    ))}
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => createPr()}
+                        disabled={prLoading}
+                        className="h-7 text-xs"
+                      >
+                        {prLoading ? (
+                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                        ) : (
+                          <GitPullRequest className="h-3 w-3 mr-1" />
+                        )}
+                        Create PR
+                      </Button>
+                    )}
+                    {prError && (
+                      <p className="text-xs text-destructive">{prError}</p>
+                    )}
                   </div>
-                </TooltipProvider>
+                )}
 
-                <div className="flex gap-2 mt-2">
-                  <Input
-                    value={newUSTitle}
-                    onChange={(e) => setNewUSTitle(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleAddUS()}
-                    placeholder="Add user story..."
-                    className="text-sm h-8"
-                  />
+                {(epic.status === "review" || epic.status === "done") && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={handleAddUS}
-                    disabled={!newUSTitle.trim()}
-                    className="h-8"
+                    onClick={handleMerge}
+                    disabled={merging}
+                    className="h-7 text-xs"
                   >
-                    <Plus className="h-3 w-3" />
+                    {merging ? (
+                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                    ) : (
+                      <GitMerge className="h-3 w-3 mr-1" />
+                    )}
+                    Merge into main
                   </Button>
-                </div>
-              </div>
-              )}
-
-              <Separator />
-
-              {/* Dependencies */}
-              {epicId && (
-                <DependencyEditor
-                  projectId={projectId}
-                  epicId={epicId}
-                  projectEpics={projectEpics}
-                />
-              )}
-
-              <Separator />
-
-              {/* Comment Thread */}
-              <div className="min-h-[200px]">
-                  <CommentThread
-                    projectId={projectId}
-                    comments={comments}
-                    loading={commentsLoading}
-                    onAddComment={addComment}
-                />
-              </div>
-
-              <Separator />
-
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium text-destructive">Danger Zone</h4>
-                <p className="text-xs text-muted-foreground">
-                  Permanently delete this epic, all child stories, and dependent
-                  planning records.
-                </p>
-                {deleteEpicError && (
-                  <p className="text-xs text-destructive">{deleteEpicError}</p>
                 )}
+                {mergeError && (
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-destructive flex-1">{mergeError}</p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setResolveMergeOpen(true)}
+                      disabled={resolvingMerge || isRunning}
+                      className="h-7 text-xs shrink-0"
+                    >
+                      {resolvingMerge ? (
+                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      ) : (
+                        <Wrench className="h-3 w-3 mr-1" />
+                      )}
+                      Resolve with Agent
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <Separator />
+
+            {/* User Stories */}
+            {epic.type !== "bug" && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-medium">
+                  User Stories ({userStories.length})
+                </h4>
+              </div>
+
+              <TooltipProvider>
+                <div className="space-y-1">
+                  {userStories.map((us) => (
+                    <div
+                      key={us.id}
+                      className="flex items-center gap-2 p-2 rounded hover:bg-accent/50 group"
+                    >
+                      <button
+                        onClick={() => {
+                          const next =
+                            us.status === "done"
+                              ? "todo"
+                              : us.status === "todo"
+                                ? "in_progress"
+                                : "done";
+                          updateUserStory(us.id, { status: next });
+                        }}
+                      >
+                        {statusIcon(us.status)}
+                      </button>
+                      <Link
+                        href={`/projects/${projectId}/stories/${us.id}`}
+                        className={`flex-1 text-sm hover:underline ${
+                          us.status === "done"
+                            ? "line-through text-muted-foreground"
+                            : ""
+                        }`}
+                      >
+                        {us.title}
+                      </Link>
+                      <UserStoryQuickActions
+                        projectId={projectId}
+                        story={us}
+                        onRefresh={refresh}
+                        isLocked={dispatching || isRunning}
+                        lockReason="Another agent is already running for this epic."
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                        onClick={() => deleteUserStory(us.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </TooltipProvider>
+
+              <div className="flex gap-2 mt-2">
+                <Input
+                  value={newUSTitle}
+                  onChange={(e) => setNewUSTitle(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddUS()}
+                  placeholder="Add user story..."
+                  className="text-sm h-8"
+                />
                 <Button
                   size="sm"
-                  variant="destructive"
-                  className="h-8 text-xs"
-                  onClick={() => setDeleteDialogOpen(true)}
-                  disabled={deletingEpic}
+                  variant="outline"
+                  onClick={handleAddUS}
+                  disabled={!newUSTitle.trim()}
+                  className="h-8"
                 >
-                  Delete Epic
+                  <Plus className="h-3 w-3" />
                 </Button>
               </div>
             </div>
-          </>
-        )}
-      </SheetContent>
+            )}
+
+            <Separator />
+
+            {/* Dependencies */}
+            {epicId && (
+              <DependencyEditor
+                projectId={projectId}
+                epicId={epicId}
+                projectEpics={projectEpics}
+              />
+            )}
+
+            <Separator />
+
+            {/* Comment Thread */}
+            <div className="min-h-[200px]">
+                <CommentThread
+                  projectId={projectId}
+                  comments={comments}
+                  loading={commentsLoading}
+                  onAddComment={addComment}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-destructive">Danger Zone</h4>
+              <p className="text-xs text-muted-foreground">
+                Permanently delete this epic, all child stories, and dependent
+                planning records.
+              </p>
+              {deleteEpicError && (
+                <p className="text-xs text-destructive">{deleteEpicError}</p>
+              )}
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-8 text-xs"
+                onClick={() => setDeleteDialogOpen(true)}
+                disabled={deletingEpic}
+              >
+                Delete Epic
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
 
       <Dialog open={resolveMergeOpen} onOpenChange={(open) => { setResolveMergeOpen(open); if (!open) setResolveMergeResumeSessionId(undefined); }}>
         <DialogContent>
@@ -714,6 +706,6 @@ export function EpicDetail({
         deleting={deletingEpic}
         onConfirm={handleDeleteEpic}
       />
-    </Sheet>
+    </div>
   );
 }

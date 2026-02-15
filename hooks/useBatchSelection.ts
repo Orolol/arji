@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 
 interface BatchSelectionState {
   /** All selected ticket IDs (user-selected + auto-included) */
@@ -9,27 +9,48 @@ interface BatchSelectionState {
   userSelected: Set<string>;
   /** IDs auto-included as transitive prerequisites */
   autoIncluded: Set<string>;
+  /** Ordered IDs selected by the user (oldest-first) */
+  selectedTicketIds: string[];
 }
 
-export function useBatchSelection(projectId: string) {
-  const [state, setState] = useState<BatchSelectionState>({
+function createEmptySelectionState(): BatchSelectionState {
+  return {
     allSelected: new Set(),
     userSelected: new Set(),
     autoIncluded: new Set(),
-  });
+    selectedTicketIds: [],
+  };
+}
+
+function normalizeTicketIds(ticketIds: Iterable<string>) {
+  return Array.from(new Set(ticketIds));
+}
+
+function sameSelection(a: string[], b: string[]) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+export function useBatchSelection(projectId: string) {
+  const [state, setState] = useState<BatchSelectionState>(createEmptySelectionState);
   const [loading, setLoading] = useState(false);
   const fetchController = useRef<AbortController | null>(null);
 
   const resolveTransitive = useCallback(
-    async (userIds: Set<string>) => {
-      if (userIds.size === 0) {
-        setState({
-          allSelected: new Set(),
-          userSelected: new Set(),
-          autoIncluded: new Set(),
-        });
+    async (ticketIds: string[]) => {
+      const selectedTicketIds = normalizeTicketIds(ticketIds);
+
+      if (selectedTicketIds.length === 0) {
+        fetchController.current?.abort();
+        setLoading(false);
+        setState(createEmptySelectionState());
         return;
       }
+
+      const userSelected = new Set(selectedTicketIds);
 
       // Cancel any in-flight request
       fetchController.current?.abort();
@@ -43,68 +64,112 @@ export function useBatchSelection(projectId: string) {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ticketIds: Array.from(userIds) }),
+            body: JSON.stringify({ ticketIds: selectedTicketIds }),
             signal: controller.signal,
           }
         );
 
         if (!res.ok) {
           // Fallback: just use user selection
-          setState({
-            allSelected: new Set(userIds),
-            userSelected: new Set(userIds),
-            autoIncluded: new Set(),
+          setState((prev) => {
+            if (!sameSelection(prev.selectedTicketIds, selectedTicketIds)) {
+              return prev;
+            }
+            return {
+              allSelected: new Set(userSelected),
+              userSelected: new Set(userSelected),
+              autoIncluded: new Set(),
+              selectedTicketIds,
+            };
           });
           return;
         }
 
         const json = await res.json();
-        const all = new Set<string>(json.data.all);
-        const auto = new Set<string>(json.data.autoIncluded);
+        const all = new Set<string>(json.data?.all ?? selectedTicketIds);
+        const auto = new Set<string>(json.data?.autoIncluded ?? []);
 
-        setState({
-          allSelected: all,
-          userSelected: new Set(userIds),
-          autoIncluded: auto,
+        setState((prev) => {
+          if (!sameSelection(prev.selectedTicketIds, selectedTicketIds)) {
+            return prev;
+          }
+          return {
+            allSelected: all,
+            userSelected: new Set(userSelected),
+            autoIncluded: auto,
+            selectedTicketIds,
+          };
         });
       } catch (e) {
         if ((e as Error).name === "AbortError") return;
         // Fallback: just use user selection
-        setState({
-          allSelected: new Set(userIds),
-          userSelected: new Set(userIds),
-          autoIncluded: new Set(),
+        setState((prev) => {
+          if (!sameSelection(prev.selectedTicketIds, selectedTicketIds)) {
+            return prev;
+          }
+          return {
+            allSelected: new Set(userSelected),
+            userSelected: new Set(userSelected),
+            autoIncluded: new Set(),
+            selectedTicketIds,
+          };
         });
       } finally {
-        setLoading(false);
+        if (fetchController.current === controller) {
+          setLoading(false);
+        }
       }
     },
     [projectId]
   );
 
-  const toggle = useCallback(
-    (epicId: string) => {
-      setState((prev) => {
-        const next = new Set(prev.userSelected);
-        if (next.has(epicId)) {
-          next.delete(epicId);
-        } else {
-          next.add(epicId);
-        }
-        // Trigger transitive resolution
-        resolveTransitive(next);
-        return { ...prev, userSelected: next };
-      });
+  const setSelectedTicketIds = useCallback(
+    (ticketIds: string[]) => {
+      const normalizedIds = normalizeTicketIds(ticketIds);
+
+      if (normalizedIds.length === 0) {
+        fetchController.current?.abort();
+        setLoading(false);
+        setState(createEmptySelectionState());
+        return;
+      }
+
+      const userSelected = new Set(normalizedIds);
+      setState((prev) => ({
+        ...prev,
+        allSelected: new Set(userSelected),
+        userSelected: new Set(userSelected),
+        autoIncluded: new Set(),
+        selectedTicketIds: normalizedIds,
+      }));
+
+      void resolveTransitive(normalizedIds);
     },
     [resolveTransitive]
   );
 
+  const selectPrimary = useCallback(
+    (epicId: string) => {
+      setSelectedTicketIds([epicId]);
+    },
+    [setSelectedTicketIds]
+  );
+
+  const toggle = useCallback(
+    (epicId: string) => {
+      const nextTicketIds = state.selectedTicketIds.includes(epicId)
+        ? state.selectedTicketIds.filter((id) => id !== epicId)
+        : [...state.selectedTicketIds, epicId];
+
+      setSelectedTicketIds(nextTicketIds);
+    },
+    [setSelectedTicketIds, state.selectedTicketIds]
+  );
+
   const clear = useCallback(() => {
-    setState({
-      allSelected: new Set(),
-      userSelected: new Set(),
-      autoIncluded: new Set(),
-    });
+    fetchController.current?.abort();
+    setLoading(false);
+    setState(createEmptySelectionState());
   }, []);
 
   const isAutoIncluded = useCallback(
@@ -121,8 +186,11 @@ export function useBatchSelection(projectId: string) {
     allSelected: state.allSelected,
     userSelected: state.userSelected,
     autoIncluded: state.autoIncluded,
+    selectedTicketIds: state.selectedTicketIds,
     loading,
+    selectPrimary,
     toggle,
+    setSelectedTicketIds,
     clear,
     isAutoIncluded,
     isUserSelected,

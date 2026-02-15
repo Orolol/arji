@@ -26,6 +26,7 @@ import {
 import { Hammer, Loader2, X, CheckCircle2, XCircle, Plus, Users, MessageSquare, Bug, Search, GitMerge, Lock, Bot } from "lucide-react";
 import { BugCreateDialog } from "@/components/kanban/BugCreateDialog";
 import type { KanbanEpicAgentActivity } from "@/lib/types/kanban";
+import { getActiveDetailTicketId, selectOnlyTicket } from "@/lib/kanban/selection";
 
 interface Toast {
   id: string;
@@ -40,7 +41,6 @@ export default function KanbanPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
-  const [selectedEpicId, setSelectedEpicId] = useState<string | null>(null);
   const batch = useBatchSelection(projectId);
   const [buildMode, setBuildMode] = useState<"parallel" | "sequential">(
     "parallel"
@@ -91,6 +91,15 @@ export default function KanbanPage() {
       ),
     [activities]
   );
+  const activeDetailTicketId = getActiveDetailTicketId(batch.selectedTicketIds);
+
+  function handlePrimaryTicketClick(epicId: string) {
+    batch.setSelectedTicketIds(selectOnlyTicket(epicId));
+  }
+
+  function handleCloseDetailPanel() {
+    batch.clear();
+  }
 
   useEffect(() => {
     if (!highlightedActivityId) return;
@@ -324,6 +333,40 @@ export default function KanbanPage() {
           projectId={projectId}
           ref={panelRef}
           onEpicCreated={() => setRefreshTrigger((t) => t + 1)}
+          sharedPanelView={
+            activeDetailTicketId
+              ? {
+                  panelId: activeDetailTicketId,
+                  label: "Ticket",
+                  onClose: handleCloseDetailPanel,
+                  content: (
+                    <EpicDetail
+                      projectId={projectId}
+                      epicId={activeDetailTicketId}
+                      open
+                      onClose={handleCloseDetailPanel}
+                      onAgentConflict={({ message, sessionUrl }) =>
+                        addToast(
+                          "error",
+                          message,
+                          sessionUrl
+                            ? { href: sessionUrl, label: "Open active session" }
+                            : undefined
+                        )
+                      }
+                      onMerged={() => {
+                        setRefreshTrigger((t) => t + 1);
+                        addToast("success", "Branch merged into main");
+                      }}
+                      onDeleted={() => {
+                        setRefreshTrigger((t) => t + 1);
+                        addToast("success", "Epic deleted permanently");
+                      }}
+                    />
+                  ),
+                }
+              : null
+          }
         >
           <div className="flex h-full flex-col">
             {/* Header bar */}
@@ -506,7 +549,7 @@ export default function KanbanPage() {
             <div className="flex-1 overflow-hidden">
               <Board
                 projectId={projectId}
-                onEpicClick={(id) => setSelectedEpicId(id)}
+                onEpicClick={handlePrimaryTicketClick}
                 selectedEpics={batch.allSelected}
                 autoIncludedEpics={batch.autoIncluded}
                 onToggleSelect={batch.toggle}
@@ -566,29 +609,6 @@ export default function KanbanPage() {
         onOpenChange={setBugDialogOpen}
         onCreated={() => setRefreshTrigger((t) => t + 1)}
         namedAgentId={namedAgentId}
-      />
-
-      <EpicDetail
-        projectId={projectId}
-        epicId={selectedEpicId}
-        open={!!selectedEpicId}
-        onClose={() => setSelectedEpicId(null)}
-        onAgentConflict={({ message, sessionUrl }) =>
-          addToast(
-            "error",
-            message,
-            sessionUrl ? { href: sessionUrl, label: "Open active session" } : undefined
-          )
-        }
-        onMerged={() => {
-          setRefreshTrigger((t) => t + 1);
-          addToast("success", "Branch merged into main");
-        }}
-        onDeleted={() => {
-          setRefreshTrigger((t) => t + 1);
-          addToast("success", "Epic deleted permanently");
-        }}
-
       />
 
     </div>

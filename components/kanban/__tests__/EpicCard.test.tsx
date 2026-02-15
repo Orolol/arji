@@ -96,6 +96,23 @@ describe("EpicCard", () => {
       fireEvent.click(container.firstChild as HTMLElement);
       expect(handleClick).toHaveBeenCalledOnce();
     });
+
+    it("uses additive selection on modifier click without triggering primary open", () => {
+      const handleClick = vi.fn();
+      const handleToggleSelect = vi.fn();
+      const { container } = render(
+        <EpicCard
+          epic={makeEpic()}
+          onClick={handleClick}
+          onToggleSelect={handleToggleSelect}
+        />
+      );
+
+      fireEvent.click(container.firstChild as HTMLElement, { ctrlKey: true });
+
+      expect(handleToggleSelect).toHaveBeenCalledOnce();
+      expect(handleClick).not.toHaveBeenCalled();
+    });
   });
 
   describe("epic ID display", () => {

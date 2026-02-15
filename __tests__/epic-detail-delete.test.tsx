@@ -51,6 +51,10 @@ vi.mock("@/components/story/CommentThread", () => ({
   CommentThread: () => <div data-testid="comment-thread" />,
 }));
 
+vi.mock("@/components/dependencies/DependencyEditor", () => ({
+  DependencyEditor: () => <div data-testid="dependency-editor" />,
+}));
+
 describe("EpicDetail delete flow", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -140,12 +144,28 @@ describe("EpicDetail delete flow", () => {
     expect(screen.getByText("This action cannot be undone.")).toBeInTheDocument();
   });
 
+  it("renders as non-modal inline panel without sheet overlay", () => {
+    renderSubject();
+    expect(screen.getByTestId("epic-detail-panel")).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="sheet-overlay"]')).toBeNull();
+  });
+
   it("submits exactly one delete request while in-flight", async () => {
     let resolveFetch: ((value: unknown) => void) | null = null;
     const fetchPromise = new Promise((resolve) => {
       resolveFetch = resolve;
     });
-    global.fetch = vi.fn().mockReturnValue(fetchPromise) as unknown as typeof fetch;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return fetchPromise;
+      }
+
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ data: [] }),
+      });
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
 
     const { onClose, onDeleted } = renderSubject();
     fireEvent.click(screen.getByRole("button", { name: "Delete Epic" }));
@@ -154,7 +174,10 @@ describe("EpicDetail delete flow", () => {
     fireEvent.click(confirmButton);
     fireEvent.click(confirmButton);
 
-    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const deleteCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === "DELETE"
+    );
+    expect(deleteCalls).toHaveLength(1);
     expect(confirmButton).toBeDisabled();
 
     resolveFetch?.({

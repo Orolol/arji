@@ -2,6 +2,7 @@
 
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import type { MouseEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import {
@@ -78,13 +79,25 @@ export function EpicCard({
     ? `${activityConfig.label} active: ${activeAgentActivity!.agentName}`
     : null;
 
+  function handleCardClick(event: MouseEvent) {
+    const additiveSelection = event.metaKey || event.ctrlKey || event.shiftKey;
+
+    if (additiveSelection && onToggleSelect) {
+      event.preventDefault();
+      onToggleSelect();
+      return;
+    }
+
+    onClick?.();
+  }
+
   return (
     <Card
       ref={setNodeRef}
       style={style}
       {...attributes}
       {...listeners}
-      onClick={onClick}
+      onClick={handleCardClick}
       onMouseEnter={() => {
         if (!linkedActivityId) return;
         onLinkedAgentHoverChange?.(linkedActivityId);
