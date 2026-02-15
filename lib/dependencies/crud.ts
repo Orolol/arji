@@ -1,12 +1,16 @@
 import { db } from "@/lib/db";
 import { ticketDependencies } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import {
   validateSameProject,
   validateDagIntegrity,
   type DependencyEdge,
 } from "@/lib/dependencies/validation";
+
+function edgeKey(edge: { ticketId: string; dependsOnTicketId: string }) {
+  return `${edge.ticketId}::${edge.dependsOnTicketId}`;
+}
 
 /**
  * Insert one or more dependency edges with validation.
@@ -31,47 +35,49 @@ export function createDependencies(
   // Validate DAG integrity (no cycles)
   validateDagIntegrity(projectId, validEdges);
 
-  const now = new Date().toISOString();
-  const created = [];
-
+  const dedupedEdges: DependencyEdge[] = [];
+  const seenEdgeKeys = new Set<string>();
   for (const edge of validEdges) {
-    // Skip if this edge already exists
-    const existing = db
-      .select({ id: ticketDependencies.id })
-      .from(ticketDependencies)
-      .where(
-        and(
-          eq(ticketDependencies.ticketId, edge.ticketId),
-          eq(ticketDependencies.dependsOnTicketId, edge.dependsOnTicketId)
-        )
-      )
-      .get();
-
-    if (existing) continue;
-
-    const id = createId();
-    db.insert(ticketDependencies)
-      .values({
-        id,
-        ticketId: edge.ticketId,
-        dependsOnTicketId: edge.dependsOnTicketId,
-        projectId,
-        scopeType: "project",
-        scopeId: projectId,
-        createdAt: now,
-      })
-      .run();
-
-    created.push({
-      id,
-      ticketId: edge.ticketId,
-      dependsOnTicketId: edge.dependsOnTicketId,
-      projectId,
-      scopeType: "project",
-      scopeId: projectId,
-      createdAt: now,
-    });
+    const key = edgeKey(edge);
+    if (seenEdgeKeys.has(key)) continue;
+    seenEdgeKeys.add(key);
+    dedupedEdges.push(edge);
   }
+  if (dedupedEdges.length === 0) return [];
+
+  const edgeFilters = dedupedEdges.map((edge) =>
+    and(
+      eq(ticketDependencies.ticketId, edge.ticketId),
+      eq(ticketDependencies.dependsOnTicketId, edge.dependsOnTicketId)
+    )
+  );
+  const existingEdges = db
+    .select({
+      ticketId: ticketDependencies.ticketId,
+      dependsOnTicketId: ticketDependencies.dependsOnTicketId,
+    })
+    .from(ticketDependencies)
+    .where(edgeFilters.length === 1 ? edgeFilters[0] : or(...edgeFilters))
+    .all();
+  const existingEdgeKeys = new Set(existingEdges.map((edge) => edgeKey(edge)));
+
+  const edgesToInsert = dedupedEdges.filter(
+    (edge) => !existingEdgeKeys.has(edgeKey(edge))
+  );
+  if (edgesToInsert.length === 0) return [];
+
+  const now = new Date().toISOString();
+  const created = edgesToInsert.map((edge) => ({
+    id: createId(),
+    ticketId: edge.ticketId,
+    dependsOnTicketId: edge.dependsOnTicketId,
+    projectId,
+    scopeType: "project" as const,
+    scopeId: projectId,
+    createdAt: now,
+  }));
+
+  db.insert(ticketDependencies).values(created).run();
 
   return created;
 }

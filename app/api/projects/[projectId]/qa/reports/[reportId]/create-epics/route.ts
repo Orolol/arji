@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { epics, projects, qaReports, userStories } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
@@ -243,55 +243,57 @@ Rules:
     );
   }
 
-  const existingPositions = db
-    .select({ position: epics.position })
+  const maxPositionResult = db
+    .select({ max: sql<number>`COALESCE(MAX(${epics.position}), -1)` })
     .from(epics)
     .where(eq(epics.projectId, projectId))
-    .all();
-  const maxPosition = existingPositions.reduce(
-    (max, row) => Math.max(max, row.position ?? 0),
-    -1,
-  );
+    .get();
+  const maxPosition = maxPositionResult?.max ?? -1;
 
   const now = new Date().toISOString();
-  const created: Array<{ id: string; title: string }> = [];
+  const epicsToInsert = generatedEpics.map((generatedEpic, epicIndex) => ({
+    id: createId(),
+    projectId,
+    title: generatedEpic.title,
+    description: generatedEpic.description,
+    priority: generatedEpic.priority,
+    status: "backlog",
+    position: maxPosition + 1 + epicIndex,
+    type: generatedEpic.type,
+    createdAt: now,
+    updatedAt: now,
+  }));
+  const created = epicsToInsert.map((epicRow) => ({
+    id: epicRow.id,
+    title: epicRow.title,
+  }));
 
-  for (let epicIndex = 0; epicIndex < generatedEpics.length; epicIndex++) {
-    const generatedEpic = generatedEpics[epicIndex];
-    const epicId = createId();
+  const storiesToInsert = generatedEpics.flatMap((generatedEpic, epicIndex) =>
+    generatedEpic.userStories.map((story, storyIndex) => ({
+      id: createId(),
+      epicId: epicsToInsert[epicIndex].id,
+      title: story.title,
+      description: story.description,
+      acceptanceCriteria: story.acceptanceCriteria,
+      status: "todo",
+      position: storyIndex,
+      createdAt: now,
+    })),
+  );
 
-    db.insert(epics)
-      .values({
-        id: epicId,
-        projectId,
-        title: generatedEpic.title,
-        description: generatedEpic.description,
-        priority: generatedEpic.priority,
-        status: "backlog",
-        position: maxPosition + 1 + epicIndex,
-        type: generatedEpic.type,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .run();
-
-    for (let storyIndex = 0; storyIndex < generatedEpic.userStories.length; storyIndex++) {
-      const story = generatedEpic.userStories[storyIndex];
-      db.insert(userStories)
-        .values({
-          id: createId(),
-          epicId,
-          title: story.title,
-          description: story.description,
-          acceptanceCriteria: story.acceptanceCriteria,
-          status: "todo",
-          position: storyIndex,
-          createdAt: now,
-        })
-        .run();
-    }
-
-    created.push({ id: epicId, title: generatedEpic.title });
+  try {
+    db.transaction((tx) => {
+      tx.insert(epics).values(epicsToInsert).run();
+      if (storiesToInsert.length > 0) {
+        tx.insert(userStories).values(storiesToInsert).run();
+      }
+    });
+  } catch (error) {
+    console.error("[qa/create-epics] Failed to persist epics transaction", error);
+    return NextResponse.json(
+      { error: "Failed to persist generated epics" },
+      { status: 500 },
+    );
   }
 
   return NextResponse.json({ data: { epics: created } });

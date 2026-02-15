@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { db } from "@/lib/db";
 
 const mockDb = vi.hoisted(() => ({
   getQueue: [] as unknown[],
@@ -14,21 +15,29 @@ const mockCreateId = vi.hoisted(() => vi.fn());
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn(() => ({})),
   and: vi.fn(() => ({})),
+  sql: vi.fn(() => ({})),
 }));
 
 vi.mock("@/lib/db", () => {
+  const makeInsert = (sink: unknown[]) =>
+    vi.fn().mockReturnValue({
+      values: vi.fn((payload: unknown) => ({
+        run: vi.fn(() => {
+          sink.push(payload);
+        }),
+      })),
+    });
+
   const chain = {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     all: vi.fn(() => mockDb.allQueue.shift() ?? []),
     get: vi.fn(() => mockDb.getQueue.shift() ?? null),
-    insert: vi.fn().mockReturnValue({
-      values: vi.fn((payload: unknown) => {
-        mockDb.insertedValues.push(payload);
-        return { run: vi.fn() };
-      }),
-    }),
+    insert: makeInsert(mockDb.insertedValues),
+    transaction: vi.fn((callback: (tx: { insert: ReturnType<typeof makeInsert> }) => unknown) =>
+      callback({ insert: makeInsert(mockDb.insertedValues) }),
+    ),
   };
   return { db: chain };
 });
@@ -114,8 +123,8 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
     mockDb.getQueue = [
       { id: "proj-1", gitRepoPath: "/tmp/repo" },
       { id: "report-1", projectId: "proj-1", reportContent: "# Findings", namedAgentId: null },
+      { max: 3 },
     ];
-    mockDb.allQueue = [[{ position: 3 }]];
 
     const { POST } = await import(
       "@/app/api/projects/[projectId]/qa/reports/[reportId]/create-epics/route"
@@ -129,19 +138,20 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
     expect(json.data.epics).toHaveLength(1);
     expect(json.data.epics[0].id).toBe("epic-1");
     expect(mockDb.insertedValues).toHaveLength(2);
-    expect(mockDb.insertedValues[0]).toEqual(
+    expect((mockDb.insertedValues[0] as Array<Record<string, unknown>>)[0]).toEqual(
       expect.objectContaining({
         id: "epic-1",
         title: "Stabilize Chat Resume Flow",
         type: "feature",
       }),
     );
-    expect(mockDb.insertedValues[1]).toEqual(
+    expect((mockDb.insertedValues[1] as Array<Record<string, unknown>>)[0]).toEqual(
       expect.objectContaining({
         id: "story-1",
         epicId: "epic-1",
       }),
     );
+    expect((db as unknown as { transaction: ReturnType<typeof vi.fn> }).transaction).toHaveBeenCalledTimes(1);
   });
 
   it("returns parse error with raw snippet when extracted JSON is non-object", async () => {
@@ -191,8 +201,8 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
     mockDb.getQueue = [
       { id: "proj-1", gitRepoPath: "/tmp/repo" },
       { id: "report-1", projectId: "proj-1", reportContent: "# Findings", namedAgentId: null },
+      { max: 0 },
     ];
-    mockDb.allQueue = [[{ position: 0 }]];
 
     const { POST } = await import(
       "@/app/api/projects/[projectId]/qa/reports/[reportId]/create-epics/route"
@@ -204,7 +214,7 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
 
     expect(res.status).toBe(200);
     expect(json.data.epics).toHaveLength(1);
-    expect(mockDb.insertedValues[0]).toEqual(
+    expect((mockDb.insertedValues[0] as Array<Record<string, unknown>>)[0]).toEqual(
       expect.objectContaining({
         type: "feature",
       }),
@@ -233,8 +243,8 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
     mockDb.getQueue = [
       { id: "proj-1", gitRepoPath: "/tmp/repo" },
       { id: "report-1", projectId: "proj-1", reportContent: "# Findings", namedAgentId: null },
+      { max: 0 },
     ];
-    mockDb.allQueue = [[{ position: 0 }]];
 
     const { POST } = await import(
       "@/app/api/projects/[projectId]/qa/reports/[reportId]/create-epics/route"
@@ -246,7 +256,7 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
 
     expect(res.status).toBe(200);
     expect(json.data.epics).toEqual([{ id: "epic-1", title: "Session Resume Reliability" }]);
-    expect(mockDb.insertedValues[0]).toEqual(
+    expect((mockDb.insertedValues[0] as Array<Record<string, unknown>>)[0]).toEqual(
       expect.objectContaining({
         id: "epic-1",
         title: "Session Resume Reliability",
@@ -255,7 +265,7 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
         type: "feature",
       }),
     );
-    expect(mockDb.insertedValues[1]).toEqual(
+    expect((mockDb.insertedValues[1] as Array<Record<string, unknown>>)[0]).toEqual(
       expect.objectContaining({
         id: "story-1",
         title: "Handle expired resume sessions",
