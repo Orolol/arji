@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { projects, epics, agentSessions } from "@/lib/db/schema";
+import { count, eq, sql } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { createProjectSchema } from "@/lib/validation/schemas";
 import { validateBody, isValidationError } from "@/lib/validation/validate";

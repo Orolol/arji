@@ -4,7 +4,7 @@ import { useProjects } from "@/hooks/useProjects";
 import { ProjectCard } from "./ProjectCard";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { Plus, FolderDown } from "lucide-react";
+import { Plus, FolderDown, AlertCircle, RefreshCw } from "lucide-react";
 import type { ProjectFilter } from "@/lib/types/dashboard";
 
 const FILTERS: { value: ProjectFilter; label: string }[] = [
@@ -14,7 +14,7 @@ const FILTERS: { value: ProjectFilter; label: string }[] = [
 ];
 
 export function ProjectGrid() {
-  const { projects, loading, filter, setFilter } = useProjects();
+  const { projects, loading, error, filter, setFilter, refresh } = useProjects();
 
   return (
     <div>
@@ -58,6 +58,15 @@ export function ProjectGrid() {
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-32 rounded-lg bg-muted/50 animate-pulse" />
           ))}
+        </div>
+      ) : error ? (
+        <div className="text-center py-16">
+          <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-3" />
+          <p className="text-destructive mb-4">{error}</p>
+          <Button variant="outline" size="sm" onClick={refresh}>
+            <RefreshCw className="h-4 w-4 mr-1" />
+            Retry
+          </Button>
         </div>
       ) : projects.length === 0 ? (
         <div className="text-center py-16">

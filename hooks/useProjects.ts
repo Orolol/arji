@@ -6,17 +6,26 @@ import type { DashboardProject, ProjectFilter } from "@/lib/types/dashboard";
 export function useProjects() {
   const [projects, setProjects] = useState<DashboardProject[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<ProjectFilter>("all");
 
   const loadProjects = useCallback(async () => {
+    setError(null);
     try {
       const res = await fetch("/api/projects");
+      if (!res.ok) {
+        setError(`Failed to load projects (${res.status})`);
+        setProjects([]);
+        return;
+      }
       const data = await res.json();
       setProjects(data.data || []);
     } catch {
-      // ignore
+      setError("Failed to load projects");
+      setProjects([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -33,6 +42,7 @@ export function useProjects() {
     projects: filtered,
     allProjects: projects,
     loading,
+    error,
     filter,
     setFilter,
     refresh: loadProjects,
