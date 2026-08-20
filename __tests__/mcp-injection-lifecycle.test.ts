@@ -250,19 +250,16 @@ describe("processManager.start() — MCP injection gating", () => {
     expect(pmState.selectGets.length).toBe(0);
   });
 
-  it("skips codex — its exec mode never serves the configured server", () => {
+  it("forwards the config to the codex provider spawn options", () => {
     pmState.sessionRow = sessionRow({ agentType: "ticket_build" });
 
     processManager.start("s6", { mode: "code", prompt: "BASE" }, "codex");
 
     const options = pmState.providerSpawnedOptions[0];
-    expect(options.mcp).toBeUndefined();
-    // No tool section either: promising mcp__arij__* tools to a model that
-    // cannot see them is what sent review sessions down the prose fallback
-    // while believing they had filed structured findings.
-    expect(options.prompt).toBe("BASE");
-    // Provider gate short-circuits before any settings/session read.
-    expect(pmState.selectGets.length).toBe(0);
+    const mcp = options.mcp as McpSpawnConfig | undefined;
+    expect(mcp).toBeDefined();
+    expect(mcp!.serverName).toBe("arij");
+    expect(options.prompt as string).toContain("## Arij tools");
   });
 
   it("survives a broken db lookup and spawns without injection", () => {

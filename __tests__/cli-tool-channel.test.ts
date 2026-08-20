@@ -35,21 +35,7 @@ beforeEach(() => {
 });
 
 describe("createChatCliToolChannel", () => {
-  it("refuses codex — its exec mode never serves the configured server", () => {
-    // Same provider gate as spawned sessions: codex-cli 0.148 does not start
-    // user-configured mcp_servers under `exec`, so minting a token and
-    // threading it through argv bought nothing. Board tools stay available to
-    // codex chat through fast mode, which does not go through MCP.
-    expect(
-      createChatCliToolChannel({
-        projectId: "proj1",
-        provider: "codex",
-        conversationType: null,
-      })
-    ).toBeNull();
-  });
-
-  it.each(["claude-code"])(
+  it.each(["claude-code", "codex"])(
     "builds a chat-toolset channel with a live project-scoped token for %s",
     (provider) => {
       const channel = createChatCliToolChannel({

@@ -111,36 +111,12 @@ export function isMcpToolsEnabled(): boolean {
 }
 
 /**
- * Whether a provider has a per-spawn MCP injection surface that actually
- * reaches the model. Verdicts: claude-code yes; codex NO (see below);
- * gemini-cli no — its CLI only reads MCP config from .gemini/settings.json
- * files, which would mean writing config into user worktrees.
- *
- * CODEX, measured against codex-cli 0.148.0: `codex exec` does not start
- * user-configured `mcp_servers` at all. Probed with a stdio server that
- * appends to a marker file on startup — the file stayed empty and the model
- * reported the tool unavailable, both via the `-c mcp_servers.*` overrides
- * this repo injects AND via a server persisted with `codex mcp add` (which
- * `codex mcp list` then shows as "enabled"), under both `-s read-only` and
- * `-s workspace-write`. Asked to enumerate what it could see, the session
- * listed 125 tools, all of them codex's own `mcp__codex_apps__*`.
- *
- * The cost of claiming support anyway was silent and expensive: review
- * sessions were told in their prompt to file findings with submit_findings,
- * could not, and fell through to the prose fallback — leaving reviewComments
- * empty for the life of the database (see lib/pipeline/parse-review-report.ts
- * for the loop that produced). Returning false here also stops minting a
- * session token and stops threading it through codex's argv, where it was
- * readable via /proc/<pid>/cmdline for nothing in return (the residual
- * exposure documented in lib/providers/codex.ts).
- *
- * Structured findings no longer depend on this: ingestProseFindings recovers
- * them from the report for every provider. Flip codex back to true once a
- * codex-cli release starts serving configured MCP servers under `exec` — the
- * injection code in lib/providers/codex.ts is left in place for that day.
+ * Whether a provider has a per-spawn MCP injection surface. Verdicts from
+ * the architecture contract: claude-code yes, codex yes, gemini-cli no
+ * (revisit when the CLI is installed and gains a per-spawn override).
  */
 export function providerSupportsMcp(provider: string): boolean {
-  return provider === "claude-code";
+  return provider === "claude-code" || provider === "codex";
 }
 
 /**
