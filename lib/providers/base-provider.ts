@@ -70,6 +70,49 @@ export interface ProviderExitInfo {
 }
 
 /**
+ * Whether the child is still running.
+ *
+ * NOT `child.killed`, which only reports that a signal was successfully
+ * delivered — it flips to true the instant `kill()` returns and says nothing
+ * about whether the process died. A process still holds the CPU until one of
+ * `exitCode` / `signalCode` is set.
+ */
+function isChildAlive(child: ChildProcess): boolean {
+  // Only an explicitly-set exit field proves death. Anything else — including
+  // a handle that does not report these at all — is treated as alive, because
+  // on a kill path a redundant signal costs nothing and a skipped one leaves
+  // an agent running loose.
+  const exited = child.exitCode !== null && child.exitCode !== undefined;
+  const signalled = child.signalCode !== null && child.signalCode !== undefined;
+  return !exited && !signalled;
+}
+
+/**
+ * Signals the child's whole process GROUP, falling back to the child alone.
+ *
+ * A CLI agent is a tree, not a process: it spawns shells, test runners and
+ * dev servers of its own. Signalling only the process at the head leaves that
+ * tree running, re-parented to init and invisible to Arij — the concrete
+ * symptom being a dev server still bound to a port hours after the session
+ * that started it was cancelled.
+ *
+ * `-pid` addresses the group, which exists because the spawn is `detached`.
+ * ESRCH simply means everything is already gone.
+ */
+function signalChild(child: ChildProcess, signal: "SIGTERM" | "SIGKILL"): void {
+  if (child.pid === undefined) return;
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // Already reaped — nothing left to signal.
+    }
+  }
+}
+
+/**
  * Abstract base class for CLI agent providers.
  *
  * Subclasses must implement:
@@ -399,6 +442,11 @@ export abstract class BaseCliProvider implements AgentProvider {
         cwd: effectiveCwd,
         env: this.buildEnv(),
         stdio: ["ignore", "pipe", "pipe"],
+        // Own process group, so cancelling reaches the whole agent and not
+        // just the CLI at its head — see signalChild. Safe here because stdio
+        // is fully piped and nothing about these background agents wants the
+        // server's terminal signals.
+        detached: true,
       });
 
       child.stdout?.on("data", (chunk: Buffer) => {
@@ -478,17 +526,23 @@ export abstract class BaseCliProvider implements AgentProvider {
     });
 
     const kill = () => {
-      if (child && !child.killed) {
-        killed = true;
-        child.kill("SIGTERM");
+      if (!child || !isChildAlive(child)) return;
+      killed = true;
+      signalChild(child, "SIGTERM");
 
-        // Force kill after 5 seconds if still running
-        setTimeout(() => {
-          if (child && !child.killed) {
-            child.kill("SIGKILL");
-          }
-        }, 5000);
-      }
+      // Force kill whatever is still standing 5s later. The guard reads the
+      // exit fields, NOT `child.killed`: Node sets `killed` as soon as a
+      // signal has been *delivered*, so `!child.killed` is already false here
+      // and the escalation this timer exists for could never fire. An agent
+      // that ignored or outran SIGTERM therefore survived its own
+      // cancellation — which is how a session marked `cancelled` in the
+      // database kept writing to a worktree that a live session had meanwhile
+      // been handed.
+      setTimeout(() => {
+        if (child && isChildAlive(child)) {
+          signalChild(child, "SIGKILL");
+        }
+      }, 5000);
     };
 
     const command = this.buildDisplayCommand(args, prompt);
