@@ -451,7 +451,10 @@ describe("parseMcpToolsEnabledSetting — default ON", () => {
 describe("providerSupportsMcp — contract verdicts", () => {
   it.each([
     ["claude-code", true],
-    ["codex", true],
+    // codex-cli 0.148 never starts configured mcp_servers under `exec`, so
+    // injecting only cost a token in argv and a prompt promising tools the
+    // model could not see. See providerSupportsMcp's comment for the probe.
+    ["codex", false],
     ["gemini-cli", false],
     ["mistral-vibe", false],
     ["qwen-code", false],
