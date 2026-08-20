@@ -344,6 +344,37 @@ describe("CodexProvider.buildArgs — -c mcp_servers overrides", () => {
 
   const spawnContext = { outputFile: "/tmp/codex-out-test.txt" };
 
+  it.each(["code", "plan", "analyze", "chat"] as const)(
+    "opens the approval gate in %s mode, so MCP tool calls can land",
+    (mode) => {
+      // `codex exec` refuses every MCP tool call unless approvals are
+      // bypassed — its closed stdin reads as a refusal. Measured on 0.148:
+      // read-only and workspace-write both start the server and then refuse
+      // the call. A sandboxed codex agent is an agent with no tool channel,
+      // so all modes get the same posture.
+      const args = provider.buildArgs(
+        baseOptions({ mode, mcp: sampleMcp }),
+        spawnContext,
+      );
+      expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
+      expect(args).not.toContain("-s");
+    },
+  );
+
+  it("opens the same gate on the resume subcommand", () => {
+    const args = provider.buildArgs(
+      baseOptions({
+        mode: "plan",
+        mcp: sampleMcp,
+        cliSessionId: "cli-1",
+        resumeSession: true,
+      }),
+      spawnContext,
+    );
+    expect(args.slice(0, 2)).toEqual(["exec", "resume"]);
+    expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
+  });
+
   it("adds the three TOML overrides in the non-resume branch, before the prompt", () => {
     const args = provider.buildArgs(baseOptions({ mcp: sampleMcp }), spawnContext);
 
