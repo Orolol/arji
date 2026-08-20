@@ -44,6 +44,7 @@ const { autoModeRegistry } = await import("@/lib/auto-mode/registry");
 const { loadAutoModeBoard } = await import("@/lib/auto-mode/select");
 const {
   AUTO_MODE_REASON_PREFIX,
+  AUTO_MODE_MAX_REVIEW_REJECTIONS,
   DEFAULT_AUTO_BUILD_CONCURRENCY,
   DEFAULT_AUTO_REVIEW_CONCURRENCY,
 } = await import("@/lib/auto-mode/constants");
@@ -1085,5 +1086,90 @@ describe("timer lifecycle", () => {
     expect(reloaded.isAutoModeRunning()).toBe(true);
     reloaded.stopAutoMode();
     expect(isAutoModeRunning()).toBe(false);
+  });
+});
+
+describe("review-rejection budget", () => {
+  /** One review → in_progress bounce, exactly as the review stage logs it. */
+  function addReviewRejection(epicId: string, minute: number): void {
+    seq += 1;
+    db.insert(ticketActivityLog)
+      .values({
+        id: `rej-${seq}`,
+        projectId: PROJECT_ID,
+        epicId,
+        fromStatus: "review",
+        toStatus: "in_progress",
+        actor: "agent",
+        reason: "Review verdict: changes requested (Code Review)",
+        createdAt: at(minute),
+      })
+      .run();
+  }
+
+  it("stops dispatching and says why, exactly once", async () => {
+    const fakes = makeFakes();
+    addEpic({ id: "e1", status: "in_progress", position: 0 });
+    for (let i = 1; i <= AUTO_MODE_MAX_REVIEW_REJECTIONS; i += 1) {
+      addReviewRejection("e1", i);
+    }
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    expect(first.parked).toContain("e1");
+    expect(fakes.dispatches).toHaveLength(0);
+
+    const announcements = autoReasons("e1").filter((r) =>
+      r.includes("rejected reviews")
+    );
+    expect(announcements).toHaveLength(1);
+    expect(announcements[0]).toContain("needs a human");
+
+    // A second sweep must stay quiet rather than re-announcing every 15s.
+    await sweepProject(PROJECT_ID, fakes.deps);
+    expect(
+      autoReasons("e1").filter((r) => r.includes("rejected reviews"))
+    ).toHaveLength(1);
+    expect(fakes.dispatches).toHaveLength(0);
+  });
+
+  it("dispatches again once the user comments", async () => {
+    const fakes = makeFakes();
+    addEpic({ id: "e1", status: "in_progress", position: 0 });
+    for (let i = 1; i <= AUTO_MODE_MAX_REVIEW_REJECTIONS; i += 1) {
+      addReviewRejection("e1", i);
+    }
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+    expect(fakes.dispatches).toHaveLength(0);
+
+    db.insert(ticketComments)
+      .values({
+        id: "c-handback",
+        epicId: "e1",
+        author: "user",
+        content: "Skip the E2E finding and ship it.",
+        createdAt: at(80),
+      })
+      .run();
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+    // Registry park cleared by the comment AND the durable counter reset by
+    // the same comment — the two agree, so work resumes.
+    expect(fakes.dispatches).toHaveLength(1);
+  });
+
+  it("leaves an epic under the cap alone", async () => {
+    const fakes = makeFakes();
+    addEpic({ id: "e1", status: "in_progress", position: 0 });
+    for (let i = 1; i < AUTO_MODE_MAX_REVIEW_REJECTIONS; i += 1) {
+      addReviewRejection("e1", i);
+    }
+
+    const result = await sweepProject(PROJECT_ID, fakes.deps);
+    expect(result.parked).not.toContain("e1");
+    expect(fakes.dispatches).toHaveLength(1);
+    expect(
+      autoReasons("e1").filter((r) => r.includes("rejected reviews"))
+    ).toHaveLength(0);
   });
 });

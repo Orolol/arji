@@ -309,6 +309,9 @@ export const AUTO_MODE_REASONS = {
     `Auto mode ${stage} dispatch failed: ${error}`,
   parked: (failures: number) =>
     `Auto mode parked this ticket after ${failures} consecutive failures`,
+  parkedOnReviewRejections: (rejections: number) =>
+    `Auto mode stopped after ${rejections} rejected reviews — this ticket needs a human. ` +
+    `Comment on it to hand it back to the supervisor.`,
   skippedBusy: "Auto mode skipped: another agent is already on this ticket",
   skippedTargetMoved: (stage: string, detail: string) =>
     `Auto mode skipped ${stage}: ${detail}`,
@@ -332,6 +335,24 @@ export function isAutoModeActivityReason(
  * loop must never burn budget re-running the same broken dispatch.
  */
 export const AUTO_MODE_MAX_CONSECUTIVE_FAILURES = 3;
+
+/**
+ * How many times an epic may be bounced from `review` back to `in_progress`
+ * before the supervisor stops re-dispatching and leaves it for a human.
+ *
+ * The failure ladder above cannot catch this: a rejected review is a
+ * SUCCESSFUL session (outcome `answered`) that simply returned a negative
+ * verdict, so it never charges a failure and never parks. Epic E-arij-096 rode
+ * that gap for four cycles — 25 build sessions, 4 reviews, ~$79 — with every
+ * session completing cleanly and the loop never terminating, because each
+ * pipeline run respected its own fix-cycle cap and auto mode then started a
+ * brand-new run on the next sweep.
+ *
+ * Counted from the durable activity log rather than in-memory state, and only
+ * over entries newer than the last user comment on the epic, so answering the
+ * ticket is what buys the next three cycles.
+ */
+export const AUTO_MODE_MAX_REVIEW_REJECTIONS = 3;
 
 /**
  * How long an epic's merge is held back after a conflict that could not be

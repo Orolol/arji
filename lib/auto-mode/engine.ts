@@ -16,6 +16,7 @@ import {
 } from "./config";
 import { autoModeRegistry } from "./registry";
 import {
+  isReviewRejectionBudgetSpent,
   loadAutoModeBoard,
   selectBuildCandidates,
   selectMergeCandidates,
@@ -421,6 +422,47 @@ function unparkTouchedTickets(
   return unparked;
 }
 
+/**
+ * Says out loud, once, that an epic has spent its review-rejection budget.
+ *
+ * The selectors already drop such an epic on their own (the count is derived
+ * from the activity log, so the exclusion survives a restart with no state to
+ * carry). What they cannot do is explain themselves: a ticket that silently
+ * stops moving reads as a broken supervisor, which is the opposite of the
+ * signal wanted here — the ticket is stuck and a human has to look at it.
+ *
+ * The registry park is what makes it once-only, and it rides the same reversal
+ * as every other park: `unparkTouchedTickets` clears it as soon as the user
+ * comments, which is the same event that resets the durable counter. The two
+ * therefore never disagree about whether the epic is back in play.
+ */
+function announceSpentReviewBudgets(
+  projectId: string,
+  deps: AutoModeEngineDeps,
+  board: AutoModeBoard,
+  parked: string[]
+): void {
+  for (const epic of board.epics) {
+    if (!isReviewRejectionBudgetSpent(board, epic.id)) continue;
+    if (autoModeRegistry.isParked(projectId, epic.id)) continue;
+
+    const rejections = board.reviewRejectionsByEpic.get(epic.id) ?? 0;
+    const reason = AUTO_MODE_REASONS.parkedOnReviewRejections(rejections);
+    // Parked AS OF the bounce that spent the budget, not wall-clock now: the
+    // un-park check asks "did the user speak since the park?", and anchoring
+    // on now would ignore a comment made between that bounce and this sweep.
+    autoModeRegistry.park(
+      projectId,
+      epic.id,
+      epic.id,
+      reason,
+      board.lastReviewRejectionAtByEpic.get(epic.id)
+    );
+    parked.push(epic.id);
+    trace(deps, projectId, epic.id, reason);
+  }
+}
+
 /** One sweep for one project. Never throws — a bad tick must not kill the loop. */
 export async function sweepProject(
   projectId: string,
@@ -460,6 +502,8 @@ export async function sweepProject(
     if (unparkTouchedTickets(projectId, board)) {
       board = deps.loadBoard(projectId);
     }
+
+    announceSpentReviewBudgets(projectId, deps, board, result.parked);
 
     // -----------------------------------------------------------------
     // 1. Merge — cheapest first, and it frees the Review column.

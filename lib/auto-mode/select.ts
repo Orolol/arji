@@ -4,6 +4,7 @@ import {
   agentSessions,
   epics,
   reviewComments,
+  ticketActivityLog,
   ticketComments,
   userStories,
 } from "@/lib/db/schema";
@@ -13,6 +14,7 @@ import { listPipelineRunsByProject } from "@/lib/pipeline/registry";
 import { dagBatchRegistry } from "@/lib/agents/dag-batch-registry";
 import { nightRunRegistry } from "@/lib/night/registry";
 import { autoModeRegistry } from "./registry";
+import { AUTO_MODE_MAX_REVIEW_REJECTIONS } from "./constants";
 
 /**
  * Candidate selection for Full Auto Mode: which tickets may be built,
@@ -24,7 +26,7 @@ import { autoModeRegistry } from "./registry";
  * what that split is for.
  *
  * Every selector shares one board snapshot built from a FIXED number of
- * queries (nine), never one lookup per ticket: the sweep runs every 15s on a
+ * queries (ten), never one lookup per ticket: the sweep runs every 15s on a
  * board that can hold hundreds of tickets, so an N+1 here would be a
  * per-sweep table scan storm.
  *
@@ -43,6 +45,11 @@ import { autoModeRegistry } from "./registry";
  *                exactly like a ticket bounced back from review, so without
  *                this guard the supervisor would bulldoze the question.
  *   parked       the supervisor already failed on this ticket three times.
+ *   rejected     the epic has been bounced review → in_progress three times
+ *                since the user last spoke. Distinct from `parked` because a
+ *                rejected review is a SUCCESSFUL session, so it never charges
+ *                the failure ladder — this is the only guard that ends a
+ *                build/review/build loop made entirely of green sessions.
  *   delivered    the epic is done/released — nothing to schedule.
  */
 
@@ -197,6 +204,19 @@ export interface AutoModeBoard {
   lastUserCommentByEpic: Map<string, string>;
   lastUserCommentByStory: Map<string, string>;
   openReviewCommentsByEpic: Map<string, number>;
+  /**
+   * How many times each epic has been bounced review → in_progress since the
+   * user last commented on it. At AUTO_MODE_MAX_REVIEW_REJECTIONS the epic
+   * stops being selectable for anything — see isEpicSelectable.
+   */
+  reviewRejectionsByEpic: Map<string, number>;
+  /**
+   * When each epic was last bounced out of review (counting only the bounces
+   * above). This is the moment a spent budget is parked AT, so the un-park
+   * check ("did the user speak since?") lines up with the same reset event the
+   * counter uses, instead of anchoring on wall-clock now.
+   */
+  lastReviewRejectionAtByEpic: Map<string, string>;
   parkedTicketIds: Set<string>;
   /**
    * Epics whose merge is on a short backoff after a conflict nobody could be
@@ -496,6 +516,44 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     openReviewCommentsByEpic.set(row.epicId, Number(row.openCount ?? 0));
   }
 
+  // 10. Rejected reviews per epic — the review→in_progress bounces that the
+  // failure ladder cannot see, because each one is a cleanly completed
+  // session. Only entries newer than the epic's last user comment count, so a
+  // human replying to the ticket resets the budget (same un-park convention as
+  // lastUserCommentByEpic serves for the failure ladder).
+  const reviewRejectionRows = db
+    .select({
+      epicId: ticketActivityLog.epicId,
+      createdAt: ticketActivityLog.createdAt,
+    })
+    .from(ticketActivityLog)
+    .innerJoin(epics, eq(ticketActivityLog.epicId, epics.id))
+    .where(
+      and(
+        eq(epics.projectId, projectId),
+        eq(ticketActivityLog.fromStatus, "review"),
+        eq(ticketActivityLog.toStatus, "in_progress")
+      )
+    )
+    .all();
+
+  const reviewRejectionsByEpic = new Map<string, number>();
+  const lastReviewRejectionAtByEpic = new Map<string, string>();
+  for (const row of reviewRejectionRows) {
+    if (!row.epicId || !row.createdAt) continue;
+    const at = normalizeAt(row.createdAt);
+    const resetAt = epicUserCommentAt.get(row.epicId);
+    if (resetAt && at <= normalizeAt(resetAt)) continue;
+    reviewRejectionsByEpic.set(
+      row.epicId,
+      (reviewRejectionsByEpic.get(row.epicId) ?? 0) + 1
+    );
+    const previous = lastReviewRejectionAtByEpic.get(row.epicId);
+    if (!previous || at > previous) {
+      lastReviewRejectionAtByEpic.set(row.epicId, at);
+    }
+  }
+
   const { blockedEpicIds, projectBlocked } = loadRegistryExclusions(projectId);
 
   // An epic with merge work outstanding is off-limits to EVERY selector: git
@@ -519,6 +577,8 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     lastUserCommentByEpic: epicUserCommentAt,
     lastUserCommentByStory: storyUserCommentAt,
     openReviewCommentsByEpic,
+    reviewRejectionsByEpic,
+    lastReviewRejectionAtByEpic,
     parkedTicketIds: autoModeRegistry.parkedTicketIds(projectId),
     mergeDeferredEpicIds: autoModeRegistry.mergeDeferredEpicIds(projectId),
   };
@@ -528,6 +588,24 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
 /* Shared predicates                                                   */
 /* ------------------------------------------------------------------ */
 
+/**
+ * True once an epic has spent its review-rejection budget — the supervisor
+ * has re-dispatched it AUTO_MODE_MAX_REVIEW_REJECTIONS times without ever
+ * reaching a clean review, so it stops and leaves the ticket for a human.
+ *
+ * Exported so the engine can report the count in the activity trace, and so
+ * the exclusion is testable without building a whole board.
+ */
+export function isReviewRejectionBudgetSpent(
+  board: AutoModeBoard,
+  epicId: string
+): boolean {
+  return (
+    (board.reviewRejectionsByEpic.get(epicId) ?? 0) >=
+    AUTO_MODE_MAX_REVIEW_REJECTIONS
+  );
+}
+
 /** Epic-level exclusions every selector applies before looking at status. */
 function isEpicSelectable(board: AutoModeBoard, epic: EpicRow): boolean {
   if (board.projectBlocked) return false;
@@ -535,6 +613,7 @@ function isEpicSelectable(board: AutoModeBoard, epic: EpicRow): boolean {
   if (board.blockedEpicIds.has(epic.id)) return false;
   if (board.busyEpicIds.has(epic.id)) return false;
   if (board.parkedTicketIds.has(epic.id)) return false;
+  if (isReviewRejectionBudgetSpent(board, epic.id)) return false;
   const awaiting = board.awaitingByEpic.get(epic.id);
   if (awaiting && isAwaitingReply(awaiting)) return false;
   return true;
