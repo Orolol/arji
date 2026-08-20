@@ -15,6 +15,9 @@ import { isErrorResponse } from "@/lib/api/route-helpers";
 import { validateBody } from "@/lib/validation/validate";
 import { requireMcpToken, resolveTicketForToken } from "@/lib/mcp/http-auth";
 import { applyTransition } from "@/lib/workflow/transition-service";
+import { applyStoryTransition } from "@/lib/workflow/story-transition";
+import { logTransition } from "@/lib/workflow/log";
+import { emitTicketMoved } from "@/lib/events/emit";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import type { KanbanStatus } from "@/lib/types/kanban";
 
@@ -38,8 +41,67 @@ export async function POST(request: NextRequest) {
   if (isErrorResponse(found)) return found;
   const { epic } = found;
 
-  const fromStatus = (epic.status ?? "backlog") as KanbanStatus;
   const toStatus = body.status;
+
+  // A story-scoped session means its OWN story unless it named another
+  // ticket. Without this the tool moved the parent epic instead, dragging
+  // every unfinished sibling into review — see lib/workflow/story-transition.ts.
+  if (auth.userStoryId && !body.ticket_id) {
+    const moved = applyStoryTransition({
+      storyId: auth.userStoryId,
+      epicId: epic.id,
+      toStatus,
+    });
+
+    if (!moved.valid) {
+      return NextResponse.json(
+        { error: moved.error ?? "Invalid transition", code: "INVALID_TRANSITION" },
+        { status: 409 }
+      );
+    }
+
+    logTransition({
+      projectId: auth.projectId,
+      epicId: epic.id,
+      fromStatus: moved.fromStatus ?? "backlog",
+      toStatus,
+      actor: "agent",
+      reason: body.reason ?? "Agent MCP: update_ticket_status (story)",
+      sessionId: auth.sessionId,
+    });
+
+    if (moved.promotedEpic) {
+      emitTicketMoved(
+        auth.projectId,
+        epic.id,
+        moved.epicFromStatus ?? "in_progress",
+        "review"
+      );
+      logTransition({
+        projectId: auth.projectId,
+        epicId: epic.id,
+        fromStatus: moved.epicFromStatus ?? "in_progress",
+        toStatus: "review",
+        actor: "agent",
+        reason: "Every story is in review or done",
+        sessionId: auth.sessionId,
+      });
+    }
+
+    tryExportArjiJson(auth.projectId);
+
+    return NextResponse.json({
+      data: {
+        ticketId: auth.userStoryId,
+        scope: "story",
+        fromStatus: moved.fromStatus,
+        toStatus,
+        promotedEpic: moved.promotedEpic ?? false,
+      },
+    });
+  }
+
+  const fromStatus = (epic.status ?? "backlog") as KanbanStatus;
 
   const result = applyTransition({
     projectId: auth.projectId,

@@ -394,6 +394,187 @@ describe("POST /api/mcp/update-ticket-status", () => {
     });
   });
 
+  it("moves the STORY, not the parent epic, for a story-scoped session", async () => {
+    // The defect this pins: a story-scoped session calling the tool used to
+    // move the whole epic, dragging unfinished siblings into review with it.
+    const now = new Date().toISOString();
+    const storyA = createId();
+    const storyB = createId();
+    db()
+      .insert(userStories)
+      .values([
+        {
+          id: storyA,
+          epicId,
+          title: "Story A",
+          status: "in_progress",
+          position: 0,
+          createdAt: now,
+        },
+        {
+          id: storyB,
+          epicId,
+          title: "Story B",
+          status: "in_progress",
+          position: 1,
+          createdAt: now,
+        },
+      ])
+      .run();
+
+    const storyToken = mintMcpToken({
+      sessionId,
+      projectId,
+      epicId,
+      userStoryId: storyA,
+      agentType: "developer",
+    });
+
+    const res = await call(updateStatusPost, { status: "review" }, storyToken);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data).toMatchObject({
+      ticketId: storyA,
+      scope: "story",
+      toStatus: "review",
+      promotedEpic: false,
+    });
+
+    const stories = db().select().from(userStories).all();
+    expect(stories.find((s) => s.id === storyA)?.status).toBe("review");
+    expect(stories.find((s) => s.id === storyB)?.status).toBe("in_progress");
+    // The sibling is unfinished, so the epic must stay put.
+    expect(
+      db().select().from(epics).where(eq(epics.id, epicId)).get()?.status
+    ).toBe("in_progress");
+  });
+
+  it("promotes the epic once the last sibling reaches review", async () => {
+    const now = new Date().toISOString();
+    const storyA = createId();
+    const storyB = createId();
+    db()
+      .insert(userStories)
+      .values([
+        {
+          id: storyA,
+          epicId,
+          title: "Story A",
+          status: "in_progress",
+          position: 0,
+          createdAt: now,
+        },
+        {
+          id: storyB,
+          epicId,
+          title: "Story B",
+          status: "done",
+          position: 1,
+          createdAt: now,
+        },
+      ])
+      .run();
+
+    const storyToken = mintMcpToken({
+      sessionId,
+      projectId,
+      epicId,
+      userStoryId: storyA,
+      agentType: "developer",
+    });
+
+    const json = await (
+      await call(updateStatusPost, { status: "review" }, storyToken)
+    ).json();
+    expect(json.data.promotedEpic).toBe(true);
+    expect(
+      db().select().from(epics).where(eq(epics.id, epicId)).get()?.status
+    ).toBe("review");
+
+    // Both moves are traceable: the story's own, then the promotion.
+    const reasons = db()
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, epicId))
+      .all()
+      .map((row) => row.reason);
+    expect(reasons).toContain("Agent MCP: update_ticket_status (story)");
+    expect(reasons).toContain("Every story is in review or done");
+  });
+
+  it("refuses to move a story straight to done", async () => {
+    const now = new Date().toISOString();
+    const storyA = createId();
+    db()
+      .insert(userStories)
+      .values({
+        id: storyA,
+        epicId,
+        title: "Story A",
+        status: "review",
+        position: 0,
+        createdAt: now,
+      })
+      .run();
+
+    const storyToken = mintMcpToken({
+      sessionId,
+      projectId,
+      epicId,
+      userStoryId: storyA,
+      agentType: "developer",
+    });
+
+    const res = await call(updateStatusPost, { status: "done" }, storyToken);
+    expect(res.status).toBe(409);
+    expect(
+      db().select().from(userStories).where(eq(userStories.id, storyA)).get()
+        ?.status
+    ).toBe("review");
+  });
+
+  it("still targets the epic when a story session names a ticket explicitly", async () => {
+    const now = new Date().toISOString();
+    const storyA = createId();
+    db()
+      .insert(userStories)
+      .values({
+        id: storyA,
+        epicId,
+        title: "Story A",
+        status: "in_progress",
+        position: 0,
+        createdAt: now,
+      })
+      .run();
+
+    const storyToken = mintMcpToken({
+      sessionId,
+      projectId,
+      epicId,
+      userStoryId: storyA,
+      agentType: "developer",
+    });
+
+    const json = await (
+      await call(
+        updateStatusPost,
+        { status: "in_progress", ticket_id: todoEpicId },
+        storyToken
+      )
+    ).json();
+
+    expect(json.data).toMatchObject({
+      ticketId: todoEpicId,
+      toStatus: "in_progress",
+    });
+    expect(
+      db().select().from(userStories).where(eq(userStories.id, storyA)).get()
+        ?.status
+    ).toBe("in_progress");
+  });
+
   it("records a custom reason", async () => {
     await call(
       updateStatusPost,
