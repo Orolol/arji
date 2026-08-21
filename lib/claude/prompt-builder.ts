@@ -233,6 +233,69 @@ ABSOLUTE REQUIREMENTS:
 }
 
 // ---------------------------------------------------------------------------
+// 2a. Spec Update Prompt
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the prompt for an agent-run update of the project specification.
+ * Like the distill flow, the agent runs in plan mode inside the project
+ * workspace and its ENTIRE response is the replacement document — nothing is
+ * persisted unless the session succeeds, so a failed run never touches the
+ * stored spec.
+ */
+export function buildSpecUpdatePrompt(
+  project: PromptProject,
+  instruction?: string | null,
+  systemPrompt?: string | null,
+): string {
+  project = withProjectMemory(project);
+  const parts: string[] = [];
+
+  parts.push(systemSection(systemPrompt));
+  parts.push(projectHeader(project.name));
+  parts.push(descriptionSection(project.description));
+  parts.push(specSection(project.spec));
+  parts.push(memorySection(project.memory));
+
+  parts.push(`## Task: Update the Project Specification
+
+You are running in plan mode inside the project's workspace. Rewrite the
+project specification so it accurately reflects the current state of the
+project: inspect the repository (code, docs, git history) and rely on the
+current specification above as the baseline.
+
+- Keep what is still accurate; correct or drop what is not.
+- Cover: project overview, objectives, constraints, technical stack,
+  architecture, and key decisions.
+- Do not invent features that have no grounding in the project context.
+`);
+
+  if (instruction && instruction.trim()) {
+    parts.push(`## User Instruction
+
+The user asked for the following focus for this update. Follow it — it takes
+precedence over the general guidance above where they conflict:
+
+${instruction.trim()}
+`);
+  }
+
+  parts.push(`## CRITICAL OUTPUT FORMAT — YOU MUST FOLLOW THIS EXACTLY
+
+Your ENTIRE response must be ONLY the complete updated specification in raw
+markdown. Nothing else.
+
+- Do NOT wrap the document in \\\`\\\`\\\` code fences.
+- Do NOT add commentary, summaries, or explanations before or after it.
+- Do NOT output a diff — output the full replacement document.
+- If you output ANYTHING besides the markdown document, the automated parser
+  will FAIL and the update will be discarded.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // 2b. Tech Check Prompt
 // ---------------------------------------------------------------------------
 
