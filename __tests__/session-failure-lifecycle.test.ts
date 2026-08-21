@@ -148,10 +148,12 @@ describe("transitionSessionStatus — log backstop for silent failures", () => {
       projectId: "p1",
     });
 
-    transitionSessionStatus(
-      { sessionId: "s6", toStatus: "failed", error: null },
-      "2026-02-12T00:01:00.000Z"
-    );
+    transitionSessionStatus({
+      sessionId: "s6",
+      toStatus: "failed",
+      error: null,
+      at: "2026-02-12T00:01:00.000Z",
+    });
 
     expect(fs.existsSync(logsPath)).toBe(true);
     const record = JSON.parse(fs.readFileSync(logsPath, "utf8"));
@@ -173,10 +175,12 @@ describe("transitionSessionStatus — log backstop for silent failures", () => {
       projectId: "p1",
     });
 
-    transitionSessionStatus(
-      { sessionId: "s7", toStatus: "failed", error: "real stderr here" },
-      "2026-02-12T00:01:00.000Z"
-    );
+    transitionSessionStatus({
+      sessionId: "s7",
+      toStatus: "failed",
+      error: "real stderr here",
+      at: "2026-02-12T00:01:00.000Z",
+    });
 
     const record = JSON.parse(fs.readFileSync(logsPath, "utf8"));
     expect(record.error).toBe("real stderr here");
@@ -194,10 +198,12 @@ describe("transitionSessionStatus — log backstop for silent failures", () => {
       projectId: "p1",
     });
 
-    const patch = transitionSessionStatus(
-      { sessionId: "s8", toStatus: "failed", error: null },
-      "2026-02-12T00:01:00.000Z"
-    );
+    const patch = transitionSessionStatus({
+      sessionId: "s8",
+      toStatus: "failed",
+      error: null,
+      at: "2026-02-12T00:01:00.000Z",
+    });
     expect(patch.error).toMatch(/failed without any error message and without any output/i);
   });
 
@@ -214,10 +220,12 @@ describe("transitionSessionStatus — log backstop for silent failures", () => {
       projectId: "p1",
     });
 
-    transitionSessionStatus(
-      { sessionId: "s9", toStatus: "cancelled", error: "Cancelled by user" },
-      "2026-02-12T00:01:00.000Z"
-    );
+    transitionSessionStatus({
+      sessionId: "s9",
+      toStatus: "cancelled",
+      error: "Cancelled by user",
+      at: "2026-02-12T00:01:00.000Z",
+    });
 
     expect(fs.existsSync(logsPath)).toBe(false);
   });
