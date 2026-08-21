@@ -19,6 +19,62 @@ import {
   type AgentProvider,
 } from "@/lib/agent-config/constants";
 
+/**
+ * Labeled field shell. Every control on this screen carries a visible label
+ * and a one-line hint — no field may rely on its placeholder alone.
+ */
+function Field({
+  id,
+  label,
+  hint,
+  children,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1">
+      <label
+        htmlFor={id}
+        className="block text-xs font-medium leading-none text-foreground"
+      >
+        {label}
+      </label>
+      {children}
+      <p className="text-xs text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
+
+function CliSelect({
+  id,
+  value,
+  onChange,
+  disabled,
+}: {
+  id: string;
+  value: AgentProvider;
+  onChange: (value: AgentProvider) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as AgentProvider)} disabled={disabled}>
+      <SelectTrigger id={id} className="h-8 text-sm">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {PROVIDER_OPTIONS.map((p) => (
+          <SelectItem key={p} value={p}>
+            {PROVIDER_LABELS[p]}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 function NamedAgentRow({
   agent,
   onUpdate,
@@ -57,32 +113,48 @@ function NamedAgentRow({
   }
 
   return (
-    <div className="rounded-lg border border-border p-3 space-y-2">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Agent name"
-          className="h-8 text-sm"
-        />
-        <Select value={provider} onValueChange={(v) => setProvider(v as AgentProvider)}>
-          <SelectTrigger className="h-8 text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PROVIDER_OPTIONS.map((p) => (
-              <SelectItem key={p} value={p}>
-                {PROVIDER_LABELS[p]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Input
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder="Model (empty = CLI default)"
-          className="h-8 text-sm"
-        />
+    <div className="rounded-lg border border-border p-3 space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="md:col-span-2">
+          <Field
+            id={`named-agent-name-${agent.id}`}
+            label="Name"
+            hint="How you recognise this agent in menus and lists."
+          >
+            <Input
+              id={`named-agent-name-${agent.id}`}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Agent name"
+              className="h-8 text-sm"
+            />
+          </Field>
+        </div>
+        <Field
+          id={`named-agent-cli-${agent.id}`}
+          label="CLI"
+          hint="The coding tool this agent runs on."
+        >
+          <CliSelect
+            id={`named-agent-cli-${agent.id}`}
+            value={provider}
+            onChange={setProvider}
+            disabled={saving || deleting}
+          />
+        </Field>
+        <Field
+          id={`named-agent-model-${agent.id}`}
+          label="Model"
+          hint="Optional — leave empty to use the CLI's own default model."
+        >
+          <Input
+            id={`named-agent-model-${agent.id}`}
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="CLI default"
+            className="h-8 text-sm"
+          />
+        </Field>
       </div>
 
       <div className="flex items-center justify-end gap-2">
@@ -142,26 +214,41 @@ export function NamedAgentsTab() {
 
   return (
     <div className="h-full flex flex-col gap-3">
-      <div className="rounded-lg border border-border p-3 space-y-2">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Name"
-            className="h-8 text-sm"
-          />
-          <Select value={provider} onValueChange={(v) => setProvider(v as AgentProvider)}>
-            <SelectTrigger className="h-8 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PROVIDER_OPTIONS.map((p) => (
-                <SelectItem key={p} value={p}>
-                  {PROVIDER_LABELS[p]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="px-1">
+        <h2 className="text-sm font-medium">Agents</h2>
+        <p className="text-xs text-muted-foreground">
+          Create the agents you will assign to work. A name and a CLI are all
+          it takes — everything runs with sensible defaults.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-border p-3 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field
+            id="new-agent-name"
+            label="Name"
+            hint="A short name you will recognise later."
+          >
+            <Input
+              id="new-agent-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Fast builder"
+              className="h-8 text-sm"
+            />
+          </Field>
+          <Field
+            id="new-agent-cli"
+            label="CLI"
+            hint="The coding tool this agent runs on. You can change it later."
+          >
+            <CliSelect
+              id="new-agent-cli"
+              value={provider}
+              onChange={setProvider}
+              disabled={creating}
+            />
+          </Field>
         </div>
         <div className="flex justify-end">
           <Button
@@ -175,18 +262,18 @@ export function NamedAgentsTab() {
             ) : (
               <>
                 <Plus className="h-3.5 w-3.5 mr-1" />
-                Add Agent
+                Add agent
               </>
             )}
           </Button>
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="space-y-2 pr-2">
           {data.length === 0 && (
             <p className="text-sm text-muted-foreground px-1 py-3">
-              No named agents yet.
+              No agents yet — create your first one above.
             </p>
           )}
           {data.map((agent) => (
