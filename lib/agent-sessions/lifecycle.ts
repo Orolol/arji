@@ -1,7 +1,10 @@
 import { eq } from "drizzle-orm";
+import fs from "fs";
+import path from "path";
 import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { notifySessionTerminal } from "./terminal-hooks";
+import { buildSessionFailureMessage, buildSessionLogsRecord } from "./failure-message";
 
 export type AgentSessionLifecycleStatus =
   | "queued"
@@ -82,6 +85,14 @@ export interface SessionLifecycleSnapshot {
   startedAt: string | null;
   endedAt: string | null;
   completedAt: string | null;
+  /**
+   * Optional context for the failed-session error synthesis (see
+   * buildSessionTransitionPatch): whether any text output was captured and
+   * where the full log lives. Absent when the snapshot is hand-built.
+   */
+  lastNonEmptyText?: string | null;
+  logsPath?: string | null;
+  projectId?: string | null;
 }
 
 export interface SessionLifecycleConflictDetails {
@@ -234,6 +245,17 @@ export function buildSessionTransitionPatch(
     } else if (toStatus === "completed") {
       patch.error = null;
     }
+    // A failed session must never end up with a NULL/empty error: the card
+    // would fall back to a bare "Agent error"-style label and the
+    // notification would carry no reason at all. When the caller brought no
+    // message (empty stderr, lost result), synthesize an explicit one that
+    // says what happened and where the full capture is.
+    if (toStatus === "failed" && !(patch.error && patch.error.trim())) {
+      patch.error = buildSessionFailureMessage({
+        hadOutput: !!(session.lastNonEmptyText && session.lastNonEmptyText.trim()),
+        logPath: session.logsPath ?? null,
+      });
+    }
     if (outcome !== undefined) {
       patch.outcome = outcome;
     }
@@ -280,6 +302,9 @@ export function transitionSessionStatus({
       startedAt: agentSessions.startedAt,
       endedAt: agentSessions.endedAt,
       completedAt: agentSessions.completedAt,
+      lastNonEmptyText: agentSessions.lastNonEmptyText,
+      logsPath: agentSessions.logsPath,
+      projectId: agentSessions.projectId,
     })
     .from(agentSessions)
     .where(eq(agentSessions.id, sessionId))
@@ -302,6 +327,17 @@ export function transitionSessionStatus({
     .set(patch)
     .where(eq(agentSessions.id, sessionId))
     .run();
+
+  // Traceability backstop: a failed session whose result envelope never
+  // reached the dispatch route (process lost, launch closure crashed before
+  // it could write logs) must still leave an on-disk record — the routes
+  // write logsPath themselves whenever a result exists, so a MISSING file
+  // is the signal that nobody captured the run. Writing the synthesized
+  // record here covers every failure funnel (routes, scheduler safety net,
+  // boot cleanup, night runs, auto mode) in one place.
+  if (patch.status === "failed") {
+    backfillMissingSessionLog(session, patch.error ?? null);
+  }
 
   // Post-terminal side effects (e.g. auto memory distillation) hang off the
   // boot-registered hook — a no-op unless instrumentation wired one, and
@@ -384,4 +420,32 @@ export function markSessionCancelled(
     at,
     error,
   });
+}
+
+/**
+ * Writes the session's log file when it is missing (see the backstop call
+ * in transitionSessionStatus). Best-effort: a failed filesystem write must
+ * never break the terminal transition — the DB row (status + error) already
+ * carries the truth, the file only adds the raw capture.
+ */
+export function backfillMissingSessionLog(
+  session: SessionLifecycleSnapshot,
+  terminalError: string | null
+): void {
+  const logsPath = session.logsPath;
+  if (!logsPath) return;
+
+  try {
+    if (fs.existsSync(logsPath)) return;
+    fs.mkdirSync(path.dirname(logsPath), { recursive: true });
+    fs.writeFileSync(
+      logsPath,
+      JSON.stringify(buildSessionLogsRecord(null, terminalError), null, 2)
+    );
+  } catch (error) {
+    console.warn(
+      `[lifecycle] Could not backfill missing session log for ${session.id}`,
+      error instanceof Error ? error.message : error
+    );
+  }
 }
