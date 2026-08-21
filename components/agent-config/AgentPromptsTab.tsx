@@ -84,6 +84,14 @@ function PromptRow({
             placeholder="Enter system prompt..."
             className="min-h-32 text-sm font-mono"
           />
+          <p className="text-xs text-muted-foreground">
+            This is the prompt the agent receives when it runs this role. It
+            already works as-is — edit it only to change how the agent
+            behaves.
+            {scope === "project"
+              ? " Reset to global restores the shared version."
+              : ""}
+          </p>
           <div className="flex items-center gap-2 justify-end">
             {scope === "project" && prompt.source === "project" && (
               <Button

@@ -17,11 +17,19 @@ import {
   Scale,
   ListChecks,
 } from "lucide-react";
+import { Field } from "@/components/agent-config/Field";
 
 interface ReviewAgentsTabProps {
   scope: "global" | "project";
   projectId?: string;
 }
+
+/**
+ * Prefilled into the new-review-agent form so a first-time user can create
+ * a working reviewer without writing a prompt from scratch. Editing it is
+ * optional, not required.
+ */
+const DEFAULT_REVIEW_AGENT_PROMPT = `You are a code reviewer. Review the changes on this ticket's branch and report concrete problems: bugs, security issues, missing edge cases, and unclear naming. Reference files and lines. Do not restyle working code.`;
 
 const BUILTIN_REVIEWS = [
   {
@@ -82,29 +90,33 @@ function CustomAgentRow({
 
   return (
     <div className="border border-border rounded-lg p-4 space-y-3">
-      <div className="flex items-center gap-2">
+      <Field
+        id={`review-agent-name-${agent.id}`}
+        label="Name"
+        hint="How you recognise this reviewer in lists and reports."
+      >
         <input
+          id={`review-agent-name-${agent.id}`}
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="flex-1 bg-transparent border-b border-border px-1 py-0.5 text-sm font-medium focus:outline-none focus:border-primary"
+          className="w-full bg-transparent border-b border-border px-1 py-0.5 text-sm font-medium focus:outline-none focus:border-primary"
           placeholder="Agent name"
         />
-        {agent.source && (
-          <Badge
-            variant={agent.source === "project" ? "default" : "secondary"}
-            className="text-xs"
-          >
-            {agent.source}
-          </Badge>
-        )}
-      </div>
-      <Textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder="System prompt for this review agent..."
-        className="min-h-24 text-sm font-mono"
-      />
+      </Field>
+      <Field
+        id={`review-agent-prompt-${agent.id}`}
+        label="Instructions"
+        hint="What this reviewer should look for. Edit only if its current checks don't match your needs."
+      >
+        <Textarea
+          id={`review-agent-prompt-${agent.id}`}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="System prompt for this review agent..."
+          className="min-h-24 text-sm font-mono"
+        />
+      </Field>
       <div className="flex items-center gap-2 justify-end">
         <Button
           variant="destructive"
@@ -139,7 +151,7 @@ function NewAgentForm({
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(DEFAULT_REVIEW_AGENT_PROMPT);
   const [creating, setCreating] = useState(false);
 
   const handleCreate = async () => {
@@ -148,7 +160,7 @@ function NewAgentForm({
     const ok = await onCreate(name.trim(), prompt.trim());
     if (ok) {
       setName("");
-      setPrompt("");
+      setPrompt(DEFAULT_REVIEW_AGENT_PROMPT);
       setOpen(false);
     }
     setCreating(false);
@@ -169,20 +181,34 @@ function NewAgentForm({
 
   return (
     <div className="border border-dashed border-border rounded-lg p-4 space-y-3">
-      <input
-        type="text"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        className="w-full bg-transparent border-b border-border px-1 py-0.5 text-sm font-medium focus:outline-none focus:border-primary"
-        placeholder="New agent name"
-        autoFocus
-      />
-      <Textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder="System prompt..."
-        className="min-h-24 text-sm font-mono"
-      />
+      <Field
+        id="new-review-agent-name"
+        label="Name"
+        hint="A short name you will recognise in review reports."
+      >
+        <input
+          id="new-review-agent-name"
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full bg-transparent border-b border-border px-1 py-0.5 text-sm font-medium focus:outline-none focus:border-primary"
+          placeholder="New agent name"
+          autoFocus
+        />
+      </Field>
+      <Field
+        id="new-review-agent-prompt"
+        label="Instructions"
+        hint="Pre-filled with sensible default checks — adjust it only if you want this reviewer to focus on something specific."
+      >
+        <Textarea
+          id="new-review-agent-prompt"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="System prompt..."
+          className="min-h-24 text-sm font-mono"
+        />
+      </Field>
       <div className="flex items-center gap-2 justify-end">
         <Button
           variant="ghost"
@@ -190,7 +216,7 @@ function NewAgentForm({
           onClick={() => {
             setOpen(false);
             setName("");
-            setPrompt("");
+            setPrompt(DEFAULT_REVIEW_AGENT_PROMPT);
           }}
         >
           Cancel

@@ -18,35 +18,8 @@ import {
   PROVIDER_LABELS,
   type AgentProvider,
 } from "@/lib/agent-config/constants";
+import { Field } from "@/components/agent-config/Field";
 
-/**
- * Labeled field shell. Every control on this screen carries a visible label
- * and a one-line hint — no field may rely on its placeholder alone.
- */
-function Field({
-  id,
-  label,
-  hint,
-  children,
-}: {
-  id: string;
-  label: string;
-  hint: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-1">
-      <label
-        htmlFor={id}
-        className="block text-xs font-medium leading-none text-foreground"
-      >
-        {label}
-      </label>
-      {children}
-      <p className="text-xs text-muted-foreground">{hint}</p>
-    </div>
-  );
-}
 
 function CliSelect({
   id,
