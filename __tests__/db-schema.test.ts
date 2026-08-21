@@ -410,6 +410,7 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       agentType: "agent_type",
       status: "status",
       title: "title",
+      message: "message",
       targetUrl: "target_url",
       createdAt: "created_at",
     },
@@ -1000,6 +1001,7 @@ describe("db schema: exported types", () => {
       agentType: "build",
       status: "completed",
       title: "Build completed",
+      message: null,
       targetUrl: "/projects/p1/sessions/s1",
       createdAt: null,
     };

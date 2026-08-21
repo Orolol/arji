@@ -31,7 +31,9 @@ function makeRequest(url: string): Request {
 function seedNotification(
   id: string,
   createdAt: string,
-  title = `notification ${id}`
+  title = `notification ${id}`,
+  message: string | null = null,
+  status = "completed"
 ): void {
   const { db } = testDb.instance!;
   db.insert(notifications)
@@ -39,8 +41,9 @@ function seedNotification(
       id,
       projectId: "p1",
       projectName: "Project One",
-      status: "completed",
+      status,
       title,
+      message,
       targetUrl: `/projects/p1#${id}`,
       createdAt,
     })
@@ -102,6 +105,28 @@ describe("GET /api/notifications", () => {
       "middle",
       "older",
     ]);
+  });
+
+  it("returns the full failure message so the bell can show it (AC1)", async () => {
+    seedNotification(
+      "n1",
+      "2026-02-18T12:00:00Z",
+      "Build failed — E-proj-001: Login",
+      "The agent session failed without any error message and without any output — the process exited (or was lost) without writing stderr or text.",
+      "failed"
+    );
+
+    const res = await GET(makeRequest("http://localhost/api/notifications"));
+    const body = await res.json();
+
+    const [n] = body.data.notifications as Array<{
+      id: string;
+      status: string;
+      message: string | null;
+    }>;
+    expect(n.id).toBe("n1");
+    expect(n.status).toBe("failed");
+    expect(n.message).toMatch(/failed without any error message and without any output/i);
   });
 
   it("respects limit parameter", async () => {

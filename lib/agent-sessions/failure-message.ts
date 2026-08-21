@@ -26,7 +26,7 @@
 export interface SessionResultLike {
   success: boolean;
   result?: string;
-  error?: string;
+  error?: string | null;
   /** null only in the synthesized no-result record: duration unknown. */
   duration: number | null;
   cliSessionId?: string;

@@ -19,12 +19,17 @@
  *
  * Finally registers the session terminal hook
  * (lib/agent-sessions/terminal-hooks.ts). That slot holds exactly ONE
- * callback, so the two consumers are composed here rather than racing to
+ * callback, so the consumers are composed here rather than racing to
  * overwrite each other:
  *   - the memory auto-distillation trigger (lib/workflow/memory-distill.ts),
  *     a no-op unless the 'memory_auto_distill' setting is on,
  *   - the Full Auto Mode kick — a freed slot should be refilled now, not up
- *     to 15s later (the interval sweep stays as the backstop).
+ *     to 15s later (the interval sweep stays as the backstop),
+ *   - the failed-session notification (lib/agent-sessions/terminal-notification.ts)
+ *     — a session that is finalized as failed by a path whose closure dies
+ *     first (scheduler safety net, boot cleanup, engines) must still ring
+ *     the bell with the full error message, not just sit there labelled
+ *     "Agent error".
  * The hook slot is globalThis-backed and registration simply replaces it, so
  * hot reloads are safe here too.
  */
@@ -52,10 +57,19 @@ export async function register(): Promise<void> {
     const { maybeAutoDistillAfterSessionTerminal } = await import(
       "@/lib/workflow/memory-distill"
     );
+    const { createTerminalSessionNotification } = await import(
+      "@/lib/agent-sessions/terminal-notification"
+    );
     setSessionTerminalHook((event) => {
       // Every terminal status frees a scheduler slot, so the supervisor is
       // kicked regardless of how the session ended.
       kickAutoModeForSession(event.sessionId);
+
+      // A failure finalized outside a live route closure (scheduler safety
+      // net, boot cleanup, night/auto-mode engines) is notified here, at
+      // the moment the row is finalized. The routes' own emit path hits
+      // createNotificationFromSession's per-session idempotency guard.
+      createTerminalSessionNotification(event);
 
       if (event.status !== "completed") return;
       // Fire-and-forget: the trigger owns its guards and never rejects.
