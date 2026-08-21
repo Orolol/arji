@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { SpecEditor } from "@/components/spec/SpecEditor";
+import { SpecUpdateProgress } from "@/components/spec/SpecUpdateProgress";
 import { SpecPreview } from "@/components/spec/SpecPreview";
 import { SpecUpdateDialog } from "@/components/spec/SpecUpdateDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -29,10 +30,12 @@ export default function SpecPage() {
 
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [updateSessionId, setUpdateSessionId] = useState<string | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<"running" | "done" | "failed" | null>(
-    null
-  );
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<
+    "running" | "done" | "failed" | null
+  >(null);
+  const [updateStream, setUpdateStream] = useState<string | null>(null);
+  const [updateResponse, setUpdateResponse] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   useEffect(() => {
     fetch(`/api/projects/${projectId}`)
       .then((r) => r.json())
@@ -68,19 +71,38 @@ export default function SpecPage() {
   // reload the spec (persisted only on a successful run) and surface the
   // outcome next to the trigger button.
   useEffect(() => {
-    if (!updateSessionId || updateStatus === "done" || updateStatus === "failed") {
+    if (
+      !updateSessionId ||
+      updateStatus === "done" ||
+      updateStatus === "failed"
+    ) {
       return;
     }
     let cancelled = false;
-    pollTimerRef.current = setTimeout(async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Self-rescheduling: a queued/running answer arms the next tick, so the
+    // poll keeps going until the session reaches a terminal state.
+    const poll = async () => {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/sessions/${updateSessionId}`
+          `/api/projects/${projectId}/sessions/${updateSessionId}`,
         );
         const json = await res.json().catch(() => ({}));
         if (cancelled) return;
-        const status = json.data?.status as string | undefined;
-        if (status === "queued" || status === "running") return;
+        const data = json.data ?? {};
+        // Live feedback for the Spec view: the streamed agent output plus,
+        // once terminal, the final answer or the failure reason.
+        const chunks = data.chunkStreams?.output;
+        setUpdateStream(
+          Array.isArray(chunks) ? chunks.map((c) => c.content).join("") : null,
+        );
+        const status = data.status as string | undefined;
+        if (status === "queued" || status === "running") {
+          timer = setTimeout(poll, 2000);
+          return;
+        }
+        setUpdateResponse(data.logs?.result ?? data.lastNonEmptyText ?? null);
+        setUpdateError(data.error ?? null);
         if (status === "completed") {
           setUpdateStatus("done");
           refreshSpec();
@@ -90,25 +112,34 @@ export default function SpecPage() {
       } catch {
         if (!cancelled) setUpdateStatus("failed");
       }
-    }, 2000);
+    };
+    timer = setTimeout(poll, 2000);
     return () => {
       cancelled = true;
-      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      if (timer) clearTimeout(timer);
     };
   }, [updateSessionId, updateStatus, projectId, refreshSpec]);
 
   function handleUpdateStarted(data: { sessionId: string }) {
     setUpdateSessionId(data.sessionId);
     setUpdateStatus("running");
+    setUpdateStream(null);
+    setUpdateResponse(null);
+    setUpdateError(null);
+  }
+
+  function handleUpdateDismissed() {
+    setUpdateSessionId(null);
+    setUpdateStatus(null);
+    setUpdateStream(null);
+    setUpdateResponse(null);
+    setUpdateError(null);
   }
 
   const sections = useMemo(() => outline(spec), [spec]);
 
   return (
-    <Tabs
-      defaultValue="edit"
-      className="flex h-full min-h-0 flex-col gap-0"
-    >
+    <Tabs defaultValue="edit" className="flex h-full min-h-0 flex-col gap-0">
       <div className="flex flex-none items-start gap-[16px] px-[26px] pb-[18px] pt-[24px]">
         <div className="flex flex-col gap-[5px]">
           <h2 className="text-[19px] font-semibold">Specification</h2>
@@ -118,28 +149,8 @@ export default function SpecPage() {
           </p>
         </div>
         <div className="ml-auto flex items-center gap-[9px]">
-          {updateStatus && (
-            <span
-              className="text-[12.5px] text-muted-foreground"
-              data-testid="spec-update-status"
-            >
-              {updateStatus === "running" ? (
-                <>
-                  Spec update running —{" "}
-                  <a
-                    href={`/projects/${projectId}/sessions/${updateSessionId}`}
-                    className="underline underline-offset-2"
-                  >
-                    view session
-                  </a>
-                </>
-              ) : updateStatus === "done" ? (
-                "Spec updated by agent."
-              ) : (
-                "Spec update failed — the saved spec was left unchanged."
-              )}
-            </span>
-          )}
+          {/* Spec-update feedback lives in the SpecUpdateProgress panel
+              below the header — status, stream, response and errors. */}
           <TabsList className="h-[31px] rounded-[8px] bg-band p-[3px]">
             <TabsTrigger
               value="edit"
@@ -174,6 +185,17 @@ export default function SpecPage() {
         </div>
       </div>
 
+      {updateSessionId && updateStatus && (
+        <SpecUpdateProgress
+          projectId={projectId}
+          sessionId={updateSessionId}
+          status={updateStatus}
+          stream={updateStream}
+          response={updateResponse}
+          error={updateError}
+          onDismiss={handleUpdateDismissed}
+        />
+      )}
       <div className="flex min-h-0 flex-1 gap-[26px] px-[26px] pb-[26px]">
         <div className="flex min-w-0 flex-1 flex-col overflow-y-auto rounded-[12px] border border-border bg-card px-[44px] py-[34px]">
           <span className="font-mono text-[11.5px] text-meta">
