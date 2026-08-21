@@ -8,6 +8,7 @@ import simpleGit from "simple-git";
 import {
   applyStoryTransition,
   applyTransition,
+  logWorkflowDecision,
   type StoryStatus,
 } from "@/lib/workflow/transition-service";
 import { getEpicOr404, isErrorResponse } from "@/lib/api/route-helpers";
@@ -47,9 +48,15 @@ export async function POST(_request: NextRequest, { params }: Params) {
     .where(eq(userStories.epicId, epicId))
     .all();
 
-  // Validate every child before applying any write; epic approval supplies
-  // the review context for its synchronized story transitions.
-  for (const story of stories) {
+  // Only stories that reached review are part of this approval. Stories added
+  // later (or otherwise still todo/in_progress) retain their status and are
+  // named in the activity log instead of invalidating the parent approval.
+  const reviewedStories = stories.filter((story) => story.status === "review");
+  const skippedStories = stories.filter((story) => story.status !== "review");
+
+  // Validate every eligible child before applying any write; epic approval
+  // supplies the review context for its synchronized story transitions.
+  for (const story of reviewedStories) {
     const validation = applyStoryTransition({
       projectId,
       epicId,
@@ -92,7 +99,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
     })
     .run();
 
-  for (const story of stories) {
+  for (const story of reviewedStories) {
     applyStoryTransition({
       projectId,
       epicId,
@@ -103,6 +110,15 @@ export async function POST(_request: NextRequest, { params }: Params) {
       source: "approve",
       reason: "Parent epic review approved",
       reviewScope: "epic",
+    });
+  }
+  if (skippedStories.length > 0) {
+    logWorkflowDecision({
+      projectId,
+      epicId,
+      status: "done",
+      actor: "user",
+      reason: `Epic approved; ${skippedStories.length} non-review ${skippedStories.length === 1 ? "story was" : "stories were"} left unchanged (${skippedStories.map((story) => `${story.id}:${story.status ?? "todo"}`).join(", ")})`,
     });
   }
 

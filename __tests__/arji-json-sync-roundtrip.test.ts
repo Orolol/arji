@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { createTestDb } from "@/lib/db/test-utils";
 import type Database from "better-sqlite3";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
@@ -8,6 +9,7 @@ import type { ArjiJson } from "@/lib/sync/arji-json";
 let testDb: ReturnType<typeof createTestDb>;
 let db: BetterSQLite3Database<typeof schema>;
 let sqlite: Database.Database;
+const emitTicketMoved = vi.hoisted(() => vi.fn());
 
 // Mock the db module to use our test database
 vi.mock("@/lib/db", () => ({
@@ -16,12 +18,15 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/events/emit", () => ({ emitTicketMoved }));
+
 describe("arji.json sync roundtrip", () => {
   beforeEach(() => {
     vi.resetModules();
     testDb = createTestDb();
     db = testDb.db;
     sqlite = testDb.sqlite;
+    emitTicketMoved.mockReset();
 
     // Seed a project
     db.insert(schema.projects)
@@ -42,7 +47,6 @@ describe("arji.json sync roundtrip", () => {
       const { exportArjiJson } = await import("@/lib/sync/export");
 
       // Mock writeArjiJson to capture the data
-      const { writeArjiJson } = await import("@/lib/sync/arji-json");
       let capturedData: ArjiJson | null = null;
       vi.spyOn(await import("@/lib/sync/arji-json"), "writeArjiJson").mockImplementation(
         async (_path: string, data: ArjiJson) => {
@@ -451,6 +455,150 @@ describe("arji.json sync roundtrip", () => {
 
       const storyComment = comments.find((c) => c.userStoryId === "us1");
       expect(storyComment).toMatchObject({ id: "c2", author: "agent", content: "Story comment" });
+    });
+  });
+
+  describe("guarded status reconciliation", () => {
+    it("skips refused done statuses while importing the remaining content", async () => {
+      db.insert(schema.epics)
+        .values({
+          id: "e-guarded",
+          projectId: "proj-1",
+          title: "Old epic title",
+          status: "review",
+        })
+        .run();
+      db.insert(schema.userStories)
+        .values({
+          id: "s-guarded",
+          epicId: "e-guarded",
+          title: "Old story title",
+          status: "in_progress",
+        })
+        .run();
+      db.insert(schema.agentSessions)
+        .values({
+          id: "completed-review",
+          projectId: "proj-1",
+          epicId: "e-guarded",
+          status: "completed",
+          agentType: "review_code",
+          mode: "plan",
+        })
+        .run();
+
+      vi.spyOn(await import("@/lib/sync/arji-json"), "readArjiJson").mockResolvedValue({
+        version: 1,
+        lastSyncedAt: new Date().toISOString(),
+        project: { name: "Updated project", description: null, status: "active", spec: null },
+        epics: [
+          {
+            id: "e-guarded",
+            title: "Updated epic title",
+            description: null,
+            priority: 0,
+            status: "done",
+            position: 0,
+            branchName: null,
+            user_stories: [
+              {
+                id: "s-guarded",
+                title: "Updated story title",
+                description: null,
+                acceptance_criteria: null,
+                status: "done",
+                position: 0,
+              },
+            ],
+          },
+        ],
+      });
+
+      const { importArjiJson } = await import("@/lib/sync/import");
+      const result = await importArjiJson("proj-1");
+
+      expect(result).toMatchObject({ epicsUpserted: 1, storiesUpserted: 1 });
+      expect(
+        db.select().from(schema.epics).where(eq(schema.epics.id, "e-guarded")).get()
+      ).toMatchObject({ title: "Updated epic title", status: "review" });
+      expect(
+        db
+          .select()
+          .from(schema.userStories)
+          .where(eq(schema.userStories.id, "s-guarded"))
+          .get()
+      ).toMatchObject({ title: "Updated story title", status: "in_progress" });
+      expect(
+        db
+          .select()
+          .from(schema.ticketActivityLog)
+          .where(eq(schema.ticketActivityLog.epicId, "e-guarded"))
+          .all()
+          .filter((entry) => entry.reason?.includes("refused"))
+      ).toHaveLength(2);
+      expect(emitTicketMoved).not.toHaveBeenCalled();
+    });
+
+    it("does not emit a valid move when a later import write rolls back", async () => {
+      db.insert(schema.epics)
+        .values({
+          id: "e-rollback",
+          projectId: "proj-1",
+          title: "Rollback epic",
+          status: "backlog",
+        })
+        .run();
+      sqlite.exec(`
+        CREATE TRIGGER reject_import_story
+        BEFORE INSERT ON user_stories
+        WHEN NEW.id = 'story-that-fails'
+        BEGIN
+          SELECT RAISE(ABORT, 'forced import rollback');
+        END;
+      `);
+
+      vi.spyOn(await import("@/lib/sync/arji-json"), "readArjiJson").mockResolvedValue({
+        version: 1,
+        lastSyncedAt: new Date().toISOString(),
+        project: { name: "Test", description: null, status: "active", spec: null },
+        epics: [
+          {
+            id: "e-rollback",
+            title: "Rollback epic",
+            description: null,
+            priority: 0,
+            status: "todo",
+            position: 0,
+            branchName: null,
+            user_stories: [
+              {
+                id: "story-that-fails",
+                title: "Force rollback",
+                description: null,
+                acceptance_criteria: null,
+                status: "todo",
+                position: 0,
+              },
+            ],
+          },
+        ],
+      });
+
+      const { importArjiJson } = await import("@/lib/sync/import");
+      await expect(importArjiJson("proj-1")).rejects.toThrow("forced import rollback");
+
+      expect(
+        db.select().from(schema.epics).where(eq(schema.epics.id, "e-rollback")).get()
+          ?.status
+      ).toBe("backlog");
+      expect(
+        db
+          .select()
+          .from(schema.ticketActivityLog)
+          .where(eq(schema.ticketActivityLog.epicId, "e-rollback"))
+          .all()
+      ).toHaveLength(0);
+      expect(emitTicketMoved).not.toHaveBeenCalled();
     });
   });
 });

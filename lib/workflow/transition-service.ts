@@ -26,6 +26,8 @@ export interface ApplyTransitionOpts {
   sessionId?: string;
   /** When true, only validate — skip DB update, emit, and log. */
   validateOnly?: boolean;
+  /** Buffer the ticket:moved event in the caller until its transaction commits. */
+  deferEvent?: boolean;
 }
 
 export interface ApplyTransitionResult {
@@ -48,6 +50,8 @@ export interface ApplyStoryTransitionOpts {
   validateOnly?: boolean;
   /** Epic approval may synchronize child stories using the epic review. */
   reviewScope?: "story" | "epic";
+  /** Explicit human story approval does not require a separate review-agent session. */
+  requireCompletedReview?: boolean;
 }
 
 function logRefusedTransition(opts: {
@@ -98,6 +102,7 @@ export function applyTransition(opts: ApplyTransitionOpts): ApplyTransitionResul
     reason,
     sessionId,
     validateOnly,
+    deferEvent,
   } = opts;
 
   // Same-status is a no-op (reorder within column)
@@ -135,7 +140,9 @@ export function applyTransition(opts: ApplyTransitionOpts): ApplyTransitionResul
     .run();
 
   // 3. Emit SSE event
-  emitTicketMoved(projectId, epicId, fromStatus, toStatus);
+  if (!deferEvent) {
+    emitTicketMoved(projectId, epicId, fromStatus, toStatus);
+  }
 
   // 4. Log to activity log
   logTransition({
@@ -171,6 +178,7 @@ export function applyStoryTransition(
     sessionId,
     validateOnly,
     reviewScope = "story",
+    requireCompletedReview = true,
   } = opts;
 
   if (fromStatus === toStatus) return { valid: true };
@@ -181,6 +189,7 @@ export function applyStoryTransition(
     fromStatus,
     toStatus,
     actor,
+    requireCompletedReview,
   });
   ctx.source = source;
   const result = validateTransition(ctx);

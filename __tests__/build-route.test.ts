@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 let getCallCount = 0;
 const mockState = vi.hoisted(() => ({
   updateCalls: [] as Array<{ table: string; values: Record<string, unknown> }>,
+  epicStatus: "todo",
   processManagerResult: {
     success: true,
     duration: 1000,
@@ -51,7 +52,7 @@ vi.mock("@/lib/db", () => {
         title: "Test Epic",
         description: "A test epic",
         epicId: "epic-1",
-        status: "todo",
+        status: mockState.epicStatus,
       };
     }),
     all: vi.fn().mockReturnValue([]),
@@ -64,6 +65,9 @@ vi.mock("@/lib/db", () => {
       return {
         set: vi.fn((values: Record<string, unknown>) => {
           mockState.updateCalls.push({ table: tableName, values });
+          if (tableName === "epics" && typeof values.status === "string") {
+            mockState.epicStatus = values.status;
+          }
           return {
             where: vi.fn().mockReturnValue({ run: vi.fn() }),
           };
@@ -168,6 +172,7 @@ describe("Build Route", () => {
   beforeEach(() => {
     getCallCount = 0;
     mockState.updateCalls = [];
+    mockState.epicStatus = "todo";
     mockState.processManagerResult = { success: true, duration: 1000 };
     mockResolveAgentByNamedId.mockReturnValue({ provider: "claude-code" });
     mockHandleAskedQuestionOutcome.mockClear();

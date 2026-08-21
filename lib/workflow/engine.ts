@@ -38,6 +38,8 @@ export interface TransitionContext {
   hasOpenReviewComments: boolean;
   /** Whether the epic has a completed review (at least one review session completed) */
   hasCompletedReview: boolean;
+  /** Story approval is itself an explicit human review decision. */
+  requireCompletedReview?: boolean;
   /** Whether there is a queued/running code-producing session on this ticket */
   hasRunningSession: boolean;
   /** The actor initiating the transition */
@@ -62,7 +64,11 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
   },
   // Cannot move to Done without completed review
   (ctx) => {
-    if (ctx.toStatus === "done" && !ctx.hasCompletedReview) {
+    if (
+      ctx.toStatus === "done" &&
+      ctx.requireCompletedReview !== false &&
+      !ctx.hasCompletedReview
+    ) {
       return "Cannot move to Done: no completed review found. A review must be completed before marking as Done.";
     }
     return null;

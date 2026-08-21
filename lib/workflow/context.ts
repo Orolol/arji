@@ -14,8 +14,16 @@ export function buildTransitionContext(opts: {
   fromStatus: KanbanStatus;
   toStatus: KanbanStatus;
   actor: "user" | "agent" | "system";
+  requireCompletedReview?: boolean;
 }): TransitionContext {
-  const { epicId, userStoryId, fromStatus, toStatus, actor } = opts;
+  const {
+    epicId,
+    userStoryId,
+    fromStatus,
+    toStatus,
+    actor,
+    requireCompletedReview = true,
+  } = opts;
 
   // Check for open review comments
   const openComments = db
@@ -77,6 +85,7 @@ export function buildTransitionContext(opts: {
     toStatus,
     hasOpenReviewComments: openComments.length > 0,
     hasCompletedReview: completedReviewSessions.length > 0,
+    requireCompletedReview,
     hasRunningSession: runningSessions.length > 0,
     actor,
   };

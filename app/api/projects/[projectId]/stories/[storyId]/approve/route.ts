@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects, epics, userStories } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { projects, epics, reviewComments, userStories } from "@/lib/db/schema";
+import { and, eq } from "drizzle-orm";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import simpleGit from "simple-git";
 import { getStoryOr404, isErrorResponse } from "@/lib/api/route-helpers";
 import {
   applyStoryTransition,
   applyTransition,
+  logWorkflowDecision,
   type StoryStatus,
 } from "@/lib/workflow/transition-service";
 import type { KanbanStatus } from "@/lib/types/kanban";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
-export async function POST(request: NextRequest, { params }: Params) {
+export async function POST(_request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
 
   // Validate story exists (project-scoped) and is in review
@@ -29,6 +30,20 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  // review_comments are epic-scoped in the current schema. Story approval is
+  // an explicit human review decision, so mirror epic approval by resolving
+  // the parent epic's open findings before validating this story.
+  const now = new Date().toISOString();
+  db.update(reviewComments)
+    .set({ status: "resolved", updatedAt: now })
+    .where(
+      and(
+        eq(reviewComments.epicId, story.epicId),
+        eq(reviewComments.status, "open")
+      )
+    )
+    .run();
+
   // Check whether this approval will complete the epic before applying any
   // status write, so all workflow guards can be validated as one decision.
   const epic = db
@@ -37,11 +52,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     .where(eq(epics.id, story.epicId))
     .get();
 
-  const allStories = epic ? db
-    .select()
-    .from(userStories)
-    .where(eq(userStories.epicId, epic.id))
-    .all() : [];
+  const allStories = epic
+    ? db
+        .select()
+        .from(userStories)
+        .where(eq(userStories.epicId, epic.id))
+        .all()
+    : [];
 
   const allDone = allStories.every((s) => s.id === storyId || s.status === "done");
 
@@ -54,27 +71,26 @@ export async function POST(request: NextRequest, { params }: Params) {
     actor: "user",
     source: "approve",
     reason: "Story review approved",
+    requireCompletedReview: false,
     validateOnly: true,
   });
   if (!storyValidation.valid) {
     return NextResponse.json({ error: storyValidation.error }, { status: 400 });
   }
 
-  if (epic && allDone) {
-    const epicValidation = applyTransition({
-      projectId,
-      epicId: epic.id,
-      fromStatus: (epic.status ?? "review") as KanbanStatus,
-      toStatus: "done",
-      actor: "user",
-      source: "approve",
-      reason: "All stories approved",
-      validateOnly: true,
-    });
-    if (!epicValidation.valid) {
-      return NextResponse.json({ error: epicValidation.error }, { status: 400 });
-    }
-  }
+  const epicValidation =
+    epic && allDone
+      ? applyTransition({
+          projectId,
+          epicId: epic.id,
+          fromStatus: (epic.status ?? "review") as KanbanStatus,
+          toStatus: "done",
+          actor: "user",
+          source: "approve",
+          reason: "All stories approved",
+          validateOnly: true,
+        })
+      : null;
 
   applyStoryTransition({
     projectId,
@@ -85,11 +101,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     actor: "user",
     source: "approve",
     reason: "Story review approved",
+    requireCompletedReview: false,
   });
 
   let merged = false;
 
-  if (epic && allDone) {
+  if (epic && allDone && epicValidation?.valid) {
     applyTransition({
       projectId,
       epicId: epic.id,
@@ -117,6 +134,14 @@ export async function POST(request: NextRequest, { params }: Params) {
         // Don't fail the approve — the merge can be done manually
       }
     }
+  } else if (epic && allDone && epicValidation && !epicValidation.valid) {
+    logWorkflowDecision({
+      projectId,
+      epicId: epic.id,
+      status: (epic.status ?? "review") as KanbanStatus,
+      actor: "user",
+      reason: `Story approved; parent epic held because completion was refused: ${epicValidation.error ?? "unknown workflow guard failure"}`,
+    });
   }
 
   tryExportArjiJson(projectId);
@@ -124,7 +149,10 @@ export async function POST(request: NextRequest, { params }: Params) {
   return NextResponse.json({
     data: {
       approved: true,
-      epicComplete: allDone,
+      epicComplete: allDone && (epicValidation?.valid ?? false),
+      ...(allDone && epicValidation && !epicValidation.valid
+        ? { epicHoldReason: epicValidation.error }
+        : {}),
       merged,
     },
   });

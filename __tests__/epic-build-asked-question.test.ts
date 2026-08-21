@@ -64,7 +64,7 @@ vi.mock("fs", () => ({
   default: { mkdirSync: vi.fn(), writeFileSync: vi.fn(), existsSync: vi.fn(() => false) },
 }));
 
-const { db } = await import("@/lib/db");
+const { db, sqlite } = await import("@/lib/db");
 const {
   projects,
   epics,
@@ -256,5 +256,66 @@ describe("epic build route — asked_question workflow effects", () => {
       .where(eq(ticketActivityLog.epicId, epicId))
       .all();
     expect(activity.some((a) => a.actor === "system")).toBe(false);
+  });
+
+  it("preserves agent output when session finalization leaves the build running", async () => {
+    const { projectId, epicId } = seedEpic();
+    processManagerState.result = {
+      success: true,
+      result: JSON.stringify({
+        type: "result",
+        subtype: "success",
+        result: "Implementation finished even though lifecycle persistence failed.",
+      }),
+      duration: 30000,
+    };
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    sqlite.exec(`
+      CREATE TRIGGER fail_completed_session_update
+      BEFORE UPDATE OF status ON agent_sessions
+      WHEN NEW.status = 'completed'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced terminal write failure');
+      END;
+    `);
+
+    try {
+      const sessionId = await dispatchBuild(projectId, epicId);
+
+      expect(
+        db.select().from(agentSessions).where(eq(agentSessions.id, sessionId)).get()
+      ).toMatchObject({ status: "running" });
+      expect(
+        db.select().from(epics).where(eq(epics.id, epicId)).get()?.status
+      ).toBe("in_progress");
+
+      const comments = db
+        .select()
+        .from(ticketComments)
+        .where(eq(ticketComments.epicId, epicId))
+        .all();
+      expect(comments).toContainEqual(
+        expect.objectContaining({
+          agentSessionId: sessionId,
+          content: "Implementation finished even though lifecycle persistence failed.",
+        })
+      );
+
+      const activity = db
+        .select()
+        .from(ticketActivityLog)
+        .where(eq(ticketActivityLog.epicId, epicId))
+        .all();
+      expect(activity).toContainEqual(
+        expect.objectContaining({
+          sessionId,
+          reason: expect.stringContaining("review promotion was refused"),
+        })
+      );
+    } finally {
+      sqlite.exec("DROP TRIGGER IF EXISTS fail_completed_session_update");
+      errorSpy.mockRestore();
+    }
   });
 });

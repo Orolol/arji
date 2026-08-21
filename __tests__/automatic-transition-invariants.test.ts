@@ -28,6 +28,7 @@ const {
 } = await import("@/lib/db/schema");
 const {
   finalizeBuildTerminalOutcome,
+  transitionBuildCompleted,
   transitionBuildStarted,
   transitionReviewRejected,
 } = await import("@/lib/workflow/automatic-transitions");
@@ -153,6 +154,117 @@ describe("deterministic build completion", () => {
     expect(result.kind).toBe("promoted");
     expect(epicStatus(epicId)).toBe("review");
     expect(storyStatus(storyIds[0])).toBe("review");
+  });
+
+  it("keeps a story added mid-build in todo without blocking epic review", () => {
+    const { projectId, epicId, storyIds } = seedEpic("in_progress", [
+      "in_progress",
+      "todo",
+    ]);
+
+    const result = finalizeBuildTerminalOutcome({
+      projectId,
+      epicId,
+      scope: "epic",
+      sessionId: "mid-build-story",
+      success: true,
+      outcome: "answered",
+    });
+
+    expect(result).toMatchObject({ kind: "promoted", epicPromoted: true });
+    expect(epicStatus(epicId)).toBe("review");
+    expect(storyStatus(storyIds[0])).toBe("review");
+    expect(storyStatus(storyIds[1])).toBe("todo");
+  });
+
+  it("returns a logged refusal instead of throwing when the session is still active", () => {
+    const { projectId, epicId } = seedEpic("in_progress");
+    db.insert(agentSessions)
+      .values({
+        id: "stuck-terminal-session",
+        projectId,
+        epicId,
+        status: "running",
+        agentType: "build",
+        mode: "code",
+      })
+      .run();
+
+    const result = finalizeBuildTerminalOutcome({
+      projectId,
+      epicId,
+      scope: "epic",
+      sessionId: "stuck-terminal-session",
+      success: true,
+      outcome: "answered",
+    });
+
+    expect(result).toMatchObject({
+      kind: "refused",
+      error: expect.stringContaining("queued or running"),
+    });
+    expect(epicStatus(epicId)).toBe("in_progress");
+    expect(
+      db
+        .select()
+        .from(ticketActivityLog)
+        .where(eq(ticketActivityLog.epicId, epicId))
+        .all()
+    ).toContainEqual(
+      expect.objectContaining({
+        fromStatus: "in_progress",
+        toStatus: "in_progress",
+        reason: expect.stringContaining("review promotion was refused"),
+        sessionId: "stuck-terminal-session",
+      })
+    );
+  });
+
+  it("uses the persisted epic status and never revives a released ticket", () => {
+    const { projectId, epicId } = seedEpic("released");
+
+    const result = transitionBuildCompleted({
+      projectId,
+      epicId,
+      scope: "epic",
+      sessionId: "late-terminal-retry",
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      error: expect.stringContaining("released"),
+    });
+    expect(epicStatus(epicId)).toBe("released");
+  });
+
+  it("isolates team-build promotion refusals so later epics still advance", () => {
+    const blocked = seedEpic("in_progress");
+    const promotable = seedEpic("in_progress", ["in_progress"]);
+    db.insert(agentSessions)
+      .values({
+        id: "other-active-build",
+        projectId: blocked.projectId,
+        epicId: blocked.epicId,
+        status: "queued",
+        agentType: "ticket_build",
+        mode: "code",
+      })
+      .run();
+
+    const results = [blocked, promotable].map(({ projectId, epicId }) =>
+      transitionBuildCompleted({
+        projectId,
+        epicId,
+        scope: "epic",
+        sessionId: "team-terminal",
+        reason: "Team build completed successfully",
+      })
+    );
+
+    expect(results[0]).toMatchObject({ valid: false });
+    expect(results[1]).toMatchObject({ valid: true, epicPromoted: true });
+    expect(epicStatus(blocked.epicId)).toBe("in_progress");
+    expect(epicStatus(promotable.epicId)).toBe("review");
   });
 
   it("reproduces B-arij-104: holds the epic with an explicit remaining-stories reason", () => {

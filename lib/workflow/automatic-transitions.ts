@@ -26,6 +26,15 @@ export class WorkflowTransitionError extends Error {
   }
 }
 
+export type BuildCompletionResult =
+  | { valid: true; epicPromoted: boolean; remainingStories: number }
+  | {
+      valid: false;
+      epicPromoted: false;
+      remainingStories: number;
+      error: string;
+    };
+
 function requireValid(result: ApplyTransitionResult): void {
   if (!result.valid) {
     throw new WorkflowTransitionError(
@@ -190,19 +199,43 @@ export function transitionBuildCompleted(opts: {
   userStoryId?: string | null;
   sessionId: string;
   reason?: string;
-}): { epicPromoted: boolean; remainingStories: number } {
+}): BuildCompletionResult {
   const reason = opts.reason ?? "Build completed successfully";
-  // Build dispatch established this invariant before the session row existed,
-  // and the engine forbids moving an in-progress ticket while that session is
-  // active. The terminal handler therefore has one deterministic source.
-  const epicStatus: KanbanStatus = "in_progress";
+  let epicStatus: KanbanStatus = "in_progress";
 
-  if (opts.scope === "epic") {
-    const stories = readStories(opts.epicId).filter(
-      (story) => story.status !== "done"
-    );
-    requireValid(
-      applyTransition({
+  const refused = (
+    error: string,
+    remainingStories = 0
+  ): BuildCompletionResult => {
+    logWorkflowDecision({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      status: epicStatus,
+      actor: "agent",
+      reason: `Build completed but review promotion was refused; ticket held in ${epicStatus}: ${error}`,
+      sessionId: opts.sessionId,
+    });
+    return {
+      valid: false,
+      epicPromoted: false,
+      remainingStories,
+      error,
+    };
+  };
+
+  try {
+    // Read the persisted source instead of assuming dispatch left the row in
+    // in_progress. This keeps terminal retries and released tickets guarded by
+    // their real state and makes emitted fromStatus values truthful.
+    epicStatus = readEpicStatus(opts.epicId);
+
+    if (opts.scope === "epic") {
+      // Only work that was part of this build advances. A story added while
+      // the agent was running remains todo and cannot invalidate completion.
+      const stories = readStories(opts.epicId).filter(
+        (story) => story.status === "in_progress"
+      );
+      const epicValidation = applyTransition({
         projectId: opts.projectId,
         epicId: opts.epicId,
         fromStatus: epicStatus,
@@ -212,11 +245,14 @@ export function transitionBuildCompleted(opts: {
         reason,
         sessionId: opts.sessionId,
         validateOnly: true,
-      })
-    );
-    for (const story of stories) {
-      requireValid(
-        transitionStory({
+      });
+      if (!epicValidation.valid) {
+        return refused(
+          epicValidation.error ?? "The workflow engine refused epic review"
+        );
+      }
+      for (const story of stories) {
+        const storyValidation = transitionStory({
           projectId: opts.projectId,
           epicId: opts.epicId,
           userStoryId: story.id,
@@ -225,13 +261,17 @@ export function transitionBuildCompleted(opts: {
           reason,
           sessionId: opts.sessionId,
           validateOnly: true,
-        })
-      );
-    }
+        });
+        if (!storyValidation.valid) {
+          return refused(
+            storyValidation.error ??
+              `The workflow engine refused review for story ${story.id}`
+          );
+        }
+      }
 
-    for (const story of stories) {
-      requireValid(
-        transitionStory({
+      for (const story of stories) {
+        const storyTransition = transitionStory({
           projectId: opts.projectId,
           epicId: opts.epicId,
           userStoryId: story.id,
@@ -239,11 +279,15 @@ export function transitionBuildCompleted(opts: {
           toStatus: "review",
           reason,
           sessionId: opts.sessionId,
-        })
-      );
-    }
-    requireValid(
-      applyTransition({
+        });
+        if (!storyTransition.valid) {
+          return refused(
+            storyTransition.error ??
+              `The workflow engine refused review for story ${story.id}`
+          );
+        }
+      }
+      const epicTransition = applyTransition({
         projectId: opts.projectId,
         epicId: opts.epicId,
         fromStatus: epicStatus,
@@ -252,22 +296,25 @@ export function transitionBuildCompleted(opts: {
         source: "build",
         reason,
         sessionId: opts.sessionId,
-      })
+      });
+      if (!epicTransition.valid) {
+        return refused(
+          epicTransition.error ?? "The workflow engine refused epic review"
+        );
+      }
+      return { valid: true, epicPromoted: true, remainingStories: 0 };
+    }
+
+    const story = readStory(opts.epicId, opts.userStoryId ?? "");
+    const stories = readStories(opts.epicId);
+    const remaining = stories.filter(
+      (candidate) =>
+        candidate.id !== story.id &&
+        candidate.status !== "review" &&
+        candidate.status !== "done"
     );
-    return { epicPromoted: true, remainingStories: 0 };
-  }
 
-  const story = readStory(opts.epicId, opts.userStoryId ?? "");
-  const stories = readStories(opts.epicId);
-  const remaining = stories.filter(
-    (candidate) =>
-      candidate.id !== story.id &&
-      candidate.status !== "review" &&
-      candidate.status !== "done"
-  );
-
-  requireValid(
-    transitionStory({
+    const storyValidation = transitionStory({
       projectId: opts.projectId,
       epicId: opts.epicId,
       userStoryId: story.id,
@@ -276,11 +323,15 @@ export function transitionBuildCompleted(opts: {
       reason,
       sessionId: opts.sessionId,
       validateOnly: true,
-    })
-  );
-  if (remaining.length === 0) {
-    requireValid(
-      applyTransition({
+    });
+    if (!storyValidation.valid) {
+      return refused(
+        storyValidation.error ?? "The workflow engine refused story review",
+        remaining.length
+      );
+    }
+    if (remaining.length === 0) {
+      const epicValidation = applyTransition({
         projectId: opts.projectId,
         epicId: opts.epicId,
         fromStatus: epicStatus,
@@ -290,12 +341,15 @@ export function transitionBuildCompleted(opts: {
         reason: "All stories are in review or done",
         sessionId: opts.sessionId,
         validateOnly: true,
-      })
-    );
-  }
+      });
+      if (!epicValidation.valid) {
+        return refused(
+          epicValidation.error ?? "The workflow engine refused epic review"
+        );
+      }
+    }
 
-  requireValid(
-    transitionStory({
+    const storyTransition = transitionStory({
       projectId: opts.projectId,
       epicId: opts.epicId,
       userStoryId: story.id,
@@ -303,12 +357,16 @@ export function transitionBuildCompleted(opts: {
       toStatus: "review",
       reason,
       sessionId: opts.sessionId,
-    })
-  );
+    });
+    if (!storyTransition.valid) {
+      return refused(
+        storyTransition.error ?? "The workflow engine refused story review",
+        remaining.length
+      );
+    }
 
-  if (remaining.length === 0) {
-    requireValid(
-      applyTransition({
+    if (remaining.length === 0) {
+      const epicTransition = applyTransition({
         projectId: opts.projectId,
         epicId: opts.epicId,
         fromStatus: epicStatus,
@@ -317,20 +375,33 @@ export function transitionBuildCompleted(opts: {
         source: "build",
         reason: "All stories are in review or done",
         sessionId: opts.sessionId,
-      })
-    );
-    return { epicPromoted: true, remainingStories: 0 };
-  }
+      });
+      if (!epicTransition.valid) {
+        return refused(
+          epicTransition.error ?? "The workflow engine refused epic review"
+        );
+      }
+      return { valid: true, epicPromoted: true, remainingStories: 0 };
+    }
 
-  logWorkflowDecision({
-    projectId: opts.projectId,
-    epicId: opts.epicId,
-    status: epicStatus,
-    actor: "agent",
-    reason: `${remaining.length} ${remaining.length === 1 ? "story remains" : "stories remain"} before epic review (${remaining.map((item) => item.id).join(", ")})`,
-    sessionId: opts.sessionId,
-  });
-  return { epicPromoted: false, remainingStories: remaining.length };
+    logWorkflowDecision({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      status: epicStatus,
+      actor: "agent",
+      reason: `${remaining.length} ${remaining.length === 1 ? "story remains" : "stories remain"} before epic review (${remaining.map((item) => item.id).join(", ")})`,
+      sessionId: opts.sessionId,
+    });
+    return {
+      valid: true,
+      epicPromoted: false,
+      remainingStories: remaining.length,
+    };
+  } catch (error) {
+    return refused(
+      error instanceof Error ? error.message : "Unknown workflow completion error"
+    );
+  }
 }
 
 /** Move a negative review back to buildable work through guarded writes. */
@@ -443,12 +514,18 @@ export function finalizeBuildTerminalOutcome(opts: {
   reason?: string;
 }):
   | { kind: "promoted"; epicPromoted: boolean; remainingStories: number }
+  | { kind: "refused"; error: string }
   | { kind: "awaiting_reply" }
   | { kind: "failed" } {
   if (opts.success && opts.outcome !== "asked_question") {
+    const completed = transitionBuildCompleted(opts);
+    if (!completed.valid) {
+      return { kind: "refused", error: completed.error };
+    }
     return {
       kind: "promoted",
-      ...transitionBuildCompleted(opts),
+      epicPromoted: completed.epicPromoted,
+      remainingStories: completed.remainingStories,
     };
   }
 

@@ -10,6 +10,7 @@ import {
   type StoryStatus,
 } from "@/lib/workflow/transition-service";
 import type { KanbanStatus } from "@/lib/types/kanban";
+import { emitTicketMoved } from "@/lib/events/emit";
 
 export interface ImportResult {
   epicsUpserted: number;
@@ -49,6 +50,11 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
   let storiesUpserted = 0;
   let storiesRemoved = 0;
   let commentsUpserted = 0;
+  const deferredTicketMoves: Array<{
+    epicId: string;
+    fromStatus: KanbanStatus;
+    toStatus: KanbanStatus;
+  }> = [];
 
   const transaction = sqlite.transaction(() => {
     // Get current epic/story IDs for deletion pass
@@ -67,19 +73,20 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
     for (const epic of data.epics) {
       const existingEpicStatus = currentEpicStatus.get(epic.id);
       if (existingEpicStatus && existingEpicStatus !== epic.status) {
+        const fromStatus = existingEpicStatus as KanbanStatus;
+        const toStatus = epic.status as KanbanStatus;
         const result = applyTransition({
           projectId,
           epicId: epic.id,
-          fromStatus: existingEpicStatus as KanbanStatus,
-          toStatus: epic.status as KanbanStatus,
+          fromStatus,
+          toStatus,
           actor: "system",
           source: "api",
           reason: "arji.json status import",
+          deferEvent: true,
         });
-        if (!result.valid) {
-          throw new Error(
-            `Cannot import status for epic "${epic.title}": ${result.error}`
-          );
+        if (result.valid) {
+          deferredTicketMoves.push({ epicId: epic.id, fromStatus, toStatus });
         }
       }
       db.insert(epics)
@@ -131,7 +138,10 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
       for (const story of epic.user_stories) {
         const existingStoryStatus = currentStoryStatus.get(story.id);
         if (existingStoryStatus && existingStoryStatus !== story.status) {
-          const result = applyStoryTransition({
+          // A refused status is logged by the workflow service and skipped;
+          // content reconciliation for this story and the rest of the file
+          // continues inside the same transaction.
+          applyStoryTransition({
             projectId,
             epicId: epic.id,
             userStoryId: story.id,
@@ -141,11 +151,6 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
             source: "api",
             reason: "arji.json story status import",
           });
-          if (!result.valid) {
-            throw new Error(
-              `Cannot import status for story "${story.title}": ${result.error}`
-            );
-          }
         }
         db.insert(userStories)
           .values({
@@ -198,6 +203,12 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
   });
 
   transaction();
+
+  // Status writes and activity entries above are transactional. Emit only
+  // after commit so a later import error cannot publish a phantom board move.
+  for (const move of deferredTicketMoves) {
+    emitTicketMoved(projectId, move.epicId, move.fromStatus, move.toStatus);
+  }
 
   return { epicsUpserted, epicsRemoved, storiesUpserted, storiesRemoved, commentsUpserted };
 }
