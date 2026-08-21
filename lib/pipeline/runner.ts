@@ -35,7 +35,7 @@ import { PIPELINE_REASONS } from "./constants";
 export interface PipelineStageResult {
   sessionId: string;
   success: boolean;
-  /** Session delivery verdict ("answered" | "asked_question" | "silent" | "error"). */
+  /** Session/workflow verdict (answered, asked_question, silent, error, or transition_refused). */
   outcome: string | null;
   error: string | null;
 }

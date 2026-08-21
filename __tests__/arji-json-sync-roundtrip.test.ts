@@ -517,7 +517,27 @@ describe("arji.json sync roundtrip", () => {
       const { importArjiJson } = await import("@/lib/sync/import");
       const result = await importArjiJson("proj-1");
 
-      expect(result).toMatchObject({ epicsUpserted: 1, storiesUpserted: 1 });
+      expect(result).toMatchObject({
+        epicsUpserted: 1,
+        storiesUpserted: 1,
+        statusesSkipped: [
+          {
+            target: "epic",
+            epicId: "e-guarded",
+            fromStatus: "review",
+            toStatus: "done",
+            reason: expect.stringContaining("manual approval"),
+          },
+          {
+            target: "story",
+            epicId: "e-guarded",
+            userStoryId: "s-guarded",
+            fromStatus: "in_progress",
+            toStatus: "done",
+            reason: expect.stringContaining("Invalid transition"),
+          },
+        ],
+      });
       expect(
         db.select().from(schema.epics).where(eq(schema.epics.id, "e-guarded")).get()
       ).toMatchObject({ title: "Updated epic title", status: "review" });

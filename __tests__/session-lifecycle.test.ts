@@ -148,6 +148,7 @@ describe("session lifecycle transitions", () => {
       "asked_question",
       "silent",
       "error",
+      "transition_refused",
     ]);
     for (const outcome of SESSION_OUTCOMES) {
       expect(isSessionOutcome(outcome)).toBe(true);

@@ -27,6 +27,11 @@ const OUTCOME_CONFIG: Record<
     label: "Error",
     className: "text-destructive border-destructive/30 bg-destructive/10",
   },
+  transition_refused: {
+    label: "Transition held",
+    className:
+      "text-priority-yellow border-priority-yellow/30 bg-priority-yellow/10",
+  },
 };
 
 function isKnownOutcome(value: string): value is SessionOutcome {

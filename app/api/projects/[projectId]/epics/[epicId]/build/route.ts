@@ -58,6 +58,7 @@ import {
 } from "@/lib/events/emit";
 import {
   finalizeBuildTerminalOutcome,
+  resolveBuildSessionResult,
   transitionBuildStarted,
   WorkflowTransitionError,
 } from "@/lib/workflow/automatic-transitions";
@@ -344,10 +345,17 @@ export async function POST(request: NextRequest, { params }: Params) {
       outcome,
       error: result?.error,
     });
-    if (terminal.kind !== "failed") {
+    if (terminal.kind !== "failed" && terminal.kind !== "refused") {
       emitSessionCompleted(projectId, epicId, sessionId);
     } else {
-      emitSessionFailed(projectId, epicId, sessionId, result?.error || "Build failed");
+      emitSessionFailed(
+        projectId,
+        epicId,
+        sessionId,
+        terminal.kind === "refused"
+          ? terminal.error
+          : result?.error || "Build failed"
+      );
     }
 
     // Post output as epic comment
@@ -364,11 +372,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       })
       .run();
 
-    return {
+    return resolveBuildSessionResult(terminal, {
       success: !!result?.success,
       outcome,
       error: result?.error ?? null,
-    };
+    });
   };
 
   // Autonomous pipeline: when active, wrap the launch closure with the

@@ -40,6 +40,8 @@ export interface TransitionContext {
   hasCompletedReview: boolean;
   /** Story approval is itself an explicit human review decision. */
   requireCompletedReview?: boolean;
+  /** Story approval cannot resolve epic-scoped findings on its own. */
+  requireResolvedComments?: boolean;
   /** Whether there is a queued/running code-producing session on this ticket */
   hasRunningSession: boolean;
   /** The actor initiating the transition */
@@ -75,7 +77,11 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
   },
   // Cannot move to Done with open review comments
   (ctx) => {
-    if (ctx.toStatus === "done" && ctx.hasOpenReviewComments) {
+    if (
+      ctx.toStatus === "done" &&
+      ctx.requireResolvedComments !== false &&
+      ctx.hasOpenReviewComments
+    ) {
       return "Cannot move to Done: there are unresolved review comments. Resolve all review comments first.";
     }
     return null;

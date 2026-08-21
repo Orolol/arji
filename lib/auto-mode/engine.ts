@@ -23,6 +23,7 @@ import {
   type AutoModeBoard,
 } from "./select";
 import { tryAutoMerge, type AutoMergeOutcome } from "./merge";
+import { SESSION_TRANSITION_REFUSED_OUTCOME } from "@/lib/agent-sessions/lifecycle";
 
 /**
  * Full Auto Mode — the standing build / review / merge supervisor.
@@ -360,22 +361,28 @@ function reconcileInFlight(
     // The selectors treat it as "no review happened" so the epic stays
     // reviewable; charging it here is what bounds those retries — three
     // silent reviews park the epic instead of looping.
+    const sessionOutcome = deps.readSessionOutcome(sessionId);
     const silentReview =
       status === "completed" &&
       entry.kind === "review" &&
-      deps.readSessionOutcome(sessionId) === "silent";
+      sessionOutcome === "silent";
+    const transitionRefused =
+      status === "completed" &&
+      sessionOutcome === SESSION_TRANSITION_REFUSED_OUTCOME;
 
-    if (status === "completed" && !silentReview) {
+    if (status === "completed" && !silentReview && !transitionRefused) {
       autoModeRegistry.clearFailures(projectId, entry.ticketId);
       continue;
     }
-    if (status !== "failed" && !silentReview) continue;
+    if (status !== "failed" && !silentReview && !transitionRefused) continue;
 
     const failures = autoModeRegistry.recordFailure(
       projectId,
       entry.ticketId,
       entry.epicId,
-      silentReview
+      transitionRefused
+        ? "build completed but its workflow transition was refused"
+        : silentReview
         ? "review completed with no verdict"
         : `${entry.kind} session failed`
     );

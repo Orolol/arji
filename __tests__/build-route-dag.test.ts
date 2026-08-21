@@ -72,7 +72,7 @@ vi.mock("@/lib/db", () => {
         title: "Test Epic",
         description: "A test epic",
         epicId: "epic-generic",
-        status: "todo",
+        status: "in_progress",
         readableId: "E-p-001",
       };
     }),
@@ -144,6 +144,7 @@ vi.mock("@/lib/agent-sessions/lifecycle", () => ({
   markSessionTerminal: mockMarkSessionTerminal,
   isSessionLifecycleConflictError: vi.fn(() => false),
   isSessionNotFoundError: vi.fn(() => false),
+  recordSessionTransitionRefusal: vi.fn(),
 }));
 
 vi.mock("@/lib/workflow/agent-question", () => ({

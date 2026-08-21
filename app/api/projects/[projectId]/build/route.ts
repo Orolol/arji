@@ -64,7 +64,7 @@ import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-ca
 import {
   finalizeBuildTerminalOutcome,
   logBuildFailure,
-  transitionBuildCompleted,
+  resolveBuildSessionResult,
   transitionBuildStarted,
   WorkflowTransitionError,
 } from "@/lib/workflow/automatic-transitions";
@@ -399,11 +399,13 @@ export async function POST(
         // Update all associated epics unless the agent ended by asking a question.
         if (result?.success && outcome !== "asked_question") {
           for (const eid of allEpicIds) {
-            transitionBuildCompleted({
+            finalizeBuildTerminalOutcome({
               projectId,
               epicId: eid,
               scope: "epic",
               sessionId,
+              success: true,
+              outcome,
               reason: "Team build completed successfully",
             });
           }
@@ -616,7 +618,7 @@ export async function POST(
         }
       }
 
-      finalizeBuildTerminalOutcome({
+      const terminal = finalizeBuildTerminalOutcome({
         projectId,
         epicId,
         scope: "epic",
@@ -640,11 +642,11 @@ export async function POST(
         })
         .run();
 
-      return {
+      return resolveBuildSessionResult(terminal, {
         success: !!result?.success,
         outcome,
         error: result?.error ?? null,
-      };
+      });
     };
 
     // Settlement signal for the wave engine (and any future caller that

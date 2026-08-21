@@ -18,6 +18,15 @@ export interface ImportResult {
   storiesUpserted: number;
   storiesRemoved: number;
   commentsUpserted: number;
+  /** Guarded status changes that were left unchanged while content synced. */
+  statusesSkipped: Array<{
+    target: "epic" | "story";
+    epicId: string;
+    userStoryId?: string;
+    fromStatus: string;
+    toStatus: string;
+    reason: string;
+  }>;
 }
 
 export async function importArjiJson(projectId: string): Promise<ImportResult> {
@@ -50,6 +59,7 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
   let storiesUpserted = 0;
   let storiesRemoved = 0;
   let commentsUpserted = 0;
+  const statusesSkipped: ImportResult["statusesSkipped"] = [];
   const deferredTicketMoves: Array<{
     epicId: string;
     fromStatus: KanbanStatus;
@@ -87,6 +97,14 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
         });
         if (result.valid) {
           deferredTicketMoves.push({ epicId: epic.id, fromStatus, toStatus });
+        } else {
+          statusesSkipped.push({
+            target: "epic",
+            epicId: epic.id,
+            fromStatus,
+            toStatus,
+            reason: result.error ?? "Unknown workflow guard failure",
+          });
         }
       }
       db.insert(epics)
@@ -141,7 +159,7 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
           // A refused status is logged by the workflow service and skipped;
           // content reconciliation for this story and the rest of the file
           // continues inside the same transaction.
-          applyStoryTransition({
+          const result = applyStoryTransition({
             projectId,
             epicId: epic.id,
             userStoryId: story.id,
@@ -151,6 +169,16 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
             source: "api",
             reason: "arji.json story status import",
           });
+          if (!result.valid) {
+            statusesSkipped.push({
+              target: "story",
+              epicId: epic.id,
+              userStoryId: story.id,
+              fromStatus: existingStoryStatus,
+              toStatus: story.status,
+              reason: result.error ?? "Unknown workflow guard failure",
+            });
+          }
         }
         db.insert(userStories)
           .values({
@@ -210,7 +238,14 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
     emitTicketMoved(projectId, move.epicId, move.fromStatus, move.toStatus);
   }
 
-  return { epicsUpserted, epicsRemoved, storiesUpserted, storiesRemoved, commentsUpserted };
+  return {
+    epicsUpserted,
+    epicsRemoved,
+    storiesUpserted,
+    storiesRemoved,
+    commentsUpserted,
+    statusesSkipped,
+  };
 }
 
 function upsertComments(

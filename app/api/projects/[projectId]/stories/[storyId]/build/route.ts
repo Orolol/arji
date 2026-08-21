@@ -56,6 +56,7 @@ import {
 } from "@/lib/pipeline";
 import {
   finalizeBuildTerminalOutcome,
+  resolveBuildSessionResult,
   transitionBuildStarted,
   WorkflowTransitionError,
 } from "@/lib/workflow/automatic-transitions";
@@ -302,7 +303,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
 
-    finalizeBuildTerminalOutcome({
+    const terminal = finalizeBuildTerminalOutcome({
       projectId,
       epicId: epic.id,
       scope: "story",
@@ -327,11 +328,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       })
       .run();
 
-    return {
+    return resolveBuildSessionResult(terminal, {
       success: !!result?.success,
       outcome,
       error: result?.error ?? null,
-    };
+    });
   };
 
   // Autonomous pipeline: when active, wrap the launch closure with the

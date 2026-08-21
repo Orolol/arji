@@ -149,6 +149,10 @@ export function EpicCard({
     : null;
   const linkedActivityId = activeAgentActivity?.sessionId ?? null;
   const showFailure = !!failedSession && !activeAgentActivity;
+  const remainingStories = Math.max(epic.usCount - epic.usDone, 0);
+  const showDeliveredWithRemainingStories =
+    (epic.status === "done" || epic.status === "released") &&
+    remainingStories > 0;
 
   // Elapsed time ticker for active agent
   const [elapsedText, setElapsedText] = useState("");
@@ -344,6 +348,16 @@ export function EpicCard({
             data-testid={`epic-draft-${epic.id}`}
           >
             Draft
+          </span>
+        )}
+        {showDeliveredWithRemainingStories && (
+          <span
+            className="inline-flex items-center gap-1 rounded-[4px] border border-amber-500/40 px-[5px] text-[10px] text-amber-600 dark:text-amber-400"
+            title={`${remainingStories} ${remainingStories === 1 ? "story remains" : "stories remain"} unfinished`}
+            data-testid={`epic-incomplete-stories-${epic.id}`}
+          >
+            <TriangleAlert className="h-3 w-3" aria-hidden="true" />
+            {remainingStories} {remainingStories === 1 ? "story" : "stories"} left
           </span>
         )}
         {hasUnreadAiUpdate && (

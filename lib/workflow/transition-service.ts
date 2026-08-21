@@ -52,6 +52,8 @@ export interface ApplyStoryTransitionOpts {
   reviewScope?: "story" | "epic";
   /** Explicit human story approval does not require a separate review-agent session. */
   requireCompletedReview?: boolean;
+  /** Epic-scoped findings stay open when one child story is approved. */
+  requireResolvedComments?: boolean;
 }
 
 function logRefusedTransition(opts: {
@@ -179,6 +181,7 @@ export function applyStoryTransition(
     validateOnly,
     reviewScope = "story",
     requireCompletedReview = true,
+    requireResolvedComments = true,
   } = opts;
 
   if (fromStatus === toStatus) return { valid: true };
@@ -190,6 +193,7 @@ export function applyStoryTransition(
     toStatus,
     actor,
     requireCompletedReview,
+    requireResolvedComments,
   });
   ctx.source = source;
   const result = validateTransition(ctx);

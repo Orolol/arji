@@ -15,6 +15,7 @@ export function buildTransitionContext(opts: {
   toStatus: KanbanStatus;
   actor: "user" | "agent" | "system";
   requireCompletedReview?: boolean;
+  requireResolvedComments?: boolean;
 }): TransitionContext {
   const {
     epicId,
@@ -23,6 +24,7 @@ export function buildTransitionContext(opts: {
     toStatus,
     actor,
     requireCompletedReview = true,
+    requireResolvedComments = true,
   } = opts;
 
   // Check for open review comments
@@ -86,6 +88,7 @@ export function buildTransitionContext(opts: {
     hasOpenReviewComments: openComments.length > 0,
     hasCompletedReview: completedReviewSessions.length > 0,
     requireCompletedReview,
+    requireResolvedComments,
     hasRunningSession: runningSessions.length > 0,
     actor,
   };

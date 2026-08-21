@@ -83,8 +83,16 @@ describe("workflow approval regressions", () => {
       mockNextRequest({ url: "http://localhost/approve", method: "POST" }),
       mockRouteContext({ projectId: "p-epic", epicId: "e-epic" })
     );
+    const body = await response.json();
 
     expect(response.status).toBe(200);
+    expect(body.data.skippedStories).toEqual([
+      {
+        id: "story-added-late",
+        title: "Added late",
+        status: "todo",
+      },
+    ]);
     expect(db.select().from(epics).where(eq(epics.id, "e-epic")).get()?.status).toBe(
       "done"
     );
@@ -114,7 +122,7 @@ describe("workflow approval regressions", () => {
     );
   });
 
-  it("treats story approval as the human review decision and holds only the parent guard", async () => {
+  it("approves one story without resolving epic-scoped findings", async () => {
     db.insert(projects).values({ id: "p-story", name: "Approval" }).run();
     db.insert(epics)
       .values({
@@ -125,11 +133,29 @@ describe("workflow approval regressions", () => {
       })
       .run();
     db.insert(userStories)
+      .values([
+        {
+          id: "story-done",
+          epicId: "e-story",
+          title: "Already approved",
+          status: "done",
+        },
+        {
+          id: "story-only",
+          epicId: "e-story",
+          title: "Built without a story review agent",
+          status: "review",
+        },
+      ])
+      .run();
+    db.insert(agentSessions)
       .values({
-        id: "story-only",
+        id: "epic-review-session",
+        projectId: "p-story",
         epicId: "e-story",
-        title: "Built without a review agent",
-        status: "review",
+        status: "completed",
+        agentType: "review_code",
+        mode: "plan",
       })
       .run();
     db.insert(reviewComments)
@@ -153,7 +179,7 @@ describe("workflow approval regressions", () => {
     expect(body.data).toMatchObject({
       approved: true,
       epicComplete: false,
-      epicHoldReason: expect.stringContaining("no completed review"),
+      epicHoldReason: expect.stringContaining("unresolved review comments"),
     });
     expect(
       db.select().from(userStories).where(eq(userStories.id, "story-only")).get()?.status
@@ -167,7 +193,7 @@ describe("workflow approval regressions", () => {
         .from(reviewComments)
         .where(eq(reviewComments.id, "open-finding"))
         .get()?.status
-    ).toBe("resolved");
+    ).toBe("open");
     expect(
       db
         .select()

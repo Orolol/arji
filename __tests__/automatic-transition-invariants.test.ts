@@ -177,24 +177,35 @@ describe("deterministic build completion", () => {
     expect(storyStatus(storyIds[1])).toBe("todo");
   });
 
-  it("returns a logged refusal instead of throwing when the session is still active", () => {
+  it("persists a refused outcome when another build still owns the ticket", () => {
     const { projectId, epicId } = seedEpic("in_progress");
     db.insert(agentSessions)
-      .values({
-        id: "stuck-terminal-session",
-        projectId,
-        epicId,
-        status: "running",
-        agentType: "build",
-        mode: "code",
-      })
+      .values([
+        {
+          id: "completed-terminal-session",
+          projectId,
+          epicId,
+          status: "completed",
+          outcome: "answered",
+          agentType: "build",
+          mode: "code",
+        },
+        {
+          id: "other-active-session",
+          projectId,
+          epicId,
+          status: "running",
+          agentType: "build",
+          mode: "code",
+        },
+      ])
       .run();
 
     const result = finalizeBuildTerminalOutcome({
       projectId,
       epicId,
       scope: "epic",
-      sessionId: "stuck-terminal-session",
+      sessionId: "completed-terminal-session",
       success: true,
       outcome: "answered",
     });
@@ -207,6 +218,17 @@ describe("deterministic build completion", () => {
     expect(
       db
         .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.id, "completed-terminal-session"))
+        .get()
+    ).toMatchObject({
+      status: "completed",
+      outcome: "transition_refused",
+      error: expect.stringContaining("queued or running"),
+    });
+    expect(
+      db
+        .select()
         .from(ticketActivityLog)
         .where(eq(ticketActivityLog.epicId, epicId))
         .all()
@@ -215,7 +237,7 @@ describe("deterministic build completion", () => {
         fromStatus: "in_progress",
         toStatus: "in_progress",
         reason: expect.stringContaining("review promotion was refused"),
-        sessionId: "stuck-terminal-session",
+        sessionId: "completed-terminal-session",
       })
     );
   });

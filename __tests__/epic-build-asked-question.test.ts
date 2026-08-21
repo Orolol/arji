@@ -60,6 +60,17 @@ vi.mock("@/lib/agents/concurrency", () => ({
   createAgentAlreadyRunningPayload: vi.fn(() => ({})),
 }));
 
+vi.mock("@/lib/events/emit", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/events/emit")>(
+    "@/lib/events/emit"
+  );
+  return {
+    ...actual,
+    emitSessionCompleted: vi.fn(actual.emitSessionCompleted),
+    emitSessionFailed: vi.fn(actual.emitSessionFailed),
+  };
+});
+
 vi.mock("fs", () => ({
   default: { mkdirSync: vi.fn(), writeFileSync: vi.fn(), existsSync: vi.fn(() => false) },
 }));
@@ -76,6 +87,9 @@ const {
 } = await import("@/lib/db/schema");
 const { POST } = await import(
   "@/app/api/projects/[projectId]/epics/[epicId]/build/route"
+);
+const { emitSessionCompleted, emitSessionFailed } = await import(
+  "@/lib/events/emit"
 );
 
 let counter = 0;
@@ -312,6 +326,17 @@ describe("epic build route — asked_question workflow effects", () => {
           sessionId,
           reason: expect.stringContaining("review promotion was refused"),
         })
+      );
+      expect(emitSessionFailed).toHaveBeenCalledWith(
+        projectId,
+        epicId,
+        sessionId,
+        expect.stringContaining("queued or running")
+      );
+      expect(emitSessionCompleted).not.toHaveBeenCalledWith(
+        projectId,
+        epicId,
+        sessionId
       );
     } finally {
       sqlite.exec("DROP TRIGGER IF EXISTS fail_completed_session_update");

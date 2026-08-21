@@ -138,6 +138,7 @@ vi.mock("@/lib/agent-sessions/lifecycle", () => ({
   markSessionTerminal: mockMarkSessionTerminal,
   isSessionLifecycleConflictError: vi.fn(() => false),
   isSessionNotFoundError: vi.fn(() => false),
+  recordSessionTransitionRefusal: vi.fn(),
 }));
 
 vi.mock("@/lib/workflow/agent-question", () => ({

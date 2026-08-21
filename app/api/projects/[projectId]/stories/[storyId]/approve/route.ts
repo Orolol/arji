@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects, epics, reviewComments, userStories } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { projects, epics, userStories } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import simpleGit from "simple-git";
 import { getStoryOr404, isErrorResponse } from "@/lib/api/route-helpers";
@@ -29,20 +29,6 @@ export async function POST(_request: NextRequest, { params }: Params) {
       { status: 400 }
     );
   }
-
-  // review_comments are epic-scoped in the current schema. Story approval is
-  // an explicit human review decision, so mirror epic approval by resolving
-  // the parent epic's open findings before validating this story.
-  const now = new Date().toISOString();
-  db.update(reviewComments)
-    .set({ status: "resolved", updatedAt: now })
-    .where(
-      and(
-        eq(reviewComments.epicId, story.epicId),
-        eq(reviewComments.status, "open")
-      )
-    )
-    .run();
 
   // Check whether this approval will complete the epic before applying any
   // status write, so all workflow guards can be validated as one decision.
@@ -72,6 +58,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
     source: "approve",
     reason: "Story review approved",
     requireCompletedReview: false,
+    requireResolvedComments: false,
     validateOnly: true,
   });
   if (!storyValidation.valid) {
@@ -102,6 +89,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
     source: "approve",
     reason: "Story review approved",
     requireCompletedReview: false,
+    requireResolvedComments: false,
   });
 
   let merged = false;

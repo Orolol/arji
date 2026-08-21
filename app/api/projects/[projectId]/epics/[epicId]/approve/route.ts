@@ -146,6 +146,11 @@ export async function POST(_request: NextRequest, { params }: Params) {
     data: {
       approved: true,
       merged,
+      skippedStories: skippedStories.map((story) => ({
+        id: story.id,
+        title: story.title,
+        status: story.status ?? "todo",
+      })),
     },
   });
 }

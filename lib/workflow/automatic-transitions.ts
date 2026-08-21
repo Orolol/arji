@@ -16,6 +16,7 @@ import {
   type StoryStatus,
 } from "./transition-service";
 import { handleAskedQuestionOutcome } from "./agent-question";
+import { recordSessionTransitionRefusal } from "@/lib/agent-sessions/lifecycle";
 
 export type BuildScope = "epic" | "story";
 
@@ -502,6 +503,31 @@ export function logBuildFailure(opts: {
  * legacy successful null outcome) is a delivered build; asked_question holds
  * the ticket; every unsuccessful/error result stays in progress with a log.
  */
+export type BuildTerminalOutcome =
+  | { kind: "promoted"; epicPromoted: boolean; remainingStories: number }
+  | { kind: "refused"; error: string }
+  | { kind: "awaiting_reply" }
+  | { kind: "failed" };
+
+export interface BuildSessionResult {
+  success: boolean;
+  outcome: string | null;
+  error: string | null;
+}
+
+/** Fold the board-transition decision into a pipeline/wave settle payload. */
+export function resolveBuildSessionResult(
+  terminal: BuildTerminalOutcome,
+  result: BuildSessionResult
+): BuildSessionResult {
+  if (terminal.kind !== "refused") return result;
+  return {
+    success: false,
+    outcome: "transition_refused",
+    error: terminal.error,
+  };
+}
+
 export function finalizeBuildTerminalOutcome(opts: {
   projectId: string;
   epicId: string;
@@ -512,14 +538,11 @@ export function finalizeBuildTerminalOutcome(opts: {
   outcome: string | null;
   error?: string | null;
   reason?: string;
-}):
-  | { kind: "promoted"; epicPromoted: boolean; remainingStories: number }
-  | { kind: "refused"; error: string }
-  | { kind: "awaiting_reply" }
-  | { kind: "failed" } {
+}): BuildTerminalOutcome {
   if (opts.success && opts.outcome !== "asked_question") {
     const completed = transitionBuildCompleted(opts);
     if (!completed.valid) {
+      recordSessionTransitionRefusal(opts.sessionId, completed.error);
       return { kind: "refused", error: completed.error };
     }
     return {

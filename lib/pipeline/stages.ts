@@ -64,8 +64,10 @@ import {
 import { handleAskedQuestionOutcome } from "@/lib/workflow/agent-question";
 import {
   finalizeBuildTerminalOutcome,
+  resolveBuildSessionResult,
   transitionBuildStarted,
   transitionReviewRejected,
+  type BuildTerminalOutcome,
 } from "@/lib/workflow/automatic-transitions";
 import {
   buildEpicTargetUrl,
@@ -686,6 +688,7 @@ async function dispatchPipelineStage(
       }
     }
 
+    let buildTerminal: BuildTerminalOutcome | null = null;
     if (isReview) {
       finalizeReviewSession({
         init,
@@ -696,7 +699,7 @@ async function dispatchPipelineStage(
         reviewOutputs,
       });
     } else {
-      finalizeCodeSession({
+      buildTerminal = finalizeCodeSession({
         init,
         sessionId,
         result,
@@ -705,11 +708,14 @@ async function dispatchPipelineStage(
       });
     }
 
-    return {
+    const sessionResult = {
       success: !!result?.success,
       outcome,
       error: result?.error ?? null,
     };
+    return buildTerminal
+      ? resolveBuildSessionResult(buildTerminal, sessionResult)
+      : sessionResult;
   };
 
   let settleLaunch!: (result: PipelineStageResult) => void;
@@ -746,7 +752,7 @@ function finalizeCodeSession(input: {
   result: StageResultPayload;
   outcome: string | null;
   completedAt: string;
-}): void {
+}): BuildTerminalOutcome {
   const { init, sessionId, result, outcome, completedAt } = input;
   const { projectId, epicId, userStoryId, scope } = init;
 
@@ -765,12 +771,14 @@ function finalizeCodeSession(input: {
         : "Story build completed successfully",
   });
   if (scope === "epic") {
-    if (terminal.kind === "failed") {
+    if (terminal.kind === "failed" || terminal.kind === "refused") {
       emitSessionFailed(
         projectId,
         epicId,
         sessionId,
-        result?.error || "Build failed"
+        terminal.kind === "refused"
+          ? terminal.error
+          : result?.error || "Build failed"
       );
     } else {
       emitSessionCompleted(projectId, epicId, sessionId);
@@ -790,6 +798,8 @@ function finalizeCodeSession(input: {
       createdAt: completedAt,
     })
     .run();
+
+  return terminal;
 }
 
 /** Post-completion effects of a review stage — review-route replica. */
