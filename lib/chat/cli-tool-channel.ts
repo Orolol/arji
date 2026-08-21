@@ -68,7 +68,7 @@ export function createChatCliToolChannel({
 
     let released = false;
     return {
-      mcp: buildMcpSpawnConfig({ token, toolset: "chat" }),
+      mcp: buildMcpSpawnConfig({ token, toolset: "chat", provider }),
       release: () => {
         if (released) return;
         released = true;

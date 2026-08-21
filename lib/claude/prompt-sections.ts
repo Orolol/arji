@@ -119,7 +119,8 @@ export function projectContextSections(
 }
 
 /**
- * Instructions for the Arij MCP tool channel (mcp__arij__* tools).
+ * Instructions for the Arij MCP tool channel (the mcp__arij tools, in the
+ * spawning provider's spelling).
  *
  * Deliberately called by NO builder function in prompt-builder.ts: the
  * section is appended centrally by processManager.start() — and only when
@@ -133,11 +134,19 @@ export function projectContextSections(
  * Review agents (agentType `review_*`) get an extra sentence pointing at
  * submit_findings while keeping the prose "**Overall Verdict: …**" line the
  * review route still parses (the verdict stays prose-driven in v1).
+ *
+ * `toolPrefix` is the spawning provider's tool-name spelling
+ * (arijMcpToolPrefix in mcp-injection.ts): omp names the tools
+ * `mcp__arij_*`, one underscore short of claude/codex — the default keeps
+ * claude/codex prompts byte-identical.
  */
-export function arijToolsSection(agentType: string | null): string {
+export function arijToolsSection(
+  agentType: string | null,
+  toolPrefix = "mcp__arij__",
+): string {
   const base =
     "You are connected to Arij, the orchestrator that launched this session, " +
-    "through MCP tools named mcp__arij__*. Use them for structured signals " +
+    `through MCP tools named ${toolPrefix}*. Use them for structured signals ` +
     "instead of prose conventions: get_ticket to re-read current ticket " +
     "state; post_comment for substantive progress/result notes; " +
     "update_ticket_status to move the ticket (transitions are validated — " +

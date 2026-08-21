@@ -262,6 +262,25 @@ describe("processManager.start() — MCP injection gating", () => {
     expect(options.prompt as string).toContain("## Arij tools");
   });
 
+  it("injects for oh-my-pi with omp's single-underscore tool spelling", () => {
+    pmState.sessionRow = sessionRow();
+
+    processManager.start("s6b", { mode: "code", prompt: "BASE" }, "oh-my-pi");
+
+    const options = pmState.providerSpawnedOptions[0];
+    const mcp = options.mcp as McpSpawnConfig | undefined;
+    expect(mcp).toBeDefined();
+    expect(mcp!.allowedToolNames).toContain("mcp__arij_get_ticket");
+    expect(mcp!.allowedToolNames).not.toContain("mcp__arij__get_ticket");
+    expect(mcp!.env.ARIJ_MCP_TOKEN).toMatch(/^arij-mcp-/);
+
+    // the prompt names the tools in omp's spelling, never claude's
+    const prompt = options.prompt as string;
+    expect(prompt).toContain("## Arij tools");
+    expect(prompt).toContain("mcp__arij_*");
+    expect(prompt).not.toContain("mcp__arij__");
+  });
+
   it("survives a broken db lookup and spawns without injection", () => {
     pmState.sessionRow = sessionRow();
     pmState.throwOnSelect = true;

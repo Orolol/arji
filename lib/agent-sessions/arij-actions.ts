@@ -10,12 +10,16 @@
  *        - ticket_activity_log rows (actor "agent")  -> status changes
  *        - ticket_comments rows (author "agent")     -> comments / questions /
  *                                                       review-findings summaries
- *   2. mcp__arij__* `tool_use` records parsed out of the session's raw chunk
+ *   2. Arij MCP tool-call records parsed out of the session's raw chunk
  *      stream — the supplement. The Claude Code provider returns a single
  *      final envelope (no per-turn stream), so for it this list is usually
- *      empty; streaming providers (codex, …) surface read-only calls
- *      (get_ticket) and calls that left no durable artifact (e.g. a rejected
- *      status transition) through this channel.
+ *      empty; streaming providers surface read-only calls (get_ticket) and
+ *      calls that left no durable artifact (e.g. a rejected status
+ *      transition) through this channel. Each provider spells the call its
+ *      own way: claude `tool_use` records named mcp__arij__*, codex records
+ *      carrying `{ server: "arij", tool }`, and omp `write`s to
+ *      `xd://mcp__arij_*` device paths (single-underscore spelling) whose
+ *      results embed `{ serverName: "arij", mcpToolName }`.
  *
  * Merging dedupes by kind-count: a tool call whose kind already has a durable
  * artifact is considered "covered" and dropped, so a post_comment call and
@@ -28,6 +32,16 @@ import { ticketActivityLog, ticketComments } from "@/lib/db/schema";
 import { listSessionChunks } from "./chunks";
 
 export const ARIJ_MCP_TOOL_PREFIX = "mcp__arij__";
+
+/**
+ * omp mounts MCP tools as xd:// devices and invokes them by `write`ing to
+ * the device path — with its single-underscore tool spelling. Both the
+ * invocation (`tool_execution_start` args) and the assistant's toolCall
+ * echo carry the path; the execution result additionally embeds
+ * `{ serverName: "arij", mcpToolName }` (see arijMcpToolName in
+ * lib/claude/mcp-injection.ts for the spelling contract).
+ */
+const OMP_XD_ARIJ_PREFIX = "xd://mcp__arij_";
 
 export type ArijActionKind =
   | "status_change"
@@ -47,7 +61,7 @@ export interface ArijAction {
 }
 
 export interface ArijToolCall {
-  /** Tool name without the mcp__arij__ prefix (e.g. "get_ticket"). */
+  /** Bare tool name, whatever the provider's prefix (e.g. "get_ticket"). */
   tool: string;
   at: string | null;
 }
@@ -116,15 +130,30 @@ function collectToolNames(
   value: unknown,
   out: ArijToolCall[],
   seenIds: Set<string>,
-  at: string | null
+  at: string | null,
+  nearestId: string | null = null
 ): void {
   if (Array.isArray(value)) {
-    for (const item of value) collectToolNames(item, out, seenIds, at);
+    for (const item of value) collectToolNames(item, out, seenIds, at, nearestId);
     return;
   }
   if (!value || typeof value !== "object") return;
 
   const obj = value as Record<string, unknown>;
+
+  // The call id in scope for omp dedupe: an omp call surfaces as several
+  // records (execution start, execution end, assistant toolCall echo) that
+  // all share one id — carried as `toolCallId` on execution records and as
+  // `id` on the toolCall object — while the arij evidence (xd:// path,
+  // xdev inner) sits in NESTED objects. Threading the nearest ancestor id
+  // down lets those nested matches collapse to a single entry.
+  const ownId =
+    typeof obj.toolCallId === "string"
+      ? obj.toolCallId
+      : typeof obj.id === "string"
+        ? obj.id
+        : null;
+  const contextId = ownId ?? nearestId;
 
   // Claude stream-json shape: { type: "tool_use", id, name, input }
   if (
@@ -144,13 +173,33 @@ function collectToolNames(
     out.push({ tool: obj.tool, at });
   }
 
+  // omp shapes — one per record kind describing the same call:
+  //   { ..., path: "xd://mcp__arij_<tool>", ... }         (invocation args)
+  //   { serverName: "arij", mcpToolName: "<tool>", ... }  (execution result)
+  const pushOmpCall = (tool: string) => {
+    const key = contextId ? `omp:${contextId}` : null;
+    if (key && seenIds.has(key)) return;
+    if (key) seenIds.add(key);
+    out.push({ tool, at });
+  };
+  if (
+    typeof obj.path === "string" &&
+    obj.path.startsWith(OMP_XD_ARIJ_PREFIX)
+  ) {
+    pushOmpCall(obj.path.slice(OMP_XD_ARIJ_PREFIX.length));
+  }
+  if (obj.serverName === "arij" && typeof obj.mcpToolName === "string") {
+    pushOmpCall(obj.mcpToolName);
+  }
+
   for (const child of Object.values(obj)) {
-    collectToolNames(child, out, seenIds, at);
+    collectToolNames(child, out, seenIds, at, contextId);
   }
 }
 
 /**
- * Parse mcp__arij__* tool calls out of an ordered raw chunk stream.
+ * Parse Arij MCP tool calls (any provider's spelling) out of an ordered raw
+ * chunk stream.
  *
  * Chunks are NDJSON-ish but chunk boundaries can fall mid-line, so lines are
  * reassembled across chunks; a line's timestamp is the timestamp of the chunk

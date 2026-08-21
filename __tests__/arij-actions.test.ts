@@ -118,6 +118,95 @@ describe("extractArijToolCalls", () => {
     ]);
   });
 
+  it("supports omp xd:// device records, deduping start/end/echo of one call", () => {
+    // Shapes captured verbatim from a live omp 17.2.1 session's raw chunks:
+    // one MCP call = a tool_execution_start (write to the xd:// device), an
+    // assistant toolCall echo, and a tool_execution_end whose result embeds
+    // { serverName, mcpToolName } — all sharing one call id.
+    const id = "89ba21e6|fc_tmp_fazrfghprin";
+    const start = JSON.stringify({
+      type: "tool_execution_start",
+      toolCallId: id,
+      toolName: "write",
+      args: { content: '{"action": "get_ticket"}', path: "xd://mcp__arij_get_ticket" },
+      intent: "Reading Arij ticket details",
+    });
+    const echo = JSON.stringify({
+      type: "message_update",
+      assistantMessageEvent: {
+        type: "toolcall_end",
+        toolCall: {
+          type: "toolCall",
+          id,
+          name: "write",
+          arguments: { path: "xd://mcp__arij_get_ticket" },
+        },
+      },
+    });
+    const end = JSON.stringify({
+      type: "tool_execution_end",
+      toolCallId: id,
+      toolName: "write",
+      result: {
+        content: [{ type: "text", text: "Error: Error (UNAUTHORIZED): Invalid or expired MCP token" }],
+        details: {
+          xdev: {
+            tool: "mcp__arij_get_ticket",
+            mode: "execute",
+            args: {},
+            inner: { serverName: "arij", mcpToolName: "get_ticket", isError: true },
+          },
+        },
+        isError: true,
+      },
+    });
+    const calls = extractArijToolCalls([
+      { content: `${start}\n${echo}\n${end}\n`, createdAt: "t-omp" },
+    ]);
+    expect(calls).toEqual([{ tool: "get_ticket", at: "t-omp" }]);
+  });
+
+  it("keeps distinct omp calls (different call ids) as separate entries", () => {
+    const call = (id: string, tool: string) =>
+      JSON.stringify({
+        type: "tool_execution_start",
+        toolCallId: id,
+        toolName: "write",
+        args: { path: `xd://mcp__arij_${tool}` },
+      });
+    const calls = extractArijToolCalls([
+      {
+        content: `${call("c1", "get_ticket")}\n${call("c2", "post_comment")}\n`,
+        createdAt: "t-omp",
+      },
+    ]);
+    expect(calls.map((c) => c.tool)).toEqual(["get_ticket", "post_comment"]);
+  });
+
+  it("ignores omp writes to non-arij xd:// devices and plain paths", () => {
+    const chunks = [
+      {
+        content:
+          JSON.stringify({
+            type: "tool_execution_start",
+            toolCallId: "c3",
+            toolName: "write",
+            args: { path: "xd://mcp__other_get_thing" },
+          }) +
+          "\n" +
+          JSON.stringify({
+            type: "tool_execution_start",
+            toolCallId: "c4",
+            toolName: "write",
+            args: { path: "/tmp/notes.md", content: "hello" },
+          }) +
+          "\n",
+        createdAt: "t-omp",
+      },
+    ];
+    expect(extractArijToolCalls(chunks)).toEqual([]);
+  });
+
   it("ignores non-arij tools, other servers, and non-JSON output", () => {
     const chunks = [
       { content: "Working on it... using mcp__arij__post_comment soon\n", createdAt: "t1" },

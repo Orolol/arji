@@ -28,7 +28,7 @@ expansion" is.
 |---|---|---|---|---|---|
 | claude-code | `claude` 2.1.221 | yes | 94 | **yes** | `--mcp-config <file>` + `--strict-mcp-config`, tools named in `--allowedTools` |
 | codex | `codex` 0.148.0 | yes | 20 | **yes** | `-c mcp_servers.arij.*` TOML overrides + `--dangerously-bypass-approvals-and-sandbox` |
-| oh-my-pi | `omp` 17.2.1 | yes | 15 | not yet | supports MCP via `mcp.json`; Arij does not pass it (see below) |
+| oh-my-pi | `omp` 17.2.1 | yes | 15 | **yes** | `mcp.json` entry (install.sh) + `ARIJ_*` env vars at spawn; MCP tools orthogonal to `--tools` (see below) |
 | pi | `pi` 0.84.2 | yes | 6 | no | no MCP surface (see below) |
 | gemini-cli | `gemini` | no | 0 | no | config-file only, no per-spawn flag |
 | deepseek, kimi, zai, qwen-code, opencode, mistral-vibe | various | no | 0 | no | not investigated — none installed, none ever dispatched |
@@ -85,7 +85,7 @@ see the comment on `buildCodexMcpOverrideArgs`.
 > `mcp_servers="probe, codex_apps"` and a live `stdio_server_launcher` all
 > along. Check the server's own stderr before concluding the client is at fault.
 
-## omp — supports MCP, not yet wired
+## omp — wired 2026-08-21
 
 `omp` and `pi` are different products with a confusingly similar lineage
 (can1357/oh-my-pi vs earendil-works/pi), and Arij's `OhMyPiProvider` extending
@@ -109,18 +109,47 @@ per-spawn flag: the entry references `${ARIJ_MCP_TOKEN}` and Arij supplies the
 value in the child's environment. `install.sh` writes exactly that entry into
 `~/.omp/agent/mcp.json`.
 
-**The entry is inert until three things change**, none of them done:
+The entry was inert until 2026-08-21; four things changed, mirroring the
+audit's checklist:
 
-1. `providerSupportsMcp()` has to admit `oh-my-pi`.
-2. The provider must put `ARIJ_BASE_URL` and `ARIJ_MCP_TOKEN` into the child's
-   environment — omp takes no per-spawn MCP flag, so `buildEnv()` is the only
-   seam. `McpSpawnConfig` already carries both values.
-3. **Tool names differ.** omp surfaces tools as `mcp__<server>_<tool>` — a
-   SINGLE underscore between server and tool — so its names are
-   `mcp__arij_get_ticket`, not the `mcp__arij__get_ticket` in
-   `ARIJ_MCP_ALLOWED_TOOL_NAMES` and in the `arijToolsSection` prompt text.
-   Both the allowlist and the prompt need a per-provider spelling before an
-   omp agent can be told to call anything by name.
+1. `providerSupportsMcp()` admits `oh-my-pi`.
+2. `OhMyPiProvider.buildEnv()` merges `options.mcp.env` — `ARIJ_BASE_URL`,
+   `ARIJ_MCP_TOKEN`, and `ARIJ_MCP_TOOLSET` for chat turns — into the child's
+   environment; `BaseCliProvider.buildEnv` gained the `options` parameter to
+   make that possible. RESIDUAL EXPOSURE, accepted: the token is in the
+   child's env, so the agent's bash subshells inherit it — same trust
+   boundary as codex's argv exposure, revoked at session end.
+3. **Tool names differ**, and both naming surfaces are now per-provider:
+   omp surfaces tools as `mcp__<server>_<tool>` — a SINGLE underscore between
+   server and tool — so `arijMcpToolName("oh-my-pi", …)` spells
+   `mcp__arij_get_ticket` into `allowedToolNames`, and `arijToolsSection`
+   takes the provider's prefix for its prompt text. claude/codex spelling
+   (and their prompts) stay byte-identical.
+4. The audit assumed non-code sessions would need the Arij names added to
+   `--tools`. Measured on 17.2.1, the OPPOSITE is true, in both directions:
+   MCP tools are orthogonal to that allowlist — under `--tools
+   read,grep,glob` they stay mounted (as `xd://mcp__arij_*` devices invoked
+   through the `write` built-in) and a fake-token probe's call still reached
+   the server — while ADDING an MCP name to `--tools` is a fatal argv error
+   (`Unknown tools in --tools: …`, validated against built-in names only)
+   that kills the spawn before the session starts. So no flag work at all:
+   review sessions keep the channel, and MCP names must never be appended.
+
+The `mcp.json` entry also passes `ARIJ_MCP_TOOLSET` through
+(`${ARIJ_MCP_TOOLSET:-agent}`), so a CLI chat turn on omp — which mints a
+chat-scoped token — selects the shim's board toolset instead of the agent
+five. Re-run `install.sh` (or just its MCP step) on machines that wrote the
+entry before the passthrough existed. The stale-entry failure is quiet, not
+loud: a chat turn's shim serves the agent five to a chat token, and three of
+them (get_ticket, update_ticket_status, post_comment) actually SUCCEED once
+the model supplies an explicit ticket_id — only ask_question and
+submit_findings 403 on chat tokens — so the symptom is a confusingly
+half-working chat with agent-flavored tool descriptions, easy to misread as
+model flakiness. The selector is presence-based, so
+`OhMyPiProvider.buildEnv` strips any `ARIJ_MCP_TOOLSET` inherited from the
+server's own environment when the channel doesn't set one — otherwise a
+stray export would silently hand every agent session the board-wide chat
+toolset (create_ticket, start_build) on an agent token.
 
 Note also `tools.discoveryMode` in `~/.omp/agent/config.yml`: past 40 tools the
 default `auto` mode hides MCP tools behind a `search_tool_bm25` discovery step
@@ -135,7 +164,7 @@ open feature request
 third-party distributions prewire it as an extension. Nothing in `pi --help` or
 `~/.pi/agent/settings.json` references it.
 
-Sessions on pi (and, for now, on omp) work from prose conventions alone. That
+Sessions on pi work from prose conventions alone. That
 is survivable because the review contract does not depend on the channel:
 reviewers must still end with `**Overall Verdict: …**`, and
 `ingestProseFindings` recovers anchored findings from the report whatever the

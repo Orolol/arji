@@ -39,6 +39,8 @@ import {
   ARIJ_MCP_ALLOWED_TOOL_NAMES,
   ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
   ARIJ_MCP_SERVER_NAME,
+  arijMcpToolName,
+  arijMcpToolPrefix,
   buildMcpSpawnConfig,
   cleanupMcpConfigFile,
   parseMcpToolsEnabledSetting,
@@ -457,6 +459,13 @@ describe("arijToolsSection", () => {
       expect(text).not.toContain("submit_findings");
     },
   );
+
+  it("renders the provider's own tool spelling when given a prefix", () => {
+    const text = arijToolsSection("build", arijMcpToolPrefix("oh-my-pi"));
+    expect(text).toContain("mcp__arij_*");
+    // the double-underscore claude spelling must not leak into an omp prompt
+    expect(text).not.toContain("mcp__arij__");
+  });
 });
 
 describe("parseMcpToolsEnabledSetting — default ON", () => {
@@ -483,12 +492,33 @@ describe("providerSupportsMcp — contract verdicts", () => {
   it.each([
     ["claude-code", true],
     ["codex", true],
+    ["oh-my-pi", true],
+    ["pi", false],
     ["gemini-cli", false],
     ["mistral-vibe", false],
     ["qwen-code", false],
     ["opencode", false],
   ])("%s -> %s", (provider, expected) => {
     expect(providerSupportsMcp(provider)).toBe(expected);
+  });
+});
+
+describe("arijMcpToolPrefix / arijMcpToolName — per-provider spelling", () => {
+  it.each([
+    ["claude-code", "mcp__arij__"],
+    ["codex", "mcp__arij__"],
+    ["oh-my-pi", "mcp__arij_"],
+  ])("%s spells the prefix %s", (provider, prefix) => {
+    expect(arijMcpToolPrefix(provider)).toBe(prefix);
+  });
+
+  it("names an omp tool with a single separating underscore", () => {
+    expect(arijMcpToolName("oh-my-pi", "get_ticket")).toBe(
+      "mcp__arij_get_ticket",
+    );
+    expect(arijMcpToolName("claude-code", "get_ticket")).toBe(
+      "mcp__arij__get_ticket",
+    );
   });
 });
 
@@ -519,6 +549,36 @@ describe("buildMcpSpawnConfig", () => {
     // no agent-only tools leak into the chat allowlist
     expect(config.allowedToolNames).not.toContain("mcp__arij__ask_question");
     expect(config.allowedToolNames).not.toContain("mcp__arij__submit_findings");
+  });
+
+  it("spells the allowlist in omp's single-underscore form for oh-my-pi", () => {
+    const config = buildMcpSpawnConfig({ token: TOKEN, provider: "oh-my-pi" });
+    expect(config.allowedToolNames).toEqual([
+      "mcp__arij_get_ticket",
+      "mcp__arij_update_ticket_status",
+      "mcp__arij_post_comment",
+      "mcp__arij_ask_question",
+      "mcp__arij_submit_findings",
+    ]);
+    // spelling is the ONLY divergence — server, shim and env are unchanged
+    expect(config.env).toEqual(buildMcpSpawnConfig({ token: TOKEN }).env);
+  });
+
+  it("applies the omp spelling to the chat toolset too", () => {
+    const config = buildMcpSpawnConfig({
+      token: TOKEN,
+      toolset: "chat",
+      provider: "oh-my-pi",
+    });
+    expect(config.env.ARIJ_MCP_TOOLSET).toBe("chat");
+    expect(config.allowedToolNames).toContain("mcp__arij_create_ticket");
+    expect(config.allowedToolNames).not.toContain("mcp__arij__create_ticket");
+  });
+
+  it("keeps an explicit claude-code provider byte-identical to the default", () => {
+    expect(buildMcpSpawnConfig({ token: TOKEN, provider: "claude-code" })).toEqual(
+      buildMcpSpawnConfig({ token: TOKEN }),
+    );
   });
 });
 

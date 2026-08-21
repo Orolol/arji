@@ -182,6 +182,10 @@ export class PiProvider extends BaseCliProvider {
     const args: string[] = ["--mode", "json"];
 
     // plan/analyze must not touch the working tree — drop write/edit/bash.
+    // MCP tool names must NEVER be added here: omp validates --tools against
+    // built-in names only, and an unknown name is a fatal argv error that
+    // kills the spawn. Its MCP tools are orthogonal to this allowlist and
+    // stay mounted regardless — see lib/providers/oh-my-pi.ts.
     if (mode !== "code") {
       args.push("--tools", this.readonlyTools().join(","));
     }

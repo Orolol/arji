@@ -125,7 +125,7 @@ function signalChild(child: ChildProcess, signal: "SIGTERM" | "SIGKILL"): void {
  * - `beforeSpawn(args, cwd, spawnContext)` — hook right before the process starts (debug logging, …)
  * - `parseSessionId(stdout, stderr, fallback)` — custom session ID extraction
  * - `isAvailable()` — custom availability check (default: `which <binaryName>`)
- * - `buildEnv()` — custom environment variables
+ * - `buildEnv(options)` — custom environment variables
  * - `buildChunkCallbacks(options)` — map ProviderSpawnOptions.onChunk to raw/output/response callbacks
  * - `buildSpawnErrorMessage(err)` — message when the process cannot be spawned (ENOENT, …)
  * - `buildExitError(code, stdout, stderr)` — error detection/mapping for non-zero exits
@@ -204,9 +204,11 @@ export abstract class BaseCliProvider implements AgentProvider {
 
   /**
    * Build environment variables for the spawned process.
-   * Default: inherits process.env.
+   * Default: inherits process.env. Receives the spawn options because for
+   * some providers the environment is the only per-spawn injection surface
+   * (oh-my-pi's MCP wiring rides entirely on env vars).
    */
-  buildEnv(): NodeJS.ProcessEnv {
+  buildEnv(_options: ProviderSpawnOptions): NodeJS.ProcessEnv {
     return { ...process.env };
   }
 
@@ -440,7 +442,7 @@ export abstract class BaseCliProvider implements AgentProvider {
 
       child = nodeSpawn(this.binaryName, args, {
         cwd: effectiveCwd,
-        env: this.buildEnv(),
+        env: this.buildEnv(options),
         stdio: ["ignore", "pipe", "pipe"],
         // Own process group, so cancelling reaches the whole agent and not
         // just the CLI at its head — see signalChild. Safe here because stdio

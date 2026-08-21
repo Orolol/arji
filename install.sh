@@ -216,6 +216,12 @@ NODE
 # spawns the CLI with ARIJ_MCP_TOKEN in its environment; a CLI launched by hand
 # without one gets a server that exits immediately with a clear message on
 # stderr, which every host isolates per-server.
+#
+# ARIJ_MCP_TOOLSET rides the same seam: agent sessions leave it unset (the
+# default expands to "agent"), CLI chat turns set it to "chat" so the shim
+# serves the board toolset. Only omp actually needs the passthrough — claude
+# gets a per-session --mcp-config carrying the real value — but the entry is
+# shared and the default keeps it inert everywhere else.
 arij_entry_json() {
   local node_bin
   node_bin="$(command -v node)"
@@ -226,7 +232,8 @@ arij_entry_json() {
   "args": ["$SHIM_PATH"],
   "env": {
     "ARIJ_BASE_URL": "\${ARIJ_BASE_URL:-http://localhost:3000}",
-    "ARIJ_MCP_TOKEN": "\${ARIJ_MCP_TOKEN}"
+    "ARIJ_MCP_TOKEN": "\${ARIJ_MCP_TOKEN}",
+    "ARIJ_MCP_TOOLSET": "\${ARIJ_MCP_TOOLSET:-agent}"
   }
 }
 JSON

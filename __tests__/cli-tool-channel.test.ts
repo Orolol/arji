@@ -105,6 +105,22 @@ describe("createChatCliToolChannel", () => {
     expect(resolveMcpToken(second.mcp.env.ARIJ_MCP_TOKEN)).not.toBeNull();
   });
 
+  it("builds an omp chat channel with the single-underscore tool spelling", () => {
+    const channel = createChatCliToolChannel({
+      projectId: "proj1",
+      provider: "oh-my-pi",
+      conversationType: null,
+    });
+
+    expect(channel).not.toBeNull();
+    expect(channel!.mcp.env.ARIJ_MCP_TOOLSET).toBe("chat");
+    expect(channel!.mcp.allowedToolNames).toContain("mcp__arij_create_ticket");
+    expect(channel!.mcp.allowedToolNames).not.toContain(
+      "mcp__arij__create_ticket",
+    );
+    channel!.release();
+  });
+
   it.each(["gemini-cli", "mistral-vibe", "pi", "openai-compatible"])(
     "returns null for provider %s (no MCP injection surface)",
     (provider) => {

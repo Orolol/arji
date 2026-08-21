@@ -66,7 +66,7 @@ export class ZaiProvider extends BaseCliProvider {
     return undefined;
   }
 
-  buildEnv(): NodeJS.ProcessEnv {
+  buildEnv(_options: ProviderSpawnOptions): NodeJS.ProcessEnv {
     return {
       ...process.env,
       // Ensure API key is available to the subprocess
