@@ -13,9 +13,11 @@
  *   2. mcp__arij__* `tool_use` records parsed out of the session's raw chunk
  *      stream — the supplement. The Claude Code provider returns a single
  *      final envelope (no per-turn stream), so for it this list is usually
- *      empty; streaming providers (codex, …) surface read-only calls
+ *      empty; streaming providers (codex, omp, …) surface read-only calls
  *      (get_ticket) and calls that left no durable artifact (e.g. a rejected
- *      status transition) through this channel.
+ *      status transition) through this channel. omp never puts the MCP tool
+ *      name in a name field — its invocations are "write" toolCalls against
+ *      an xd:// device URI (see OMP_ARIJ_DEVICE_PREFIX).
  *
  * Merging dedupes by kind-count: a tool call whose kind already has a durable
  * artifact is considered "covered" and dropped, so a post_comment call and
@@ -28,6 +30,14 @@ import { ticketActivityLog, ticketComments } from "@/lib/db/schema";
 import { listSessionChunks } from "./chunks";
 
 export const ARIJ_MCP_TOOL_PREFIX = "mcp__arij__";
+
+/**
+ * oh-my-pi (omp) exposes MCP tools as device files: an invocation is a
+ * built-in "write" whose arguments.path is the tool's device URI. Note the
+ * single underscore after "arij" (device names flatten the mcp__server__tool
+ * separator), so ARIJ_MCP_TOOL_PREFIX never appears in a name field.
+ */
+const OMP_ARIJ_DEVICE_PREFIX = "xd://mcp__arij_";
 
 export type ArijActionKind =
   | "status_change"
@@ -142,6 +152,32 @@ function collectToolNames(
   // Codex-style shape: { ..., server: "arij", tool: "post_comment" }
   if (obj.server === "arij" && typeof obj.tool === "string") {
     out.push({ tool: obj.tool, at });
+  }
+
+  // omp device-URI shape: { type: "toolCall", id, name: "write",
+  //   arguments: { path: "xd://mcp__arij_post_comment", content: "{...}" } }.
+  // Only "write" is an invocation; "read" on the same path is a schema read
+  // and would double-count against durable artifacts. The same id is echoed
+  // by message_start/message_end/toolcall_end/turn_end, hence the id-dedupe.
+  if (obj.type === "toolCall" && obj.name === "write") {
+    const args = obj.arguments;
+    const path =
+      args && typeof args === "object"
+        ? (args as Record<string, unknown>).path
+        : undefined;
+    if (
+      typeof path === "string" &&
+      path.startsWith(OMP_ARIJ_DEVICE_PREFIX)
+    ) {
+      const tool = path
+        .slice(OMP_ARIJ_DEVICE_PREFIX.length)
+        .replace(/^_+/, "");
+      const id = typeof obj.id === "string" ? obj.id : null;
+      if (tool && (!id || !seenIds.has(id))) {
+        if (id) seenIds.add(id);
+        out.push({ tool, at });
+      }
+    }
   }
 
   for (const child of Object.values(obj)) {
