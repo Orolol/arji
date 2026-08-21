@@ -58,13 +58,17 @@ vi.mock("fs", () => ({
 }));
 
 const { db } = await import("@/lib/db");
-const { projects, agentSessions } = await import("@/lib/db/schema");
+const { projects, agentSessions, epics, userStories, releases } = await import(
+  "@/lib/db/schema"
+);
 const {
   dispatchSpecUpdateSession,
   hasPendingSpecUpdate,
   sanitizeUpdatedSpec,
 } = await import("@/lib/workflow/spec-update");
-const { buildSpecUpdatePrompt } = await import("@/lib/claude/prompt-builder");
+const { buildSpecUpdatePrompt, buildProjectStateSection } = await import(
+  "@/lib/claude/prompt-builder"
+);
 
 let counter = 0;
 
@@ -88,6 +92,30 @@ function seedProject(spec: string | null) {
     .values({ id: projectId, name: "Spec Project", gitRepoPath: "/repos/s", spec })
     .run();
   return projectId;
+}
+
+function seedBoardState(projectId: string) {
+  const epicId = `epic-${counter}`;
+  db.insert(epics)
+    .values({ id: epicId, projectId, title: "Auth Epic", status: "in_progress" })
+    .run();
+  db.insert(userStories)
+    .values({
+      id: `us-${counter}`,
+      epicId,
+      title: "Login form",
+      status: "done",
+    })
+    .run();
+  db.insert(releases)
+    .values({
+      id: `rel-${counter}`,
+      projectId,
+      version: "1.2.0",
+      title: "First release",
+      changelog: "- login works",
+    })
+    .run();
 }
 
 function specUpdateSessions(projectId: string) {
@@ -202,7 +230,28 @@ describe("dispatchSpecUpdateSession", () => {
       .run();
     expect(hasPendingSpecUpdate(projectId)).toBe(true);
   });
+
+
+  it("embeds the board and release state in the dispatched prompt", async () => {
+    const projectId = seedProject("# Spec");
+    seedBoardState(projectId);
+
+    await dispatchSpecUpdateSession({
+      projectId,
+      instruction: null,
+      namedAgentId: null,
+    });
+    await flushBackground();
+
+    const prompt = specUpdateSessions(projectId)[0].prompt;
+    expect(prompt).toContain("## Current Project State");
+    expect(prompt).toContain("**Auth Epic** — in_progress");
+    expect(prompt).toContain("- Login form — done");
+    expect(prompt).toContain("**1.2.0** — First release");
+    expect(prompt).toContain("- login works");
+  });
 });
+
 
 describe("sanitizeUpdatedSpec", () => {
   it("strips a full-document fence but keeps inner content intact", () => {
@@ -210,5 +259,24 @@ describe("sanitizeUpdatedSpec", () => {
       "# A\n\n- b"
     );
     expect(sanitizeUpdatedSpec("# A\n\n- b")).toBe("# A\n\n- b");
+  });
+});
+
+
+describe("buildProjectStateSection", () => {
+  it("renders nothing when the project has no epics or releases", () => {
+    expect(buildProjectStateSection([], [], [])).toBe("");
+  });
+
+  it("groups stories under their epics", () => {
+    const section = buildProjectStateSection(
+      [{ id: "e1", title: "Epic One", status: "review" }],
+      [{ epicId: "e1", title: "Story A", status: "todo" }],
+      []
+    );
+    expect(section).toContain("### Board");
+    expect(section).toContain("- **Epic One** — review");
+    expect(section).toContain("  - Story A — todo");
+    expect(section).not.toContain("### Releases");
   });
 });

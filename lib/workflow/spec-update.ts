@@ -13,7 +13,7 @@ import fs from "fs";
 import path from "path";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { agentSessions, projects } from "@/lib/db/schema";
+import { agentSessions, epics, projects, releases, userStories } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { processManager } from "@/lib/claude/process-manager";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
@@ -22,7 +22,7 @@ import {
   extractSessionUsage,
   resolveSessionOutput,
 } from "@/lib/claude/resolve-session-output";
-import { buildSpecUpdatePrompt } from "@/lib/claude/prompt-builder";
+import { buildProjectStateSection, buildSpecUpdatePrompt } from "@/lib/claude/prompt-builder";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
@@ -112,7 +112,33 @@ export async function dispatchSpecUpdateSession(
     // itself, the same way every other dispatch route feeds the builders.
     project,
     input.instruction,
-    systemPrompt
+    systemPrompt,
+    buildProjectStateSection(
+      db
+        .select({ id: epics.id, title: epics.title, status: epics.status })
+        .from(epics)
+        .where(eq(epics.projectId, input.projectId))
+        .all(),
+      db
+        .select({
+          epicId: userStories.epicId,
+          title: userStories.title,
+          status: userStories.status,
+        })
+        .from(userStories)
+        .innerJoin(epics, eq(userStories.epicId, epics.id))
+        .where(eq(epics.projectId, input.projectId))
+        .all(),
+      db
+        .select({
+          version: releases.version,
+          title: releases.title,
+          changelog: releases.changelog,
+        })
+        .from(releases)
+        .where(eq(releases.projectId, input.projectId))
+        .all()
+    )
   );
 
   const sessionId = createId();
