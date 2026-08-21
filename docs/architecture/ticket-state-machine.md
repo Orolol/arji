@@ -38,13 +38,13 @@ must not repeat SQL/event/log logic.
 
 ### Shared automatic driver
 
-- `lib/workflow/automatic-transitions.ts:81,111,139` — story service adapter and build-start epic preflight/apply; story moves use the adapter.
-- `lib/workflow/automatic-transitions.ts:201,242,279,307` — successful build promotion and all-stories gate.
-- `lib/workflow/automatic-transitions.ts:350,364,380,393` — negative review to `in_progress` for epic/story scope.
+- `lib/workflow/automatic-transitions.ts:81,113,143` — story service adapter and build-start epic preflight/apply; story moves use the adapter.
+- `lib/workflow/automatic-transitions.ts:205,246,283,311` — successful build promotion and all-stories gate.
+- `lib/workflow/automatic-transitions.ts:354,368,384,397` — negative review to `in_progress` for epic/story scope.
 - `lib/pipeline/stages.ts:591,753,881,899` — pipeline build start, terminal outcome, negative review.
 - `app/api/projects/[projectId]/epics/[epicId]/build/route.ts:252,338` — manual epic build.
 - `app/api/projects/[projectId]/stories/[storyId]/build/route.ts:217,305` — manual story build.
-- `app/api/projects/[projectId]/build/route.ts:261,406,523,604` — team/batch/night build start, team-build failure decision, and terminal outcome.
+- `app/api/projects/[projectId]/build/route.ts:246,288,421,538,619` — team preflight/apply, batch/night build start, team-build failure decision, and terminal outcome.
 - `app/api/projects/[projectId]/epics/[epicId]/review/route.ts:363` and `stories/[storyId]/review/route.ts:354` — manual negative review.
 
 Full Auto itself does not write status: `lib/auto-mode/select.ts` selects and
