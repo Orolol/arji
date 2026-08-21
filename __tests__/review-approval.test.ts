@@ -43,7 +43,12 @@ vi.mock("@/lib/db", () => {
       if (this._currentTable === "projects") return mockProject;
       return mockEpic;
     }),
-    all: vi.fn(() => []),
+    all: vi.fn(function (this: typeof chain & { _currentTable?: string }) {
+      if (this._currentTable === "userStories") {
+        return [{ id: "story-1", epicId: "epic-1", status: "review" }];
+      }
+      return [];
+    }),
     insert: vi.fn((table: { _name?: string }) => ({
       values: vi.fn((vals: Record<string, unknown>) => {
         insertCalls.push({ table: table?._name ?? "unknown", values: vals });
@@ -81,6 +86,7 @@ vi.mock("@/lib/db/schema", () => ({
   },
   userStories: {
     _name: "userStories",
+    id: "id",
     epicId: "epicId",
     status: "status",
   },

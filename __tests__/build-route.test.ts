@@ -51,6 +51,7 @@ vi.mock("@/lib/db", () => {
         title: "Test Epic",
         description: "A test epic",
         epicId: "epic-1",
+        status: "todo",
       };
     }),
     all: vi.fn().mockReturnValue([]),
@@ -75,10 +76,12 @@ vi.mock("@/lib/db", () => {
 
 vi.mock("@/lib/db/schema", () => ({
   projects: { _name: "projects" },
-  epics: { _name: "epics", id: "id", epicId: "epicId", position: "position" },
-  userStories: { _name: "userStories", epicId: "epicId", position: "position", status: "status" },
+  epics: { _name: "epics", id: "id", epicId: "epicId", projectId: "projectId", position: "position", status: "status" },
+  userStories: { _name: "userStories", id: "id", epicId: "epicId", position: "position", status: "status" },
   documents: { projectId: "projectId" },
-  agentSessions: { id: "id", epicId: "epicId", mode: "mode", status: "status" },
+  agentSessions: { id: "id", epicId: "epicId", userStoryId: "userStoryId", mode: "mode", status: "status", agentType: "agentType" },
+  reviewComments: { epicId: "epicId", status: "status" },
+  ticketActivityLog: { _name: "ticketActivityLog" },
   ticketComments: { userStoryId: "userStoryId", createdAt: "createdAt" },
 }));
 
@@ -130,6 +133,7 @@ vi.mock("@/lib/agent-sessions/lifecycle", () => ({
   markSessionRunning: vi.fn(),
   markSessionTerminal: mockMarkSessionTerminal,
   isSessionLifecycleConflictError: vi.fn(() => false),
+  isSessionNotFoundError: vi.fn(() => false),
 }));
 
 vi.mock("@/lib/workflow/agent-question", () => ({
@@ -190,6 +194,7 @@ describe("Build Route", () => {
     expect(json.error).toContain(
       "Team mode is only available with Claude Code"
     );
+    expect(mockState.updateCalls).toEqual([]);
   });
 
   it("rejects empty epicIds", async () => {

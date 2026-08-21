@@ -434,7 +434,7 @@ afterEach(() => {
 
 describe("pipeline e2e — clean pass", () => {
   it("build → review clean → succeeded, ticket left in review, coherent trace", async () => {
-    const { projectId, epicId } = seed();
+    const { projectId, epicId, storyId } = seed();
     scriptRun("build", cliOk("Implemented the ticket."));
     scriptRun(
       "review",
@@ -489,7 +489,9 @@ describe("pipeline e2e — clean pass", () => {
     // The activity log tells the whole story in order.
     expect(epicReasons(epicId)).toEqual([
       "Build agent started",
+      `Story ${storyId} — Build agent started`,
       PIPELINE_REASONS.started,
+      `Story ${storyId} — Build completed successfully`,
       "Build completed successfully",
       PIPELINE_REASONS.reviewStarted,
       PIPELINE_REASONS.finished,
@@ -511,7 +513,7 @@ describe("pipeline e2e — clean pass", () => {
 
 describe("pipeline e2e — blocking findings and fix cycle", () => {
   it("review files [critical] → fix resumes the build session → re-review clean → succeeded (1 cycle)", async () => {
-    const { projectId, epicId } = seed();
+    const { projectId, epicId, storyId } = seed();
 
     scriptRun("build", cliOk("Implemented the ticket."));
     // The reviewer files a structured finding mid-session (submit_findings
@@ -591,11 +593,15 @@ describe("pipeline e2e — blocking findings and fix cycle", () => {
     ).toBe("review");
     expect(epicReasons(epicId)).toEqual([
       "Build agent started",
+      `Story ${storyId} — Build agent started`,
       PIPELINE_REASONS.started,
+      `Story ${storyId} — Build completed successfully`,
       "Build completed successfully",
       PIPELINE_REASONS.reviewStarted,
       "Build agent started",
+      `Story ${storyId} — Build agent started`,
       PIPELINE_REASONS.fixStarted(1, 2),
+      `Story ${storyId} — Build completed successfully`,
       "Build completed successfully",
       PIPELINE_REASONS.reviewStarted,
       PIPELINE_REASONS.finished,
@@ -609,7 +615,7 @@ describe("pipeline e2e — blocking findings and fix cycle", () => {
 
 describe("pipeline e2e — build failure ladder and forensic hand-off", () => {
   it("fail → resume retry → fail → escalated provider → fail → forensic comment, run failed", async () => {
-    const { projectId, epicId } = seed();
+    const { projectId, epicId, storyId } = seed();
     // Per-project attempt cap 3 (scoped key so other tests keep the default).
     db.insert(settings)
       .values({ key: pipelineMaxAttemptsSettingKey(projectId), value: "3" })
@@ -700,12 +706,16 @@ describe("pipeline e2e — build failure ladder and forensic hand-off", () => {
     // (escalation) → stage failure → forensic diagnostic.
     expect(epicReasons(epicId)).toEqual([
       "Build agent started",
+      `Story ${storyId} — Build agent started`,
       PIPELINE_REASONS.started,
+      "Build failed; ticket held in in_progress: npm test exploded",
       PIPELINE_REASONS.retry("build", 2, 3),
       "Build agent started",
+      "Build failed; ticket held in in_progress: still exploding",
       PIPELINE_REASONS.retry("build", 3, 3),
       "Build agent started",
       PIPELINE_REASONS.escalation("build", "codex"),
+      "Build failed; ticket held in in_progress: codex also failed",
       PIPELINE_REASONS.failedStage("build", 3),
       PIPELINE_REASONS.forensic,
     ]);
@@ -718,7 +728,7 @@ describe("pipeline e2e — build failure ladder and forensic hand-off", () => {
 
 describe("pipeline e2e — asked_question pause", () => {
   it("review asks a question → run paused, ticket held in review, no further sessions", async () => {
-    const { projectId, epicId } = seed();
+    const { projectId, epicId, storyId } = seed();
     scriptRun("build", cliOk("Implemented the ticket."));
     scriptRun(
       "review",
@@ -765,7 +775,9 @@ describe("pipeline e2e — asked_question pause", () => {
     // (workflow's own entry) → pipeline pause.
     expect(epicReasons(epicId)).toEqual([
       "Build agent started",
+      `Story ${storyId} — Build agent started`,
       PIPELINE_REASONS.started,
+      `Story ${storyId} — Build completed successfully`,
       "Build completed successfully",
       PIPELINE_REASONS.reviewStarted,
       AGENT_ASKED_QUESTION_REASON,
@@ -780,7 +792,7 @@ describe("pipeline e2e — asked_question pause", () => {
 
 describe("pipeline e2e — user stop mid-review", () => {
   it("stopping the live review session cancels the run cleanly with no orphan stages", async () => {
-    const { projectId, epicId } = seed();
+    const { projectId, epicId, storyId } = seed();
     scriptRun("build", cliOk("Implemented the ticket."));
     // The review spawns live; ~30 fake-ms in, the user hits Stop: replica of
     // the sessions DELETE route (scheduler removal is a no-op for a started
@@ -836,7 +848,9 @@ describe("pipeline e2e — user stop mid-review", () => {
     // Story ends on the stop — and nothing after it.
     expect(epicReasons(epicId)).toEqual([
       "Build agent started",
+      `Story ${storyId} — Build agent started`,
       PIPELINE_REASONS.started,
+      `Story ${storyId} — Build completed successfully`,
       "Build completed successfully",
       PIPELINE_REASONS.reviewStarted,
       PIPELINE_REASONS.cancelled,

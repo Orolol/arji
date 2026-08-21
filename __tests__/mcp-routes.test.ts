@@ -366,28 +366,36 @@ describe("POST /api/mcp/get-ticket", () => {
 
 describe("POST /api/mcp/update-ticket-status", () => {
   it("applies a valid transition and logs it as agent actor", async () => {
-    const res = await call(updateStatusPost, { status: "review" }, token);
+    const res = await call(
+      updateStatusPost,
+      { status: "in_progress", ticket_id: todoEpicId },
+      token
+    );
     const json = await res.json();
 
     expect(res.status).toBe(200);
     expect(json.data).toEqual({
-      ticketId: epicId,
-      fromStatus: "in_progress",
-      toStatus: "review",
+      ticketId: todoEpicId,
+      fromStatus: "todo",
+      toStatus: "in_progress",
     });
 
-    const epic = db().select().from(epics).where(eq(epics.id, epicId)).get();
-    expect(epic?.status).toBe("review");
+    const epic = db()
+      .select()
+      .from(epics)
+      .where(eq(epics.id, todoEpicId))
+      .get();
+    expect(epic?.status).toBe("in_progress");
 
     const logs = db()
       .select()
       .from(ticketActivityLog)
-      .where(eq(ticketActivityLog.epicId, epicId))
+      .where(eq(ticketActivityLog.epicId, todoEpicId))
       .all();
     expect(logs).toHaveLength(1);
     expect(logs[0]).toMatchObject({
-      fromStatus: "in_progress",
-      toStatus: "review",
+      fromStatus: "todo",
+      toStatus: "in_progress",
       actor: "agent",
       sessionId,
       reason: "Agent MCP: update_ticket_status",
@@ -397,16 +405,50 @@ describe("POST /api/mcp/update-ticket-status", () => {
   it("records a custom reason", async () => {
     await call(
       updateStatusPost,
-      { status: "review", reason: "Implementation complete" },
+      {
+        status: "in_progress",
+        ticket_id: todoEpicId,
+        reason: "Implementation started",
+      },
       token
     );
 
     const logs = db()
       .select()
       .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, todoEpicId))
+      .all();
+    expect(logs[0]?.reason).toBe("Implementation started");
+  });
+
+  it("refuses to move the ticket away while its build session is active", async () => {
+    db()
+      .update(agentSessions)
+      .set({ agentType: "build" })
+      .where(eq(agentSessions.id, sessionId))
+      .run();
+
+    const res = await call(updateStatusPost, { status: "review" }, token);
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.error).toContain("session is queued or running");
+
+    const logs = db()
+      .select()
+      .from(ticketActivityLog)
       .where(eq(ticketActivityLog.epicId, epicId))
       .all();
-    expect(logs[0]?.reason).toBe("Implementation complete");
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      fromStatus: "in_progress",
+      toStatus: "in_progress",
+      actor: "agent",
+      sessionId,
+    });
+    expect(logs[0].reason).toContain(
+      "Transition in_progress → review refused"
+    );
   });
 
   it("treats same-status as a no-op (no log entry)", async () => {

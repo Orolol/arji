@@ -179,14 +179,14 @@ beforeEach(() => {
 /* ------------------------------------------------------------------ */
 
 describe("selectBuildCandidates", () => {
-  it("picks todo and in_progress epics without stories, epic-scoped", () => {
+  it("picks backlog, todo and in_progress epics without stories, epic-scoped", () => {
     addEpic({ id: "e-todo", status: "todo" });
     addEpic({ id: "e-progress", status: "in_progress" });
     addEpic({ id: "e-backlog", status: "backlog" });
     addEpic({ id: "e-review", status: "review" });
 
     const ids = selectBuildCandidates(PROJECT_ID).map((c) => c.ticketId);
-    expect(ids.sort()).toEqual(["e-progress", "e-todo"]);
+    expect(ids.sort()).toEqual(["e-backlog", "e-progress", "e-todo"]);
     expect(
       selectBuildCandidates(PROJECT_ID).every((c) => c.scope === "epic")
     ).toBe(true);
