@@ -43,9 +43,9 @@ must not repeat SQL/event/log logic.
 
 ### Shared automatic driver
 
-- `lib/workflow/automatic-transitions.ts:94,126,156` — story service adapter and build-start epic preflight/apply; story moves use the adapter.
-- `lib/workflow/automatic-transitions.ts:242,294,338,373` — non-throwing successful build promotion and all-stories gate.
-- `lib/workflow/automatic-transitions.ts:429,443,459,472` — negative review to `in_progress` for epic/story scope.
+- `lib/workflow/automatic-transitions.ts:91,123,153` — story service adapter and build-start epic preflight/apply; story moves use the adapter.
+- `lib/workflow/automatic-transitions.ts:239,291,335,370` — non-throwing successful build promotion and all-stories gate.
+- `lib/workflow/automatic-transitions.ts:426,440,456,469` — negative review to `in_progress` for epic/story scope.
 - `lib/pipeline/stages.ts:593,759,891,909` — pipeline build start, consumed terminal outcome, negative review.
 - `app/api/projects/[projectId]/epics/[epicId]/build/route.ts:253,339` — manual epic build.
 - `app/api/projects/[projectId]/stories/[storyId]/build/route.ts:218,306` — manual story build.
