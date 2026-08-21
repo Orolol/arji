@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from "react";
 import type { AgentType, AgentProvider } from "@/lib/agent-config/constants";
 
 type PromptSource = "builtin" | "global" | "project";
-type ProviderSource = "builtin" | "global" | "project";
 
 export interface ResolvedAgentPrompt {
   agentType: AgentType;
@@ -13,21 +12,6 @@ export interface ResolvedAgentPrompt {
   scope: string;
 }
 
-export interface ResolvedAgentProvider {
-  agentType: AgentType;
-  provider: AgentProvider;
-  namedAgentId: string | null;
-  namedAgentName: string | null;
-  namedAgentModel: string | null;
-  source: ProviderSource;
-  scope: string;
-  namedAgent?: {
-    id: string;
-    name: string;
-    provider: AgentProvider;
-    model: string;
-  } | null;
-}
 
 export interface CustomReviewAgent {
   id: string;
@@ -106,76 +90,6 @@ export function useAgentPrompts(
   );
 
   return { data, loading, refresh: load, updatePrompt, resetPrompt };
-}
-
-export function useAgentProviders(
-  scope: "global" | "project",
-  projectId?: string
-) {
-  const [data, setData] = useState<ResolvedAgentProvider[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const url = buildUrl("/agent-config/providers", scope, projectId);
-      const res = await fetch(url);
-      const json = await res.json();
-      setData(json.data || []);
-    } catch {
-      // ignore
-    }
-    setLoading(false);
-  }, [scope, projectId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const updateProvider = useCallback(
-    async (
-      agentType: AgentType,
-      provider: AgentProvider,
-      namedAgentId?: string | null
-    ) => {
-      const url = buildUrl(
-        `/agent-config/providers/${agentType}`,
-        scope,
-        projectId
-      );
-      const res = await fetch(url, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          namedAgentId: namedAgentId || null,
-        }),
-      });
-      if (res.ok) await load();
-      return res.ok;
-    },
-    [scope, projectId, load]
-  );
-
-  const assignNamedAgent = useCallback(
-    async (agentType: AgentType, namedAgentId: string) => {
-      const url = buildUrl(
-        `/agent-config/providers/${agentType}`,
-        scope,
-        projectId
-      );
-      const res = await fetch(url, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ namedAgentId }),
-      });
-      if (res.ok) await load();
-      return res.ok;
-    },
-    [scope, projectId, load]
-  );
-
-  return { data, loading, refresh: load, updateProvider, assignNamedAgent };
 }
 
 export function useReviewAgents(

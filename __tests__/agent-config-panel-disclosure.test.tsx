@@ -42,7 +42,7 @@ vi.mock("@/components/ui/select", () => ({
       {children}
     </select>
   ),
-  SelectTrigger: ({ id }: { id?: string }) => <select id={id} readOnly />,
+  SelectTrigger: ({ id }: { id?: string }) => <select id={id} disabled />,
   SelectValue: () => null,
   SelectContent: ({ children }: { children: ReactNode }) => <>{children}</>,
   SelectItem: ({
@@ -62,8 +62,8 @@ vi.mock("@/components/agent-config/AgentPromptsTab", () => ({
 vi.mock("@/components/agent-config/ReviewAgentsTab", () => ({
   ReviewAgentsTab: () => <div>review-tab-marker</div>,
 }));
-vi.mock("@/components/agent-config/ProviderDefaultsTab", () => ({
-  ProviderDefaultsTab: () => <div>providers-tab-marker</div>,
+vi.mock("@/components/agent-config/RuntimeSettingsTab", () => ({
+  RuntimeSettingsTab: () => <div>runtime-tab-marker</div>,
 }));
 vi.mock("@/components/agent-config/StatsTab", () => ({
   StatsTab: () => <div>stats-tab-marker</div>,

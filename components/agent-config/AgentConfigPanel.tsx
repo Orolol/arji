@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AgentPromptsTab } from "./AgentPromptsTab";
 import { ReviewAgentsTab } from "./ReviewAgentsTab";
-import { ProviderDefaultsTab } from "./ProviderDefaultsTab";
+import { RuntimeSettingsTab } from "./RuntimeSettingsTab";
 import { NamedAgentsTab } from "./NamedAgentsTab";
 import { StatsTab } from "./StatsTab";
 import { Globe, FolderOpen, ChevronDown, ChevronRight } from "lucide-react";
@@ -58,7 +58,7 @@ export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
           Advanced settings
           {!advancedOpen && (
             <span className="text-xs font-normal text-muted-foreground/70">
-              prompts, review agents, role defaults, usage
+              prompts, review agents, runtime limits, usage
             </span>
           )}
         </button>
@@ -96,7 +96,7 @@ export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
             <TabsList variant="line" className="px-4 shrink-0">
               <TabsTrigger value="prompts">Prompts</TabsTrigger>
               <TabsTrigger value="review">Review Agents</TabsTrigger>
-              <TabsTrigger value="providers">Providers</TabsTrigger>
+              <TabsTrigger value="runtime">Runtime</TabsTrigger>
               <TabsTrigger value="stats">Stats</TabsTrigger>
             </TabsList>
 
@@ -114,8 +114,8 @@ export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
               />
             </TabsContent>
 
-            <TabsContent value="providers" className="flex-1 min-h-0 px-3 pb-3">
-              <ProviderDefaultsTab
+            <TabsContent value="runtime" className="flex-1 min-h-0 px-3 pb-3">
+              <RuntimeSettingsTab
                 scope={scope}
                 projectId={scope === "project" ? projectId : undefined}
               />

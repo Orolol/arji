@@ -30,7 +30,7 @@ export const UNLIMITED_MAX_CONCURRENT_AGENTS = Number.POSITIVE_INFINITY;
 /**
  * Built-in fallback when neither settings key is set: no cap. Arij queues
  * nothing by default — the machine, the CLIs and the user's own judgement are
- * the limit. Set an explicit number in Agent Configuration → Providers to get
+ * the limit. Set an explicit number in Agent Configuration → Runtime to get
  * a queue back.
  */
 export const DEFAULT_MAX_CONCURRENT_AGENTS = UNLIMITED_MAX_CONCURRENT_AGENTS;
