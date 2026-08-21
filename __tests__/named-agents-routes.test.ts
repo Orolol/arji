@@ -115,7 +115,16 @@ describe("Named Agents API Routes", () => {
       expect(json.details.provider[0]).toContain("provider");
     });
 
-    it("validates model is required", async () => {
+    it("creates a named agent without a model (CLI default)", async () => {
+      const created = {
+        id: "a2",
+        name: "Test",
+        provider: "claude-code",
+        model: "",
+        createdAt: "2026-01-01",
+      };
+      mockCreate.mockReturnValue({ data: created });
+
       const { POST } = await import("@/app/api/agent-config/named-agents/route");
       const res = await POST(mockJsonRequest({
         name: "Test",
@@ -123,9 +132,8 @@ describe("Named Agents API Routes", () => {
       }));
       const json = await res.json();
 
-      expect(res.status).toBe(400);
-      expect(json.error).toBe("Validation failed");
-      expect(json.details.model[0]).toContain("model");
+      expect(res.status).toBe(201);
+      expect(json.data).toEqual(created);
     });
 
     it("returns 409 for duplicate name", async () => {

@@ -140,11 +140,20 @@ describe("createNamedAgent", () => {
     expect(error).toContain("Invalid provider");
   });
 
-  it("validates empty model", async () => {
+  it("defaults to CLI default model when empty", async () => {
     const { createNamedAgent } = await import("@/lib/agent-config/named-agents");
     const { data, error } = await createNamedAgent({ name: "Test", provider: "claude-code", model: "  " });
-    expect(data).toBeNull();
-    expect(error).toContain("Model must not be empty");
+    expect(error).toBeUndefined();
+    expect(data).toBeDefined();
+    expect(data!.model).toBe("");
+  });
+
+  it("defaults to CLI default model when model is omitted", async () => {
+    const { createNamedAgent } = await import("@/lib/agent-config/named-agents");
+    const { data, error } = await createNamedAgent({ name: "NoModel", provider: "codex" });
+    expect(error).toBeUndefined();
+    expect(data).toBeDefined();
+    expect(data!.model).toBe("");
   });
 
   it("accepts gemini-cli as provider", async () => {

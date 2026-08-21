@@ -279,7 +279,7 @@ export function useNamedAgents() {
   }, [load]);
 
   const createNamedAgent = useCallback(
-    async (input: { name: string; provider: AgentProvider; model: string }) => {
+    async (input: { name: string; provider: AgentProvider; model?: string }) => {
       const res = await fetch("/api/agent-config/named-agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
