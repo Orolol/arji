@@ -6,7 +6,7 @@ import {
   ticketComments,
   reviewComments,
 } from "@/lib/db/schema";
-import { eq, and, notInArray } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import {
   getEpicOr404,
   getProjectOr404,
@@ -55,10 +55,12 @@ import {
   emitSessionStarted,
   emitSessionCompleted,
   emitSessionFailed,
-  emitTicketMoved,
 } from "@/lib/events/emit";
-import { logTransition } from "@/lib/workflow/log";
-import { handleAskedQuestionOutcome } from "@/lib/workflow/agent-question";
+import {
+  finalizeBuildTerminalOutcome,
+  transitionBuildStarted,
+  WorkflowTransitionError,
+} from "@/lib/workflow/automatic-transitions";
 import {
   resolvePipelineEnabled,
   startPipelineRun,
@@ -246,6 +248,26 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  try {
+    transitionBuildStarted({
+      projectId,
+      epicId,
+      scope: "epic",
+      sessionId,
+    });
+  } catch (error) {
+    if (error instanceof WorkflowTransitionError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
+  }
+
+  // Branch metadata is not a status transition and stays a plain update.
+  db.update(epics)
+    .set({ branchName, updatedAt: now })
+    .where(eq(epics.id, epicId))
+    .run();
+
   createQueuedSession({
     id: sessionId,
     projectId,
@@ -264,33 +286,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     createdAt: now,
   });
 
-  // Status sync: epic -> in_progress, non-done US -> in_progress
-  db.update(epics)
-    .set({ status: "in_progress", branchName, updatedAt: now })
-    .where(eq(epics.id, epicId))
-    .run();
-
-  db.update(userStories)
-    .set({ status: "in_progress" })
-    .where(
-      and(
-        eq(userStories.epicId, epicId),
-        notInArray(userStories.status, ["done"])
-      )
-    )
-    .run();
-
   emitSessionStarted(projectId, epicId, sessionId, "build");
-  emitTicketMoved(projectId, epicId, epic.status ?? "backlog", "in_progress");
-  logTransition({
-    projectId,
-    epicId,
-    fromStatus: epic.status ?? "backlog",
-    toStatus: "in_progress",
-    actor: "agent",
-    reason: "Build agent started",
-    sessionId,
-  });
 
   // Batch-style launch: goes through the per-project scheduler. The session
   // stays 'queued' until a slot frees; the closure spawns, waits for
@@ -339,44 +335,16 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
 
-    // On success: all non-done US -> review, epic -> review.
-    // If the agent asked a follow-up question, keep work in progress.
-    if (result?.success && outcome !== "asked_question") {
-      db.update(userStories)
-        .set({ status: "review" })
-        .where(
-          and(
-            eq(userStories.epicId, epicId),
-            notInArray(userStories.status, ["done"])
-          )
-        )
-        .run();
-
-      db.update(epics)
-        .set({ status: "review", updatedAt: completedAt })
-        .where(eq(epics.id, epicId))
-        .run();
-
-      emitSessionCompleted(projectId, epicId, sessionId);
-      emitTicketMoved(projectId, epicId, "in_progress", "review");
-      logTransition({
-        projectId,
-        epicId,
-        fromStatus: "in_progress",
-        toStatus: "review",
-        actor: "agent",
-        reason: "Build completed successfully",
-        sessionId,
-      });
-    } else if (result?.success) {
-      // asked_question: hold the ticket in in_progress, notify with a deep
-      // link to the epic, and log the decision to the activity feed.
-      handleAskedQuestionOutcome({
-        projectId,
-        epicIds: [epicId],
-        sessionId,
-        ticketStatus: "in_progress",
-      });
+    const terminal = finalizeBuildTerminalOutcome({
+      projectId,
+      epicId,
+      scope: "epic",
+      sessionId,
+      success: !!result?.success,
+      outcome,
+      error: result?.error,
+    });
+    if (terminal.kind !== "failed") {
       emitSessionCompleted(projectId, epicId, sessionId);
     } else {
       emitSessionFailed(projectId, epicId, sessionId, result?.error || "Build failed");

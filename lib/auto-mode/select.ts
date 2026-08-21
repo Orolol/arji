@@ -53,7 +53,7 @@ import { autoModeRegistry } from "./registry";
 const ACTIVE_SESSION_STATUSES = ["queued", "running"];
 
 /** Epic statuses the supervisor may dispatch a build for. */
-const BUILDABLE_EPIC_STATUSES = new Set(["todo", "in_progress"]);
+const BUILDABLE_EPIC_STATUSES = new Set(["backlog", "todo", "in_progress"]);
 
 /** Story statuses the supervisor may dispatch a build for. */
 const BUILDABLE_STORY_STATUSES = new Set(["todo", "in_progress"]);
@@ -618,9 +618,9 @@ export function selectBuildCandidates(
       continue;
     }
 
-    // Story scope: the first buildable story by position. The epic itself may
-    // still be in `todo` — the story build route promotes the epic to
-    // `review` only once every sibling is review/done.
+    // Story scope: the first buildable story by position. The parent may start
+    // in backlog/todo; the shared dispatch transition moves both parent and
+    // story to in_progress before the queued session row is created.
     const next = stories.find((story) => {
       if (!BUILDABLE_STORY_STATUSES.has(story.status ?? "")) return false;
       if (board.busyStoryIds.has(story.id)) return false;

@@ -38,7 +38,7 @@ export interface TransitionContext {
   hasOpenReviewComments: boolean;
   /** Whether the epic has a completed review (at least one review session completed) */
   hasCompletedReview: boolean;
-  /** Whether there's a running agent session on this epic */
+  /** Whether there is a queued/running code-producing session on this ticket */
   hasRunningSession: boolean;
   /** The actor initiating the transition */
   actor: "user" | "agent" | "system";
@@ -47,6 +47,19 @@ export interface TransitionContext {
 }
 
 const TRANSITION_GUARDS: TransitionGuard[] = [
+  // A build session owns in_progress until its terminal handler promotes or
+  // holds the ticket. Letting a concurrent drag move it would recreate the
+  // active-session/orphaned-column state this engine is meant to prevent.
+  (ctx) => {
+    if (
+      ctx.fromStatus === "in_progress" &&
+      ctx.toStatus !== "in_progress" &&
+      ctx.hasRunningSession
+    ) {
+      return "Cannot move an in-progress ticket while an agent session is queued or running.";
+    }
+    return null;
+  },
   // Cannot move to Done without completed review
   (ctx) => {
     if (ctx.toStatus === "done" && !ctx.hasCompletedReview) {

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { and, eq, notInArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   agentSessions,
@@ -60,10 +60,13 @@ import {
   emitSessionCompleted,
   emitSessionFailed,
   emitSessionStarted,
-  emitTicketMoved,
 } from "@/lib/events/emit";
-import { logTransition } from "@/lib/workflow/log";
 import { handleAskedQuestionOutcome } from "@/lib/workflow/agent-question";
+import {
+  finalizeBuildTerminalOutcome,
+  transitionBuildStarted,
+  transitionReviewRejected,
+} from "@/lib/workflow/automatic-transitions";
 import {
   buildEpicTargetUrl,
   createUnresolvedMentionsNotification,
@@ -584,6 +587,21 @@ async function dispatchPipelineStage(
   const logsPath = path.join(logsDir, "logs.json");
   const agentMode = isReview ? "plan" : "code";
 
+  if (!isReview) {
+    transitionBuildStarted({
+      projectId,
+      epicId,
+      scope,
+      userStoryId,
+      sessionId,
+      reason: "Build agent started",
+    });
+    db.update(epics)
+      .set({ branchName, updatedAt: now })
+      .where(eq(epics.id, epicId))
+      .run();
+  }
+
   createQueuedSession({
     id: sessionId,
     projectId,
@@ -609,40 +627,7 @@ async function dispatchPipelineStage(
       emitSessionStarted(projectId, epicId, sessionId, agentType);
     }
   } else if (scope === "epic") {
-    const fromStatus = epic.status ?? "backlog";
-    db.update(epics)
-      .set({ status: "in_progress", branchName, updatedAt: now })
-      .where(eq(epics.id, epicId))
-      .run();
-    db.update(userStories)
-      .set({ status: "in_progress" })
-      .where(
-        and(
-          eq(userStories.epicId, epicId),
-          notInArray(userStories.status, ["done"])
-        )
-      )
-      .run();
     emitSessionStarted(projectId, epicId, sessionId, agentType);
-    emitTicketMoved(projectId, epicId, fromStatus, "in_progress");
-    logTransition({
-      projectId,
-      epicId,
-      fromStatus,
-      toStatus: "in_progress",
-      actor: "agent",
-      reason: "Build agent started",
-      sessionId,
-    });
-  } else {
-    db.update(userStories)
-      .set({ status: "in_progress" })
-      .where(eq(userStories.id, userStoryId!))
-      .run();
-    db.update(epics)
-      .set({ branchName, updatedAt: now })
-      .where(eq(epics.id, epicId))
-      .run();
   }
 
   // ---------------------------------------------------------------------
@@ -765,75 +750,31 @@ function finalizeCodeSession(input: {
   const { init, sessionId, result, outcome, completedAt } = input;
   const { projectId, epicId, userStoryId, scope } = init;
 
-  if (result?.success && outcome !== "asked_question") {
-    if (scope === "epic") {
-      db.update(userStories)
-        .set({ status: "review" })
-        .where(
-          and(
-            eq(userStories.epicId, epicId),
-            notInArray(userStories.status, ["done"])
-          )
-        )
-        .run();
-      db.update(epics)
-        .set({ status: "review", updatedAt: completedAt })
-        .where(eq(epics.id, epicId))
-        .run();
-      emitSessionCompleted(projectId, epicId, sessionId);
-      emitTicketMoved(projectId, epicId, "in_progress", "review");
-      logTransition({
+  const terminal = finalizeBuildTerminalOutcome({
+    projectId,
+    epicId,
+    scope,
+    userStoryId,
+    sessionId,
+    success: !!result?.success,
+    outcome,
+    error: result?.error,
+    reason:
+      scope === "epic"
+        ? "Build completed successfully"
+        : "Story build completed successfully",
+  });
+  if (scope === "epic") {
+    if (terminal.kind === "failed") {
+      emitSessionFailed(
         projectId,
         epicId,
-        fromStatus: "in_progress",
-        toStatus: "review",
-        actor: "agent",
-        reason: "Build completed successfully",
         sessionId,
-      });
-    } else {
-      db.update(userStories)
-        .set({ status: "review" })
-        .where(
-          and(
-            eq(userStories.id, userStoryId!),
-            eq(userStories.status, "in_progress")
-          )
-        )
-        .run();
-      const allStories = db
-        .select()
-        .from(userStories)
-        .where(eq(userStories.epicId, epicId))
-        .all();
-      const allReviewOrDone = allStories.every(
-        (s) =>
-          s.id === userStoryId || s.status === "done" || s.status === "review"
+        result?.error || "Build failed"
       );
-      if (allReviewOrDone) {
-        db.update(epics)
-          .set({ status: "review", updatedAt: completedAt })
-          .where(eq(epics.id, epicId))
-          .run();
-      }
-    }
-  } else if (result?.success) {
-    handleAskedQuestionOutcome({
-      projectId,
-      epicIds: [epicId],
-      sessionId,
-      ticketStatus: "in_progress",
-    });
-    if (scope === "epic") {
+    } else {
       emitSessionCompleted(projectId, epicId, sessionId);
     }
-  } else if (scope === "epic") {
-    emitSessionFailed(
-      projectId,
-      epicId,
-      sessionId,
-      result?.error || "Build failed"
-    );
   }
 
   const output = resolveSessionOutput(result, sessionId);
@@ -937,27 +878,10 @@ function finalizeReviewSession(input: {
       currentEpic &&
       (currentEpic.status === "done" || currentEpic.status === "review")
     ) {
-      const prevStatus = currentEpic.status;
-      db.update(epics)
-        .set({ status: "in_progress", updatedAt: completedAt })
-        .where(eq(epics.id, epicId))
-        .run();
-      db.update(userStories)
-        .set({ status: "in_progress" })
-        .where(
-          and(
-            eq(userStories.epicId, epicId),
-            notInArray(userStories.status, ["in_progress"])
-          )
-        )
-        .run();
-      emitTicketMoved(projectId, epicId, prevStatus, "in_progress");
-      logTransition({
+      transitionReviewRejected({
         projectId,
         epicId,
-        fromStatus: prevStatus,
-        toStatus: "in_progress",
-        actor: "agent",
+        scope: "epic",
         reason: `Review verdict: changes requested (${PIPELINE_REVIEW_LABEL})`,
         sessionId,
       });
@@ -972,24 +896,14 @@ function finalizeReviewSession(input: {
       currentStory &&
       (currentStory.status === "done" || currentStory.status === "review")
     ) {
-      db.update(userStories)
-        .set({ status: "in_progress" })
-        .where(eq(userStories.id, userStoryId))
-        .run();
-      const parentEpic = db
-        .select()
-        .from(epics)
-        .where(eq(epics.id, currentStory.epicId))
-        .get();
-      if (
-        parentEpic &&
-        (parentEpic.status === "done" || parentEpic.status === "review")
-      ) {
-        db.update(epics)
-          .set({ status: "in_progress", updatedAt: completedAt })
-          .where(eq(epics.id, currentStory.epicId))
-          .run();
-      }
+      transitionReviewRejected({
+        projectId,
+        epicId,
+        scope: "story",
+        userStoryId,
+        reason: `Review verdict: changes requested (${PIPELINE_REVIEW_LABEL})`,
+        sessionId,
+      });
     }
   }
 }

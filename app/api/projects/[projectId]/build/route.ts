@@ -7,7 +7,7 @@ import {
   userStories,
   ticketComments,
 } from "@/lib/db/schema";
-import { eq, and, notInArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
@@ -61,6 +61,13 @@ import { NIGHT_RUN_ID_PREFIX } from "@/lib/night/constants";
 import { nightRunRegistry } from "@/lib/night/registry";
 import { startNightRun } from "@/lib/night/run";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
+import {
+  finalizeBuildTerminalOutcome,
+  logBuildFailure,
+  transitionBuildCompleted,
+  transitionBuildStarted,
+  WorkflowTransitionError,
+} from "@/lib/workflow/automatic-transitions";
 
 /**
  * Batch build options (everything except `epicIds`, which keeps its
@@ -219,6 +226,33 @@ export async function POST(
   // -----------------------------------------------------------------------
   if (team) {
     try {
+      const resolvedTeamAgent = resolveAgentByNamedId(
+        "team_build",
+        projectId,
+        namedAgentId
+      );
+      if (resolvedTeamAgent.provider !== "claude-code") {
+        return NextResponse.json(
+          { error: "Team mode is only available with Claude Code." },
+          { status: 400 }
+        );
+      }
+
+      const sessionId = createId();
+      // Validate every ticket before the first move. A guard failure on one
+      // epic must not leave earlier epics in_progress without the shared
+      // team session.
+      for (const epicId of epicIds) {
+        transitionBuildStarted({
+          projectId,
+          epicId,
+          scope: "epic",
+          sessionId,
+          reason: "Team build agent started",
+          validateOnly: true,
+        });
+      }
+
       // Pre-create all worktrees
       const teamEpics: TeamEpic[] = [];
       const epicRecords: Array<{ id: string; branchName: string }> = [];
@@ -250,10 +284,16 @@ export async function POST(
 
         epicRecords.push({ id: epicId, branchName });
 
-        // Move epic to in_progress
         const now = new Date().toISOString();
+        transitionBuildStarted({
+          projectId,
+          epicId,
+          scope: "epic",
+          sessionId,
+          reason: "Team build agent started",
+        });
         db.update(epics)
-          .set({ status: "in_progress", branchName, updatedAt: now })
+          .set({ branchName, updatedAt: now })
           .where(eq(epics.id, epicId))
           .run();
       }
@@ -269,20 +309,7 @@ export async function POST(
       // user-written text — epic and story fields are generated content, and
       // an agent's `@some/file.ts` points at the project's codebase, not Docs.
       const enrichedTeamPrompt = prompt;
-      const resolvedTeamAgent = resolveAgentByNamedId(
-        "team_build",
-        projectId,
-        namedAgentId
-      );
-      if (resolvedTeamAgent.provider !== "claude-code") {
-        return NextResponse.json(
-          { error: "Team mode is only available with Claude Code." },
-          { status: 400 }
-        );
-      }
-
       // Create single team session
-      const sessionId = createId();
       const now = new Date().toISOString();
       const logsDir = path.join(process.cwd(), "data", "sessions", sessionId);
       fs.mkdirSync(logsDir, { recursive: true });
@@ -372,10 +399,13 @@ export async function POST(
         // Update all associated epics unless the agent ended by asking a question.
         if (result?.success && outcome !== "asked_question") {
           for (const eid of allEpicIds) {
-            db.update(epics)
-              .set({ status: "review", updatedAt: completedAt })
-              .where(eq(epics.id, eid))
-              .run();
+            transitionBuildCompleted({
+              projectId,
+              epicId: eid,
+              scope: "epic",
+              sessionId,
+              reason: "Team build completed successfully",
+            });
           }
         } else if (result?.success) {
           // asked_question: hold every coordinated epic, notify once, and
@@ -386,6 +416,15 @@ export async function POST(
             sessionId,
             ticketStatus: "in_progress",
           });
+        } else {
+          for (const eid of allEpicIds) {
+            logBuildFailure({
+              projectId,
+              epicId: eid,
+              sessionId,
+              error: result?.error,
+            });
+          }
         }
 
         // Post output as comment on each epic
@@ -418,7 +457,7 @@ export async function POST(
     } catch (e) {
       return NextResponse.json(
         { error: e instanceof Error ? e.message : "Team build launch failed" },
-        { status: 500 }
+        { status: e instanceof WorkflowTransitionError ? 409 : 500 }
       );
     }
   }
@@ -496,6 +535,17 @@ export async function POST(
       ? crypto.randomUUID()
       : undefined;
 
+    transitionBuildStarted({
+      projectId,
+      epicId,
+      scope: "epic",
+      sessionId,
+    });
+    db.update(epics)
+      .set({ branchName, updatedAt: now })
+      .where(eq(epics.id, epicId))
+      .run();
+
     createQueuedSession({
       id: sessionId,
       projectId,
@@ -515,23 +565,6 @@ export async function POST(
       batchRunId: currentBatchRunId,
       createdAt: now,
     });
-
-    // Move epic to in_progress
-    db.update(epics)
-      .set({ status: "in_progress", branchName, updatedAt: now })
-      .where(eq(epics.id, epicId))
-      .run();
-
-    // Sync US statuses: non-done -> in_progress
-    db.update(userStories)
-      .set({ status: "in_progress" })
-      .where(
-        and(
-          eq(userStories.epicId, epicId),
-          notInArray(userStories.status, ["done"])
-        )
-      )
-      .run();
 
     // Update project status to building
     db.update(projects)
@@ -583,33 +616,15 @@ export async function POST(
         }
       }
 
-      // Move epic + US to review if successful.
-      // If the agent asked a follow-up question, keep work in progress.
-      if (result?.success && outcome !== "asked_question") {
-        db.update(userStories)
-          .set({ status: "review" })
-          .where(
-            and(
-              eq(userStories.epicId, epicId),
-              notInArray(userStories.status, ["done"])
-            )
-          )
-          .run();
-
-        db.update(epics)
-          .set({ status: "review", updatedAt: completedAt })
-          .where(eq(epics.id, epicId))
-          .run();
-      } else if (result?.success) {
-        // asked_question: hold the epic in in_progress, notify with a deep
-        // link to the epic, and log the decision to the activity feed.
-        handleAskedQuestionOutcome({
-          projectId,
-          epicIds: [epicId],
-          sessionId,
-          ticketStatus: "in_progress",
-        });
-      }
+      finalizeBuildTerminalOutcome({
+        projectId,
+        epicId,
+        scope: "epic",
+        sessionId,
+        success: !!result?.success,
+        outcome,
+        error: result?.error,
+      });
 
       // Post output as epic comment
       const output = resolveSessionOutput(result, sessionId);

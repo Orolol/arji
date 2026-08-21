@@ -46,6 +46,8 @@ import {
   isResumableProvider,
   providerAcceptsAssignedSessionId,
 } from "@/lib/agent-sessions/resume-capability";
+import { applyTransition } from "@/lib/workflow/transition-service";
+import type { KanbanStatus } from "@/lib/types/kanban";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
 
@@ -100,6 +102,19 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   // If merge was clean, just do the final merge into main directly
   if (!mergeResult.conflicted) {
+    const preflight = applyTransition({
+      projectId,
+      epicId,
+      fromStatus: (epic.status ?? "review") as KanbanStatus,
+      toStatus: "done",
+      actor: "user",
+      source: "merge",
+      reason: "Merge resolution preflight",
+      validateOnly: true,
+    });
+    if (!preflight.valid) {
+      return NextResponse.json({ error: preflight.error }, { status: 400 });
+    }
     const finalMerge = await mergeWorktree(gitRepoPath, branchName, worktreePath, {
       defaultBranch: project.defaultBranch,
     });
@@ -110,9 +125,20 @@ export async function POST(request: NextRequest, { params }: Params) {
       );
     }
 
-    const now = new Date().toISOString();
+    const transition = applyTransition({
+      projectId,
+      epicId,
+      fromStatus: (epic.status ?? "review") as KanbanStatus,
+      toStatus: "done",
+      actor: "user",
+      source: "merge",
+      reason: "Clean merge resolution completed",
+    });
+    if (!transition.valid) {
+      return NextResponse.json({ error: transition.error }, { status: 409 });
+    }
     db.update(epics)
-      .set({ status: "done", branchName: null, updatedAt: now })
+      .set({ branchName: null, updatedAt: new Date().toISOString() })
       .where(eq(epics.id, epicId))
       .run();
 
@@ -248,6 +274,24 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     // On success: attempt the final merge into main
     if (result?.success) {
+      const currentStatus = (db
+        .select({ status: epics.status })
+        .from(epics)
+        .where(eq(epics.id, epicId))
+        .get()?.status ?? "review") as KanbanStatus;
+      const preflight = applyTransition({
+        projectId,
+        epicId,
+        fromStatus: currentStatus,
+        toStatus: "done",
+        actor: "agent",
+        source: "merge",
+        reason: "Merge-fix completion preflight",
+        sessionId,
+        validateOnly: true,
+      });
+      if (!preflight.valid) return;
+
       const finalMerge = await mergeWorktree(
         gitRepoPath,
         branchName,
@@ -256,8 +300,19 @@ export async function POST(request: NextRequest, { params }: Params) {
       );
 
       if (finalMerge.merged) {
+        const transition = applyTransition({
+          projectId,
+          epicId,
+          fromStatus: currentStatus,
+          toStatus: "done",
+          actor: "agent",
+          source: "merge",
+          reason: "Merge-fix agent resolved conflicts and merged",
+          sessionId,
+        });
+        if (!transition.valid) return;
         db.update(epics)
-          .set({ status: "done", branchName: null, updatedAt: completedAt })
+          .set({ branchName: null, updatedAt: completedAt })
           .where(eq(epics.id, epicId))
           .run();
 

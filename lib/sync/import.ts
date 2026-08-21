@@ -4,6 +4,12 @@ import { eq } from "drizzle-orm";
 import { readArjiJson } from "./arji-json";
 import type { ArjiJsonComment } from "./arji-json";
 import Database from "better-sqlite3";
+import {
+  applyStoryTransition,
+  applyTransition,
+  type StoryStatus,
+} from "@/lib/workflow/transition-service";
+import type { KanbanStatus } from "@/lib/types/kanban";
 
 export interface ImportResult {
   epicsUpserted: number;
@@ -46,14 +52,36 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
 
   const transaction = sqlite.transaction(() => {
     // Get current epic/story IDs for deletion pass
-    const currentEpicIds = new Set(
-      db.select({ id: epics.id }).from(epics)
-        .where(eq(epics.projectId, projectId)).all().map((e) => e.id)
+    const currentEpicRows = db
+      .select({ id: epics.id, status: epics.status })
+      .from(epics)
+      .where(eq(epics.projectId, projectId))
+      .all();
+    const currentEpicIds = new Set(currentEpicRows.map((epic) => epic.id));
+    const currentEpicStatus = new Map(
+      currentEpicRows.map((epic) => [epic.id, epic.status ?? "backlog"])
     );
     const jsonEpicIds = new Set(data.epics.map((e) => e.id));
 
     // Upsert epics
     for (const epic of data.epics) {
+      const existingEpicStatus = currentEpicStatus.get(epic.id);
+      if (existingEpicStatus && existingEpicStatus !== epic.status) {
+        const result = applyTransition({
+          projectId,
+          epicId: epic.id,
+          fromStatus: existingEpicStatus as KanbanStatus,
+          toStatus: epic.status as KanbanStatus,
+          actor: "system",
+          source: "api",
+          reason: "arji.json status import",
+        });
+        if (!result.valid) {
+          throw new Error(
+            `Cannot import status for epic "${epic.title}": ${result.error}`
+          );
+        }
+      }
       db.insert(epics)
         .values({
           id: epic.id,
@@ -74,7 +102,6 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
             title: epic.title,
             description: epic.description,
             priority: epic.priority,
-            status: epic.status,
             position: epic.position,
             branchName: epic.branchName,
             type: epic.type ?? "feature",
@@ -90,13 +117,36 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
       }
 
       // Sync user stories within this epic
-      const currentStoryIds = new Set(
-        db.select({ id: userStories.id }).from(userStories)
-          .where(eq(userStories.epicId, epic.id)).all().map((s) => s.id)
+      const currentStoryRows = db
+        .select({ id: userStories.id, status: userStories.status })
+        .from(userStories)
+        .where(eq(userStories.epicId, epic.id))
+        .all();
+      const currentStoryIds = new Set(currentStoryRows.map((story) => story.id));
+      const currentStoryStatus = new Map(
+        currentStoryRows.map((story) => [story.id, story.status ?? "todo"])
       );
       const jsonStoryIds = new Set(epic.user_stories.map((s) => s.id));
 
       for (const story of epic.user_stories) {
+        const existingStoryStatus = currentStoryStatus.get(story.id);
+        if (existingStoryStatus && existingStoryStatus !== story.status) {
+          const result = applyStoryTransition({
+            projectId,
+            epicId: epic.id,
+            userStoryId: story.id,
+            fromStatus: existingStoryStatus as StoryStatus,
+            toStatus: story.status as StoryStatus,
+            actor: "system",
+            source: "api",
+            reason: "arji.json story status import",
+          });
+          if (!result.valid) {
+            throw new Error(
+              `Cannot import status for story "${story.title}": ${result.error}`
+            );
+          }
+        }
         db.insert(userStories)
           .values({
             id: story.id,
@@ -114,7 +164,6 @@ export async function importArjiJson(projectId: string): Promise<ImportResult> {
               title: story.title,
               description: story.description,
               acceptanceCriteria: story.acceptance_criteria,
-              status: story.status,
               position: story.position,
             },
           })

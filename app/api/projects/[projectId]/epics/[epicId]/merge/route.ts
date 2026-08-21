@@ -29,8 +29,6 @@ import {
 import { agentScheduler } from "@/lib/agents/scheduler";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
 import { applyTransition } from "@/lib/workflow/transition-service";
-import { emitTicketMoved } from "@/lib/events/emit";
-import { logTransition } from "@/lib/workflow/log";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import fs from "fs";
 import path from "path";
@@ -61,6 +59,21 @@ export async function POST(
     return NextResponse.json({ error: "Epic has no branch to merge" }, { status: 400 });
   }
 
+  // Workflow guards run before git, so a dirty review can never be merged.
+  const preflight = applyTransition({
+    projectId,
+    epicId,
+    fromStatus: (epic.status ?? "review") as KanbanStatus,
+    toStatus: "done",
+    actor: "user",
+    source: "merge",
+    reason: "Manual merge preflight",
+    validateOnly: true,
+  });
+  if (!preflight.valid) {
+    return NextResponse.json({ error: preflight.error }, { status: 400 });
+  }
+
   // Find the worktree path from the most recent session for this epic
   const session = db
     .select()
@@ -82,7 +95,7 @@ export async function POST(
   if (result.merged) {
     const prevStatus = (epic.status ?? "review") as KanbanStatus;
 
-    // Validate + emit + log via transition service (skip DB update — we handle branchName too)
+    // Re-check and apply after git: guards may have changed during the merge.
     const validation = applyTransition({
       projectId,
       epicId,
@@ -91,16 +104,14 @@ export async function POST(
       actor: "user",
       source: "merge",
       reason: "Branch merged successfully",
-      skipDbUpdate: true,
     });
     if (!validation.valid) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
 
-    // Move epic to done + clear branch name
-    const now = new Date().toISOString();
+    // The status is already guarded/applied; branch cleanup is metadata only.
     db.update(epics)
-      .set({ status: "done", branchName: null, updatedAt: now })
+      .set({ branchName: null, updatedAt: new Date().toISOString() })
       .where(eq(epics.id, epicId))
       .run();
 
@@ -219,21 +230,27 @@ export async function POST(
           { defaultBranch: project.defaultBranch }
         );
         if (retryResult.merged) {
-          const mergedAt = new Date().toISOString();
-          db.update(epics)
-            .set({ status: "done", branchName: null, updatedAt: mergedAt })
+          const currentStatus = (db
+            .select({ status: epics.status })
+            .from(epics)
             .where(eq(epics.id, epicId))
-            .run();
-          emitTicketMoved(projectId, epicId, epic.status ?? "review", "done");
-          logTransition({
+            .get()?.status ?? "review") as KanbanStatus;
+          const transition = applyTransition({
             projectId,
             epicId,
-            fromStatus: epic.status ?? "review",
+            fromStatus: currentStatus,
             toStatus: "done",
             actor: "agent",
+            source: "merge",
             reason: "Merge-fix agent resolved conflicts and merged",
             sessionId,
           });
+          if (transition.valid) {
+            db.update(epics)
+              .set({ branchName: null, updatedAt: new Date().toISOString() })
+              .where(eq(epics.id, epicId))
+              .run();
+          }
           tryExportArjiJson(projectId);
         }
       }

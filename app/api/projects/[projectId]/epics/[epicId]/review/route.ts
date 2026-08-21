@@ -5,7 +5,7 @@ import {
   userStories,
   ticketComments,
 } from "@/lib/db/schema";
-import { eq, and, notInArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
@@ -50,13 +50,12 @@ import {
 import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
-import { logTransition } from "@/lib/workflow/log";
+import { transitionReviewRejected } from "@/lib/workflow/automatic-transitions";
 import { handleAskedQuestionOutcome } from "@/lib/workflow/agent-question";
 import {
   emitSessionStarted,
   emitSessionCompleted,
   emitSessionFailed,
-  emitTicketMoved,
 } from "@/lib/events/emit";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
@@ -361,29 +360,10 @@ export async function POST(request: NextRequest, { params }: Params) {
             .get();
 
           if (currentEpic && (currentEpic.status === "done" || currentEpic.status === "review")) {
-            const prevStatus = currentEpic.status;
-            db.update(epics)
-              .set({ status: "in_progress", updatedAt: completedAt })
-              .where(eq(epics.id, epicId))
-              .run();
-
-            db.update(userStories)
-              .set({ status: "in_progress" })
-              .where(
-                and(
-                  eq(userStories.epicId, epicId),
-                  notInArray(userStories.status, ["in_progress"])
-                )
-              )
-              .run();
-
-            emitTicketMoved(projectId, epicId, prevStatus, "in_progress");
-            logTransition({
+            transitionReviewRejected({
               projectId,
               epicId,
-              fromStatus: prevStatus,
-              toStatus: "in_progress",
-              actor: "agent",
+              scope: "epic",
               reason: `Review verdict: changes requested (${lbl})`,
               sessionId: sid,
             });

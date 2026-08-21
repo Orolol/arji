@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects, epics, userStories, reviewComments, ticketComments } from "@/lib/db/schema";
+import { projects, userStories, reviewComments, ticketComments } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import simpleGit from "simple-git";
-import { applyTransition } from "@/lib/workflow/transition-service";
+import {
+  applyStoryTransition,
+  applyTransition,
+  type StoryStatus,
+} from "@/lib/workflow/transition-service";
 import { getEpicOr404, isErrorResponse } from "@/lib/api/route-helpers";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
@@ -37,7 +41,33 @@ export async function POST(_request: NextRequest, { params }: Params) {
     )
     .run();
 
-  // Validate + apply transition (updates epic status, emits event, logs)
+  const stories = db
+    .select()
+    .from(userStories)
+    .where(eq(userStories.epicId, epicId))
+    .all();
+
+  // Validate every child before applying any write; epic approval supplies
+  // the review context for its synchronized story transitions.
+  for (const story of stories) {
+    const validation = applyStoryTransition({
+      projectId,
+      epicId,
+      userStoryId: story.id,
+      fromStatus: (story.status ?? "todo") as StoryStatus,
+      toStatus: "done",
+      actor: "user",
+      source: "approve",
+      reason: "Parent epic review approved",
+      reviewScope: "epic",
+      validateOnly: true,
+    });
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
+    }
+  }
+
+  // Validate + apply the epic transition (DB update, event and log).
   const validation = applyTransition({
     projectId,
     epicId,
@@ -46,7 +76,6 @@ export async function POST(_request: NextRequest, { params }: Params) {
     actor: "user",
     source: "approve",
     reason: "Review approved",
-    skipDbUpdate: true, // we handle epic + US update below
   });
   if (!validation.valid) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
@@ -63,17 +92,19 @@ export async function POST(_request: NextRequest, { params }: Params) {
     })
     .run();
 
-  // Epic -> done
-  db.update(epics)
-    .set({ status: "done", updatedAt: now })
-    .where(eq(epics.id, epicId))
-    .run();
-
-  // All US -> done
-  db.update(userStories)
-    .set({ status: "done" })
-    .where(eq(userStories.epicId, epicId))
-    .run();
+  for (const story of stories) {
+    applyStoryTransition({
+      projectId,
+      epicId,
+      userStoryId: story.id,
+      fromStatus: (story.status ?? "todo") as StoryStatus,
+      toStatus: "done",
+      actor: "user",
+      source: "approve",
+      reason: "Parent epic review approved",
+      reviewScope: "epic",
+    });
+  }
 
   // Attempt auto-merge
   let merged = false;

@@ -61,7 +61,7 @@ import { tryAutoMerge, type AutoMergeOutcome } from "./merge";
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 /** Statuses a build may still be dispatched onto, checked at the last moment. */
-const DISPATCHABLE_BUILD_STATUSES = new Set(["todo", "in_progress"]);
+const DISPATCHABLE_BUILD_STATUSES = new Set(["backlog", "todo", "in_progress"]);
 
 /** Epics past the finish line — never a valid dispatch target. */
 const DELIVERED_EPIC_STATUSES = new Set(["done", "released"]);
