@@ -13,7 +13,7 @@ import fs from "fs";
 import path from "path";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { agentSessions, epics, projects, releases, userStories } from "@/lib/db/schema";
+import { agentSessions, epics, namedAgents, projects, releases, userStories } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { processManager } from "@/lib/claude/process-manager";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
@@ -39,6 +39,24 @@ const POLL_INTERVAL_MS = 2000;
 
 /** Sessions of this type queued/running block a new dispatch (see route 409). */
 const SPEC_UPDATE_AGENT_TYPE = "spec_generation";
+
+/**
+ * Thrown when the picked named agent no longer exists (a stale dropdown
+ * selection). resolveAgentByNamedId would silently fall back to the default
+ * chain and run the update with a different agent than the user chose, so
+ * dispatch rejects first; the route maps this to a 400 the dialog displays.
+ */
+export class SpecUpdateAgentNotFoundError extends Error {
+  readonly namedAgentId: string;
+
+  constructor(namedAgentId: string) {
+    super(
+      "The selected agent no longer exists. Pick another agent and try again."
+    );
+    this.name = "SpecUpdateAgentNotFoundError";
+    this.namedAgentId = namedAgentId;
+  }
+}
 
 export interface DispatchSpecUpdateInput {
   projectId: string;
@@ -102,6 +120,19 @@ export async function dispatchSpecUpdateSession(
     SPEC_UPDATE_AGENT_TYPE,
     input.projectId
   );
+  // Fail loudly on an unknown named agent instead of letting
+  // resolveAgentByNamedId fall through to the default chain.
+  if (input.namedAgentId) {
+    const picked = db
+      .select({ id: namedAgents.id })
+      .from(namedAgents)
+      .where(eq(namedAgents.id, input.namedAgentId))
+      .get();
+    if (!picked) {
+      throw new SpecUpdateAgentNotFoundError(input.namedAgentId);
+    }
+  }
+
   const resolvedAgent = resolveAgentByNamedId(
     SPEC_UPDATE_AGENT_TYPE,
     input.projectId,
@@ -196,12 +227,27 @@ export async function dispatchSpecUpdateSession(
 
     const outcome = classifySessionOutcome(result, sessionId);
 
+    // Only a delivered answer replaces the spec — silent runs, asked
+    // questions, and failures leave it untouched.
+    const output =
+      result?.success && outcome === "answered"
+        ? sanitizeUpdatedSpec(resolveSessionOutput(result, sessionId, ""))
+        : "";
+
     try {
       markSessionTerminal(
         sessionId,
         {
-          success: !!result?.success,
-          error: result?.error ?? null,
+          // A run that produced no usable spec is a failure for this
+          // workflow even when the CLI exited cleanly: the session row must
+          // not claim success over an unchanged document.
+          success: !!output,
+          error: output
+            ? null
+            : result?.error ??
+              (result?.success
+                ? "The agent finished without returning an updated spec — the saved spec was left unchanged."
+                : "The spec update session failed without reporting an error."),
           outcome,
           usage: extractSessionUsage(result),
         },
@@ -213,15 +259,6 @@ export async function dispatchSpecUpdateSession(
       }
     }
 
-    // Only a delivered answer replaces the spec — silent runs, asked
-    // questions, and failures leave it untouched.
-    if (!result?.success || outcome !== "answered") {
-      return;
-    }
-
-    const output = sanitizeUpdatedSpec(
-      resolveSessionOutput(result, sessionId, "")
-    );
     if (!output) {
       return;
     }

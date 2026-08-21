@@ -65,6 +65,7 @@ const {
   dispatchSpecUpdateSession,
   hasPendingSpecUpdate,
   sanitizeUpdatedSpec,
+  SpecUpdateAgentNotFoundError,
 } = await import("@/lib/workflow/spec-update");
 const { buildSpecUpdatePrompt, buildProjectStateSection } = await import(
   "@/lib/claude/prompt-builder"
@@ -229,6 +230,73 @@ describe("dispatchSpecUpdateSession", () => {
       })
       .run();
     expect(hasPendingSpecUpdate(projectId)).toBe(true);
+  });
+
+  it("rejects a nonexistent named agent before creating any session", async () => {
+    const projectId = seedProject("# Spec");
+
+    await expect(
+      dispatchSpecUpdateSession({
+        projectId,
+        instruction: null,
+        namedAgentId: "agent-gone",
+      })
+    ).rejects.toBeInstanceOf(SpecUpdateAgentNotFoundError);
+    expect(specUpdateSessions(projectId)).toHaveLength(0);
+  });
+
+  it("marks a silent run failed and leaves the spec untouched", async () => {
+    const projectId = seedProject("# Old Spec\n\n- stale");
+    processManagerState.result = {
+      success: true,
+      result: "",
+      duration: 500,
+    };
+
+    await dispatchSpecUpdateSession({
+      projectId,
+      instruction: null,
+      namedAgentId: null,
+    });
+    await flushBackground();
+
+    const session = specUpdateSessions(projectId)[0];
+    expect(session.status).toBe("failed");
+    expect(session.outcome).toBe("silent");
+    expect(session.error).toContain("left unchanged");
+    const row = db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .get();
+    expect(row?.spec).toBe("# Old Spec\n\n- stale");
+  });
+
+  it("keeps a missing-CLI spawn failure's readable reason on the session", async () => {
+    const projectId = seedProject("# Old Spec\n\n- stale");
+    processManagerState.result = {
+      success: false,
+      error:
+        "Codex CLI not found. Install it with: npm i -g @openai/codex",
+      duration: 10,
+    };
+
+    await dispatchSpecUpdateSession({
+      projectId,
+      instruction: null,
+      namedAgentId: null,
+    });
+    await flushBackground();
+
+    const session = specUpdateSessions(projectId)[0];
+    expect(session.status).toBe("failed");
+    expect(session.error).toContain("Codex CLI not found");
+    const row = db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .get();
+    expect(row?.spec).toBe("# Old Spec\n\n- stale");
   });
 
 

@@ -9,6 +9,7 @@ import { validateBody, isValidationError } from "@/lib/validation/validate";
 import {
   dispatchSpecUpdateSession,
   hasPendingSpecUpdate,
+  SpecUpdateAgentNotFoundError,
 } from "@/lib/workflow/spec-update";
 
 type Params = { params: Promise<{ projectId: string }> };
@@ -59,6 +60,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     });
     return NextResponse.json({ data: { sessionId } });
   } catch (error) {
+    // A stale agent pick (the row was deleted after the dropdown rendered)
+    // is a client error, not a dispatch failure — say so readably.
+    if (error instanceof SpecUpdateAgentNotFoundError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     return errorResponse(error, "Failed to dispatch spec update");
   }
 }
