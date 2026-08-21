@@ -7,6 +7,11 @@
  * its branch to land first (mergeWorktree, merge-before-done). A failed epic
  * merge leaves the epic status untouched and reports the partial outcome
  * with 200 + mergeError — the story approval itself DID succeed.
+ *
+ * Every status write (story → done, epic → done) goes through the
+ * transition service, so the engine's guards still apply: an epic whose
+ * completion the engine refuses stays put and the refusal is reported back
+ * to the caller instead of force-closing it.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
@@ -18,6 +23,9 @@ import {
 
 const mocks = vi.hoisted(() => ({
   mergeWorktree: vi.fn(),
+  applyTransition: vi.fn(),
+  applyStoryTransition: vi.fn(),
+  logWorkflowDecision: vi.fn(),
   logTransition: vi.fn(),
   createApproveMergeFailedNotification: vi.fn(),
   tryExportArjiJson: vi.fn(),
@@ -32,6 +40,12 @@ vi.mock("@/lib/db", async () => {
 
 vi.mock("@/lib/git/manager", () => ({
   mergeWorktree: mocks.mergeWorktree,
+}));
+
+vi.mock("@/lib/workflow/transition-service", () => ({
+  applyTransition: mocks.applyTransition,
+  applyStoryTransition: mocks.applyStoryTransition,
+  logWorkflowDecision: mocks.logWorkflowDecision,
 }));
 
 vi.mock("@/lib/workflow/log", () => ({
@@ -121,11 +135,21 @@ function epicUpdates() {
   ) as Record<string, unknown>[];
 }
 
+/** The service call that closes the epic (absent when the epic is held). */
+function epicCloseCall() {
+  return mocks.applyTransition.mock.calls.find(
+    (c) => (c[0] as Record<string, unknown>).toStatus === "done" &&
+      !("validateOnly" in (c[0] as object))
+  )?.[0] as Record<string, unknown> | undefined;
+}
+
 describe("Story approval", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
     mocks.mergeWorktree.mockResolvedValue({ merged: true, commitHash: "abc123" });
+    mocks.applyTransition.mockReturnValue({ valid: true });
+    mocks.applyStoryTransition.mockReturnValue({ valid: true });
     mocks.beginMergeWork.mockReturnValue(true);
   });
 
@@ -137,6 +161,7 @@ describe("Story approval", () => {
     const json = await res.json();
     expect(json.error).toContain("review");
     expect(dbMockState.updateCalls).toEqual([]);
+    expect(mocks.applyStoryTransition).not.toHaveBeenCalled();
   });
 
   it("moves the story to done without closing the epic when siblings remain", async () => {
@@ -153,8 +178,17 @@ describe("Story approval", () => {
       merged: false,
     });
     expect(mocks.mergeWorktree).not.toHaveBeenCalled();
-    // Only the story update — the epic row is untouched
-    expect(dbMockState.updateCalls).toEqual([{ status: "done" }]);
+    // The story verdict is the service's write; the epic row is untouched
+    // and the epic transition is never even validated.
+    expect(mocks.applyStoryTransition).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userStoryId: "us-1",
+        fromStatus: "review",
+        toStatus: "done",
+      })
+    );
+    expect(mocks.applyTransition).not.toHaveBeenCalled();
+    expect(dbMockState.updateCalls).toEqual([]);
   });
 
   describe("last story approved — epic merge success", () => {
@@ -178,8 +212,14 @@ describe("Story approval", () => {
         commitHash: "abc123",
       });
 
-      const [epicUpdate] = epicUpdates();
-      expect(epicUpdate).toMatchObject({ status: "done", branchName: null });
+      // The status write is the service's; the route only clears the branch.
+      expect(epicCloseCall()).toMatchObject({
+        fromStatus: "review",
+        toStatus: "done",
+        source: "approve",
+      });
+      const [branchClear] = epicUpdates();
+      expect(branchClear).toMatchObject({ branchName: null });
     });
 
     it("acquires and releases the per-epic merge lock", async () => {
@@ -210,13 +250,47 @@ describe("Story approval", () => {
           "A merge is already in flight for this epic — retry in a moment.",
       });
       expect(mocks.mergeWorktree).not.toHaveBeenCalled();
-      // Only the story update — the epic row and its comments are untouched,
-      // and no spurious failure trail was written for a healthy epic.
-      expect(dbMockState.updateCalls).toEqual([{ status: "done" }]);
+      // The story verdict stands (service write); the epic row and its
+      // comments are untouched, and no spurious failure trail was written
+      // for a healthy epic.
+      expect(dbMockState.updateCalls).toEqual([]);
       expect(dbMockState.insertCalls).toEqual([]);
       expect(mocks.createApproveMergeFailedNotification).not.toHaveBeenCalled();
       // Never acquired, so never released.
       expect(mocks.endMergeWork).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("last story approved — engine refuses the epic close", () => {
+    it("holds the epic in place and reports the refusal instead of force-closing", async () => {
+      mocks.applyTransition.mockReturnValue({
+        valid: false,
+        error: "Cannot move to Done: no completed review found.",
+      });
+      seed();
+      const res = await callApprove();
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data).toEqual({
+        approved: true,
+        epicComplete: false,
+        epicHoldReason: "Cannot move to Done: no completed review found.",
+        merged: false,
+      });
+
+      // Nothing git-related ran and the epic row was never written.
+      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+      expect(mocks.beginMergeWork).not.toHaveBeenCalled();
+      expect(dbMockState.updateCalls).toEqual([]);
+      // The hold is named in the activity log, not left implicit.
+      expect(mocks.logWorkflowDecision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          epicId: "epic-1",
+          actor: "user",
+          reason: expect.stringContaining("no completed review"),
+        })
+      );
     });
   });
 
@@ -247,9 +321,10 @@ describe("Story approval", () => {
       seed();
       await callApprove();
 
-      // The story went done; nothing else was written
+      // The story went done (service write); nothing was written to the epic
+      // row — the branch-clear only happens when the merge lands.
       expect(epicUpdates()).toEqual([]);
-      expect(dbMockState.updateCalls).toEqual([{ status: "done" }]);
+      expect(dbMockState.updateCalls).toEqual([]);
     });
 
     it("posts a ticket comment, notification, and same-status log entry", async () => {
@@ -339,10 +414,10 @@ describe("Story approval", () => {
       });
       expect(mocks.mergeWorktree).not.toHaveBeenCalled();
 
-      const [epicUpdate] = epicUpdates();
-      expect(epicUpdate).toMatchObject({ status: "done" });
-      // Not merged, so the (nonexistent) branch is not force-cleared
-      expect("branchName" in epicUpdate).toBe(false);
+      // The epic still closes through the service, it just has nothing to
+      // land — and no branch-name cleanup runs.
+      expect(epicCloseCall()).toMatchObject({ toStatus: "done" });
+      expect(dbMockState.updateCalls).toEqual([]);
     });
 
     it("closes the epic without a merge when the project has no git repo", async () => {

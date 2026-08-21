@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
-  epics,
   userStories,
   ticketComments,
 } from "@/lib/db/schema";
@@ -52,6 +51,7 @@ import {
 } from "@/lib/notifications/create";
 import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
+import { transitionReviewRejected } from "@/lib/workflow/automatic-transitions";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
@@ -351,24 +351,14 @@ export async function POST(request: NextRequest, { params }: Params) {
             .get();
 
           if (currentStory && (currentStory.status === "done" || currentStory.status === "review")) {
-            db.update(userStories)
-              .set({ status: "in_progress" })
-              .where(eq(userStories.id, storyId))
-              .run();
-
-            // Also revert the parent epic if it's done/review
-            const parentEpic = db
-              .select()
-              .from(epics)
-              .where(eq(epics.id, currentStory.epicId))
-              .get();
-
-            if (parentEpic && (parentEpic.status === "done" || parentEpic.status === "review")) {
-              db.update(epics)
-                .set({ status: "in_progress", updatedAt: completedAt })
-                .where(eq(epics.id, currentStory.epicId))
-                .run();
-            }
+            transitionReviewRejected({
+              projectId,
+              epicId: currentStory.epicId,
+              scope: "story",
+              userStoryId: storyId,
+              sessionId: sid,
+              reason: `Review verdict: changes requested (${lbl})`,
+            });
           }
         }
       });

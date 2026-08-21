@@ -48,7 +48,7 @@ export interface WaveTicketResult {
   /** Null when the launch itself failed before a session row existed. */
   sessionId: string | null;
   success: boolean;
-  /** Session delivery verdict (e.g. "answered" | "asked_question" | "error"). */
+  /** Session/workflow verdict (e.g. "answered", "asked_question", "transition_refused"). */
   outcome: string | null;
   error: string | null;
 }

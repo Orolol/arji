@@ -106,7 +106,7 @@ vi.mock("fs", () => ({
   },
 }));
 
-const { db } = await import("@/lib/db");
+const { db, sqlite } = await import("@/lib/db");
 const {
   projects,
   epics,
@@ -337,6 +337,58 @@ describe("fix stage dispatch (epic scope)", () => {
         toStatus: "review",
       })
     );
+  });
+
+  it("settles a successful provider run as failed when review promotion is refused", async () => {
+    const { projectId, epicId } = seed("review");
+    sqlite.exec(`
+      CREATE TRIGGER refuse_pipeline_terminal_write
+      BEFORE UPDATE OF status ON agent_sessions
+      WHEN NEW.status = 'completed'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced terminal write failure');
+      END;
+    `);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const driver = createPipelineStageDriver({
+        projectId,
+        scope: "epic",
+        epicId,
+        userStoryId: null,
+        buildNamedAgentId: null,
+      });
+      const handle = await driver.launchStage({
+        stage: "fix",
+        attempt: 1,
+        fixCycle: 1,
+        previousAttemptSessionId: null,
+        lastCodeSessionId: null,
+      });
+
+      await expect(handle.settled).resolves.toMatchObject({
+        sessionId: handle.sessionId,
+        success: false,
+        outcome: "transition_refused",
+        error: expect.stringContaining("queued or running"),
+      });
+      expect(
+        db.select().from(epics).where(eq(epics.id, epicId)).get()?.status
+      ).toBe("in_progress");
+      expect(
+        db
+          .select()
+          .from(ticketComments)
+          .where(eq(ticketComments.epicId, epicId))
+          .all()
+      ).toContainEqual(
+        expect.objectContaining({ content: "Fixed everything." })
+      );
+    } finally {
+      sqlite.exec("DROP TRIGGER IF EXISTS refuse_pipeline_terminal_write");
+      errorSpy.mockRestore();
+    }
   });
 
   it("starts fresh (no cliSessionId) when the provider cannot resume", async () => {

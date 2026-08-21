@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   isGitRepo: vi.fn(),
   startMergeInWorktree: vi.fn(),
   waitForProcessCompletion: vi.fn(),
+  applyTransition: vi.fn(),
   createMergeRetryFailedNotification: vi.fn(),
   tryExportArjiJson: vi.fn(),
 }));
@@ -30,6 +31,12 @@ vi.mock("@/lib/db", async () => {
   const { dbModuleMock } = await import("@/__tests__/helpers/db-mock");
   return dbModuleMock();
 });
+
+vi.mock("@/lib/workflow/transition-service", () => ({
+  applyTransition: mocks.applyTransition,
+  applyStoryTransition: vi.fn(),
+  logWorkflowDecision: vi.fn(),
+}));
 
 vi.mock("@/lib/git/manager", () => ({
   mergeWorktree: mocks.mergeWorktree,
@@ -143,6 +150,7 @@ describe("Resolve-merge: final merge fails after the agent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
+    mocks.applyTransition.mockReturnValue({ valid: true });
     mocks.isGitRepo.mockResolvedValue(true);
     mocks.createWorktree.mockResolvedValue({
       worktreePath: "/tmp/worktrees/epic-abc",
@@ -195,11 +203,14 @@ describe("Resolve-merge: final merge fails after the agent", () => {
     expect(failureComment).toBeDefined();
     expect(String(failureComment.content)).toContain("conflict markers");
 
-    // …and the epic was NOT closed.
-    const doneUpdate = dbMockState.updateCalls.find(
-      (c) => (c as Record<string, unknown>).status === "done"
+    // …and the epic was NOT closed: the service never ran a close and no
+    // branch-name cleanup touched the row.
+    const closeCall = mocks.applyTransition.mock.calls.find(
+      (c) => (c[0] as Record<string, unknown>).toStatus === "done" &&
+        !("validateOnly" in (c[0] as object))
     );
-    expect(doneUpdate).toBeUndefined();
+    expect(closeCall).toBeUndefined();
+    expect(dbMockState.updateCalls).toEqual([]);
     expect(mocks.tryExportArjiJson).not.toHaveBeenCalled();
   });
 
@@ -212,10 +223,19 @@ describe("Resolve-merge: final merge fails after the agent", () => {
     await callResolveMerge();
 
     await vi.waitFor(() => {
-      const doneUpdate = dbMockState.updateCalls.find(
-        (c) => (c as Record<string, unknown>).status === "done"
+      const closeCall = mocks.applyTransition.mock.calls.find(
+        (c) => (c[0] as Record<string, unknown>).toStatus === "done" &&
+          !("validateOnly" in (c[0] as object))
       );
-      expect(doneUpdate).toBeDefined();
+      expect(closeCall).toBeDefined();
+    });
+
+    // The landing merge clears the branch on the epic row.
+    await vi.waitFor(() => {
+      const branchClear = dbMockState.updateCalls.find(
+        (c) => (c as Record<string, unknown>).branchName === null
+      );
+      expect(branchClear).toBeDefined();
     });
     expect(mocks.createMergeRetryFailedNotification).not.toHaveBeenCalled();
   });

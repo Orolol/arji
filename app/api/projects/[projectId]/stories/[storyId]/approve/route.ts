@@ -15,6 +15,13 @@ import { logTransition } from "@/lib/workflow/log";
 import { createApproveMergeFailedNotification } from "@/lib/notifications/create";
 import { autoModeRegistry } from "@/lib/auto-mode/registry";
 import { getStoryOr404, isErrorResponse } from "@/lib/api/route-helpers";
+import {
+  applyStoryTransition,
+  applyTransition,
+  logWorkflowDecision,
+  type StoryStatus,
+} from "@/lib/workflow/transition-service";
+import type { KanbanStatus } from "@/lib/types/kanban";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
@@ -29,6 +36,11 @@ type Params = { params: Promise<{ projectId: string; storyId: string }> };
  * marked done. The previous implementation did it the other way around —
  * epic done first, then a naive checked-out-branch merge whose failure was
  * swallowed — which produced "done" epics whose code never reached main.
+ *
+ * Both status writes (story → done, and the epic → done when all stories
+ * are approved) go through the transition service, so the engine's guards
+ * still apply: an epic whose completion the engine refuses stays put and
+ * the refusal is reported back to the caller instead of force-closed.
  */
 export async function POST(_request: NextRequest, { params }: Params) {
   const { projectId, storyId } = await params;
@@ -47,13 +59,8 @@ export async function POST(_request: NextRequest, { params }: Params) {
 
   const now = new Date().toISOString();
 
-  // Move story to done — unconditionally, whatever git does below.
-  db.update(userStories)
-    .set({ status: "done" })
-    .where(eq(userStories.id, storyId))
-    .run();
-
-  // Check if all stories in the epic are now done
+  // Check whether this approval will complete the epic before applying any
+  // status write, so all workflow guards can be validated as one decision.
   const epic = db
     .select()
     .from(epics)
@@ -61,6 +68,37 @@ export async function POST(_request: NextRequest, { params }: Params) {
     .get();
 
   if (!epic) {
+    // Orphaned story (epic deleted out from under it): record the verdict
+    // for the story itself, nothing else to close.
+    const orphanValidation = applyStoryTransition({
+      projectId,
+      epicId: story.epicId,
+      userStoryId: storyId,
+      fromStatus: (story.status ?? "review") as StoryStatus,
+      toStatus: "done",
+      actor: "user",
+      source: "approve",
+      reason: "Story review approved",
+      requireCompletedReview: false,
+      requireResolvedComments: false,
+      validateOnly: true,
+    });
+    if (!orphanValidation.valid) {
+      return NextResponse.json({ error: orphanValidation.error }, { status: 400 });
+    }
+    applyStoryTransition({
+      projectId,
+      epicId: story.epicId,
+      userStoryId: storyId,
+      fromStatus: (story.status ?? "review") as StoryStatus,
+      toStatus: "done",
+      actor: "user",
+      source: "approve",
+      reason: "Story review approved",
+      requireCompletedReview: false,
+      requireResolvedComments: false,
+    });
+    tryExportArjiJson(projectId);
     return NextResponse.json({ data: { approved: true, epicComplete: false } });
   }
 
@@ -72,6 +110,38 @@ export async function POST(_request: NextRequest, { params }: Params) {
 
   const allDone = allStories.every((s) => s.id === storyId || s.status === "done");
 
+  // Explicit human approval of a story is itself the review verdict for it,
+  // and story approval cannot resolve epic-scoped findings on its own.
+  const storyValidation = applyStoryTransition({
+    projectId,
+    epicId: epic.id,
+    userStoryId: storyId,
+    fromStatus: (story.status ?? "review") as StoryStatus,
+    toStatus: "done",
+    actor: "user",
+    source: "approve",
+    reason: "Story review approved",
+    requireCompletedReview: false,
+    requireResolvedComments: false,
+    validateOnly: true,
+  });
+  if (!storyValidation.valid) {
+    return NextResponse.json({ error: storyValidation.error }, { status: 400 });
+  }
+
+  applyStoryTransition({
+    projectId,
+    epicId: epic.id,
+    userStoryId: storyId,
+    fromStatus: (story.status ?? "review") as StoryStatus,
+    toStatus: "done",
+    actor: "user",
+    source: "approve",
+    reason: "Story review approved",
+    requireCompletedReview: false,
+    requireResolvedComments: false,
+  });
+
   if (!allDone) {
     tryExportArjiJson(projectId);
     return NextResponse.json({
@@ -79,8 +149,43 @@ export async function POST(_request: NextRequest, { params }: Params) {
     });
   }
 
-  // Last story approved — the epic is complete. Land the branch BEFORE
-  // marking the epic done, so "done" always means "on main".
+  // This is the last open story, so the epic may close — but only if the
+  // engine agrees (completed review session, no open comments, no build
+  // session still running). A refusal holds the epic in place and reports
+  // why, instead of force-closing it.
+  const epicValidation = applyTransition({
+    projectId,
+    epicId: epic.id,
+    fromStatus: (epic.status ?? "review") as KanbanStatus,
+    toStatus: "done",
+    actor: "user",
+    source: "approve",
+    reason: "All stories approved",
+    validateOnly: true,
+  });
+
+  if (!epicValidation.valid) {
+    logWorkflowDecision({
+      projectId,
+      epicId: epic.id,
+      status: (epic.status ?? "review") as KanbanStatus,
+      actor: "user",
+      reason: `Story approved; parent epic held because completion was refused: ${epicValidation.error ?? "unknown workflow guard failure"}`,
+    });
+    tryExportArjiJson(projectId);
+    return NextResponse.json({
+      data: {
+        approved: true,
+        epicComplete: false,
+        epicHoldReason: epicValidation.error,
+        merged: false,
+      },
+    });
+  }
+
+  // Last story approved and the engine agrees — the epic is complete. Land
+  // the branch BEFORE marking the epic done, so "done" always means "on
+  // main".
   const project = db
     .select()
     .from(projects)
@@ -89,8 +194,8 @@ export async function POST(_request: NextRequest, { params }: Params) {
 
   if (project?.gitRepoPath && epic.branchName) {
     // Same per-epic merge lock as auto-mode (lib/auto-mode/merge.ts).
-    // Without it, this merge racing auto-mode's can be silently un-merged by
-    // auto's rollback (its checkpoint predates our merge), and racing an
+    // Without it, this merge racing auto-mode's can be silently un-merged
+    // by auto's rollback (its checkpoint predates our merge), and racing an
     // epic-approve has the loser hit 'branch-missing' and leave a spurious
     // failure trail on a healthy epic. When the lock is held, the story
     // stays done (the verdict stands) and the epic is left untouched — the
@@ -203,11 +308,27 @@ export async function POST(_request: NextRequest, { params }: Params) {
         });
       }
 
-      // Merge landed — NOW the epic may close. The branch name is cleared
-      // because mergeWorktree deleted the branch on success; keeping the
-      // name would point at nothing and make later merge attempts fail.
+      // Merge landed — NOW the epic may close (status write, event and log
+      // via the service). The branch name is cleared because mergeWorktree
+      // deleted the branch on success; keeping it would point at nothing and
+      // make later merge attempts fail.
+      const applied = applyTransition({
+        projectId,
+        epicId: epic.id,
+        fromStatus: (epic.status ?? "review") as KanbanStatus,
+        toStatus: "done",
+        actor: "user",
+        source: "approve",
+        reason: "All stories approved",
+      });
+      if (!applied.valid) {
+        // Same rare race as the epic-approve route: pre-flight passed, the
+        // merge landed, then a guard refused. Surface it — the branch is on
+        // main, a human is reading this.
+        return NextResponse.json({ error: applied.error }, { status: 400 });
+      }
       db.update(epics)
-        .set({ status: "done", branchName: null, updatedAt: now })
+        .set({ branchName: null, updatedAt: now })
         .where(eq(epics.id, epic.id))
         .run();
 
@@ -228,10 +349,15 @@ export async function POST(_request: NextRequest, { params }: Params) {
 
   // No repo or no branch: nothing to land, so closing the epic without a
   // merge is correct, not an error.
-  db.update(epics)
-    .set({ status: "done", updatedAt: now })
-    .where(eq(epics.id, epic.id))
-    .run();
+  applyTransition({
+    projectId,
+    epicId: epic.id,
+    fromStatus: (epic.status ?? "review") as KanbanStatus,
+    toStatus: "done",
+    actor: "user",
+    source: "approve",
+    reason: "All stories approved",
+  });
 
   tryExportArjiJson(projectId);
 

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { notifySessionTerminal } from "./terminal-hooks";
@@ -18,16 +18,21 @@ export type AgentSessionLifecycleStatus =
  *   - asked_question: the agent ended by asking the user a question
  *   - silent:         the run succeeded but produced no textual deliverable
  *   - error:          the session failed
+ *   - transition_refused: output was delivered but the required ticket move
+ *                         was rejected by a workflow guard
  *
  * NULL in the database means "not classified": legacy rows, non-terminal
  * sessions, and user-cancelled sessions (cancellation is a user decision,
  * not a delivery verdict).
  */
+export const SESSION_TRANSITION_REFUSED_OUTCOME = "transition_refused";
+
 export const SESSION_OUTCOMES = [
   "answered",
   "asked_question",
   "silent",
   "error",
+  SESSION_TRANSITION_REFUSED_OUTCOME,
 ] as const;
 
 export type SessionOutcome = (typeof SESSION_OUTCOMES)[number];
@@ -53,11 +58,6 @@ export interface SessionUsage {
 
 export const SESSION_LIFECYCLE_CONFLICT_CODE = "INVALID_SESSION_TRANSITION";
 export const SESSION_NOT_FOUND_CODE = "SESSION_NOT_FOUND";
-
-type TerminalStatus = Extract<
-  AgentSessionLifecycleStatus,
-  "completed" | "failed" | "cancelled"
->;
 
 const TERMINAL_STATUSES: Set<string> = new Set([
   "completed",
@@ -316,11 +316,10 @@ export function transitionSessionStatus({
   return patch;
 }
 
-export interface CreateQueuedSessionInput
-  extends Omit<
-    typeof agentSessions.$inferInsert,
-    "status" | "startedAt" | "endedAt" | "completedAt"
-  > {}
+export type CreateQueuedSessionInput = Omit<
+  typeof agentSessions.$inferInsert,
+  "status" | "startedAt" | "endedAt" | "completedAt"
+>;
 
 export function createQueuedSession(values: CreateQueuedSessionInput): void {
   db.insert(agentSessions)
@@ -371,6 +370,35 @@ export function markSessionTerminal(
     outcome: result.outcome ?? (result.success ? undefined : "error"),
     usage: result.usage,
   });
+}
+
+/**
+ * A provider run may complete successfully while its required board
+ * transition is refused. Preserve the completed lifecycle status (the agent
+ * did deliver output), but replace the delivery verdict so supervisors and
+ * pipeline settle handlers do not credit it as completed work.
+ */
+export function recordSessionTransitionRefusal(
+  sessionId: string,
+  error: string
+): boolean {
+  const session = db
+    .select({ status: agentSessions.status })
+    .from(agentSessions)
+    .where(eq(agentSessions.id, sessionId))
+    .get();
+  if (normalizeSessionLifecycleStatus(session?.status) !== "completed") {
+    return false;
+  }
+
+  const result = db
+    .update(agentSessions)
+    .set({ outcome: SESSION_TRANSITION_REFUSED_OUTCOME, error })
+    .where(
+      and(eq(agentSessions.id, sessionId), eq(agentSessions.status, "completed"))
+    )
+    .run();
+  return result.changes > 0;
 }
 
 export function markSessionCancelled(

@@ -2,10 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
   epics,
-  userStories,
   ticketComments,
 } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   getEpicOr404,
   getProjectOr404,
@@ -23,7 +22,6 @@ import {
   extractSessionUsage,
   resolveSessionOutput,
 } from "@/lib/claude/resolve-session-output";
-import { handleAskedQuestionOutcome } from "@/lib/workflow/agent-question";
 import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
 import {
   createAgentAlreadyRunningPayload,
@@ -56,6 +54,12 @@ import {
   startPipelineRun,
   type PipelineStageResult,
 } from "@/lib/pipeline";
+import {
+  finalizeBuildTerminalOutcome,
+  resolveBuildSessionResult,
+  transitionBuildStarted,
+  WorkflowTransitionError,
+} from "@/lib/workflow/automatic-transitions";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
@@ -210,6 +214,27 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  try {
+    transitionBuildStarted({
+      projectId,
+      epicId: epic.id,
+      scope: "story",
+      userStoryId: storyId,
+      sessionId,
+    });
+  } catch (error) {
+    if (error instanceof WorkflowTransitionError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
+  }
+
+  // Branch metadata is separate from the guarded status transition.
+  db.update(epics)
+    .set({ branchName, updatedAt: now })
+    .where(eq(epics.id, epic.id))
+    .run();
+
   createQueuedSession({
     id: sessionId,
     projectId,
@@ -228,18 +253,6 @@ export async function POST(request: NextRequest, { params }: Params) {
     model: resolvedAgent.model || null,
     createdAt: now,
   });
-
-  // Move ticket to in_progress
-  db.update(userStories)
-    .set({ status: "in_progress" })
-    .where(eq(userStories.id, storyId))
-    .run();
-
-  // Update epic branch info
-  db.update(epics)
-    .set({ branchName, updatedAt: now })
-    .where(eq(epics.id, epic.id))
-    .run();
 
   // Batch-style launch via the per-project scheduler: the session stays
   // 'queued' until a slot frees, then the closure spawns the agent, waits
@@ -290,46 +303,16 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
 
-    // On success: move story to review (not done — requires review/approval first).
-    // If the agent asked a follow-up question, keep it in progress.
-    if (result?.success && outcome !== "asked_question") {
-      db.update(userStories)
-        .set({ status: "review" })
-        .where(
-          and(
-            eq(userStories.id, storyId),
-            eq(userStories.status, "in_progress")
-          )
-        )
-        .run();
-
-      // Check if all stories in the epic are now done or in review
-      const allStories = db
-        .select()
-        .from(userStories)
-        .where(eq(userStories.epicId, epic.id))
-        .all();
-
-      const allReviewOrDone = allStories.every(
-        (s) => s.id === storyId || s.status === "done" || s.status === "review"
-      );
-
-      if (allReviewOrDone) {
-        db.update(epics)
-          .set({ status: "review", updatedAt: completedAt })
-          .where(eq(epics.id, epic.id))
-          .run();
-      }
-    } else if (result?.success) {
-      // asked_question: hold the story in in_progress, notify with a deep
-      // link to the epic, and log the decision to the activity feed.
-      handleAskedQuestionOutcome({
-        projectId,
-        epicIds: [epic.id],
-        sessionId,
-        ticketStatus: "in_progress",
-      });
-    }
+    const terminal = finalizeBuildTerminalOutcome({
+      projectId,
+      epicId: epic.id,
+      scope: "story",
+      userStoryId: storyId,
+      sessionId,
+      success: !!result?.success,
+      outcome,
+      error: result?.error,
+    });
 
     // Post agent output as comment
     const output = resolveSessionOutput(result, sessionId);
@@ -345,11 +328,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       })
       .run();
 
-    return {
+    return resolveBuildSessionResult(terminal, {
       success: !!result?.success,
       outcome,
       error: result?.error ?? null,
-    };
+    });
   };
 
   // Autonomous pipeline: when active, wrap the launch closure with the

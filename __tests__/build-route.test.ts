@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 let getCallCount = 0;
 const mockState = vi.hoisted(() => ({
   updateCalls: [] as Array<{ table: string; values: Record<string, unknown> }>,
+  epicStatus: "todo",
   processManagerResult: {
     success: true,
     duration: 1000,
@@ -51,6 +52,7 @@ vi.mock("@/lib/db", () => {
         title: "Test Epic",
         description: "A test epic",
         epicId: "epic-1",
+        status: mockState.epicStatus,
       };
     }),
     all: vi.fn().mockReturnValue([]),
@@ -63,6 +65,9 @@ vi.mock("@/lib/db", () => {
       return {
         set: vi.fn((values: Record<string, unknown>) => {
           mockState.updateCalls.push({ table: tableName, values });
+          if (tableName === "epics" && typeof values.status === "string") {
+            mockState.epicStatus = values.status;
+          }
           return {
             where: vi.fn().mockReturnValue({ run: vi.fn() }),
           };
@@ -75,10 +80,12 @@ vi.mock("@/lib/db", () => {
 
 vi.mock("@/lib/db/schema", () => ({
   projects: { _name: "projects" },
-  epics: { _name: "epics", id: "id", epicId: "epicId", position: "position" },
-  userStories: { _name: "userStories", epicId: "epicId", position: "position", status: "status" },
+  epics: { _name: "epics", id: "id", epicId: "epicId", projectId: "projectId", position: "position", status: "status" },
+  userStories: { _name: "userStories", id: "id", epicId: "epicId", position: "position", status: "status" },
   documents: { projectId: "projectId" },
-  agentSessions: { id: "id", epicId: "epicId", mode: "mode", status: "status" },
+  agentSessions: { id: "id", epicId: "epicId", userStoryId: "userStoryId", mode: "mode", status: "status", agentType: "agentType" },
+  reviewComments: { epicId: "epicId", status: "status" },
+  ticketActivityLog: { _name: "ticketActivityLog" },
   ticketComments: { userStoryId: "userStoryId", createdAt: "createdAt" },
 }));
 
@@ -130,6 +137,8 @@ vi.mock("@/lib/agent-sessions/lifecycle", () => ({
   markSessionRunning: vi.fn(),
   markSessionTerminal: mockMarkSessionTerminal,
   isSessionLifecycleConflictError: vi.fn(() => false),
+  isSessionNotFoundError: vi.fn(() => false),
+  recordSessionTransitionRefusal: vi.fn(),
 }));
 
 vi.mock("@/lib/workflow/agent-question", () => ({
@@ -164,6 +173,7 @@ describe("Build Route", () => {
   beforeEach(() => {
     getCallCount = 0;
     mockState.updateCalls = [];
+    mockState.epicStatus = "todo";
     mockState.processManagerResult = { success: true, duration: 1000 };
     mockResolveAgentByNamedId.mockReturnValue({ provider: "claude-code" });
     mockHandleAskedQuestionOutcome.mockClear();
@@ -190,6 +200,7 @@ describe("Build Route", () => {
     expect(json.error).toContain(
       "Team mode is only available with Claude Code"
     );
+    expect(mockState.updateCalls).toEqual([]);
   });
 
   it("rejects empty epicIds", async () => {

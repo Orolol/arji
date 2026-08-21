@@ -10,6 +10,10 @@ import {
 import { updateStorySchema } from "@/lib/validation/schemas";
 import { validateBody, isValidationError } from "@/lib/validation/validate";
 import { getStoryOr404, isErrorResponse } from "@/lib/api/route-helpers";
+import {
+  applyStoryTransition,
+  type StoryStatus,
+} from "@/lib/workflow/transition-service";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
@@ -54,12 +58,27 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const existing = getStoryOr404(projectId, storyId);
   if (isErrorResponse(existing)) return existing;
 
+  if (body.status !== undefined && body.status !== existing.story.status) {
+    const result = applyStoryTransition({
+      projectId,
+      epicId: existing.story.epicId,
+      userStoryId: storyId,
+      fromStatus: (existing.story.status ?? "todo") as StoryStatus,
+      toStatus: body.status as StoryStatus,
+      actor: "user",
+      source: "api",
+      reason: "Manual story status update",
+    });
+    if (!result.valid) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+  }
+
   const updates: Record<string, unknown> = {};
   if (body.title !== undefined) updates.title = body.title;
   if (body.description !== undefined) updates.description = body.description;
   if (body.acceptanceCriteria !== undefined)
     updates.acceptanceCriteria = body.acceptanceCriteria;
-  if (body.status !== undefined) updates.status = body.status;
   if (body.position !== undefined) updates.position = body.position;
 
   db.update(userStories)

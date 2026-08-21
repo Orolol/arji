@@ -114,4 +114,23 @@ describe("EpicCard", () => {
     expect(screen.getByTestId("epic-activity-epic-1")).toBeInTheDocument();
     expect(screen.getByTestId("epic-unread-ai-epic-1")).toBeInTheDocument();
   });
+
+  it("flags delivered epics that still have unfinished stories", () => {
+    render(
+      <EpicCard
+        epic={{ ...baseEpic, status: "done", usCount: 4, usDone: 2 }}
+      />
+    );
+
+    expect(
+      screen.getByTestId("epic-incomplete-stories-epic-1")
+    ).toHaveTextContent("2 stories left");
+  });
+
+  it("does not show the unfinished-story warning before delivery", () => {
+    render(<EpicCard epic={{ ...baseEpic, usCount: 4, usDone: 2 }} />);
+    expect(
+      screen.queryByTestId("epic-incomplete-stories-epic-1")
+    ).not.toBeInTheDocument();
+  });
 });

@@ -11,6 +11,7 @@ describe("SessionOutcomeBadge", () => {
     ["asked_question", "Asked a question"],
     ["silent", "Silent"],
     ["error", "Error"],
+    ["transition_refused", "Transition held"],
   ] as const)("renders the %s verdict as '%s'", (outcome, label) => {
     render(<SessionOutcomeBadge outcome={outcome} />);
     const badge = screen.getByTestId(`session-outcome-${outcome}`);

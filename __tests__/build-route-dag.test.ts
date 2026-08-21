@@ -72,7 +72,7 @@ vi.mock("@/lib/db", () => {
         title: "Test Epic",
         description: "A test epic",
         epicId: "epic-generic",
-        status: "todo",
+        status: "in_progress",
         readableId: "E-p-001",
       };
     }),
@@ -143,6 +143,8 @@ vi.mock("@/lib/agent-sessions/lifecycle", () => ({
   markSessionRunning: vi.fn(),
   markSessionTerminal: mockMarkSessionTerminal,
   isSessionLifecycleConflictError: vi.fn(() => false),
+  isSessionNotFoundError: vi.fn(() => false),
+  recordSessionTransitionRefusal: vi.fn(),
 }));
 
 vi.mock("@/lib/workflow/agent-question", () => ({
@@ -230,6 +232,19 @@ function createdSessions(): Array<[string, string]> {
   ]);
 }
 
+function systemActivity() {
+  return mockLogTransition.mock.calls
+    .map((call) => call[0] as {
+      actor: string;
+      epicId: string;
+      reason?: string;
+      fromStatus: string;
+      toStatus: string;
+      projectId: string;
+    })
+    .filter((entry) => entry.actor === "system");
+}
+
 describe("Build Route — dag mode", () => {
   beforeEach(() => {
     getCallCount = 0;
@@ -277,7 +292,7 @@ describe("Build Route — dag mode", () => {
     expect(sessions.map(([epicId]) => epicId)).toEqual(["e1", "e2"]);
     expect(json.data.sessions[0]).toBe(sessions[0][1]);
     expect(mockState.startedSessions).toEqual([sessions[0][1], sessions[1][1]]);
-    expect(mockLogTransition).not.toHaveBeenCalled();
+    expect(systemActivity()).toEqual([]);
     expect(mockCreateDagWaveOutcomeNotification).not.toHaveBeenCalled();
   });
 
@@ -326,7 +341,7 @@ describe("Build Route — dag mode", () => {
 
     // The done epic is never rebuilt, and never blocks its dependent.
     expect(createdSessions().map(([epicId]) => epicId)).toEqual(["e2"]);
-    expect(mockLogTransition).not.toHaveBeenCalled();
+    expect(systemActivity()).toEqual([]);
     expect(mockCreateDagWaveOutcomeNotification).not.toHaveBeenCalled();
   });
 
@@ -369,19 +384,10 @@ describe("Build Route — dag mode", () => {
     expect(createdSessions().map(([epicId]) => epicId)).toEqual(["e1"]);
 
     // Skips are logged as system activity, blaming the failed dependency.
-    expect(mockLogTransition).toHaveBeenCalledTimes(2);
-    const loggedEpicIds = mockLogTransition.mock.calls.map(
-      (call) => (call[0] as { epicId: string }).epicId
-    );
+    expect(systemActivity()).toHaveLength(2);
+    const loggedEpicIds = systemActivity().map((entry) => entry.epicId);
     expect(new Set(loggedEpicIds)).toEqual(new Set(["e2", "e3"]));
-    for (const call of mockLogTransition.mock.calls) {
-      const entry = call[0] as {
-        actor: string;
-        reason: string;
-        fromStatus: string;
-        toStatus: string;
-        projectId: string;
-      };
+    for (const entry of systemActivity()) {
       expect(entry.projectId).toBe("proj-1");
       expect(entry.actor).toBe("system");
       expect(entry.reason).toBe("skipped: dependency E-p-001 failed");
@@ -431,8 +437,8 @@ describe("Build Route — dag mode", () => {
     );
 
     // ...and the dependent is skipped with the question-flavored reason.
-    expect(mockLogTransition).toHaveBeenCalledTimes(1);
-    expect(mockLogTransition).toHaveBeenCalledWith(
+    expect(systemActivity()).toHaveLength(1);
+    expect(systemActivity()).toContainEqual(
       expect.objectContaining({
         epicId: "e2",
         actor: "system",
@@ -477,7 +483,7 @@ describe("Build Route — dag mode", () => {
       expect.objectContaining({ epicIds: ["e1"] })
     );
     expect(createdSessions().map(([epicId]) => epicId)).toEqual(["e1", "e2"]);
-    expect(mockLogTransition).not.toHaveBeenCalled();
+    expect(systemActivity()).toEqual([]);
     expect(mockCreateDagWaveOutcomeNotification).not.toHaveBeenCalled();
   });
 
@@ -522,7 +528,7 @@ describe("Build Route — dag mode", () => {
 
     // Independent e2 still got its session; nothing was skipped.
     expect(createdSessions().map(([epicId]) => epicId)).toEqual(["e1", "e2"]);
-    expect(mockLogTransition).not.toHaveBeenCalled();
+    expect(systemActivity()).toEqual([]);
     expect(mockCreateDagWaveOutcomeNotification).toHaveBeenCalledWith(
       expect.objectContaining({ skippedCount: 0, stopped: false })
     );
@@ -551,8 +557,8 @@ describe("Build Route — dag mode", () => {
     await flushBackground();
 
     expect(createdSessions().map(([epicId]) => epicId)).toEqual(["e1"]);
-    expect(mockLogTransition).toHaveBeenCalledTimes(1);
-    expect(mockLogTransition).toHaveBeenCalledWith(
+    expect(systemActivity()).toHaveLength(1);
+    expect(systemActivity()).toContainEqual(
       expect.objectContaining({
         epicId: "e2",
         actor: "system",

@@ -144,7 +144,7 @@ describe("applyTransition", () => {
     expect(mockEmitTicketMoved).not.toHaveBeenCalled();
   });
 
-  it("skips DB update when skipDbUpdate is true", async () => {
+  it("logs a refused transition with its ticket and guard reason", async () => {
     const { applyTransition } = await import(
       "@/lib/workflow/transition-service"
     );
@@ -152,20 +152,25 @@ describe("applyTransition", () => {
       projectId: "p1",
       epicId: "e1",
       fromStatus: "backlog",
-      toStatus: "todo",
+      toStatus: "done",
       actor: "user",
       source: "drag",
-      skipDbUpdate: true,
+      reason: "Manual move",
     });
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
 
-    // Should NOT update DB
     const epicUpdate = updateCalls.find((c) => c.table === "epics");
     expect(epicUpdate).toBeUndefined();
-
-    // Should still emit and log
-    expect(mockEmitTicketMoved).toHaveBeenCalled();
-    expect(mockLogTransition).toHaveBeenCalled();
+    expect(mockEmitTicketMoved).not.toHaveBeenCalled();
+    expect(mockLogTransition).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "p1",
+        epicId: "e1",
+        fromStatus: "backlog",
+        toStatus: "backlog",
+        reason: expect.stringContaining("Transition backlog → done refused"),
+      })
+    );
   });
 
   it("only validates when validateOnly is true", async () => {

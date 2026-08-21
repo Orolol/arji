@@ -38,7 +38,11 @@ export interface TransitionContext {
   hasOpenReviewComments: boolean;
   /** Whether the epic has a completed review (at least one review session completed) */
   hasCompletedReview: boolean;
-  /** Whether there's a running agent session on this epic */
+  /** Story approval is itself an explicit human review decision. */
+  requireCompletedReview?: boolean;
+  /** Story approval cannot resolve epic-scoped findings on its own. */
+  requireResolvedComments?: boolean;
+  /** Whether there is a queued/running code-producing session on this ticket */
   hasRunningSession: boolean;
   /** The actor initiating the transition */
   actor: "user" | "agent" | "system";
@@ -47,16 +51,37 @@ export interface TransitionContext {
 }
 
 const TRANSITION_GUARDS: TransitionGuard[] = [
+  // A build session owns in_progress until its terminal handler promotes or
+  // holds the ticket. Letting a concurrent drag move it would recreate the
+  // active-session/orphaned-column state this engine is meant to prevent.
+  (ctx) => {
+    if (
+      ctx.fromStatus === "in_progress" &&
+      ctx.toStatus !== "in_progress" &&
+      ctx.hasRunningSession
+    ) {
+      return "Cannot move an in-progress ticket while an agent session is queued or running.";
+    }
+    return null;
+  },
   // Cannot move to Done without completed review
   (ctx) => {
-    if (ctx.toStatus === "done" && !ctx.hasCompletedReview) {
+    if (
+      ctx.toStatus === "done" &&
+      ctx.requireCompletedReview !== false &&
+      !ctx.hasCompletedReview
+    ) {
       return "Cannot move to Done: no completed review found. A review must be completed before marking as Done.";
     }
     return null;
   },
   // Cannot move to Done with open review comments
   (ctx) => {
-    if (ctx.toStatus === "done" && ctx.hasOpenReviewComments) {
+    if (
+      ctx.toStatus === "done" &&
+      ctx.requireResolvedComments !== false &&
+      ctx.hasOpenReviewComments
+    ) {
       return "Cannot move to Done: there are unresolved review comments. Resolve all review comments first.";
     }
     return null;
