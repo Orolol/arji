@@ -1,0 +1,242 @@
+/**
+ * Resolve-merge route, background agent path: what happens when the agent
+ * reports success but the FINAL merge into main still fails (e.g. the agent
+ * committed the conflict markers, tripping mergeWorktree's marker guard).
+ *
+ * This runs in a fire-and-forget closure with no HTTP response left to carry
+ * the failure — exactly the silent swallow this route exists to kill. The
+ * pinned contract: the epic is NOT closed, a ticket comment explains the
+ * failed final merge, and a merge-retry-failed notification is created.
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  dbMockState,
+  resetDbMockState,
+  mockJsonRequest,
+  mockRouteContext,
+} from "@/__tests__/helpers/db-mock";
+
+const mocks = vi.hoisted(() => ({
+  mergeWorktree: vi.fn(),
+  createWorktree: vi.fn(),
+  isGitRepo: vi.fn(),
+  startMergeInWorktree: vi.fn(),
+  waitForProcessCompletion: vi.fn(),
+  applyTransition: vi.fn(),
+  createMergeRetryFailedNotification: vi.fn(),
+  tryExportArjiJson: vi.fn(),
+}));
+
+vi.mock("@/lib/db", async () => {
+  const { dbModuleMock } = await import("@/__tests__/helpers/db-mock");
+  return dbModuleMock();
+});
+
+vi.mock("@/lib/workflow/transition-service", () => ({
+  applyTransition: mocks.applyTransition,
+  applyStoryTransition: vi.fn(),
+  logWorkflowDecision: vi.fn(),
+}));
+
+vi.mock("@/lib/git/manager", () => ({
+  mergeWorktree: mocks.mergeWorktree,
+  createWorktree: mocks.createWorktree,
+  isGitRepo: mocks.isGitRepo,
+  startMergeInWorktree: mocks.startMergeInWorktree,
+}));
+
+vi.mock("@/lib/claude/process-manager", () => ({
+  processManager: { start: vi.fn() },
+}));
+
+vi.mock("@/lib/agent-sessions/wait-for-completion", () => ({
+  waitForProcessCompletion: mocks.waitForProcessCompletion,
+}));
+
+vi.mock("@/lib/claude/prompt-builder", () => ({
+  buildMergeResolutionPrompt: vi.fn(() => "resolve the conflicts"),
+}));
+
+vi.mock("@/lib/claude/resolve-session-output", () => ({
+  classifySessionOutcome: vi.fn(() => "completed"),
+  extractSessionUsage: vi.fn(() => null),
+  resolveSessionOutput: vi.fn(() => "agent output"),
+}));
+
+vi.mock("@/lib/agent-config/agent-resolution", () => ({
+  resolveAgentByNamedId: vi.fn(() => ({
+    provider: "claude-code",
+    model: null,
+    namedAgentId: null,
+    name: null,
+  })),
+}));
+
+vi.mock("@/lib/sync/export", () => ({
+  tryExportArjiJson: mocks.tryExportArjiJson,
+}));
+
+vi.mock("@/lib/agents/concurrency", () => ({
+  getRunningSessionForTarget: vi.fn(() => null),
+  createAgentAlreadyRunningPayload: vi.fn(() => ({ error: "running" })),
+}));
+
+vi.mock("@/lib/agent-sessions/lifecycle", () => ({
+  createQueuedSession: vi.fn(),
+  markSessionRunning: vi.fn(),
+  markSessionTerminal: vi.fn(),
+  isSessionLifecycleConflictError: vi.fn(() => false),
+}));
+
+vi.mock("@/lib/agent-sessions/validate-resume", () => ({
+  validateResumeSession: vi.fn(() => null),
+}));
+
+vi.mock("@/lib/agent-sessions/resume-capability", () => ({
+  isResumableProvider: vi.fn(() => false),
+  providerAcceptsAssignedSessionId: vi.fn(() => false),
+}));
+
+vi.mock("@/lib/notifications/create", () => ({
+  createMergeRetryFailedNotification:
+    mocks.createMergeRetryFailedNotification,
+}));
+
+vi.mock("@/lib/utils/nanoid", () => ({
+  createId: vi.fn(() => "session-1"),
+}));
+
+vi.mock("fs", () => ({
+  default: {
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    existsSync: vi.fn(() => false),
+  },
+}));
+
+const mockProject = {
+  id: "p1",
+  gitRepoPath: "/tmp/repo",
+  defaultBranch: "main",
+};
+
+const mockEpic = {
+  id: "epic-1",
+  title: "Test Epic",
+  branchName: "feature/epic-abc",
+  status: "review",
+};
+
+/**
+ * Seed the db-mock queues in the route's read order:
+ *   get #1 → project (getProjectOr404), get #2 → epic (getEpicOr404),
+ *   get #3 → settings row (global prompt).
+ */
+function seed() {
+  dbMockState.getQueue.push(mockProject, mockEpic, null);
+}
+
+async function callResolveMerge() {
+  const { POST } = await import(
+    "@/app/api/projects/[projectId]/epics/[epicId]/resolve-merge/route"
+  );
+  return POST(
+    mockJsonRequest({}),
+    mockRouteContext({ projectId: "p1", epicId: "epic-1" })
+  );
+}
+
+describe("Resolve-merge: final merge fails after the agent", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetDbMockState();
+    mocks.applyTransition.mockReturnValue({ valid: true });
+    mocks.isGitRepo.mockResolvedValue(true);
+    mocks.createWorktree.mockResolvedValue({
+      worktreePath: "/tmp/worktrees/epic-abc",
+      branchName: "feature/epic-abc",
+    });
+    // Conflicts exist, so the agent path (not the clean fast path) runs.
+    mocks.startMergeInWorktree.mockResolvedValue({
+      conflicted: true,
+      output: "CONFLICT (content): lib/foo.ts",
+    });
+    // The agent "succeeds"...
+    mocks.waitForProcessCompletion.mockResolvedValue({
+      status: "completed",
+      result: { success: true },
+    });
+    // ...but the final merge still refuses (markers committed).
+    mocks.mergeWorktree.mockResolvedValue({
+      merged: false,
+      error:
+        "Branch feature/epic-abc contains unresolved conflict markers in: lib/foo.ts",
+      reason: "conflict-markers",
+    });
+  });
+
+  it("leaves a comment + notification instead of swallowing the failure", async () => {
+    seed();
+    const res = await callResolveMerge();
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data).toMatchObject({ sessionId: "session-1", resolved: false });
+
+    // The background closure settles in microtasks (every awaited mock
+    // resolves immediately).
+    await vi.waitFor(() => {
+      expect(mocks.createMergeRetryFailedNotification).toHaveBeenCalledWith({
+        projectId: "p1",
+        epicId: "epic-1",
+        sessionId: "session-1",
+        error:
+          "Branch feature/epic-abc contains unresolved conflict markers in: lib/foo.ts",
+      });
+    });
+
+    // The failure comment reached the ticket…
+    const failureComment = dbMockState.insertCalls.find((c) =>
+      String((c as Record<string, unknown>).content).includes(
+        "final merge still failed"
+      )
+    ) as Record<string, unknown>;
+    expect(failureComment).toBeDefined();
+    expect(String(failureComment.content)).toContain("conflict markers");
+
+    // …and the epic was NOT closed: the service never ran a close and no
+    // branch-name cleanup touched the row.
+    const closeCall = mocks.applyTransition.mock.calls.find(
+      (c) => (c[0] as Record<string, unknown>).toStatus === "done" &&
+        !("validateOnly" in (c[0] as object))
+    );
+    expect(closeCall).toBeUndefined();
+    expect(dbMockState.updateCalls).toEqual([]);
+    expect(mocks.tryExportArjiJson).not.toHaveBeenCalled();
+  });
+
+  it("still closes the epic when the final merge lands (control)", async () => {
+    mocks.mergeWorktree.mockResolvedValue({
+      merged: true,
+      commitHash: "abc123",
+    });
+    seed();
+    await callResolveMerge();
+
+    await vi.waitFor(() => {
+      const closeCall = mocks.applyTransition.mock.calls.find(
+        (c) => (c[0] as Record<string, unknown>).toStatus === "done" &&
+          !("validateOnly" in (c[0] as object))
+      );
+      expect(closeCall).toBeDefined();
+    });
+
+    // The landing merge clears the branch on the epic row.
+    await vi.waitFor(() => {
+      const branchClear = dbMockState.updateCalls.find(
+        (c) => (c as Record<string, unknown>).branchName === null
+      );
+      expect(branchClear).toBeDefined();
+    });
+    expect(mocks.createMergeRetryFailedNotification).not.toHaveBeenCalled();
+  });
+});

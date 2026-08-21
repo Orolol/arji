@@ -11,7 +11,7 @@ import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
 import {
   isEpicCreationConversationAgentType,
-  isOpenAiIneligibleConversationAgentType,
+  isToolIneligibleConversationAgentType,
 } from "@/lib/chat/conversation-agent";
 import {
   getOpenAiConfigFromSettings,
@@ -162,22 +162,26 @@ export async function POST(
     conversation?.namedAgentId ?? null
   );
   const conversationProvider = normalizeProvider(conversation?.provider);
+  const overridesProvider =
+    Boolean(conversationProvider) && !conversation?.namedAgentId;
   const resolvedAgent =
-    conversationProvider && !conversation?.namedAgentId
-      ? { ...resolvedByNamedAgent, provider: conversationProvider }
+    overridesProvider && conversationProvider
+      ? {
+          ...resolvedByNamedAgent,
+          provider: conversationProvider,
+          // A raw provider choice carries no model. Keeping the resolved
+          // agent's model would hand e.g. `claude-opus-*` to `codex -m`,
+          // which rejects it — drop it and let the CLI pick its default
+          // unless both sides agree on the provider.
+          model:
+            conversationProvider === resolvedByNamedAgent.provider
+              ? resolvedByNamedAgent.model
+              : undefined,
+        }
       : resolvedByNamedAgent;
 
   let openAiConfig: ReturnType<typeof getOpenAiConfigFromSettings> | null = null;
   if (resolvedAgent.provider === OPENAI_COMPATIBLE_PROVIDER) {
-    if (isOpenAiIneligibleConversationAgentType(conversationType)) {
-      return NextResponse.json(
-        {
-          error:
-            "OpenAI-compatible mode is not available for epic-creation or brainstorm conversations.",
-        },
-        { status: 400 }
-      );
-    }
 
     if (attachmentIds.length > 0) {
       return NextResponse.json(
@@ -316,19 +320,80 @@ export async function POST(
     controller.close();
   }
 
+  // Full history including the user message just saved above, required by
+  // prompt builders so the agent answers the current question.
+  const fullHistory = [
+    ...messageHistory,
+    { role: "user" as const, content: userContent },
+  ];
+
+  let prompt = "";
+  let chatSystemPrompt = "";
+  const isEpicCreation = isEpicCreationConversationAgentType(conversationType);
+  const isFastMode =
+    resolvedAgent.provider === OPENAI_COMPATIBLE_PROVIDER && openAiConfig !== null;
+
+  if (isEpicCreation) {
+    const settingsRow = db.select().from(settings).where(eq(settings.key, "global_prompt")).get();
+    const globalPrompt = settingsRow ? JSON.parse(settingsRow.value) : "";
+    const existingEpics = db
+      .select({
+        title: epics.title,
+        description: epics.description,
+      })
+      .from(epics)
+      .where(eq(epics.projectId, projectId))
+      .orderBy(epics.position)
+      .all();
+
+    // The CLI path ships one self-contained prompt, so the transcript it
+    // embeds must include the message just saved. Fast mode sends that
+    // message as its own `user` turn, so its prompt stops one turn earlier
+    // — otherwise the current question travels twice.
+    const historyForPrompt = isFastMode ? messageHistory : fullHistory;
+
+    prompt = finalize
+      ? buildEpicFinalizationPrompt(
+          project,
+          [],
+          historyForPrompt,
+          globalPrompt,
+          existingEpics,
+        )
+      : buildEpicRefinementPrompt(
+          project,
+          [],
+          historyForPrompt,
+          globalPrompt,
+          existingEpics,
+        );
+  } else {
+    chatSystemPrompt = await resolveAgentPrompt("chat", projectId);
+  }
+
   // ---------------------------------------------------------------------
   // OpenAI-compatible fast mode: dedicated HTTP path ahead of the CLI
   // branches. History travels in the messages array (no session resume),
   // and upstream SSE chunks are re-emitted as token-by-token delta events.
   // ---------------------------------------------------------------------
-  if (resolvedAgent.provider === OPENAI_COMPATIBLE_PROVIDER && openAiConfig) {
-    let chatSystemPrompt = await resolveAgentPrompt("chat", projectId);
+  if (isFastMode && openAiConfig) {
+    // Parity with the CLI branch below: the direct API must see the project
+    // context (spec, memory, documents) too, not just the configured chat
+    // system prompt — which is empty by default, leaving the model with no
+    // idea which project it is talking about. History is left out here; it
+    // travels as real chat messages.
+    let fastModeSystemPrompt = isEpicCreation
+      ? prompt
+      : buildChatPrompt(project, [], [], chatSystemPrompt);
+
     try {
-      chatSystemPrompt = enrichPromptWithDocumentMentions({
-        projectId,
-        prompt: chatSystemPrompt,
-        textSources: [body.content, ...messageHistory.map((m) => m.content)],
-      }).prompt;
+      if (fastModeSystemPrompt.trim()) {
+        fastModeSystemPrompt = enrichPromptWithDocumentMentions({
+          projectId,
+          prompt: fastModeSystemPrompt,
+          textSources: [body.content, ...messageHistory.map((m) => m.content)],
+        }).prompt;
+      }
     } catch (error) {
       if (error instanceof MentionResolutionError) {
         return NextResponse.json({ error: error.message }, { status: 400 });
@@ -338,25 +403,37 @@ export async function POST(
 
     // Same global toggle as the CLI agents' MCP injection: off means the
     // model gets neither the tools nor a system prompt promising them.
-    const chatToolsEnabled = isMcpToolsEnabled();
+    // Prompt-contract conversations (epic creation, brainstorm) keep their
+    // structured prompts pure — no board tools there (gate parity with the
+    // CLI chat tool channel).
+    const chatToolsEnabled =
+      !isToolIneligibleConversationAgentType(conversationType) &&
+      isMcpToolsEnabled();
     const systemSections = [
-      chatSystemPrompt.trim(),
+      fastModeSystemPrompt.trim(),
       chatToolsEnabled ? buildBoardToolsSystemSection(project) : "",
     ].filter(Boolean);
-    const openAiMessages: OpenAiChatMessage[] = [
-      { role: "system", content: systemSections.join("\n\n") },
-    ];
-    for (const message of messageHistory) {
+    const openAiMessages: OpenAiChatMessage[] = [];
+    if (systemSections.length > 0) {
       openAiMessages.push({
-        role: message.role,
-        content: message.content,
+        role: "system",
+        content: systemSections.join("\n\n"),
       });
+    }
+    // The epic builders embed the transcript in the system prompt already;
+    // only the chat prompt needs it replayed as messages.
+    if (!isEpicCreation) {
+      for (const message of messageHistory) {
+        openAiMessages.push({
+          role: message.role,
+          content: message.content,
+        });
+      }
     }
     openAiMessages.push({
       role: "user",
       content: userContent,
     });
-
     const activityLabel = conversation?.label
       ? `Chat: ${conversation.label}`
       : "Chat";
@@ -452,7 +529,7 @@ export async function POST(
                 toolsEnabled = false;
                 round = 0;
                 if (messages[0]?.role === "system") {
-                  const noToolsSystemContent = chatSystemPrompt.trim();
+                  const noToolsSystemContent = fastModeSystemPrompt.trim();
                   if (noToolsSystemContent) {
                     messages[0] = { role: "system", content: noToolsSystemContent };
                   } else {
@@ -586,44 +663,7 @@ export async function POST(
     return sseResponse(sseStream);
   }
 
-  // Full history including the user message just saved above, required by
-  // prompt builders so the agent answers the current question.
-  const fullHistory = [
-    ...messageHistory,
-    { role: "user" as const, content: userContent },
-  ];
-
-  let prompt: string;
-  if (isEpicCreationConversationAgentType(conversationType)) {
-    const settingsRow = db.select().from(settings).where(eq(settings.key, "global_prompt")).get();
-    const globalPrompt = settingsRow ? JSON.parse(settingsRow.value) : "";
-    const existingEpics = db
-      .select({
-        title: epics.title,
-        description: epics.description,
-      })
-      .from(epics)
-      .where(eq(epics.projectId, projectId))
-      .orderBy(epics.position)
-      .all();
-
-    prompt = finalize
-      ? buildEpicFinalizationPrompt(
-          project,
-          [],
-          fullHistory,
-          globalPrompt,
-          existingEpics,
-        )
-      : buildEpicRefinementPrompt(
-          project,
-          [],
-          fullHistory,
-          globalPrompt,
-          existingEpics,
-        );
-  } else {
-    const chatSystemPrompt = await resolveAgentPrompt("chat", projectId);
+  if (!isEpicCreation) {
     prompt = buildChatPrompt(project, [], fullHistory, chatSystemPrompt);
   }
 
@@ -639,7 +679,6 @@ export async function POST(
     }
     throw error;
   }
-
   const providerSupportsResume = isResumableProvider(resolvedAgent.provider);
   // Legacy-row fallback handled inside resolveCliSessionId().
   let cliSessionId = conversation

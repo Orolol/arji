@@ -25,6 +25,12 @@ import { validateBody, isValidationError } from "@/lib/validation/validate";
 import { generateReadableId } from "@/lib/db/readable-id";
 import { emitTicketCreated } from "@/lib/events/emit";
 
+/** Optional prose: blank is absence, so it is stored as NULL, not `""`. */
+function trimmedOrNull(value: string | null | undefined): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
@@ -204,25 +210,15 @@ export async function POST(
 
   const now = new Date().toISOString();
 
-  const normalizedUserStories = Array.isArray(body.userStories)
-    ? body.userStories
-        .filter(
-          (story) =>
-            typeof story?.title === "string" && story.title.trim().length > 0
-        )
-        .map((story) => ({
-          title: story.title.trim(),
-          description:
-            typeof story.description === "string" && story.description.trim().length > 0
-              ? story.description.trim()
-              : null,
-          acceptanceCriteria:
-            typeof story.acceptanceCriteria === "string" &&
-            story.acceptanceCriteria.trim().length > 0
-              ? story.acceptanceCriteria.trim()
-              : null,
-        }))
-    : [];
+  // Every story the caller sent gets inserted. `userStoryInput` already
+  // rejected untitled ones, so there is nothing left to filter here — and
+  // filtering is precisely what must not happen: silently dropping a member and
+  // still answering 201 makes partial persistence look like success.
+  const normalizedUserStories = (body.userStories ?? []).map((story) => ({
+    title: story.title,
+    description: trimmedOrNull(story.description),
+    acceptanceCriteria: trimmedOrNull(story.acceptanceCriteria),
+  }));
 
   const maxPos = db
     .select({ max: sql<number>`COALESCE(MAX(position), -1)` })
@@ -231,12 +227,6 @@ export async function POST(
     .get();
 
   const id = createId();
-
-  const readableId = generateReadableId(
-    projectId,
-    project.name,
-    (body.type as "feature" | "bug") || "feature"
-  );
 
   const storiesToInsert = normalizedUserStories.map((story, index) => ({
     id: createId(),
@@ -318,6 +308,15 @@ export async function POST(
 
   try {
     db.transaction((tx) => {
+      // Inside the transaction on purpose: this bumps `projects.ticket_counter`,
+      // so run outside it the increment would survive a rolled-back insert and
+      // burn a readable id on an epic that never existed — a permanent gap in
+      // E-<slug>-NNN. `generateReadableId` asks its callers for exactly this.
+      const readableId = generateReadableId(
+        projectId,
+        project.name,
+        (body.type as "feature" | "bug") || "feature"
+      );
       tx.insert(epics)
         .values({
           id,

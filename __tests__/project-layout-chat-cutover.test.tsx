@@ -133,16 +133,79 @@ describe("project layout chrome", () => {
     expect(nav.push).toHaveBeenCalledWith("/projects/proj-1?night=start");
   });
 
-  it("opens the new-epic and new-bug panels from the New menu", async () => {
+  it("offers manual epic, chat epic and bug in the New menu", async () => {
+    const user = userEvent.setup();
+    await renderLayout();
+
+    await user.click(screen.getByTestId("header-new-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("header-new-epic-manual")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("menuitem", { name: /New Epic \(manual\)/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /New Epic \(via chat\)/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /New Bug/i })).toBeInTheDocument();
+  });
+
+  it("opens the manual epic dialog through its own panel param", async () => {
     const user = userEvent.setup();
     await renderLayout();
 
     await user.click(screen.getByTestId("header-new-button"));
     await waitFor(() => {
-      expect(screen.getByTestId("header-new-epic")).toBeInTheDocument();
+      expect(screen.getByTestId("header-new-epic-manual")).toBeInTheDocument();
     });
-    await user.click(screen.getByTestId("header-new-epic"));
+    await user.click(screen.getByTestId("header-new-epic-manual"));
+
+    expect(nav.push).toHaveBeenCalledWith(
+      "/projects/proj-1?panel=new-epic-manual",
+    );
+  });
+
+  it("emits no agent-provider call when the manual epic entry is chosen", async () => {
+    const user = userEvent.setup();
+    await renderLayout();
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith("/api/projects/proj-1");
+    });
+    (global.fetch as ReturnType<typeof vi.fn>).mockClear();
+
+    await user.click(screen.getByTestId("header-new-button"));
+    await waitFor(() => {
+      expect(screen.getByTestId("header-new-epic-manual")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("header-new-epic-manual"));
+
+    // The whole point of the manual entry is that it costs nothing: picking it
+    // must stay a pure navigation. Asserting the exact call set rather than a
+    // denylist of agent routes means any request added here — an agent warm-up,
+    // a conversation prefetch, a model probe — fails this test.
+    expect(
+      (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map(([url]) => url),
+    ).toEqual([]);
+  });
+
+  it("keeps the chat epic entry on the untouched new-epic panel", async () => {
+    const user = userEvent.setup();
+    await renderLayout();
+
+    await user.click(screen.getByTestId("header-new-button"));
+    await waitFor(() => {
+      expect(screen.getByTestId("header-new-epic-chat")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("header-new-epic-chat"));
+
     expect(nav.push).toHaveBeenCalledWith("/projects/proj-1?panel=new-epic");
+  });
+
+  it("opens the new-bug panel from the New menu", async () => {
+    const user = userEvent.setup();
+    await renderLayout();
 
     await user.click(screen.getByTestId("header-new-button"));
     await waitFor(() => {
@@ -150,6 +213,75 @@ describe("project layout chrome", () => {
     });
     await user.click(screen.getByTestId("header-new-bug"));
     expect(nav.push).toHaveBeenCalledWith("/projects/proj-1?panel=new-bug");
+  });
+
+  it("sends every New menu entry to the board even from a secondary tab", async () => {
+    // The menu lives in the chrome, which outlives the board page, so an entry
+    // only works if it navigates to the *board* URL — nothing on Spec or
+    // Sessions consumes ?panel=. Every other menu test runs at the board
+    // pathname, where the current route and the board href are the same string,
+    // so none of them can tell the two apart: routing through the pathname
+    // instead leaves the manual entry silently dead on five of the eight tabs.
+    nav.pathname = "/projects/proj-1/spec";
+    const user = userEvent.setup();
+    await renderLayout();
+
+    for (const [testId, panel] of [
+      ["header-new-epic-manual", "new-epic-manual"],
+      ["header-new-epic-chat", "new-epic"],
+      ["header-new-bug", "new-bug"],
+    ]) {
+      await user.click(screen.getByTestId("header-new-button"));
+      await waitFor(() => {
+        expect(screen.getByTestId(testId)).toBeInTheDocument();
+      });
+      await user.click(screen.getByTestId(testId));
+
+      expect(nav.push).toHaveBeenCalledWith(`/projects/proj-1?panel=${panel}`);
+    }
+  });
+
+  it("drives the New menu from the keyboard", async () => {
+    const user = userEvent.setup();
+    await renderLayout();
+
+    screen.getByTestId("header-new-button").focus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("header-new-epic-manual")).toBeInTheDocument();
+    });
+
+    // Radix focuses the first item on open; Escape must close without acting.
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("header-new-epic-manual"),
+      ).not.toBeInTheDocument();
+    });
+    expect(nav.push).not.toHaveBeenCalled();
+
+    // Reopen: Radix lands on the first item, so one ArrowDown reaches the
+    // chat entry and Enter activates it — no pointer involved anywhere.
+    await user.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(screen.getByTestId("header-new-epic-manual")).toBeInTheDocument();
+    });
+    await user.keyboard("{ArrowDown}");
+    await user.keyboard("{Enter}");
+
+    expect(nav.push).toHaveBeenCalledWith("/projects/proj-1?panel=new-epic");
+
+    // And Enter straight after opening picks the manual entry.
+    await user.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(screen.getByTestId("header-new-epic-manual")).toBeInTheDocument();
+    });
+    await user.keyboard("{Enter}");
+
+    expect(nav.push).toHaveBeenCalledWith(
+      "/projects/proj-1?panel=new-epic-manual",
+    );
   });
 
   it("mounts the repo bar on the board route only", async () => {

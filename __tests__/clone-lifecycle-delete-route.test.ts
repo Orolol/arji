@@ -43,6 +43,15 @@ vi.mock("@/lib/projects/cancel-sessions", () => ({
   cancelProjectSessions: mockCancelProjectSessions,
 }));
 
+// Stubbed rather than exercised: the real one unlinks under `process.cwd()`,
+// which in a test run is the working tree. Its behaviour is covered against a
+// temporary directory in attachment-ownership.test.ts; what matters here is
+// that the route calls it, and calls it before the row it depends on is gone.
+const mockDeleteProjectUploads = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/uploads/attachment-ownership", () => ({
+  deleteProjectUploads: mockDeleteProjectUploads,
+}));
+
 vi.mock("@/lib/sync/export", () => ({ tryExportArjiJson: vi.fn() }));
 
 /** Order of side effects, so "cancelled before removal" is actually asserted. */
@@ -85,6 +94,13 @@ beforeEach(() => {
       worktreesRemoved: ["/workspace/projects/.arij-worktrees/feature-x"],
       worktreesPruned: 0,
     };
+  });
+
+  // Records nothing by default, so the existing `callOrder` assertions keep
+  // meaning exactly what they meant; the ordering test opts in below.
+  mockDeleteProjectUploads.mockReturnValue({
+    rowsDeleted: 3,
+    directoryRemoved: true,
   });
 
   mockGetProjectOr404.mockReturnValue({ project: project() });
@@ -220,6 +236,34 @@ describe("DELETE /api/projects/[projectId]", () => {
     expect(getDbChainMock().delete).toHaveBeenCalled();
   });
 
+  it("removes the project's uploads and reports what went", async () => {
+    const json = await (await callDelete()).json();
+
+    expect(mockDeleteProjectUploads).toHaveBeenCalledWith("proj-1");
+    expect(json.data.uploadsRemoved).toBe(3);
+    expect(json.data.uploadsDirectoryRemoved).toBe(true);
+  });
+
+  it("removes the uploads before the project row they hang off", async () => {
+    // The attachment rows cascade away with the project, so afterwards nothing
+    // names the files any more — the cleanup only reaches them from in front.
+    mockDeleteProjectUploads.mockImplementation(() => {
+      callOrder.push("uploads");
+      return { rowsDeleted: 3, directoryRemoved: true };
+    });
+    getDbChainMock().delete.mockImplementation(() => {
+      callOrder.push("delete-project");
+      return getDbChainMock();
+    });
+
+    await callDelete();
+
+    expect(callOrder.indexOf("uploads")).toBeGreaterThanOrEqual(0);
+    expect(callOrder.indexOf("uploads")).toBeLessThan(
+      callOrder.lastIndexOf("delete-project")
+    );
+  });
+
   it("returns the 404 from the project lookup untouched", async () => {
     const { NextResponse } = await import("next/server");
     mockGetProjectOr404.mockReturnValue(
@@ -231,6 +275,7 @@ describe("DELETE /api/projects/[projectId]", () => {
     expect(response.status).toBe(404);
     expect(mockCancelProjectSessions).not.toHaveBeenCalled();
     expect(mockRemoveProjectClone).not.toHaveBeenCalled();
+    expect(mockDeleteProjectUploads).not.toHaveBeenCalled();
   });
 });
 

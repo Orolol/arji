@@ -280,6 +280,10 @@ export async function POST(
           description: epic.description,
           worktreePath,
           userStories: us,
+          // A bug batched into a team build carries its screenshots like any
+          // other dispatch; solo mode gets them by passing the row whole.
+          projectId: epic.projectId,
+          images: epic.images,
         });
 
         epicRecords.push({ id: epicId, branchName });

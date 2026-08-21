@@ -3,8 +3,10 @@
 import { Loader2, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChatProviderSelect } from "@/components/chat/ChatProviderSelect";
-import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
+import {
+  ChatProviderSelect,
+  type ChatAgentSelection,
+} from "@/components/chat/ChatProviderSelect";
 import type { Conversation } from "@/hooks/useConversations";
 import { resolveLegacyConversationLabel } from "@/lib/chat/parity-contract";
 
@@ -13,22 +15,19 @@ interface ChatWorkspaceHeaderProps {
   activeProvider: string;
   hasMessages: boolean;
   isBusy: boolean;
-  onAgentChange: (namedAgentId: string) => void;
-  onProviderChange: (provider: string) => void;
+  onSelectAgentOrProvider: (selection: ChatAgentSelection) => void;
 }
 
 /**
  * Right-hand meta cluster of the conversation tab row: the provider marker
- * (read by tests) and the named-agent picker. The conversation label is not
- * repeated here — the active sub-tab already carries it.
+ * (read by tests) and the unified chat provider / named-agent picker.
  */
 export function ChatWorkspaceHeader({
   activeConversation,
   activeProvider,
   hasMessages,
   isBusy,
-  onAgentChange,
-  onProviderChange,
+  onSelectAgentOrProvider,
 }: ChatWorkspaceHeaderProps) {
   return (
     <div className="flex items-center gap-2">
@@ -44,22 +43,9 @@ export function ChatWorkspaceHeader({
         </Badge>
       )}
       <ChatProviderSelect
-        value={activeProvider}
-        onChange={onProviderChange}
-        conversationType={activeConversation?.type ?? null}
-        disabled={
-          !activeConversation ||
-          hasMessages ||
-          isBusy ||
-          Boolean(activeConversation?.namedAgentId)
-        }
-      />
-      <NamedAgentSelect
-        value={activeConversation?.namedAgentId ?? null}
-        onChange={onAgentChange}
-        allowClear
+        activeConversation={activeConversation}
+        onSelect={onSelectAgentOrProvider}
         disabled={!activeConversation || hasMessages || isBusy}
-        className="h-[26px] w-40 border-0 bg-transparent text-[12.5px] text-muted-foreground shadow-none"
       />
     </div>
   );

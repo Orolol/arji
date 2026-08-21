@@ -28,6 +28,13 @@ export interface ApplyTransitionOpts {
   validateOnly?: boolean;
   /** Buffer the ticket:moved event in the caller until its transaction commits. */
   deferEvent?: boolean;
+  /**
+   * When true, validate as if every open review comment were already
+   * resolved. For the approve flow's pre-merge check: approval bulk-resolves
+   * comments and closes the ticket in one action, but must validate BEFORE
+   * writing anything — the comment resolution included.
+   */
+  assumeReviewCommentsResolved?: boolean;
 }
 
 export interface ApplyTransitionResult {
@@ -54,6 +61,11 @@ export interface ApplyStoryTransitionOpts {
   requireCompletedReview?: boolean;
   /** Epic-scoped findings stay open when one child story is approved. */
   requireResolvedComments?: boolean;
+  /**
+   * Validate as if every open review comment were already resolved — for the
+   * approve flow, which bulk-resolves them as part of the same action.
+   */
+  assumeReviewCommentsResolved?: boolean;
 }
 
 function logRefusedTransition(opts: {
@@ -105,6 +117,7 @@ export function applyTransition(opts: ApplyTransitionOpts): ApplyTransitionResul
     sessionId,
     validateOnly,
     deferEvent,
+    assumeReviewCommentsResolved,
   } = opts;
 
   // Same-status is a no-op (reorder within column)
@@ -115,6 +128,9 @@ export function applyTransition(opts: ApplyTransitionOpts): ApplyTransitionResul
   // 1. Build context & validate
   const ctx = buildTransitionContext({ epicId, fromStatus, toStatus, actor });
   ctx.source = source;
+  if (assumeReviewCommentsResolved) {
+    ctx.hasOpenReviewComments = false;
+  }
   const result = validateTransition(ctx);
   if (!result.valid) {
     logRefusedTransition({
@@ -182,6 +198,7 @@ export function applyStoryTransition(
     reviewScope = "story",
     requireCompletedReview = true,
     requireResolvedComments = true,
+    assumeReviewCommentsResolved,
   } = opts;
 
   if (fromStatus === toStatus) return { valid: true };
@@ -196,6 +213,9 @@ export function applyStoryTransition(
     requireResolvedComments,
   });
   ctx.source = source;
+  if (assumeReviewCommentsResolved) {
+    ctx.hasOpenReviewComments = false;
+  }
   const result = validateTransition(ctx);
   if (!result.valid) {
     logRefusedTransition({

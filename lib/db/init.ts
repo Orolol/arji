@@ -63,6 +63,10 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
   { folderMillis: 1786712500000, table: "projects", column: "clone_source" },
   { folderMillis: 1786712500000, table: "projects", column: "git_remote_url" },
   { folderMillis: 1786712500000, table: "projects", column: "default_branch" },
+  // 0030_chat_attachment_ownership (single transactional migration: the two
+  // columns are always present or absent together on real databases)
+  { folderMillis: 1786712700000, table: "chat_attachments", column: "project_id" },
+  { folderMillis: 1786712700000, table: "chat_attachments", column: "epic_id" },
 ];
 
 /** Default on-disk location of the drizzle migration files. */

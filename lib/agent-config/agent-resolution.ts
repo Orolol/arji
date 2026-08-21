@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { agentProviderDefaults, namedAgents } from "@/lib/db/schema";
 import {
   AGENT_TYPES,
+  FALLBACK_PROVIDER,
   isAgentProvider,
   type AgentProvider,
   type AgentType,
@@ -35,8 +36,6 @@ export interface ResolvedAgentConfig {
   scope: string;
   namedAgentId: string | null;
 }
-
-const FALLBACK_PROVIDER: AgentProvider = "claude-code";
 
 /** Name of the seeded global default agent (inserted by lib/db/index.ts). */
 export const GLOBAL_DEFAULT_AGENT_NAME = "Claude Code";

@@ -18,8 +18,11 @@ export async function validatePath(
 
   const trimmed = inputPath.trim();
 
-  // Reject traversal attempts before normalization
-  if (trimmed.includes("..")) {
+  // Reject `..` as a whole path segment before normalization. A `..` *inside*
+  // a file or directory name (e.g. a cloned `repo..v2`, a repo name GitHub
+  // allows) is not a traversal: the segments are already isolated by the
+  // separator, and the resolve() below normalises the path regardless.
+  if (trimmed.split(/[/\\]/).some((segment) => segment === "..")) {
     return {
       valid: false,
       error: "Path must not contain traversal components (..)",

@@ -391,6 +391,111 @@ export function createAutoModeMergeParkedNotification(input: {
 }
 
 /**
+ * Create the "Approval blocked — could not merge <ticket>" notification.
+ *
+ * Fired by the approve routes when the pre-approval merge fails. The approve
+ * flow merges FIRST and only then marks anything done, so a failed merge
+ * means the ticket deliberately stayed put — nothing was resolved, nothing
+ * moved. The user has to act: open the epic, run Resolve Merge, and approve
+ * again. Deep-links to the epic on the board (the actionable place is the
+ * ticket, not a session — no agent ran). Uses the "failed" status for alarm
+ * styling.
+ */
+export function createApproveMergeFailedNotification(input: {
+  projectId: string;
+  epicId: string;
+  error: string;
+}): void {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  const epic = db
+    .select({ title: epics.title, readableId: epics.readableId })
+    .from(epics)
+    .where(eq(epics.id, input.epicId))
+    .get();
+
+  const label = epic?.readableId
+    ? epic.title
+      ? `${epic.readableId}: ${epic.title}`
+      : epic.readableId
+    : (epic?.title ?? input.epicId);
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: null,
+      // Own type string (not "merge"): approval blockage is user-actionable,
+      // not an agent run, and must stay distinguishable from auto-mode rows.
+      agentType: "approve_merge_failed",
+      status: "failed",
+      title: `Approval blocked — could not merge ${label}: ${input.error}. Use Resolve Merge, then approve again.`,
+      targetUrl: buildEpicTargetUrl(input.projectId, input.epicId),
+    })
+    .run();
+
+  pruneNotifications();
+}
+
+/**
+ * Create the "merge-fix agent ran, but the merge STILL failed" notification.
+ *
+ * Fired by the resolve-merge route and the merge route's autoAgent retry
+ * when the post-agent merge attempt comes back `merged: false` — e.g. the
+ * agent committed the conflict markers instead of resolving them, tripping
+ * the conflict-marker guard. Without this the failure would be silent: the
+ * routes' background closures have no HTTP response left to carry it, so a
+ * notification is the only way the user learns why the epic did not close.
+ * Deep-links to the epic on the board; uses "failed" for alarm styling.
+ */
+export function createMergeRetryFailedNotification(input: {
+  projectId: string;
+  epicId: string;
+  sessionId: string | null;
+  error: string;
+}): void {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  const epic = db
+    .select({ title: epics.title, readableId: epics.readableId })
+    .from(epics)
+    .where(eq(epics.id, input.epicId))
+    .get();
+
+  const label = epic?.readableId
+    ? epic.title
+      ? `${epic.readableId}: ${epic.title}`
+      : epic.readableId
+    : (epic?.title ?? input.epicId);
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: input.sessionId,
+      agentType: "merge",
+      status: "failed",
+      title: `Merge-fix agent finished, but the merge still failed for ${label} — ${input.error}`,
+      targetUrl: buildEpicTargetUrl(input.projectId, input.epicId),
+    })
+    .run();
+
+  pruneNotifications();
+}
+
+/**
  * Create the watchdog's "Agent seems stalled" notification for a running
  * session that has produced no output chunks past its staleness threshold
  * (see lib/agents/watchdog.ts, which also guarantees at-most-once delivery

@@ -33,6 +33,10 @@ import {
   type OpenAiReasoningEffort,
 } from "@/lib/openai/constants";
 import {
+  PROJECTS_ROOT_SETTING_KEY,
+  parseProjectsRootSetting,
+} from "@/lib/projects/workspace-constants";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -105,6 +109,14 @@ export default function SettingsPage() {
   const [usageBudgetMessage, setUsageBudgetMessage] = useState<string | null>(
     null
   );
+  // Clone root. Empty means "use the default", which only the server can
+  // compute (process.cwd()); it arrives as `defaults.projects_root`.
+  const [projectsRoot, setProjectsRoot] = useState("");
+  const [projectsRootDefault, setProjectsRootDefault] = useState("");
+  const [savingProjectsRoot, setSavingProjectsRoot] = useState(false);
+  const [projectsRootMessage, setProjectsRootMessage] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     fetch("/api/settings/webhooks")
@@ -173,6 +185,15 @@ export default function SettingsPage() {
             ? String(budget)
             : ""
         );
+        // Clone root: absent key means "no override", shown as an empty input
+        // with the server-resolved default as placeholder.
+        setProjectsRoot(
+          parseProjectsRootSetting(d.data?.[PROJECTS_ROOT_SETTING_KEY]) ?? ""
+        );
+        const rootDefault = d.defaults?.[PROJECTS_ROOT_SETTING_KEY];
+        if (typeof rootDefault === "string") {
+          setProjectsRootDefault(rootDefault);
+        }
       })
       .catch(() => {});
   }, []);
@@ -329,6 +350,42 @@ export default function SettingsPage() {
       setUsageBudgetMessage("Failed to save the usage budget.");
     } finally {
       setSavingUsageBudget(false);
+    }
+  }
+
+  async function handleSaveProjectsRoot() {
+    setProjectsRootMessage(null);
+    setSavingProjectsRoot(true);
+
+    const trimmed = projectsRoot.trim();
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [PROJECTS_ROOT_SETTING_KEY]: trimmed }),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setProjectsRootMessage(
+          payload?.error ??
+            "Failed to save the projects directory. Check the path and retry."
+        );
+        return;
+      }
+
+      setProjectsRoot(trimmed);
+      setProjectsRootMessage(
+        trimmed
+          ? "Projects directory saved."
+          : "Projects directory reset to the default."
+      );
+    } catch {
+      setProjectsRootMessage(
+        "Failed to save the projects directory. Check your connection and retry."
+      );
+    } finally {
+      setSavingProjectsRoot(false);
     }
   }
 
@@ -1020,6 +1077,53 @@ export default function SettingsPage() {
 
         {gitHubMessage && <p className="text-sm text-muted-foreground">{gitHubMessage}</p>}
         {gitHubError && <p className="text-sm text-destructive">{gitHubError}</p>}
+      </section>
+
+      <section
+        className="space-y-4 rounded-md border border-border p-4"
+        data-testid="projects-root-settings"
+      >
+        <div>
+          <h2 className="text-lg font-semibold">Projects Directory</h2>
+          <p className="text-sm text-muted-foreground">
+            Where Arij clones repositories imported from a GitHub URL. Each
+            clone lands in <code>&lt;directory&gt;/owner-repo</code>. Leave
+            empty to use the default. Changing it only affects future clones —
+            existing projects keep the path they were created with.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="projects-root" className="block text-sm font-medium">
+            Directory
+          </label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="projects-root"
+              data-testid="projects-root-setting"
+              value={projectsRoot}
+              onChange={(e) => setProjectsRoot(e.target.value)}
+              placeholder={projectsRootDefault}
+              disabled={savingProjectsRoot}
+            />
+            <Button
+              type="button"
+              onClick={handleSaveProjectsRoot}
+              disabled={savingProjectsRoot}
+            >
+              {savingProjectsRoot ? "Saving..." : "Save Directory"}
+            </Button>
+          </div>
+        </div>
+
+        {projectsRootMessage && (
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="projects-root-message"
+          >
+            {projectsRootMessage}
+          </p>
+        )}
       </section>
 
       <section

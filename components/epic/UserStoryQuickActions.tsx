@@ -30,6 +30,7 @@ export function UserStoryQuickActions({
   lockReason = "Another agent is already running for this task.",
 }: UserStoryQuickActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const actionsLocked = loading !== null || isLocked;
 
   const canSendToDev = ["todo", "in_progress"].includes(story.status);
@@ -40,6 +41,7 @@ export function UserStoryQuickActions({
 
   async function handleSendToDev() {
     setLoading("dev");
+    setError(null);
     try {
       const res = await fetch(
         `/api/projects/${projectId}/stories/${story.id}/build`,
@@ -49,17 +51,18 @@ export function UserStoryQuickActions({
           body: JSON.stringify({}),
         }
       );
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to send to dev");
       onRefresh();
-    } catch {
-      // silent
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to send to dev");
     }
     setLoading(null);
   }
 
   async function handleReview() {
     setLoading("review");
+    setError(null);
     try {
       const res = await fetch(
         `/api/projects/${projectId}/stories/${story.id}/review`,
@@ -69,17 +72,18 @@ export function UserStoryQuickActions({
           body: JSON.stringify({ reviewTypes: ["code_review"] }),
         }
       );
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to dispatch review");
       onRefresh();
-    } catch {
-      // silent
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to dispatch review");
     }
     setLoading(null);
   }
 
   async function handleApprove() {
     setLoading("approve");
+    setError(null);
     try {
       const res = await fetch(
         `/api/projects/${projectId}/stories/${story.id}/approve`,
@@ -88,17 +92,35 @@ export function UserStoryQuickActions({
           headers: { "Content-Type": "application/json" },
         }
       );
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to approve");
+      // Approving the last story merges the epic; a 200 can still report
+      // that the merge failed — the story is approved, the epic is not merged.
+      if (data.data?.mergeError) {
+        setError(`Story approved, but the epic merge failed: ${data.data.mergeError}`);
+      }
       onRefresh();
-    } catch {
-      // silent
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to approve");
     }
     setLoading(null);
   }
 
   return (
-    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+    <>
+      {/* Stays visible outside the hover-gated action row so a failed
+          action is not silently swallowed when the pointer leaves. */}
+      {error && (
+        <span
+          role="alert"
+          title={error}
+          data-testid="story-quick-action-error"
+          className="max-w-[200px] truncate text-[11px] text-destructive"
+        >
+          {error}
+        </span>
+      )}
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
       {canSendToDev && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -106,6 +128,7 @@ export function UserStoryQuickActions({
               variant="ghost"
               size="icon"
               className="h-6 w-6"
+              aria-label="Send to Dev"
               onClick={(e) => {
                 e.preventDefault();
                 handleSendToDev();
@@ -130,6 +153,7 @@ export function UserStoryQuickActions({
               variant="ghost"
               size="icon"
               className="h-6 w-6"
+              aria-label="Code Review"
               onClick={(e) => {
                 e.preventDefault();
                 handleReview();
@@ -154,6 +178,7 @@ export function UserStoryQuickActions({
               variant="ghost"
               size="icon"
               className="h-6 w-6 text-green-500 hover:text-green-600"
+              aria-label="Approve"
               onClick={(e) => {
                 e.preventDefault();
                 handleApprove();
@@ -170,6 +195,7 @@ export function UserStoryQuickActions({
           <TooltipContent>{isLocked ? lockReason : "Approve"}</TooltipContent>
         </Tooltip>
       )}
-    </div>
+      </div>
+    </>
   );
 }

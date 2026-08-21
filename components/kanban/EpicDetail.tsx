@@ -37,6 +37,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { DiffViewer } from "@/components/review/DiffViewer";
 import { EpicGitSection } from "./epic-detail/EpicGitSection";
 import { EpicUserStoriesSection } from "./epic-detail/EpicUserStoriesSection";
+import { TicketImagesSection } from "./epic-detail/TicketImagesSection";
 import { WhatTheAgentDid } from "./epic-detail/WhatTheAgentDid";
 import { formatCostUsd } from "@/lib/utils/format-usage";
 import { formatElapsed } from "@/lib/utils/format-elapsed";
@@ -207,7 +208,21 @@ export function EpicDetail({
   }
 
   async function handleApprove() {
-    await approve();
+    try {
+      await approve();
+      setMergeError(null);
+    } catch (e) {
+      if (isAgentAlreadyRunningError(e)) {
+        onAgentConflict?.({
+          message: e.message,
+          sessionUrl: e.sessionUrl || `/projects/${projectId}/sessions/${e.activeSessionId}`,
+        });
+      }
+      // Same surface as resolve-merge failures: the destructive line in the
+      // Git section, next to the Resolve Merge action the message points at.
+      setMergeError(e instanceof Error ? e.message : "Failed to approve epic");
+    }
+    // Refresh either way — on a merge failure the epic stayed in review.
     refresh();
   }
 
@@ -433,6 +448,14 @@ export function EpicDetail({
                 multiline
                 markdown
                 className="text-[14px] leading-[1.65]"
+              />
+
+              {/* Directly under the report it illustrates; renders nothing
+                  when the ticket has no attached screenshot. */}
+              <TicketImagesSection
+                projectId={projectId}
+                images={epic.images}
+                labelClassName={SECTION_LABEL_CLASS}
               />
 
               <WhatTheAgentDid

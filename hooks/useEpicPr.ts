@@ -49,8 +49,11 @@ export function useEpicPr(projectId: string, epicId: string | null) {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            // baseBranch is omitted when not explicitly chosen: the route
+            // decides from the project's stored default branch, which is
+            // authoritative for Arij-cloned projects.
             body: JSON.stringify({
-              baseBranch: opts?.baseBranch ?? "main",
+              baseBranch: opts?.baseBranch,
               draft: opts?.draft ?? false,
             }),
           }

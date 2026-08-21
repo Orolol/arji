@@ -31,13 +31,15 @@ afterEach(() => {
 });
 
 describe("createReleaseBranchAndCommitChangelog", () => {
+  const changelog = "# 1.2.3\n\n## Features\n- Added release helper\n\n## Bugfixes\n- None\n\n## Breaking Changes\n- None";
+
   it("creates release branch and commits CHANGELOG.md", async () => {
     const { dir, git } = await createTempRepo();
 
     const result = await createReleaseBranchAndCommitChangelog(
       dir,
       "1.2.3",
-      "# 1.2.3\n\n## Features\n- Added release helper\n\n## Bugfixes\n- None\n\n## Breaking Changes\n- None"
+      changelog
     );
 
     expect(result.releaseBranch).toBe("release/v1.2.3");
@@ -45,9 +47,60 @@ describe("createReleaseBranchAndCommitChangelog", () => {
     expect(result.commitHash).toBeTruthy();
 
     await git.checkout("release/v1.2.3");
-    const changelog = fs.readFileSync(path.join(dir, "CHANGELOG.md"), "utf-8");
-    expect(changelog).toContain("## Features");
-    expect(changelog).toContain("## Bugfixes");
-    expect(changelog).toContain("## Breaking Changes");
+    const changelogFile = fs.readFileSync(path.join(dir, "CHANGELOG.md"), "utf-8");
+    expect(changelogFile).toContain("## Features");
+    expect(changelogFile).toContain("## Bugfixes");
+    expect(changelogFile).toContain("## Breaking Changes");
+  });
+
+  it("branches the release off the stored default branch when it exists", async () => {
+    const { dir, git } = await createTempRepo();
+    // A develop-default clone also carries local main; the stored
+    // default_branch must win over the main preference.
+    await git.checkoutLocalBranch("develop");
+    fs.writeFileSync(path.join(dir, "develop-only.txt"), "develop\n", "utf-8");
+    await git.add(["develop-only.txt"]);
+    await git.commit("feat: develop-only change");
+
+    const result = await createReleaseBranchAndCommitChangelog(
+      dir,
+      "1.0.0",
+      changelog,
+      { defaultBranch: "develop" }
+    );
+
+    expect(result.releaseBranch).toBe("release/v1.0.0");
+    expect(result.changelogCommitted).toBe(true);
+
+    await git.checkout("release/v1.0.0");
+    // The release branch must carry develop's commit — if it had been cut
+    // from main, this file would be missing.
+    expect(fs.existsSync(path.join(dir, "develop-only.txt"))).toBe(true);
+    // And the caller is checked back out onto the branch they were on.
+    expect((await git.branch()).current).toBe("release/v1.0.0");
+    await git.checkout("develop");
+    expect((await git.branch()).current).toBe("develop");
+  });
+
+  it("falls back to the main preference when the stored default is missing", async () => {
+    const { dir, git } = await createTempRepo();
+    await git.checkoutLocalBranch("develop");
+    fs.writeFileSync(path.join(dir, "develop-only.txt"), "develop\n", "utf-8");
+    await git.add(["develop-only.txt"]);
+    await git.commit("feat: develop-only change");
+
+    // `trunk` does not exist locally: the release is cut from main, and
+    // develop's commit stays out of it.
+    const result = await createReleaseBranchAndCommitChangelog(
+      dir,
+      "2.0.0",
+      changelog,
+      { defaultBranch: "trunk" }
+    );
+
+    expect(result.releaseBranch).toBe("release/v2.0.0");
+
+    await git.checkout("release/v2.0.0");
+    expect(fs.existsSync(path.join(dir, "develop-only.txt"))).toBe(false);
   });
 });

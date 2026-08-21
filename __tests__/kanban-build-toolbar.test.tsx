@@ -159,11 +159,62 @@ describe("Kanban Build Toolbar", () => {
     expect(mockPanelOpenChat).not.toHaveBeenCalled();
   });
 
+  it("?panel=new-epic-manual opens the manual epic dialog and strips the param", async () => {
+    searchParams = new URLSearchParams("panel=new-epic-manual");
+    render(<KanbanPage />);
+
+    // The menu that pushes this param lives in the project chrome, a layout
+    // that outlives this page, so the param string is the only contract
+    // between them. Without this, either side could be renamed and the whole
+    // manual entry would go dead with every other test still green.
+    await screen.findByTestId("epic-create-dialog");
+    expect(routerReplace).toHaveBeenCalledWith("/projects/proj1");
+  });
+
+  it("?panel=new-epic-manual never reaches for the chat panel", async () => {
+    searchParams = new URLSearchParams("panel=new-epic-manual");
+    render(<KanbanPage />);
+    await screen.findByTestId("epic-create-dialog");
+
+    // Manual creation exists to skip the agent round-trip: touching the chat
+    // panel here — even to warm it up or pre-create a conversation — is the
+    // exact cost this path promises not to pay.
+    expect(mockPanelOpenChat).not.toHaveBeenCalled();
+    expect(mockPanelOpenNewEpic).not.toHaveBeenCalled();
+  });
+
+  it("reopens the manual epic dialog when the entry is picked a second time", async () => {
+    // Writing several epics back to back is the whole point of the manual
+    // path, and the New menu can only reach this page through ?panel=, which
+    // is consumed once per value. So the strip landing has to *release* the
+    // guard: without that, the second pick of the same entry is silently dead
+    // for the life of the mount — the menu navigates, nothing opens, and the
+    // chat entry still works, so it reads as a bug in manual creation alone.
+    searchParams = new URLSearchParams("panel=new-epic-manual");
+    const { rerender } = render(<KanbanPage />);
+    await screen.findByTestId("epic-create-dialog");
+
+    // The user cancels, and the replace() asserted above lands: no param.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    searchParams = new URLSearchParams();
+    rerender(<KanbanPage />);
+    await waitFor(() =>
+      expect(screen.queryByTestId("epic-create-dialog")).not.toBeInTheDocument()
+    );
+
+    // Same entry, same param string, same board mount.
+    searchParams = new URLSearchParams("panel=new-epic-manual");
+    rerender(<KanbanPage />);
+
+    await screen.findByTestId("epic-create-dialog");
+  });
+
   it("does not touch the panel without a panel param", async () => {
     render(<KanbanPage />);
     await screen.findByTestId("board");
     expect(mockPanelOpenChat).not.toHaveBeenCalled();
     expect(mockPanelOpenNewEpic).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("epic-create-dialog")).not.toBeInTheDocument();
   });
 
   it("does not show build toolbar when no epics selected", () => {

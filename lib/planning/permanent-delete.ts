@@ -3,11 +3,16 @@ import { and, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   agentSessions,
+  chatAttachments,
   chatConversations,
   epics,
   ticketComments,
   userStories,
 } from "@/lib/db/schema";
+import {
+  removeUploadFiles,
+  ticketUploadPaths,
+} from "@/lib/uploads/attachment-ownership";
 
 export class ScopedDeleteNotFoundError extends Error {
   constructor(message: string) {
@@ -30,6 +35,11 @@ export function deleteEpicPermanently(projectId: string, epicId: string) {
   if (!epic) {
     throw new ScopedDeleteNotFoundError("Epic not found");
   }
+
+  // Read before the delete, unlink after it commits: the rows carrying these
+  // paths are gone by the time the transaction ends, and unlinking first would
+  // destroy a bug's screenshots for a delete that then rolled back.
+  const uploadPaths = ticketUploadPaths(epicId);
 
   const transaction = sqliteClient().transaction(() => {
     const storyIds = db
@@ -69,10 +79,16 @@ export function deleteEpicPermanently(projectId: string, epicId: string) {
 
     db.delete(ticketComments).where(eq(ticketComments.epicId, epicId)).run();
     db.delete(chatConversations).where(eq(chatConversations.epicId, epicId)).run();
+    // Stated rather than left to the FK cascade, which only fires when
+    // `foreign_keys` is ON — the screenshots must go with the ticket whatever
+    // the connection's pragma happens to be.
+    db.delete(chatAttachments).where(eq(chatAttachments.epicId, epicId)).run();
     db.delete(epics).where(eq(epics.id, epicId)).run();
   });
 
   transaction();
+
+  removeUploadFiles(uploadPaths);
 }
 
 export function deleteUserStoryPermanently(projectId: string, storyId: string) {

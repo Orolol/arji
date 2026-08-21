@@ -87,6 +87,7 @@ export type AgentProvider =
   | "pi"
   | "oh-my-pi";
 
+export const FALLBACK_PROVIDER: AgentProvider = "claude-code";
 /**
  * The direct-API chat provider (fast mode). Deliberately NOT an
  * `AgentProvider`: it has no CLI to install or spawn, so it must never be

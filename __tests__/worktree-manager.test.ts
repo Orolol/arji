@@ -18,7 +18,7 @@ vi.mock("fs", () => ({
   mkdirSync: vi.fn(),
 }));
 
-import { createWorktree } from "@/lib/git/manager";
+import { createWorktree, resolveDefaultBranch } from "@/lib/git/manager";
 import fs from "fs";
 
 describe("createWorktree", () => {
@@ -100,5 +100,45 @@ describe("createWorktree", () => {
     expect(result.branchName).toContain("feature/epic-epic123");
     // Should not call git at all
     expect(mockGit.raw).not.toHaveBeenCalled();
+  });
+});
+
+// The thin path-only wrapper the diff route uses: same resolution as
+// createWorktree/mergeWorktree (stored default when it exists locally,
+// then origin/HEAD, then main/master), for callers holding only a repo path.
+describe("resolveDefaultBranch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("answers with origin/HEAD for a clone whose default is neither main nor master", async () => {
+    mockGit.branchLocal.mockResolvedValue({ all: ["develop"], current: "develop" });
+    mockGit.raw.mockImplementation(async (args: string[]) =>
+      args[0] === "symbolic-ref" ? "origin/develop\n" : ""
+    );
+
+    expect(await resolveDefaultBranch("/repo")).toBe("develop");
+  });
+
+  it("answers with the stored default branch when it exists locally", async () => {
+    mockGit.branchLocal.mockResolvedValue({ all: ["main", "develop"], current: "main" });
+    mockGit.raw.mockImplementation(async (args: string[]) =>
+      args[0] === "symbolic-ref" ? "origin/main\n" : ""
+    );
+
+    expect(await resolveDefaultBranch("/repo", "develop")).toBe("develop");
+    // The stored value is trusted without an origin/HEAD lookup.
+    expect(mockGit.raw).not.toHaveBeenCalledWith(
+      expect.arrayContaining(["symbolic-ref"])
+    );
+  });
+
+  it("ignores a stored default branch that no longer exists locally", async () => {
+    mockGit.branchLocal.mockResolvedValue({ all: ["main"], current: "main" });
+    mockGit.raw.mockImplementation(async (args: string[]) =>
+      args[0] === "symbolic-ref" ? "origin/main\n" : ""
+    );
+
+    expect(await resolveDefaultBranch("/repo", "develop")).toBe("main");
   });
 });

@@ -3,18 +3,9 @@ import { db } from "@/lib/db";
 import { chatAttachments } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { errorResponse } from "@/lib/api/route-helpers";
+import { imageUploadRejectionReason } from "@/lib/uploads/image-attachments";
 import path from "path";
 import fs from "fs";
-
-const ALLOWED_MIME_TYPES = [
-  "image/png",
-  "image/jpg",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-];
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 export async function POST(
   request: NextRequest,
@@ -29,18 +20,11 @@ export async function POST(
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
   }
 
-  if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-    return NextResponse.json(
-      { error: `Unsupported file type: ${file.type}. Allowed: png, jpg, jpeg, gif, webp` },
-      { status: 400 }
-    );
-  }
-
-  if (file.size > MAX_FILE_SIZE) {
-    return NextResponse.json(
-      { error: `File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max: 10MB` },
-      { status: 400 }
-    );
+  // Same rules the attach UI enforces client-side — one source of truth, so
+  // the two cannot drift apart.
+  const rejectionReason = imageUploadRejectionReason(file);
+  if (rejectionReason) {
+    return NextResponse.json({ error: rejectionReason }, { status: 400 });
   }
 
   try {
@@ -60,7 +44,13 @@ export async function POST(
     db.insert(chatAttachments)
       .values({
         id,
+        // Staged: no owner yet. Sending the chat message sets `chatMessageId`,
+        // filing a bug with it sets `epicId`, and until one of those happens
+        // the row is what lets the upload be discarded again. `projectId` is
+        // known now and is what makes deleting the project reach these files.
         chatMessageId: null,
+        projectId,
+        epicId: null,
         fileName: file.name,
         filePath: relativePath,
         mimeType: file.type,

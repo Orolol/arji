@@ -6,9 +6,18 @@ import {
   mockRouteContext,
 } from "@/__tests__/helpers/db-mock";
 
+/**
+ * `buildChatPrompt` echoes the system prompt it was handed so tests can tell
+ * "the project-context prompt was built" apart from "the raw configured
+ * system prompt leaked through".
+ */
+const chatPromptFor = (systemPrompt?: string | null) =>
+  `CHAT_PROMPT[${systemPrompt ?? ""}]`;
+
 const mockPromptBuilder = vi.hoisted(() => ({
-  buildChatPrompt: vi.fn(() => "CHAT_PROMPT"),
+  buildChatPrompt: vi.fn(),
   buildEpicRefinementPrompt: vi.fn(() => "EPIC_PROMPT"),
+  buildEpicFinalizationPrompt: vi.fn(() => "EPIC_FINALIZATION_PROMPT"),
   buildTitleGenerationPrompt: vi.fn(() => "TITLE_PROMPT"),
 }));
 
@@ -28,6 +37,7 @@ vi.mock("@/lib/utils/nanoid", () => ({
 vi.mock("@/lib/claude/prompt-builder", () => ({
   buildChatPrompt: mockPromptBuilder.buildChatPrompt,
   buildEpicRefinementPrompt: mockPromptBuilder.buildEpicRefinementPrompt,
+  buildEpicFinalizationPrompt: mockPromptBuilder.buildEpicFinalizationPrompt,
   buildTitleGenerationPrompt: mockPromptBuilder.buildTitleGenerationPrompt,
 }));
 
@@ -146,7 +156,14 @@ describe("POST /api/projects/[projectId]/chat/stream — OpenAI-compatible fast 
     vi.clearAllMocks();
     resetDbMockState();
 
-    mockPromptBuilder.buildChatPrompt.mockReturnValue("CHAT_PROMPT");
+    mockPromptBuilder.buildChatPrompt.mockImplementation(
+      (
+        _project: unknown,
+        _documents: unknown,
+        _messages: unknown,
+        systemPrompt?: string | null,
+      ) => chatPromptFor(systemPrompt),
+    );
     mockResolveAgentPrompt.mockResolvedValue("Chat system prompt");
     mockResolveAgentByNamedId.mockReturnValue({
       provider: "claude-code",
@@ -195,7 +212,7 @@ describe("POST /api/projects/[projectId]/chat/stream — OpenAI-compatible fast 
     expect(dbMockState.updateCalls).toContainEqual({ status: "active" });
   });
 
-  it("posts the system prompt plus recent history to /chat/completions with stream: true", async () => {
+  it("posts the project-context system prompt plus recent history to /chat/completions with stream: true", async () => {
     seedFastModeConversation();
     fetchMock.mockResolvedValue(sseResponse(["ok"]));
 
@@ -218,18 +235,31 @@ describe("POST /api/projects/[projectId]/chat/stream — OpenAI-compatible fast 
     };
     expect(body.model).toBe("llama3.1");
     expect(body.stream).toBe(true);
-    // System prompt first (configured prompt + board-tools section), then
-    // the history in chronological order (the just-saved user message
+    // System prompt first (project-context prompt + board-tools section),
+    // then the history in chronological order (the just-saved user message
     // included).
     expect(body.messages).toHaveLength(3);
     expect(body.messages[0].role).toBe("system");
-    expect(body.messages[0].content).toMatch(/^Chat system prompt\n\n/);
+    expect(
+      body.messages[0].content.startsWith(
+        `${chatPromptFor("Chat system prompt")}\n\n`,
+      ),
+    ).toBe(true);
     expect(body.messages[0].content).toContain("project assistant");
     expect(body.messages.slice(1)).toEqual([
       { role: "assistant", content: "Previous message" },
       { role: "user", content: "Current question" },
     ]);
-    // The board tools ride along on every fast-mode request.
+    // Parity with the CLI path: the system message is the project-context
+    // prompt (spec, memory, documents), not the bare configured prompt.
+    // History is left out of it — it travels as chat messages above.
+    expect(mockPromptBuilder.buildChatPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "proj1", spec: "spec" }),
+      [],
+      [],
+      "Chat system prompt",
+    );
+    // The board tools ride along on every fast-mode chat request.
     const tools = (JSON.parse(String(init.body)) as {
       tools?: Array<{ function: { name: string } }>;
     }).tools;
@@ -269,7 +299,10 @@ describe("POST /api/projects/[projectId]/chat/stream — OpenAI-compatible fast 
     expect(body.reasoning_effort).toBe("medium");
   });
 
-  it("still sends the board-tools system section when no chat system prompt is configured", async () => {
+  it("still sends the project context and board-tools section when no chat system prompt is configured", async () => {
+    // The built-in chat prompt is empty by default, so this is the shape a
+    // fresh install runs with — the model must still learn what the project
+    // is instead of answering as a generic assistant.
     mockResolveAgentPrompt.mockResolvedValue("   ");
     seedFastModeConversation();
     fetchMock.mockResolvedValue(sseResponse(["ok"]));
@@ -287,39 +320,113 @@ describe("POST /api/projects/[projectId]/chat/stream — OpenAI-compatible fast 
     };
     const system = body.messages.filter((m) => m.role === "system");
     expect(system).toHaveLength(1);
-    // The empty configured prompt is dropped; only the board section rides.
-    expect(system[0].content).not.toMatch(/^\s/);
+    // The project-context prompt still leads even with an empty configured
+    // prompt, and the board section rides along after it.
+    expect(
+      system[0].content.startsWith(`${chatPromptFor("   ")}\n\n`),
+    ).toBe(true);
     expect(system[0].content).toContain("project assistant");
   });
 
-  it("rejects epic_creation and brainstorm conversations with 400", async () => {
-    for (const type of ["epic_creation", "brainstorm"]) {
-      seedFastModeConversation({
-        conversation: {
-          id: "conv1",
-          type,
-          provider: "openai-compatible",
-          label: type === "epic_creation" ? "New Epic" : "Brainstorm",
-          status: "active",
-          namedAgentId: null,
-        },
-        settings: {},
-      });
-      fetchMock.mockReset();
-      fetchMock.mockResolvedValue(sseResponse(["ok"]));
+  it("supports epic_creation refinement and finalization prompts in OpenAI-compatible fast mode", async () => {
+    // Refinement prompt when finalize is false
+    seedFastModeConversation({
+      conversation: {
+        id: "conv-epic",
+        type: "epic_creation",
+        provider: "openai-compatible",
+        label: "New Epic",
+        status: "active",
+        namedAgentId: null,
+      },
+      settings: {},
+    });
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(sseResponse(["ok"]));
 
-      const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
-      const response = await POST(
-        mockJsonRequest({ content: "Hello", conversationId: "conv1" }),
-        mockRouteContext({ projectId: "proj1" }),
-      );
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const resRefine = await POST(
+      mockJsonRequest({ content: "Refine epic idea", conversationId: "conv-epic", finalize: false }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
 
-      expect(response.status).toBe(400);
-      const json = (await response.json()) as { error: string };
-      expect(json.error).toContain("not available for epic-creation or brainstorm");
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(dbMockState.insertCalls).toHaveLength(0);
-    }
+    expect(resRefine.status).toBe(200);
+    // The epic prompt embeds the transcript, so it must stop at the previous
+    // turn: the current message is sent once, as the `user` turn below.
+    expect(mockPromptBuilder.buildEpicRefinementPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "proj1" }),
+      [],
+      [{ role: "assistant", content: "Previous message" }],
+      expect.anything(),
+      expect.anything(),
+    );
+    const refineReqBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(refineReqBody.messages).toEqual([
+      { role: "system", content: "EPIC_PROMPT" },
+      { role: "user", content: "Refine epic idea" },
+    ]);
+    // Drain before re-seeding: the stream's tail still issues DB reads, and
+    // those would otherwise consume the rows seeded for the finalize call.
+    await readSseEvents(resRefine);
+
+    // Finalization prompt when finalize is true
+    seedFastModeConversation({
+      conversation: {
+        id: "conv-epic",
+        type: "epic_creation",
+        provider: "openai-compatible",
+        label: "New Epic",
+        status: "active",
+        namedAgentId: null,
+      },
+      settings: {},
+    });
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(sseResponse(["```json\n{\"title\": \"Epic\"}\n```"]));
+
+    const resFinalize = await POST(
+      mockJsonRequest({ content: "Generate stories", conversationId: "conv-epic", finalize: true }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+
+    expect(resFinalize.status).toBe(200);
+    expect(mockPromptBuilder.buildEpicFinalizationPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "proj1" }),
+      [],
+      [{ role: "assistant", content: "Previous message" }],
+      expect.anything(),
+      expect.anything(),
+    );
+    const finalizeReqBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(finalizeReqBody.messages).toEqual([
+      { role: "system", content: "EPIC_FINALIZATION_PROMPT" },
+      { role: "user", content: "Generate stories" },
+    ]);
+  });
+
+  it("supports brainstorm conversations with OpenAI-compatible fast mode", async () => {
+    seedFastModeConversation({
+      conversation: {
+        id: "conv-brainstorm",
+        type: "brainstorm",
+        provider: "openai-compatible",
+        label: "Brainstorm",
+        status: "active",
+        namedAgentId: null,
+      },
+      settings: {},
+    });
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(sseResponse(["ok"]));
+
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockJsonRequest({ content: "Hello", conversationId: "conv-brainstorm" }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it("rejects image attachments with 400", async () => {
@@ -690,5 +797,77 @@ describe("POST /api/projects/[projectId]/chat/stream — OpenAI-compatible fast 
     await readSseEvents(response);
     expect(mockGetProvider).toHaveBeenCalledWith("gemini-cli");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("drops the default agent's model when the conversation picks another CLI provider", async () => {
+    // The default chat agent is Claude Code with a Claude model; the
+    // conversation asks for Codex. Passing that model through would spawn
+    // `codex -m claude-opus-4-6`, which the CLI rejects.
+    mockResolveAgentByNamedId.mockReturnValue({
+      provider: "claude-code",
+      model: "claude-opus-4-6",
+      namedAgentId: null,
+    });
+    seedFastModeConversation({
+      conversation: {
+        id: "conv1",
+        type: "brainstorm",
+        provider: "codex",
+        label: "Brainstorm",
+        status: "active",
+        namedAgentId: null,
+      },
+    });
+    const spawn = vi.fn(() => ({
+      promise: Promise.resolve({ success: true, result: "Codex response" }),
+      kill: vi.fn(),
+    }));
+    mockGetProvider.mockReturnValue({ spawn });
+
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockJsonRequest({ content: "Current question", conversationId: "conv1" }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+    await readSseEvents(response);
+
+    expect(mockGetProvider).toHaveBeenCalledWith("codex");
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ model: undefined }),
+    );
+  });
+
+  it("keeps the resolved model when the conversation provider matches the agent's", async () => {
+    mockResolveAgentByNamedId.mockReturnValue({
+      provider: "gemini-cli",
+      model: "gemini-2.0-flash",
+      namedAgentId: null,
+    });
+    seedFastModeConversation({
+      conversation: {
+        id: "conv1",
+        type: "brainstorm",
+        provider: "gemini-cli",
+        label: "Brainstorm",
+        status: "active",
+        namedAgentId: null,
+      },
+    });
+    const spawn = vi.fn(() => ({
+      promise: Promise.resolve({ success: true, result: "Gemini response" }),
+      kill: vi.fn(),
+    }));
+    mockGetProvider.mockReturnValue({ spawn });
+
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockJsonRequest({ content: "Current question", conversationId: "conv1" }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+    await readSseEvents(response);
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gemini-2.0-flash" }),
+    );
   });
 });

@@ -47,13 +47,15 @@ const worktrees = {
 /** Render and flush the PR fetch so its setState stays inside act(). */
 async function renderBar(
   ownerRepo: string | null,
-  gitRepoPath: string | null = "/home/user/repo"
+  gitRepoPath: string | null = "/home/user/repo",
+  defaultBranch: string | null = null
 ) {
   const result = render(
     <RepoStatusBar
       projectId="p1"
       ownerRepo={ownerRepo}
       gitRepoPath={gitRepoPath}
+      defaultBranch={defaultBranch}
     />
   );
   await act(async () => {});
@@ -146,6 +148,31 @@ describe("RepoStatusBar", () => {
     await renderBar("owner/repo");
 
     expect(screen.getByText("main · never fetched")).toBeInTheDocument();
+  });
+
+  it("reads the branch from the project's stored default branch", async () => {
+    await renderBar("owner/repo", "/home/user/repo", "develop");
+
+    expect(screen.getByText(/develop · never fetched/)).toBeInTheDocument();
+    // ahead/behind is resolved — and pushed — against the stored branch.
+    expect(git.calls[0]).toEqual(["p1", "develop", true]);
+    expect(screen.getByTestId("repo-push-button")).toHaveTextContent(
+      "Push develop"
+    );
+  });
+
+  it("surfaces the git status error instead of a stale bar", async () => {
+    // The hook resolves ahead/behind against this branch; when it cannot
+    // (branch missing locally, git unreadable) the bar must say why instead
+    // of silently showing zeros.
+    git.error = "Local branch 'main' was not found.";
+
+    await renderBar("owner/repo");
+
+    expect(screen.getByTestId("repo-status-error")).toHaveTextContent(
+      "Local branch 'main' was not found."
+    );
+    expect(screen.queryByText(/main · never fetched/)).not.toBeInTheDocument();
   });
 
   it("reads ahead/behind against main only", async () => {

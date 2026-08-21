@@ -18,6 +18,15 @@ const eslintConfig = defineConfig([
       ]
     }
   },
+  {
+    // Playwright fixtures hand their value to a callback named `use`, which
+    // the React hooks rule reads as a hook called outside a component. No file
+    // under e2e/ renders React at all, so the rule has nothing to check here.
+    files: ["e2e/**"],
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

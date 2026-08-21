@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
 import { MarkdownContent } from "./MarkdownContent";
+import { ImageLightbox, type LightboxImage } from "@/components/shared/ImageLightbox";
 import type { ChatAttachment } from "@/hooks/useChat";
 import { cn } from "@/lib/utils";
 
@@ -22,20 +22,11 @@ interface MessageListProps {
 
 export function MessageList({ messages, loading, streamStatus }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
-  const [lightboxImage, setLightboxImage] = useState<{ url: string; alt: string } | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<LightboxImage | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  useEffect(() => {
-    if (!lightboxImage) return;
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setLightboxImage(null);
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [lightboxImage]);
 
   if (loading) {
     return (
@@ -103,27 +94,7 @@ export function MessageList({ messages, loading, streamStatus }: MessageListProp
         <div ref={bottomRef} />
       </div>
 
-      {/* Lightbox overlay */}
-      {lightboxImage && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-          onClick={() => setLightboxImage(null)}
-        >
-          <button
-            onClick={() => setLightboxImage(null)}
-            className="absolute top-4 right-4 text-white/80 transition-colors hover:text-white"
-            type="button"
-          >
-            <X className="h-6 w-6" />
-          </button>
-          <img
-            src={lightboxImage.url}
-            alt={lightboxImage.alt}
-            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
+      <ImageLightbox image={lightboxImage} onClose={() => setLightboxImage(null)} />
     </>
   );
 }

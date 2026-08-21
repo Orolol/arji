@@ -131,6 +131,24 @@ describe("mergeWorktree", () => {
     expect(gitApi.merge).not.toHaveBeenCalled();
   });
 
+  it("reports a vanished repo directory as an error instead of throwing", async () => {
+    // simple-git throws SYNCHRONOUSLY from its factory when the repo path no
+    // longer exists — that must come back through the merged:false contract,
+    // not escape as an exception for every caller to special-case.
+    const simpleGitFactory = vi.mocked((await import("simple-git")).default);
+    simpleGitFactory.mockImplementationOnce(() => {
+      throw new Error(
+        "Cannot use simple-git on a directory that does not exist"
+      );
+    });
+
+    const result = await mergeWorktree("/gone", "feature/epic-1");
+
+    expect(result).toMatchObject({ merged: false, reason: "error" });
+    expect(result.error).toContain("does not exist");
+    expect(gitApi.merge).not.toHaveBeenCalled();
+  });
+
   it("still reports MERGED when the commit-hash lookup fails afterwards", async () => {
     gitApi.log.mockRejectedValue(new Error("log exploded"));
 

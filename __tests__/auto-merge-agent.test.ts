@@ -98,6 +98,11 @@ vi.mock("@/lib/workflow/log", () => ({
   logTransition: vi.fn(),
 }));
 
+const mockCreateMergeRetryFailedNotification = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/notifications/create", () => ({
+  createMergeRetryFailedNotification: mockCreateMergeRetryFailedNotification,
+}));
+
 vi.mock("@/lib/events/emit", () => ({
   emitTicketMoved: vi.fn(),
 }));
@@ -205,6 +210,56 @@ describe("POST /api/projects/[projectId]/epics/[epicId]/merge", () => {
     expect(json.data.sessionId).toBe("test-session-id");
     expect(json.data.merged).toBe(false);
     expect(mockStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a trail when the agent's RETRY merge fails again", async () => {
+    // First mergeWorktree call fails (dispatches the agent); the mocked
+    // process manager reports the agent as succeeded; the retry merge then
+    // fails AGAIN (e.g. the agent committed the markers, tripping the
+    // conflict-marker guard). This runs in a background closure with no HTTP
+    // response left — dropping it silently would leave the user with a
+    // never-closing epic and no word on why.
+    mockMergeWorktree.mockResolvedValue({
+      merged: false,
+      error: "Branch feature/epic1 contains unresolved conflict markers in: a.ts",
+      reason: "conflict-markers",
+    });
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/epics/[epicId]/merge/route"
+    );
+    const res = await POST(
+      mockRequest({ autoAgent: true }),
+      { params: Promise.resolve({ projectId: "proj1", epicId: "epic1" }) }
+    );
+    expect(res.status).toBe(200);
+
+    // The background closure settles in microtasks (the mocked process
+    // manager reports completion immediately).
+    await vi.waitFor(() => {
+      expect(mockCreateMergeRetryFailedNotification).toHaveBeenCalledWith({
+        projectId: "proj1",
+        epicId: "epic1",
+        sessionId: "test-session-id",
+        error:
+          "Branch feature/epic1 contains unresolved conflict markers in: a.ts",
+      });
+    });
+
+    // The failure comment reached the ticket, and the epic was NOT closed.
+    const chain = db as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    const commentPayloads = chain.values.mock.calls
+      .map(([payload]) => payload as Record<string, unknown>)
+      .filter((p) => typeof p?.content === "string");
+    expect(
+      commentPayloads.some((p) =>
+        String(p.content).includes("merge still failed")
+      )
+    ).toBe(true);
+    const epicUpdates = chain.set.mock.calls
+      .map(([payload]) => payload as Record<string, unknown>)
+      .filter((p) => p?.status === "done");
+    expect(epicUpdates).toEqual([]);
   });
 
   it("does not launch agent when autoAgent is false and merge fails", async () => {

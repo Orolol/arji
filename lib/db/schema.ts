@@ -124,9 +124,20 @@ export const chatMessages = sqliteTable("chat_messages", {
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * An uploaded file and, in the three owner columns, what keeps it alive.
+ *
+ * `chatMessageId` is set when the staged upload is sent as part of a chat
+ * message; `epicId` when it is filed as a bug's screenshot. Both NULL means
+ * the upload is still staged in a form nobody has submitted — the only state
+ * in which discarding it is allowed. `projectId` is set at upload time and
+ * outlives either claim, so deleting a project takes its files with it.
+ */
 export const chatAttachments = sqliteTable("chat_attachments", {
   id: text("id").primaryKey(),
   chatMessageId: text("chat_message_id").references(() => chatMessages.id, { onDelete: "cascade" }),
+  projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  epicId: text("epic_id").references(() => epics.id, { onDelete: "cascade" }),
   fileName: text("file_name").notNull(),
   filePath: text("file_path").notNull(),
   mimeType: text("mime_type").notNull(),

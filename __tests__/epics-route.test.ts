@@ -326,6 +326,95 @@ describe("POST /api/projects/[projectId]/epics", () => {
     expect(json.error).toBe("Validation failed");
   });
 
+  it("rejects a whitespace-only story title without persisting anything", async () => {
+    // The route used to filter this story out and still answer 201, so the
+    // caller was told two stories landed when only one did. Asserting the 400
+    // alone would not catch a regression that inserts the epic first, hence the
+    // zero-insert check.
+    mockDbState.getQueue = [{ id: "proj1", name: "Test Project" }, { max: 0 }];
+
+    const { POST } = await import("@/app/api/projects/[projectId]/epics/route");
+    const response = await POST(
+      mockRequest({
+        title: "Account Security",
+        userStories: [
+          { title: "As a user, I want 2FA so that my account is secure" },
+          { title: "   " },
+        ],
+      }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+
+    const json = await response.json();
+    expect(response.status).toBe(400);
+    expect(json.error).toBe("Validation failed");
+    expect(mockDbState.insertCalls).toHaveLength(0);
+    expect(mockTryExportArjiJson).not.toHaveBeenCalled();
+  });
+
+  it("rejects a whitespace-only epic title without persisting anything", async () => {
+    mockDbState.getQueue = [{ id: "proj1", name: "Test Project" }, { max: 0 }];
+
+    const { POST } = await import("@/app/api/projects/[projectId]/epics/route");
+    const response = await POST(
+      mockRequest({ title: "   " }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+
+    const json = await response.json();
+    expect(response.status).toBe(400);
+    expect(json.error).toBe("Validation failed");
+    expect(mockDbState.insertCalls).toHaveLength(0);
+  });
+
+  it("persists epic and story titles trimmed", async () => {
+    mockDbState.getQueue = [
+      { id: "proj1", name: "Test Project" },
+      { max: 0 },
+      { id: "id-1", projectId: "proj1", title: "Account Security" },
+    ];
+
+    const { POST } = await import("@/app/api/projects/[projectId]/epics/route");
+    const response = await POST(
+      mockRequest({
+        title: "  Account Security  ",
+        description: "  Improve auth  ",
+        userStories: [
+          {
+            title: "  As a user, I want 2FA so that my account is secure  ",
+            description: "   ",
+            acceptanceCriteria: "  - [ ] 2FA toggle available  ",
+          },
+        ],
+      }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+
+    expect(response.status).toBe(201);
+
+    const epicInsert = mockDbState.insertCalls.find(
+      (call) => call.table === mockSchema.epics,
+    )?.payload as Record<string, unknown>;
+    expect(epicInsert).toEqual(
+      expect.objectContaining({
+        title: "Account Security",
+        description: "Improve auth",
+      }),
+    );
+
+    const storyInsert = mockDbState.insertCalls.find(
+      (call) => call.table === mockSchema.userStories,
+    )?.payload as Array<Record<string, unknown>>;
+    expect(storyInsert[0]).toEqual(
+      expect.objectContaining({
+        title: "As a user, I want 2FA so that my account is secure",
+        // Blank prose is absence, not an empty string.
+        description: null,
+        acceptanceCriteria: "- [ ] 2FA toggle available",
+      }),
+    );
+  });
+
   it("rolls back epic creation when story insert fails inside transaction", async () => {
     mockDbState.getQueue = [{ id: "proj1", name: "Test Project" }, { max: 0 }];
     mockDbState.failOnStoryInsert = true;

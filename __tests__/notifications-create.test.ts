@@ -35,6 +35,7 @@ import {
   createNotificationFromSession,
   createAskedQuestionNotificationFromSession,
   createDagWaveOutcomeNotification,
+  createMergeRetryFailedNotification,
   buildUnresolvedMentionsTitle,
   createUnresolvedMentionsNotification,
 } from "@/lib/notifications/create";
@@ -476,6 +477,64 @@ describe("unresolved document mentions", () => {
       missing: [],
       agentType: "build",
       targetUrl: "/projects/p1",
+    });
+
+    expect(dbMockState.insertCalls).toHaveLength(0);
+  });
+});
+
+describe("createMergeRetryFailedNotification()", () => {
+  beforeEach(() => {
+    resetDbMockState();
+  });
+
+  it("inserts a failed-status notification deep-linking to the epic", () => {
+    dbMockState.getQueue.push(
+      { name: "My Project" }, // project lookup
+      { title: "Payments", readableId: "E-proj-004" } // epic lookup
+    );
+
+    createMergeRetryFailedNotification({
+      projectId: "p1",
+      epicId: "e4",
+      sessionId: "s9",
+      error: "Branch feature/epic-4 contains unresolved conflict markers in: pay.ts",
+    });
+
+    expect(dbMockState.insertCalls).toHaveLength(1);
+    const payload = dbMockState.insertCalls[0] as Record<string, unknown>;
+    expect(payload.title).toBe(
+      "Merge-fix agent finished, but the merge still failed for E-proj-004: Payments — Branch feature/epic-4 contains unresolved conflict markers in: pay.ts"
+    );
+    expect(payload.status).toBe("failed");
+    expect(payload.agentType).toBe("merge");
+    expect(payload.sessionId).toBe("s9");
+    expect(payload.targetUrl).toBe("/projects/p1?ticket=e4");
+  });
+
+  it("falls back to the epic id when the epic row is gone", () => {
+    dbMockState.getQueue.push({ name: "My Project" }, undefined);
+
+    createMergeRetryFailedNotification({
+      projectId: "p1",
+      epicId: "e4",
+      sessionId: null,
+      error: "boom",
+    });
+
+    const payload = dbMockState.insertCalls[0] as Record<string, unknown>;
+    expect(payload.title).toContain("e4");
+    expect(payload.sessionId).toBeNull();
+  });
+
+  it("does nothing when the project is gone", () => {
+    dbMockState.getQueue.push(undefined);
+
+    createMergeRetryFailedNotification({
+      projectId: "p-gone",
+      epicId: "e4",
+      sessionId: null,
+      error: "boom",
     });
 
     expect(dbMockState.insertCalls).toHaveLength(0);

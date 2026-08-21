@@ -582,9 +582,10 @@ describe("POST /api/projects/[projectId]/chat/stream — fast-mode tool loop", (
     const retryBody = completionsBody(1);
     expect("tools" in retryBody).toBe(false);
     // The retry drops the board-tools system section (the model must not be
-    // told it has tools it no longer gets) and keeps the rest verbatim.
-    expect(retryBody.messages[0]).toEqual({ role: "system", content: "Chat system prompt" });
-    expect(firstBody.messages[0].content).toMatch(/^Chat system prompt\n\n/);
+    // told it has tools it no longer gets) and keeps the project-context
+    // prompt and the rest verbatim.
+    expect(retryBody.messages[0]).toEqual({ role: "system", content: "CHAT_PROMPT" });
+    expect(firstBody.messages[0].content).toMatch(/^CHAT_PROMPT\n\n/);
     expect(retryBody.messages.slice(1)).toEqual(firstBody.messages.slice(1));
 
     // The retry succeeded, so the turn is a normal successful one.

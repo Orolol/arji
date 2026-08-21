@@ -12,32 +12,49 @@ export default function NewProjectPage() {
   const [description, setDescription] = useState("");
   const [gitRepoPath, setGitRepoPath] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
 
     setLoading(true);
-    const res = await fetch("/api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: name.trim(),
-        description: description.trim() || undefined,
-        gitRepoPath: gitRepoPath.trim() || undefined,
-      }),
-    });
+    setError("");
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          description: description.trim() || undefined,
+          gitRepoPath: gitRepoPath.trim() || undefined,
+        }),
+      });
 
-    const data = await res.json();
-    if (data.data?.id) {
-      router.push(`/projects/${data.data.id}`);
+      const data = await res.json().catch(() => null);
+      if (data?.data?.id) {
+        router.push(`/projects/${data.data.id}`);
+        return;
+      }
+
+      // A rejected path or a validation error used to leave the form silently
+      // stuck on "Creating..." — say what went wrong instead.
+      setError(data?.error || `Failed to create project (HTTP ${res.status})`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create project");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   return (
     <div className="p-6 max-w-lg mx-auto">
       <h1 className="text-2xl font-bold mb-6">New Project</h1>
+      {error && (
+        <div className="bg-destructive/10 text-destructive p-3 rounded-md mb-4 text-sm">
+          {error}
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1">

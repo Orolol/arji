@@ -39,12 +39,14 @@ export function isEpicCreationConversationAgentType(type: string | null | undefi
 }
 
 /**
- * Conversation types that must run on a real coding agent. The
- * OpenAI-compatible fast mode (direct API chat) is not offered for these:
- * epic creation uses refinement/finalization prompts, and brainstorm is
- * the structured spec flow with Claude-based title generation.
+ * Conversation types whose turns are strict prompt contracts: epic creation
+ * must answer with refinement/finalization output (finalization in strict
+ * JSON), and brainstorm is the structured spec flow. They may run in the
+ * OpenAI-compatible fast mode, but board tools would corrupt their output,
+ * so every tool surface — fast-mode board tools and the CLI chat tool
+ * channel — is gated off for them.
  */
-export function isOpenAiIneligibleConversationAgentType(
+export function isToolIneligibleConversationAgentType(
   type: string | null | undefined
 ): boolean {
   return (
@@ -52,4 +54,5 @@ export function isOpenAiIneligibleConversationAgentType(
     isBrainstormConversationAgentType(type)
   );
 }
+
 

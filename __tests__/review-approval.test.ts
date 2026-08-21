@@ -1,14 +1,77 @@
 /**
- * Tests for Story 5: Review Completion & Approval.
+ * Tests for Review Completion & Approval (epic approve route).
  *
- * Validates that the approve route resolves all open review comments,
- * posts an approval activity comment, and sets statuses to done.
+ * The route's contract is merge-first: the epic branch must land on the
+ * default branch (via mergeWorktree) BEFORE any ticket state changes. A
+ * failed merge must change NOTHING — comments stay open, the epic stays in
+ * review — and surface a 409 plus a notification. Only a successful merge
+ * (or having nothing to merge) lets the approval resolve comments and close
+ * the ticket.
+ *
+ * Closing the ticket itself goes through the transition service: the epic
+ * → done write (and the child stories' → done writes) are the service's
+ * status writes, and every child transition is pre-flighted before the
+ * merge. Stories that never reached review are left unchanged and reported
+ * as `skippedStories` instead of invalidating the approval.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  dbMockState,
+  resetDbMockState,
   mockNextRequest,
   mockRouteContext,
 } from "@/__tests__/helpers/db-mock";
+
+const mocks = vi.hoisted(() => ({
+  mergeWorktree: vi.fn(),
+  applyTransition: vi.fn(),
+  applyStoryTransition: vi.fn(),
+  logWorkflowDecision: vi.fn(),
+  logTransition: vi.fn(),
+  createApproveMergeFailedNotification: vi.fn(),
+  tryExportArjiJson: vi.fn(),
+  beginMergeWork: vi.fn(),
+  endMergeWork: vi.fn(),
+}));
+
+vi.mock("@/lib/db", async () => {
+  const { dbModuleMock } = await import("@/__tests__/helpers/db-mock");
+  return dbModuleMock();
+});
+
+vi.mock("@/lib/git/manager", () => ({
+  mergeWorktree: mocks.mergeWorktree,
+}));
+
+vi.mock("@/lib/workflow/transition-service", () => ({
+  applyTransition: mocks.applyTransition,
+  applyStoryTransition: mocks.applyStoryTransition,
+  logWorkflowDecision: mocks.logWorkflowDecision,
+}));
+
+vi.mock("@/lib/workflow/log", () => ({
+  logTransition: mocks.logTransition,
+}));
+
+vi.mock("@/lib/notifications/create", () => ({
+  createApproveMergeFailedNotification:
+    mocks.createApproveMergeFailedNotification,
+}));
+
+vi.mock("@/lib/sync/export", () => ({
+  tryExportArjiJson: mocks.tryExportArjiJson,
+}));
+
+vi.mock("@/lib/auto-mode/registry", () => ({
+  autoModeRegistry: {
+    beginMergeWork: mocks.beginMergeWork,
+    endMergeWork: mocks.endMergeWork,
+  },
+}));
+
+vi.mock("@/lib/utils/nanoid", () => ({
+  createId: vi.fn(() => "new-id"),
+}));
 
 const mockEpic = {
   id: "epic-1",
@@ -20,266 +83,471 @@ const mockEpic = {
 const mockProject = {
   id: "p1",
   gitRepoPath: "/tmp/repo",
+  defaultBranch: "main",
 };
 
-let insertCalls: { table: string; values: Record<string, unknown> }[] = [];
-let updateCalls: { table: string; updates: Record<string, unknown> }[] = [];
+/**
+ * Seed the db-mock queues in the route's read order:
+ *   get #1 → epic (getEpicOr404), get #2 → project,
+ *   all #1 → the epic's stories (review/skip split),
+ *   all #2 → agent sessions (worktree lookup, merge path only).
+ */
+function seed({
+  epic = mockEpic,
+  project = mockProject,
+  stories = [{ id: "story-1", epicId: "epic-1", status: "review", title: "One" }],
+  sessions = [{ worktreePath: "/tmp/worktrees/epic-abc" }],
+}: {
+  epic?: Record<string, unknown> | null;
+  project?: Record<string, unknown> | null;
+  stories?: Record<string, unknown>[];
+  sessions?: Record<string, unknown>[];
+} = {}) {
+  dbMockState.getQueue.push(epic, project);
+  dbMockState.allQueue.push(stories, sessions);
+}
 
-vi.mock("@/lib/db", () => {
-  const chain = {
-    select: vi.fn().mockReturnThis(),
-    from: vi.fn(function (this: typeof chain, table: { _name?: string }) {
-      // Return different data based on table
-      (this as Record<string, unknown>)._currentTable = table?._name;
-      return this;
-    }),
-    where: vi.fn(function (this: typeof chain) {
-      return this;
-    }),
-    orderBy: vi.fn(function (this: typeof chain) {
-      return this;
-    }),
-    get: vi.fn(function (this: typeof chain & { _currentTable?: string }) {
-      if (this._currentTable === "projects") return mockProject;
-      return mockEpic;
-    }),
-    all: vi.fn(function (this: typeof chain & { _currentTable?: string }) {
-      if (this._currentTable === "userStories") {
-        return [{ id: "story-1", epicId: "epic-1", status: "review" }];
-      }
-      return [];
-    }),
-    insert: vi.fn((table: { _name?: string }) => ({
-      values: vi.fn((vals: Record<string, unknown>) => {
-        insertCalls.push({ table: table?._name ?? "unknown", values: vals });
-        return { run: vi.fn() };
-      }),
-    })),
-    update: vi.fn((table: { _name?: string }) => ({
-      set: vi.fn((updates: Record<string, unknown>) => {
-        updateCalls.push({ table: table?._name ?? "unknown", updates });
-        return {
-          where: vi.fn().mockReturnValue({ run: vi.fn() }),
-        };
-      }),
-    })),
-    delete: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({ run: vi.fn() }),
-    }),
-  };
-  return { db: chain };
-});
+async function callApprove(projectId = "p1", epicId = "epic-1") {
+  const { POST } = await import(
+    "@/app/api/projects/[projectId]/epics/[epicId]/approve/route"
+  );
+  const req = mockNextRequest({
+    url: "http://localhost/api/test",
+    method: "POST",
+  });
+  return POST(req, mockRouteContext({ projectId, epicId }));
+}
 
-vi.mock("@/lib/db/schema", () => ({
-  reviewComments: {
-    _name: "reviewComments",
-    id: "id",
-    epicId: "epicId",
-    status: "status",
-    updatedAt: "updatedAt",
-  },
-  epics: {
-    _name: "epics",
-    id: "id",
-    status: "status",
-    updatedAt: "updatedAt",
-  },
-  userStories: {
-    _name: "userStories",
-    id: "id",
-    epicId: "epicId",
-    status: "status",
-  },
-  projects: {
-    _name: "projects",
-    id: "id",
-  },
-  ticketComments: {
-    _name: "ticketComments",
-    id: "id",
-    epicId: "epicId",
-    author: "author",
-    content: "content",
-    createdAt: "createdAt",
-  },
-  ticketActivityLog: {
-    _name: "ticketActivityLog",
-    id: "id",
-    projectId: "projectId",
-    epicId: "epicId",
-    fromStatus: "fromStatus",
-    toStatus: "toStatus",
-    actor: "actor",
-    reason: "reason",
-    sessionId: "sessionId",
-    createdAt: "createdAt",
-  },
-  agentSessions: {
-    _name: "agentSessions",
-    id: "id",
-    epicId: "epicId",
-    projectId: "projectId",
-    status: "status",
-    agentType: "agentType",
-  },
-}));
+/** Last transition-service epic call (the close, after the pre-flight). */
+function lastEpicCall() {
+  const calls = mocks.applyTransition.mock.calls;
+  return calls[calls.length - 1]?.[0] as Record<string, unknown> | undefined;
+}
 
-vi.mock("@/lib/workflow/engine", () => ({
-  validateTransition: vi.fn(() => ({ valid: true })),
-  isAllowedTransition: vi.fn(() => true),
-}));
-
-vi.mock("@/lib/workflow/context", () => ({
-  buildTransitionContext: vi.fn(() => ({
-    epicId: "epic-1",
-    fromStatus: "review",
-    toStatus: "done",
-    hasOpenReviewComments: false,
-    hasCompletedReview: true,
-    hasRunningSession: false,
-    actor: "user",
-    source: "approve",
-  })),
-}));
-
-vi.mock("@/lib/utils/nanoid", () => ({
-  createId: vi.fn(() => "new-id"),
-}));
-
-vi.mock("drizzle-orm", () => ({
-  eq: vi.fn((...args: unknown[]) => args),
-  and: vi.fn((...args: unknown[]) => args),
-}));
-
-vi.mock("simple-git", () => ({
-  default: vi.fn(() => ({
-    merge: vi.fn().mockResolvedValue(undefined),
-  })),
-}));
-
-vi.mock("@/lib/sync/export", () => ({
-  tryExportArjiJson: vi.fn(),
-}));
-
-vi.mock("@/lib/workflow/log", () => ({
-  logTransition: vi.fn(),
-}));
-
-vi.mock("@/lib/events/emit", () => ({
-  emitTicketMoved: vi.fn(),
-}));
-
-describe("Review approval", () => {
+describe("Epic review approval", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    insertCalls = [];
-    updateCalls = [];
+    resetDbMockState();
+    mocks.mergeWorktree.mockResolvedValue({ merged: true, commitHash: "abc123" });
+    mocks.applyTransition.mockReturnValue({ valid: true });
+    mocks.applyStoryTransition.mockReturnValue({ valid: true });
+    mocks.beginMergeWork.mockReturnValue(true);
   });
 
-  it("resolves all open review comments on approve", async () => {
-    const { POST } = await import(
-      "@/app/api/projects/[projectId]/epics/[epicId]/approve/route"
-    );
+  describe("merge success", () => {
+    it("merges the branch via mergeWorktree before approving", async () => {
+      seed();
+      const res = await callApprove();
 
-    const req = mockNextRequest({ url: "http://localhost/api/test", method: "POST" });
+      expect(res.status).toBe(200);
+      expect(mocks.mergeWorktree).toHaveBeenCalledWith(
+        "/tmp/repo",
+        "feature/epic-abc",
+        "/tmp/worktrees/epic-abc",
+        { defaultBranch: "main" }
+      );
+    });
 
-    const res = await POST(req, mockRouteContext({ projectId: "p1", epicId: "epic-1" }));
+    it("returns approved, merged and the commit hash", async () => {
+      seed();
+      const res = await callApprove();
 
-    expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data).toEqual({
+        approved: true,
+        merged: true,
+        commitHash: "abc123",
+      });
+    });
 
-    // Check that reviewComments were updated with status: resolved
-    const reviewUpdate = updateCalls.find(
-      (c) => c.table === "reviewComments"
-    );
-    expect(reviewUpdate).toBeDefined();
-    expect(reviewUpdate!.updates.status).toBe("resolved");
+    it("resolves all open review comments on approve", async () => {
+      seed();
+      await callApprove();
+
+      const reviewUpdate = dbMockState.updateCalls.find(
+        (c) => (c as Record<string, unknown>).status === "resolved"
+      );
+      expect(reviewUpdate).toBeDefined();
+    });
+
+    it("posts an approval activity comment to ticket comments", async () => {
+      seed();
+      await callApprove();
+
+      const approvalComment = dbMockState.insertCalls.find((c) =>
+        String((c as Record<string, unknown>).content).includes("approved")
+      ) as Record<string, unknown>;
+      expect(approvalComment).toBeDefined();
+      expect(approvalComment.author).toBe("user");
+    });
+
+    it("closes the epic through the transition service and clears the merged branch name", async () => {
+      seed();
+      await callApprove();
+
+      // The status write is the service's (pre-flight excluded): review →
+      // done, not validate-only.
+      const close = lastEpicCall();
+      expect(close).toMatchObject({
+        fromStatus: "review",
+        toStatus: "done",
+        source: "approve",
+      });
+      expect("validateOnly" in (close ?? {})).toBe(false);
+
+      // Branch cleanup is metadata only, kept out of the service on purpose.
+      const branchClear = dbMockState.updateCalls.find(
+        (c) => "branchName" in (c as Record<string, unknown>)
+      ) as Record<string, unknown>;
+      expect(branchClear).toBeDefined();
+      expect(branchClear.branchName).toBeNull();
+    });
+
+    it("moves the epic's review stories to done through the transition service", async () => {
+      seed();
+      await callApprove();
+
+      expect(mocks.applyStoryTransition).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userStoryId: "story-1",
+          fromStatus: "review",
+          toStatus: "done",
+          reviewScope: "epic",
+        })
+      );
+    });
   });
 
-  it("posts an approval activity comment to ticket comments", async () => {
-    const { POST } = await import(
-      "@/app/api/projects/[projectId]/epics/[epicId]/approve/route"
-    );
+  describe("merge failure", () => {
+    beforeEach(() => {
+      mocks.mergeWorktree.mockResolvedValue({
+        merged: false,
+        error: "CONFLICTS: lib/foo.ts",
+        reason: "conflict",
+      });
+    });
 
-    const req = mockNextRequest({ url: "http://localhost/api/test", method: "POST" });
+    it("returns 409 with mergeFailed and keeps the ticket in review", async () => {
+      seed();
+      const res = await callApprove();
 
-    await POST(req, mockRouteContext({ projectId: "p1", epicId: "epic-1" }));
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.error).toContain("Merge failed");
+      expect(json.error).toContain("CONFLICTS: lib/foo.ts");
+      expect(json.mergeFailed).toBe(true);
+    });
 
-    const ticketInsert = insertCalls.find(
-      (c) => c.table === "ticketComments"
-    );
-    expect(ticketInsert).toBeDefined();
-    expect(ticketInsert!.values.content).toContain("approved");
-    expect(ticketInsert!.values.author).toBe("user");
+    it("changes NOTHING about ticket state (no updates at all)", async () => {
+      seed();
+      await callApprove();
+
+      // No comment resolution, no epic/US status writes, no real transition
+      // — the whole point of merge-first approval. The only applyTransition
+      // call is the side-effect-free pre-flight validation.
+      expect(dbMockState.updateCalls).toEqual([]);
+      expect(mocks.applyTransition).toHaveBeenCalledTimes(1);
+      expect(mocks.applyTransition).toHaveBeenCalledWith(
+        expect.objectContaining({ validateOnly: true })
+      );
+    });
+
+    it("re-exports arji.json so the failure comment reaches the file", async () => {
+      seed();
+      await callApprove();
+
+      expect(mocks.tryExportArjiJson).toHaveBeenCalledWith("p1");
+    });
+
+    it("keeps the 409 contract when writing the failure trail throws", async () => {
+      // SQLITE_BUSY on the trail writes must not turn the contractual 409
+      // into a generic 500 — the trail is best-effort.
+      mocks.createApproveMergeFailedNotification.mockImplementationOnce(() => {
+        throw new Error("SQLITE_BUSY");
+      });
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      seed();
+      const res = await callApprove();
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.mergeFailed).toBe(true);
+      expect(consoleError).toHaveBeenCalled();
+      consoleError.mockRestore();
+    });
+
+    it("releases the merge lock", async () => {
+      seed();
+      await callApprove();
+
+      expect(mocks.beginMergeWork).toHaveBeenCalledWith("p1", "epic-1");
+      expect(mocks.endMergeWork).toHaveBeenCalledWith("p1", "epic-1");
+    });
+
+    it("funnels a mergeWorktree THROW into the same failure path", async () => {
+      // getGit can throw before mergeWorktree's try block when the repo
+      // directory is gone — the route must not surface a raw 500 with no
+      // trail.
+      mocks.mergeWorktree.mockRejectedValue(
+        new Error("Cannot use simple-git on a directory that does not exist")
+      );
+      seed();
+      const res = await callApprove();
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.mergeFailed).toBe(true);
+      expect(json.error).toContain("does not exist");
+      expect(dbMockState.updateCalls).toEqual([]);
+      expect(mocks.createApproveMergeFailedNotification).toHaveBeenCalledWith({
+        projectId: "p1",
+        epicId: "epic-1",
+        error: "Cannot use simple-git on a directory that does not exist",
+      });
+      expect(mocks.endMergeWork).toHaveBeenCalledWith("p1", "epic-1");
+    });
+
+    it("posts a ticket comment explaining the failed merge", async () => {
+      seed();
+      await callApprove();
+
+      expect(dbMockState.insertCalls).toHaveLength(1);
+      const comment = dbMockState.insertCalls[0] as Record<string, unknown>;
+      expect(String(comment.content)).toContain("merge failed");
+      expect(String(comment.content)).toContain("CONFLICTS: lib/foo.ts");
+    });
+
+    it("creates the approve-merge-failed notification", async () => {
+      seed();
+      await callApprove();
+
+      expect(mocks.createApproveMergeFailedNotification).toHaveBeenCalledWith({
+        projectId: "p1",
+        epicId: "epic-1",
+        error: "CONFLICTS: lib/foo.ts",
+      });
+    });
+
+    it("logs a review → review activity entry as system", async () => {
+      seed();
+      await callApprove();
+
+      expect(mocks.logTransition).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: "p1",
+          epicId: "epic-1",
+          fromStatus: "review",
+          toStatus: "review",
+          actor: "system",
+        })
+      );
+    });
   });
 
-  it("sets epic status to done", async () => {
-    const { POST } = await import(
-      "@/app/api/projects/[projectId]/epics/[epicId]/approve/route"
-    );
+  describe("story synchronization (epic-scoped approval)", () => {
+    it("promotes every review story, leaves the rest untouched and reports them", async () => {
+      seed({
+        stories: [
+          { id: "story-1", epicId: "epic-1", status: "review", title: "One" },
+          { id: "story-2", epicId: "epic-1", status: "review", title: "Two" },
+          { id: "story-3", epicId: "epic-1", status: "todo", title: "Three" },
+        ],
+      });
+      const res = await callApprove();
 
-    const req = mockNextRequest({ url: "http://localhost/api/test", method: "POST" });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data.skippedStories).toEqual([
+        { id: "story-3", title: "Three", status: "todo" },
+      ]);
 
-    await POST(req, mockRouteContext({ projectId: "p1", epicId: "epic-1" }));
+      // Both review stories are promoted; the todo one is never touched.
+      expect(mocks.applyStoryTransition).toHaveBeenCalledWith(
+        expect.objectContaining({ userStoryId: "story-1", toStatus: "done" })
+      );
+      expect(mocks.applyStoryTransition).toHaveBeenCalledWith(
+        expect.objectContaining({ userStoryId: "story-2", toStatus: "done" })
+      );
+      const touchedIds = mocks.applyStoryTransition.mock.calls.map(
+        (c) => (c[0] as { userStoryId: string }).userStoryId
+      );
+      expect(touchedIds).not.toContain("story-3");
 
-    const epicUpdate = updateCalls.find(
-      (c) => c.table === "epics" && c.updates.status === "done"
-    );
-    expect(epicUpdate).toBeDefined();
+      // The hold is named in the activity log, not left implicit.
+      expect(mocks.logWorkflowDecision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          epicId: "epic-1",
+          actor: "user",
+          reason: expect.stringContaining("story-3:todo"),
+        })
+      );
+    });
+
+    it("validates the child transitions BEFORE the merge and bounces 400 when one refuses", async () => {
+      seed({
+        stories: [
+          { id: "story-1", epicId: "epic-1", status: "review", title: "One" },
+          { id: "story-2", epicId: "epic-1", status: "review", title: "Two" },
+        ],
+      });
+      // The second child's guards refuse (e.g. a build session still running
+      // on it). The refusal must land before anything is merged or written.
+      mocks.applyStoryTransition
+        .mockReturnValueOnce({ valid: true })
+        .mockReturnValueOnce({
+          valid: false,
+          error: "Cannot move while a build session is running.",
+        });
+      const res = await callApprove();
+
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toContain("build session");
+      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+      expect(dbMockState.updateCalls).toEqual([]);
+      expect(dbMockState.insertCalls).toEqual([]);
+      expect(mocks.beginMergeWork).not.toHaveBeenCalled();
+    });
   });
 
-  it("sets all user stories to done", async () => {
-    const { POST } = await import(
-      "@/app/api/projects/[projectId]/epics/[epicId]/approve/route"
-    );
+  describe("nothing to merge", () => {
+    it("approves without a merge when the epic has no branch", async () => {
+      seed({ epic: { ...mockEpic, branchName: null } });
+      const res = await callApprove();
 
-    const req = mockNextRequest({ url: "http://localhost/api/test", method: "POST" });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data).toEqual({
+        approved: true,
+        merged: false,
+        mergeSkipped: "no-branch",
+      });
+      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
 
-    await POST(req, mockRouteContext({ projectId: "p1", epicId: "epic-1" }));
+      // The epic still closes through the service, it just has nothing to land.
+      const close = lastEpicCall();
+      expect(close).toMatchObject({ toStatus: "done" });
+      expect("validateOnly" in (close ?? {})).toBe(false);
+    });
 
-    const usUpdate = updateCalls.find(
-      (c) => c.table === "userStories" && c.updates.status === "done"
-    );
-    expect(usUpdate).toBeDefined();
-  });
+    it("approves without a merge when the project has no git repo", async () => {
+      seed({ project: { ...mockProject, gitRepoPath: null } });
+      const res = await callApprove();
 
-  it("returns approved and merged status", async () => {
-    const { POST } = await import(
-      "@/app/api/projects/[projectId]/epics/[epicId]/approve/route"
-    );
-
-    const req = mockNextRequest({ url: "http://localhost/api/test", method: "POST" });
-
-    const res = await POST(req, mockRouteContext({ projectId: "p1", epicId: "epic-1" }));
-
-    const json = await res.json();
-    expect(json.data.approved).toBe(true);
-    expect(typeof json.data.merged).toBe("boolean");
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data.mergeSkipped).toBe("no-branch");
+      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+    });
   });
 
   it("rejects approval when epic is not in review status", async () => {
-    // Override the mock to return a non-review epic
-    const { db } = await import("@/lib/db");
-    const originalGet = (db.get as ReturnType<typeof vi.fn>).getMockImplementation();
-    (db.get as ReturnType<typeof vi.fn>).mockReturnValueOnce({
-      ...mockEpic,
-      status: "in_progress",
-    });
-
-    const { POST } = await import(
-      "@/app/api/projects/[projectId]/epics/[epicId]/approve/route"
-    );
-
-    const req = mockNextRequest({ url: "http://localhost/api/test", method: "POST" });
-
-    const res = await POST(req, mockRouteContext({ projectId: "p1", epicId: "epic-1" }));
+    seed({ epic: { ...mockEpic, status: "in_progress" } });
+    const res = await callApprove();
 
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toContain("review");
+    expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+  });
 
-    // Restore
-    if (originalGet) {
-      (db.get as ReturnType<typeof vi.fn>).mockImplementation(originalGet);
-    }
+  describe("pre-flight validation (before the merge)", () => {
+    it("validates the transition BEFORE merging, treating open comments as resolved", async () => {
+      seed();
+      await callApprove();
+
+      const [firstCall] = mocks.applyTransition.mock.calls;
+      expect(firstCall[0]).toMatchObject({
+        fromStatus: "review",
+        toStatus: "done",
+        source: "approve",
+        validateOnly: true,
+        assumeReviewCommentsResolved: true,
+      });
+      // Pre-flight strictly precedes the merge.
+      expect(mocks.applyTransition.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.mergeWorktree.mock.invocationCallOrder[0]
+      );
+    });
+
+    it("returns 400 without ANY side effects when the pre-flight refuses", async () => {
+      // Deterministic refusal, e.g. the epic was dragged into review with no
+      // completed review session. Merging first would change main, delete
+      // the branch, and resolve the comments — then strand the epic in
+      // review with a stale branchName.
+      mocks.applyTransition.mockReturnValue({
+        valid: false,
+        error: "Cannot move to Done: no completed review found.",
+      });
+      seed();
+      const res = await callApprove();
+
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toContain("no completed review");
+      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+      expect(dbMockState.updateCalls).toEqual([]);
+      expect(dbMockState.insertCalls).toEqual([]);
+      expect(mocks.beginMergeWork).not.toHaveBeenCalled();
+      expect(mocks.tryExportArjiJson).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("merge lock", () => {
+    it("returns 409 without side effects when a merge is already in flight", async () => {
+      mocks.beginMergeWork.mockReturnValue(false);
+      seed();
+      const res = await callApprove();
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.error).toContain("already in flight");
+      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+      expect(dbMockState.updateCalls).toEqual([]);
+      expect(dbMockState.insertCalls).toEqual([]);
+      // Never acquired, so never released.
+      expect(mocks.endMergeWork).not.toHaveBeenCalled();
+    });
+
+    it("acquires and releases the lock around a successful merge", async () => {
+      seed();
+      await callApprove();
+
+      expect(mocks.beginMergeWork).toHaveBeenCalledWith("p1", "epic-1");
+      expect(mocks.endMergeWork).toHaveBeenCalledWith("p1", "epic-1");
+      expect(mocks.beginMergeWork.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.mergeWorktree.mock.invocationCallOrder[0]
+      );
+    });
+
+    it("does not take the lock when there is nothing to merge", async () => {
+      seed({ epic: { ...mockEpic, branchName: null } });
+      await callApprove();
+
+      expect(mocks.beginMergeWork).not.toHaveBeenCalled();
+      expect(mocks.endMergeWork).not.toHaveBeenCalled();
+    });
+  });
+
+  it("returns 400 when the transition is refused after a successful merge", async () => {
+    // Genuinely rare race now that the guards are pre-flighted: the pre-check
+    // passed, the merge landed, then a guard refused review → done. The merge
+    // route's precedent applies — surface the validation error.
+    mocks.applyTransition
+      .mockReturnValueOnce({ valid: true }) // pre-flight
+      .mockReturnValueOnce({
+        valid: false,
+        error: "Epic has open review comments",
+      });
+    seed();
+    const res = await callApprove();
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("Epic has open review comments");
+    // The lock is still released through the finally.
+    expect(mocks.endMergeWork).toHaveBeenCalledWith("p1", "epic-1");
   });
 });

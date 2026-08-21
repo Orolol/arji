@@ -10,9 +10,6 @@ import { useWorktrees } from "@/hooks/useWorktrees";
 import { timeAgo } from "@/lib/utils/format-date";
 import { cn } from "@/lib/utils";
 
-/** The repo bar only ever talks about `main` — worktree branches are agent noise. */
-const BRANCH = "main";
-
 type PrStatus = "draft" | "open" | "closed" | "merged";
 
 interface OpenPr {
@@ -28,11 +25,15 @@ interface RepoStatusBarProps {
   ownerRepo: string | null;
   /** Local repository path from the project record; may be null. */
   gitRepoPath: string | null;
+  /** The project's stored default branch (captured at GitHub import).
+   *  The bar falls back to "main" for legacy rows that predate the column. */
+  defaultBranch?: string | null;
 }
 
 /**
- * Footer state of the repository: where `main` stands against its remote,
- * which pull requests are still open, and the two actions that change that.
+ * Footer state of the repository: where the project's default branch stands
+ * against its remote, which pull requests are still open, and the two
+ * actions that change that.
  *
  * It deliberately never shows agent or session activity — the board's
  * breathing dots and the Sessions tab already own that, and a second,
@@ -45,14 +46,18 @@ export function RepoStatusBar({
   projectId,
   ownerRepo,
   gitRepoPath,
+  defaultBranch,
 }: RepoStatusBarProps) {
   const config = useGitHubConfig(projectId);
   const repo = ownerRepo ?? config.ownerRepo;
   const enabled = Boolean(gitRepoPath);
   const prsEnabled = enabled && config.isConfigured;
+  // The stored default branch is authoritative — it is the branch worktrees
+  // are cut from and merged into. "main" is only the legacy fallback.
+  const branch = defaultBranch || "main";
 
-  const { ahead, behind, lastFetchedAt, loading, refresh, push, pushing } =
-    useGitStatus(projectId, BRANCH, enabled);
+  const { ahead, behind, lastFetchedAt, loading, error, refresh, push, pushing } =
+    useGitStatus(projectId, branch, enabled);
 
   // Count only — the list and the cleanup action live on Git Sync. Null while
   // unknown (no git repo, failed listing): a "0 worktrees" we cannot vouch
@@ -95,9 +100,22 @@ export function RepoStatusBar({
           <span className="text-[12.5px] font-medium truncate">
             {repo ?? gitRepoPath?.split("/").filter(Boolean).pop() ?? "local repo"}
           </span>
-          <span className="font-mono text-[11px] text-meta truncate">
-            {`${BRANCH} · ${fetchedLabel}`}
-          </span>
+          {error ? (
+            // The hook resolves ahead/behind against this branch; when it
+            // cannot (branch missing locally, git unreadable) it reports why
+            // — surface that instead of a stale zero-count bar.
+            <span
+              data-testid="repo-status-error"
+              className="font-mono text-[11px] text-destructive truncate"
+              title={error}
+            >
+              {error}
+            </span>
+          ) : (
+            <span className="font-mono text-[11px] text-meta truncate">
+              {`${branch} · ${fetchedLabel}`}
+            </span>
+          )}
         </div>
       </div>
 
@@ -155,7 +173,7 @@ export function RepoStatusBar({
           className="h-[29px] rounded-[8px] px-[12px] text-[12.5px] font-medium gap-[7px]"
         >
           <GitMerge className="w-[13px] h-[13px]" />
-          Push main
+          Push {branch}
         </Button>
       </div>
     </div>

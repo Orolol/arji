@@ -14,6 +14,7 @@ import {
 } from "@/lib/projects/clone-cleanup";
 import { GITHUB_CLONE_SOURCE } from "@/lib/projects/clone-provenance";
 import { perProjectSettingKeys } from "@/lib/projects/project-settings-keys";
+import { deleteProjectUploads } from "@/lib/uploads/attachment-ownership";
 
 export async function GET(
   _request: NextRequest,
@@ -130,6 +131,12 @@ export async function DELETE(
   // so the cascade does not reach them.
   const settingsRemoved = deleteProjectSettings(projectId);
 
+  // Before the project row: the attachment rows cascade away with it, and the
+  // files under data/uploads/<projectId> would then have nothing left naming
+  // them. Deleting the project is what deletes the last reference to them, so
+  // it is also the last chance to remove the bytes.
+  const uploads = deleteProjectUploads(projectId);
+
   db.delete(projects).where(eq(projects.id, projectId)).run();
 
   return NextResponse.json({
@@ -150,6 +157,8 @@ export async function DELETE(
       cancelledSessions: cancelled.sessions,
       cancelledActivities: cancelled.activities,
       settingsRemoved,
+      uploadsRemoved: uploads.rowsDeleted,
+      uploadsDirectoryRemoved: uploads.directoryRemoved,
     },
   });
 }

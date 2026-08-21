@@ -29,6 +29,7 @@ import {
 import { agentScheduler } from "@/lib/agents/scheduler";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
 import { applyTransition } from "@/lib/workflow/transition-service";
+import { createMergeRetryFailedNotification } from "@/lib/notifications/create";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import fs from "fs";
 import path from "path";
@@ -252,6 +253,37 @@ export async function POST(
               .run();
           }
           tryExportArjiJson(projectId);
+        } else {
+          // The agent claimed success but the retry merge STILL failed —
+          // e.g. it committed the conflict markers, tripping the marker
+          // guard. This closure has no HTTP response left to carry the
+          // failure, so leave a trail or the user never learns why the epic
+          // did not close.
+          const retryError = retryResult.error || "Merge failed";
+          try {
+            db.insert(ticketComments)
+              .values({
+                id: createId(),
+                epicId,
+                author: "agent",
+                content: `**Merge-fix agent finished, but the merge still failed.** ${retryError}\n\nThe epic keeps its current status. Use Resolve Merge to land the branch.`,
+                agentSessionId: sessionId,
+                createdAt: completedAt,
+              })
+              .run();
+
+            createMergeRetryFailedNotification({
+              projectId,
+              epicId,
+              sessionId,
+              error: retryError,
+            });
+          } catch (trailError) {
+            console.error(
+              "[merge/auto-agent] Failed to record the merge-failure trail:",
+              trailError
+            );
+          }
         }
       }
 

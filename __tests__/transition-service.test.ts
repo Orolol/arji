@@ -210,4 +210,45 @@ describe("applyTransition", () => {
     // Guard fires for no completed review (first guard in chain)
     expect(result.error).toContain("Done");
   });
+
+  it("treats open comments as resolved when assumeReviewCommentsResolved is set", async () => {
+    // The approve flow's pre-merge check: approval bulk-resolves the open
+    // comments, but only AFTER the merge lands, so its validation must not
+    // trip over comments it is about to resolve — while every OTHER guard
+    // (like "no completed review") must still fire.
+    const { applyTransition } = await import(
+      "@/lib/workflow/transition-service"
+    );
+    const { db } = await import("@/lib/db");
+    const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
+    // Context read order: open comments, completed reviews, running sessions.
+    const seedReads = () =>
+      all
+        .mockReturnValueOnce([{ id: "rc1", status: "open" }])
+        .mockReturnValueOnce([
+          { agentType: "code_reviewer", status: "completed" },
+        ])
+        .mockReturnValueOnce([]);
+    const opts = {
+      projectId: "p1",
+      epicId: "e1",
+      fromStatus: "review" as const,
+      toStatus: "done" as const,
+      actor: "user" as const,
+      source: "approve" as const,
+      validateOnly: true,
+    };
+
+    seedReads();
+    const refused = applyTransition(opts);
+    expect(refused.valid).toBe(false);
+    expect(refused.error).toContain("unresolved review comments");
+
+    seedReads();
+    const allowed = applyTransition({
+      ...opts,
+      assumeReviewCommentsResolved: true,
+    });
+    expect(allowed.valid).toBe(true);
+  });
 });

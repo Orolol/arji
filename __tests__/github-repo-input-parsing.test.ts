@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import path from "node:path";
 import { parseGitHubRepoInput } from "@/lib/git/remote";
 
 const OWNER_REPO = { owner: "octocat", repo: "hello-world" };
@@ -217,5 +218,94 @@ describe("parseGitHubRepoInput — strict owner/repo validation", () => {
       owner: "dot.org",
       repo: "my.repo.name",
     });
+  });
+});
+
+// Ported from the tests-and-docs epic (github-url-parse.test.ts): payload
+// shapes and parser properties the suites above did not pin. All of them hold
+// against the github-url.ts grammar — embedded `..` stays rejected here, per
+// isSafeRepoSegment, unlike the narrower validatePath() posture.
+describe("parseGitHubRepoInput — traversal payloads reach no filesystem path", () => {
+  it.each([
+    ["dot-dot in a git:// remote", "git://github.com/../etc/passwd"],
+    ["absolute path as repo", "octocat//etc/passwd"],
+    ["home-relative repo", "octocat/~/.ssh"],
+    ["percent-encoded slash", "octocat/hello%2fworld"],
+    ["double-encoded dot-dot", "octocat/%252e%252e"],
+    ["windows drive letter", "C:/Windows/System32"],
+    ["UNC path", "\\\\server\\share"],
+    ["newline smuggling", "octocat/hello\nworld"],
+    ["carriage return smuggling", "octocat/hello\rworld"],
+    ["tab smuggling", "octocat/hello\tworld"],
+    ["trailing dot-dot after a valid pair", "octocat/hello-world/.."],
+    ["dot-dot dressed as a browser suffix", "github.com/octocat/../.."],
+  ])("rejects %s", (_label, input) => {
+    expect(parseGitHubRepoInput(input)).toBeNull();
+  });
+
+  it("never yields a segment that changes meaning when joined into a path", () => {
+    // The contract resolveCloneDestination() depends on: whatever comes back,
+    // the `<owner>-<repo>` directory name is a single, self-contained segment.
+    const accepted = [
+      "https://github.com/octocat/hello-world",
+      "git@github.com:my-org/my_cool.repo.git",
+      "dot.org/my.repo.name",
+      "octocat/hello-world",
+    ];
+
+    for (const input of accepted) {
+      const parsed = parseGitHubRepoInput(input);
+      expect(parsed).not.toBeNull();
+
+      const dirName = `${parsed!.owner}-${parsed!.repo}`;
+      expect(path.basename(dirName)).toBe(dirName);
+      expect(path.join("/srv/clones", dirName)).toBe(`/srv/clones/${dirName}`);
+      expect(dirName).not.toMatch(/[/\\]/);
+    }
+  });
+});
+
+describe("parseGitHubRepoInput — properties", () => {
+  it("is idempotent: re-parsing its own cloneUrl yields the same repo", () => {
+    // Re-importing a project must resolve to the same destination, otherwise
+    // the reuse branch of the clone service would never trigger.
+    for (const input of [
+      "https://github.com/octocat/hello-world/pull/12",
+      "git@github.com:octocat/hello-world.git",
+      "octocat/hello-world",
+      "www.github.com/octocat/hello-world?tab=readme-ov-file",
+    ]) {
+      const first = parseGitHubRepoInput(input);
+      expect(first).not.toBeNull();
+      expect(parseGitHubRepoInput(first!.cloneUrl)).toEqual(first);
+    }
+  });
+
+  it("refuses a URL carrying credentials rather than laundering them", () => {
+    // `git_remote_url` is persisted on the project and shown in the UI, so a
+    // tokenised remote must never become a parse result. Rejecting outright
+    // (instead of stripping the userinfo) also keeps the user from believing
+    // Arij stored the credentials they pasted.
+    expect(
+      parseGitHubRepoInput(
+        "https://x-access-token:ghp_secret@github.com/octocat/hello-world.git"
+      )
+    ).toBeNull();
+    expect(
+      parseGitHubRepoInput("https://user@github.com/octocat/hello-world")
+    ).toBeNull();
+  });
+
+  it("emits a clean https cloneUrl for every accepted shape", () => {
+    for (const input of [
+      "git@github.com:octocat/hello-world.git",
+      "ssh://git@github.com/octocat/hello-world",
+      "git://github.com/octocat/hello-world",
+      "octocat/hello-world",
+    ]) {
+      const cloneUrl = parseGitHubRepoInput(input)?.cloneUrl;
+      expect(cloneUrl).toBe("https://github.com/octocat/hello-world.git");
+      expect(cloneUrl).not.toContain("@");
+    }
   });
 });

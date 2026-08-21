@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 
@@ -12,7 +12,7 @@ vi.mock("@/components/ui/select", () => ({
     disabled,
   }: {
     value: string | undefined;
-    onValueChange: (v: string) => void;
+    onValueChange?: (v: string) => void;
     children: ReactNode;
     disabled?: boolean;
   }) => (
@@ -20,7 +20,7 @@ vi.mock("@/components/ui/select", () => ({
       data-testid="provider-select-native"
       value={value ?? ""}
       disabled={disabled}
-      onChange={(e) => onValueChange(e.target.value)}
+      onChange={(e) => onValueChange?.(e.target.value)}
     >
       {children}
     </select>
@@ -28,6 +28,8 @@ vi.mock("@/components/ui/select", () => ({
   SelectTrigger: () => null,
   SelectValue: () => null,
   SelectContent: ({ children }: { children: ReactNode }) => <>{children}</>,
+  SelectGroup: ({ children }: { children: ReactNode }) => <>{children}</>,
+  SelectLabel: ({ children }: { children: ReactNode }) => <optgroup label={String(children)} />,
   SelectItem: ({
     value,
     children,
@@ -37,8 +39,17 @@ vi.mock("@/components/ui/select", () => ({
   }) => <option value={value}>{children}</option>,
 }));
 
-vi.mock("@/components/shared/NamedAgentSelect", () => ({
-  NamedAgentSelect: () => null,
+let mockAgents = [
+  { id: "agent-1", name: "Claude Code", provider: "claude-code", model: "sonnet" },
+  { id: "agent-2", name: "Codex", provider: "codex", model: "gpt-5.3" },
+];
+
+vi.mock("@/hooks/useNamedAgentsList", () => ({
+  useNamedAgentsList: () => ({
+    agents: mockAgents,
+    loading: false,
+    refresh: vi.fn(),
+  }),
 }));
 
 import { ChatProviderSelect } from "@/components/chat/ChatProviderSelect";
@@ -66,43 +77,29 @@ function optionValues(): string[] {
 }
 
 describe("ChatProviderSelect", () => {
-  it("offers the CLI providers plus OpenAI-compatible for chat conversations", () => {
+  beforeEach(() => {
+    mockAgents = [
+      { id: "agent-1", name: "Claude Code", provider: "claude-code", model: "sonnet" },
+      { id: "agent-2", name: "Codex", provider: "codex", model: "gpt-5.3" },
+    ];
+  });
+
+  it("offers Direct API (OpenAI-compatible) plus all configured Named Agents", () => {
     render(
-      <ChatProviderSelect
-        value="claude-code"
-        onChange={noop}
-        conversationType="chat"
-      />,
+      <ChatProviderSelect activeConversation={conversation()} onSelect={noop} />,
     );
 
     const values = optionValues();
-    expect(values).toContain("claude-code");
-    expect(values).toContain("codex");
     expect(values).toContain("openai-compatible");
+    expect(values).toContain("agent-1");
+    expect(values).toContain("agent-2");
   });
-
-  it.each(["epic_creation", "brainstorm"])(
-    "hides the OpenAI-compatible option for %s conversations",
-    (type) => {
-      render(
-        <ChatProviderSelect
-          value="claude-code"
-          onChange={noop}
-          conversationType={type}
-        />,
-      );
-
-      expect(optionValues()).not.toContain("openai-compatible");
-      expect(optionValues()).toContain("claude-code");
-    },
-  );
 
   it("labels the fast mode OpenAI-compatible", () => {
     render(
       <ChatProviderSelect
-        value="openai-compatible"
-        onChange={noop}
-        conversationType="chat"
+        activeConversation={conversation({ provider: "openai-compatible" })}
+        onSelect={noop}
       />,
     );
 
@@ -113,21 +110,41 @@ describe("ChatProviderSelect", () => {
     expect(fastOption?.textContent).toBe("OpenAI-compatible");
   });
 
-  it("reports the chosen provider through onChange", () => {
-    const onChange = vi.fn();
+  it("falls back to the stored provider when the linked named agent was deleted", () => {
     render(
       <ChatProviderSelect
-        value="claude-code"
-        onChange={onChange}
-        conversationType="chat"
+        activeConversation={conversation({ namedAgentId: "agent-gone", provider: "codex" })}
+        onSelect={noop}
       />,
+    );
+
+    const select = screen.getByTestId("provider-select-native") as HTMLSelectElement;
+    expect(select.value).toBe("codex");
+  });
+
+  it("reports the chosen provider and named agent through onSelect", () => {
+    const onSelect = vi.fn();
+    render(
+      <ChatProviderSelect activeConversation={conversation()} onSelect={onSelect} />,
     );
 
     fireEvent.change(screen.getByTestId("provider-select-native"), {
       target: { value: "openai-compatible" },
     });
 
-    expect(onChange).toHaveBeenCalledWith("openai-compatible");
+    expect(onSelect).toHaveBeenCalledWith({
+      namedAgentId: null,
+      provider: "openai-compatible",
+    });
+
+    fireEvent.change(screen.getByTestId("provider-select-native"), {
+      target: { value: "agent-2" },
+    });
+
+    expect(onSelect).toHaveBeenCalledWith({
+      namedAgentId: "agent-2",
+      provider: "codex",
+    });
   });
 });
 
@@ -139,49 +156,47 @@ describe("ChatWorkspaceHeader provider select gating", () => {
         activeProvider="claude-code"
         hasMessages={false}
         isBusy={false}
-        onAgentChange={noop}
-        onProviderChange={noop}
+        onSelectAgentOrProvider={noop}
         {...props}
       />,
     );
   }
 
-  it("enables the provider select for a fresh chat conversation", () => {
+  it("enables the unified select for a fresh chat conversation", () => {
     renderHeader();
     const select = screen.getByTestId("provider-select-native") as HTMLSelectElement;
     expect(select).not.toBeDisabled();
     expect(optionValues()).toContain("openai-compatible");
+    expect(optionValues()).toContain("agent-1");
   });
 
-  it("disables the provider select once the conversation has messages", () => {
+  it("disables the select once the conversation has messages", () => {
     renderHeader({ hasMessages: true });
     expect(screen.getByTestId("provider-select-native")).toBeDisabled();
   });
 
-  it("disables the provider select while busy", () => {
+  it("disables the select while busy", () => {
     renderHeader({ isBusy: true });
     expect(screen.getByTestId("provider-select-native")).toBeDisabled();
   });
 
-  it("disables the provider select when no conversation is active", () => {
+  it("disables the select when no conversation is active", () => {
     renderHeader({ activeConversation: null });
     expect(screen.getByTestId("provider-select-native")).toBeDisabled();
   });
 
-  it("gives a named agent precedence over the provider select", () => {
+  it("keeps the select enabled for a fresh conversation even when a named agent is selected", () => {
     renderHeader({
       activeConversation: conversation({ namedAgentId: "agent-1" }),
     });
-    expect(screen.getByTestId("provider-select-native")).toBeDisabled();
+    const select = screen.getByTestId("provider-select-native") as HTMLSelectElement;
+    expect(select).not.toBeDisabled();
+    expect(select.value).toBe("agent-1");
   });
 
-  it("hides the fast mode for epic-creation conversations", () => {
-    renderHeader({
-      activeConversation: conversation({
-        type: "epic_creation",
-        label: "New Epic",
-      }),
-    });
-    expect(optionValues()).not.toContain("openai-compatible");
+  it("renders a single select dropdown without a second disabled dropdown", () => {
+    renderHeader();
+    const selects = screen.getAllByTestId("provider-select-native");
+    expect(selects).toHaveLength(1);
   });
 });

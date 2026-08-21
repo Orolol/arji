@@ -123,6 +123,7 @@ vi.mock("@/lib/git/manager", () => ({
     branchName: "feature/test",
   }),
   isGitRepo: vi.fn().mockResolvedValue(true),
+  resolveDefaultBranch: vi.fn().mockResolvedValue("main"),
   startMergeInWorktree: vi.fn().mockResolvedValue({
     conflicted: true,
     output: "merge conflict",

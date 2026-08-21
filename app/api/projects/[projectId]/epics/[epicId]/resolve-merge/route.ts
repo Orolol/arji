@@ -42,6 +42,7 @@ import {
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
 import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
+import { createMergeRetryFailedNotification } from "@/lib/notifications/create";
 import {
   isResumableProvider,
   providerAcceptsAssignedSessionId,
@@ -317,6 +318,36 @@ export async function POST(request: NextRequest, { params }: Params) {
           .run();
 
         tryExportArjiJson(projectId);
+      } else {
+        // The agent claimed success but the follow-up merge STILL failed —
+        // e.g. it committed the conflict markers, tripping the marker guard.
+        // This closure has no HTTP response left to carry the failure, so a
+        // silent swallow here would be exactly the bug this route exists to
+        // kill: an epic that never closes and no word on why.
+        const mergeError = finalMerge.error || "Merge failed";
+        try {
+          db.insert(ticketComments)
+            .values({
+              id: createId(),
+              epicId,
+              author: "agent",
+              content: `**Merge resolution finished, but the final merge still failed.** ${mergeError}\n\nThe epic keeps its current status. Run Resolve Merge again to land the branch.`,
+              createdAt: completedAt,
+            })
+            .run();
+
+          createMergeRetryFailedNotification({
+            projectId,
+            epicId,
+            sessionId,
+            error: mergeError,
+          });
+        } catch (trailError) {
+          console.error(
+            "[resolve merge] Failed to record the merge-failure trail:",
+            trailError
+          );
+        }
       }
     }
 

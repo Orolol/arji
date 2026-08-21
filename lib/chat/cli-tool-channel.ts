@@ -32,7 +32,7 @@ import {
   isMcpToolsEnabled,
   providerSupportsMcp,
 } from "@/lib/claude/mcp-injection";
-import { isOpenAiIneligibleConversationAgentType } from "@/lib/chat/conversation-agent";
+import { isToolIneligibleConversationAgentType } from "@/lib/chat/conversation-agent";
 import { mintMcpToken, revokeMcpTokensForSession } from "@/lib/mcp/token-store";
 import type { McpSpawnConfig } from "@/lib/providers/types";
 
@@ -53,7 +53,7 @@ export function createChatCliToolChannel({
   conversationType: string | null;
 }): ChatCliToolChannel | null {
   try {
-    if (isOpenAiIneligibleConversationAgentType(conversationType)) return null;
+    if (isToolIneligibleConversationAgentType(conversationType)) return null;
     if (!providerSupportsMcp(provider)) return null;
     if (!isMcpToolsEnabled()) return null;
 

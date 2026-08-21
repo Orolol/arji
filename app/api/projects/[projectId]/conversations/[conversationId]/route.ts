@@ -125,6 +125,14 @@ export async function PATCH(
       // Also clear the legacy column so stale legacy-row fallbacks cannot
       // resurrect a session from the previous agent.
       updates.claudeSessionId = null;
+    } else if (
+      typeof body.provider === "string" &&
+      isChatProvider(body.provider.trim())
+    ) {
+      updates.provider = body.provider.trim();
+      updates.namedAgentId = null;
+      updates.cliSessionId = null;
+      updates.claudeSessionId = null;
     } else {
       // Clearing a conversation-specific named agent falls back to configured chat default.
       const resolved = resolveAgent("chat", projectId);
@@ -135,10 +143,10 @@ export async function PATCH(
     }
   } else if (
     typeof body.provider === "string" &&
-    isChatProvider(body.provider)
+    isChatProvider(body.provider.trim())
   ) {
-    // Legacy compatibility: provider patching clears named-agent linkage.
-    updates.provider = body.provider;
+    // Provider patching clears named-agent linkage.
+    updates.provider = body.provider.trim();
     updates.namedAgentId = null;
     updates.cliSessionId = null;
     updates.claudeSessionId = null;

@@ -242,6 +242,48 @@ describe("Release creation with pushToGitHub", () => {
     );
   });
 
+  it("hands the stored default branch to the release helper", async () => {
+    // A develop-default clone must not be branched from main: the release
+    // helper receives the project's stored default_branch and bases the
+    // release branch on it when it exists locally.
+    dbMockState.getQueue = [
+      {
+        id: "proj_1",
+        name: "Test Project",
+        gitRepoPath: "/tmp/repo",
+        githubOwnerRepo: "owner/repo",
+        defaultBranch: "develop",
+      },
+      { id: "test-release-id", version: "1.0.0" },
+    ];
+    dbMockState.allQueue = [
+      [{ id: "ep_1", title: "Epic 1", description: "desc", status: "done" }],
+    ];
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/releases/route"
+    );
+
+    const req = createMockRequest({
+      version: "1.0.0",
+      epicIds: ["ep_1"],
+      generateChangelog: false,
+      pushToGitHub: false,
+    });
+
+    const res = await POST(req, mockRouteContext({ projectId: "proj_1" }));
+    const json = await res.json();
+
+    expect(res.status).toBe(201);
+    expect(json.data).toBeDefined();
+    expect(mockCreateReleaseBranchAndCommitChangelog).toHaveBeenCalledWith(
+      "/tmp/repo",
+      "1.0.0",
+      expect.any(String),
+      { defaultBranch: "develop" }
+    );
+  });
+
   it("creates local release even when GitHub push fails", async () => {
     dbMockState.getQueue = [
       { id: "proj_1", name: "Test Project", gitRepoPath: "/tmp/repo", githubOwnerRepo: "owner/repo" },

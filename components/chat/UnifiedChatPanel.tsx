@@ -25,6 +25,7 @@ import {
   ChatProposalCard,
   ChatWorkspaceHeader,
 } from "@/components/chat/ChatWorkspaceHeader";
+import type { ChatAgentSelection } from "@/components/chat/ChatProviderSelect";
 import { MessageList } from "@/components/chat/MessageList";
 import { MessageInput } from "@/components/chat/MessageInput";
 import { QuestionCards } from "@/components/chat/QuestionCards";
@@ -294,18 +295,22 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       [activeId, rawSendMessage],
     );
 
-    async function handleAgentChange(namedAgentId: string) {
-      if (!activeId || hasMessages) {
-        return;
-      }
-      await updateConversation(activeId, { namedAgentId });
-    }
 
-    async function handleProviderChange(provider: string) {
+    async function handleSelectAgentOrProvider({
+      namedAgentId,
+      provider,
+    }: ChatAgentSelection) {
       if (!activeId || hasMessages) {
         return;
       }
-      await updateConversation(activeId, { provider });
+      // A named agent owns its provider: the PATCH route re-derives it from
+      // the agent row, so sending one here would be silently ignored. Direct
+      // API and raw CLI providers both travel as a provider with the
+      // named-agent link explicitly cleared.
+      await updateConversation(
+        activeId,
+        namedAgentId ? { namedAgentId } : { provider, namedAgentId: null },
+      );
     }
 
     async function handleCreateEpic() {
@@ -338,8 +343,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
               activeProvider={activeProvider}
               hasMessages={hasMessages}
               isBusy={isCurrentConversationBusy}
-              onAgentChange={handleAgentChange}
-              onProviderChange={handleProviderChange}
+              onSelectAgentOrProvider={handleSelectAgentOrProvider}
             />
           }
         />

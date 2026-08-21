@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { UploadZone } from "@/components/documents/UploadZone";
+import { ScanProjectDialog } from "@/components/documents/ScanProjectDialog";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
 import { ProjectMemoryCard } from "@/components/documents/ProjectMemoryCard";
 import { Button } from "@/components/ui/button";
@@ -98,6 +99,9 @@ export default function DocumentsPage() {
             What agents can cite: specs, audits, notes. Mentionable with @name
             in the chat.
           </p>
+        </div>
+        <div className="ml-auto">
+          <ScanProjectDialog projectId={projectId} onImported={handleUploaded} />
         </div>
       </div>
 
