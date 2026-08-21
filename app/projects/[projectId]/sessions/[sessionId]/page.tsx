@@ -403,6 +403,26 @@ export default function SessionDetailPage() {
         </div>
       )}
 
+      {/* Failed without a captured error message (legacy rows predating the
+          failure-message synthesis, or a loss that escaped it): say so
+          explicitly instead of showing nothing — and point at the Raw Logs
+          tab, which keeps whatever the process actually wrote. */}
+      {!session.error && session.status === "failed" && (
+        <div className="rounded-[11px] border border-destructive/50 bg-band p-[14px]">
+          <div className="mb-2 flex items-center gap-2">
+            <XCircle className="h-4 w-4 text-destructive" />
+            <h3 className="text-[13px] font-medium text-destructive">
+              Failed — no error message captured
+            </h3>
+          </div>
+          <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+            This session failed before Arij could record an error message: the
+            process exited (or was lost) without writing stderr or text.
+            Whatever it did produce is kept in the Raw Logs tab below.
+          </p>
+        </div>
+      )}
+
       {/* Output: Response / Prompt / Raw Logs */}
       <Tabs defaultValue="response">
         <TabsList>

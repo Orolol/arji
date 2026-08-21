@@ -276,17 +276,24 @@ export function EpicCard({
 
       {showFailure && (
         <>
-          <div
-            className="flex items-start gap-[7px] text-[12px] text-destructive"
-            aria-label="Agent session failed"
+          {/* The failure line is the failure signal itself: an anchor into
+              the session view, so the detail (full error + logs) is one
+              click away from the very text the user reads. The full text
+              stays on hover (title) — the visible line is clamped so a long
+              error cannot balloon the card. */}
+          <a
+            href={`/projects/${epic.projectId}/sessions/${failedSession!.sessionId}`}
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-start gap-[7px] rounded-[7px] px-1 py-0.5 -mx-1 text-[12px] text-destructive transition-colors hover:bg-band motion-reduce:transition-none"
+            aria-label="Agent session failed — open session view for details"
             title={failedSession!.error}
             data-testid={`epic-error-${epic.id}`}
           >
             <TriangleAlert className="mt-[2px] h-[13px] w-[13px] shrink-0" />
-            <span className="min-w-0 break-words">
+            <span className="min-w-0 break-words line-clamp-3">
               Session failed {"·"} {failedSession!.error}
             </span>
-          </div>
+          </a>
           <div className="flex flex-wrap items-center gap-[8px]">
             {onRetryBuild && (
               <button
