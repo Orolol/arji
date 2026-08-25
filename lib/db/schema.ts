@@ -13,6 +13,7 @@ import type {
   FrictionCategory,
   FrictionStatus,
 } from "@/lib/frictions/constants";
+import type { RoutineKind } from "@/lib/routines/constants";
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
@@ -32,6 +33,40 @@ export const projects = sqliteTable("projects", {
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+export type { RoutineKind } from "@/lib/routines/constants";
+
+/**
+ * Durable routine definitions. Daily scheduling is interpreted in the
+ * server's local timezone; `lastRunAt` is written before dispatch so a
+ * process restart cannot replay a routine already claimed that day.
+ */
+export const routines = sqliteTable(
+  "routines",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<RoutineKind>().notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    timeOfDay: text("time_of_day").notNull(),
+    config: text("config").notNull().default("{}"),
+    lastRunAt: text("last_run_at"),
+    lastStatus: text("last_status"),
+  },
+  (table) => ({
+    projectKindUnique: uniqueIndex("routines_project_kind_unique").on(
+      table.projectId,
+      table.kind
+    ),
+    projectIdx: index("routines_project_idx").on(table.projectId),
+    enabledIdx: index("routines_enabled_idx").on(table.enabled),
+  })
+);
+
+export type Routine = typeof routines.$inferSelect;
+export type NewRoutine = typeof routines.$inferInsert;
 
 export const documents = sqliteTable("documents", {
   id: text("id").primaryKey(),
@@ -174,6 +209,13 @@ export const agentSessions = sqliteTable("agent_sessions", {
   // answered | asked_question | silent | error. NULL while running/queued,
   // for user-cancelled sessions, and for legacy rows.
   outcome: text("outcome"),
+  // Structured review verdict submitted through the MCP `submit_findings`
+  // tool: approved | approved_with_minor_issues | changes_requested. The
+  // authoritative transition signal for a review stage — see
+  // lib/pipeline/findings.ts. NULL for non-review sessions, for reviewers
+  // that never called the tool (providers without MCP), and for legacy rows;
+  // NULL is what selects the prose-verdict fallback.
+  reviewVerdict: text("review_verdict"),
   // Usage reported by the CLI at session end. NULL for legacy rows,
   // non-terminal sessions, and providers that do not report usage.
   inputTokens: integer("input_tokens"),
@@ -278,6 +320,37 @@ export const frictions = sqliteTable(
     occurrencesCheck: check(
       "frictions_occurrences_check",
       sql`${table.occurrences} >= 1`
+    ),
+  })
+);
+
+/**
+ * A durable visual proof copied out of a session worktree while it still
+ * exists. `filename` is the generated basename below
+ * data/sessions/<session-id>/artifacts/; source paths are never persisted.
+ */
+export const sessionArtifacts = sqliteTable(
+  "session_artifacts",
+  {
+    id: text("id").primaryKey(),
+    agentSessionId: text("agent_session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    epicId: text("epic_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    caption: text("caption").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    sessionCreatedAtIdx: index("session_artifacts_session_created_at_idx").on(
+      table.agentSessionId,
+      table.createdAt
+    ),
+    epicCreatedAtIdx: index("session_artifacts_epic_created_at_idx").on(
+      table.epicId,
+      table.createdAt
     ),
   })
 );
@@ -555,7 +628,7 @@ export const qaReports = sqliteTable("qa_reports", {
   customPromptId: text("custom_prompt_id"),
   reportContent: text("report_content"),
   summary: text("summary"),
-  checkType: text("check_type").notNull().default("tech_check"), // tech_check | e2e_test
+  checkType: text("check_type").notNull().default("tech_check"), // tech_check | e2e_test | failure_digest
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   completedAt: text("completed_at"),
 });
@@ -614,6 +687,9 @@ export type NewGradingReport = typeof gradingReports.$inferInsert;
 
 export type Friction = typeof frictions.$inferSelect;
 export type NewFriction = typeof frictions.$inferInsert;
+
+export type SessionArtifact = typeof sessionArtifacts.$inferSelect;
+export type NewSessionArtifact = typeof sessionArtifacts.$inferInsert;
 
 export const ticketActivityLog = sqliteTable(
   "ticket_activity_log",

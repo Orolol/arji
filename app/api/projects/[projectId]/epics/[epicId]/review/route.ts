@@ -51,6 +51,7 @@ import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
 import { transitionReviewRejected } from "@/lib/workflow/automatic-transitions";
+import { resolveReviewVerdict } from "@/lib/pipeline/findings";
 import { handleAskedQuestionOutcome } from "@/lib/workflow/agent-question";
 import {
   emitSessionStarted,
@@ -337,14 +338,18 @@ export async function POST(request: NextRequest, { params }: Params) {
           });
         }
 
-        // If the review verdict indicates work is not done, revert
-        // epic and user stories back to in_progress
-        const lowerOutput = output.toLowerCase();
-        const isNegativeVerdict =
-          !askedQuestion &&
-          (lowerOutput.includes("changes requested") ||
-            lowerOutput.includes("not complete") ||
-            lowerOutput.includes("partially complete"));
+        // If the review verdict indicates work is not done, revert epic and
+        // user stories back to in_progress. Channels in priority order: the
+        // reviewer's persisted submit_findings verdict, else the prose scan of
+        // its final message (lib/pipeline/findings.ts owns the priority; a
+        // reviewer on a provider without MCP only ever produces the prose one).
+        const decision = askedQuestion
+          ? null
+          : resolveReviewVerdict({
+              epicId,
+              reviewSessionId: sid,
+              sessionOutput: output,
+            });
 
         if (result?.success) {
           emitSessionCompleted(projectId, epicId, sid);
@@ -352,7 +357,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           emitSessionFailed(projectId, epicId, sid, result?.error || "Review failed");
         }
 
-        if (isNegativeVerdict) {
+        if (decision?.negative) {
           const currentEpic = db
             .select()
             .from(epics)
@@ -366,6 +371,7 @@ export async function POST(request: NextRequest, { params }: Params) {
               scope: "epic",
               reason: `Review verdict: changes requested (${lbl})`,
               sessionId: sid,
+              verdictSource: decision.source,
             });
           }
         }

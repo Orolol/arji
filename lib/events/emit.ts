@@ -85,6 +85,15 @@ export function emitSessionFailed(
   }
 }
 
+export function emitSessionArtifactCreated(
+  projectId: string,
+  epicId: string,
+  sessionId: string,
+  artifactId: string
+) {
+  emit("artifact:created", projectId, epicId, { sessionId, artifactId });
+}
+
 export function emitReleaseCreated(
   projectId: string,
   releaseId: string,

@@ -38,6 +38,9 @@ import {
   createMergeRetryFailedNotification,
   buildUnresolvedMentionsTitle,
   createUnresolvedMentionsNotification,
+  createRoutineRunNotification,
+  createCiWatchFailureNotification,
+  createCiAutofixReadyNotification,
 } from "@/lib/notifications/create";
 
 // ---- Tests ----
@@ -81,6 +84,12 @@ describe("buildTargetUrl()", () => {
 
   it("routes e2e_test to QA tab", () => {
     expect(buildTargetUrl("p1", "s1", "e2e_test")).toBe("/projects/p1/qa");
+  });
+
+  it("routes failure_digest to QA tab", () => {
+    expect(buildTargetUrl("p1", "s1", "failure_digest")).toBe(
+      "/projects/p1/qa",
+    );
   });
 
   it("routes build to session detail", () => {
@@ -310,6 +319,108 @@ describe("buildStalledTitle()", () => {
     expect(buildStalledTitle(7, null, null)).toBe(
       "Agent seems stalled — no output for 7m"
     );
+  });
+});
+
+describe("createRoutineRunNotification()", () => {
+  beforeEach(() => {
+    resetDbMockState();
+    mockSqliteState.pruneCount = { cnt: 5 };
+  });
+
+  it("records a scheduled trigger with its outcome and deep link", () => {
+    dbMockState.getQueue.push({ name: "My Project" });
+
+    createRoutineRunNotification({
+      projectId: "p1",
+      kind: "night_run",
+      status: "completed",
+      message: "Night run night-1 started.",
+      targetUrl: "/projects/p1?nightRun=night-1",
+    });
+
+    expect(dbMockState.insertCalls).toContainEqual({
+      id: "notif-123",
+      projectId: "p1",
+      projectName: "My Project",
+      sessionId: null,
+      agentType: "routine",
+      status: "completed",
+      title: "Night run routine triggered",
+      message: "Night run night-1 started.",
+      targetUrl: "/projects/p1?nightRun=night-1",
+    });
+  });
+});
+
+describe("createCiWatchFailureNotification()", () => {
+  beforeEach(() => {
+    resetDbMockState();
+    mockSqliteState.pruneCount = { cnt: 5 };
+  });
+
+  it("lists failed checks and deep-links to the affected epic", () => {
+    dbMockState.getQueue.push({ name: "My Project" });
+
+    createCiWatchFailureNotification({
+      projectId: "p1",
+      epicId: "e1",
+      epicTitle: "Checkout",
+      epicReadableId: "E-shop-004",
+      prNumber: 42,
+      headSha: "1234567890abcdef",
+      failedChecks: ["lint", "unit"],
+    });
+
+    expect(dbMockState.insertCalls).toContainEqual({
+      id: "notif-123",
+      projectId: "p1",
+      projectName: "My Project",
+      sessionId: null,
+      agentType: "ci_watch",
+      status: "failed",
+      title: "CI failed on PR #42 — E-shop-004: Checkout",
+      message: "Failing checks: lint, unit. Head 1234567890ab.",
+      targetUrl: "/projects/p1?ticket=e1",
+    });
+  });
+});
+
+describe("createCiAutofixReadyNotification()", () => {
+  beforeEach(() => {
+    resetDbMockState();
+    mockSqliteState.pruneCount = { cnt: 5 };
+  });
+
+  it("makes the unpushed branch explicit and links to the completed session", () => {
+    dbMockState.getQueue.push(
+      undefined,
+      { name: "My Project" },
+      { title: "Checkout", readableId: "E-shop-004" }
+    );
+
+    createCiAutofixReadyNotification({
+      projectId: "p1",
+      epicId: "e1",
+      sessionId: "session-fix",
+      branchName: "feature/checkout",
+      prNumber: 42,
+      headSha: "1234567890abcdef",
+    });
+
+    expect(dbMockState.insertCalls).toContainEqual({
+      id: "notif-123",
+      projectId: "p1",
+      projectName: "My Project",
+      sessionId: "session-fix",
+      agentType: "ci_autofix",
+      status: "completed",
+      title:
+        "CI autofix completed locally — push feature/checkout for PR #42 — E-shop-004: Checkout",
+      message:
+        "The branch contains a fix for head 1234567890ab, but Arij did not push it automatically. Push the branch to rerun CI.",
+      targetUrl: "/projects/p1/sessions/session-fix",
+    });
   });
 });
 

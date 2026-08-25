@@ -274,6 +274,34 @@ const CALL_MATRIX: ReadonlyArray<{
     },
   },
   {
+    tool: "attach_artifact",
+    args: {
+      path: "screenshots/result.png",
+      caption: "Rendered result after the change",
+    },
+    data: {
+      artifact: { id: "artifact-1", filename: "artifact-1.png" },
+    },
+  },
+  {
+    tool: "create_bug",
+    args: {
+      title: "Board refresh drops ticket moves",
+      description: "Observed after a reconnect; the card stays in the old column.",
+      severity: "high",
+    },
+    data: {
+      bug: {
+        id: "bug-1",
+        readable_id: "B-arij-101",
+        title: "Board refresh drops ticket moves",
+        status: "backlog",
+        type: "bug",
+        priority: 2,
+      },
+    },
+  },
+  {
     tool: "ask_question",
     args: { question: "Should retries be capped at 3 or configurable?" },
     data: { acknowledged: true, holds_ticket: true },

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Activity, Plus, RefreshCw } from "lucide-react";
 import { ReportDetail } from "@/components/qa/ReportDetail";
 import { StartQaCheckDialog } from "@/components/qa/StartQaCheckDialog";
@@ -10,12 +10,13 @@ import { useQaReports } from "@/hooks/useQaReports";
 import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/utils/format-date";
 
-type FilterCheckType = "tech_check" | "e2e_test" | null;
+type FilterCheckType = "tech_check" | "e2e_test" | "failure_digest" | null;
 
 const CHECK_TYPE_FILTERS: { value: FilterCheckType; label: string }[] = [
   { value: null, label: "All" },
   { value: "tech_check", label: "Tech Check" },
   { value: "e2e_test", label: "E2E Test" },
+  { value: "failure_digest", label: "Failure Digest" },
 ];
 
 function statusTone(status: string): string {
@@ -26,11 +27,15 @@ function statusTone(status: string): string {
 }
 
 function checkTypeBadgeLabel(checkType: string): string {
-  return checkType === "e2e_test" ? "E2E" : "TECH";
+  if (checkType === "e2e_test") return "E2E";
+  if (checkType === "failure_digest") return "DIGEST";
+  return "TECH";
 }
 
 export default function QAPage() {
   const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const projectId = params.projectId as string;
   const { reports, loading, error, refresh } = useQaReports(projectId);
   const [startDialogOpen, setStartDialogOpen] = useState(false);
@@ -38,25 +43,54 @@ export default function QAPage() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [filterCheckType, setFilterCheckType] = useState<FilterCheckType>(null);
 
+  // Source links from generated tickets select the referenced report once,
+  // then remove the transient parameter so later navigation does not restore
+  // a stale selection.
+  useEffect(() => {
+    const reportId = searchParams.get("reportId");
+    if (!reportId) return;
+
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("reportId");
+    const query = next.toString();
+
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setSelectedReportId(reportId);
+      router.replace(
+        query
+          ? `/projects/${projectId}/qa?${query}`
+          : `/projects/${projectId}/qa`,
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, router, searchParams]);
+
   const filteredReports = useMemo(() => {
     if (!filterCheckType) return reports;
     return reports.filter((report) => report.checkType === filterCheckType);
   }, [reports, filterCheckType]);
 
-  useEffect(() => {
-    if (filteredReports.length === 0) {
-      setSelectedReportId(null);
-      return;
-    }
+  const effectiveSelectedReportId =
+    selectedReportId &&
+    filteredReports.some((report) => report.id === selectedReportId)
+      ? selectedReportId
+      : (filteredReports[0]?.id ?? null);
 
-    setSelectedReportId((prev) => {
-      if (prev && filteredReports.some((report) => report.id === prev)) return prev;
-      return filteredReports[0].id;
-    });
-  }, [filteredReports]);
-
-  const handleStarted = useCallback((data: { reportId: string; sessionId: string }) => {
-    setActionMessage("QA check started.");
+  const handleStarted = useCallback((data: {
+    reportId: string;
+    sessionId: string | null;
+    noOp?: boolean;
+  }) => {
+    setActionMessage(
+      data.noOp
+        ? "Failure digest recorded: no evidence in the selected window."
+        : "QA check started.",
+    );
     setSelectedReportId(data.reportId);
     void refresh();
   }, [refresh]);
@@ -80,8 +114,8 @@ export default function QAPage() {
         <div className="flex flex-col gap-[5px]">
           <h2 className="text-[19px] font-semibold">QA</h2>
           <p className="text-[13px] text-muted-foreground">
-            Run tech checks and E2E tests, review report history, and create
-            epics from findings.
+            Run tech checks, E2E tests, and recurring-failure digests; review
+            report history and create epics from findings.
           </p>
         </div>
         <div className="ml-auto flex items-center gap-[9px]">
@@ -153,7 +187,7 @@ export default function QAPage() {
           )}
           {!loading && !error && filteredReports.length === 0 && (
             <p className="text-[12.5px] text-muted-foreground">
-              No QA reports yet. Start a tech check or E2E test to generate a
+              No QA reports yet. Start a check or failure digest to generate a
               report.
             </p>
           )}
@@ -165,7 +199,7 @@ export default function QAPage() {
               onClick={() => setSelectedReportId(report.id)}
               className={cn(
                 "flex flex-col gap-[8px] rounded-[11px] border px-[16px] py-[14px] text-left transition-colors",
-                selectedReportId === report.id
+                effectiveSelectedReportId === report.id
                   ? "border-primary bg-card"
                   : "border-border hover:bg-band"
               )}
@@ -191,7 +225,7 @@ export default function QAPage() {
         <div className="min-w-0 flex-1">
           <ReportDetail
             projectId={projectId}
-            reportId={selectedReportId}
+            reportId={effectiveSelectedReportId}
             onReportUpdated={refresh}
             onCreateEpics={handleCreateEpics}
           />

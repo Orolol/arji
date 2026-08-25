@@ -103,6 +103,13 @@ export interface PipelineReviewAssessment {
   agentCommentCount: number;
   /** True when zero rows were filed and the prose scan decided instead. */
   usedProseFallback: boolean;
+  /**
+   * Which channel decided: `structured` when the reviewer's persisted
+   * submit_findings verdict did, `prose` for the fallback path.
+   */
+  verdictSource?: "structured" | "prose";
+  /** The persisted submit_findings verdict, when the reviewer filed one. */
+  structuredVerdict?: string | null;
 }
 
 export interface PipelineGradingAssessment {

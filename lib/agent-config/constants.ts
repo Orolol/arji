@@ -16,6 +16,7 @@ export const AGENT_TYPES = [
   "memory_distill",
   "dreaming",
   "forensic",
+  "failure_digest",
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
@@ -90,6 +91,7 @@ export const AGENT_TYPE_LABELS: Record<AgentType, string> = {
   memory_distill: "Memory Distill",
   dreaming: "Dreaming",
   forensic: "Forensic",
+  failure_digest: "Failure Digest",
 };
 
 export function isAgentType(value: string): value is AgentType {
@@ -121,6 +123,7 @@ export const BUILTIN_AGENT_PROMPTS: Record<AgentType, string> = {
   memory_distill: "",
   dreaming: "",
   forensic: "",
+  failure_digest: "",
 };
 
 /**

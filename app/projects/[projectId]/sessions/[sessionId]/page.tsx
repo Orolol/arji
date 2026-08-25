@@ -72,6 +72,7 @@ const AGENT_TYPE_LABELS: Record<string, string> = {
   memory_distill: "Memory Distill",
   dreaming: "Dreaming",
   forensic: "Forensic",
+  failure_digest: "Failure Digest",
 };
 
 /** Token-only colouring for the state pill. */

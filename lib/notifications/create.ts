@@ -1,10 +1,11 @@
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import {
   agentSessions,
   projects,
   epics,
   notifications,
+  type RoutineKind,
 } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { AGENT_TYPE_LABELS } from "@/lib/agent-config/constants";
@@ -16,6 +17,7 @@ import {
   MEMORY_DREAMED_TITLE,
 } from "@/lib/workflow/dreaming-constants";
 import type { TicketExecutionStatus } from "@/lib/dependencies/scheduler";
+import { ROUTINE_KIND_LABELS } from "@/lib/routines/constants";
 
 const MAX_NOTIFICATIONS = 200;
 
@@ -52,14 +54,18 @@ export function buildTitle(
 /**
  * Build the target URL for a notification.
  *
- * tech_check and e2e_test navigate to the QA tab; everything else to the session detail.
+ * QA report sessions navigate to the QA tab; everything else to the session detail.
  */
 export function buildTargetUrl(
   projectId: string,
   sessionId: string,
   agentType: string | null
 ): string {
-  if (agentType === "tech_check" || agentType === "e2e_test") {
+  if (
+    agentType === "tech_check" ||
+    agentType === "e2e_test" ||
+    agentType === "failure_digest"
+  ) {
     return `/projects/${projectId}/qa`;
   }
   return `/projects/${projectId}/sessions/${sessionId}`;
@@ -93,6 +99,147 @@ export function buildAskedQuestionTitle(
  */
 export function buildEpicTargetUrl(projectId: string, epicId: string): string {
   return `/projects/${projectId}?ticket=${epicId}`;
+}
+
+/**
+ * Persist the visible audit signal for one scheduled trigger. The routine
+ * row keeps the durable last-run state; this notification explains the
+ * outcome and links to the surface affected by the canonical action.
+ */
+export function createRoutineRunNotification(input: {
+  projectId: string;
+  kind: RoutineKind;
+  status: "completed" | "skipped" | "failed";
+  message: string;
+  targetUrl: string;
+}): void {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  const label = ROUTINE_KIND_LABELS[input.kind];
+  const outcome =
+    input.status === "failed"
+      ? "failed"
+      : input.status === "skipped"
+        ? "skipped"
+        : "triggered";
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: null,
+      agentType: "routine",
+      status: input.status === "failed" ? "failed" : "completed",
+      title: `${label} routine ${outcome}`,
+      message: input.message,
+      targetUrl: input.targetUrl,
+    })
+    .run();
+
+  pruneNotifications();
+}
+
+/** One durable, ticket-scoped alarm for a failing PR head SHA. */
+export function createCiWatchFailureNotification(input: {
+  projectId: string;
+  epicId: string;
+  epicTitle: string;
+  epicReadableId: string | null;
+  prNumber: number;
+  headSha: string;
+  failedChecks: string[];
+}): void {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  const ticket = input.epicReadableId
+    ? `${input.epicReadableId}: ${input.epicTitle}`
+    : input.epicTitle;
+  const failedChecks = input.failedChecks.join(", ") || "unknown check";
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: null,
+      agentType: "ci_watch",
+      status: "failed",
+      title: `CI failed on PR #${input.prNumber} — ${ticket}`,
+      message: `Failing checks: ${failedChecks}. Head ${input.headSha.slice(0, 12)}.`,
+      targetUrl: buildEpicTargetUrl(input.projectId, input.epicId),
+    })
+    .run();
+
+  pruneNotifications();
+}
+
+/**
+ * A successful autofix only changes the local epic branch. Make the required
+ * manual push explicit instead of letting the generic "Build completed"
+ * notification imply that GitHub has already received the fix.
+ */
+export function createCiAutofixReadyNotification(input: {
+  projectId: string;
+  epicId: string;
+  sessionId: string;
+  branchName: string;
+  prNumber: number;
+  headSha: string;
+}): void {
+  const existing = db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.sessionId, input.sessionId),
+        isNotNull(notifications.message)
+      )
+    )
+    .limit(1)
+    .get();
+  if (existing) return;
+
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  const epic = db
+    .select({ title: epics.title, readableId: epics.readableId })
+    .from(epics)
+    .where(eq(epics.id, input.epicId))
+    .get();
+  if (!project || !epic) return;
+
+  const ticket = epic.readableId
+    ? `${epic.readableId}: ${epic.title}`
+    : epic.title;
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: input.sessionId,
+      agentType: "ci_autofix",
+      status: "completed",
+      title: `CI autofix completed locally — push ${input.branchName} for PR #${input.prNumber} — ${ticket}`,
+      message: `The branch contains a fix for head ${input.headSha.slice(0, 12)}, but Arij did not push it automatically. Push the branch to rerun CI.`,
+      targetUrl: buildTargetUrl(input.projectId, input.sessionId, "build"),
+    })
+    .run();
+
+  pruneNotifications();
 }
 
 /**
@@ -261,9 +408,9 @@ function loadSessionNotificationContext(
  * Idempotent per session: the terminal hook (instrumentation.ts) creates
  * the notification the moment the session row is finalized, and the
  * dispatch routes' emitSessionFailed/emitSessionCompleted then call this
- * same function. Rows created here always carry a non-NULL message for
- * failures, so "a row for this session with a message" is exactly "the
- * failure notification already exists" — other session rows (stalled-watchdog
+ * same function. A message-bearing row means a terminal path already supplied
+ * full context — either a failure or a specialized completion signal such as
+ * a local CI autofix awaiting a push. Other session rows (stalled-watchdog
  * alarms, merge-parked, …) carry NULL and never suppress it.
  *
  * Sessions whose delivery verdict is `asked_question` are skipped here: the

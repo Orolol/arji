@@ -6,6 +6,7 @@ import {
   frictions,
   gradingReports,
   ticketComments,
+  ticketActivityLog,
   ticketReadCursors,
   userStories,
 } from "@/lib/db/schema";
@@ -26,6 +27,16 @@ import { createEpicSchema } from "@/lib/validation/schemas";
 import { validateBody, isValidationError } from "@/lib/validation/validate";
 import { generateReadableId } from "@/lib/db/readable-id";
 import { emitTicketCreated } from "@/lib/events/emit";
+import { resolveOptionalMcpToken } from "@/lib/mcp/http-auth";
+import {
+  buildMcpCreateBugActivityReason,
+  MCP_CREATE_BUG_ACTION_HEADER,
+  MCP_CREATE_BUG_SOURCE_TICKET_HEADER,
+} from "@/lib/mcp/create-bug-contract";
+import {
+  findOpenDuplicateBug,
+  type OpenBugDuplicate,
+} from "@/lib/mcp/create-bug";
 import {
   aggregateGradingStatus,
   parseGradingEntries,
@@ -38,6 +49,15 @@ class FrictionConversionConflict extends Error {}
 function trimmedOrNull(value: string | null | undefined): string | null {
   const trimmed = typeof value === "string" ? value.trim() : "";
   return trimmed.length > 0 ? trimmed : null;
+}
+
+class DuplicateMcpBugError extends Error {
+  constructor(readonly existingBug: OpenBugDuplicate) {
+    super(
+      `An open bug with the same normalized title already exists: ${existingBug.readableId ?? existingBug.id}.`
+    );
+    this.name = "DuplicateMcpBugError";
+  }
 }
 
 export async function GET(
@@ -249,6 +269,37 @@ export async function POST(
 
   const body = validated.data;
 
+  // create_bug still enters through this exact UI route. A valid short-lived
+  // MCP token upgrades its creation audit from an ordinary UI write to a
+  // session-attributed agent write. Unauthenticated/spoofed headers are
+  // ignored, so callers cannot impersonate an agent session.
+  const optionalMcpAuth = resolveOptionalMcpToken(request);
+  const isAttributedAgentBug =
+    body.type === "bug" &&
+    request.headers.get(MCP_CREATE_BUG_ACTION_HEADER) === "create_bug" &&
+    optionalMcpAuth?.projectId === projectId &&
+    optionalMcpAuth.agentType !== "chat";
+
+  let sourceTicketForAudit: { id: string; readableId: string | null } | null = null;
+  if (isAttributedAgentBug) {
+    const sourceTicketId = request.headers.get(
+      MCP_CREATE_BUG_SOURCE_TICKET_HEADER,
+    );
+    if (sourceTicketId) {
+      sourceTicketForAudit =
+        db
+          .select({ id: epics.id, readableId: epics.readableId })
+          .from(epics)
+          .where(
+            and(
+              eq(epics.id, sourceTicketId),
+              eq(epics.projectId, projectId),
+            ),
+          )
+          .get() ?? null;
+    }
+  }
+
   const foundProject = getProjectOr404(projectId);
   if (isErrorResponse(foundProject)) return foundProject;
   const { project } = foundProject;
@@ -386,6 +437,11 @@ export async function POST(
 
   try {
     db.transaction((tx) => {
+      if (isAttributedAgentBug) {
+        const duplicate = findOpenDuplicateBug(projectId, body.title, tx);
+        if (duplicate) throw new DuplicateMcpBugError(duplicate);
+      }
+
       // Inside the transaction on purpose: this bumps `projects.ticket_counter`,
       // so run outside it the increment would survive a rolled-back insert and
       // burn a readable id on an epic that never existed — a permanent gap in
@@ -434,12 +490,50 @@ export async function POST(
           throw new FrictionConversionConflict();
         }
       }
+      if (isAttributedAgentBug && optionalMcpAuth) {
+        const sourceTicketRef =
+          sourceTicketForAudit?.readableId ??
+          sourceTicketForAudit?.id ??
+          "project-scoped session";
+        tx.insert(ticketActivityLog)
+          .values({
+            id: createId(),
+            projectId,
+            epicId: id,
+            fromStatus: body.status || "backlog",
+            toStatus: body.status || "backlog",
+            actor: "agent",
+            reason: buildMcpCreateBugActivityReason({
+              sourceTicketRef,
+              sourceStoryId: optionalMcpAuth.userStoryId,
+              sessionId: optionalMcpAuth.sessionId,
+            }),
+            sessionId: optionalMcpAuth.sessionId,
+            createdAt: now,
+          })
+          .run();
+      }
     });
   } catch (error) {
     if (error instanceof FrictionConversionConflict) {
       return NextResponse.json(
         { error: "Friction is no longer open", code: "FRICTION_CLOSED" },
         { status: 409 },
+      );
+    }
+    if (error instanceof DuplicateMcpBugError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: "DUPLICATE_BUG",
+          existing_bug: {
+            id: error.existingBug.id,
+            readable_id: error.existingBug.readableId,
+            title: error.existingBug.title,
+            status: error.existingBug.status,
+          },
+        },
+        { status: 409 }
       );
     }
     console.error("[epics/POST] Failed to create epic transaction:", error);

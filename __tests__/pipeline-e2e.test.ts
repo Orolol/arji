@@ -14,6 +14,9 @@
  *   (b) build success → review files a [critical] finding → fix RESUMES the
  *       build session → re-review clean (old open finding outside the second
  *       stage window) → succeeded with exactly one fix cycle,
+ *   (b2) review submits a structured `changes_requested` verdict while its
+ *       prose signs off → the structured channel wins, one fix cycle runs,
+ *       and the revert is attributed to it in the activity trail,
  *   (c) build fails → retry resumes the failed attempt → fails → escalated
  *       provider (fresh, no resume) → fails → forensic diagnostic comment
  *       posted, run failed, attempt cap respected,
@@ -600,6 +603,90 @@ describe("pipeline e2e — blocking findings and fix cycle", () => {
       PIPELINE_REASONS.reviewStarted,
       "Build agent started",
       `Story ${storyId} — Build agent started`,
+      PIPELINE_REASONS.fixStarted(1, 2),
+      `Story ${storyId} — Build completed successfully`,
+      "Build completed successfully",
+      PIPELINE_REASONS.reviewStarted,
+      PIPELINE_REASONS.finished,
+    ]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* (b2) structured verdict outranks the prose                          */
+/* ------------------------------------------------------------------ */
+
+describe("pipeline e2e — the structured submit_findings verdict decides", () => {
+  it("changes_requested through the tool drives a fix cycle even though the prose says Complete", async () => {
+    const { projectId, epicId, storyId } = seed();
+
+    scriptRun("build", cliOk("Implemented the ticket."));
+    // The reviewer calls submit_findings with changes_requested (persisted on
+    // its own session row) but signs off in prose. Before the structured
+    // channel existed, the substring scan would have passed this review.
+    scriptRun(
+      "review-1",
+      cliOk("**Overall Verdict: Complete** — nothing blocking, ship it."),
+      {
+        onStart: (sessionId) => {
+          db.update(agentSessions)
+            .set({ reviewVerdict: "changes_requested" })
+            .where(eq(agentSessions.id, sessionId))
+            .run();
+        },
+      }
+    );
+    scriptRun("fix", cliOk("Addressed the reviewer's request."));
+    // Second review: no tool call at all → the prose fallback decides, and it
+    // is clean.
+    scriptRun(
+      "review-2",
+      cliOk("**Overall Verdict: Complete** — the fix holds.")
+    );
+
+    const { runId } = await dispatchPipelineBuild(projectId, epicId);
+    const run = await waitForTerminalRun(runId);
+
+    expect(run).toMatchObject({ state: "succeeded", reason: null });
+    expect(run.fixCycles).toBe(1);
+
+    // The verdict survived on the review session, and only on it.
+    const reviewSessions = projectSessions(projectId).filter(
+      (session) => session.agentType === "review_code"
+    );
+    expect(reviewSessions).toHaveLength(2);
+    expect(reviewSessions.map((session) => session.reviewVerdict).sort()).toEqual(
+      ["changes_requested", null]
+    );
+
+    // Zero findings rows were filed: the verdict alone blocked the stage.
+    expect(
+      db.select().from(reviewComments).where(eq(reviewComments.epicId, epicId)).all()
+    ).toHaveLength(0);
+
+    // The revert is attributed to the structured channel in the trail.
+    expect(epicReasons(epicId)).toContain(
+      "Review verdict: changes requested (Code Review) [verdict source: structured]"
+    );
+
+    // Same end state as the findings-driven cycle: back in review, awaiting
+    // a human.
+    expect(
+      db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
+    ).toBe("review");
+    expect(epicReasons(epicId)).toEqual([
+      "Build agent started",
+      `Story ${storyId} — Build agent started`,
+      PIPELINE_REASONS.started,
+      `Story ${storyId} — Build completed successfully`,
+      "Build completed successfully",
+      PIPELINE_REASONS.reviewStarted,
+      "Review verdict: changes requested (Code Review) [verdict source: structured]",
+      `Story ${storyId} — Review verdict: changes requested (Code Review) [verdict source: structured]`,
+      // The revert already put both rows in in_progress, so the fix
+      // dispatch only re-logs the epic (same-state dispatch trace); the
+      // story's no-op transition writes nothing.
+      "Build agent started",
       PIPELINE_REASONS.fixStarted(1, 2),
       `Story ${storyId} — Build completed successfully`,
       "Build completed successfully",

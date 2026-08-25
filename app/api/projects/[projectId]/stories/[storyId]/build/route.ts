@@ -16,6 +16,7 @@ import { createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
 import { buildTicketBuildPrompt } from "@/lib/claude/prompt-builder";
+import { isVisualProofEnabled } from "@/lib/claude/visual-proof";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import {
   classifySessionOutcome,
@@ -150,7 +151,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       content: c.content,
       createdAt: c.createdAt ?? "",
     })),
-    ticketBuildSystemPrompt
+    ticketBuildSystemPrompt,
+    { visualProofEnabled: isVisualProofEnabled() }
   );
 
   // Only user-written text can reference an Arij document; an agent comment

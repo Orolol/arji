@@ -28,6 +28,8 @@ const EXPECTED_TOOL_NAMES = [
   "update_ticket_status",
   "post_comment",
   "report_friction",
+  "attach_artifact",
+  "create_bug",
   "ask_question",
   "submit_findings",
   "submit_grading",
@@ -304,6 +306,10 @@ describe("tools/list", () => {
     ]);
     expect(reportFriction.inputSchema.properties.filePath.type).toBe("string");
 
+    const attachArtifact: any = byName.get("attach_artifact");
+    expect(attachArtifact.inputSchema.required).toEqual(["path", "caption"]);
+    expect(attachArtifact.inputSchema.properties.caption.maxLength).toBe(2000);
+
     const getTicket: any = byName.get("get_ticket");
     expect(getTicket.inputSchema.properties.ticket_id.type).toBe("string");
   });
@@ -401,6 +407,26 @@ describe("tools/call → HTTP bridge", () => {
     expect(result.isError).toBeFalsy();
     expect(capturedRequests[0]).toMatchObject({
       url: "/api/mcp/report-friction",
+      authorization: "Bearer test-token",
+      body: payload,
+    });
+  });
+
+  it("bridges attach_artifact to the kebab-case endpoint without reshaping the payload", async () => {
+    nextResponse = {
+      status: 200,
+      body: { data: { artifact: { id: "artifact-1", filename: "artifact-1.png" } } },
+    };
+    const payload = {
+      path: "artifacts/settings-page.png",
+      caption: "Settings page after saving the new preference",
+    };
+
+    const result = await client.callTool("attach_artifact", payload);
+
+    expect(result.isError).toBeFalsy();
+    expect(capturedRequests[0]).toMatchObject({
+      url: "/api/mcp/attach-artifact",
       authorization: "Bearer test-token",
       body: payload,
     });
@@ -571,7 +597,9 @@ describe("chat toolset (ARIJ_MCP_TOOLSET=chat)", () => {
 
   it("rejects agent-only tools without calling the backend", async () => {
     for (const name of [
+      "create_bug",
       "ask_question",
+      "attach_artifact",
       "report_friction",
       "submit_findings",
       "submit_grading",
