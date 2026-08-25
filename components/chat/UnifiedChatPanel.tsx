@@ -394,14 +394,25 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     );
 
     if (panelState === "expanded") {
-      if (isMobile && panelContentMode === "chat") {
+      // On mobile the panel becomes a full-width Sheet in BOTH views (chat
+      // and shared ticket). The shared view must not fall through to the
+      // desktop split below the breakpoint: its width clamps assume a
+      // container of ~706px+ and would compute an unusable panel width
+      // (or a negative one), pushing the ticket out of the board row.
+      if (isMobile) {
         return (
           <div ref={containerRef} className="relative h-full w-full overflow-hidden">
             <div className="h-full w-full">{children}</div>
             <Sheet
               open
               onOpenChange={(open) => {
-                if (!open) {
+                if (open) return;
+                // Mirror the desktop Escape handling: dismissing the shared
+                // view closes the ticket (the parent syncs back to chat and
+                // collapses the panel); dismissing chat collapses the panel.
+                if (panelContentMode === "shared") {
+                  sharedPanelView?.onClose?.();
+                } else {
                   setPanelState("collapsed");
                 }
               }}
@@ -412,7 +423,9 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                 className="w-full max-w-none p-0 sm:max-w-none"
                 data-testid="unified-panel-mobile-sheet"
               >
-                {chatWorkspace}
+                {panelContentMode === "shared"
+                  ? sharedPanelView?.content
+                  : chatWorkspace}
               </SheetContent>
             </Sheet>
           </div>

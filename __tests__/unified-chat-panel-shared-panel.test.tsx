@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { UnifiedChatPanel } from "@/components/chat/UnifiedChatPanel";
 
 vi.mock("next/navigation", () => ({
@@ -64,6 +64,48 @@ vi.mock("@/components/chat/QuestionCards", () => ({
   QuestionCards: () => null,
 }));
 
+// Mock Sheet components for the mobile tests (same pattern as
+// unified-chat-panel-mobile-persist.test.tsx): jsdom + Radix Dialog is
+// flaky, and the layout contract under test is which branch renders and at
+// what width, not Radix internals.
+vi.mock("@/components/ui/sheet", () => ({
+  Sheet: ({
+    children,
+    open,
+    onOpenChange,
+  }: {
+    children: ReactNode;
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  }) =>
+    open ? (
+      <div data-testid="sheet-root">
+        {children}
+        <button
+          data-testid="sheet-close-trigger"
+          onClick={() => onOpenChange(false)}
+        >
+          Close
+        </button>
+      </div>
+    ) : null,
+  SheetContent: ({
+    children,
+    ...props
+  }: {
+    children: ReactNode;
+    className?: string;
+    [key: string]: unknown;
+  }) => (
+    <div
+      data-testid={props["data-testid"] as string}
+      className={props.className as string}
+    >
+      {children}
+    </div>
+  ),
+}));
+
 function BoardFixture() {
   const [clickCount, setClickCount] = useState(0);
 
@@ -112,7 +154,11 @@ describe("UnifiedChatPanel shared panel mode", () => {
     expect(screen.getByTestId("ticket-detail-content")).toBeInTheDocument();
   });
 
-  it("stays non-modal on mobile when shared panel is active", async () => {
+  it("uses the full-width mobile Sheet for the shared panel on narrow viewports", async () => {
+    // 500px is below the 768px mobile breakpoint. The desktop split layout
+    // must NOT render here: with the shared width its clamps would compute a
+    // ~94px panel (and a negative one below 400px), pushing the ticket out
+    // of the board row. The ticket must instead get the full-width Sheet.
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
       writable: true,
@@ -125,7 +171,7 @@ describe("UnifiedChatPanel shared panel mode", () => {
         sharedPanelView={{
           panelId: "epic-1",
           label: "Ticket",
-          content: <div>Ticket detail</div>,
+          content: <div data-testid="ticket-detail-content">Ticket detail</div>,
         }}
       >
         <BoardFixture />
@@ -133,10 +179,58 @@ describe("UnifiedChatPanel shared panel mode", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("unified-panel-shared")).toBeInTheDocument();
+      expect(screen.getByTestId("unified-panel-mobile-sheet")).toBeInTheDocument();
     });
 
-    expect(screen.queryByTestId("unified-panel-mobile-sheet")).not.toBeInTheDocument();
+    // Width: the Sheet takes the full 500px container width (w-full, no
+    // sm:max-w-sm cap), so the ticket is readable instead of squeezed into
+    // a 94px aside.
+    const sheet = screen.getByTestId("unified-panel-mobile-sheet");
+    expect(sheet).toHaveClass("w-full");
+    expect(sheet).toHaveClass("max-w-none");
+
+    // The desktop split layout (board + divider + aside) is not rendered.
+    expect(screen.queryByTestId("unified-panel-shared")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("panel-divider")).not.toBeInTheDocument();
+
+    // The ticket content and the board behind the Sheet are both present,
+    // and the board stays interactive.
+    expect(screen.getByTestId("ticket-detail-content")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("board-interaction"));
+    expect(screen.getByText("board-1")).toBeInTheDocument();
+  });
+
+  it("closes the ticket view (not the chat panel) when the mobile Sheet is dismissed in shared mode", async () => {
+    const onClose = vi.fn();
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 500,
+    });
+
+    render(
+      <UnifiedChatPanel
+        projectId="proj-1"
+        sharedPanelView={{
+          panelId: "epic-1",
+          label: "Ticket",
+          onClose,
+          content: <div data-testid="ticket-detail-content">Ticket detail</div>,
+        }}
+      >
+        <BoardFixture />
+      </UnifiedChatPanel>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("unified-panel-mobile-sheet")).toBeInTheDocument();
+    });
+
+    // Dismissing the Sheet in shared mode must mirror the desktop Escape
+    // handling: close the ticket (parent's onClose), which syncs back to
+    // chat and collapses the panel.
+    fireEvent.click(screen.getByTestId("sheet-close-trigger"));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("renders the shared ticket panel at the same width as the chat panel", async () => {

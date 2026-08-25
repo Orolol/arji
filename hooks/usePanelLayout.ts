@@ -92,7 +92,13 @@ export function usePanelLayout({
       const minRatio = MIN_PANEL_WIDTH / totalWidth;
       const maxRatio = (totalWidth - MIN_BOARD_WIDTH - DIVIDER_WIDTH) / totalWidth;
       const safeRatio = clamp(ratio, minRatio, maxRatio);
-      return Math.round(totalWidth * safeRatio);
+      const width = Math.round(totalWidth * safeRatio);
+      // Below ~706px the two minima collide (minRatio > maxRatio) and the
+      // clamp degenerates into a sub-usable — even negative — width. The
+      // desktop split never renders below MOBILE_BREAKPOINT (the mobile
+      // Sheet takes over), but floor the result anyway so a degenerate
+      // container can never emit an invalid `width` style.
+      return Math.max(MIN_PANEL_WIDTH, width);
     },
     [getContainerWidth],
   );
