@@ -120,6 +120,30 @@ const AGENT_TOOLS = [
     },
   },
   {
+    name: "attach_artifact",
+    description:
+      "Attach a PNG, JPEG, or WebP screenshot as durable visual proof for this session. The path may be absolute or relative to the session worktree; the file must be inside that worktree, no larger than 5 MiB, and one of at most 10 artifacts for the session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          minLength: 1,
+          description:
+            "Path to the screenshot inside this session's worktree (absolute or worktree-relative).",
+        },
+        caption: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2000,
+          description: "Short explanation of what the screenshot demonstrates.",
+        },
+      },
+      required: ["path", "caption"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "ask_question",
     description:
       "Ask the user a blocking question and stop working on the blocked part. This reliably marks the session as awaiting a reply and holds the ticket from advancing. Include full context and concrete options in one call, then end your turn.",

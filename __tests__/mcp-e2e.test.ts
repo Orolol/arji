@@ -261,6 +261,16 @@ const CALL_MATRIX: ReadonlyArray<{
     data: { commentId: "comment-1" },
   },
   {
+    tool: "attach_artifact",
+    args: {
+      path: "screenshots/result.png",
+      caption: "Rendered result after the change",
+    },
+    data: {
+      artifact: { id: "artifact-1", filename: "artifact-1.png" },
+    },
+  },
+  {
     tool: "ask_question",
     args: { question: "Should retries be capped at 3 or configurable?" },
     data: { acknowledged: true, holds_ticket: true },

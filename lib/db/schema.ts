@@ -223,6 +223,37 @@ export const agentSessionChunks = sqliteTable(
   })
 );
 
+/**
+ * A durable visual proof copied out of a session worktree while it still
+ * exists. `filename` is the generated basename below
+ * data/sessions/<session-id>/artifacts/; source paths are never persisted.
+ */
+export const sessionArtifacts = sqliteTable(
+  "session_artifacts",
+  {
+    id: text("id").primaryKey(),
+    agentSessionId: text("agent_session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    epicId: text("epic_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    caption: text("caption").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    sessionCreatedAtIdx: index("session_artifacts_session_created_at_idx").on(
+      table.agentSessionId,
+      table.createdAt
+    ),
+    epicCreatedAtIdx: index("session_artifacts_epic_created_at_idx").on(
+      table.epicId,
+      table.createdAt
+    ),
+  })
+);
+
 export const ticketComments = sqliteTable("ticket_comments", {
   id: text("id").primaryKey(),
   userStoryId: text("user_story_id").references(() => userStories.id, {
@@ -552,6 +583,9 @@ export type NewReviewComment = typeof reviewComments.$inferInsert;
 
 export type GradingReport = typeof gradingReports.$inferSelect;
 export type NewGradingReport = typeof gradingReports.$inferInsert;
+
+export type SessionArtifact = typeof sessionArtifacts.$inferSelect;
+export type NewSessionArtifact = typeof sessionArtifacts.$inferInsert;
 
 export const ticketActivityLog = sqliteTable(
   "ticket_activity_log",
