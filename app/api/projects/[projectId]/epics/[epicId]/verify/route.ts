@@ -4,19 +4,24 @@ import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentSessions, verifyReports } from "@/lib/db/schema";
 import {
+  createAgentAlreadyRunningPayload,
+  getRunningSessionForTarget,
+} from "@/lib/agents/concurrency";
+import {
   errorResponse,
   getEpicOr404,
   getProjectOr404,
   isErrorResponse,
 } from "@/lib/api/route-helpers";
 import { emitTicketUpdated } from "@/lib/events/emit";
-import {
-  containsPathOnDisk,
-  worktreesRootFor,
-} from "@/lib/projects/workspace";
 import { logTransition } from "@/lib/workflow/log";
 import { resolveVerifyConfigForProject } from "@/lib/verify/config";
+import {
+  isVerificationAlreadyRunningError,
+  withVerificationWorktreeLock,
+} from "@/lib/verify/execution-lock";
 import { runVerification } from "@/lib/verify/runner";
+import { isManagedEpicWorktreePath } from "@/lib/verify/worktree";
 import type {
   VerificationReport,
   VerifyCommandResult,
@@ -87,11 +92,10 @@ function findExistingWorktree(
     )
     .orderBy(desc(agentSessions.createdAt), desc(agentSessions.id))
     .all();
-  const managedRoot = worktreesRootFor(repoPath);
 
   for (const candidate of candidates) {
     if (!candidate.worktreePath) continue;
-    if (!containsPathOnDisk(candidate.worktreePath, managedRoot)) continue;
+    if (!isManagedEpicWorktreePath(candidate.worktreePath, repoPath)) continue;
     try {
       if (fs.statSync(candidate.worktreePath).isDirectory()) {
         return candidate.worktreePath;
@@ -135,6 +139,22 @@ export async function POST(_request: NextRequest, { params }: Params) {
   const foundEpic = getEpicOr404(projectId, epicId);
   if (isErrorResponse(foundEpic)) return foundEpic;
 
+  const conflict = getRunningSessionForTarget({
+    scope: "epic",
+    projectId,
+    epicId,
+  });
+  if (conflict) {
+    return NextResponse.json(
+      createAgentAlreadyRunningPayload(
+        { scope: "epic", projectId, epicId },
+        conflict,
+        "Verification cannot run while an agent is active on this epic."
+      ),
+      { status: 409 }
+    );
+  }
+
   const worktreePath = findExistingWorktree(
     projectId,
     epicId,
@@ -159,14 +179,19 @@ export async function POST(_request: NextRequest, { params }: Params) {
   }
 
   try {
-    const report = await runVerification({
-      projectId,
-      epicId,
-      agentSessionId: null,
+    const report = await withVerificationWorktreeLock(
       worktreePath,
-      commands: config.commands,
-      timeoutMs: config.timeoutMs,
-    });
+      () =>
+        runVerification({
+          projectId,
+          epicId,
+          agentSessionId: null,
+          worktreePath,
+          commands: config.commands,
+          timeoutMs: config.timeoutMs,
+        }),
+      { wait: false }
+    );
 
     const epicStatus = foundEpic.epic.status ?? "backlog";
     const failedCommand = report.commands.find(
@@ -193,6 +218,9 @@ export async function POST(_request: NextRequest, { params }: Params) {
 
     return NextResponse.json({ data: report });
   } catch (error) {
+    if (isVerificationAlreadyRunningError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     return errorResponse(error, "Failed to run verification");
   }
 }

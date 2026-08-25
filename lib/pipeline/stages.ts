@@ -54,8 +54,10 @@ import {
   type PromptComment,
 } from "@/lib/claude/prompt-builder";
 import { resolveVerifyConfigForProject } from "@/lib/verify/config";
+import { withVerificationWorktreeLock } from "@/lib/verify/execution-lock";
 import { buildRegressionFixSection } from "@/lib/verify/regression-report";
 import { runVerification as executeVerification } from "@/lib/verify/runner";
+import { assertManagedEpicWorktreePath } from "@/lib/verify/worktree";
 import { readRegressionConfig } from "@/lib/pipeline/verify";
 import {
   enrichPromptWithDocumentMentions,
@@ -262,15 +264,30 @@ async function runPipelineVerification(
       "Deterministic verification requires the epic worktree from the last code session"
     );
   }
+  const worktreePath = codeSession.worktreePath;
 
-  const result = await executeVerification({
-    projectId: init.projectId,
-    epicId: init.epicId,
-    agentSessionId: lastCodeSessionId,
-    worktreePath: codeSession.worktreePath,
-    commands: config.commands,
-    timeoutMs: config.timeoutMs,
-  });
+  const project = db
+    .select({ gitRepoPath: projects.gitRepoPath })
+    .from(projects)
+    .where(eq(projects.id, init.projectId))
+    .get();
+  if (!project?.gitRepoPath) {
+    throw new Error("Deterministic verification requires a Git repository");
+  }
+  assertManagedEpicWorktreePath(worktreePath, project.gitRepoPath);
+
+  const result = await withVerificationWorktreeLock(
+    worktreePath,
+    () =>
+      executeVerification({
+        projectId: init.projectId,
+        epicId: init.epicId,
+        agentSessionId: lastCodeSessionId,
+        worktreePath,
+        commands: config.commands,
+        timeoutMs: config.timeoutMs,
+      })
+  );
   return { ran: true, result };
 }
 

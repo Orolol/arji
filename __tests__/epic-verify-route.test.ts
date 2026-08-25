@@ -279,4 +279,59 @@ describe("POST /api/projects/[projectId]/epics/[epicId]/verify", () => {
     expect(body.error).toMatch(/existing epic worktree/i);
     expect(verifyMocks.runVerification).not.toHaveBeenCalled();
   });
+
+  it("refuses verification while an agent is active on the epic", async () => {
+    seedSession(worktreePath);
+    testDb.instance!.db
+      .update(agentSessions)
+      .set({ status: "running" })
+      .run();
+
+    const response = await callPost();
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toMatch(/while an agent is active/i);
+    expect(verifyMocks.runVerification).not.toHaveBeenCalled();
+  });
+
+  it("refuses a second manual verification in the same worktree", async () => {
+    seedSession(worktreePath);
+    let releaseFirst!: (report: unknown) => void;
+    verifyMocks.runVerification.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseFirst = resolve;
+        })
+    );
+
+    const firstRequest = callPost();
+    await vi.waitFor(() => {
+      expect(verifyMocks.runVerification).toHaveBeenCalledTimes(1);
+    });
+
+    const secondResponse = await callPost();
+    expect(secondResponse.status).toBe(409);
+    expect((await secondResponse.json()).error).toMatch(/already running/i);
+
+    releaseFirst({
+      id: "report-manual-concurrent",
+      projectId,
+      epicId,
+      agentSessionId: null,
+      status: "pass",
+      startedAt: "2026-08-25T12:01:00.000Z",
+      finishedAt: "2026-08-25T12:01:01.000Z",
+      commands: [
+        {
+          name: "test",
+          command: "npm test",
+          exitCode: 0,
+          durationMs: 1_000,
+          tail: "all green\n",
+        },
+      ],
+    });
+    expect((await firstRequest).status).toBe(200);
+  });
 });

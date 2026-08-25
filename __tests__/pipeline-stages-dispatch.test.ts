@@ -1011,7 +1011,7 @@ describe("deterministic verification driver", () => {
       id: codeSessionId,
       projectId,
       epicId,
-      worktreePath: "/tmp/exact-epic-worktree",
+      worktreePath: "/repos/.arij-worktrees/exact-epic-worktree",
     });
     db.insert(settings)
       .values([
@@ -1061,13 +1061,43 @@ describe("deterministic verification driver", () => {
       projectId,
       epicId,
       agentSessionId: codeSessionId,
-      worktreePath: "/tmp/exact-epic-worktree",
+      worktreePath: "/repos/.arij-worktrees/exact-epic-worktree",
       commands: [
         { name: "test", command: "npm test" },
         { name: "lint", command: "npm run lint" },
       ],
       timeoutMs: 45_000,
     });
+  });
+
+  it("refuses the repository checkout recorded as a session worktree", async () => {
+    const { projectId, epicId } = seed("review");
+    const codeSessionId = `verify-main-checkout-${counter}`;
+    insertSession({
+      id: codeSessionId,
+      projectId,
+      epicId,
+      worktreePath: "/repos/s",
+    });
+    db.insert(settings)
+      .values({
+        key: verifyCommandsSettingKey(projectId),
+        value: JSON.stringify([{ name: "test", command: "npm test" }]),
+      })
+      .run();
+
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+
+    await expect(
+      driver.runDeterministicVerification(codeSessionId)
+    ).rejects.toThrow(/managed epic worktree/i);
+    expect(verificationMocks.runVerification).not.toHaveBeenCalled();
   });
 });
 
