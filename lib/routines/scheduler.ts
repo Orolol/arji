@@ -6,24 +6,14 @@ import {
   executeRoutineAction,
   type RoutineActionResult,
 } from "@/lib/routines/actions";
+import {
+  isDailyRoutineKind,
+  isSameLocalDay,
+  TIME_OF_DAY_PATTERN,
+} from "@/lib/routines/constants";
 import { DEFAULT_CI_WATCH_INTERVAL_MINUTES } from "@/lib/routines/ci-watch";
 
 export const ROUTINE_SWEEP_INTERVAL_MS = 60_000;
-
-const DAILY_KINDS = new Set<Routine["kind"]>([
-  "night_run",
-  "github_issue_sync",
-]);
-const TIME_OF_DAY_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-
-/** Calendar comparison deliberately uses the server's local timezone. */
-export function isSameLocalDay(left: Date, right: Date): boolean {
-  return (
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate()
-  );
-}
 
 /**
  * Pure dueness decision. Daily routines compare local calendar days; CI watch
@@ -58,7 +48,7 @@ export function isRoutineDue(
     return now.getTime() - lastRunAt.getTime() >= intervalMinutes * 60_000;
   }
 
-  if (!DAILY_KINDS.has(routine.kind)) return false;
+  if (!isDailyRoutineKind(routine.kind)) return false;
   if (!TIME_OF_DAY_PATTERN.test(routine.timeOfDay)) return false;
 
   const [hours, minutes] = routine.timeOfDay.split(":").map(Number);

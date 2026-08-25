@@ -11,6 +11,7 @@ import {
 import { parseOwnerRepo } from "@/lib/github/client";
 import { createCiWatchFailureNotification } from "@/lib/notifications/create";
 import type { RoutineActionResult } from "@/lib/routines/actions";
+import { parseRoutineConfig } from "@/lib/routines/constants";
 import {
   launchCiAutofixSession,
   type CiAutofixLaunchResult,
@@ -124,7 +125,10 @@ export const defaultCiWatchDeps: CiWatchDeps = {
         .where(eq(routines.id, routineId))
         .get();
       if (!current) return;
-      const config = parseConfig({ id: routineId, config: current.config });
+      const config = parseRoutineConfig({
+        id: routineId,
+        config: current.config,
+      });
       tx.update(routines)
         .set({
           config: JSON.stringify({
@@ -139,24 +143,6 @@ export const defaultCiWatchDeps: CiWatchDeps = {
   },
   notifyFailure: createCiWatchFailureNotification,
 };
-
-function parseConfig(
-  routine: Pick<Routine, "id" | "config">,
-): Record<string, unknown> {
-  try {
-    const config = JSON.parse(routine.config) as unknown;
-    if (!config || typeof config !== "object" || Array.isArray(config)) {
-      throw new Error("config must be a JSON object");
-    }
-    return config as Record<string, unknown>;
-  } catch (error) {
-    throw new Error(
-      `Routine ${routine.id} has invalid config: ${
-        error instanceof Error ? error.message : "invalid JSON"
-      }`,
-    );
-  }
-}
 
 function parseStoredState(value: unknown): StoredCiWatchState {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -273,7 +259,7 @@ export async function runCiWatchRoutine(
     };
   }
 
-  const config = parseConfig(routine);
+  const config = parseRoutineConfig(routine);
   const previousState = parseStoredState(config[CI_WATCH_STATE_CONFIG_KEY]);
   const previousErrorState = parseStoredErrorState(
     config[CI_WATCH_ERROR_STATE_CONFIG_KEY],
