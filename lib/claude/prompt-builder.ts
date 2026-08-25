@@ -21,6 +21,9 @@ import {
 } from "./prompt-sections";
 import { getProjectMemoryContent } from "@/lib/documents/memory";
 import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
+// The prompt asks for these headings and the workflow refuses to store a
+// document without them — one contract, one definition.
+import { DREAMING_MEMORY_SECTIONS } from "@/lib/workflow/dreaming-constants";
 
 // ---------------------------------------------------------------------------
 // Types — lightweight projections of the Drizzle schema rows
@@ -1366,21 +1369,6 @@ Your ENTIRE response must be ONLY the new memory document body, as raw markdown.
 // ---------------------------------------------------------------------------
 // 12b. Dreaming Prompt (cross-session memory distillation)
 // ---------------------------------------------------------------------------
-
-/**
- * The four sections a dreamed memory MUST be organised into. Imposed rather
- * than suggested: the value of a dream is that every project's memory answers
- * the same four questions, so an agent reading it knows where to look.
- *
- * Exported so the workflow tests can assert the contract without re-typing the
- * headings.
- */
-export const DREAMING_MEMORY_SECTIONS: readonly string[] = [
-  "Codebase pitfalls",
-  "Recurring agent mistakes",
-  "Strategies that work",
-  "Build instructions",
-];
 
 /** The cross-session evidence a dream reasons over (lib/workflow/dreaming.ts). */
 export interface DreamingDigestContext {

@@ -99,9 +99,9 @@ const { PROJECT_MEMORY_MAX_CHARS } = await import(
 const {
   DREAMING_AFTER_NIGHT_RUN_SETTING_KEY,
   DREAMING_AGENT_TYPE,
+  DREAMING_MEMORY_SECTIONS,
   dreamingAfterNightRunSettingKey,
 } = await import("@/lib/workflow/dreaming-constants");
-const { DREAMING_MEMORY_SECTIONS } = await import("@/lib/claude/prompt-builder");
 const { sumNightRunCost } = await import("@/lib/night/summary");
 
 let counter = 0;
@@ -371,9 +371,15 @@ describe("dispatchDreamingSession", () => {
 
   it("enforces the memory cap on the dreamed output", async () => {
     seedSourceSession();
+    // Over the cap, but the four headings all sit inside it — so capping
+    // trims the tail of the LAST section and the document stays well-formed.
     processManagerState.result = {
       success: true,
-      result: claudeEnvelope("m".repeat(PROJECT_MEMORY_MAX_CHARS + 2000)),
+      result: claudeEnvelope(
+        DREAMING_MEMORY_SECTIONS.map(
+          (title) => `## ${title}\n\n- a rule`
+        ).join("\n\n") + `\n${"- filler\n".repeat(2000)}`
+      ),
       duration: 1000,
     };
 
@@ -386,20 +392,115 @@ describe("dispatchDreamingSession", () => {
     expect(PROJECT_MEMORY_MAX_CHARS).toBe(8000);
   });
 
-  it("unwraps an accidental full-document code fence", async () => {
+  /**
+   * The prompt imposes four sections; a prompt is not a guarantee. Storing an
+   * unstructured document would put it into every future prompt AND mark the
+   * window as learned, so the dream is discarded instead — and the window stays
+   * open for the retry.
+   */
+  it("refuses a delivered answer that ignored the section structure", async () => {
+    saveProjectMemory(projectId, "- EXISTING MEMORY");
     seedSourceSession();
     processManagerState.result = {
       success: true,
-      result: claudeEnvelope("```markdown\n## Codebase pitfalls\n\n- fenced\n```"),
+      result: claudeEnvelope(
+        "Here is a summary of everything I read across the sessions."
+      ),
+      duration: 1000,
+    };
+
+    const result = await dispatchDreamingSession({ projectId });
+    await flushBackground();
+
+    // The session itself answered...
+    expect(
+      db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.id, result.sessionId!))
+        .get()!.outcome
+    ).toBe("answered");
+    // ...but nothing was stored, nothing archived, nothing claimed.
+    expect(getProjectMemoryContent(projectId)).toBe("- EXISTING MEMORY");
+    expect(getProjectMemoryArchiveDoc(projectId)).toBeNull();
+    expect(findLastDreamCutoff(projectId)).toBeNull();
+    expect(
+      db
+        .select()
+        .from(notifications)
+        .where(eq(notifications.projectId, projectId))
+        .all()
+        .filter((row) => row.agentType === DREAMING_AGENT_TYPE)
+    ).toHaveLength(0);
+  });
+
+  /**
+   * The truncation case the cap creates: a response long enough that capping
+   * cuts a whole section off. It is validated on the text that WOULD BE
+   * STORED, so this is caught rather than saved half-written.
+   */
+  it("refuses an over-cap answer whose last sections the cap would cut off", async () => {
+    saveProjectMemory(projectId, "- EXISTING MEMORY");
+    seedSourceSession();
+    processManagerState.result = {
+      success: true,
+      result: claudeEnvelope(
+        DREAMING_MEMORY_SECTIONS.map(
+          (title) => `## ${title}\n\n${"- a long rule\n".repeat(400)}`
+        ).join("\n")
+      ),
       duration: 1000,
     };
 
     await dispatchDreamingSession({ projectId });
     await flushBackground();
 
-    expect(getProjectMemoryContent(projectId)).toBe(
-      "## Codebase pitfalls\n\n- fenced"
-    );
+    expect(getProjectMemoryContent(projectId)).toBe("- EXISTING MEMORY");
+    expect(findLastDreamCutoff(projectId)).toBeNull();
+  });
+
+  it("refuses sections delivered out of order", async () => {
+    seedSourceSession();
+    processManagerState.result = {
+      success: true,
+      result: claudeEnvelope(
+        [
+          DREAMING_MEMORY_SECTIONS[3],
+          DREAMING_MEMORY_SECTIONS[0],
+          DREAMING_MEMORY_SECTIONS[1],
+          DREAMING_MEMORY_SECTIONS[2],
+        ]
+          .map((title) => `## ${title}\n\n- a rule`)
+          .join("\n\n")
+      ),
+      duration: 1000,
+    };
+
+    await dispatchDreamingSession({ projectId });
+    await flushBackground();
+
+    expect(getProjectMemoryContent(projectId)).toBeNull();
+    expect(findLastDreamCutoff(projectId)).toBeNull();
+  });
+
+  it("unwraps an accidental full-document code fence", async () => {
+    seedSourceSession();
+    // A well-formed document that merely arrived wrapped: unwrapping has to
+    // happen BEFORE the structure check, or the fence would look like a
+    // missing first heading and the whole dream would be thrown away.
+    const body = DREAMING_MEMORY_SECTIONS.map(
+      (title) => `## ${title}\n\n- fenced rule`
+    ).join("\n\n");
+    processManagerState.result = {
+      success: true,
+      result: claudeEnvelope(`\`\`\`markdown\n${body}\n\`\`\``),
+      duration: 1000,
+    };
+
+    await dispatchDreamingSession({ projectId });
+    await flushBackground();
+
+    expect(getProjectMemoryContent(projectId)).toBe(body);
   });
 
   it("inherits the batch run id so the dream stays inside the night cost cap", async () => {

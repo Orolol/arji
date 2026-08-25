@@ -8,6 +8,7 @@
  */
 
 import {
+  DREAMING_MEMORY_SECTIONS,
   DREAM_DIGEST_MAX_CHARS,
   DREAM_ERROR_MAX_CHARS,
   DREAM_FINAL_TEXT_MAX_CHARS,
@@ -235,6 +236,83 @@ export function renderSessionDigest(entry: DreamSessionDigest): string {
   }
 
   return lines.join("\n");
+}
+
+/* ------------------------------------------------------------------ */
+/* Output contract                                                     */
+/* ------------------------------------------------------------------ */
+
+export interface DreamedMemoryValidation {
+  valid: boolean;
+  /** Empty when valid; otherwise why the document was refused. */
+  reason: string;
+}
+
+/** `## Heading` lines, in document order. */
+function markdownHeadings(text: string): string[] {
+  const headings: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^##\s+(.+?)\s*$/);
+    if (match) headings.push(match[1]);
+  }
+  return headings;
+}
+
+/**
+ * Checks that a dreamed document really carries the imposed structure.
+ *
+ * Two failures this catches, both of which would otherwise be stored AND mark
+ * the digest window as learned:
+ *   - the agent ignored the section contract (the prompt asks for it, but a
+ *     prompt is not a guarantee);
+ *   - the response was longer than the memory cap, so the truncation that
+ *     `saveProjectMemory` applies silently lopped the tail off — leaving a
+ *     document that stops mid-sentence and has lost its last section. This is
+ *     why the CALLER must validate the cap-effective text, not the raw output.
+ *
+ * Required: all four headings, each exactly once, in the prescribed order.
+ * EXTRA `##` sections are tolerated on purpose — a dream that answered the four
+ * questions and added one of its own is still a good document, and discarding
+ * it would cost a real rewrite to enforce a cosmetic rule.
+ */
+export function validateDreamedMemoryStructure(
+  text: string,
+  requiredSections: readonly string[] = DREAMING_MEMORY_SECTIONS
+): DreamedMemoryValidation {
+  const headings = markdownHeadings(text);
+
+  const missing = requiredSections.filter(
+    (title) => !headings.includes(title)
+  );
+  if (missing.length > 0) {
+    return {
+      valid: false,
+      reason: `missing required section(s): ${missing.join(", ")}`,
+    };
+  }
+
+  const duplicated = requiredSections.filter(
+    (title) => headings.filter((heading) => heading === title).length > 1
+  );
+  if (duplicated.length > 0) {
+    return {
+      valid: false,
+      reason: `duplicated section(s): ${duplicated.join(", ")}`,
+    };
+  }
+
+  const positions = requiredSections.map((title) => headings.indexOf(title));
+  const ordered = positions.every(
+    (position, index) => index === 0 || position > positions[index - 1]
+  );
+  if (!ordered) {
+    return {
+      valid: false,
+      reason: `sections are out of order (expected ${requiredSections.join(" → ")})`,
+    };
+  }
+
+  return { valid: true, reason: "" };
 }
 
 /* ------------------------------------------------------------------ */

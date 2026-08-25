@@ -26,8 +26,9 @@
  *     and nothing else — the tag alone is the entire integration (same pitfall
  *     documented on memory-distill);
  *   - the memory is replaced ONLY when the session actually delivers
- *     (`outcome === 'answered'` with non-empty output), the same guard
- *     spec-auto-rewrite.ts applies to the spec. The previous memory is
+ *     (`outcome === 'answered'` with non-empty output) AND the text that would
+ *     be stored still carries the four imposed sections — a cap-truncated or
+ *     unstructured document is refused rather than saved. The previous memory is
  *     snapshotted in the SAME transaction (documents row, kind
  *     'memory_archive'), so a failed save can never burn the snapshot — and
  *     only when the stored memory is still the one the dream reasoned from, so
@@ -74,6 +75,7 @@ import {
   parseForensicDeadSessionId,
 } from "@/lib/pipeline/forensic";
 import {
+  enforceMemoryCap,
   getProjectMemoryContent,
   isProjectMemoryChangedError,
   replaceProjectMemoryWithSnapshot,
@@ -100,6 +102,7 @@ import {
   extractReviewVerdict,
   parseTimestampMs,
   resolveDreamWindow,
+  validateDreamedMemoryStructure,
   type AssembledDreamDigest,
   type DreamSessionDigest,
 } from "./dreaming-digest";
@@ -1024,6 +1027,25 @@ export async function dispatchDreamingSession(
       resolveSessionOutput(result, sessionId, "")
     );
     if (!output) {
+      return;
+    }
+
+    // Validate what would ACTUALLY BE STORED, not what the agent produced.
+    // `saveProjectMemory` truncates at the cap, so an over-long response can
+    // arrive with all four sections and land with its last one cut off — a
+    // document that stops mid-sentence, injected into every future prompt,
+    // with the digest window marked as learned. Checking the cap-effective
+    // text catches that as well as an agent that ignored the contract.
+    const structure = validateDreamedMemoryStructure(enforceMemoryCap(output));
+    if (!structure.valid) {
+      // Same posture as the mid-dream edit: nothing stored, cutoff unmoved, so
+      // the next dream reads the same sessions and gets another attempt. The
+      // rejected text stays readable on the session page.
+      console.warn(
+        `${DREAMING_LOG_PREFIX} discarded for project ${input.projectId}:` +
+          ` the dreamed memory did not match the required structure` +
+          ` (${structure.reason}); session ${sessionId}`
+      );
       return;
     }
 

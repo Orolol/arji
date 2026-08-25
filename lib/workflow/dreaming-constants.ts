@@ -153,6 +153,23 @@ export function dreamingLastCutoffSettingKey(projectId: string): string {
   return `${DREAMING_LAST_CUTOFF_SETTING_KEY}:${projectId}`;
 }
 
+/**
+ * The four sections a dreamed memory MUST be organised into, in this order.
+ *
+ * Imposed rather than suggested: the value of a dream is that every project's
+ * memory answers the same four questions, so an agent reading it knows where
+ * to look. Lives here rather than in the prompt builder because it is BOTH
+ * halves of one contract — the prompt asks for these headings and the
+ * workflow refuses to store a document that does not have them (see
+ * `validateDreamedMemoryStructure`).
+ */
+export const DREAMING_MEMORY_SECTIONS: readonly string[] = [
+  "Codebase pitfalls",
+  "Recurring agent mistakes",
+  "Strategies that work",
+  "Build instructions",
+];
+
 /* ------------------------------------------------------------------ */
 /* Collection window                                                   */
 /* ------------------------------------------------------------------ */

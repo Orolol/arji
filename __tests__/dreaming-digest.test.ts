@@ -18,9 +18,13 @@ import {
   resolveDreamWindow,
   tailText,
   truncateText,
+  validateDreamedMemoryStructure,
   type DreamSessionDigest,
 } from "@/lib/workflow/dreaming-digest";
-import { DREAM_WINDOW_DAYS } from "@/lib/workflow/dreaming-constants";
+import {
+  DREAMING_MEMORY_SECTIONS,
+  DREAM_WINDOW_DAYS,
+} from "@/lib/workflow/dreaming-constants";
 
 const NOW = new Date("2026-08-25T12:00:00.000Z");
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -122,6 +126,100 @@ describe("parseTimestampMs", () => {
     expect(parseTimestampMs(undefined)).toBeNull();
     expect(parseTimestampMs("")).toBeNull();
     expect(parseTimestampMs("not-a-date")).toBeNull();
+  });
+});
+
+/**
+ * The prompt IMPOSES four sections, but a prompt is not a guarantee — and even
+ * a compliant answer can arrive malformed, because `saveProjectMemory`
+ * truncates at the cap and can lop the last section off a long response.
+ * Storing either would put a broken document into every future prompt AND mark
+ * the digest window as learned.
+ */
+describe("validateDreamedMemoryStructure", () => {
+  const wellFormed = DREAMING_MEMORY_SECTIONS.map(
+    (title) => `## ${title}\n\n- a rule`
+  ).join("\n\n");
+
+  it("accepts the four sections in order", () => {
+    expect(validateDreamedMemoryStructure(wellFormed)).toEqual({
+      valid: true,
+      reason: "",
+    });
+  });
+
+  it("rejects a document missing a section", () => {
+    const withoutLast = DREAMING_MEMORY_SECTIONS.slice(0, 3)
+      .map((title) => `## ${title}\n\n- a rule`)
+      .join("\n\n");
+    const result = validateDreamedMemoryStructure(withoutLast);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain(DREAMING_MEMORY_SECTIONS[3]);
+  });
+
+  it("rejects sections in the wrong order", () => {
+    const shuffled = [
+      DREAMING_MEMORY_SECTIONS[1],
+      DREAMING_MEMORY_SECTIONS[0],
+      DREAMING_MEMORY_SECTIONS[2],
+      DREAMING_MEMORY_SECTIONS[3],
+    ]
+      .map((title) => `## ${title}\n\n- a rule`)
+      .join("\n\n");
+    const result = validateDreamedMemoryStructure(shuffled);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("out of order");
+  });
+
+  it("rejects a duplicated section", () => {
+    const result = validateDreamedMemoryStructure(
+      `${wellFormed}\n\n## ${DREAMING_MEMORY_SECTIONS[0]}\n\n- again`
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("duplicated");
+  });
+
+  /**
+   * The truncation case, reproduced exactly as the cap would produce it: a
+   * long compliant document cut mid-way, losing its tail sections.
+   */
+  it("rejects a document the cap truncated mid-way", () => {
+    const long = DREAMING_MEMORY_SECTIONS.map(
+      (title) => `## ${title}\n\n${"- a long rule\n".repeat(200)}`
+    ).join("\n");
+    expect(validateDreamedMemoryStructure(long).valid).toBe(true);
+
+    const truncated = long.slice(0, 2_000);
+    const result = validateDreamedMemoryStructure(truncated);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("missing required section");
+  });
+
+  it("rejects prose with no sections at all", () => {
+    const result = validateDreamedMemoryStructure(
+      "Here is my summary of the sessions I read."
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("missing required section");
+  });
+
+  /**
+   * Deliberately tolerated: a dream that answered the four questions and added
+   * one of its own is still a good document, and discarding it would cost a
+   * real rewrite to enforce a cosmetic rule.
+   */
+  it("tolerates an EXTRA section alongside the four", () => {
+    expect(
+      validateDreamedMemoryStructure(`${wellFormed}\n\n## Open questions\n\n- x`)
+        .valid
+    ).toBe(true);
+  });
+
+  it("ignores deeper headings and bold text that only look like sections", () => {
+    const withNoise = DREAMING_MEMORY_SECTIONS.map(
+      (title) => `## ${title}\n\n### ${title} details\n\n**${title}**\n\n- a rule`
+    ).join("\n\n");
+    expect(validateDreamedMemoryStructure(withNoise).valid).toBe(true);
   });
 });
 
