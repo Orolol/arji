@@ -224,6 +224,7 @@ export function startPipelineRun(input: StartPipelineRunInput): {
       settled: input.buildSettled,
     },
     launchStage: driver.launchStage,
+    runDeterministicVerification: driver.runDeterministicVerification,
     runVerifyGate: createVerifyGate({
       projectId: input.projectId,
       scope: input.scope,

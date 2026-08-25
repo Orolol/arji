@@ -1,0 +1,207 @@
+/**
+ * Pipeline wiring for Arij-owned deterministic verification:
+ *
+ *   successful code stage -> configured verification -> review
+ *   failed verification -> existing fix-cycle budget -> verification -> review
+ *   no configured commands -> the historical pipeline request/trace contract
+ *
+ * Verification reports are not agent sessions. The maxSessions=2 happy path
+ * below only has room for the initial build and review and must still pass.
+ */
+import { describe, expect, it } from "vitest";
+
+import { PIPELINE_REASONS } from "@/lib/pipeline/constants";
+import {
+  runPipeline,
+  type PipelineGuardCheck,
+  type PipelineStageRequest,
+  type PipelineStageResult,
+} from "@/lib/pipeline/runner";
+import type { VerificationResult } from "@/lib/verify/runner";
+
+const OPEN_GUARD: PipelineGuardCheck = {
+  conflictSessionId: null,
+  reviewTargetStatus: "review",
+};
+
+function report(
+  status: "pass" | "fail",
+  suffix: string
+): VerificationResult {
+  return {
+    id: `verify-${suffix}`,
+    projectId: "project-1",
+    epicId: "epic-1",
+    agentSessionId: `code-${suffix}`,
+    status,
+    startedAt: "2026-08-25T10:00:00.000Z",
+    finishedAt: "2026-08-25T10:00:01.000Z",
+    commands: [
+      {
+        name: "test",
+        command: "npm test",
+        exitCode: status === "pass" ? 0 : 1,
+        durationMs: 1_234,
+        tail:
+          status === "pass"
+            ? "Tests passed"
+            : "AssertionError: expected true to be false\nlast failure line",
+      },
+    ],
+  };
+}
+
+interface HarnessOptions {
+  verification?: Array<{
+    ran: boolean;
+    result: VerificationResult | null;
+  }>;
+  maxSessions?: number;
+}
+
+function runHarness(options: HarnessOptions = {}) {
+  const requests: PipelineStageRequest[] = [];
+  const traces: string[] = [];
+  const verificationSessionIds: Array<string | null> = [];
+  let stageNumber = 0;
+  let verificationNumber = 0;
+
+  const promise = runPipeline({
+    maxAttempts: 2,
+    maxFixCycles: 1,
+    maxSessions: options.maxSessions ?? 12,
+    initialBuild: {
+      sessionId: "s-build",
+      settled: Promise.resolve<PipelineStageResult>({
+        sessionId: "s-build",
+        success: true,
+        outcome: "answered",
+        error: null,
+      }),
+    },
+    launchStage: async (request) => {
+      requests.push(request);
+      const sessionId = `s-${request.stage}-${++stageNumber}`;
+      return {
+        sessionId,
+        settled: Promise.resolve<PipelineStageResult>({
+          sessionId,
+          success: true,
+          outcome: "answered",
+          error: null,
+        }),
+      };
+    },
+    assessReview: async () => ({
+      blocking: false,
+      blockingCount: 0,
+      agentCommentCount: 1,
+      usedProseFallback: false,
+    }),
+    readSessionStatus: () => "completed",
+    checkGuards: () => OPEN_GUARD,
+    runForensic: async () => ({
+      sessionId: null,
+      settled: Promise.resolve({
+        sessionId: "",
+        success: true,
+        outcome: "answered",
+        error: null,
+      }),
+    }),
+    ...(options.verification
+      ? {
+          runDeterministicVerification: async (
+            lastCodeSessionId: string | null
+          ) => {
+            verificationSessionIds.push(lastCodeSessionId);
+            const index = Math.min(
+              verificationNumber++,
+              options.verification!.length - 1
+            );
+            return options.verification![index];
+          },
+        }
+      : {}),
+    callbacks: { onTrace: (reason) => traces.push(reason) },
+  });
+
+  return { promise, requests, traces, verificationSessionIds };
+}
+
+describe("runPipeline — deterministic verification stage", () => {
+  it("keeps the disabled path observably identical to the historical pipeline", async () => {
+    const historical = runHarness();
+    const disabled = runHarness({
+      verification: [{ ran: false, result: null }],
+    });
+
+    const [historicalSummary, disabledSummary] = await Promise.all([
+      historical.promise,
+      disabled.promise,
+    ]);
+
+    expect(disabledSummary).toEqual(historicalSummary);
+    expect(disabled.requests).toEqual(historical.requests);
+    expect(disabled.traces).toEqual(historical.traces);
+    expect(disabled.verificationSessionIds).toEqual(["s-build"]);
+  });
+
+  it("spends one existing fix cycle and carries the failing output tail into the fix request", async () => {
+    const failed = report("fail", "build");
+    const passed = report("pass", "fix");
+    const harness = runHarness({
+      verification: [
+        { ran: true, result: failed },
+        { ran: true, result: passed },
+      ],
+    });
+
+    const summary = await harness.promise;
+
+    expect(summary).toMatchObject({ state: "succeeded", fixCycles: 1 });
+    expect(harness.requests.map((request) => request.stage)).toEqual([
+      "fix",
+      "review",
+    ]);
+    expect(harness.requests[0]).toMatchObject({
+      fixCycle: 1,
+      verificationFailure: failed.commands[0],
+    });
+    expect(harness.requests[1]).toMatchObject({
+      verificationReport: passed,
+    });
+    expect(harness.verificationSessionIds).toEqual(["s-build", "s-fix-1"]);
+    expect(harness.traces).toContain(
+      PIPELINE_REASONS.deterministicVerificationFailed("test")
+    );
+    expect(harness.traces).toContain(
+      PIPELINE_REASONS.deterministicVerificationPassed(1)
+    );
+  });
+
+  it("passes a successful one-line-per-command report to review without consuming a session", async () => {
+    const passed = report("pass", "build");
+    const harness = runHarness({
+      verification: [{ ran: true, result: passed }],
+      // Exactly enough room for build + review. A verify session would make
+      // the review dispatch hit the hard cap and fail this run.
+      maxSessions: 2,
+    });
+
+    const summary = await harness.promise;
+
+    expect(summary).toMatchObject({
+      state: "succeeded",
+      sessionIds: ["s-build", "s-review-1"],
+    });
+    expect(harness.requests).toHaveLength(1);
+    expect(harness.requests[0]).toMatchObject({
+      stage: "review",
+      verificationReport: passed,
+    });
+    expect(harness.traces).toContain(
+      PIPELINE_REASONS.deterministicVerificationPassed(1)
+    );
+  });
+});

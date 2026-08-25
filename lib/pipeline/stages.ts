@@ -46,12 +46,16 @@ import {
 } from "@/lib/agent-config/constants";
 import {
   buildBuildPrompt,
+  buildDeterministicVerificationFixSection,
+  buildDeterministicVerificationReviewSection,
   buildEpicReviewPrompt,
   buildReviewPrompt,
   buildTicketBuildPrompt,
   type PromptComment,
 } from "@/lib/claude/prompt-builder";
+import { resolveVerifyConfigForProject } from "@/lib/verify/config";
 import { buildRegressionFixSection } from "@/lib/verify/regression-report";
+import { runVerification as executeVerification } from "@/lib/verify/runner";
 import { readRegressionConfig } from "@/lib/pipeline/verify";
 import {
   enrichPromptWithDocumentMentions,
@@ -78,6 +82,7 @@ import {
 import { PIPELINE_REVIEW_TYPE } from "./constants";
 import { assessReviewOutcome } from "./findings";
 import type {
+  PipelineDeterministicVerificationOutcome,
   PipelineGuardCheck,
   PipelineReviewAssessment,
   PipelineStageHandle,
@@ -151,6 +156,9 @@ export interface PipelineStageDriverInit {
 
 export interface PipelineStageDriver {
   launchStage(request: PipelineStageRequest): Promise<PipelineStageHandle>;
+  runDeterministicVerification(
+    lastCodeSessionId: string | null
+  ): Promise<PipelineDeterministicVerificationOutcome>;
   assessReview(input: {
     sessionId: string;
     stageStartedAt: string;
@@ -193,6 +201,9 @@ export function createPipelineStageDriver(
       }
     },
 
+    runDeterministicVerification: (lastCodeSessionId) =>
+      runPipelineVerification(init, lastCodeSessionId),
+
     assessReview: async ({ sessionId, stageStartedAt }) => {
       const output =
         reviewOutputs.get(sessionId) ?? readLastNonEmptyText(sessionId) ?? "";
@@ -218,6 +229,49 @@ export function createPipelineStageDriver(
 
     checkGuards: (ownSessionIds) => checkPipelineGuards(init, ownSessionIds),
   };
+}
+
+/**
+ * Resolve the human-owned command list for this invocation and run it only
+ * in the successful code session's recorded epic worktree. There is no
+ * repository-checkout fallback: a missing/mismatched worktree fails closed.
+ */
+async function runPipelineVerification(
+  init: PipelineStageDriverInit,
+  lastCodeSessionId: string | null
+): Promise<PipelineDeterministicVerificationOutcome> {
+  const config = resolveVerifyConfigForProject(init.projectId);
+  if (!config.enabled) return { ran: false, result: null };
+  if (!lastCodeSessionId) {
+    throw new Error("Deterministic verification requires a code session");
+  }
+
+  const codeSession = db
+    .select({ worktreePath: agentSessions.worktreePath })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, lastCodeSessionId),
+        eq(agentSessions.projectId, init.projectId),
+        eq(agentSessions.epicId, init.epicId)
+      )
+    )
+    .get();
+  if (!codeSession?.worktreePath) {
+    throw new Error(
+      "Deterministic verification requires the epic worktree from the last code session"
+    );
+  }
+
+  const result = await executeVerification({
+    projectId: init.projectId,
+    epicId: init.epicId,
+    agentSessionId: lastCodeSessionId,
+    worktreePath: codeSession.worktreePath,
+    commands: config.commands,
+    timeoutMs: config.timeoutMs,
+  });
+  return { ran: true, result };
 }
 
 /**
@@ -575,7 +629,24 @@ async function dispatchPipelineStage(
             readRegressionConfig(projectId).patterns
           );
       }
+      if (request.verificationFailure) {
+        prompt =
+          prompt +
+          "\n\n" +
+          buildDeterministicVerificationFixSection(
+            request.verificationFailure
+          );
+      }
     }
+  }
+
+  if (isReview && request.verificationReport) {
+    prompt =
+      prompt +
+      "\n\n" +
+      buildDeterministicVerificationReviewSection(
+        request.verificationReport.commands
+      );
   }
 
   // Document mentions: user-written comments only. An agent comment naming a

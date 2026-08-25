@@ -41,6 +41,10 @@ const resolutionMocks = vi.hoisted(() => ({
   pickAlternativeReviewProvider: vi.fn(async () => "codex"),
 }));
 
+const verificationMocks = vi.hoisted(() => ({
+  runVerification: vi.fn(),
+}));
+
 vi.mock("@/lib/db", async () => {
   const { createTestDb } = await import("@/lib/db/test-utils");
   const created = createTestDb();
@@ -85,6 +89,10 @@ vi.mock("@/lib/events/emit", () => ({
   emitTicketMoved: vi.fn(),
 }));
 
+vi.mock("@/lib/verify/runner", () => ({
+  runVerification: verificationMocks.runVerification,
+}));
+
 vi.mock("@/lib/documents/mentions", () => ({
   enrichPromptWithDocumentMentions: vi.fn(
     ({ prompt }: { prompt: string }) => ({ prompt, missing: [] })
@@ -116,11 +124,15 @@ const {
   ticketComments,
   ticketActivityLog,
   namedAgents,
+  settings,
 } = await import("@/lib/db/schema");
 const { processManager } = await import("@/lib/claude/process-manager");
 const { createPipelineStageDriver } = await import("@/lib/pipeline/stages");
 const { PIPELINE_FIX_INSTRUCTIONS_SECTION } = await import(
   "@/lib/pipeline/stages"
+);
+const { verifyCommandsSettingKey, verifyTimeoutMsSettingKey } = await import(
+  "@/lib/verify/verify-constants"
 );
 
 let counter = 0;
@@ -170,6 +182,7 @@ function insertSession(input: {
   cliSessionId?: string | null;
   status?: string;
   agentType?: string;
+  worktreePath?: string | null;
 }) {
   db.insert(agentSessions)
     .values({
@@ -182,6 +195,7 @@ function insertSession(input: {
       status: input.status ?? "completed",
       agentType: input.agentType ?? "build",
       mode: "code",
+      worktreePath: input.worktreePath ?? null,
       createdAt: new Date().toISOString(),
     })
     .run();
@@ -393,6 +407,47 @@ describe("fix stage dispatch (epic scope)", () => {
     }
   });
 
+  it("injects the exact failed command tail into a deterministic-verification fix prompt", async () => {
+    const { projectId, epicId } = seed("review");
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+
+    const handle = await driver.launchStage({
+      stage: "fix",
+      attempt: 1,
+      fixCycle: 1,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+      verificationFailure: {
+        name: "unit tests",
+        command: "npm test",
+        exitCode: 1,
+        durationMs: 432,
+        tail: "AssertionError: expected 2 to equal 3\nfinal diagnostic line",
+      },
+    });
+
+    const row = db
+      .select({ prompt: agentSessions.prompt })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, handle.sessionId!))
+      .get()!;
+    expect(row.prompt).toContain("## Deterministic verification failure");
+    expect(row.prompt).toContain("unit tests");
+    expect(row.prompt).toContain("npm test");
+    expect(row.prompt).toContain("exited with code 1");
+    expect(row.prompt).toContain(
+      "AssertionError: expected 2 to equal 3\nfinal diagnostic line"
+    );
+
+    await handle.settled;
+  });
+
   it("starts fresh (no cliSessionId) when the provider cannot resume", async () => {
     const { projectId, epicId } = seed("review");
     const buildSid = `build-${counter}`;
@@ -576,6 +631,7 @@ describe("review stage dispatch", () => {
       .where(eq(agentSessions.id, handle.sessionId!))
       .get()!;
     expect(row).toMatchObject({ agentType: "review_code", mode: "plan" });
+    expect(row.prompt).not.toContain("## Deterministic verification evidence");
 
     const spawn = startOpts();
     expect(spawn.opts.mode).toBe("plan");
@@ -594,6 +650,62 @@ describe("review stage dispatch", () => {
     expect(
       db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
     ).toBe("review");
+  });
+
+  it("injects one compact line per passing command into the reviewer prompt", async () => {
+    const { projectId, epicId } = seed("review");
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+
+    const handle = await driver.launchStage({
+      stage: "review",
+      attempt: 1,
+      fixCycle: 0,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: "s-build",
+      verificationReport: {
+        id: "verify-pass",
+        projectId,
+        epicId,
+        agentSessionId: "s-build",
+        status: "pass",
+        startedAt: "2026-08-25T10:00:00.000Z",
+        finishedAt: "2026-08-25T10:00:02.000Z",
+        commands: [
+          {
+            name: "test",
+            command: "npm test",
+            exitCode: 0,
+            durationMs: 1_200,
+            tail: "ok",
+          },
+          {
+            name: "lint",
+            command: "npm run lint",
+            exitCode: 0,
+            durationMs: 800,
+            tail: "clean",
+          },
+        ],
+      },
+    });
+
+    const row = db
+      .select({ prompt: agentSessions.prompt })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, handle.sessionId!))
+      .get()!;
+    expect(row.prompt).toContain("## Deterministic verification evidence");
+    expect(row.prompt).toContain("- PASS — test: npm test (1200 ms)");
+    expect(row.prompt).toContain("- PASS — lint: npm run lint (800 ms)");
+    expect(row.prompt).not.toContain("clean");
+
+    await handle.settled;
   });
 
   it("passes an explicit reviewNamedAgentId through to the review resolution", async () => {
@@ -872,6 +984,90 @@ describe("story scope", () => {
       { purpose: "review", projectId, epicId, storyId }
     );
     await handle.settled;
+  });
+});
+
+describe("deterministic verification driver", () => {
+  it("returns the strict no-op outcome when verify_commands is not configured", async () => {
+    const { projectId, epicId } = seed("review");
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+
+    await expect(
+      driver.runDeterministicVerification("unused-session")
+    ).resolves.toEqual({ ran: false, result: null });
+    expect(verificationMocks.runVerification).not.toHaveBeenCalled();
+  });
+
+  it("resolves settings and runs in the recorded epic worktree with the code session attribution", async () => {
+    const { projectId, epicId } = seed("review");
+    const codeSessionId = `verify-code-${counter}`;
+    insertSession({
+      id: codeSessionId,
+      projectId,
+      epicId,
+      worktreePath: "/tmp/exact-epic-worktree",
+    });
+    db.insert(settings)
+      .values([
+        {
+          key: verifyCommandsSettingKey(projectId),
+          value: JSON.stringify([
+            { name: "test", command: "npm test" },
+            { name: "lint", command: "npm run lint" },
+          ]),
+        },
+        { key: verifyTimeoutMsSettingKey(projectId), value: "45000" },
+      ])
+      .run();
+
+    const expected = {
+      id: "verify-report",
+      projectId,
+      epicId,
+      agentSessionId: codeSessionId,
+      status: "pass" as const,
+      startedAt: "2026-08-25T10:00:00.000Z",
+      finishedAt: "2026-08-25T10:00:02.000Z",
+      commands: [
+        {
+          name: "test",
+          command: "npm test",
+          exitCode: 0,
+          durationMs: 2_000,
+          tail: "ok",
+        },
+      ],
+    };
+    verificationMocks.runVerification.mockResolvedValueOnce(expected);
+
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+    await expect(
+      driver.runDeterministicVerification(codeSessionId)
+    ).resolves.toEqual({ ran: true, result: expected });
+
+    expect(verificationMocks.runVerification).toHaveBeenCalledWith({
+      projectId,
+      epicId,
+      agentSessionId: codeSessionId,
+      worktreePath: "/tmp/exact-epic-worktree",
+      commands: [
+        { name: "test", command: "npm test" },
+        { name: "lint", command: "npm run lint" },
+      ],
+      timeoutMs: 45_000,
+    });
   });
 });
 

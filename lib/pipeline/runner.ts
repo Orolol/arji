@@ -2,6 +2,10 @@ import type { PipelineStage, PipelineState } from "./constants";
 import { PIPELINE_REASONS } from "./constants";
 import type { VerifyGate, VerifyGateOutcome } from "./verify";
 import type { RegressionReportPayload } from "@/lib/verify/regression-report";
+import type {
+  VerificationResult,
+  VerifyCommandResult,
+} from "@/lib/verify/runner";
 
 /**
  * Autonomous pipeline state machine (build → review → auto-fix → forensic).
@@ -82,6 +86,17 @@ export interface PipelineStageRequest {
    * the precise failure reason. Null/absent for every other dispatch.
    */
   verifyFailure?: RegressionReportPayload | null;
+  /** Failed human-configured command whose tail must guide this fix stage. */
+  verificationFailure?: VerifyCommandResult;
+  /** Passing mechanical evidence appended to this review stage's prompt. */
+  verificationReport?: VerificationResult;
+}
+
+/** Result of resolving and, when configured, running deterministic checks. */
+export interface PipelineDeterministicVerificationOutcome {
+  /** False when verify_commands is absent/empty: the strict passthrough path. */
+  ran: boolean;
+  result: VerificationResult | null;
 }
 
 /** Verdict of the blocking-findings assessment after a successful review. */
@@ -197,6 +212,14 @@ export interface RunPipelineOptions {
    */
   runVerifyGate?: VerifyGate;
   /**
+   * Arij-owned test/lint/build commands run after every successful code stage.
+   * Reports are plain persisted records, never agent sessions, so invoking
+   * this callback cannot consume the session ceiling.
+   */
+  runDeterministicVerification?: (
+    lastCodeSessionId: string | null
+  ) => Promise<PipelineDeterministicVerificationOutcome>;
+  /**
    * Parks a gate-rejected bug back to in_progress (guarded review →
    * in_progress) before the run terminates on regression exhaustion — the
    * board counterpart of the terminal failure. Receives the last code
@@ -242,6 +265,7 @@ export async function runPipeline(
     settled: options.initialBuild.settled,
     escalatedToProvider: null,
   };
+  let currentRequest: PipelineStageRequest | null = null;
 
   const readStatusSafe = (sessionId: string): string | null => {
     try {
@@ -358,6 +382,7 @@ export async function runPipeline(
 
     stage = request.stage;
     stageAttempt = request.attempt;
+    currentRequest = request;
     callbacks.onStageChange?.(
       RUNNING_STATE_BY_STAGE[request.stage],
       request.stage,
@@ -432,6 +457,15 @@ export async function runPipeline(
         fixCycle: fixCycles,
         previousAttemptSessionId: handle.sessionId,
         lastCodeSessionId,
+        ...(currentRequest?.verifyFailure
+          ? { verifyFailure: currentRequest.verifyFailure }
+          : {}),
+        ...(currentRequest?.verificationFailure
+          ? { verificationFailure: currentRequest.verificationFailure }
+          : {}),
+        ...(currentRequest?.verificationReport
+          ? { verificationReport: currentRequest.verificationReport }
+          : {}),
       });
     }
 
@@ -510,11 +544,109 @@ export async function runPipeline(
       continue;
     }
 
-    // Success: mechanical verify gate (bug tickets), then code stages flow
-    // into review. The gate never throws for check outcomes; an unhandled
-    // rejection is an infrastructure crash and fails the run.
+    // Success: Arij-owned deterministic commands, then the bug-specific
+    // regression gate, then review. Neither mechanical check creates an
+    // agent session or enters sessionIds, so the hard ceiling remains an
+    // agent-session ceiling.
     if (stage === "build" || stage === "fix") {
       lastCodeSessionId = handle.sessionId ?? lastCodeSessionId;
+      let verificationReport: VerificationResult | undefined;
+      try {
+        if (options.runDeterministicVerification) {
+          const verification =
+            await options.runDeterministicVerification(lastCodeSessionId);
+          if (verification.ran) {
+            if (!verification.result) {
+              throw new Error("Verification ran without producing a report");
+            }
+
+            if (verification.result.status === "pass") {
+              verificationReport = verification.result;
+              callbacks.onTrace?.(
+                PIPELINE_REASONS.deterministicVerificationPassed(
+                  verification.result.commands.length
+                ),
+                handle.sessionId
+              );
+            } else {
+              const failedCommand =
+                verification.result.commands.find(
+                  (command) => command.exitCode !== 0
+                ) ?? verification.result.commands.at(-1);
+              if (!failedCommand) {
+                throw new Error(
+                  "Failed verification report contains no command result"
+                );
+              }
+
+              callbacks.onTrace?.(
+                PIPELINE_REASONS.deterministicVerificationFailed(
+                  failedCommand.name
+                ),
+                handle.sessionId
+              );
+
+              if (fixCycles >= options.maxFixCycles) {
+                callbacks.onTrace?.(
+                  PIPELINE_REASONS.failedDeterministicVerification(fixCycles),
+                  handle.sessionId
+                );
+                try {
+                  options.parkRejectedTicket?.(
+                    lastCodeSessionId,
+                    "Deterministic verification rejected the branch"
+                  );
+                } catch (parkError) {
+                  console.warn(
+                    "[pipeline] Failed to park verification-rejected ticket:",
+                    parkError instanceof Error
+                      ? parkError.message
+                      : parkError
+                  );
+                }
+                return finish(
+                  "failed",
+                  `deterministic verification still failing after ${fixCycles} fix cycles`
+                );
+              }
+
+              fixCycles += 1;
+              const summary = await dispatch({
+                stage: "fix",
+                attempt: 1,
+                fixCycle: fixCycles,
+                previousAttemptSessionId: null,
+                lastCodeSessionId,
+                verificationFailure: failedCommand,
+              });
+              if (summary) return summary;
+              continue;
+            }
+          }
+        }
+      } catch (error) {
+        console.warn(
+          "[pipeline] Deterministic verification crashed:",
+          error instanceof Error ? error.message : error
+        );
+        callbacks.onTrace?.(
+          PIPELINE_REASONS.failedDeterministicVerificationCrashed,
+          handle.sessionId
+        );
+        try {
+          options.parkRejectedTicket?.(
+            lastCodeSessionId,
+            "Deterministic verification crashed before it could verify the branch"
+          );
+        } catch (parkError) {
+          console.warn(
+            "[pipeline] Failed to park verification-crashed ticket:",
+            parkError instanceof Error ? parkError.message : parkError
+          );
+        }
+        return finish("failed", "deterministic verification crashed");
+      }
+
       let gate: VerifyGateOutcome = { ran: false, passed: null, result: null };
       try {
         if (options.runVerifyGate) {
@@ -626,6 +758,7 @@ export async function runPipeline(
         fixCycle: fixCycles,
         previousAttemptSessionId: null,
         lastCodeSessionId,
+        ...(verificationReport ? { verificationReport } : {}),
       });
       if (summary) return summary;
       continue;
