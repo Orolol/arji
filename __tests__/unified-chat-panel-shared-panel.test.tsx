@@ -139,7 +139,7 @@ describe("UnifiedChatPanel shared panel mode", () => {
     expect(screen.queryByTestId("unified-panel-mobile-sheet")).not.toBeInTheDocument();
   });
 
-  it("renders the shared detail panel at the 440px spec width", async () => {
+  it("renders the shared ticket panel at the same width as the chat panel", async () => {
     render(
       <UnifiedChatPanel
         projectId="proj-1"
@@ -157,8 +157,86 @@ describe("UnifiedChatPanel shared panel mode", () => {
       expect(screen.getByTestId("unified-panel-shared")).toBeInTheDocument();
     });
 
+    // Default ratio 0.4 on a 1200px container → 480px.
     expect(screen.getByTestId("unified-panel-shared")).toHaveStyle({
-      width: "440px",
+      width: "480px",
     });
+
+    // Switching to the chat view must not change the container width:
+    // the ticket and chat panels are the same container.
+    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("unified-panel-expanded")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("unified-panel-expanded")).toHaveStyle({
+      width: "480px",
+    });
+  });
+
+  it("keeps chat and ticket panels at the same width at the smallest supported desktop size", async () => {
+    // 768px is the mobile breakpoint boundary: the desktop layout (board +
+    // divider + panel) must still render, and both views share its width.
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 768,
+    });
+
+    render(
+      <UnifiedChatPanel
+        projectId="proj-1"
+        sharedPanelView={{
+          panelId: "epic-1",
+          label: "Ticket",
+          content: <div>Ticket detail</div>,
+        }}
+      >
+        <BoardFixture />
+      </UnifiedChatPanel>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("unified-panel-shared")).toBeInTheDocument();
+    });
+
+    // 0.4 × 768 = 307.2 → 307px, inside the [300px panel min, board ≥ 400px]
+    // bounds, so no clamping — but the width must be identical in both views.
+    const sharedWidth = screen
+      .getByTestId("unified-panel-shared")
+      .style.width;
+    expect(sharedWidth).toBe("307px");
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("unified-panel-expanded")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("unified-panel-expanded").style.width).toBe(
+      sharedWidth,
+    );
+
+    // The board keeps rendering next to the panel at this size.
+    expect(screen.getByTestId("board-interaction")).toBeInTheDocument();
+    expect(screen.getByTestId("panel-divider")).toBeInTheDocument();
+  });
+
+  it("exposes the resize divider in the shared view, like the chat view", async () => {
+    render(
+      <UnifiedChatPanel
+        projectId="proj-1"
+        sharedPanelView={{
+          panelId: "epic-1",
+          label: "Ticket",
+          content: <div>Ticket detail</div>,
+        }}
+      >
+        <BoardFixture />
+      </UnifiedChatPanel>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("unified-panel-shared")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("panel-divider")).toBeInTheDocument();
   });
 });
