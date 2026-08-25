@@ -30,13 +30,18 @@ export function isSameLocalDay(left: Date, right: Date): boolean {
  * compares its minute interval. `lastRunAt` is durable, so a new scheduler
  * instance after a server restart reaches the same answer as the old one.
  */
-export function isRoutineDue(routine: Routine, now: Date = new Date()): boolean {
+export function isRoutineDue(
+  routine: Routine,
+  now: Date = new Date(),
+): boolean {
   if (!routine.enabled) return false;
 
   if (routine.kind === "ci_watch") {
     let intervalMinutes = DEFAULT_CI_WATCH_INTERVAL_MINUTES;
     try {
-      const config = JSON.parse(routine.config) as { intervalMinutes?: unknown };
+      const config = JSON.parse(routine.config) as {
+        intervalMinutes?: unknown;
+      };
       if (
         Number.isInteger(config?.intervalMinutes) &&
         (config.intervalMinutes as number) > 0
@@ -86,11 +91,7 @@ export interface RoutineSchedulerDeps {
 
 export const defaultRoutineSchedulerDeps: RoutineSchedulerDeps = {
   listEnabledRoutines: () =>
-    db
-      .select()
-      .from(routines)
-      .where(eq(routines.enabled, true))
-      .all(),
+    db.select().from(routines).where(eq(routines.enabled, true)).all(),
   markStarted: (routineId, startedAt) => {
     db.update(routines)
       .set({ lastRunAt: startedAt, lastStatus: "running" })
@@ -106,6 +107,72 @@ export const defaultRoutineSchedulerDeps: RoutineSchedulerDeps = {
   execute: executeRoutineAction,
   notify: createRoutineRunNotification,
 };
+
+export interface InterruptedRoutineRecoveryDeps {
+  listInterruptedRoutines(): Routine[];
+  markFailed(routineId: string): void;
+  notify(input: {
+    projectId: string;
+    kind: Routine["kind"];
+    status: "failed";
+    message: string;
+    targetUrl: string;
+  }): void;
+}
+
+const defaultInterruptedRoutineRecoveryDeps: InterruptedRoutineRecoveryDeps = {
+  listInterruptedRoutines: () =>
+    db.select().from(routines).where(eq(routines.lastStatus, "running")).all(),
+  markFailed: (routineId) => {
+    db.update(routines)
+      .set({ lastStatus: "failed" })
+      .where(eq(routines.id, routineId))
+      .run();
+  },
+  notify: createRoutineRunNotification,
+};
+
+/**
+ * A process restart loses every in-flight action. Reconcile its durable
+ * `running` claim once at boot so the settings UI and audit signal describe
+ * the interrupted terminal outcome instead of remaining stuck forever.
+ */
+export function recoverInterruptedRoutineRuns(
+  deps: InterruptedRoutineRecoveryDeps = defaultInterruptedRoutineRecoveryDeps,
+): number {
+  const interrupted = deps.listInterruptedRoutines();
+  let recovered = 0;
+
+  for (const routine of interrupted) {
+    try {
+      deps.markFailed(routine.id);
+      recovered += 1;
+    } catch (error) {
+      console.error(
+        `[routines] Failed to reconcile interrupted routine ${routine.id}`,
+        error,
+      );
+      continue;
+    }
+
+    try {
+      deps.notify({
+        projectId: routine.projectId,
+        kind: routine.kind,
+        status: "failed",
+        message: "Routine execution was interrupted by a server restart.",
+        targetUrl: `/projects/${routine.projectId}`,
+      });
+    } catch (error) {
+      console.error(
+        `[routines] Failed to notify interrupted routine ${routine.id}`,
+        error,
+      );
+    }
+  }
+
+  return recovered;
+}
 
 export interface RoutineSweepResult {
   routineId: string;
@@ -126,7 +193,7 @@ export class RoutineScheduler {
   private readonly runningRoutineIds = new Set<string>();
 
   constructor(
-    private readonly deps: RoutineSchedulerDeps = defaultRoutineSchedulerDeps
+    private readonly deps: RoutineSchedulerDeps = defaultRoutineSchedulerDeps,
   ) {}
 
   async sweep(now: Date = new Date()): Promise<RoutineSweepResult[]> {
@@ -141,7 +208,7 @@ export class RoutineScheduler {
     return Promise.all(
       candidates
         .filter((routine) => isRoutineDue(routine, now))
-        .map((routine) => this.run(routine, now))
+        .map((routine) => this.run(routine, now)),
     );
   }
 
@@ -149,10 +216,7 @@ export class RoutineScheduler {
     return this.runningRoutineIds.has(routineId);
   }
 
-  private async run(
-    routine: Routine,
-    now: Date
-  ): Promise<RoutineSweepResult> {
+  private async run(routine: Routine, now: Date): Promise<RoutineSweepResult> {
     // A second interval can fire while a slow GitHub request is still in
     // flight. The durable timestamp also stops it, but this guard closes the
     // window for concurrent sweeps that loaded candidates before the claim.
@@ -171,7 +235,7 @@ export class RoutineScheduler {
       this.deps.markStarted(routine.id, startedAt);
       claimed = true;
       console.info(
-        `[routines] Triggering ${routine.kind} routine ${routine.id} for project ${routine.projectId}`
+        `[routines] Triggering ${routine.kind} routine ${routine.id} for project ${routine.projectId}`,
       );
 
       const result = await this.deps.execute({
@@ -180,10 +244,12 @@ export class RoutineScheduler {
         lastStatus: "running",
       });
       this.deps.markFinished(routine.id, result.status);
-      this.notifySafely(routine, {
-        ...result,
-        status: result.status,
-      });
+      if (result.shouldNotify !== false) {
+        this.notifySafely(routine, {
+          ...result,
+          status: result.status,
+        });
+      }
       return {
         routineId: routine.id,
         status: result.status,
@@ -197,7 +263,7 @@ export class RoutineScheduler {
         } catch (persistError) {
           console.error(
             `[routines] Failed to persist failure for routine ${routine.id}`,
-            persistError
+            persistError,
           );
         }
       }
@@ -215,11 +281,13 @@ export class RoutineScheduler {
 
   private notifySafely(
     routine: Routine,
-    result: RoutineActionResult | {
-      status: "failed";
-      message: string;
-      targetUrl: string;
-    }
+    result:
+      | RoutineActionResult
+      | {
+          status: "failed";
+          message: string;
+          targetUrl: string;
+        },
   ): void {
     try {
       this.deps.notify({
@@ -232,7 +300,7 @@ export class RoutineScheduler {
     } catch (error) {
       console.error(
         `[routines] Failed to create notification for routine ${routine.id}`,
-        error
+        error,
       );
     }
   }
@@ -243,6 +311,7 @@ const ROUTINE_SCHEDULER_GLOBAL_KEY = Symbol.for("arij.routine-scheduler");
 interface RoutineSchedulerSlot {
   scheduler: RoutineScheduler;
   timer: ReturnType<typeof setInterval> | null;
+  recoveredInterruptedRuns: boolean;
 }
 
 type RoutineSchedulerGlobal = {
@@ -255,6 +324,7 @@ function schedulerSlot(): RoutineSchedulerSlot {
     store[ROUTINE_SCHEDULER_GLOBAL_KEY] = {
       scheduler: new RoutineScheduler(),
       timer: null,
+      recoveredInterruptedRuns: false,
     };
   }
   return store[ROUTINE_SCHEDULER_GLOBAL_KEY];
@@ -268,6 +338,16 @@ export function getRoutineScheduler(): RoutineScheduler {
 export function startRoutineScheduler(): void {
   const slot = schedulerSlot();
   if (slot.timer) return;
+
+  if (!slot.recoveredInterruptedRuns) {
+    slot.recoveredInterruptedRuns = true;
+    try {
+      recoverInterruptedRoutineRuns();
+    } catch (error) {
+      // A boot cleanup failure must not disable all future routine sweeps.
+      console.error("[routines] Failed to reconcile interrupted runs", error);
+    }
+  }
 
   slot.timer = setInterval(() => {
     void slot.scheduler.sweep().catch((error) => {

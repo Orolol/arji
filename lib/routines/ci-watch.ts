@@ -1,11 +1,6 @@
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import {
-  epics,
-  projects,
-  routines,
-  type Routine,
-} from "@/lib/db/schema";
+import { epics, projects, routines, type Routine } from "@/lib/db/schema";
 import {
   fetchPullRequestCiFailureEvidence,
   fetchPullRequestCiStatus,
@@ -58,13 +53,13 @@ export interface CiWatchDeps {
   fetchPullRequestCi(
     owner: string,
     repo: string,
-    prNumber: number
+    prNumber: number,
   ): Promise<PullRequestCiStatus>;
   isAutofixEnabled(projectId: string): boolean;
   fetchFailureEvidence(
     owner: string,
     repo: string,
-    snapshot: PullRequestCiStatus
+    snapshot: PullRequestCiStatus,
   ): Promise<PullRequestCiFailureEvidence[]>;
   launchAutofix(input: {
     projectId: string;
@@ -100,8 +95,8 @@ export const defaultCiWatchDeps: CiWatchDeps = {
         and(
           eq(epics.projectId, projectId),
           eq(epics.prStatus, "open"),
-          isNotNull(epics.prNumber)
-        )
+          isNotNull(epics.prNumber),
+        ),
       )
       .all(),
   getGitHubOwnerRepo: (projectId) =>
@@ -115,10 +110,7 @@ export const defaultCiWatchDeps: CiWatchDeps = {
   fetchFailureEvidence: fetchPullRequestCiFailureEvidence,
   launchAutofix: launchCiAutofixSession,
   persistConfig: (routineId, config) => {
-    db.update(routines)
-      .set({ config })
-      .where(eq(routines.id, routineId))
-      .run();
+    db.update(routines).set({ config }).where(eq(routines.id, routineId)).run();
   },
   notifyFailure: createCiWatchFailureNotification,
 };
@@ -134,7 +126,7 @@ function parseConfig(routine: Routine): Record<string, unknown> {
     throw new Error(
       `Routine ${routine.id} has invalid config: ${
         error instanceof Error ? error.message : "invalid JSON"
-      }`
+      }`,
     );
   }
 }
@@ -144,7 +136,11 @@ function parseStoredState(value: unknown): StoredCiWatchState {
 
   const state: StoredCiWatchState = {};
   for (const [epicId, candidate] of Object.entries(value)) {
-    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate)
+    ) {
       continue;
     }
     const row = candidate as Partial<StoredCiObservation>;
@@ -166,9 +162,7 @@ function parseStoredState(value: unknown): StoredCiWatchState {
           ? row.autofixAttempted
           : false,
       autofixSessionId:
-        typeof row.autofixSessionId === "string"
-          ? row.autofixSessionId
-          : null,
+        typeof row.autofixSessionId === "string" ? row.autofixSessionId : null,
     } as StoredCiObservation;
   }
   return state;
@@ -183,7 +177,7 @@ function parseStoredState(value: unknown): StoredCiWatchState {
 export function nextCiObservation(
   previous: StoredCiObservation | undefined,
   prNumber: number,
-  snapshot: PullRequestCiStatus
+  snapshot: PullRequestCiStatus,
 ): { observation: StoredCiObservation; shouldNotify: boolean } {
   const sameHead =
     previous?.prNumber === prNumber && previous.headSha === snapshot.headSha;
@@ -197,11 +191,9 @@ export function nextCiObservation(
       state: snapshot.state,
       failureNotified: alreadyNotified || shouldNotify,
       autofixAttempted: sameHead
-        ? previous?.autofixAttempted ?? false
+        ? (previous?.autofixAttempted ?? false)
         : false,
-      autofixSessionId: sameHead
-        ? previous?.autofixSessionId ?? null
-        : null,
+      autofixSessionId: sameHead ? (previous?.autofixSessionId ?? null) : null,
     },
     shouldNotify,
   };
@@ -209,19 +201,20 @@ export function nextCiObservation(
 
 export async function runCiWatchRoutine(
   routine: Routine,
-  deps: CiWatchDeps = defaultCiWatchDeps
+  deps: CiWatchDeps = defaultCiWatchDeps,
 ): Promise<RoutineActionResult> {
   const openPullRequests = deps
     .listOpenPullRequestEpics(routine.projectId)
     .filter(
       (epic): epic is CiWatchEpic & { prNumber: number } =>
-        epic.prStatus === "open" && epic.prNumber !== null
+        epic.prStatus === "open" && epic.prNumber !== null,
     );
   if (openPullRequests.length === 0) {
     return {
       status: "skipped",
       message: "No open pull requests are currently attached to epics.",
       targetUrl: `/projects/${routine.projectId}`,
+      shouldNotify: false,
     };
   }
 
@@ -250,12 +243,12 @@ export async function runCiWatchRoutine(
       const snapshot = await deps.fetchPullRequestCi(
         owner,
         repo,
-        epic.prNumber
+        epic.prNumber,
       );
       const decision = nextCiObservation(
         previousState[epic.id],
         epic.prNumber,
-        snapshot
+        snapshot,
       );
       nextState[epic.id] = decision.observation;
       if (snapshot.state === "failing") failingPullRequests += 1;
@@ -264,7 +257,7 @@ export async function runCiWatchRoutine(
       // restart immediately after the notification unable to replay it.
       deps.persistConfig(
         routine.id,
-        JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState })
+        JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState }),
       );
 
       if (decision.shouldNotify) {
@@ -294,24 +287,24 @@ export async function runCiWatchRoutine(
         };
         deps.persistConfig(
           routine.id,
-          JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState })
+          JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState }),
         );
 
         let failures: PullRequestCiFailureEvidence[];
         try {
           failures = boundCiAutofixEvidence(
-            await deps.fetchFailureEvidence(owner, repo, snapshot)
+            await deps.fetchFailureEvidence(owner, repo, snapshot),
           );
         } catch (error) {
           console.warn(
             `[ci-watch] Could not fetch CI log tails for PR #${epic.prNumber}`,
-            error
+            error,
           );
           failures = boundCiAutofixEvidence(
             snapshot.failedChecks.map((name) => ({
               name,
               logTail: null,
-            }))
+            })),
           );
         }
 
@@ -336,7 +329,7 @@ export async function runCiWatchRoutine(
         };
         deps.persistConfig(
           routine.id,
-          JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState })
+          JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState }),
         );
       }
 
@@ -345,7 +338,7 @@ export async function runCiWatchRoutine(
       failedPullRequestNumbers.push(epic.prNumber);
       console.error(
         `[ci-watch] Failed to process PR #${epic.prNumber}; continuing the sweep`,
-        error
+        error,
       );
     }
   }
@@ -355,7 +348,7 @@ export async function runCiWatchRoutine(
   }
   deps.persistConfig(
     routine.id,
-    JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState })
+    JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState }),
   );
 
   return {
@@ -372,5 +365,9 @@ export async function runCiWatchRoutine(
         : ""
     }.`,
     targetUrl: `/projects/${routine.projectId}`,
+    shouldNotify:
+      newFailures > 0 ||
+      autofixesLaunched > 0 ||
+      failedPullRequestNumbers.length > 0,
   };
 }

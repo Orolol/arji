@@ -67,7 +67,7 @@ function deps(row: Routine): CiWatchDeps {
       snapshot.failedChecks.map((name: string) => ({
         name,
         logTail: `${name} failed`,
-      }))
+      })),
     ),
     launchAutofix: vi.fn(async () => ({
       status: "launched" as const,
@@ -90,14 +90,27 @@ describe("CI watch", () => {
     const row = routine();
     const watchDeps = deps(row);
 
-    await runCiWatchRoutine(row, watchDeps);
+    const result = await runCiWatchRoutine(row, watchDeps);
 
     expect(watchDeps.fetchPullRequestCi).toHaveBeenCalledTimes(1);
     expect(watchDeps.fetchPullRequestCi).toHaveBeenCalledWith(
       "acme",
       "widgets",
-      11
+      11,
     );
+    expect(result.shouldNotify).toBe(true);
+  });
+
+  it("suppresses the generic run notification when no PR needs polling", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.listOpenPullRequestEpics).mockReturnValue([]);
+
+    const result = await runCiWatchRoutine(row, watchDeps);
+
+    expect(result.status).toBe("skipped");
+    expect(result.shouldNotify).toBe(false);
+    expect(watchDeps.fetchPullRequestCi).not.toHaveBeenCalled();
   });
 
   it("notifies a failing SHA once and includes the failed check names", async () => {
@@ -148,7 +161,7 @@ describe("CI watch", () => {
         epicId: "epic-open-2",
         prNumber: 14,
         failedChecks: ["e2e"],
-      })
+      }),
     );
     expect(result.message).toContain("Checked 1 of 2 open pull requests");
     expect(result.message).toContain("1 could not be processed (PR #11)");
@@ -169,10 +182,12 @@ describe("CI watch", () => {
         failedChecks: ["e2e"],
       });
 
-    await runCiWatchRoutine(row, watchDeps);
+    const passingResult = await runCiWatchRoutine(row, watchDeps);
     expect(watchDeps.notifyFailure).not.toHaveBeenCalled();
-    await runCiWatchRoutine(row, watchDeps);
+    const failingResult = await runCiWatchRoutine(row, watchDeps);
 
+    expect(passingResult.shouldNotify).toBe(false);
+    expect(failingResult.shouldNotify).toBe(true);
     expect(watchDeps.notifyFailure).toHaveBeenCalledTimes(1);
   });
 
@@ -228,9 +243,7 @@ describe("CI watch", () => {
     ];
     expect(isCiAutofixEnabled("project-1")).toBe(false);
 
-    dbMockState.allRows = [
-      { key: "ci_autofix_enabled", value: "true" },
-    ];
+    dbMockState.allRows = [{ key: "ci_autofix_enabled", value: "true" }];
     expect(isCiAutofixEnabled("project-1")).toBe(true);
   });
 
@@ -276,11 +289,11 @@ describe("CI watch", () => {
     expect(watchDeps.launchAutofix).toHaveBeenCalledTimes(2);
     expect(watchDeps.launchAutofix).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ headSha: "sha-1", prNumber: 11 })
+      expect.objectContaining({ headSha: "sha-1", prNumber: 11 }),
     );
     expect(watchDeps.launchAutofix).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ headSha: "sha-2", prNumber: 11 })
+      expect.objectContaining({ headSha: "sha-2", prNumber: 11 }),
     );
   });
 

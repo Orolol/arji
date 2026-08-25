@@ -12,6 +12,12 @@ export interface RoutineActionResult {
   status: "completed" | "skipped";
   message: string;
   targetUrl: string;
+  /**
+   * Daily actions omit this and notify every trigger. High-frequency polling
+   * actions may suppress a quiet result while retaining lastRunAt/lastStatus
+   * and the scheduler log entry.
+   */
+  shouldNotify?: boolean;
 }
 
 interface NightRunRequest {
@@ -27,11 +33,11 @@ interface NightRunRequest {
 export interface RoutineActionDeps {
   listNightRunEpicIds(
     projectId: string,
-    statuses: Array<"todo" | "backlog">
+    statuses: Array<"todo" | "backlog">,
   ): string[];
   launchNightRun(
     projectId: string,
-    request: NightRunRequest
+    request: NightRunRequest,
   ): Promise<{
     batchId: string;
     totalEpics: number;
@@ -50,7 +56,7 @@ export interface RoutineActionDeps {
  */
 async function launchNightRunThroughBuildRoute(
   projectId: string,
-  requestBody: NightRunRequest
+  requestBody: NightRunRequest,
 ): Promise<{ batchId: string; totalEpics: number; waves: number }> {
   const [{ NextRequest }, { POST }] = await Promise.all([
     import("next/server"),
@@ -62,7 +68,7 @@ async function launchNightRunThroughBuildRoute(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestBody),
-    }
+    },
   );
   const response = await POST(request, {
     params: Promise.resolve({ projectId }),
@@ -93,7 +99,7 @@ export const defaultRoutineActionDeps: RoutineActionDeps = {
       .select({ id: epics.id })
       .from(epics)
       .where(
-        and(eq(epics.projectId, projectId), inArray(epics.status, statuses))
+        and(eq(epics.projectId, projectId), inArray(epics.status, statuses)),
       )
       .orderBy(epics.position)
       .all()
@@ -104,7 +110,9 @@ export const defaultRoutineActionDeps: RoutineActionDeps = {
   runCiWatch: runCiWatchRoutine,
 };
 
-function parseConfig(routine: Pick<Routine, "id" | "config">): Record<string, unknown> {
+function parseConfig(
+  routine: Pick<Routine, "id" | "config">,
+): Record<string, unknown> {
   try {
     const parsed = JSON.parse(routine.config) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -115,7 +123,7 @@ function parseConfig(routine: Pick<Routine, "id" | "config">): Record<string, un
     throw new Error(
       `Routine ${routine.id} has invalid config: ${
         error instanceof Error ? error.message : "invalid JSON"
-      }`
+      }`,
     );
   }
 }
@@ -123,7 +131,7 @@ function parseConfig(routine: Pick<Routine, "id" | "config">): Record<string, un
 function optionalBoolean(
   config: Record<string, unknown>,
   key: string,
-  fallback: boolean
+  fallback: boolean,
 ): boolean {
   const value = config[key];
   if (value === undefined) return fallback;
@@ -135,7 +143,7 @@ function optionalBoolean(
 
 function parseNightRunRequest(
   routine: Routine,
-  deps: RoutineActionDeps
+  deps: RoutineActionDeps,
 ): NightRunRequest | null {
   const config = parseConfig(routine);
   const includeBacklog = optionalBoolean(config, "includeBacklog", false);
@@ -170,7 +178,7 @@ function parseNightRunRequest(
       (config.circuitBreaker as number) > 10
     ) {
       throw new Error(
-        "Routine config.circuitBreaker must be an integer between 0 and 10"
+        "Routine config.circuitBreaker must be an integer between 0 and 10",
       );
     }
     request.circuitBreaker = config.circuitBreaker as number;
@@ -192,7 +200,7 @@ function parseNightRunRequest(
 
 async function runNightRoutine(
   routine: Routine,
-  deps: RoutineActionDeps
+  deps: RoutineActionDeps,
 ): Promise<RoutineActionResult> {
   const request = parseNightRunRequest(routine, deps);
   if (!request) {
@@ -210,14 +218,14 @@ async function runNightRoutine(
       result.totalEpics === 1 ? "" : "s"
     } across ${result.waves} wave${result.waves === 1 ? "" : "s"}.`,
     targetUrl: `/projects/${routine.projectId}?nightRun=${encodeURIComponent(
-      result.batchId
+      result.batchId,
     )}`,
   };
 }
 
 async function runGitHubIssueSyncRoutine(
   routine: Routine,
-  deps: RoutineActionDeps
+  deps: RoutineActionDeps,
 ): Promise<RoutineActionResult> {
   const config = parseConfig(routine);
   const configuredInterval = config.intervalMinutes ?? 15;
@@ -225,7 +233,9 @@ async function runGitHubIssueSyncRoutine(
     !Number.isInteger(configuredInterval) ||
     (configuredInterval as number) < 1
   ) {
-    throw new Error("Routine config.intervalMinutes must be a positive integer");
+    throw new Error(
+      "Routine config.intervalMinutes must be a positive integer",
+    );
   }
   const intervalMinutes = configuredInterval as number;
 
@@ -250,7 +260,7 @@ async function runGitHubIssueSyncRoutine(
 /** Execute one currently supported routine kind through its canonical service. */
 export async function executeRoutineAction(
   routine: Routine,
-  deps: RoutineActionDeps = defaultRoutineActionDeps
+  deps: RoutineActionDeps = defaultRoutineActionDeps,
 ): Promise<RoutineActionResult> {
   switch (routine.kind) {
     case "night_run":
