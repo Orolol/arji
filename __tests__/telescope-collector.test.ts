@@ -262,6 +262,17 @@ describe("mechanical signatures", () => {
     expect(first.motif).toContain("<n>");
   });
 
+  it("normalizes commit-like hashes without erasing ordinary hexadecimal words", () => {
+    const signature = buildFailureSignature({
+      provider: "codex",
+      agentType: "ticket_build",
+      motif: "Commit abc1234 defaced the output after 1712345678 attempts",
+    });
+
+    expect(signature.motif).toContain("commit <hash> defaced");
+    expect(signature.motif).toContain("after <n> attempts");
+  });
+
   it("groups equal motifs but keeps providers and agent types separate", () => {
     const { db } = testDatabase();
     const epicId = seedProject(db, "project-signatures");
@@ -405,8 +416,8 @@ describe("forensic reports and recurring findings", () => {
     expect(forensic).toMatchObject({
       sessionId: forensicSession,
       relatedSessionId: deadSession,
-      provider: "codex",
-      agentType: "forensic",
+      provider: "claude-code",
+      agentType: "ticket_build",
       message: "Root cause: flaky package mirror",
     });
 
@@ -423,6 +434,69 @@ describe("forensic reports and recurring findings", () => {
     expect(
       result.groups.filter((group) => group.sourceCounts.finding > 0)
     ).toHaveLength(2);
+  });
+
+  it("requires findings to recur within the provider and agent-type signature", () => {
+    const { db } = testDatabase();
+    const epicId = seedProject(db, "project-finding-dimensions");
+    const claudeReview = seedSession(db, {
+      projectId: "project-finding-dimensions",
+      epicId,
+      status: "completed",
+      outcome: "answered",
+      provider: "claude-code",
+      agentType: "review_code",
+      error: null,
+    });
+    const codexReview = seedSession(db, {
+      projectId: "project-finding-dimensions",
+      epicId,
+      status: "completed",
+      outcome: "answered",
+      provider: "codex",
+      agentType: "review_code",
+      error: null,
+    });
+
+    for (const [id, sessionId, body] of [
+      ["claude-finding-1", claudeReview, "[major] First auth issue"],
+      ["claude-finding-2", claudeReview, "[critical] Second auth issue"],
+      ["codex-finding-1", codexReview, "[major] Third auth issue"],
+    ] as const) {
+      db.insert(reviewComments)
+        .values({
+          id,
+          epicId,
+          filePath: "lib/auth.ts",
+          lineNumber: 12,
+          body,
+          author: "agent",
+          status: "open",
+          agentSessionId: sessionId,
+          createdAt: daysAgo(1),
+          updatedAt: daysAgo(1),
+        })
+        .run();
+    }
+
+    const result = collectFailureDigestEvidence(
+      "project-finding-dimensions",
+      { now: NOW, database: db }
+    );
+    const findingGroups = result.groups.filter(
+      (group) => group.sourceCounts.finding > 0
+    );
+
+    expect(findingGroups).toHaveLength(1);
+    expect(findingGroups[0]).toMatchObject({
+      provider: "claude-code",
+      agentType: "review_code",
+      count: 2,
+    });
+    expect(findingGroups[0].examples.map((item) => item.id).sort()).toEqual([
+      "finding:claude-finding-1",
+      "finding:claude-finding-2",
+    ]);
   });
 });
 

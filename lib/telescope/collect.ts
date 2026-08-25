@@ -6,7 +6,7 @@
  * provider + agent type + failure motif, and returns a strictly bounded set
  * of examples for the later `failure_digest` prompt.
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, like, max, or, sql } from "drizzle-orm";
 import { db as defaultDb, type ArijDatabase } from "@/lib/db";
 import {
   agentSessionChunks,
@@ -249,13 +249,15 @@ function sessionTerminalAt(row: SessionEvidenceRow): string | null {
 function trimHead(value: string, maxChars: number): string {
   const trimmed = value.trim();
   if (maxChars <= 0) return "";
-  return trimmed.length > maxChars ? trimmed.slice(0, maxChars) : trimmed;
+  if (trimmed.length <= maxChars) return trimmed;
+  return maxChars === 1 ? "…" : `${trimmed.slice(0, maxChars - 1)}…`;
 }
 
 function trimTail(value: string, maxChars: number): string {
   const trimmed = value.trim();
   if (maxChars <= 0) return "";
-  return trimmed.length > maxChars ? trimmed.slice(-maxChars) : trimmed;
+  if (trimmed.length <= maxChars) return trimmed;
+  return maxChars === 1 ? "…" : `…${trimmed.slice(-(maxChars - 1))}`;
 }
 
 /** Normalizes the two categorical parts of a signature. */
@@ -280,7 +282,10 @@ export function normalizeFailureMotif(value: string): string {
     .replace(/^\[(critical|major)\]\s*/i, "")
     .replace(/\b\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}:\d{2}(?:\.\d+)?z?\b/gi, "<timestamp>")
     .replace(/\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/gi, "<id>")
-    .replace(/\b[0-9a-f]{7,64}\b/gi, "<hash>")
+    .replace(
+      /\b(?=[0-9a-f]{7,64}\b)(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]+\b/gi,
+      "<hash>"
+    )
     .replace(/(?:file:\/\/)?\/(?:[^\s:'\"`]+\/)+[^\s:'\"`]+/g, "<path>")
     .replace(/:\d+(?::\d+)?\b/g, ":<n>")
     .replace(/\b\d+\b/g, "<n>")
@@ -338,9 +343,35 @@ function loadLatestChunks(
   const latest = new Map<string, TelescopeChunkExcerpt>();
   if (wanted.size === 0) return latest;
 
-  // Avoid an N+1 while keeping below SQLite's usual 999-parameter ceiling.
+  // Read only each session's maximum sequence first, then fetch the matching
+  // rows. This keeps raw chunk bodies out of memory except for the winners.
+  // Batch sizes stay below SQLite's usual 999-parameter ceiling: the second
+  // query uses two bound values per session.
   for (let start = 0; start < sessionIds.length; start += 400) {
     const ids = sessionIds.slice(start, start + 400);
+    const latestSequences = database
+      .select({
+        sessionId: agentSessionChunks.sessionId,
+        sequence: max(agentSessionChunks.sequence),
+      })
+      .from(agentSessionChunks)
+      .where(inArray(agentSessionChunks.sessionId, ids))
+      .groupBy(agentSessionChunks.sessionId)
+      .all()
+      .filter(
+        (row): row is { sessionId: string; sequence: number } =>
+          row.sequence !== null
+      );
+    const latestPredicate = or(
+      ...latestSequences.map((row) =>
+        and(
+          eq(agentSessionChunks.sessionId, row.sessionId),
+          eq(agentSessionChunks.sequence, row.sequence)
+        )
+      )
+    );
+    if (!latestPredicate) continue;
+
     for (const row of database
       .select({
         sessionId: agentSessionChunks.sessionId,
@@ -349,10 +380,8 @@ function loadLatestChunks(
         content: agentSessionChunks.content,
       })
       .from(agentSessionChunks)
-      .where(inArray(agentSessionChunks.sessionId, ids))
+      .where(latestPredicate)
       .all()) {
-      const existing = latest.get(row.sessionId);
-      if (existing && existing.sequence >= row.sequence) continue;
       latest.set(row.sessionId, {
         streamType: row.streamType,
         sequence: row.sequence,
@@ -369,6 +398,8 @@ function collectSessionEvidence(
   sinceMs: number,
   untilMs: number
 ): TelescopeEvidence[] {
+  const sinceIso = new Date(sinceMs).toISOString();
+  const untilIso = new Date(untilMs).toISOString();
   const rows: SessionEvidenceRow[] = options.database
     .select({
       id: agentSessions.id,
@@ -386,7 +417,17 @@ function collectSessionEvidence(
       completedAt: agentSessions.completedAt,
     })
     .from(agentSessions)
-    .where(eq(agentSessions.projectId, projectId))
+    .where(
+      and(
+        eq(agentSessions.projectId, projectId),
+        or(
+          eq(agentSessions.status, "failed"),
+          inArray(agentSessions.outcome, ["silent", "transition_refused"])
+        ),
+        sql`datetime(coalesce(${agentSessions.endedAt}, ${agentSessions.completedAt}, ${agentSessions.startedAt}, ${agentSessions.createdAt})) >= datetime(${sinceIso})`,
+        sql`datetime(coalesce(${agentSessions.endedAt}, ${agentSessions.completedAt}, ${agentSessions.startedAt}, ${agentSessions.createdAt})) <= datetime(${untilIso})`
+      )
+    )
     .all()
     .filter((row) => {
       const eligible =
@@ -459,13 +500,51 @@ function stripForensicMetadata(content: string): string {
     .trim();
 }
 
+function loadSessionDimensions(
+  database: ArijDatabase,
+  projectId: string,
+  sessionIds: string[]
+): Map<string, { provider: string | null; agentType: string | null }> {
+  const dimensions = new Map<
+    string,
+    { provider: string | null; agentType: string | null }
+  >();
+  const uniqueIds = [...new Set(sessionIds)];
+  for (let start = 0; start < uniqueIds.length; start += 400) {
+    const ids = uniqueIds.slice(start, start + 400);
+    if (ids.length === 0) continue;
+    for (const row of database
+      .select({
+        id: agentSessions.id,
+        provider: agentSessions.provider,
+        agentType: agentSessions.agentType,
+      })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.projectId, projectId),
+          inArray(agentSessions.id, ids)
+        )
+      )
+      .all()) {
+      dimensions.set(row.id, {
+        provider: row.provider,
+        agentType: row.agentType,
+      });
+    }
+  }
+  return dimensions;
+}
+
 function collectForensicEvidence(
   projectId: string,
   options: ResolvedOptions,
   sinceMs: number,
   untilMs: number
 ): TelescopeEvidence[] {
-  return options.database
+  const sinceIso = new Date(sinceMs).toISOString();
+  const untilIso = new Date(untilMs).toISOString();
+  const rows = options.database
     .select({
       id: ticketComments.id,
       epicId: ticketComments.epicId,
@@ -482,7 +561,10 @@ function collectForensicEvidence(
     .where(
       and(
         eq(epics.projectId, projectId),
-        eq(ticketComments.author, "agent")
+        eq(ticketComments.author, "agent"),
+        like(ticketComments.content, `${FORENSIC_COMMENT_HEADING}%`),
+        sql`datetime(${ticketComments.createdAt}) >= datetime(${sinceIso})`,
+        sql`datetime(${ticketComments.createdAt}) <= datetime(${untilIso})`
       )
     )
     .all()
@@ -490,12 +572,27 @@ function collectForensicEvidence(
       (row) =>
         row.content.startsWith(FORENSIC_COMMENT_HEADING) &&
         isWithinWindow(row.createdAt, sinceMs, untilMs)
+    );
+  const rowsWithRelatedSession = rows.map((row) => ({
+    ...row,
+    relatedSessionId: parseForensicDeadSessionId(row.content),
+  }));
+  const relatedDimensions = loadSessionDimensions(
+    options.database,
+    projectId,
+    rowsWithRelatedSession.flatMap((row) =>
+      row.relatedSessionId ? [row.relatedSessionId] : []
     )
-    .map((row) => {
+  );
+
+  return rowsWithRelatedSession.map((row) => {
       const diagnostic = stripForensicMetadata(row.content) || "empty forensic diagnostic";
+      const failedSession = row.relatedSessionId
+        ? relatedDimensions.get(row.relatedSessionId)
+        : undefined;
       const signature = buildFailureSignature({
-        provider: row.provider,
-        agentType: row.agentType ?? "forensic",
+        provider: failedSession?.provider ?? row.provider,
+        agentType: failedSession?.agentType ?? row.agentType ?? "forensic",
         motif: diagnostic,
       });
       return {
@@ -503,7 +600,7 @@ function collectForensicEvidence(
         source: "forensic" as const,
         occurredAt: row.createdAt!,
         sessionId: row.sessionId,
-        relatedSessionId: parseForensicDeadSessionId(row.content),
+        relatedSessionId: row.relatedSessionId,
         epicId: row.epicId,
         userStoryId: row.userStoryId,
         provider: signature.provider,
@@ -530,6 +627,8 @@ function collectFindingCandidates(
   untilMs: number
 ): FindingCandidate[] {
   const candidates: FindingCandidate[] = [];
+  const sinceIso = new Date(sinceMs).toISOString();
+  const untilIso = new Date(untilMs).toISOString();
   const rows = options.database
     .select({
       id: reviewComments.id,
@@ -548,7 +647,13 @@ function collectFindingCandidates(
     .where(
       and(
         eq(epics.projectId, projectId),
-        eq(reviewComments.author, "agent")
+        eq(reviewComments.author, "agent"),
+        or(
+          like(sql<string>`lower(ltrim(${reviewComments.body}))`, "[critical]%"),
+          like(sql<string>`lower(ltrim(${reviewComments.body}))`, "[major]%")
+        ),
+        sql`datetime(${reviewComments.createdAt}) >= datetime(${sinceIso})`,
+        sql`datetime(${reviewComments.createdAt}) <= datetime(${untilIso})`
       )
     )
     .all();
@@ -591,25 +696,43 @@ function collectRecurringFindingEvidence(
   );
   const pathCounts = new Map<string, number>();
   const prefixCounts = new Map<string, number>();
+  const recurrenceKey = (finding: FindingCandidate, motif: string) =>
+    `${normalizeFailureDimension(finding.provider)}::${normalizeFailureDimension(
+      finding.agentType
+    )}::${motif}`;
   for (const finding of candidates) {
     if (finding.normalizedFilePath) {
+      const pathKey = recurrenceKey(
+        finding,
+        `file:${finding.normalizedFilePath}`
+      );
       pathCounts.set(
-        finding.normalizedFilePath,
-        (pathCounts.get(finding.normalizedFilePath) ?? 0) + 1
+        pathKey,
+        (pathCounts.get(pathKey) ?? 0) + 1
       );
     }
     if (finding.messagePrefix) {
+      const prefixKey = recurrenceKey(
+        finding,
+        `message:${finding.messagePrefix}`
+      );
       prefixCounts.set(
-        finding.messagePrefix,
-        (prefixCounts.get(finding.messagePrefix) ?? 0) + 1
+        prefixKey,
+        (prefixCounts.get(prefixKey) ?? 0) + 1
       );
     }
   }
 
   const evidence: TelescopeEvidence[] = [];
   for (const finding of candidates) {
-    const pathCount = pathCounts.get(finding.normalizedFilePath) ?? 0;
-    const prefixCount = prefixCounts.get(finding.messagePrefix) ?? 0;
+    const pathCount =
+      pathCounts.get(
+        recurrenceKey(finding, `file:${finding.normalizedFilePath}`)
+      ) ?? 0;
+    const prefixCount =
+      prefixCounts.get(
+        recurrenceKey(finding, `message:${finding.messagePrefix}`)
+      ) ?? 0;
     if (
       pathCount < options.findingMinOccurrences &&
       prefixCount < options.findingMinOccurrences
