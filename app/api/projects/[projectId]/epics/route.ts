@@ -33,6 +33,10 @@ import {
   MCP_CREATE_BUG_SOURCE_TICKET_HEADER,
 } from "@/lib/mcp/create-bug-contract";
 import {
+  findOpenDuplicateBug,
+  type OpenBugDuplicate,
+} from "@/lib/mcp/create-bug";
+import {
   aggregateGradingStatus,
   parseGradingEntries,
 } from "@/lib/grading/report";
@@ -41,6 +45,15 @@ import {
 function trimmedOrNull(value: string | null | undefined): string | null {
   const trimmed = typeof value === "string" ? value.trim() : "";
   return trimmed.length > 0 ? trimmed : null;
+}
+
+class DuplicateMcpBugError extends Error {
+  constructor(readonly existingBug: OpenBugDuplicate) {
+    super(
+      `An open bug with the same normalized title already exists: ${existingBug.readableId ?? existingBug.id}.`
+    );
+    this.name = "DuplicateMcpBugError";
+  }
 }
 
 export async function GET(
@@ -387,6 +400,11 @@ export async function POST(
 
   try {
     db.transaction((tx) => {
+      if (isAttributedAgentBug) {
+        const duplicate = findOpenDuplicateBug(projectId, body.title, tx);
+        if (duplicate) throw new DuplicateMcpBugError(duplicate);
+      }
+
       // Inside the transaction on purpose: this bumps `projects.ticket_counter`,
       // so run outside it the increment would survive a rolled-back insert and
       // burn a readable id on an epic that never existed — a permanent gap in
@@ -444,6 +462,21 @@ export async function POST(
       }
     });
   } catch (error) {
+    if (error instanceof DuplicateMcpBugError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: "DUPLICATE_BUG",
+          existing_bug: {
+            id: error.existingBug.id,
+            readable_id: error.existingBug.readableId,
+            title: error.existingBug.title,
+            status: error.existingBug.status,
+          },
+        },
+        { status: 409 }
+      );
+    }
     console.error("[epics/POST] Failed to create epic transaction:", error);
     return NextResponse.json({ error: "Failed to create epic" }, { status: 500 });
   }

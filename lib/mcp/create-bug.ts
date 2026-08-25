@@ -8,7 +8,7 @@
  */
 
 import { and, eq, like, notInArray, or, sql } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db, type ArijDatabase } from "@/lib/db";
 import { epics, ticketActivityLog } from "@/lib/db/schema";
 import type { McpTokenRecord } from "@/lib/mcp/token-store";
 import {
@@ -49,6 +49,11 @@ interface CreatedBug {
   priority: number;
 }
 
+export type OpenBugDuplicate = Pick<
+  CreatedBug,
+  "id" | "readableId" | "title" | "status"
+>;
+
 export type CreateBugFromMcpResult =
   | {
       ok: true;
@@ -64,7 +69,7 @@ export type CreateBugFromMcpResult =
       status: number;
       code: string;
       error: string;
-      existingBug?: Pick<CreatedBug, "id" | "readableId" | "title" | "status">;
+      existingBug?: OpenBugDuplicate;
     };
 
 /**
@@ -82,9 +87,21 @@ export function normalizeBugTitle(title: string): string {
     .replace(/\s+/g, " ");
 }
 
-function findOpenDuplicate(projectId: string, title: string) {
+/**
+ * Find an open bug with the same normalized title.
+ *
+ * Accepting a select-capable database lets the canonical creation route repeat
+ * this check inside its insert transaction. The early MCP check gives agents a
+ * fast response; the transactional check closes the concurrent check-then-act
+ * race between two agent calls.
+ */
+export function findOpenDuplicateBug(
+  projectId: string,
+  title: string,
+  database: Pick<ArijDatabase, "select"> = db
+): OpenBugDuplicate | null {
   const titleKey = normalizeBugTitle(title);
-  const candidates = db
+  const candidates = database
     .select({
       id: epics.id,
       readableId: epics.readableId,
@@ -139,12 +156,38 @@ function resolveSourceTicket(auth: McpTokenRecord, explicitRef?: string) {
   );
 }
 
-function upstreamErrorBody(value: unknown): { error?: string; code?: string } {
+function upstreamErrorBody(value: unknown): {
+  error?: string;
+  code?: string;
+  existingBug?: OpenBugDuplicate;
+} {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const body = value as Record<string, unknown>;
+  const rawExisting = body.existing_bug;
+  const existingBug =
+    rawExisting &&
+    typeof rawExisting === "object" &&
+    !Array.isArray(rawExisting)
+      ? (rawExisting as Record<string, unknown>)
+      : null;
   return {
     error: typeof body.error === "string" ? body.error : undefined,
     code: typeof body.code === "string" ? body.code : undefined,
+    existingBug:
+      existingBug &&
+      typeof existingBug.id === "string" &&
+      typeof existingBug.title === "string" &&
+      typeof existingBug.status === "string"
+        ? {
+            id: existingBug.id,
+            readableId:
+              typeof existingBug.readable_id === "string"
+                ? existingBug.readable_id
+                : null,
+            title: existingBug.title,
+            status: existingBug.status,
+          }
+        : undefined,
   };
 }
 
@@ -165,7 +208,7 @@ export async function createBugFromMcp({
     };
   }
 
-  const duplicate = findOpenDuplicate(auth.projectId, input.title);
+  const duplicate = findOpenDuplicateBug(auth.projectId, input.title);
   if (duplicate) {
     return {
       ok: false,
@@ -236,6 +279,7 @@ export async function createBugFromMcp({
       status: response.status,
       code: upstream.code ?? "CANONICAL_CREATE_REJECTED",
       error: upstream.error ?? `Canonical ticket creation failed (${response.status}).`,
+      ...(upstream.existingBug ? { existingBug: upstream.existingBug } : {}),
     };
   }
 

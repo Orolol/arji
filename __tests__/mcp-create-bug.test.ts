@@ -318,6 +318,33 @@ describe("POST /api/mcp/create-bug", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("serializes the duplicate check with canonical creation under concurrent reports", async () => {
+    installCanonicalCreationStub();
+
+    const body = {
+      title: "Concurrent board refresh bug",
+      description: "Two tool calls observed the same problem at once.",
+    };
+    const [first, second] = await Promise.all([call(body), call(body)]);
+    const responses = [first, second].sort(
+      (left, right) => left.status - right.status,
+    );
+
+    expect(responses.map((response) => response.status)).toEqual([200, 409]);
+    expect(await responses[1].json()).toMatchObject({
+      code: "DUPLICATE_BUG",
+      existing_bug: {
+        title: body.title,
+        status: "backlog",
+      },
+    });
+    expect(
+      db().select().from(epics).where(eq(epics.title, body.title)).all(),
+    ).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mockTryExportArjiJson).toHaveBeenCalledTimes(1);
+  });
+
   it("enforces the per-session creation ceiling", async () => {
     const now = new Date().toISOString();
     for (let index = 0; index < MAX_MCP_BUGS_PER_SESSION; index += 1) {
