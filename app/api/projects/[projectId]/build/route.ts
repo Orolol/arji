@@ -63,7 +63,7 @@ import { startNightRun } from "@/lib/night/run";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import {
   finalizeBuildTerminalOutcome,
-  logBuildFailure,
+  holdFailedBuild,
   pullTicketBackIfPromoted,
   resolveBuildSessionResult,
   transitionBuildStarted,
@@ -417,9 +417,13 @@ export async function POST(
         } else if (result?.success) {
           // asked_question: the work is not delivered, so a coordinated epic
           // the agent promoted to Review mid-run comes back first; then hold
-          // every coordinated epic, notify once, and log on each feed.
+          // every coordinated epic, notify once, and log on each feed. Each
+          // epic is logged with the status its own pullback actually left it
+          // in — a coordinated set can straddle several columns, so one
+          // shared guess would put a false hold entry on the others.
+          const heldStatusByEpicId: Record<string, string> = {};
           for (const eid of allEpicIds) {
-            pullTicketBackIfPromoted({
+            heldStatusByEpicId[eid] = pullTicketBackIfPromoted({
               projectId,
               epicId: eid,
               scope: "epic",
@@ -432,11 +436,11 @@ export async function POST(
             projectId,
             epicIds: allEpicIds,
             sessionId,
-            ticketStatus: "in_progress",
+            ticketStatusByEpicId: heldStatusByEpicId,
           });
         } else {
           for (const eid of allEpicIds) {
-            logBuildFailure({
+            holdFailedBuild({
               projectId,
               epicId: eid,
               sessionId,

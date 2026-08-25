@@ -494,10 +494,29 @@ export function transitionReviewRejected(opts: {
  *
  * Returns the status the ticket is held at afterwards: in_progress when the
  * pullback landed (or the ticket was never out of it), the real status when
- * the guarded pullback is refused — so the caller's hold entry stays
- * truthful instead of hard-coding in_progress.
+ * the guarded pullback is refused or could not run — so the caller's hold
+ * entry stays truthful instead of hard-coding in_progress.
  */
-export function pullTicketBackIfPromoted(opts: {
+export function pullTicketBackIfPromoted(
+  opts: TicketPullbackOpts
+): KanbanStatus {
+  try {
+    return applyTicketPullback(opts);
+  } catch (err) {
+    // Best-effort, like the rest of the terminal handlers: the failure and
+    // asked_question paths call this from background completion blocks that
+    // do not wrap it (see agent-question.ts), so a throw here would reject
+    // runBuildSession and lose the agent's output comment. Degrade to
+    // reporting the column the board is actually in.
+    console.warn(
+      "[workflow] Failed to pull the ticket back out of review:",
+      (err as Error).message
+    );
+    return readHeldStatus(opts);
+  }
+}
+
+export interface TicketPullbackOpts {
   projectId: string;
   epicId: string;
   scope: BuildScope;
@@ -506,7 +525,29 @@ export function pullTicketBackIfPromoted(opts: {
   sessionId: string;
   /** Activity-trail wording for why the ticket must not stay in Review. */
   reason: string;
-}): KanbanStatus {
+}
+
+/**
+ * The column the ticket sits in when the pullback itself could not run.
+ * Never throws: a caller inside a completion block has nothing better to
+ * fall back to than in_progress, the status the build started from.
+ */
+function readHeldStatus(opts: TicketPullbackOpts): KanbanStatus {
+  try {
+    if (opts.scope === "story" && opts.userStoryId) {
+      return (db
+        .select({ status: userStories.status })
+        .from(userStories)
+        .where(eq(userStories.id, opts.userStoryId))
+        .get()?.status ?? "in_progress") as KanbanStatus;
+    }
+    return readEpicStatus(opts.epicId);
+  } catch {
+    return "in_progress";
+  }
+}
+
+function applyTicketPullback(opts: TicketPullbackOpts): KanbanStatus {
   if (opts.scope === "story" && opts.userStoryId) {
     const story = db
       .select({ id: userStories.id, status: userStories.status })
@@ -558,8 +599,12 @@ export function pullTicketBackIfPromoted(opts: {
  * — except that the owning-session exemption may have promoted the ticket
  * to Review mid-run, in which case the failure undoes that promotion first.
  * The hold entry logs the status the ticket is actually held in.
+ *
+ * Named `hold*`, not `log*`: unlike logWorkflowDecision/logTransition this
+ * writes board state (the pullback), so a caller cannot treat it as a
+ * pure audit call.
  */
-export function logBuildFailure(opts: {
+export function holdFailedBuild(opts: {
   projectId: string;
   epicId: string;
   /** Which ticket to hold/rollback; defaults to the epic (batch/team callers). */
@@ -663,7 +708,7 @@ export function finalizeBuildTerminalOutcome(opts: {
     return { kind: "awaiting_reply" };
   }
 
-  logBuildFailure({
+  holdFailedBuild({
     projectId: opts.projectId,
     epicId: opts.epicId,
     scope: opts.scope,
