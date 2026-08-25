@@ -2,6 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { usePolling } from "@/hooks/usePolling";
+import {
+  isVerificationReport,
+  type VerificationReport,
+} from "@/lib/verify/verify-constants";
 
 interface UserStory {
   id: string;
@@ -37,25 +41,39 @@ interface EpicDetail {
 export function useEpicDetail(projectId: string, epicId: string | null) {
   const [epic, setEpic] = useState<EpicDetail | null>(null);
   const [userStories, setUserStories] = useState<UserStory[]>([]);
+  const [verificationState, setVerificationState] = useState<{
+    epicId: string;
+    report: VerificationReport | null;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
 
   const fetchData = useCallback(async () => {
     if (!epicId) return;
     try {
-      const [epicRes, usRes] = await Promise.all([
+      const [epicRes, usRes, verifyRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/epics`),
         fetch(`/api/projects/${projectId}/user-stories?epicId=${epicId}`),
+        fetch(`/api/projects/${projectId}/epics/${epicId}/verify`).catch(
+          () => null
+        ),
       ]);
 
       const epicData = await epicRes.json();
       const usData = await usRes.json();
+      const verifyData = verifyRes?.ok
+        ? await verifyRes.json().catch(() => ({}))
+        : {};
 
       const foundEpic = (epicData.data || []).find(
         (e: EpicDetail) => e.id === epicId
       );
       if (foundEpic) setEpic(foundEpic);
       setUserStories(usData.data || []);
+      setVerificationState({
+        epicId,
+        report: isVerificationReport(verifyData.data) ? verifyData.data : null,
+      });
     } catch {
       // silently fail on poll
     }
@@ -70,6 +88,9 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
   }, [epicId, fetchData]);
 
   useEffect(() => {
+    // This effect synchronizes the selected epic with three HTTP resources;
+    // loadData owns the intentional loading-state transition around them.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
 
@@ -81,6 +102,14 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
   const refresh = useCallback(async () => {
     await fetchData();
   }, [fetchData]);
+
+  const setVerificationReport = useCallback(
+    (report: VerificationReport | null) => {
+      if (!epicId) return;
+      setVerificationState({ epicId, report });
+    },
+    [epicId]
+  );
 
   const updateEpic = useCallback(
     async (updates: Partial<EpicDetail>): Promise<{ ok: boolean; error?: string }> => {
@@ -153,12 +182,17 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
   return {
     epic,
     userStories,
+    verificationReport:
+      verificationState?.epicId === epicId
+        ? verificationState.report
+        : null,
     loading,
     updateEpic,
     addUserStory,
     updateUserStory,
     deleteUserStory,
     refresh,
+    setVerificationReport,
     setPolling,
   };
 }

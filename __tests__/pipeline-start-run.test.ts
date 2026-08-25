@@ -8,6 +8,10 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
+import type {
+  PipelineDeterministicVerificationOutcome,
+  PipelineStageResult,
+} from "@/lib/pipeline/runner";
 
 const driverMocks = vi.hoisted(() => ({
   launchStage: vi.fn(),
@@ -17,10 +21,12 @@ const driverMocks = vi.hoisted(() => ({
     conflictSessionId: null as string | null,
     reviewTargetStatus: "review" as string | null,
   })),
-  runDeterministicVerification: vi.fn(async () => ({
-    ran: false,
-    result: null,
-  })),
+  runDeterministicVerification: vi.fn(
+    async (): Promise<PipelineDeterministicVerificationOutcome> => ({
+      ran: false,
+      result: null,
+    })
+  ),
   runForensic: vi.fn(),
 }));
 
@@ -56,8 +62,6 @@ const { PIPELINE_REASONS, pipelineEnabledSettingKey } = await import(
 const { pipelineMaxAttemptsSettingKey } = await import(
   "@/lib/pipeline/constants"
 );
-import type { PipelineStageResult } from "@/lib/pipeline/runner";
-
 let counter = 0;
 
 async function flushBackground() {

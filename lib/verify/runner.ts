@@ -5,7 +5,11 @@ import {
 import { db as defaultDb, type ArijDatabase } from "@/lib/db";
 import { verifyReports } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
-import type { VerifyCommand } from "./verify-constants";
+import type {
+  VerificationReport,
+  VerifyCommand,
+  VerifyCommandResult,
+} from "./verify-constants";
 
 /** Maximum combined stdout/stderr retained for one command. */
 export const VERIFY_OUTPUT_LIMIT_BYTES = 64 * 1024;
@@ -13,24 +17,8 @@ export const VERIFY_OUTPUT_LIMIT_BYTES = 64 * 1024;
 /** Match provider cancellation: allow five seconds before force-killing. */
 export const VERIFY_KILL_GRACE_MS = 5_000;
 
-export interface VerifyCommandResult extends VerifyCommand {
-  /** Null when the command timed out or could not be started. */
-  exitCode: number | null;
-  durationMs: number;
-  /** Bounded, interleaved stdout/stderr tail. */
-  tail: string;
-}
-
-export interface VerificationResult {
-  id: string;
-  projectId: string;
-  epicId: string;
-  agentSessionId: string | null;
-  status: "pass" | "fail";
-  startedAt: string;
-  finishedAt: string;
-  commands: VerifyCommandResult[];
-}
+export type VerificationResult = VerificationReport;
+export type { VerifyCommandResult } from "./verify-constants";
 
 export interface RunVerificationInput {
   projectId: string;

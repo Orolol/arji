@@ -21,6 +21,58 @@ export interface VerifyCommand {
   command: string;
 }
 
+/** Persisted outcome of one human-configured command. */
+export interface VerifyCommandResult extends VerifyCommand {
+  /** Null when the command timed out or could not be started. */
+  exitCode: number | null;
+  durationMs: number;
+  /** Bounded, interleaved stdout/stderr tail. */
+  tail: string;
+}
+
+/** Client-safe shape returned by the manual verification endpoint. */
+export interface VerificationReport {
+  id: string;
+  projectId: string;
+  epicId: string;
+  agentSessionId: string | null;
+  status: "pass" | "fail";
+  startedAt: string;
+  finishedAt: string;
+  commands: VerifyCommandResult[];
+}
+
+/** Runtime guard for the JSON report returned to client components. */
+export function isVerificationReport(value: unknown): value is VerificationReport {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const report = value as Record<string, unknown>;
+  if (
+    typeof report.id !== "string" ||
+    typeof report.projectId !== "string" ||
+    typeof report.epicId !== "string" ||
+    (report.agentSessionId !== null &&
+      typeof report.agentSessionId !== "string") ||
+    (report.status !== "pass" && report.status !== "fail") ||
+    typeof report.startedAt !== "string" ||
+    typeof report.finishedAt !== "string" ||
+    !Array.isArray(report.commands)
+  ) {
+    return false;
+  }
+
+  return report.commands.every((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const command = entry as Record<string, unknown>;
+    return (
+      typeof command.name === "string" &&
+      typeof command.command === "string" &&
+      (typeof command.exitCode === "number" || command.exitCode === null) &&
+      typeof command.durationMs === "number" &&
+      typeof command.tail === "string"
+    );
+  });
+}
+
 /**
  * No commands is the safe default and keeps the pre-verification pipeline
  * behaviour unchanged. This is intentionally an array (rather than a
