@@ -189,12 +189,16 @@ export default function DocumentsPage() {
               />
             </div>
           )}
-        </div>
 
-        {/* Below `lg` the aside is hidden, so the memory card — and with it the
-            only manual Dream button — renders in the main column instead. */}
-        <div className="lg:hidden">
-          <ProjectMemoryCard projectId={projectId} />
+          {/* Below `lg` the aside is hidden, so the memory card — and with it
+              the only manual Dream button — renders here instead. It has to
+              live INSIDE the main column: as a sibling it became a second
+              flex item on a row-direction container and sat BESIDE the
+              documents, squeezing both, which is the opposite of the stack a
+              narrow screen needs. */}
+          <div className="lg:hidden">
+            <ProjectMemoryCard projectId={projectId} />
+          </div>
         </div>
 
         <aside className="hidden w-[340px] flex-none flex-col gap-[16px] lg:flex">
