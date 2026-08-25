@@ -11,10 +11,11 @@ import { and, eq, like, notInArray, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { epics, ticketActivityLog } from "@/lib/db/schema";
 import type { McpTokenRecord } from "@/lib/mcp/token-store";
-import { logTransition } from "@/lib/workflow/log";
 import {
   MAX_MCP_BUGS_PER_SESSION,
+  MCP_CREATE_BUG_ACTION_HEADER,
   MCP_CREATE_BUG_ACTIVITY_PREFIX,
+  MCP_CREATE_BUG_SOURCE_TICKET_HEADER,
   type McpBugSeverity,
 } from "./create-bug-contract";
 
@@ -191,7 +192,14 @@ export async function createBugFromMcp({
       `${origin}/api/projects/${encodeURIComponent(auth.projectId)}/epics`,
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${auth.token}`,
+          [MCP_CREATE_BUG_ACTION_HEADER]: "create_bug",
+          ...(sourceTicket
+            ? { [MCP_CREATE_BUG_SOURCE_TICKET_HEADER]: sourceTicket.id }
+            : {}),
+        },
         body: JSON.stringify({
           title: input.title,
           description: input.description,
@@ -262,18 +270,6 @@ export async function createBugFromMcp({
     type: "bug",
     priority: typeof created.priority === "number" ? created.priority : priority,
   };
-
-  const sourceRef = sourceTicket?.readableId ?? sourceTicket?.id ?? "project-scoped session";
-  const storyRef = auth.userStoryId ? `; source story ${auth.userStoryId}` : "";
-  logTransition({
-    projectId: auth.projectId,
-    epicId: bug.id,
-    fromStatus: bug.status,
-    toStatus: bug.status,
-    actor: "agent",
-    sessionId: auth.sessionId,
-    reason: `${MCP_CREATE_BUG_ACTIVITY_PREFIX} reported from ${sourceRef}${storyRef}; source session ${auth.sessionId}`,
-  });
 
   return {
     ok: true,

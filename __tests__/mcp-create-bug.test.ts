@@ -18,7 +18,9 @@ import {
 } from "@/lib/mcp/token-store";
 import {
   MAX_MCP_BUGS_PER_SESSION,
+  MCP_CREATE_BUG_ACTION_HEADER,
   MCP_CREATE_BUG_ACTIVITY_PREFIX,
+  MCP_CREATE_BUG_SOURCE_TICKET_HEADER,
 } from "@/lib/mcp/create-bug-contract";
 
 const testDb = vi.hoisted(() => ({
@@ -194,6 +196,11 @@ describe("POST /api/mcp/create-bug", () => {
       priority: 3,
       status: "backlog",
     });
+    expect(init.headers).toMatchObject({
+      authorization: `Bearer ${token}`,
+      [MCP_CREATE_BUG_ACTION_HEADER]: "create_bug",
+      [MCP_CREATE_BUG_SOURCE_TICKET_HEADER]: sourceEpicId,
+    });
 
     const created = db()
       .select()
@@ -223,6 +230,61 @@ describe("POST /api/mcp/create-bug", () => {
     expect(activity?.reason).toContain("E-main-001");
     expect(activity?.reason).toContain(sessionId);
     expect(mockTryExportArjiJson).toHaveBeenCalledWith(projectId);
+  });
+
+  it("rolls back canonical creation when its session audit cannot be persisted", async () => {
+    testDb.instance!.sqlite.exec(`
+      CREATE TRIGGER reject_create_bug_audit
+      BEFORE INSERT ON ticket_activity_log
+      BEGIN
+        SELECT RAISE(ABORT, 'audit unavailable');
+      END
+    `);
+    installCanonicalCreationStub();
+
+    const response = await call({
+      title: "Audit must be atomic",
+      description: "Do not create this ticket without its source session.",
+    });
+
+    expect(response.status).toBe(500);
+    expect(
+      db()
+        .select()
+        .from(epics)
+        .where(eq(epics.title, "Audit must be atomic"))
+        .all(),
+    ).toHaveLength(0);
+    expect(mockTryExportArjiJson).not.toHaveBeenCalled();
+  });
+
+  it("ignores spoofed create_bug provenance without a valid MCP bearer", async () => {
+    const response = await createEpicPost(
+      mockNextRequest({
+        url: `${ORIGIN}/api/projects/${projectId}/epics`,
+        method: "POST",
+        body: {
+          title: "Ordinary UI bug",
+          description: "This is not an agent-attributed write.",
+          type: "bug",
+        },
+        headers: {
+          [MCP_CREATE_BUG_ACTION_HEADER]: "create_bug",
+          [MCP_CREATE_BUG_SOURCE_TICKET_HEADER]: sourceEpicId,
+        },
+      }),
+      { params: Promise.resolve({ projectId }) },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(
+      db()
+        .select()
+        .from(ticketActivityLog)
+        .where(eq(ticketActivityLog.epicId, json.data.id))
+        .all(),
+    ).toHaveLength(0);
   });
 
   it("refuses a punctuation/case-equivalent open bug instead of duplicating it", async () => {

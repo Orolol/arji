@@ -5,6 +5,7 @@ import {
   epics,
   gradingReports,
   ticketComments,
+  ticketActivityLog,
   ticketReadCursors,
   userStories,
 } from "@/lib/db/schema";
@@ -25,6 +26,12 @@ import { createEpicSchema } from "@/lib/validation/schemas";
 import { validateBody, isValidationError } from "@/lib/validation/validate";
 import { generateReadableId } from "@/lib/db/readable-id";
 import { emitTicketCreated } from "@/lib/events/emit";
+import { resolveOptionalMcpToken } from "@/lib/mcp/http-auth";
+import {
+  buildMcpCreateBugActivityReason,
+  MCP_CREATE_BUG_ACTION_HEADER,
+  MCP_CREATE_BUG_SOURCE_TICKET_HEADER,
+} from "@/lib/mcp/create-bug-contract";
 import {
   aggregateGradingStatus,
   parseGradingEntries,
@@ -245,6 +252,37 @@ export async function POST(
 
   const body = validated.data;
 
+  // create_bug still enters through this exact UI route. A valid short-lived
+  // MCP token upgrades its creation audit from an ordinary UI write to a
+  // session-attributed agent write. Unauthenticated/spoofed headers are
+  // ignored, so callers cannot impersonate an agent session.
+  const optionalMcpAuth = resolveOptionalMcpToken(request);
+  const isAttributedAgentBug =
+    body.type === "bug" &&
+    request.headers.get(MCP_CREATE_BUG_ACTION_HEADER) === "create_bug" &&
+    optionalMcpAuth?.projectId === projectId &&
+    optionalMcpAuth.agentType !== "chat";
+
+  let sourceTicketForAudit: { id: string; readableId: string | null } | null = null;
+  if (isAttributedAgentBug) {
+    const sourceTicketId = request.headers.get(
+      MCP_CREATE_BUG_SOURCE_TICKET_HEADER,
+    );
+    if (sourceTicketId) {
+      sourceTicketForAudit =
+        db
+          .select({ id: epics.id, readableId: epics.readableId })
+          .from(epics)
+          .where(
+            and(
+              eq(epics.id, sourceTicketId),
+              eq(epics.projectId, projectId),
+            ),
+          )
+          .get() ?? null;
+    }
+  }
+
   const foundProject = getProjectOr404(projectId);
   if (isErrorResponse(foundProject)) return foundProject;
   const { project } = foundProject;
@@ -380,6 +418,29 @@ export async function POST(
         .run();
       if (storiesToInsert.length > 0) {
         tx.insert(userStories).values(storiesToInsert).run();
+      }
+      if (isAttributedAgentBug && optionalMcpAuth) {
+        const sourceTicketRef =
+          sourceTicketForAudit?.readableId ??
+          sourceTicketForAudit?.id ??
+          "project-scoped session";
+        tx.insert(ticketActivityLog)
+          .values({
+            id: createId(),
+            projectId,
+            epicId: id,
+            fromStatus: body.status || "backlog",
+            toStatus: body.status || "backlog",
+            actor: "agent",
+            reason: buildMcpCreateBugActivityReason({
+              sourceTicketRef,
+              sourceStoryId: optionalMcpAuth.userStoryId,
+              sessionId: optionalMcpAuth.sessionId,
+            }),
+            sessionId: optionalMcpAuth.sessionId,
+            createdAt: now,
+          })
+          .run();
       }
     });
   } catch (error) {
