@@ -72,6 +72,15 @@ export const AUTO_MODE_REVIEW_AGENT_SETTING_KEY = "auto_mode_review_agent";
 export const AUTO_MODE_REVIEW_CONCURRENCY_SETTING_KEY =
   "auto_mode_review_concurrency";
 
+/**
+ * Global settings key: may the mode pick the build/review agent from its
+ * measured 30-day success rate when no agent is explicitly configured for the
+ * role? Tri-state like every other flag here (absent = fall through), and OFF
+ * by default — an unattended mode must not start choosing differently than it
+ * did yesterday because of a setting nobody turned on.
+ */
+export const AUTO_MODE_SMART_DISPATCH_SETTING_KEY = "auto_mode_smart_dispatch";
+
 /** Per-project override (`auto_mode_enabled:<projectId>`). */
 export function autoModeEnabledSettingKey(projectId: string): string {
   return `${AUTO_MODE_ENABLED_SETTING_KEY}:${projectId}`;
@@ -95,6 +104,11 @@ export function autoModeReviewAgentSettingKey(projectId: string): string {
 /** Per-project override (`auto_mode_review_concurrency:<projectId>`). */
 export function autoModeReviewConcurrencySettingKey(projectId: string): string {
   return `${AUTO_MODE_REVIEW_CONCURRENCY_SETTING_KEY}:${projectId}`;
+}
+
+/** Per-project override (`auto_mode_smart_dispatch:<projectId>`). */
+export function autoModeSmartDispatchSettingKey(projectId: string): string {
+  return `${AUTO_MODE_SMART_DISPATCH_SETTING_KEY}:${projectId}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -199,6 +213,12 @@ export interface AutoModeConfig {
   buildConcurrency: number;
   reviewAgent: string | null;
   reviewConcurrency: number;
+  /**
+   * Pick the agent from its measured record when the role has no explicit
+   * agent. Never overrides `buildAgent`/`reviewAgent` — see
+   * lib/agent-config/smart-dispatch.ts.
+   */
+  smartDispatch: boolean;
 }
 
 /**
@@ -257,6 +277,12 @@ export function resolveAutoModeConfig(
       parseAutoModeConcurrency,
       DEFAULT_AUTO_REVIEW_CONCURRENCY
     ),
+    smartDispatch: pick(
+      autoModeSmartDispatchSettingKey(projectId),
+      AUTO_MODE_SMART_DISPATCH_SETTING_KEY,
+      parseAutoModeEnabled,
+      false
+    ),
   };
 }
 
@@ -288,6 +314,21 @@ export const AUTO_MODE_REASONS = {
   buildDispatched: (scope: "epic" | "story") =>
     `Auto mode dispatched a build (${scope} scope)`,
   reviewDispatched: "Auto mode dispatched a review",
+  /**
+   * Why THIS agent ran. Written on every smart-dispatched session so the
+   * choice is reconstructable from the ticket feed alone — an unattended mode
+   * that silently picks a different agent than the settings show is the one
+   * thing a user cannot debug afterwards.
+   */
+  smartDispatch: (
+    stage: "build" | "review",
+    agentName: string,
+    successRate: number,
+    sampleSize: number
+  ) =>
+    `Auto mode picked ${agentName} for the ${stage}: best ${Math.round(
+      successRate * 100
+    )}% success over ${sampleSize} runs in the last 30 days`,
   mergeAttempted: "Auto mode attempting merge after a clean review",
   merged: "Auto mode: review clean, merged",
   mergeRefused: (error: string) => `Auto mode skipped merge: ${error}`,

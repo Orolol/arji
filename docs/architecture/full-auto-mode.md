@@ -50,9 +50,27 @@ without a restart.
 | `auto_mode_build_concurrency` | `2` | How many builds of the mode's own dispatch may be in flight. Clamped 0..10. |
 | `auto_mode_review_agent` | *(none)* | Named agent for review dispatches. An explicit choice beats review-provider segregation. |
 | `auto_mode_review_concurrency` | `1` | How many reviews may be in flight. Clamped 0..10. |
+| `auto_mode_smart_dispatch` | `false` | Pick the named agent with the best measured 30-day success rate for the stage, **only** for a role whose agent key above is absent. |
 
 `0` is a legal concurrency and means "do not dispatch this kind" — builds-only
 and reviews-only are both supported configurations.
+
+### Informed selection (`auto_mode_smart_dispatch`)
+
+Off by default. When on, and only when the stage's agent key is absent, the
+mode asks `lib/agent-config/smart-dispatch.ts` for the named agent with the
+best success rate over the last 30 days **for that role** (build or review),
+among those with at least 5 finished runs. Nothing clears the threshold → the
+normal resolution chain applies, exactly as before. The lookup happens once per
+stage per sweep and only when there is something to dispatch, so an idle sweep
+costs no extra query.
+
+It is a plain argmax, not a bandit: no exploration, no confidence intervals, no
+decay. The numbers are the same ones the reliability badge shows in every agent
+picker, so a user can predict the choice before it happens — and read it
+afterwards, because each smart-dispatched session gets a second activity entry
+naming the agent, its rate and its sample size on top of the usual dispatch
+trace.
 
 The sweep runs every **15 s** (`AUTO_MODE_SWEEP_INTERVAL_MS`), and additionally
 right after any agent session reaches a terminal state (the session terminal
