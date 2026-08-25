@@ -11,6 +11,8 @@ export interface NotificationItem {
   agentType: string | null;
   status: string; // completed | failed
   title: string;
+  /** Full error message for failed session notifications (migration 0031). */
+  message: string | null;
   targetUrl: string;
   createdAt: string | null;
 }

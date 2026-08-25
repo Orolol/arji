@@ -219,6 +219,55 @@ describe("SessionDetailPage - error session", () => {
 
     expect(screen.getByText("Error")).toBeInTheDocument();
   });
+
+  it("does not show the no-error-captured box when an error IS present", async () => {
+    render(<SessionDetailPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Compilation failed with 3 errors")
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      screen.queryByText(/no error message captured/i)
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("SessionDetailPage - failed session without captured error", () => {
+  beforeEach(() => {
+    // The legacy/worst case: the session row says failed but carries no error
+    // text (predates the failure-message synthesis). The view must say so
+    // explicitly and point at the logs instead of showing nothing.
+    const silentFailedSession = {
+      ...mockSession,
+      status: "failed",
+      error: null,
+      outcome: "error",
+      lastNonEmptyText: null,
+      logs: null,
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ data: silentFailedSession }),
+    });
+  });
+
+  it("shows the explicit no-error-captured notice with a pointer to the logs", async () => {
+    render(<SessionDetailPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Failed — no error message captured/i)
+      ).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText(/failed before Arij could record an error message/i)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Raw Logs tab/i)).toBeInTheDocument();
+  });
 });
 
 describe("SessionDetailPage - large payload rendering", () => {

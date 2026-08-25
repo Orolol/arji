@@ -251,6 +251,7 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE projects DROP COLUMN default_branch");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
+      conn.exec("ALTER TABLE notifications DROP COLUMN message");
     });
 
     withDb(file, (conn) => {
@@ -267,6 +268,7 @@ describe("initDb", () => {
       expect(columnNames(conn, "projects")).toContain("default_branch");
       expect(columnNames(conn, "chat_attachments")).toContain("project_id");
       expect(columnNames(conn, "chat_attachments")).toContain("epic_id");
+      expect(columnNames(conn, "notifications")).toContain("message");
       expect(appliedMigrationTimestamps(conn)).toHaveLength(TOTAL_MIGRATIONS);
       expectFullSchema(conn);
     });
@@ -326,6 +328,7 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE projects DROP COLUMN default_branch");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
+      conn.exec("ALTER TABLE notifications DROP COLUMN message");
       conn.exec("DROP TABLE ticket_read_cursors");
     });
 
@@ -431,6 +434,7 @@ describe("migration journal", () => {
         .run(entry!.when);
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
+      conn.exec("ALTER TABLE notifications DROP COLUMN message");
 
       expect(() => initDb(conn)).not.toThrow();
 
