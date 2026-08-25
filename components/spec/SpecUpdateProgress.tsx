@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import Link from "next/link";
 import { CheckCircle2, Loader2, XCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -69,12 +70,12 @@ export function SpecUpdateProgress({
               </span>
             </>
           )}
-          <a
+          <Link
             href={`/projects/${projectId}/sessions/${sessionId}`}
             className="ml-auto text-[12.5px] text-muted-foreground underline underline-offset-2"
           >
             view session
-          </a>
+          </Link>
           {status !== "running" && (
             <Button
               variant="ghost"

@@ -254,6 +254,11 @@ ABSOLUTE REQUIREMENTS:
 // 2a. Spec Update Prompt
 // ---------------------------------------------------------------------------
 
+export const SPEC_UPDATE_MAX_EPICS = 30;
+export const SPEC_UPDATE_MAX_STORIES_PER_EPIC = 20;
+export const SPEC_UPDATE_MAX_RELEASES = 10;
+export const SPEC_UPDATE_MAX_CHANGELOG_CHARS = 1000;
+
 /**
  * Renders the live board (epics + user stories with their statuses) and the
  * release history as a compact markdown section. Pure: callers query the DB
@@ -275,31 +280,56 @@ export function buildProjectStateSection(
       if (list) list.push(story);
       else storiesByEpic.set(story.epicId, [story]);
     }
-    const epicLines = epics.map((epic) => {
+    const displayedEpics = epics.slice(0, SPEC_UPDATE_MAX_EPICS);
+    const epicLines = displayedEpics.map((epic) => {
       const lines = [`- **${epic.title}** — ${epic.status || "backlog"}`];
-      for (const story of storiesByEpic.get(epic.id) ?? []) {
+      const stories = storiesByEpic.get(epic.id) ?? [];
+      const displayedStories = stories.slice(0, SPEC_UPDATE_MAX_STORIES_PER_EPIC);
+      for (const story of displayedStories) {
         lines.push(`  - ${story.title} — ${story.status || "todo"}`);
+      }
+      if (stories.length > SPEC_UPDATE_MAX_STORIES_PER_EPIC) {
+        lines.push(
+          `  - _... and ${stories.length - SPEC_UPDATE_MAX_STORIES_PER_EPIC} more stories (truncated)_`
+        );
       }
       return lines.join("\n");
     });
+    if (epics.length > SPEC_UPDATE_MAX_EPICS) {
+      epicLines.push(
+        `- _... and ${epics.length - SPEC_UPDATE_MAX_EPICS} more epics (truncated)_`
+      );
+    }
     parts.push(epicLines.join("\n") + "\n");
   }
 
   if (releases.length > 0) {
     parts.push(`### Releases\n`);
-    const releaseLines = releases.map((release) => {
+    const displayedReleases = releases.slice(0, SPEC_UPDATE_MAX_RELEASES);
+    const releaseLines = displayedReleases.map((release) => {
       const lines = [`- **${release.version}**${release.title ? ` — ${release.title}` : ""}`];
       if (release.changelog?.trim()) {
-        lines.push(
-          release.changelog
-            .trim()
-            .split("\n")
-            .map((line) => `  ${line}`)
-            .join("\n")
-        );
+        let cl = release.changelog.trim();
+        let wasTruncated = false;
+        if (cl.length > SPEC_UPDATE_MAX_CHANGELOG_CHARS) {
+          cl = cl.slice(0, SPEC_UPDATE_MAX_CHANGELOG_CHARS).trimEnd();
+          wasTruncated = true;
+        }
+        const clLines = cl
+          .split("\n")
+          .map((line) => `  ${line}`);
+        if (wasTruncated) {
+          clLines.push(`  _... [changelog truncated]_`);
+        }
+        lines.push(clLines.join("\n"));
       }
       return lines.join("\n");
     });
+    if (releases.length > SPEC_UPDATE_MAX_RELEASES) {
+      releaseLines.push(
+        `- _... and ${releases.length - SPEC_UPDATE_MAX_RELEASES} older releases (truncated)_`
+      );
+    }
     parts.push(releaseLines.join("\n") + "\n");
   }
 

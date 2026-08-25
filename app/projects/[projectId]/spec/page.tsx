@@ -20,11 +20,27 @@ function outline(markdown: string): string[] {
     .map((match) => match[2])
     .slice(0, 12);
 }
+interface SessionChunk {
+  content: string;
+}
+
+interface SessionDetailResponse {
+  status?: string;
+  chunkStreams?: {
+    output?: SessionChunk[];
+  };
+  logs?: {
+    result?: string;
+  };
+  lastNonEmptyText?: string;
+  error?: string;
+}
 
 export default function SpecPage() {
   const params = useParams();
   const projectId = params.projectId as string;
   const [spec, setSpec] = useState("");
+  const [savedSpec, setSavedSpec] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
@@ -38,31 +54,57 @@ export default function SpecPage() {
   const [updateError, setUpdateError] = useState<string | null>(null);
   useEffect(() => {
     fetch(`/api/projects/${projectId}`)
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d.data?.spec) setSpec(d.data.spec);
-        if (d.data?.updatedAt) setSavedAt(d.data.updatedAt);
+        if (!d?.data) return;
+        if (d.data.spec !== undefined) {
+          setSpec(d.data.spec ?? "");
+          setSavedSpec(d.data.spec ?? "");
+        }
+        if (d.data.updatedAt) setSavedAt(d.data.updatedAt);
+      })
+      .catch(() => {});
+
+    // Check for an in-flight spec update session so page reloads adopt
+    // the running update rather than rendering a disconnected UI.
+    fetch(`/api/projects/${projectId}/spec/update`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.data?.pending && d.data.sessionId) {
+          setUpdateSessionId(d.data.sessionId);
+          setUpdateStatus("running");
+        }
       })
       .catch(() => {});
   }, [projectId]);
-
   async function handleSave() {
     setSaving(true);
-    await fetch(`/api/projects/${projectId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ spec }),
-    });
-    setSavedAt(new Date().toISOString());
-    setSaving(false);
+    try {
+      await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spec }),
+      });
+      const now = new Date().toISOString();
+      setSavedAt(now);
+      setSavedSpec(spec);
+    } catch {
+      // Best effort save
+    } finally {
+      setSaving(false);
+    }
   }
 
   const refreshSpec = useCallback(() => {
     fetch(`/api/projects/${projectId}`)
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d.data?.spec !== undefined) setSpec(d.data.spec ?? "");
-        if (d.data?.updatedAt) setSavedAt(d.data.updatedAt);
+        if (!d?.data) return;
+        if (d.data.spec !== undefined) {
+          setSpec(d.data.spec ?? "");
+          setSavedSpec(d.data.spec ?? "");
+        }
+        if (d.data.updatedAt) setSavedAt(d.data.updatedAt);
       })
       .catch(() => {});
   }, [projectId]);
@@ -87,16 +129,29 @@ export default function SpecPage() {
         const res = await fetch(
           `/api/projects/${projectId}/sessions/${updateSessionId}`,
         );
-        const json = await res.json().catch(() => ({}));
-        if (cancelled) return;
-        const data = json.data ?? {};
+        if (!res.ok) {
+          // Non-200 HTTP response (e.g. dev server recompile, temporary network glitch)
+          // must NOT falsely report failure while the agent run continues.
+          if (!cancelled) {
+            timer = setTimeout(poll, 2000);
+          }
+          return;
+        }
+        const json = await res.json().catch(() => null);
+        if (cancelled || !json?.data) {
+          if (!cancelled) {
+            timer = setTimeout(poll, 2000);
+          }
+          return;
+        }
+        const data = json.data as SessionDetailResponse;
         // Live feedback for the Spec view: the streamed agent output plus,
         // once terminal, the final answer or the failure reason.
         const chunks = data.chunkStreams?.output;
         setUpdateStream(
           Array.isArray(chunks) ? chunks.map((c) => c.content).join("") : null,
         );
-        const status = data.status as string | undefined;
+        const status = data.status;
         if (status === "queued" || status === "running") {
           timer = setTimeout(poll, 2000);
           return;
@@ -110,7 +165,10 @@ export default function SpecPage() {
           setUpdateStatus("failed");
         }
       } catch {
-        if (!cancelled) setUpdateStatus("failed");
+        // Network exception during fetch — keep polling on next tick.
+        if (!cancelled) {
+          timer = setTimeout(poll, 2000);
+        }
       }
     };
     timer = setTimeout(poll, 2000);
@@ -177,7 +235,7 @@ export default function SpecPage() {
           </Button>
           <Button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || updateStatus === "running"}
             className="h-[31px] rounded-[8px] px-[13px] text-[13px]"
           >
             {saving ? "Saving..." : "Save"}
@@ -199,10 +257,17 @@ export default function SpecPage() {
       <div className="flex min-h-0 flex-1 gap-[26px] px-[26px] pb-[26px]">
         <div className="flex min-w-0 flex-1 flex-col overflow-y-auto rounded-[12px] border border-border bg-card px-[44px] py-[34px]">
           <span className="font-mono text-[11.5px] text-meta">
-            SPEC.md{savedAt ? ` · saved ${timeAgo(savedAt)}` : ""}
+            SPEC.md
+            {savedAt ? ` · saved ${timeAgo(savedAt)}` : ""}
+            {spec !== savedSpec ? " · unsaved changes" : ""}
           </span>
           <TabsContent value="edit" className="mt-[16px]">
-            <SpecEditor projectId={projectId} value={spec} onChange={setSpec} />
+            <SpecEditor
+              projectId={projectId}
+              value={spec}
+              onChange={setSpec}
+              disabled={updateStatus === "running"}
+            />
           </TabsContent>
           <TabsContent value="preview" className="mt-[16px]">
             <SpecPreview markdown={spec} />

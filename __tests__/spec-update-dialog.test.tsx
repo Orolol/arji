@@ -140,4 +140,38 @@ describe("SpecUpdateDialog", () => {
     );
     expect(onStarted).not.toHaveBeenCalled();
   });
+
+  it("resets the form when dialog is closed", async () => {
+    const onOpenChange = vi.fn();
+    const { rerender } = render(
+      <SpecUpdateDialog
+        projectId="proj-1"
+        open
+        onOpenChange={onOpenChange}
+        onStarted={vi.fn()}
+      />
+    );
+
+    fireEvent.change(
+      screen.getByTestId("spec-update-instruction"),
+      { target: { value: "some instruction" } }
+    );
+    expect(screen.getByTestId("spec-update-instruction")).toHaveValue(
+      "some instruction"
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+
+    // Reopening with open=true after reset
+    rerender(
+      <SpecUpdateDialog
+        projectId="proj-1"
+        open
+        onOpenChange={onOpenChange}
+        onStarted={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("spec-update-instruction")).toHaveValue("");
+  });
 });

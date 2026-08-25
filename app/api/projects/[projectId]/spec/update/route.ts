@@ -8,6 +8,7 @@ import {
 import { validateBody, isValidationError } from "@/lib/validation/validate";
 import {
   dispatchSpecUpdateSession,
+  getPendingSpecUpdateSession,
   hasPendingSpecUpdate,
   SpecUpdateAgentNotFoundError,
 } from "@/lib/workflow/spec-update";
@@ -20,6 +21,29 @@ const specUpdateSchema = z.object({
   /** Optional explicit named agent, like other dispatch routes accept. */
   namedAgentId: z.string().min(1).optional(),
 });
+
+/**
+ * GET /api/projects/[projectId]/spec/update
+ *
+ * Returns whether an agent spec update is currently pending (queued or running)
+ * for the project, and if so, its session id and status. Used for page reload
+ * recovery.
+ */
+export async function GET(request: NextRequest, { params }: Params) {
+  const { projectId } = await params;
+
+  const found = getProjectOr404(projectId);
+  if (isErrorResponse(found)) return found;
+
+  const pending = getPendingSpecUpdateSession(projectId);
+  return NextResponse.json({
+    data: {
+      pending: Boolean(pending),
+      sessionId: pending?.id ?? null,
+      status: pending?.status ?? null,
+    },
+  });
+}
 
 /**
  * POST /api/projects/[projectId]/spec/update
@@ -35,7 +59,7 @@ const specUpdateSchema = z.object({
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
 
-  const found = getProjectOr404(projectId);
+  const found = getProjectOr404(projectId, { requireGitRepo: true });
   if (isErrorResponse(found)) return found;
 
   const validated = await validateBody(specUpdateSchema, request);

@@ -63,6 +63,7 @@ const { projects, agentSessions, epics, userStories, releases } = await import(
 );
 const {
   dispatchSpecUpdateSession,
+  getPendingSpecUpdateSession,
   hasPendingSpecUpdate,
   sanitizeUpdatedSpec,
   SpecUpdateAgentNotFoundError,
@@ -86,11 +87,11 @@ function claudeEnvelope(text: string): string {
   });
 }
 
-function seedProject(spec: string | null) {
+function seedProject(spec: string | null, gitRepoPath: string | null = "/repos/s") {
   counter += 1;
   const projectId = `proj-spec-${counter}`;
   db.insert(projects)
-    .values({ id: projectId, name: "Spec Project", gitRepoPath: "/repos/s", spec })
+    .values({ id: projectId, name: "Spec Project", gitRepoPath, spec })
     .run();
   return projectId;
 }
@@ -232,6 +233,19 @@ describe("dispatchSpecUpdateSession", () => {
     expect(hasPendingSpecUpdate(projectId)).toBe(true);
   });
 
+  it("rejects when the project has no git repository configured", async () => {
+    const projectId = seedProject("# Spec", null);
+
+    await expect(
+      dispatchSpecUpdateSession({
+        projectId,
+        instruction: null,
+        namedAgentId: null,
+      })
+    ).rejects.toThrow("no git repository path configured");
+    expect(specUpdateSessions(projectId)).toHaveLength(0);
+  });
+
   it("rejects a nonexistent named agent before creating any session", async () => {
     const projectId = seedProject("# Spec");
 
@@ -245,6 +259,31 @@ describe("dispatchSpecUpdateSession", () => {
     expect(specUpdateSessions(projectId)).toHaveLength(0);
   });
 
+  it("leaves the spec untouched when the agent asks a question", async () => {
+    const projectId = seedProject("# Old Spec\n\n- stale");
+    processManagerState.result = {
+      success: true,
+      endedWithQuestion: true,
+      result: claudeEnvelope("Which sections should I update?"),
+      duration: 500,
+    };
+
+    await dispatchSpecUpdateSession({
+      projectId,
+      instruction: null,
+      namedAgentId: null,
+    });
+    await flushBackground();
+
+    const session = specUpdateSessions(projectId)[0];
+    expect(session.error).toContain("asked a question");
+    const row = db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .get();
+    expect(row?.spec).toBe("# Old Spec\n\n- stale");
+  });
   it("marks a silent run failed and leaves the spec untouched", async () => {
     const projectId = seedProject("# Old Spec\n\n- stale");
     processManagerState.result = {
@@ -318,18 +357,39 @@ describe("dispatchSpecUpdateSession", () => {
     expect(prompt).toContain("**1.2.0** — First release");
     expect(prompt).toContain("- login works");
   });
-});
 
+  it("returns the pending session or null via getPendingSpecUpdateSession", () => {
+    const projectId = seedProject("# Spec");
+    expect(getPendingSpecUpdateSession(projectId)).toBeNull();
+
+    db.insert(agentSessions)
+      .values({
+        id: `spec-queued-pending-${counter}`,
+        projectId,
+        status: "running",
+        agentType: "spec_generation",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    const pending = getPendingSpecUpdateSession(projectId);
+    expect(pending).not.toBeNull();
+    expect(pending?.id).toBe(`spec-queued-pending-${counter}`);
+    expect(pending?.status).toBe("running");
+  });
+});
 
 describe("sanitizeUpdatedSpec", () => {
   it("strips a full-document fence but keeps inner content intact", () => {
     expect(sanitizeUpdatedSpec("```markdown\n# A\n\n- b\n```")).toBe(
       "# A\n\n- b"
     );
+    expect(sanitizeUpdatedSpec("```md5\r\n# A\r\n\n- b\r\n```  ")).toBe(
+      "# A\r\n\n- b"
+    );
     expect(sanitizeUpdatedSpec("# A\n\n- b")).toBe("# A\n\n- b");
   });
 });
-
 
 describe("buildProjectStateSection", () => {
   it("renders nothing when the project has no epics or releases", () => {
@@ -346,5 +406,48 @@ describe("buildProjectStateSection", () => {
     expect(section).toContain("- **Epic One** — review");
     expect(section).toContain("  - Story A — todo");
     expect(section).not.toContain("### Releases");
+  });
+
+  it("truncates epics over cap and appends truncation marker", () => {
+    const epicsList = Array.from({ length: 35 }, (_, i) => ({
+      id: `epic-${i}`,
+      title: `Epic ${i}`,
+      status: "todo",
+    }));
+    const section = buildProjectStateSection(epicsList, [], []);
+    expect(section).toContain("- **Epic 0** — todo");
+    expect(section).toContain("- **Epic 29** — todo");
+    expect(section).not.toContain("- **Epic 30** — todo");
+    expect(section).toContain("- _... and 5 more epics (truncated)_");
+  });
+
+  it("truncates stories over cap per epic and appends truncation marker", () => {
+    const stories = Array.from({ length: 25 }, (_, i) => ({
+      epicId: "e1",
+      title: `Story ${i}`,
+      status: "done",
+    }));
+    const section = buildProjectStateSection(
+      [{ id: "e1", title: "Epic 1", status: "todo" }],
+      stories,
+      []
+    );
+    expect(section).toContain("  - Story 0 — done");
+    expect(section).toContain("  - Story 19 — done");
+    expect(section).not.toContain("  - Story 20 — done");
+    expect(section).toContain("  - _... and 5 more stories (truncated)_");
+  });
+
+  it("truncates releases over cap and long changelogs with truncation markers", () => {
+    const releasesList = Array.from({ length: 15 }, (_, i) => ({
+      version: `1.${i}.0`,
+      title: `Release ${i}`,
+      changelog: i === 0 ? "x".repeat(1500) : "short changelog",
+    }));
+    const section = buildProjectStateSection([], [], releasesList);
+    expect(section).toContain("### Releases");
+    expect(section).toContain("**1.0.0** — Release 0");
+    expect(section).toContain("_... [changelog truncated]_");
+    expect(section).toContain("- _... and 5 older releases (truncated)_");
   });
 });

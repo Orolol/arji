@@ -37,6 +37,12 @@ export function SpecUpdateDialog({
     setInstruction("");
     setError(null);
   }
+  function handleOpenChange(newOpen: boolean) {
+    if (!newOpen) {
+      resetForm();
+    }
+    onOpenChange(newOpen);
+  }
 
   async function handleStart() {
     setStarting(true);
@@ -73,9 +79,9 @@ export function SpecUpdateDialog({
   return (
     <AgentDispatchDialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={handleOpenChange}
       title="Update the specification with an agent"
-      description="The agent runs in the project workspace and rewrites SPEC.md from its current state. The saved spec is only replaced if the session succeeds."
+      description="The agent runs in the project workspace and updates the project specification from its current state. The saved spec is only replaced if the session succeeds."
       projectId={projectId}
       agentProps={{
         value: namedAgentId,
@@ -104,6 +110,7 @@ export function SpecUpdateDialog({
       confirmLabel="Update spec"
       confirmIcon={<Sparkles className="h-4 w-4 mr-1" />}
       busy={starting}
+      confirmDisabled={starting}
       onConfirm={handleStart}
     />
   );

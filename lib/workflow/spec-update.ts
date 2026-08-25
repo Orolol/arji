@@ -70,10 +70,12 @@ export interface DispatchSpecUpdateResult {
   sessionId: string;
 }
 
-/** True when a spec update session is queued/running for the project. */
-export function hasPendingSpecUpdate(projectId: string): boolean {
+/** Returns the active (queued or running) spec update session for the project, if any. */
+export function getPendingSpecUpdateSession(
+  projectId: string
+): { id: string; status: string | null } | null {
   const row = db
-    .select({ id: agentSessions.id })
+    .select({ id: agentSessions.id, status: agentSessions.status })
     .from(agentSessions)
     .where(
       and(
@@ -83,7 +85,12 @@ export function hasPendingSpecUpdate(projectId: string): boolean {
       )
     )
     .get();
-  return !!row;
+  return row ?? null;
+}
+
+/** True when a spec update session is queued/running for the project. */
+export function hasPendingSpecUpdate(projectId: string): boolean {
+  return Boolean(getPendingSpecUpdateSession(projectId));
 }
 
 /**
@@ -92,7 +99,9 @@ export function hasPendingSpecUpdate(projectId: string): boolean {
  */
 export function sanitizeUpdatedSpec(output: string): string {
   const trimmed = output.trim();
-  const fenceMatch = trimmed.match(/^```[a-zA-Z]*\n([\s\S]*)\n```$/);
+  const fenceMatch = trimmed.match(
+    /^```[a-zA-Z0-9_-]*\r?\n([\s\S]*?)\r?\n```\s*$/
+  );
   if (fenceMatch) {
     return fenceMatch[1].trim();
   }
@@ -114,6 +123,9 @@ export async function dispatchSpecUpdateSession(
     .get();
   if (!project) {
     throw new Error("Project not found");
+  }
+  if (!project.gitRepoPath) {
+    throw new Error("Project has no git repository path configured");
   }
 
   const systemPrompt = await resolveAgentPrompt(
@@ -207,8 +219,8 @@ export async function dispatchSpecUpdateSession(
       {
         mode: "plan",
         prompt,
-        cwd: project.gitRepoPath || process.cwd(),
-        model: resolvedAgent.model,
+        cwd: project.gitRepoPath ?? undefined,
+        model: resolvedAgent.model || undefined,
         cliSessionId,
       },
       resolvedAgent.provider
@@ -241,12 +253,14 @@ export async function dispatchSpecUpdateSession(
           // A run that produced no usable spec is a failure for this
           // workflow even when the CLI exited cleanly: the session row must
           // not claim success over an unchanged document.
-          success: !!output,
+          success: Boolean(result?.success && outcome === "answered" && output),
           error: output
             ? null
             : result?.error ??
               (result?.success
-                ? "The agent finished without returning an updated spec — the saved spec was left unchanged."
+                ? outcome === "asked_question"
+                  ? "The agent asked a question — the saved spec was left unchanged."
+                  : "The agent finished without returning an updated spec — the saved spec was left unchanged."
                 : "The spec update session failed without reporting an error."),
           outcome,
           usage: extractSessionUsage(result),
