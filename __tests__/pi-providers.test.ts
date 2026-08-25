@@ -168,9 +168,9 @@ describe("PiProvider", () => {
       expect(args[args.indexOf("--tools") + 1]).toBe("read,grep,find,ls");
     });
 
-    it("restricts tools to read-only ones in analyze mode", () => {
+    it("leaves write tools enabled in analyze mode so imports can create arji.json", () => {
       const args = provider.buildArgs(baseOptions({ mode: "analyze" }));
-      expect(args[args.indexOf("--tools") + 1]).toBe("read,grep,find,ls");
+      expect(args).not.toContain("--tools");
     });
 
     it("needs no config overlay — pi's allowlist genuinely strips write", () => {
@@ -391,12 +391,18 @@ describe("OhMyPiProvider", () => {
   });
 
   it("adds the xdev-off overlay in read-only modes — omp's allowlist alone leaves write mounted", () => {
-    for (const mode of ["plan", "analyze"] as const) {
+    for (const mode of ["plan", "chat"] as const) {
       const args = provider.buildArgs(baseOptions({ mode }));
       const overlayPath = args[args.indexOf("--config") + 1];
       expect(overlayPath).toMatch(/arij-omp-readonly-\d+\.yml$/);
       expect(readFileSync(overlayPath, "utf-8")).toBe("tools:\n  xdev: false\n");
     }
+  });
+
+  it("keeps the full tool set in analyze mode so imports can create arji.json", () => {
+    const args = provider.buildArgs(baseOptions({ mode: "analyze" }));
+    expect(args).not.toContain("--tools");
+    expect(args).not.toContain("--config");
   });
 
   it("keeps the full tool set in code mode: no --tools, no overlay", () => {

@@ -2,12 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   resolveAgent: vi.fn(),
+  resolveAgentPrompt: vi.fn(),
   getProvider: vi.fn(),
   spawn: vi.fn(),
 }));
 
 vi.mock("@/lib/agent-config/agent-resolution", () => ({
   resolveAgent: mocks.resolveAgent,
+}));
+
+vi.mock("@/lib/agent-config/prompts", () => ({
+  resolveAgentPrompt: mocks.resolveAgentPrompt,
 }));
 
 vi.mock("@/lib/providers", () => ({
@@ -27,6 +32,9 @@ describe("conversation title agent mapping", () => {
       name: "Lightweight",
       namedAgentId: "agent-light",
     });
+    mocks.resolveAgentPrompt.mockResolvedValue(
+      "Prefer concrete nouns and never use punctuation."
+    );
     mocks.getProvider.mockReturnValue({ spawn: mocks.spawn });
     mocks.spawn.mockReturnValue({
       promise: Promise.resolve({
@@ -53,12 +61,19 @@ describe("conversation title agent mapping", () => {
       "title_generation",
       "project-123"
     );
+    expect(mocks.resolveAgentPrompt).toHaveBeenCalledWith(
+      "title_generation",
+      "project-123"
+    );
     expect(mocks.getProvider).toHaveBeenCalledWith("gemini-cli");
     expect(mocks.spawn).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "title-title-session",
         mode: "plan",
         model: "gemini-flash",
+        prompt: expect.stringContaining(
+          "Prefer concrete nouns and never use punctuation."
+        ),
       })
     );
   });

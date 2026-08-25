@@ -6,7 +6,7 @@
  * Mode mapping:
  * - plan    → no --yolo (read-only default)
  * - code    → --yolo (auto-approve)
- * - analyze → no --yolo
+ * - analyze → --yolo (the import task must write arji.json)
  *
  * Resume: not supported (uses /resume internal command, not suitable for headless).
  * Output: plain text from stdout.
@@ -27,7 +27,7 @@ export class QwenCodeProvider extends BaseCliProvider {
 
     const args: string[] = ["-p", prompt];
 
-    if (mode === "code") {
+    if (mode === "code" || mode === "analyze") {
       args.push("--yolo");
     }
 

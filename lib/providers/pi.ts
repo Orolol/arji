@@ -6,7 +6,7 @@
  * Mode mapping: pi has no permission system — capability is expressed through
  * the tool allowlist, so read-only modes drop the mutating built-ins.
  * - plan    → --tools read,grep,find,ls
- * - analyze → --tools read,grep,find,ls
+ * - analyze → default tool set (the import task must write arji.json)
  * - code    → default tool set (adds write, edit, bash)
  *
  * Resume: supported via `--session <ID>`, using the id of the session header
@@ -191,8 +191,9 @@ export class PiProvider extends BaseCliProvider {
 
     const args: string[] = ["--mode", "json"];
 
-    // plan/analyze must not touch the working tree — drop write/edit/bash.
-    if (mode !== "code") {
+    // Plan/chat runs must not touch the working tree. Analyze intentionally
+    // keeps write available because repository import produces arji.json.
+    if (mode === "plan" || mode === "chat") {
       args.push("--tools", this.readonlyTools().join(","));
       args.push(...this.readonlyExtraArgs());
     }

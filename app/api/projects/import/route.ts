@@ -6,6 +6,7 @@ import { settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { buildImportPrompt } from "@/lib/claude/prompt-builder";
 import { resolveAgent } from "@/lib/agent-config/agent-resolution";
+import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { getProvider } from "@/lib/providers";
 import { arjiJsonExists, readArjiJson } from "@/lib/sync/arji-json";
 import { importProjectSchema } from "@/lib/validation/schemas";
@@ -49,7 +50,13 @@ export async function POST(request: NextRequest) {
   const settingsRow = db.select().from(settings).where(eq(settings.key, "global_prompt")).get();
   const globalPrompt = settingsRow ? JSON.parse(settingsRow.value) : "";
 
-  const prompt = buildImportPrompt(globalPrompt);
+  const importRolePrompt = await resolveAgentPrompt("import_analysis");
+  const importSystemPrompt = [globalPrompt, importRolePrompt]
+    .filter((value): value is string =>
+      typeof value === "string" && value.trim().length > 0
+    )
+    .join("\n\n");
+  const prompt = buildImportPrompt(importSystemPrompt);
   // Import happens before a project row exists, so only the global mapping
   // can apply here. The resolver's builtin fallback preserves the historical
   // Claude CLI/default-model behavior when no lightweight agent is assigned.

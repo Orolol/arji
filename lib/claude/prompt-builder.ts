@@ -603,8 +603,9 @@ Your response should be a well-formatted markdown report.
 
 /**
  * Builds the prompt for analyzing an existing project directory.
- * Claude Code runs in analyze mode within the target project's directory
- * and writes the structured JSON assessment to `arji.json` at the project root.
+ * The configured provider runs in analyze mode within the target project's
+ * directory and writes the structured JSON assessment to `arji.json` at the
+ * project root.
  */
 export function buildImportPrompt(
   systemPrompt?: string | null,
@@ -787,15 +788,17 @@ ABSOLUTE REQUIREMENTS:
 export function buildTitleGenerationPrompt(
   firstUserMessage: string,
   firstAssistantResponse: string,
+  systemPrompt?: string | null,
 ): string {
   const trimmedResponse = firstAssistantResponse.slice(0, 500);
-  return [
+  const taskPrompt = [
     "Generate a concise 2-4 word title for this conversation. Return ONLY the title text, nothing else.",
     "",
     `User: ${firstUserMessage}`,
     "",
     `Assistant: ${trimmedResponse}`,
   ].join("\n");
+  return [systemSection(systemPrompt), taskPrompt].filter(Boolean).join("\n");
 }
 
 // ---------------------------------------------------------------------------

@@ -149,6 +149,22 @@ describe("GeminiCliProvider", () => {
     expect(args).toContain("-y");
   });
 
+  it("auto-approves writes in analyze mode so imports can create arji.json", () => {
+    const provider = new GeminiCliProvider();
+
+    provider.spawn(
+      baseOptions({
+        sessionId: "analyze-test",
+        prompt: "Analyze the repository and write arji.json",
+        cwd: "/tmp",
+        mode: "analyze",
+      })
+    );
+
+    const args = mockSpawn.mock.calls[0][1] as string[];
+    expect(args).toContain("-y");
+  });
+
   it("maps onChunk to raw/output/response chunks", async () => {
     const provider = new GeminiCliProvider();
 

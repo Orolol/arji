@@ -1,4 +1,5 @@
 import { resolveAgent } from "@/lib/agent-config/agent-resolution";
+import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { buildTitleGenerationPrompt } from "@/lib/claude/prompt-builder";
 import { getProvider } from "@/lib/providers";
 import { createId } from "@/lib/utils/nanoid";
@@ -16,9 +17,14 @@ export async function generateConversationTitle(input: {
   assistantContent: string;
 }): Promise<string | null> {
   const resolvedAgent = resolveAgent("title_generation", input.projectId);
+  const systemPrompt = await resolveAgentPrompt(
+    "title_generation",
+    input.projectId
+  );
   const prompt = buildTitleGenerationPrompt(
     input.userContent,
-    input.assistantContent
+    input.assistantContent,
+    systemPrompt
   );
   const session = getProvider(resolvedAgent.provider).spawn({
     sessionId: `title-${createId()}`,

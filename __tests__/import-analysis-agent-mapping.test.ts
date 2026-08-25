@@ -10,6 +10,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   resolveAgent: vi.fn(),
+  resolveAgentPrompt: vi.fn(),
   getProvider: vi.fn(),
   spawn: vi.fn(),
 }));
@@ -21,6 +22,10 @@ vi.mock("@/lib/db", async () => {
 
 vi.mock("@/lib/agent-config/agent-resolution", () => ({
   resolveAgent: mocks.resolveAgent,
+}));
+
+vi.mock("@/lib/agent-config/prompts", () => ({
+  resolveAgentPrompt: mocks.resolveAgentPrompt,
 }));
 
 vi.mock("@/lib/providers", () => ({
@@ -45,6 +50,9 @@ beforeEach(() => {
     name: "Lightweight Importer",
     namedAgentId: "agent-light",
   });
+  mocks.resolveAgentPrompt.mockResolvedValue(
+    "Focus on public product capabilities, not implementation trivia."
+  );
   mocks.getProvider.mockReturnValue({ spawn: mocks.spawn });
   mocks.spawn.mockImplementation((options: { cwd: string }) => {
     fs.writeFileSync(
@@ -73,6 +81,7 @@ describe("repository import agent mapping", () => {
     expect(response.status).toBe(200);
     expect(json.data.preview.project.name).toBe("Imported");
     expect(mocks.resolveAgent).toHaveBeenCalledWith("import_analysis");
+    expect(mocks.resolveAgentPrompt).toHaveBeenCalledWith("import_analysis");
     expect(mocks.getProvider).toHaveBeenCalledWith("codex");
     expect(mocks.spawn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -80,6 +89,9 @@ describe("repository import agent mapping", () => {
         cwd: fs.realpathSync(repoPath),
         mode: "analyze",
         model: "gpt-5-mini",
+        prompt: expect.stringContaining(
+          "Focus on public product capabilities, not implementation trivia."
+        ),
       })
     );
   });

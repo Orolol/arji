@@ -125,7 +125,10 @@ export class GeminiCliProvider extends BaseCliProvider {
 
     args.push("-p", prompt, "--output-format", "json");
 
-    if (mode === "code") {
+    // Import analysis must write arji.json. Gemini has no narrower
+    // write-only approval posture, so analyze shares code mode's headless
+    // approval flag; the import prompt constrains the requested mutation.
+    if (mode === "code" || mode === "analyze") {
       args.push("-y");
     }
 

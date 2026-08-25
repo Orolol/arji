@@ -199,9 +199,9 @@ describe("QwenCodeProvider", () => {
       expect(args).not.toContain("--yolo");
     });
 
-    it("does not include --yolo for analyze mode", () => {
+    it("includes --yolo for analyze mode so imports can create arji.json", () => {
       const args = provider.buildArgs({ ...baseOptions, mode: "analyze" });
-      expect(args).not.toContain("--yolo");
+      expect(args).toContain("--yolo");
     });
 
     it("includes --model when model is specified", () => {
