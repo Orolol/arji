@@ -418,6 +418,27 @@ describe("arijToolsSection", () => {
     },
   );
 
+  it("presents submit_findings as the authoritative channel and the prose line as its fallback", () => {
+    const text = arijToolsSection("review_code");
+
+    // The structured channel decides the transition...
+    expect(text).toContain(
+      "submit_findings is the channel your review is read from"
+    );
+    expect(text).toContain(
+      "its verdict decides whether the ticket goes back for changes"
+    );
+    // ...open blocking findings still veto an approval (findings prime).
+    expect(text).toContain(
+      "an 'approved' verdict alongside an open [critical] or [major] finding still blocks"
+    );
+    // ...and the prose verdict survives, explicitly as the fallback, because
+    // providers without MCP injection have no other channel.
+    expect(text).toContain(
+      "it is the fallback Arij reads only when no submit_findings verdict was recorded"
+    );
+  });
+
   it.each([null, "chat", "merge", "memory_distill"])(
     "keeps the base section for non-review agent type %s",
     (agentType) => {

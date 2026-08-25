@@ -182,9 +182,13 @@ export function projectContextSections(
  * the chat toolset's tool descriptions carry their own usage guidance, so
  * chat prompts stay byte-identical with and without the channel.
  *
- * Review agents (agentType `review_*`) get an extra sentence pointing at
- * submit_findings while keeping the prose "**Overall Verdict: …**" line the
- * review route still parses (the verdict stays prose-driven in v1).
+ * Review agents (agentType `review_*`) get an extra sentence making
+ * submit_findings the authoritative verdict channel — its `verdict` is
+ * persisted on the session row and is what the transition drivers read
+ * (lib/pipeline/findings.ts). The prose "**Overall Verdict: …**" line stays
+ * required because it is the fallback those drivers use when no structured
+ * verdict was submitted, which is the only channel a provider without MCP
+ * injection has.
  */
 export function arijToolsSection(agentType: string | null): string {
   const base =
@@ -199,9 +203,15 @@ export function arijToolsSection(agentType: string | null): string {
 
   const reviewExtra =
     agentType && agentType.startsWith("review_")
-      ? " File review findings with submit_findings (file+line anchored; " +
-        "open findings block approval), and still end your final message " +
-        "with the required '**Overall Verdict: …**' line."
+      ? " submit_findings is the channel your review is read from: its " +
+        "verdict decides whether the ticket goes back for changes, and each " +
+        "finding you file (file+line anchored) becomes an open review " +
+        "comment that blocks approval until it is resolved — so an " +
+        "'approved' verdict alongside an open [critical] or [major] finding " +
+        "still blocks. Call it once, at the end, with your real verdict. " +
+        "Also end your final message with the required " +
+        "'**Overall Verdict: …**' line: it is the fallback Arij reads only " +
+        "when no submit_findings verdict was recorded."
       : "";
 
   return section("Arij tools", base + reviewExtra);
