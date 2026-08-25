@@ -81,6 +81,7 @@ const {
   maybeDreamAfterNightRun,
   sanitizeDreamedMemory,
 } = await import("@/lib/workflow/dreaming");
+const { processManager } = await import("@/lib/claude/process-manager");
 const { hasPendingMemoryWriter } = await import(
   "@/lib/workflow/memory-writer-lock"
 );
@@ -646,6 +647,69 @@ describe("memory writers exclude each other", () => {
           row.agentType === "memory_distill"
       );
     expect(writers).toHaveLength(1);
+  });
+});
+
+/**
+ * A dream reads the memory when it builds its prompt and writes minutes later.
+ * The Docs editor is live that whole time.
+ */
+describe("dispatchDreamingSession — a human edit mid-dream wins", () => {
+  it("discards the dreamed output when the memory changed while it ran", async () => {
+    saveProjectMemory(projectId, "- AS THE DREAM READ IT");
+    seedSourceSession();
+
+    // The edit lands from inside the running session rather than from a race:
+    // getStatus is polled after the prompt captured the memory and before the
+    // replacement, which is exactly when a Docs-tab save would arrive.
+    vi.mocked(processManager.getStatus).mockImplementationOnce((() => {
+      saveProjectMemory(projectId, "- A HUMAN EDITED THIS");
+      return { status: "completed", result: processManagerState.result };
+      // The module mock returns this loose shape everywhere; only the real
+      // signature is wider, so the cast keeps the test on the mock's contract.
+    }) as unknown as typeof processManager.getStatus);
+
+    const result = await dispatchDreamingSession({ projectId });
+    await flushBackground();
+
+    // The session still answered — its output is readable on the session page.
+    const session = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, result.sessionId!))
+      .get();
+    expect(session!.outcome).toBe("answered");
+
+    // ...but the human edit stands, untouched.
+    expect(getProjectMemoryContent(projectId)).toBe("- A HUMAN EDITED THIS");
+    // No snapshot was taken and no notification claimed an update.
+    expect(getProjectMemoryArchiveDoc(projectId)).toBeNull();
+    expect(
+      db
+        .select()
+        .from(notifications)
+        .where(eq(notifications.projectId, projectId))
+        .all()
+        .filter((row) => row.agentType === DREAMING_AGENT_TYPE)
+    ).toHaveLength(0);
+    // And the window did not advance, so the next dream re-reads the evidence.
+    expect(findLastDreamCutoff(projectId)).toBeNull();
+  });
+
+  it("replaces normally when nobody touched the memory", async () => {
+    saveProjectMemory(projectId, "- AS THE DREAM READ IT");
+    seedSourceSession();
+
+    await dispatchDreamingSession({ projectId });
+    await flushBackground();
+
+    expect(getProjectMemoryContent(projectId)).not.toBe(
+      "- AS THE DREAM READ IT"
+    );
+    expect(getProjectMemoryArchiveDoc(projectId)!.markdownContent).toBe(
+      "- AS THE DREAM READ IT"
+    );
+    expect(findLastDreamCutoff(projectId)).not.toBeNull();
   });
 });
 

@@ -134,6 +134,41 @@ export interface ReplaceProjectMemoryResult extends SaveProjectMemoryResult {
 }
 
 /**
+ * Thrown when the memory changed under a long-running rewrite (see
+ * `expectedPrevious`). A conflict, not a fault: the caller drops its output
+ * and leaves everything as the newer writer left it.
+ */
+export class ProjectMemoryChangedError extends Error {
+  constructor() {
+    super("The project memory changed while the rewrite was running.");
+    this.name = "ProjectMemoryChangedError";
+  }
+}
+
+export function isProjectMemoryChangedError(error: unknown): boolean {
+  return error instanceof ProjectMemoryChangedError;
+}
+
+export interface ReplaceProjectMemoryOptions {
+  /**
+   * The memory content the caller REASONED FROM, for optimistic concurrency.
+   *
+   * A dream reads the memory when it builds its prompt and writes minutes
+   * later; the manual editor can save in between. Without this check the dream
+   * would silently overwrite that edit with text produced from the version
+   * before it. When the stored content no longer matches, the replacement is
+   * refused with ProjectMemoryChangedError — the human edit wins, because it
+   * is the newer intent and the dream can simply be run again.
+   *
+   * Compared against the trimmed content (what `getProjectMemoryContent`
+   * returns), so a no-op save that rewrites identical text is not a conflict.
+   * Omit to replace unconditionally.
+   */
+  expectedPrevious?: string | null;
+  database?: ArijDatabase;
+}
+
+/**
  * Replaces the memory document and snapshots what it replaced, ATOMICALLY.
  *
  * The two writes have to commit together or not at all. Archiving first and
@@ -143,15 +178,23 @@ export interface ReplaceProjectMemoryResult extends SaveProjectMemoryResult {
  * has, in exchange for a rewrite that never happened. One transaction makes
  * the failure mode honest: nothing moves, and the previous snapshot survives.
  *
+ * The optional `expectedPrevious` check runs INSIDE that transaction, so a
+ * concurrent save cannot slip between the comparison and the write.
+ *
  * Callers get the same throw-on-failure contract as `saveProjectMemory`.
  */
 export function replaceProjectMemoryWithSnapshot(
   projectId: string,
   content: string,
-  database: ArijDatabase = defaultDb
+  options: ReplaceProjectMemoryOptions = {}
 ): ReplaceProjectMemoryResult {
+  const database = options.database ?? defaultDb;
+  const guarded = "expectedPrevious" in options;
   return database.transaction((tx) => {
     const previous = getProjectMemoryContent(projectId, tx);
+    if (guarded && previous !== (options.expectedPrevious ?? null)) {
+      throw new ProjectMemoryChangedError();
+    }
     const archive = archiveProjectMemory(projectId, previous, tx);
     const saved = saveProjectMemory(projectId, content, tx);
     return { ...saved, archive };

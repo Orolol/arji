@@ -29,7 +29,9 @@
  *     (`outcome === 'answered'` with non-empty output), the same guard
  *     spec-auto-rewrite.ts applies to the spec. The previous memory is
  *     snapshotted in the SAME transaction (documents row, kind
- *     'memory_archive'), so a failed save can never burn the snapshot.
+ *     'memory_archive'), so a failed save can never burn the snapshot — and
+ *     only when the stored memory is still the one the dream reasoned from, so
+ *     a human edit made mid-dream is never silently overwritten.
  */
 
 import fs from "fs";
@@ -65,11 +67,15 @@ import { buildDreamingPrompt } from "@/lib/claude/prompt-builder";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
-// Single source of truth for the heading the pipeline files diagnostics under —
-// the digest recognises forensic comments by exactly that string.
-import { FORENSIC_COMMENT_HEADING } from "@/lib/pipeline/forensic";
+// Single source of truth for the heading the pipeline files diagnostics under,
+// and for the dead-session marker it stamps into them.
+import {
+  FORENSIC_COMMENT_HEADING,
+  parseForensicDeadSessionId,
+} from "@/lib/pipeline/forensic";
 import {
   getProjectMemoryContent,
+  isProjectMemoryChangedError,
   replaceProjectMemoryWithSnapshot,
 } from "@/lib/documents/memory";
 import { createMemoryDreamedNotification } from "@/lib/notifications/create";
@@ -336,6 +342,8 @@ interface DatedRow {
   createdMs: number | null;
   /** Story the row was filed against; null for epic-scoped rows. */
   userStoryId?: string | null;
+  /** Session the row explicitly names as its subject (forensic comments). */
+  deadSessionId?: string | null;
 }
 
 /**
@@ -401,12 +409,18 @@ function loadForensicCommentsByEpic(epicIds: string[]): Map<string, DatedRow[]> 
     .all()) {
     if (!row.epicId) continue;
     if (!row.content.startsWith(FORENSIC_COMMENT_HEADING)) continue;
+    const deadSessionId = parseForensicDeadSessionId(row.content);
     const list = byEpic.get(row.epicId) ?? [];
     list.push({
       id: row.id,
-      body: row.content.slice(FORENSIC_COMMENT_HEADING.length).trim(),
+      body: row.content
+        .slice(FORENSIC_COMMENT_HEADING.length)
+        // The marker is metadata, not prose — never feed it to the dream.
+        .replace(/<!--\s*arij:dead-session=[^>]*-->/, "")
+        .trim(),
       createdMs: parseTimestampMs(row.createdAt),
       userStoryId: row.userStoryId ?? null,
+      deadSessionId,
     });
     byEpic.set(row.epicId, list);
   }
@@ -416,11 +430,18 @@ function loadForensicCommentsByEpic(epicIds: string[]): Map<string, DatedRow[]> 
 /**
  * Assigns each forensic diagnostic to the session it actually diagnoses.
  *
- * The pipeline files a post-mortem right after the doomed stage settles, but
- * the comment row carries no link back to the dead session — only an epic, an
- * optional story, and a timestamp. So the match is: same scope, comment inside
- * the run's window (start → terminal + slack), and — the part that matters —
- * the CLOSEST such session, preferring the one that had already ended.
+ * Two paths, in order.
+ *
+ * EXACT: the pipeline stamps the diagnosed session's id into the comment
+ * (`forensicDeadSessionMarker`), so a marked comment is matched by id — which
+ * is the only attribution that survives a forensic agent sitting in a queue
+ * for an hour before it writes. A marker naming a session outside this window
+ * attaches to nothing rather than falling back.
+ *
+ * HEURISTIC, for comments written before that marker existed: same scope,
+ * comment inside the run's window (start → terminal + slack), and — the part
+ * that matters — the CLOSEST such session, preferring one that had already
+ * ended.
  *
  * "Closest" is what makes reruns come out right. A first attempt ending at
  * 10:00 and its retry ending at 10:20 both have windows covering a diagnostic
@@ -441,10 +462,28 @@ function assignForensicComments(
 
   const comments = [...forensicByEpic.values()]
     .flat()
-    .filter((comment) => comment.createdMs !== null)
+    // A comment with an explicit marker needs no timestamp; only the legacy
+    // heuristic below does.
+    .filter((comment) => comment.deadSessionId || comment.createdMs !== null)
     .sort((a, b) => (a.createdMs ?? 0) - (b.createdMs ?? 0));
 
   for (const comment of comments) {
+    // Exact link when the pipeline recorded one: no timestamps, no guessing,
+    // and immune to a forensic agent that was queued for an hour.
+    if (comment.deadSessionId) {
+      const named = rows.find(
+        (row) => row.id === comment.deadSessionId && !takenSessions.has(row.id)
+      );
+      if (named) {
+        takenSessions.add(named.id);
+        assigned.set(named.id, comment.body);
+      }
+      // A marker pointing outside this digest's window means the diagnosed
+      // session is not here — it must NOT fall through to the heuristic and
+      // land on some other run.
+      continue;
+    }
+
     const at = comment.createdMs!;
     const candidates = rows
       .filter((row) => {
@@ -988,17 +1027,33 @@ export async function dispatchDreamingSession(
       return;
     }
 
-    const previous = getProjectMemoryContent(input.projectId);
     try {
       // Snapshot and replacement commit together or not at all. A dream
       // rewrites the whole document, so the pre-dream text is the only way
       // back — and archiving it separately would let a failed save burn that
       // snapshot while leaving the live memory untouched.
-      replaceProjectMemoryWithSnapshot(input.projectId, output);
+      //
+      // `expectedPrevious` is the memory this dream actually REASONED FROM
+      // (captured minutes ago, at prompt time). A dream runs long enough for
+      // someone to save an edit in the Docs tab meanwhile; replacing blindly
+      // would throw that edit away in favour of text derived from the version
+      // before it. The human edit is the newer intent and wins — a dream can
+      // just be run again.
+      replaceProjectMemoryWithSnapshot(input.projectId, output, {
+        expectedPrevious: currentMemory,
+      });
     } catch (error) {
-      // The window deliberately does NOT advance here. A dream that produced
-      // text but failed to store it taught the project nothing, so the next
-      // dream must read the same sessions again rather than skip past them.
+      // Either way the window deliberately does NOT advance: a dream whose
+      // output was never stored taught the project nothing, so the next dream
+      // must read the same sessions again rather than skip past them.
+      if (isProjectMemoryChangedError(error)) {
+        console.info(
+          `${DREAMING_LOG_PREFIX} discarded for project ${input.projectId}:` +
+            ` the memory was edited while the dream ran (its output is still` +
+            ` readable on session ${sessionId})`
+        );
+        return;
+      }
       console.error(`${DREAMING_LOG_PREFIX} Failed to save dreamed memory`, error);
       return;
     }
@@ -1024,7 +1079,9 @@ export async function dispatchDreamingSession(
         projectId: input.projectId,
         sessionId,
         sessionsAnalyzed: collected.includedCount,
-        previousChars: previous?.length ?? 0,
+        // The memory this dream replaced is exactly what it reasoned from —
+        // the guard above just proved the two are still the same text.
+        previousChars: currentMemory?.length ?? 0,
         newChars: getProjectMemoryContent(input.projectId)?.length ?? 0,
       });
     } catch (error) {

@@ -16,6 +16,7 @@ import { eq } from "drizzle-orm";
 import { createTestDb } from "@/lib/db/test-utils";
 import { documents, projects } from "@/lib/db/schema";
 import {
+  ProjectMemoryChangedError,
   archiveProjectMemory,
   enforceMemoryCap,
   getProjectMemoryArchiveDoc,
@@ -221,7 +222,9 @@ describe("replaceProjectMemoryWithSnapshot", () => {
   it("stores the new memory and snapshots the old one", () => {
     saveProjectMemory(PROJECT_ID, "- OLD RULE", db);
 
-    const result = replaceProjectMemoryWithSnapshot(PROJECT_ID, "- NEW RULE", db);
+    const result = replaceProjectMemoryWithSnapshot(PROJECT_ID, "- NEW RULE", {
+      database: db,
+    });
 
     expect(getProjectMemoryContent(PROJECT_ID, db)).toBe("- NEW RULE");
     expect(result.archive?.markdownContent).toBe("- OLD RULE");
@@ -231,7 +234,9 @@ describe("replaceProjectMemoryWithSnapshot", () => {
   });
 
   it("writes no snapshot when there was no memory to replace", () => {
-    const result = replaceProjectMemoryWithSnapshot(PROJECT_ID, "- FIRST", db);
+    const result = replaceProjectMemoryWithSnapshot(PROJECT_ID, "- FIRST", {
+      database: db,
+    });
 
     expect(result.archive).toBeNull();
     expect(getProjectMemoryArchiveDoc(PROJECT_ID, db)).toBeNull();
@@ -242,11 +247,9 @@ describe("replaceProjectMemoryWithSnapshot", () => {
     saveProjectMemory(PROJECT_ID, "- ORIGINAL", db);
 
     expect(() =>
-      replaceProjectMemoryWithSnapshot(
-        PROJECT_ID,
-        "- NEVER STORED",
-        dbWithFailingUpdate(db)
-      )
+      replaceProjectMemoryWithSnapshot(PROJECT_ID, "- NEVER STORED", {
+        database: dbWithFailingUpdate(db),
+      })
     ).toThrow("simulated disk failure");
 
     // Nothing moved: no half-written archive, memory untouched.
@@ -256,17 +259,17 @@ describe("replaceProjectMemoryWithSnapshot", () => {
 
   it("keeps the PREVIOUS snapshot intact when a later replacement fails", () => {
     saveProjectMemory(PROJECT_ID, "- FIRST MEMORY", db);
-    replaceProjectMemoryWithSnapshot(PROJECT_ID, "- SECOND MEMORY", db);
+    replaceProjectMemoryWithSnapshot(PROJECT_ID, "- SECOND MEMORY", {
+      database: db,
+    });
     expect(getProjectMemoryArchiveDoc(PROJECT_ID, db)?.markdownContent).toBe(
       "- FIRST MEMORY"
     );
 
     expect(() =>
-      replaceProjectMemoryWithSnapshot(
-        PROJECT_ID,
-        "- THIRD MEMORY",
-        dbWithFailingUpdate(db)
-      )
+      replaceProjectMemoryWithSnapshot(PROJECT_ID, "- THIRD MEMORY", {
+        database: dbWithFailingUpdate(db),
+      })
     ).toThrow();
 
     // The snapshot still holds the memory the user might want back — NOT the
@@ -275,6 +278,78 @@ describe("replaceProjectMemoryWithSnapshot", () => {
       "- FIRST MEMORY"
     );
     expect(getProjectMemoryContent(PROJECT_ID, db)).toBe("- SECOND MEMORY");
+  });
+});
+
+/**
+ * A dream reads the memory to build its prompt and writes minutes later. If a
+ * human saved an edit in between, replacing unconditionally would discard that
+ * edit in favour of text reasoned from the version before it.
+ */
+describe("replaceProjectMemoryWithSnapshot — optimistic guard", () => {
+  it("replaces when the memory is still what the caller reasoned from", () => {
+    saveProjectMemory(PROJECT_ID, "- AS READ", db);
+
+    replaceProjectMemoryWithSnapshot(PROJECT_ID, "- DREAMED", {
+      expectedPrevious: "- AS READ",
+      database: db,
+    });
+
+    expect(getProjectMemoryContent(PROJECT_ID, db)).toBe("- DREAMED");
+  });
+
+  it("refuses — and changes nothing — when the memory moved underneath", () => {
+    saveProjectMemory(PROJECT_ID, "- AS READ", db);
+    // The human edit that lands while the dream is running.
+    saveProjectMemory(PROJECT_ID, "- HUMAN EDIT", db);
+
+    expect(() =>
+      replaceProjectMemoryWithSnapshot(PROJECT_ID, "- DREAMED", {
+        expectedPrevious: "- AS READ",
+        database: db,
+      })
+    ).toThrow(ProjectMemoryChangedError);
+
+    expect(getProjectMemoryContent(PROJECT_ID, db)).toBe("- HUMAN EDIT");
+    // No snapshot either: nothing was replaced, so nothing was archived.
+    expect(getProjectMemoryArchiveDoc(PROJECT_ID, db)).toBeNull();
+  });
+
+  it("treats an identical re-save as no change at all", () => {
+    saveProjectMemory(PROJECT_ID, "- AS READ", db);
+    saveProjectMemory(PROJECT_ID, "  - AS READ  ", db);
+
+    expect(() =>
+      replaceProjectMemoryWithSnapshot(PROJECT_ID, "- DREAMED", {
+        expectedPrevious: "- AS READ",
+        database: db,
+      })
+    ).not.toThrow();
+  });
+
+  it("guards the empty case in both directions", () => {
+    // Nothing read, nothing stored: the dream may write the first memory.
+    expect(() =>
+      replaceProjectMemoryWithSnapshot(PROJECT_ID, "- FIRST EVER", {
+        expectedPrevious: null,
+        database: db,
+      })
+    ).not.toThrow();
+
+    // Nothing read, but something appeared meanwhile: refuse.
+    saveProjectMemory(PROJECT_ID, "- APPEARED", db);
+    expect(() =>
+      replaceProjectMemoryWithSnapshot(PROJECT_ID, "- DREAMED", {
+        expectedPrevious: null,
+        database: db,
+      })
+    ).toThrow(ProjectMemoryChangedError);
+  });
+
+  it("replaces unconditionally when no expectation is given", () => {
+    saveProjectMemory(PROJECT_ID, "- WHATEVER", db);
+    replaceProjectMemoryWithSnapshot(PROJECT_ID, "- FORCED", { database: db });
+    expect(getProjectMemoryContent(PROJECT_ID, db)).toBe("- FORCED");
   });
 });
 
