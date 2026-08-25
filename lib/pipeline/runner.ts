@@ -51,6 +51,8 @@ export interface PipelineStageHandle {
   sessionId: string | null;
   /** Resolves (never rejects) when the stage session reaches a terminal state. */
   settled: Promise<PipelineStageResult>;
+  /** Named agent selected by the opt-in same-provider effort rung, else null. */
+  escalatedToNamedAgent?: string | null;
   /**
    * Provider the stage was escalated to (attempt >= 3 without a configured
    * same-provider model escalation, or attempt >= 4 with one), else
@@ -385,6 +387,7 @@ export async function runPipeline(
           error:
             error instanceof Error ? error.message : "Stage dispatch failed",
         }),
+        escalatedToNamedAgent: null,
         escalatedToProvider: null,
       };
     }
@@ -410,6 +413,15 @@ export async function runPipeline(
     if (handle.escalatedToProvider) {
       callbacks.onTrace?.(
         PIPELINE_REASONS.escalation(request.stage, handle.escalatedToProvider),
+        handle.sessionId
+      );
+    }
+    if (handle.escalatedToNamedAgent) {
+      callbacks.onTrace?.(
+        PIPELINE_REASONS.effortEscalation(
+          request.stage,
+          handle.escalatedToNamedAgent
+        ),
         handle.sessionId
       );
     }

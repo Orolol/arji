@@ -361,6 +361,7 @@ function buildReviewFeedbackSection(
 
 interface ResolvedStageAgent {
   resolved: ResolvedAgent;
+  escalatedToNamedAgent: string | null;
   escalatedToProvider: AgentProvider | null;
 }
 
@@ -399,7 +400,11 @@ async function resolveStageAgent(
   };
 
   if (request.attempt < 3) {
-    return { resolved: await resolveConfigured(), escalatedToProvider: null };
+    return {
+      resolved: await resolveConfigured(),
+      escalatedToNamedAgent: null,
+      escalatedToProvider: null,
+    };
   }
 
   // Escalation always starts fresh. If the failed named agent opted into a
@@ -421,7 +426,12 @@ async function resolveStageAgent(
         baseProvider
       );
       if (effortTarget) {
-        return { resolved: effortTarget, escalatedToProvider: null };
+        return {
+          resolved: effortTarget,
+          escalatedToNamedAgent:
+            effortTarget.name ?? effortTarget.namedAgentId ?? "stronger agent",
+          escalatedToProvider: null,
+        };
       }
     }
   }
@@ -433,11 +443,13 @@ async function resolveStageAgent(
   if (alternative) {
     return {
       resolved: { provider: alternative, namedAgentId: null },
+      escalatedToNamedAgent: null,
       escalatedToProvider: alternative,
     };
   }
   return {
     resolved: { provider: baseProvider, namedAgentId: null },
+    escalatedToNamedAgent: null,
     escalatedToProvider: null,
   };
 }
@@ -485,12 +497,8 @@ async function dispatchPipelineStage(
   const isReview = request.stage === "review";
   const agentType = isReview ? reviewAgentType : codeAgentType;
 
-  const { resolved, escalatedToProvider } = await resolveStageAgent(
-    init,
-    request,
-    codeAgentType,
-    reviewAgentType
-  );
+  const { resolved, escalatedToNamedAgent, escalatedToProvider } =
+    await resolveStageAgent(init, request, codeAgentType, reviewAgentType);
 
   // ---------------------------------------------------------------------
   // Resume decision. Targets: attempt 2 resumes the failed attempt of THIS
@@ -822,7 +830,12 @@ async function dispatchPipelineStage(
     }
   });
 
-  return { sessionId, settled, escalatedToProvider };
+  return {
+    sessionId,
+    settled,
+    escalatedToNamedAgent,
+    escalatedToProvider,
+  };
 }
 
 type StageResultPayload = ClaudeResult | undefined;

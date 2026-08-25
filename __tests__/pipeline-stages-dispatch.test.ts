@@ -779,6 +779,7 @@ describe("review stage dispatch", () => {
       resolutionMocks.pickAlternativeReviewProvider
     ).toHaveBeenCalledWith("claude-code");
     expect(resolutionMocks.resolveAgentForDispatch).not.toHaveBeenCalled();
+    expect(handle.escalatedToNamedAgent).toBeNull();
     expect(handle.escalatedToProvider).toBe("codex");
 
     const row = db
@@ -845,6 +846,9 @@ describe("review stage dispatch", () => {
     expect(
       resolutionMocks.pickAlternativeReviewProvider
     ).not.toHaveBeenCalled();
+    expect(effortHandle.escalatedToNamedAgent).toBe(
+      `Stronger reviewer ${counter}`
+    );
     expect(effortHandle.escalatedToProvider).toBeNull();
     expect(
       db
@@ -872,6 +876,7 @@ describe("review stage dispatch", () => {
     expect(
       resolutionMocks.pickAlternativeReviewProvider
     ).toHaveBeenCalledWith("claude-code");
+    expect(providerHandle.escalatedToNamedAgent).toBeNull();
     expect(providerHandle.escalatedToProvider).toBe("codex");
     expect(
       db

@@ -167,6 +167,8 @@ export const PIPELINE_REASONS = {
     `Pipeline stage: fix started (cycle ${cycle}/${max})`,
   retry: (stage: string, attempt: number, max: number) =>
     `Pipeline retry: ${stage} attempt ${attempt}/${max}`,
+  effortEscalation: (stage: string, namedAgent: string) =>
+    `Pipeline effort escalation: ${stage} retried with ${namedAgent}`,
   escalation: (stage: string, provider: string) =>
     `Pipeline escalation: ${stage} retried on ${provider}`,
   pausedQuestion: (stage: string) =>

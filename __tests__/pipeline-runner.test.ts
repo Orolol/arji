@@ -22,6 +22,7 @@ interface ScriptedStage {
   success?: boolean;
   outcome?: string | null;
   error?: string | null;
+  escalatedToNamedAgent?: string | null;
   escalatedToProvider?: string | null;
   /** Row status after settle (default: completed/failed by success). */
   rowStatus?: string;
@@ -140,6 +141,7 @@ function runScripted(config: HarnessConfig = {}) {
         settled: script.neverSettle
           ? new Promise<PipelineStageResult>(() => {})
           : Promise.resolve(result),
+        escalatedToNamedAgent: script.escalatedToNamedAgent ?? null,
         escalatedToProvider: script.escalatedToProvider ?? null,
       };
     },
@@ -407,6 +409,27 @@ describe("runPipeline — retry ladder and forensic", () => {
       PIPELINE_REASONS.escalation("review", "codex")
     );
     expect(h.reasons()).toContain(PIPELINE_REASONS.retry("review", 3, 3));
+  });
+
+  it("traces a same-provider effort escalation by named agent", async () => {
+    const h = runScripted({
+      maxAttempts: 3,
+      stages: [
+        { success: false },
+        { success: false },
+        { escalatedToNamedAgent: "Opus reviewer" },
+      ],
+      assessments: [false],
+    });
+    const summary = await h.promise;
+
+    expect(summary.state).toBe("succeeded");
+    expect(h.reasons()).toContain(
+      PIPELINE_REASONS.effortEscalation("review", "Opus reviewer")
+    );
+    expect(h.reasons()).not.toContain(
+      PIPELINE_REASONS.escalation("review", "claude-code")
+    );
   });
 
   it("maxAttempts 1 fails straight into forensic without a retry trace", async () => {
