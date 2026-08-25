@@ -14,6 +14,7 @@ import {
   buildMergeResolutionPrompt,
   buildEpicReviewPrompt,
   buildGradingPrompt,
+  VISUAL_PROOF_SECTION,
   type PromptProject,
   type PromptDocument,
   type PromptMessage,
@@ -119,8 +120,66 @@ describe("Prompt builder snapshot regression", () => {
     expect(buildBuildPrompt(project, docs, epic, [story], systemPrompt, comments)).toMatchSnapshot();
   });
 
+  it("buildBuildPrompt - visual proof enabled", () => {
+    expect(
+      buildBuildPrompt(project, docs, epic, [story], systemPrompt, comments, {
+        visualProofEnabled: true,
+      })
+    ).toMatchSnapshot();
+  });
+
   it("buildTicketBuildPrompt", () => {
     expect(buildTicketBuildPrompt(project, docs, epic, story, comments, systemPrompt)).toMatchSnapshot();
+  });
+
+  it("buildTicketBuildPrompt - visual proof enabled", () => {
+    expect(
+      buildTicketBuildPrompt(project, docs, epic, story, comments, systemPrompt, {
+        visualProofEnabled: true,
+      })
+    ).toMatchSnapshot();
+  });
+
+  it("keeps build prompts byte-identical when visual proof is omitted or off", () => {
+    const legacyEpicPrompt = buildBuildPrompt(
+      project,
+      docs,
+      epic,
+      [story],
+      systemPrompt,
+      comments
+    );
+    const explicitlyOffEpicPrompt = buildBuildPrompt(
+      project,
+      docs,
+      epic,
+      [story],
+      systemPrompt,
+      comments,
+      { visualProofEnabled: false }
+    );
+    const legacyStoryPrompt = buildTicketBuildPrompt(
+      project,
+      docs,
+      epic,
+      story,
+      comments,
+      systemPrompt
+    );
+    const explicitlyOffStoryPrompt = buildTicketBuildPrompt(
+      project,
+      docs,
+      epic,
+      story,
+      comments,
+      systemPrompt,
+      { visualProofEnabled: false }
+    );
+
+    expect(explicitlyOffEpicPrompt).toBe(legacyEpicPrompt);
+    expect(explicitlyOffStoryPrompt).toBe(legacyStoryPrompt);
+    expect(legacyEpicPrompt).not.toContain(VISUAL_PROOF_SECTION);
+    expect(legacyStoryPrompt).not.toContain(VISUAL_PROOF_SECTION);
   });
 
   it("buildReviewPrompt - security", () => {

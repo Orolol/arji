@@ -17,6 +17,7 @@ import { isBuildableStatus } from "@/lib/types/kanban";
 import { createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import { buildBuildPrompt } from "@/lib/claude/prompt-builder";
+import { isVisualProofEnabled } from "@/lib/claude/visual-proof";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import {
   classifySessionOutcome,
@@ -185,7 +186,15 @@ export async function POST(request: NextRequest, { params }: Params) {
   );
 
   // Build prompt — append review context if present
-  let prompt = buildBuildPrompt(project, [], epic, us, buildSystemPrompt, promptComments);
+  let prompt = buildBuildPrompt(
+    project,
+    [],
+    epic,
+    us,
+    buildSystemPrompt,
+    promptComments,
+    { visualProofEnabled: isVisualProofEnabled() }
+  );
   if (reviewContext) {
     prompt = prompt + "\n\n" + reviewContext;
   }

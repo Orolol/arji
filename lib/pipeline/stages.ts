@@ -52,6 +52,7 @@ import {
   buildTicketBuildPrompt,
   type PromptComment,
 } from "@/lib/claude/prompt-builder";
+import { isVisualProofEnabled } from "@/lib/claude/visual-proof";
 import { buildRegressionFixSection } from "@/lib/verify/regression-report";
 import { readRegressionConfig } from "@/lib/pipeline/verify";
 import { dispatchGradingSession } from "@/lib/grading/dispatch";
@@ -613,7 +614,8 @@ async function dispatchPipelineStage(
             epic,
             usList,
             buildSystemPrompt,
-            promptComments
+            promptComments,
+            { visualProofEnabled: isVisualProofEnabled() }
           )
         : buildTicketBuildPrompt(
             project,
@@ -621,7 +623,8 @@ async function dispatchPipelineStage(
             epic,
             story!,
             promptComments,
-            buildSystemPrompt
+            buildSystemPrompt,
+            { visualProofEnabled: isVisualProofEnabled() }
           );
 
     // Open review feedback (includes the blocking findings verbatim with

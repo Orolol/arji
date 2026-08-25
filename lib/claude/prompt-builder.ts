@@ -102,6 +102,21 @@ This ticket is a **bug fix**. The pipeline runs a mechanical regression check on
 2. **Then apply the fix.** Make the minimal change that makes the same test pass.
 3. **Commit the test file(s) together with the fix.** The check inspects the files added/modified on the branch and selects them with the project's configured test-file patterns — follow this repository's existing test layout and naming. A diff with no test file fails (\`no_test_in_diff\`), a test that already passes without the fix fails (\`test_passes_on_base\`), and a test still failing on the branch fails (\`test_fails_on_branch\`). Any of these sends the ticket back to a fix cycle.`;
 
+/**
+ * Best-effort visual demo guidance for ticket-scoped code sessions. This is
+ * appended only when the caller resolved visual_proof_enabled to true.
+ */
+export const VISUAL_PROOF_SECTION = `## Optional visual proof
+
+If this project has a UI, a browser is available, and the \`attach_artifact\` tool is available, run the application, exercise the functionality you implemented, capture 1 to 3 screenshots, and attach each screenshot with \`attach_artifact\` using a clear caption.
+
+Visual proof is best-effort and is never a completion requirement. If the application or browser cannot be run, the tool is unavailable, or no useful screenshot can be produced, complete the session normally. Missing visual proof must never make the build fail.`;
+
+export interface BuildPromptOptions {
+  /** Effective value of the global visual_proof_enabled setting. */
+  visualProofEnabled?: boolean;
+}
+
 export interface PromptEpicStatus {
   id: string;
   title: string;
@@ -918,6 +933,7 @@ export function buildBuildPrompt(
   userStories: PromptUserStory[],
   systemPrompt?: string | null,
   comments?: PromptComment[],
+  options: BuildPromptOptions = {},
 ): string {
   project = withProjectMemory(project);
   const parts: string[] = [];
@@ -966,6 +982,9 @@ Work through the user stories in order. If a story depends on another, implement
   if (epic.type === "bug") {
     parts.push(BUG_RED_GREEN_SECTION);
   }
+  if (options.visualProofEnabled) {
+    parts.push(VISUAL_PROOF_SECTION);
+  }
 
   return parts.filter(Boolean).join("\n");
 }
@@ -992,6 +1011,7 @@ export function buildTicketBuildPrompt(
   story: PromptUserStory,
   comments: PromptComment[],
   systemPrompt?: string | null,
+  options: BuildPromptOptions = {},
 ): string {
   project = withProjectMemory(project);
   const parts: string[] = [];
@@ -1042,6 +1062,9 @@ Implement this ticket following the specification and acceptance criteria above.
 `);
   if (epic.type === "bug") {
     parts.push(BUG_RED_GREEN_SECTION);
+  }
+  if (options.visualProofEnabled) {
+    parts.push(VISUAL_PROOF_SECTION);
   }
 
   return parts.filter(Boolean).join("\n");
