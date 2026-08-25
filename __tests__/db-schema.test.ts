@@ -379,6 +379,19 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       completedAt: "completed_at",
     },
   },
+  verifyReports: {
+    sqlName: "verify_reports",
+    columns: {
+      id: "id",
+      projectId: "project_id",
+      epicId: "epic_id",
+      agentSessionId: "agent_session_id",
+      status: "status",
+      startedAt: "started_at",
+      finishedAt: "finished_at",
+      commands: "commands",
+    },
+  },
   qaPrompts: {
     sqlName: "qa_prompts",
     columns: {
@@ -585,6 +598,12 @@ const NOT_NULL: [string, string][] = [
   ["reviewComments", "filePath"],
   ["reviewComments", "lineNumber"],
   ["reviewComments", "body"],
+  ["verifyReports", "projectId"],
+  ["verifyReports", "epicId"],
+  ["verifyReports", "status"],
+  ["verifyReports", "startedAt"],
+  ["verifyReports", "finishedAt"],
+  ["verifyReports", "commands"],
   ["ticketActivityLog", "fromStatus"],
   ["ticketActivityLog", "toStatus"],
   ["ticketActivityLog", "actor"],
@@ -638,6 +657,7 @@ const NULLABLE: [string, string][] = [
   ["agentSessions", "totalCostUsd"],
   ["chatConversations", "cliSessionId"],
   ["chatConversations", "namedAgentId"],
+  ["verifyReports", "agentSessionId"],
   ["notifications", "sessionId"],
   ["notifications", "agentType"],
 ];
@@ -742,6 +762,13 @@ const INDEXES: Record<string, IndexSpec[]> = {
       columns: ["epic_id", "file_path"],
     },
   ],
+  verifyReports: [
+    {
+      name: "verify_reports_epic_finished_idx",
+      unique: false,
+      columns: ["epic_id", "finished_at"],
+    },
+  ],
   githubIssues: [
     {
       name: "github_issues_project_issue_unique",
@@ -837,6 +864,11 @@ const FOREIGN_KEYS: Record<string, ForeignKeySpec[]> = {
   ],
   reviewComments: [
     { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "cascade" },
+  ],
+  verifyReports: [
+    { columns: ["project_id"], foreignTable: "projects", foreignColumns: ["id"], onDelete: "cascade" },
+    { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "cascade" },
+    { columns: ["agent_session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "set null" },
   ],
   notifications: [
     { columns: ["project_id"], foreignTable: "projects", foreignColumns: ["id"], onDelete: "cascade" },
@@ -993,6 +1025,21 @@ describe("db schema: exported types", () => {
     };
     expect(report.status).toBe("running");
     expect(prompt.name).toBe("Backend Audit");
+  });
+
+  it("VerifyReport select shape", () => {
+    const report: schema.VerifyReport = {
+      id: "vr_1",
+      projectId: "proj_1",
+      epicId: "epic_1",
+      agentSessionId: null,
+      status: "pass",
+      startedAt: "2026-08-25T10:00:00.000Z",
+      finishedAt: "2026-08-25T10:00:02.000Z",
+      commands:
+        '[{"name":"test","command":"npm test","exitCode":0,"durationMs":2000,"tail":"ok"}]',
+    };
+    expect(report.status).toBe("pass");
   });
 
   it("Notification select shapes", () => {
