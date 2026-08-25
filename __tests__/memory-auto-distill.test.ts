@@ -153,6 +153,7 @@ describe("evaluateDistillSourceEligibility", () => {
       const result = evaluateDistillSourceEligibility({
         agentType,
         status: "completed",
+        outcome: "answered",
       });
       expect(result.eligible).toBe(false);
       expect(result.reason).toContain("cannot itself be distilled");
@@ -165,9 +166,39 @@ describe("evaluateDistillSourceEligibility", () => {
       const result = evaluateDistillSourceEligibility({
         agentType: "build",
         status,
+        outcome: "answered",
       });
       expect(result.eligible).toBe(false);
       expect(result.reason).toContain("completed");
+    }
+  );
+
+  /**
+   * `asked_question` sessions are `completed` too, so the status check alone
+   * lets them through — and the agent is still waiting for a reply that never
+   * came. Distilling one writes an unresolved question into a document
+   * injected in every future prompt.
+   */
+  it("rejects a completed session that stopped to ask a question", () => {
+    const result = evaluateDistillSourceEligibility({
+      agentType: "build",
+      status: "completed",
+      outcome: "asked_question",
+    });
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toContain("ask a question");
+  });
+
+  it.each(["answered", "silent", "transition_refused", null])(
+    "accepts a completed session whose outcome is %s",
+    (outcome) => {
+      expect(
+        evaluateDistillSourceEligibility({
+          agentType: "build",
+          status: "completed",
+          outcome,
+        }).eligible
+      ).toBe(true);
     }
   );
 
@@ -175,7 +206,11 @@ describe("evaluateDistillSourceEligibility", () => {
     "accepts a completed %s session",
     (agentType) => {
       expect(
-        evaluateDistillSourceEligibility({ agentType, status: "completed" })
+        evaluateDistillSourceEligibility({
+          agentType,
+          status: "completed",
+          outcome: "answered",
+        })
       ).toEqual({ eligible: true, reason: "" });
     }
   );

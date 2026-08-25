@@ -252,6 +252,34 @@ describe("POST /api/projects/[projectId]/memory/distill", () => {
     }
   );
 
+  /**
+   * `asked_question` rows are `completed` too, so the status check alone lets
+   * them through — and the agent is still waiting for a reply that never came.
+   */
+  it("400s when the source session stopped to ask a question", async () => {
+    const projectId = seedProject();
+    db.insert(agentSessions)
+      .values({
+        id: "src-asked",
+        projectId,
+        status: "completed",
+        agentType: "build",
+        outcome: "asked_question",
+      })
+      .run();
+
+    const res = await DISTILL(
+      mockJsonRequest({ sourceSessionId: "src-asked" }),
+      mockRouteContext({ projectId })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.code).toBe("MEMORY_DISTILL_SOURCE_INVALID");
+    expect(json.error).toContain("ask a question");
+    expect(dispatchMock).not.toHaveBeenCalled();
+  });
+
   it("still accepts a completed review as a source — the manual button is offered there", async () => {
     const projectId = seedProject();
     db.insert(agentSessions)

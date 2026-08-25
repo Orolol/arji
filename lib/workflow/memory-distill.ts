@@ -221,6 +221,8 @@ export function isMemoryDistillSourceError(error: unknown): boolean {
 export interface DistillSourceCandidate {
   agentType: string | null;
   status: string | null;
+  /** Delivery verdict — 'asked_question' is completed but NOT settled. */
+  outcome: string | null;
 }
 
 export interface DistillSourceEligibility {
@@ -234,14 +236,20 @@ export interface DistillSourceEligibility {
  *
  * The auto-trigger has always enforced this (evaluateAutoDistillGuards) and
  * the UI only offers the button where it holds, but the manual endpoint took
- * any session id belonging to the project — so a direct POST could distill a
- * dream, or a run that never finished. Two rules, deliberately looser than the
- * auto matrix because the manual button IS offered on reviews and QA runs:
+ * any session id belonging to the project. Three rules, deliberately looser
+ * than the auto matrix because the manual button IS offered on reviews and QA
+ * runs:
  *
  *   - never a memory WRITER. Its output is the memory document itself, so
  *     distilling it would feed the memory back into the memory;
  *   - only a COMPLETED run. A queued or running session has no learnings yet,
- *     and a failed one has no delivered output to read.
+ *     and a failed one has no delivered output to read;
+ *   - never an ASKED_QUESTION run. Those are `completed` too, so the status
+ *     check alone lets them through — but the agent stopped to ask the user
+ *     something and the answer never came. Distilling one writes an unresolved
+ *     question into a document injected in every future prompt, as if it were
+ *     a settled convention. The auto matrix has always refused it; the manual
+ *     path now agrees.
  *
  * `null` means the session does not exist (or belongs to another project) —
  * the caller's own 404 case.
@@ -266,6 +274,13 @@ export function evaluateDistillSourceEligibility(
     return {
       eligible: false,
       reason: `Only a completed session can be distilled (this one is '${session.status ?? "unknown"}').`,
+    };
+  }
+  if (session.outcome === "asked_question") {
+    return {
+      eligible: false,
+      reason:
+        "This session stopped to ask a question — its learnings are not settled yet, so there is nothing durable to distill.",
     };
   }
   return { eligible: true, reason: "" };
@@ -404,6 +419,7 @@ export function loadDistillSourceCandidate(
       .select({
         agentType: agentSessions.agentType,
         status: agentSessions.status,
+        outcome: agentSessions.outcome,
       })
       .from(agentSessions)
       .where(

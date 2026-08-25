@@ -269,9 +269,14 @@ export default function SessionDetailPage() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          {/* Never offer to distill a session that WROTE the memory — a
-              distill of a distill (or of a dream) has no source learnings. */}
+          {/* Mirrors evaluateDistillSourceEligibility, which the endpoint
+              enforces: never a session that WROTE the memory (a distill of a
+              distill has no source learnings), and never one that stopped to
+              ask a question — those are `completed` too, but the agent is
+              still waiting for a reply, so there is nothing settled to fold
+              into a document every future prompt reads. */}
           {session.status === "completed" &&
+            session.outcome !== "asked_question" &&
             !MEMORY_WRITER_AGENT_TYPES.includes(session.agentType ?? "") && (
               <Button
                 variant="outline"

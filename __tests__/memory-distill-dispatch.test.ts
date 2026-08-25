@@ -316,6 +316,21 @@ describe("dispatchMemoryDistillSession", () => {
     }
   );
 
+  it("refuses a completed source that stopped to ask a question", async () => {
+    const { projectId, epicId } = seedProject();
+    const askedId = seedSourceSession(projectId, epicId, {
+      status: "completed",
+      outcome: "asked_question",
+    });
+
+    await expect(
+      dispatchMemoryDistillSession({ projectId, sourceSessionId: askedId })
+    ).rejects.toThrow(/ask a question/i);
+    await flushBackground();
+
+    expect(distillSessions(projectId)).toHaveLength(0);
+  });
+
   it("refuses a source that never completed", async () => {
     const { projectId, epicId } = seedProject();
     const runningId = seedSourceSession(projectId, epicId, {
