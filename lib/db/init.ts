@@ -35,6 +35,19 @@ export const DEFAULT_NAMED_AGENT_MODEL = "claude-opus-4-6";
 export const LEGACY_BASELINE_MS = 1771372800000;
 
 /**
+ * Migration identities involved in the short-lived 0033 collision between
+ * the review-verdict branch and main's grading-reports migration.
+ *
+ * A database that ran the branch before it was rebased has `review_verdict`
+ * at the first timestamp, but no `grading_reports` table. Drizzle only keeps a
+ * high-water mark, so it would skip the real 0033 and then fail while applying
+ * 0034 because the column already exists. See
+ * `repairReviewVerdictMigrationCollision` below.
+ */
+const GRADING_REPORTS_MIGRATION_MS = 1786713000000;
+const REVIEW_VERDICT_MIGRATION_MS = 1786713100000;
+
+/**
  * Post-baseline migrations that ADD COLUMNs, keyed by their journal `when`
  * timestamp. On bookkeeping-less databases these are stamped as applied when
  * the column already exists (re-running the ALTER would throw), and left to
@@ -49,11 +62,27 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
   { folderMillis: 1786712000000, table: "agent_sessions", column: "outcome" },
   // 0024_agent_session_usage (single transactional migration: the three
   // columns are always present or absent together on real databases)
-  { folderMillis: 1786712100000, table: "agent_sessions", column: "input_tokens" },
-  { folderMillis: 1786712100000, table: "agent_sessions", column: "output_tokens" },
-  { folderMillis: 1786712100000, table: "agent_sessions", column: "total_cost_usd" },
+  {
+    folderMillis: 1786712100000,
+    table: "agent_sessions",
+    column: "input_tokens",
+  },
+  {
+    folderMillis: 1786712100000,
+    table: "agent_sessions",
+    column: "output_tokens",
+  },
+  {
+    folderMillis: 1786712100000,
+    table: "agent_sessions",
+    column: "total_cost_usd",
+  },
   // 0026_agent_session_batch_run
-  { folderMillis: 1786712300000, table: "agent_sessions", column: "batch_run_id" },
+  {
+    folderMillis: 1786712300000,
+    table: "agent_sessions",
+    column: "batch_run_id",
+  },
   // 0028_project_clone_source (single transactional migration: the three
   // columns are always present or absent together on real databases).
   // Renumbered from 0027 when it collided with 0027_provider_usage_snapshots:
@@ -65,7 +94,11 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
   { folderMillis: 1786712500000, table: "projects", column: "default_branch" },
   // 0030_chat_attachment_ownership (single transactional migration: the two
   // columns are always present or absent together on real databases)
-  { folderMillis: 1786712700000, table: "chat_attachments", column: "project_id" },
+  {
+    folderMillis: 1786712700000,
+    table: "chat_attachments",
+    column: "project_id",
+  },
   { folderMillis: 1786712700000, table: "chat_attachments", column: "epic_id" },
   // 0031_notification_message (single column ALTER)
   { folderMillis: 1786712800000, table: "notifications", column: "message" },
@@ -101,12 +134,87 @@ function tableExists(connection: Database.Database, name: string): boolean {
 function columnExists(
   connection: Database.Database,
   table: string,
-  column: string
+  column: string,
 ): boolean {
   const row = connection
     .prepare("SELECT 1 FROM pragma_table_info(?) WHERE name = ?")
     .get(table, column);
   return row !== undefined;
+}
+
+/**
+ * Repair the exact database state produced by the review-verdict migration
+ * while it temporarily occupied main's 0033 journal slot.
+ *
+ * The old row's timestamp now identifies `0033_grading_reports`, even though
+ * that SQL never ran, and `0034_agent_session_review_verdict` is pending even
+ * though its column already exists. Apply the missing idempotent table
+ * migration, correct the old row's hash, and stamp 0034 as applied. The repair
+ * is transactional and preserves every already-persisted review verdict.
+ *
+ * This deliberately requires the whole collision fingerprint: the ledger's
+ * high-water mark is exactly 0033, its hash is not the current grading
+ * migration hash, the review-verdict column exists, and grading_reports does
+ * not. Other damaged or manually edited databases are not guessed at here.
+ */
+function repairReviewVerdictMigrationCollision(
+  connection: Database.Database,
+  migrationsFolder: string,
+): void {
+  if (
+    !tableExists(connection, "__drizzle_migrations") ||
+    !columnExists(connection, "agent_sessions", "review_verdict") ||
+    tableExists(connection, "grading_reports")
+  ) {
+    return;
+  }
+
+  const latest = connection
+    .prepare(
+      `SELECT hash, created_at
+       FROM "__drizzle_migrations"
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+    .get() as { hash: string; created_at: number } | undefined;
+
+  if (Number(latest?.created_at) !== GRADING_REPORTS_MIGRATION_MS) return;
+
+  const migrations = readMigrationFiles({ migrationsFolder });
+  const gradingReportsMigration = migrations.find(
+    (migration) => migration.folderMillis === GRADING_REPORTS_MIGRATION_MS,
+  );
+  const reviewVerdictMigration = migrations.find(
+    (migration) => migration.folderMillis === REVIEW_VERDICT_MIGRATION_MS,
+  );
+
+  if (!gradingReportsMigration || !reviewVerdictMigration) {
+    throw new Error(
+      "Cannot repair the review-verdict migration collision: required migrations are missing",
+    );
+  }
+  if (latest?.hash === gradingReportsMigration.hash) return;
+
+  const repair = connection.transaction(() => {
+    for (const statement of gradingReportsMigration.sql) {
+      connection.exec(statement);
+    }
+    connection
+      .prepare(
+        `UPDATE "__drizzle_migrations"
+         SET hash = ?
+         WHERE created_at = ?`,
+      )
+      .run(gradingReportsMigration.hash, GRADING_REPORTS_MIGRATION_MS);
+    connection
+      .prepare(
+        `INSERT INTO "__drizzle_migrations" ("hash", "created_at")
+         VALUES (?, ?)`,
+      )
+      .run(reviewVerdictMigration.hash, REVIEW_VERDICT_MIGRATION_MS);
+  });
+
+  repair();
 }
 
 /**
@@ -120,7 +228,7 @@ function columnExists(
  */
 function stampLegacyBaseline(
   connection: Database.Database,
-  migrationsFolder: string
+  migrationsFolder: string,
 ): void {
   if (tableExists(connection, "__drizzle_migrations")) return;
   if (!tableExists(connection, "projects")) return; // fresh DB: let migrate() run the full chain
@@ -137,7 +245,7 @@ function stampLegacyBaseline(
       columnExists(connection, spec.table, spec.column)
         ? spec.folderMillis
         : ceiling,
-    LEGACY_BASELINE_MS
+    LEGACY_BASELINE_MS,
   );
 
   const toStamp = migrations.filter((m) => m.folderMillis <= stampCeilingMs);
@@ -147,11 +255,11 @@ function stampLegacyBaseline(
       id SERIAL PRIMARY KEY,
       hash text NOT NULL,
       created_at numeric
-    )`
+    )`,
   );
 
   const insert = connection.prepare(
-    `INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)`
+    `INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)`,
   );
   const stampAll = connection.transaction(() => {
     for (const migration of toStamp) {
@@ -171,7 +279,7 @@ function seedDefaultNamedAgent(connection: Database.Database): void {
     // Extremely old databases may predate named_agents and can't be fully
     // healed here; skip the seed instead of crashing at startup.
     console.warn(
-      "[db-init] named_agents table missing — skipping default agent seed"
+      "[db-init] named_agents table missing — skipping default agent seed",
     );
     return;
   }
@@ -183,13 +291,13 @@ function seedDefaultNamedAgent(connection: Database.Database): void {
   if (!existing) {
     connection
       .prepare(
-        "INSERT OR IGNORE INTO named_agents (id, name, provider, model, created_at) VALUES (?, ?, ?, ?, datetime('now'))"
+        "INSERT OR IGNORE INTO named_agents (id, name, provider, model, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
       )
       .run(
         nanoid(12),
         DEFAULT_NAMED_AGENT_NAME,
         DEFAULT_NAMED_AGENT_PROVIDER,
-        DEFAULT_NAMED_AGENT_MODEL
+        DEFAULT_NAMED_AGENT_MODEL,
       );
   }
 }
@@ -206,10 +314,12 @@ function seedDefaultNamedAgent(connection: Database.Database): void {
  */
 export function initDb(
   connection: Database.Database,
-  options: { migrationsFolder?: string } = {}
+  options: { migrationsFolder?: string } = {},
 ): void {
-  const migrationsFolder = options.migrationsFolder ?? defaultMigrationsFolder();
+  const migrationsFolder =
+    options.migrationsFolder ?? defaultMigrationsFolder();
 
+  repairReviewVerdictMigrationCollision(connection, migrationsFolder);
   stampLegacyBaseline(connection, migrationsFolder);
   migrate(drizzle(connection), { migrationsFolder });
   seedDefaultNamedAgent(connection);

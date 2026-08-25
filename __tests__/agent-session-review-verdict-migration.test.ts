@@ -239,6 +239,86 @@ describe("0034_agent_session_review_verdict — applied schema", () => {
     });
   });
 
+  it("repairs the collided pre-rebase 0033 without losing persisted verdicts", () => {
+    const file = tempDbPath();
+
+    withDb(file, (conn) => {
+      initDb(conn);
+      conn
+        .prepare("INSERT INTO projects (id, name) VALUES (?, ?)")
+        .run("p1", "Project One");
+      conn
+        .prepare(
+          "INSERT INTO agent_sessions (id, project_id, status, agent_type, review_verdict) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run("review-1", "p1", "completed", "review_code", "changes_requested");
+
+      // Before the branch was rebased, its review-verdict ALTER occupied
+      // main's 0033 timestamp. Recreate that exact fingerprint: the column and
+      // its data exist, grading_reports does not, and the high-water row has a
+      // non-grading hash at 0033.
+      conn.exec("DROP TABLE grading_reports");
+      conn
+        .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')
+        .run(PREVIOUS_MIGRATION_WHEN);
+      conn
+        .prepare(
+          'INSERT INTO "__drizzle_migrations" (hash, created_at) VALUES (?, ?)',
+        )
+        .run("pre-rebase-review-verdict-hash", PREVIOUS_MIGRATION_WHEN);
+    });
+
+    withDb(file, (conn) => {
+      expect(() => initDb(conn)).not.toThrow();
+
+      expect(
+        conn
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'grading_reports'",
+          )
+          .get(),
+      ).toBeDefined();
+      expect(
+        (
+          conn
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'grading_reports' ORDER BY name",
+            )
+            .all() as { name: string }[]
+        ).map((row) => row.name),
+      ).toEqual([
+        "grading_reports_epic_created_at_idx",
+        "grading_reports_session_idx",
+        "sqlite_autoindex_grading_reports_1",
+      ]);
+      expect(columnNames(conn, "agent_sessions")).toContain("review_verdict");
+      expect(
+        conn
+          .prepare(
+            "SELECT review_verdict FROM agent_sessions WHERE id = 'review-1'",
+          )
+          .get(),
+      ).toEqual({ review_verdict: "changes_requested" });
+
+      const applied = (
+        conn
+          .prepare(
+            'SELECT created_at FROM "__drizzle_migrations" ORDER BY created_at',
+          )
+          .all() as { created_at: number }[]
+      ).map((row) => row.created_at);
+      expect(applied).toContain(PREVIOUS_MIGRATION_WHEN);
+      expect(applied).toContain(MIGRATION_WHEN);
+      expect(
+        conn
+          .prepare(
+            'SELECT hash FROM "__drizzle_migrations" WHERE created_at = ?',
+          )
+          .get(PREVIOUS_MIGRATION_WHEN),
+      ).not.toEqual({ hash: "pre-rebase-review-verdict-hash" });
+    });
+  });
+
   it("stamps 0034 on a bookkeeping-less database that already has the column", () => {
     const file = tempDbPath();
 
