@@ -35,7 +35,8 @@ const {
   autoModeEnabledSettingKey,
   autoModeReviewAgentSettingKey,
   autoModeReviewConcurrencySettingKey,
-  autoModeBuildAgentSettingKey,
+    autoModeBuildAgentSettingKey,
+    fullAutoSecondOpinionSettingKey,
 } = await import("@/lib/auto-mode/constants");
 
 const PROJECT_ID = "proj-route";
@@ -86,6 +87,7 @@ describe("GET /auto-mode", () => {
       buildConcurrency: 2,
       reviewAgent: null,
       reviewConcurrency: 1,
+      secondOpinion: false,
       // Unlimited (Infinity in-process) crosses JSON as an explicit null.
       effectiveSchedulerBudget: null,
       running: false,
@@ -161,7 +163,7 @@ describe("PUT /auto-mode", () => {
     expect(res.status).toBe(404);
   });
 
-  it("persists all five settings keys and returns the new state", async () => {
+  it("persists all seven settings keys and returns the new state", async () => {
     const res = await PUT(
       putRequest({
         enabled: true,
@@ -169,6 +171,8 @@ describe("PUT /auto-mode", () => {
         buildConcurrency: 4,
         reviewAgent: "agent-review",
         reviewConcurrency: 2,
+        smartDispatch: true,
+        secondOpinion: true,
       }) as never,
       params()
     );
@@ -185,6 +189,7 @@ describe("PUT /auto-mode", () => {
     expect(settingValue(autoModeReviewConcurrencySettingKey(PROJECT_ID))).toBe(
       2
     );
+    expect(settingValue(fullAutoSecondOpinionSettingKey(PROJECT_ID))).toBe(true);
 
     expect(data).toMatchObject({
       enabled: true,
@@ -192,6 +197,8 @@ describe("PUT /auto-mode", () => {
       buildConcurrency: 4,
       reviewAgent: "agent-review",
       reviewConcurrency: 2,
+      smartDispatch: true,
+      secondOpinion: true,
     });
   });
 
@@ -261,6 +268,12 @@ describe("PUT /auto-mode", () => {
       params()
     );
     expect(badConcurrency.status).toBe(400);
+
+    const badSecondOpinion = await PUT(
+      putRequest({ secondOpinion: "sometimes" }) as never,
+      params()
+    );
+    expect(badSecondOpinion.status).toBe(400);
   });
 
   it("writes NOTHING when any field of the payload is invalid", async () => {

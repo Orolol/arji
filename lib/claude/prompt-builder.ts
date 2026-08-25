@@ -1463,6 +1463,55 @@ Your response should be a well-formatted markdown report.
 }
 
 // ---------------------------------------------------------------------------
+// 11b. Full Auto pre-merge second opinion
+// ---------------------------------------------------------------------------
+
+/**
+ * Short, read-only review of the final epic diff. Unlike the normal review
+ * prompt this is a merge gate, not another broad QA pass: it asks an
+ * independent provider to look only for reasons the already-reviewed branch
+ * must not land and requires the structured MCP verdict the supervisor reads.
+ */
+export function buildSecondOpinionPrompt(
+  project: PromptProject,
+  epic: PromptEpic,
+  userStories: PromptUserStory[],
+  branchName: string,
+  baseBranch: string
+): string {
+  project = withProjectMemory(project);
+  const parts: string[] = [];
+
+  parts.push(projectContextSections(project, []));
+  parts.push(`## Epic Awaiting Merge\n`);
+  parts.push(`### ${epic.title}\n`);
+  if (epic.description) parts.push(`${epic.description.trim()}\n`);
+  if (epic.type !== "bug") {
+    parts.push(userStoriesSection(userStories, { checkmark: false }));
+  }
+
+  parts.push(`## Independent Second Opinion
+
+Branch: \`${branchName}\`
+Base branch: \`${baseBranch}\`
+
+This epic already passed its normal review. Perform one short, independent,
+read-only pass over the **final branch diff** before Full Auto merges it.
+
+1. Inspect the exact final diff with \`git diff ${baseBranch}...HEAD\` and read only the surrounding code needed to validate it.
+2. Look only for merge-blocking defects: correctness regressions, security issues, destructive behaviour, or an acceptance criterion that the diff plainly does not implement. Do not restyle working code and do not edit files.
+3. Call \`mcp__arij__submit_findings\` exactly once. Use \`changes_requested\` and file/line-anchored \`critical\` or \`major\` findings for any blocker. Otherwise use \`approved\` (or \`approved_with_minor_issues\`) with an empty findings array; keep non-blocking suggestions in the summary so they do not become open merge blockers.
+4. End your response with exactly one of these lines:
+   - \`**Overall Verdict: Approved**\`
+   - \`**Overall Verdict: Approved with Minor Issues**\`
+   - \`**Overall Verdict: Changes Requested**\`
+
+A missing structured verdict is a failed gate and the branch will not merge.`);
+
+  return parts.filter(Boolean).join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // 12. Memory Distillation Prompt
 // ---------------------------------------------------------------------------
 

@@ -81,6 +81,15 @@ export const AUTO_MODE_REVIEW_CONCURRENCY_SETTING_KEY =
  */
 export const AUTO_MODE_SMART_DISPATCH_SETTING_KEY = "auto_mode_smart_dispatch";
 
+/**
+ * Global setting: require an independent plan-mode verdict before an
+ * otherwise mergeable epic may land. Tri-state like the other flags and OFF
+ * when absent, so existing Full Auto installations keep their exact merge
+ * behaviour until the user opts in.
+ */
+export const FULL_AUTO_SECOND_OPINION_SETTING_KEY =
+  "full_auto_second_opinion";
+
 /** Per-project override (`auto_mode_enabled:<projectId>`). */
 export function autoModeEnabledSettingKey(projectId: string): string {
   return `${AUTO_MODE_ENABLED_SETTING_KEY}:${projectId}`;
@@ -109,6 +118,11 @@ export function autoModeReviewConcurrencySettingKey(projectId: string): string {
 /** Per-project override (`auto_mode_smart_dispatch:<projectId>`). */
 export function autoModeSmartDispatchSettingKey(projectId: string): string {
   return `${AUTO_MODE_SMART_DISPATCH_SETTING_KEY}:${projectId}`;
+}
+
+/** Per-project override (`full_auto_second_opinion:<projectId>`). */
+export function fullAutoSecondOpinionSettingKey(projectId: string): string {
+  return `${FULL_AUTO_SECOND_OPINION_SETTING_KEY}:${projectId}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -219,6 +233,8 @@ export interface AutoModeConfig {
    * lib/agent-config/smart-dispatch.ts.
    */
   smartDispatch: boolean;
+  /** Require a fresh, segregated second opinion before each automatic merge. */
+  secondOpinion: boolean;
 }
 
 /**
@@ -283,6 +299,12 @@ export function resolveAutoModeConfig(
       parseAutoModeEnabled,
       false
     ),
+    secondOpinion: pick(
+      fullAutoSecondOpinionSettingKey(projectId),
+      FULL_AUTO_SECOND_OPINION_SETTING_KEY,
+      parseAutoModeEnabled,
+      false
+    ),
   };
 }
 
@@ -314,6 +336,10 @@ export const AUTO_MODE_REASONS = {
   buildDispatched: (scope: "epic" | "story") =>
     `Auto mode dispatched a build (${scope} scope)`,
   reviewDispatched: "Auto mode dispatched a review",
+  secondOpinionDispatched:
+    "Auto mode dispatched an independent second opinion before merge",
+  secondOpinionRejected: (detail: string) =>
+    `Auto mode parked this ticket after the second opinion rejected the merge: ${detail}`,
   /**
    * Why THIS agent ran. Written on every smart-dispatched session so the
    * choice is reconstructable from the ticket feed alone — an unattended mode

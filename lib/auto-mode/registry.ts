@@ -4,7 +4,7 @@ import { AUTO_MODE_MAX_CONSECUTIVE_FAILURES } from "./constants";
  * In-process state of Full Auto Mode, modeled on NightRunRegistry.
  *
  * There is deliberately NO table: the mode's *configuration* is durable (the
- * five `settings` keys) but its *runtime* state is not. A server restart
+ * seven `settings` keys) but its *runtime* state is not. A server restart
  * therefore resumes the mode from settings with an empty in-flight set,
  * which is exactly right — the sessions it was tracking died with the
  * process and boot cleanup cancels/fails their rows like any other orphan.
@@ -25,6 +25,7 @@ export const AUTO_MODE_RECENT_LIMIT = 20;
 export type AutoModeDispatchKind =
   | "build"
   | "review"
+  | "second-opinion"
   | "merge"
   | "merge-fix"
   | "skip";
@@ -77,6 +78,8 @@ interface FailureEntry {
 /** What one in-flight session of the mode's own dispatch is working on. */
 export interface AutoModeInFlightEntry {
   kind: "build" | "review";
+  /** Distinguishes the opt-in pre-merge gate from an ordinary review slot. */
+  purpose?: "second-opinion";
   /** Story id for story-scoped work, else the epic id (the parking key). */
   ticketId: string;
   epicId: string;

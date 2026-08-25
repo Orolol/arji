@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import {
   agentSessions,
@@ -420,6 +420,63 @@ export function createAutoModeMergeParkedNotification(input: {
       status: "failed",
       title: `Auto mode could not merge ${label} — ${input.error}`,
       targetUrl: buildEpicTargetUrl(input.projectId, input.epicId),
+    })
+    .run();
+
+  pruneNotifications();
+}
+
+/**
+ * Alarm raised when Full Auto's independent pre-merge reviewer vetoes the
+ * branch. The session is the evidence, so unlike a git-conflict park this
+ * notification deep-links directly to the completed second-opinion run.
+ */
+export function createAutoModeSecondOpinionParkedNotification(input: {
+  projectId: string;
+  epicId: string;
+  sessionId: string;
+  reason: string;
+}): void {
+  const duplicate = db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.sessionId, input.sessionId),
+        eq(notifications.agentType, "review_second_opinion")
+      )
+    )
+    .get();
+  if (duplicate) return;
+
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  const epic = db
+    .select({ title: epics.title, readableId: epics.readableId })
+    .from(epics)
+    .where(eq(epics.id, input.epicId))
+    .get();
+  const label = epic?.readableId
+    ? epic.title
+      ? `${epic.readableId}: ${epic.title}`
+      : epic.readableId
+    : (epic?.title ?? input.epicId);
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: input.sessionId,
+      agentType: "review_second_opinion",
+      status: "failed",
+      title: `Second opinion blocked auto-merge for ${label} — ${input.reason}`,
+      targetUrl: `/projects/${input.projectId}/sessions/${input.sessionId}`,
     })
     .run();
 

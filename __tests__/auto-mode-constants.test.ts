@@ -27,6 +27,7 @@ const {
   AUTO_MODE_REASON_PREFIX,
   AUTO_MODE_REVIEW_CONCURRENCY_SETTING_KEY,
   AUTO_MODE_SMART_DISPATCH_SETTING_KEY,
+  FULL_AUTO_SECOND_OPINION_SETTING_KEY,
   AUTO_MODE_SWEEP_INTERVAL_MS,
   AUTO_RUN_ID_PREFIX,
   DEFAULT_AUTO_BUILD_CONCURRENCY,
@@ -37,6 +38,7 @@ const {
   autoModeReviewAgentSettingKey,
   autoModeReviewConcurrencySettingKey,
   autoModeSmartDispatchSettingKey,
+  fullAutoSecondOpinionSettingKey,
   autoRunId,
   isAutoModeActivityReason,
   isAutoRunId,
@@ -83,6 +85,12 @@ describe("auto-mode setting keys", () => {
     );
     expect(AUTO_MODE_SMART_DISPATCH_SETTING_KEY).toBe(
       "auto_mode_smart_dispatch"
+    );
+    expect(FULL_AUTO_SECOND_OPINION_SETTING_KEY).toBe(
+      "full_auto_second_opinion"
+    );
+    expect(fullAutoSecondOpinionSettingKey("p1")).toBe(
+      "full_auto_second_opinion:p1"
     );
     expect(autoModeReviewConcurrencySettingKey("p1")).toBe(
       "auto_mode_review_concurrency:p1"
@@ -221,6 +229,7 @@ describe("resolveAutoModeConfig (client-side, settings map)", () => {
       reviewAgent: null,
       reviewConcurrency: DEFAULT_AUTO_REVIEW_CONCURRENCY,
       smartDispatch: false,
+      secondOpinion: false,
     });
   });
 });
@@ -236,6 +245,7 @@ describe("resolveAutoModeConfigForProject (server-side)", () => {
       // Informed selection is opt-in: an unattended mode must keep dispatching
       // the way it did yesterday until someone turns this on.
       smartDispatch: false,
+      secondOpinion: false,
     });
   });
 
@@ -252,7 +262,19 @@ describe("resolveAutoModeConfigForProject (server-side)", () => {
       reviewAgent: "reviewer-agent",
       reviewConcurrency: DEFAULT_AUTO_REVIEW_CONCURRENCY,
       smartDispatch: false,
+      secondOpinion: false,
     });
+  });
+
+  it("resolves full_auto_second_opinion per project → global → OFF", () => {
+    expect(resolveAutoModeConfigForProject("p1").secondOpinion).toBe(false);
+
+    putSetting(FULL_AUTO_SECOND_OPINION_SETTING_KEY, true);
+    expect(resolveAutoModeConfigForProject("p1").secondOpinion).toBe(true);
+
+    putSetting(fullAutoSecondOpinionSettingKey("p1"), false);
+    expect(resolveAutoModeConfigForProject("p1").secondOpinion).toBe(false);
+    expect(resolveAutoModeConfigForProject("p2").secondOpinion).toBe(true);
   });
 
   it("resolves auto_mode_smart_dispatch per project → global → OFF", () => {
