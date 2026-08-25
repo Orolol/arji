@@ -2,7 +2,7 @@
  * Tests for the chat-toolset /api/mcp/* board routes (list-tickets,
  * create-ticket, update-ticket, get-agent-status, start-build) and the
  * chat-token guards on the agent-only routes (ask-question,
- * submit-findings).
+ * submit-findings, submit-grading).
  *
  * Real handlers against an isolated in-memory database (createTestDb) and
  * real tokens from the MCP token store — same harness as mcp-routes.test.ts.
@@ -49,6 +49,7 @@ import { POST as getAgentStatusPost } from "@/app/api/mcp/get-agent-status/route
 import { POST as startBuildPost } from "@/app/api/mcp/start-build/route";
 import { POST as askQuestionPost } from "@/app/api/mcp/ask-question/route";
 import { POST as submitFindingsPost } from "@/app/api/mcp/submit-findings/route";
+import { POST as submitGradingPost } from "@/app/api/mcp/submit-grading/route";
 import { POST as postCommentPost } from "@/app/api/mcp/post-comment/route";
 
 type RouteHandler = (request: NextRequest) => Promise<Response>;
@@ -440,6 +441,28 @@ describe("agent-only routes — chat tokens are rejected", () => {
     const response = await call(
       submitFindingsPost,
       { verdict: "approved", summary: "ok", findings: [] },
+      chatToken
+    );
+
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { code: string };
+    expect(body.code).toBe("FORBIDDEN");
+  });
+
+  it("submit-grading: 403 FORBIDDEN", async () => {
+    const response = await call(
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId: "story-id",
+            criterion: "criterion",
+            status: "met",
+            evidence: "evidence",
+          },
+        ],
+        summary: "ok",
+      },
       chatToken
     );
 

@@ -113,6 +113,24 @@ export function useAgentDispatch(projectId: string, target: AgentDispatchTarget)
     [targetPath, requestJson, pollSessions]
   );
 
+  /** Epic targets only: grading is observational and never changes status. */
+  const sendToGrading = useCallback(
+    async (namedAgentId?: string | null) => {
+      if (kind !== "epic" || !targetPath) return;
+      setDispatching(true);
+      try {
+        const data = await requestJson(`${targetPath}/grading`, {
+          namedAgentId,
+        });
+        await pollSessions();
+        return data;
+      } finally {
+        setDispatching(false);
+      }
+    },
+    [kind, targetPath, requestJson, pollSessions],
+  );
+
   /** Epic targets only — no-op for story targets. */
   const resolveMerge = useCallback(
     async (namedAgentId?: string | null, resumeSessionId?: string) => {
@@ -155,6 +173,7 @@ export function useAgentDispatch(projectId: string, target: AgentDispatchTarget)
     isRunning,
     sendToDev,
     sendToReview,
+    sendToGrading,
     resolveMerge,
     approve,
     refreshSessions: pollSessions,

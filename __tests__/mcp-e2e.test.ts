@@ -345,6 +345,6 @@ describe("tools/call → authed HTTP bridge → result round-trip", () => {
 
     // The connection survived the bad call — the registry still answers.
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(5);
+    expect(tools).toHaveLength(ARIJ_MCP_ALLOWED_TOOL_NAMES.length);
   });
 });

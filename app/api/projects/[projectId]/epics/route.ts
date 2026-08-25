@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import {
   agentSessions,
   epics,
+  gradingReports,
   ticketComments,
   ticketReadCursors,
   userStories,
@@ -24,6 +25,10 @@ import { createEpicSchema } from "@/lib/validation/schemas";
 import { validateBody, isValidationError } from "@/lib/validation/validate";
 import { generateReadableId } from "@/lib/db/readable-id";
 import { emitTicketCreated } from "@/lib/events/emit";
+import {
+  aggregateGradingStatus,
+  parseGradingEntries,
+} from "@/lib/grading/report";
 
 /** Optional prose: blank is absence, so it is stored as NULL, not `""`. */
 function trimmedOrNull(value: string | null | undefined): string | null {
@@ -119,6 +124,31 @@ export async function GET(
     .groupBy(agentSessions.epicId)
     .as("epic_session_costs");
 
+  const rankedGradingReports = db
+    .select({
+      epicId: gradingReports.epicId,
+      latestGradingEntries: gradingReports.gradings,
+      latestGradingSummary: gradingReports.summary,
+      latestGradingCreatedAt: gradingReports.createdAt,
+      rowNum: sql<number>`ROW_NUMBER() OVER (
+        PARTITION BY ${gradingReports.epicId}
+        ORDER BY ${gradingReports.createdAt} DESC, ${gradingReports.id} DESC
+      )`.as("grading_row_num"),
+    })
+    .from(gradingReports)
+    .as("ranked_grading_reports");
+
+  const latestGradingReports = db
+    .select({
+      epicId: rankedGradingReports.epicId,
+      latestGradingEntries: rankedGradingReports.latestGradingEntries,
+      latestGradingSummary: rankedGradingReports.latestGradingSummary,
+      latestGradingCreatedAt: rankedGradingReports.latestGradingCreatedAt,
+    })
+    .from(rankedGradingReports)
+    .where(eq(rankedGradingReports.rowNum, 1))
+    .as("latest_grading_reports");
+
   // Latest user-authored comment per epic — a user comment newer than the
   // asked_question session counts as the reply.
   const latestUserComments = db
@@ -169,6 +199,9 @@ export async function GET(
       latestSessionEndedAt: latestEpicSessions.latestSessionEndedAt,
       latestUserCommentCreatedAt: latestUserComments.latestUserCommentCreatedAt,
       sessionsCostUsd: epicSessionCosts.sessionsCostUsd,
+      latestGradingEntries: latestGradingReports.latestGradingEntries,
+      gradingSummary: latestGradingReports.latestGradingSummary,
+      gradingCreatedAt: latestGradingReports.latestGradingCreatedAt,
       // Per-epic read cursor (ticket_read_cursors) — the client derives the
       // "unread AI comment" dot from latestComment* vs this timestamp.
       lastReadAt: ticketReadCursors.lastReadAt,
@@ -179,6 +212,7 @@ export async function GET(
     .leftJoin(latestEpicSessions, eq(epics.id, latestEpicSessions.epicId))
     .leftJoin(latestUserComments, eq(epics.id, latestUserComments.epicId))
     .leftJoin(epicSessionCosts, eq(epics.id, epicSessionCosts.epicId))
+    .leftJoin(latestGradingReports, eq(epics.id, latestGradingReports.epicId))
     .leftJoin(ticketReadCursors, eq(epics.id, ticketReadCursors.epicId))
     .where(eq(epics.projectId, projectId))
     .orderBy(epics.position)
@@ -190,7 +224,14 @@ export async function GET(
     queryMs: Date.now() - queryStartedAt,
   });
 
-  return NextResponse.json({ data: result });
+  const data = result.map(({ latestGradingEntries, ...epic }) => ({
+    ...epic,
+    gradingStatus: aggregateGradingStatus(
+      parseGradingEntries(latestGradingEntries),
+    ),
+  }));
+
+  return NextResponse.json({ data });
 }
 
 export async function POST(

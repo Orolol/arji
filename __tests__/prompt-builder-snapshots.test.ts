@@ -13,6 +13,7 @@ import {
   buildReviewPrompt,
   buildMergeResolutionPrompt,
   buildEpicReviewPrompt,
+  buildGradingPrompt,
   type PromptProject,
   type PromptDocument,
   type PromptMessage,
@@ -53,6 +54,11 @@ const story: PromptUserStory = {
   title: "As a dev I can configure prompts",
   description: "Add prompt editors for agent types",
   acceptanceCriteria: "- [ ] Editors are persisted\n- [ ] Changes apply immediately",
+};
+
+const gradingStory = {
+  id: "story-grade-1",
+  ...story,
 };
 
 const comments: PromptComment[] = [
@@ -147,5 +153,16 @@ describe("Prompt builder snapshot regression", () => {
 
   it("buildEpicReviewPrompt - bug ticket code_review", () => {
     expect(buildEpicReviewPrompt(project, docs, bugEpic, [], "code_review", systemPrompt, comments)).toMatchSnapshot();
+  });
+
+  it("buildGradingPrompt requires one structured grading per criterion", () => {
+    const prompt = buildGradingPrompt(project, docs, epic, [gradingStory], systemPrompt);
+
+    expect(prompt).toContain("story-grade-1");
+    expect(prompt).toContain("Editors are persisted");
+    expect(prompt).toContain("mcp__arij__submit_grading");
+    expect(prompt).toContain("MUST call");
+    expect(prompt).toContain("met | partial | missed");
+    expect(prompt).toContain("Do not judge general code quality");
   });
 });

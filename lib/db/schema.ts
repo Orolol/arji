@@ -405,6 +405,38 @@ export const reviewComments = sqliteTable(
   })
 );
 
+/**
+ * One atomic acceptance-criteria grading submitted by a grader session.
+ *
+ * `gradings` is the validated JSON array accepted by submit_grading. Keeping
+ * the array together preserves the report boundary: downstream pipeline and
+ * UI consumers can select the latest report without reconstructing one from
+ * independently timestamped criterion rows.
+ */
+export const gradingReports = sqliteTable(
+  "grading_reports",
+  {
+    id: text("id").primaryKey(),
+    epicId: text("epic_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "cascade" }),
+    agentSessionId: text("agent_session_id").references(
+      () => agentSessions.id,
+      { onDelete: "set null" }
+    ),
+    gradings: text("gradings").notNull(), // JSON: GradingEntry[]
+    summary: text("summary").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    epicCreatedAtIdx: index("grading_reports_epic_created_at_idx").on(
+      table.epicId,
+      table.createdAt
+    ),
+    sessionIdx: index("grading_reports_session_idx").on(table.agentSessionId),
+  })
+);
+
 export const gitSyncLog = sqliteTable("git_sync_log", {
   id: text("id").primaryKey(),
   // Nullable since 0029_git_sync_log_nullable_project: a clone is logged
@@ -517,6 +549,9 @@ export type NewTicketDependency = typeof ticketDependencies.$inferInsert;
 
 export type ReviewComment = typeof reviewComments.$inferSelect;
 export type NewReviewComment = typeof reviewComments.$inferInsert;
+
+export type GradingReport = typeof gradingReports.$inferSelect;
+export type NewGradingReport = typeof gradingReports.$inferInsert;
 
 export const ticketActivityLog = sqliteTable(
   "ticket_activity_log",

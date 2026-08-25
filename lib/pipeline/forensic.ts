@@ -121,7 +121,7 @@ export interface RunForensicInput {
   userStoryId: string | null;
   /** Session that exhausted its retry ladder. */
   deadSessionId: string;
-  stage: "build" | "review" | "fix";
+  stage: "build" | "grading" | "review" | "fix";
   /** Attempts burned on that stage. */
   attempts: number;
   /**

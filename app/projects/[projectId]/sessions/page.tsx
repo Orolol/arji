@@ -93,6 +93,7 @@ const AGENT_TYPE_LABELS: Record<string, string> = {
   review_code: "Code Review",
   review_compliance: "Compliance",
   review_feature: "Feature Review",
+  grading: "Acceptance Grading",
   merge: "Merge",
   tech_check: "Tech Check",
   release_notes: "Release Notes",

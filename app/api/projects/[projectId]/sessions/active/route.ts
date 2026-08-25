@@ -24,7 +24,8 @@ export interface UnifiedActivity {
     | "chat"
     | "spec_generation"
     | "release"
-    | "memory";
+    | "memory"
+    | "grading";
   label: string;
   status: string;
   mode: string;
@@ -56,6 +57,10 @@ function inferDbActivityType(row: {
 }): UnifiedActivity["type"] {
   if (row.agentType === "release_notes") {
     return "release";
+  }
+
+  if (row.agentType === "grading") {
+    return "grading";
   }
 
   // Before the mode heuristic below: both memory writers run in plan mode, so
@@ -110,6 +115,12 @@ function buildDbActivityLabel(
     return row.agentType === DREAMING_AGENT_TYPE
       ? "Dreaming: rewriting project memory"
       : "Distilling project memory";
+  }
+
+  if (type === "grading") {
+    return row.epicTitle
+      ? `Grading: ${row.epicTitle}`
+      : "Grading acceptance criteria";
   }
 
   if (type === "merge") {

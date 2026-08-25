@@ -5,7 +5,7 @@
  * client would) and drives the JSON-RPC handshake over stdio:
  * initialize → notifications/initialized → tools/list → tools/call, against a
  * stub node:http backend standing in for the Arij server. Asserts the bearer
- * header, the 5-tool registry shape, kebab-case endpoint mapping, and the
+ * header, the agent-tool registry shape, kebab-case endpoint mapping, and the
  * error → isError tool-result mapping (never a protocol crash).
  */
 import { spawn, type ChildProcess } from "node:child_process";
@@ -29,6 +29,7 @@ const EXPECTED_TOOL_NAMES = [
   "post_comment",
   "ask_question",
   "submit_findings",
+  "submit_grading",
 ];
 
 const EXPECTED_CHAT_TOOL_NAMES = [
@@ -93,7 +94,6 @@ function startStubServer(): Promise<void> {
 /* Minimal JSON-RPC stdio client                                       */
 /* ------------------------------------------------------------------ */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 class McpStdioClient {
   readonly child: ChildProcess;
   stderr = "";
@@ -183,14 +183,12 @@ class McpStdioClient {
     this.child.kill();
   }
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /* ------------------------------------------------------------------ */
 /* Suite                                                               */
 /* ------------------------------------------------------------------ */
 
 let client: McpStdioClient;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let initResult: any;
 
 beforeAll(async () => {
@@ -243,10 +241,9 @@ describe("startup", () => {
 });
 
 describe("tools/list", () => {
-  it("declares exactly the five Arij tools, in order, with schemas", async () => {
+  it("declares exactly the Arij agent tools, in order, with schemas", async () => {
     const result = await client.request("tools/list", {});
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const byName = new Map(result.tools.map((tool: any) => [tool.name, tool]));
     expect(result.tools.map((tool: { name: string }) => tool.name)).toEqual(
       EXPECTED_TOOL_NAMES
@@ -257,7 +254,6 @@ describe("tools/list", () => {
       expect(tool.inputSchema.additionalProperties).toBe(false);
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateStatus: any = byName.get("update_ticket_status");
     expect(updateStatus.inputSchema.properties.status.enum).toEqual([
       "backlog",
@@ -268,7 +264,6 @@ describe("tools/list", () => {
     ]); // "released" is system-only and must not be offered
     expect(updateStatus.inputSchema.required).toEqual(["status"]);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const submitFindings: any = byName.get("submit_findings");
     expect(submitFindings.inputSchema.required).toEqual([
       "verdict",
@@ -280,7 +275,20 @@ describe("tools/list", () => {
       submitFindings.inputSchema.properties.findings.items.required
     ).toEqual(["file_path", "line", "body", "severity"]);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const submitGrading: any = byName.get("submit_grading");
+    expect(submitGrading.inputSchema.required).toEqual([
+      "gradings",
+      "summary",
+    ]);
+    expect(submitGrading.inputSchema.properties.gradings.minItems).toBe(1);
+    expect(submitGrading.inputSchema.properties.gradings.maxItems).toBe(100);
+    expect(
+      submitGrading.inputSchema.properties.gradings.items.required
+    ).toEqual(["storyId", "criterion", "status", "evidence"]);
+    expect(
+      submitGrading.inputSchema.properties.gradings.items.properties.status.enum
+    ).toEqual(["met", "partial", "missed"]);
+
     const getTicket: any = byName.get("get_ticket");
     expect(getTicket.inputSchema.properties.ticket_id.type).toBe("string");
   });
@@ -326,6 +334,33 @@ describe("tools/call → HTTP bridge", () => {
     expect(capturedRequests[0]).toMatchObject({
       url: "/api/mcp/update-ticket-status",
       body: { status: "review", reason: "Implementation complete" },
+    });
+  });
+
+  it("bridges submit_grading to the kebab-case endpoint without reshaping the payload", async () => {
+    nextResponse = {
+      status: 200,
+      body: { data: { reportId: "grading-1" } },
+    };
+    const payload = {
+      gradings: [
+        {
+          storyId: "story-1",
+          criterion: "The feature works",
+          status: "met",
+          evidence: "Covered by feature.test.ts",
+        },
+      ],
+      summary: "All criteria met",
+    };
+
+    const result = await client.callTool("submit_grading", payload);
+
+    expect(result.isError).toBeFalsy();
+    expect(capturedRequests[0]).toMatchObject({
+      url: "/api/mcp/submit-grading",
+      authorization: "Bearer test-token",
+      body: payload,
     });
   });
 
@@ -388,7 +423,7 @@ describe("tools/call → HTTP bridge", () => {
 
       // The shim survived: it still answers requests afterwards.
       const list = await isolated.request("tools/list", {});
-      expect(list.tools).toHaveLength(5);
+      expect(list.tools).toHaveLength(EXPECTED_TOOL_NAMES.length);
     } finally {
       isolated.kill();
     }
@@ -493,7 +528,7 @@ describe("chat toolset (ARIJ_MCP_TOOLSET=chat)", () => {
   });
 
   it("rejects agent-only tools without calling the backend", async () => {
-    for (const name of ["ask_question", "submit_findings"]) {
+    for (const name of ["ask_question", "submit_findings", "submit_grading"]) {
       const result = await chatClient.callTool(name, {});
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("UNKNOWN_TOOL");

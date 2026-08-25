@@ -1,3 +1,5 @@
+import type { GradingStatus } from "@/lib/grading/report";
+
 export const KANBAN_COLUMNS = [
   "backlog",
   "todo",
@@ -94,6 +96,10 @@ export interface KanbanEpic {
   latestUserCommentCreatedAt?: string | null;
   /** The epic's read cursor (ticket_read_cursors.last_read_at), if any. */
   lastReadAt?: string | null;
+  /** Aggregate of the latest atomic acceptance-grading report. */
+  gradingStatus?: GradingStatus | null;
+  gradingSummary?: string | null;
+  gradingCreatedAt?: string | null;
 }
 
 export type KanbanAgentActionType = "build" | "review" | "merge";
