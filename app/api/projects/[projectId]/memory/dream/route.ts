@@ -58,6 +58,18 @@ export async function POST(request: NextRequest, { params }: Params) {
       namedAgentId: namedAgentId ?? null,
       trigger: "manual",
     });
+    // Losing the last-moment race for the document is a conflict, not a
+    // successful no-op: answer it exactly like the pre-check above, so the
+    // route has ONE contract for "a writer holds the memory" instead of two.
+    if (!result.dispatched && result.reason.includes("already pending")) {
+      return NextResponse.json(
+        {
+          error: "A memory rewrite is already in progress for this project.",
+          code: "DREAMING_PENDING",
+        },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({
       data: {
         sessionId: result.sessionId,

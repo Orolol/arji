@@ -32,15 +32,26 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
     let cancelled = false;
     setLoading(true);
     fetch(`/api/projects/${projectId}/memory`)
-      .then((res) => res.json())
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        // Without this check a 404/500 renders as an empty editor, which reads
+        // as "this project has no memory" — and saving from there would wipe a
+        // memory that merely failed to load.
+        if (!res.ok) {
+          throw new Error(data?.error || "Failed to load project memory.");
+        }
+        return data;
+      })
       .then((data) => {
         if (cancelled) return;
         setContent(data.data?.content ?? "");
         setUpdatedAt(data.data?.updatedAt ?? null);
         setDirty(false);
       })
-      .catch(() => {
-        if (!cancelled) setError("Failed to load project memory.");
+      .catch((err: Error) => {
+        if (!cancelled) {
+          setError(err?.message || "Failed to load project memory.");
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

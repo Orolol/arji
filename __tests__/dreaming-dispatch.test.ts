@@ -179,6 +179,13 @@ function dreamSessions() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The GLOBAL dreaming setting outlives a test — every project reads it, so a
+  // test that turns it on would silently arm every test after it. Each test
+  // states its own global answer (its per-project key is fresh with the
+  // project).
+  db.delete(settings)
+    .where(eq(settings.key, DREAMING_AFTER_NIGHT_RUN_SETTING_KEY))
+    .run();
   seedProject();
   processManagerState.result = {
     success: true,
@@ -773,6 +780,9 @@ describe("maybeDreamAfterNightRun", () => {
   });
 
   it("lets a per-project true opt in while the global stays off", async () => {
+    // Explicit rather than implied by test order: the point of the assertion is
+    // the per-project override winning over an OFF global.
+    setSetting(DREAMING_AFTER_NIGHT_RUN_SETTING_KEY, false);
     setSetting(dreamingAfterNightRunSettingKey(projectId), true);
     seedSourceSession();
 
