@@ -47,6 +47,26 @@ describe("buildCiFixPrompt", () => {
     expect(prompt).toContain("before\n~ ~ ~\nafter");
   });
 
+  it("distinguishes a budget-dropped log from one GitHub never exposed", () => {
+    const prompt = buildCiFixPrompt(
+      { name: "Widgets", memory: null },
+      { title: "Checkout" },
+      {
+        prNumber: 42,
+        headSha: "abc123",
+        failures: [
+          { name: "unit", logTail: null, logTailReason: "budget" },
+          { name: "e2e", logTail: null, logTailReason: "unavailable" },
+        ],
+      },
+    );
+
+    expect(prompt).toContain(
+      "omitted to stay within this session's evidence budget",
+    );
+    expect(prompt).toContain("did not expose a downloadable log");
+  });
+
   it("truncates an oversized specification to keep the prompt argv-safe", () => {
     const spec = "x".repeat(40_000);
     const prompt = buildCiFixPrompt(

@@ -60,6 +60,7 @@ function deps(row: Routine): CiWatchDeps {
     fetchPullRequestCi: vi.fn(async () => ({
       headSha: "sha-1",
       state: "failing" as const,
+      prState: "open" as const,
       failedChecks: ["lint", "unit"],
     })),
     isAutofixEnabled: vi.fn(() => false),
@@ -156,6 +157,7 @@ describe("CI watch", () => {
       .mockResolvedValueOnce({
         headSha: "sha-2",
         state: "failing",
+        prState: "open",
         failedChecks: ["e2e"],
       });
 
@@ -233,11 +235,13 @@ describe("CI watch", () => {
       .mockResolvedValueOnce({
         headSha: "sha-1",
         state: "passing",
+        prState: "open",
         failedChecks: [],
       })
       .mockResolvedValueOnce({
         headSha: "sha-1",
         state: "failing",
+        prState: "open",
         failedChecks: ["e2e"],
       });
 
@@ -257,11 +261,13 @@ describe("CI watch", () => {
       .mockResolvedValueOnce({
         headSha: "sha-1",
         state: "failing",
+        prState: "open",
         failedChecks: ["unit"],
       })
       .mockResolvedValueOnce({
         headSha: "sha-2",
         state: "failing",
+        prState: "open",
         failedChecks: ["unit"],
       });
 
@@ -275,16 +281,19 @@ describe("CI watch", () => {
     const first = nextCiObservation(undefined, 11, {
       headSha: "sha-1",
       state: "failing",
+      prState: "open",
       failedChecks: ["unit"],
     });
     const green = nextCiObservation(first.observation, 11, {
       headSha: "sha-1",
       state: "passing",
+      prState: "open",
       failedChecks: [],
     });
     const redAgain = nextCiObservation(green.observation, 11, {
       headSha: "sha-1",
       state: "failing",
+      prState: "open",
       failedChecks: ["unit"],
     });
 
@@ -325,16 +334,19 @@ describe("CI watch", () => {
       .mockResolvedValueOnce({
         headSha: "sha-1",
         state: "failing",
+        prState: "open",
         failedChecks: ["unit"],
       })
       .mockResolvedValueOnce({
         headSha: "sha-1",
         state: "failing",
+        prState: "open",
         failedChecks: ["unit"],
       })
       .mockResolvedValueOnce({
         headSha: "sha-2",
         state: "failing",
+        prState: "open",
         failedChecks: ["unit"],
       });
     vi.mocked(watchDeps.launchAutofix)

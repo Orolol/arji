@@ -90,6 +90,7 @@ const {
   epics,
   agentSessions,
   settings,
+  reviewComments,
   ticketActivityLog,
   notifications,
 } = await import("@/lib/db/schema");
@@ -302,6 +303,17 @@ describe("scheduler-integrated batch build", () => {
       })
       .where(eq(epics.id, epicIds[1]))
       .run();
+    // An unresolved review finding exists — a CI autofix must not inherit
+    // the ordinary build's "address each one" rework block.
+    db.insert(reviewComments)
+      .values({
+        id: `rc-${epicIds[1]}`,
+        epicId: epicIds[1],
+        filePath: "src/legacy.ts",
+        lineNumber: 12,
+        body: "Extract this duplicated logic.",
+      })
+      .run();
     vi.mocked(attachWorktree).mockClear();
     vi.mocked(createWorktree).mockClear();
     // The local branch already carries commits the PR head never ran.
@@ -343,6 +355,11 @@ describe("scheduler-integrated batch build", () => {
     expect(autofixRow?.prompt).toContain("Expected 2, received 1");
     expect(autofixRow?.prompt).toContain("ahead of the PR head");
     expect(autofixRow?.prompt).toContain("dddd000");
+    expect(autofixRow?.prompt).toContain("smallest correct change");
+    // The open finding must not leak into the autofix prompt as a trailing
+    // rework instruction that overrides the narrowing above.
+    expect(autofixRow?.prompt).not.toContain("Code Review Feedback");
+    expect(autofixRow?.prompt).not.toContain("Extract this duplicated logic.");
 
     const activeResponse = await activeGet(
       mockNextRequest(),
@@ -400,6 +417,33 @@ describe("scheduler-integrated batch build", () => {
     expect(autofixNotification?.title).toContain(
       `push ${persistedPrBranch} for PR #42`,
     );
+  });
+
+  it("keeps review feedback in an ordinary build prompt", async () => {
+    const { projectId, epicIds } = seedProject(1);
+    db.insert(reviewComments)
+      .values({
+        id: `rc-ord-${epicIds[0]}`,
+        epicId: epicIds[0],
+        filePath: "src/a.ts",
+        lineNumber: 3,
+        body: "Rename this variable.",
+      })
+      .run();
+
+    const response = await epicBuildPost(
+      mockJsonRequest({}),
+      mockRouteContext({ projectId, epicId: epicIds[0] }),
+    );
+    expect(response.status).toBe(200);
+    const json = await response.json();
+
+    const state = sessionsByStatus(projectId);
+    const row = [...state.queued, ...state.running].find(
+      (candidate) => candidate.id === json.data.sessionId,
+    );
+    expect(row?.prompt).toContain("Code Review Feedback");
+    expect(row?.prompt).toContain("Rename this variable.");
   });
 
   it("refuses CI autofix when the epic has no persisted PR branch", async () => {

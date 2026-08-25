@@ -25,6 +25,7 @@ import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
 // document without them — one contract, one definition.
 import { DREAMING_MEMORY_SECTIONS } from "@/lib/workflow/dreaming-constants";
 import type { TelescopeCollectionResult } from "@/lib/telescope/collect";
+import { utf8Head } from "@/lib/routines/ci-autofix-limits";
 
 // ---------------------------------------------------------------------------
 // Types — lightweight projections of the Drizzle schema rows
@@ -85,6 +86,8 @@ export interface PromptUserStory {
 export interface PromptCiFailure {
   name: string;
   logTail: string | null;
+  /** Distinguishes a budget-dropped log from one GitHub never exposed. */
+  logTailReason?: "unavailable" | "budget";
 }
 
 /** Story projection used by the acceptance-criteria grader. */
@@ -1077,11 +1080,11 @@ Work through the user stories in order. If a story depends on another, implement
 }
 
 /**
- * Spec budget for CI fix prompts, which also carry up to 60 KB of bounded
- * log evidence. Codex passes the prompt as a single argv element against a
- * 128 KB MAX_ARG_STRLEN kernel cap.
+ * Spec budget in UTF-8 bytes for CI fix prompts, which also carry up to
+ * 60 KB of bounded log evidence. Codex passes the prompt as a single argv
+ * element against a 128 KB MAX_ARG_STRLEN kernel cap.
  */
-export const CI_FIX_MAX_SPEC_CHARS = 16_000;
+export const CI_FIX_MAX_SPEC_BYTES = 16_000;
 
 /**
  * Build a narrowly-scoped code prompt from mechanical GitHub CI evidence.
@@ -1100,13 +1103,19 @@ export function buildCiFixPrompt(
   systemPrompt?: string | null,
 ): string {
   project = withProjectMemory(project);
-  // The CI evidence below is already argv-budgeted; an uncapped spec could
-  // still push the prompt past MAX_ARG_STRLEN on argv-based providers.
-  // Memory is capped at write time, so only the spec needs a bound here.
+  // The CI evidence is already byte-budgeted; an uncapped spec could still
+  // push the prompt past MAX_ARG_STRLEN on argv-based providers. Memory is
+  // capped at write time, so only the spec needs a bound here — measured
+  // in bytes, since MAX_ARG_STRLEN counts bytes.
+  const specMarker = "\n\n[Specification truncated for this fix session]";
+  const rawSpec = project.spec ?? "";
   const spec =
-    project.spec && project.spec.length > CI_FIX_MAX_SPEC_CHARS
-      ? `${project.spec.slice(0, CI_FIX_MAX_SPEC_CHARS)}\n\n[Specification truncated for this fix session]`
-      : project.spec;
+    Buffer.byteLength(rawSpec, "utf8") > CI_FIX_MAX_SPEC_BYTES
+      ? `${utf8Head(
+          rawSpec,
+          CI_FIX_MAX_SPEC_BYTES - Buffer.byteLength(specMarker, "utf8"),
+        )}${specMarker}`
+      : rawSpec;
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
@@ -1130,6 +1139,10 @@ export function buildCiFixPrompt(
       const safeTail = failure.logTail.replace(/~~~/g, "~ ~ ~");
       parts.push(
         `Untrusted GitHub Actions log tail:\n\n~~~text\n${safeTail}\n~~~`,
+      );
+    } else if (failure.logTailReason === "budget") {
+      parts.push(
+        `Its log was downloaded but omitted to stay within this session's evidence budget; diagnose it from the check name and a local run.`,
       );
     } else {
       parts.push(`GitHub did not expose a downloadable log for this check.`);

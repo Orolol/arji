@@ -266,6 +266,12 @@ export async function runCiWatchRoutine(
   routine: Routine,
   deps: CiWatchDeps = defaultCiWatchDeps,
 ): Promise<RoutineActionResult> {
+  const config = parseRoutineConfig(routine);
+  const previousState = parseStoredState(config[CI_WATCH_STATE_CONFIG_KEY]);
+  const previousErrorState = parseStoredErrorState(
+    config[CI_WATCH_ERROR_STATE_CONFIG_KEY],
+  );
+
   const openPullRequests = deps
     .listOpenPullRequestEpics(routine.projectId)
     .filter(
@@ -274,6 +280,14 @@ export async function runCiWatchRoutine(
         epic.prNumber !== null,
     );
   if (openPullRequests.length === 0) {
+    // Nothing left to watch — prune the durable observations instead of
+    // letting the routine config accumulate stale per-PR entries forever.
+    if (
+      Object.keys(previousState).length > 0 ||
+      Object.keys(previousErrorState).length > 0
+    ) {
+      deps.persistState(routine.id, {}, {});
+    }
     return {
       status: "skipped",
       message: "No open pull requests are currently attached to epics.",
@@ -282,12 +296,8 @@ export async function runCiWatchRoutine(
     };
   }
 
-  const config = parseRoutineConfig(routine);
-  const previousState = parseStoredState(config[CI_WATCH_STATE_CONFIG_KEY]);
-  const previousErrorState = parseStoredErrorState(
-    config[CI_WATCH_ERROR_STATE_CONFIG_KEY],
-  );
   const nextErrorState: StoredCiWatchErrorState = { ...previousErrorState };
+
   let owner: string;
   let repo: string;
   try {

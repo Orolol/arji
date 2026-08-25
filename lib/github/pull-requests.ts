@@ -86,13 +86,15 @@ export interface PullRequestCiStatus {
    */
   failedCheckRuns?: PullRequestFailedCheckRun[];
   /** Lifecycle of the PR itself, so CI watch can stop polling merged PRs. */
-  prState?: "draft" | "open" | "closed" | "merged";
+  prState: "draft" | "open" | "closed" | "merged";
 }
 
 export interface PullRequestCiFailureEvidence {
   name: string;
-  /** Best-effort tail of the job log; null for legacy/third-party checks. */
+  /** Best-effort tail of the job log; null when GitHub exposes none or the
+   * bounded evidence budget dropped it (see `logTailReason`). */
   logTail: string | null;
+  logTailReason?: "unavailable" | "budget";
 }
 
 interface CheckRunSignal {
@@ -173,7 +175,7 @@ export function tailCiJobLog(
 export function classifyPullRequestCi(input: {
   checkRuns: CheckRunSignal[];
   commitStatuses: CommitStatusSignal[];
-}): Omit<PullRequestCiStatus, "headSha"> {
+}): PullRequestCiClassification {
   const failedChecks = new Set<string>();
   const hasActionableFailure =
     input.checkRuns.some(
@@ -411,6 +413,14 @@ export async function fetchPullRequestCiStatus(
 }
 
 /**
+ * CI-only classification, independent of the PR's lifecycle state.
+ */
+export interface PullRequestCiClassification {
+  state: PullRequestCiState;
+  failedChecks: string[];
+}
+
+/**
  * Fetch bounded log tails for failed GitHub Actions checks. Every failed
  * check name remains present, but only a limited number of Actions logs are
  * downloaded and their combined evidence stays within the build-route byte
@@ -448,8 +458,13 @@ export async function fetchPullRequestCiFailureEvidence(
       .slice(0, CI_AUTOFIX_MAX_FAILURES)
       .map(async (name) => {
         const checkRun = runByName.get(name);
-        if (!checkRun || !loggedCheckNames.has(name)) {
-          return { name, logTail: null };
+        if (!checkRun) {
+          // Legacy commit status: GitHub exposes no Actions job log at all.
+          return { name, logTail: null, logTailReason: "unavailable" as const };
+        }
+        if (!loggedCheckNames.has(name)) {
+          // A real log exists but falls outside the bounded download set.
+          return { name, logTail: null, logTailReason: "budget" as const };
         }
 
         try {
@@ -465,7 +480,11 @@ export async function fetchPullRequestCiFailureEvidence(
           // A non-Actions check run, expired redirect, or missing permission is
           // expected to have no downloadable log. The check name is still
           // useful evidence and the autofix must continue with the rest.
-          return { name, logTail: null };
+          return {
+            name,
+            logTail: null,
+            logTailReason: "unavailable" as const,
+          };
         }
       }),
   );

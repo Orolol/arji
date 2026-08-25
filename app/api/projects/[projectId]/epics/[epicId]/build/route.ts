@@ -211,15 +211,24 @@ export async function POST(request: NextRequest, { params }: Params) {
     createdAt: c.createdAt ?? "",
   }));
 
-  // Load open review comments (code review feedback)
-  const openReviewComments = db
-    .select()
-    .from(reviewComments)
-    .where(
-      and(eq(reviewComments.epicId, epicId), eq(reviewComments.status, "open")),
-    )
-    .orderBy(reviewComments.createdAt)
-    .all();
+  // Load open review comments (code review feedback). A CI autofix is a
+  // narrowly-scoped session — its prompt ends with "fix only the code or
+  // tests responsible for the CI failures" and "make the smallest correct
+  // change", so open findings must not override that as a trailing,
+  // highest-recency "address each one" block.
+  const openReviewComments = ciAutofix
+    ? []
+    : db
+        .select()
+        .from(reviewComments)
+        .where(
+          and(
+            eq(reviewComments.epicId, epicId),
+            eq(reviewComments.status, "open"),
+          ),
+        )
+        .orderBy(reviewComments.createdAt)
+        .all();
 
   // Format review comments as additional prompt context
   let reviewContext = "";

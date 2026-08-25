@@ -289,6 +289,7 @@ describe("classifyPullRequestCi", () => {
       "widgets",
       {
         headSha: "head-123",
+        prState: "open",
         state: "failing",
         failedChecks: ["legacy", "unit"],
         failedCheckRuns: [{ id: 701, name: "unit" }],
@@ -296,7 +297,7 @@ describe("classifyPullRequestCi", () => {
     );
 
     expect(evidence).toEqual([
-      { name: "legacy", logTail: null },
+      { name: "legacy", logTail: null, logTailReason: "unavailable" },
       {
         name: "unit",
         logTail: `prefix-${"x".repeat(40)}-failure-tail`,
@@ -318,11 +319,14 @@ describe("classifyPullRequestCi", () => {
     await expect(
       fetchPullRequestCiFailureEvidence("acme", "widgets", {
         headSha: "head-123",
+        prState: "open",
         state: "failing",
         failedChecks: ["third-party"],
         failedCheckRuns: [{ id: 999, name: "third-party" }],
       }),
-    ).resolves.toEqual([{ name: "third-party", logTail: null }]);
+    ).resolves.toEqual([
+      { name: "third-party", logTail: null, logTailReason: "unavailable" },
+    ]);
   });
 
   it("bounds combined evidence and downloads logs for only a limited check set", async () => {
@@ -339,6 +343,7 @@ describe("classifyPullRequestCi", () => {
       "widgets",
       {
         headSha: "head-123",
+        prState: "open",
         state: "failing",
         failedChecks,
         failedCheckRuns: failedChecks.map((name, index) => ({
@@ -373,6 +378,7 @@ describe("classifyPullRequestCi", () => {
 
     await fetchPullRequestCiFailureEvidence("acme", "widgets", {
       headSha: "head-123",
+      prState: "open",
       state: "failing",
       failedChecks: [
         ...cancelledChecks.map((check) => check.name),
@@ -415,6 +421,7 @@ describe("classifyPullRequestCi", () => {
       "widgets",
       {
         headSha: "head-123",
+        prState: "open",
         state: "failing",
         failedChecks: [
           ...cancelledChecks.map((check) => check.name),
@@ -440,6 +447,14 @@ describe("classifyPullRequestCi", () => {
       (failure) =>
         failure.name.startsWith("a-cancelled") && failure.logTail !== null,
     );
+    // A tail dropped by the fair-share allocation is disclosed as such
+    // rather than reported as missing.
+    expect(realFailure?.logTailReason).toBeUndefined();
+    for (const failure of evidence) {
+      if (failure.name !== "z-real-failure" && failure.logTail === null) {
+        expect(failure.logTailReason).toBe("budget");
+      }
+    }
     expect(cancelledWithLogs.length).toBeLessThan(
       CI_AUTOFIX_MAX_LOGGED_FAILURES,
     );

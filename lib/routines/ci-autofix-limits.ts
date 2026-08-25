@@ -7,6 +7,12 @@ export const CI_AUTOFIX_MAX_EVIDENCE_BYTES = 60_000;
 export interface CiAutofixEvidenceLike {
   name: string;
   logTail: string | null;
+  /**
+   * Why a log tail is absent: GitHub exposed none ("unavailable"), or one
+   * existed and the shared evidence budget dropped it ("budget"). The two
+   * read very differently in the fix prompt.
+   */
+  logTailReason?: "unavailable" | "budget";
 }
 
 export function ciAutofixEvidenceBytes(
@@ -39,8 +45,7 @@ function utf8Tail(value: string, maxBytes: number): string {
   return codePoints.slice(start).join("");
 }
 
-function utf8Head(value: string, maxBytes: number): string {
-  if (maxBytes <= 0) return "";
+export function utf8Head(value: string, maxBytes: number): string {
   if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
 
   const result: string[] = [];
@@ -86,20 +91,48 @@ export function boundCiAutofixEvidence<T extends CiAutofixEvidenceLike>(
       return leftRank - rightRank || left.index - right.index;
     });
 
+  // Fair share: priority decides the order, but no single verbose job may
+  // spend the whole budget — several genuine failures each keep a bounded
+  // slice instead of later ones getting nothing at all.
+  let remainingLogChecks = bindOrder.filter(
+    ({ failure }) => typeof failure.logTail === "string",
+  ).length;
+
   const boundTails = new Map<T, string | null>();
+  const budgetDropped = new Set<T>();
   for (const { failure } of bindOrder) {
-    if (!failure.logTail || remainingBytes === 0) {
+    const hasLog = typeof failure.logTail === "string";
+    if (!hasLog || remainingBytes <= 0) {
+      if (hasLog) budgetDropped.add(failure);
       boundTails.set(failure, null);
       continue;
     }
-    const perCheckTail = failure.logTail.slice(-CI_AUTOFIX_MAX_LOG_TAIL_CHARS);
-    const tail = utf8Tail(perCheckTail, remainingBytes) || null;
-    boundTails.set(failure, tail);
-    remainingBytes -= tail === null ? 0 : Buffer.byteLength(tail, "utf8");
+    const share = Math.max(
+      1,
+      Math.floor(remainingBytes / Math.max(remainingLogChecks, 1)),
+    );
+    const perCheckTail = failure.logTail!.slice(-CI_AUTOFIX_MAX_LOG_TAIL_CHARS);
+    const tail = utf8Tail(perCheckTail, Math.min(share, remainingBytes));
+    if (tail) {
+      boundTails.set(failure, tail);
+      remainingBytes -= Buffer.byteLength(tail, "utf8");
+    } else {
+      // No bytes left for this check — its downloaded log is a casualty of
+      // the budget, not missing evidence.
+      budgetDropped.add(failure);
+      boundTails.set(failure, null);
+    }
+    remainingLogChecks -= 1;
   }
 
-  return nonEmpty.map((failure) => ({
-    ...failure,
-    logTail: boundTails.get(failure) ?? null,
-  }));
+  return nonEmpty.map((failure) => {
+    const tail = boundTails.get(failure) ?? null;
+    return {
+      ...failure,
+      logTail: tail,
+      ...(tail === null && budgetDropped.has(failure)
+        ? { logTailReason: "budget" as const }
+        : {}),
+    };
+  });
 }
