@@ -679,6 +679,11 @@ type IndexSpec = { name: string; unique: boolean; columns: string[] };
 const INDEXES: Record<string, IndexSpec[]> = {
   routines: [
     {
+      name: "routines_project_kind_unique",
+      unique: true,
+      columns: ["project_id", "kind"],
+    },
+    {
       name: "routines_project_idx",
       unique: false,
       columns: ["project_id"],

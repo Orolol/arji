@@ -1,6 +1,42 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RoutinesSettings } from "@/components/routines/RoutinesSettings";
+
+// Radix Select uses a popper that jsdom cannot drive reliably. Keep these
+// component tests focused on RoutinesSettings state and API behavior.
+vi.mock("@/components/ui/select", () => ({
+  Select: ({
+    value,
+    onValueChange,
+    children,
+    disabled,
+  }: {
+    value: string;
+    onValueChange: (value: string) => void;
+    children: ReactNode;
+    disabled?: boolean;
+  }) => (
+    <select
+      data-testid="routine-kind-select"
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onValueChange(event.target.value)}
+    >
+      {children}
+    </select>
+  ),
+  SelectTrigger: () => null,
+  SelectValue: () => null,
+  SelectContent: ({ children }: { children: ReactNode }) => <>{children}</>,
+  SelectItem: ({
+    value,
+    children,
+  }: {
+    value: string;
+    children: ReactNode;
+  }) => <option value={value}>{children}</option>,
+}));
 
 const fetchMock = vi.fn();
 
@@ -98,7 +134,7 @@ describe("RoutinesSettings", () => {
     await screen.findByText("No routines configured");
     fireEvent.click(screen.getByRole("button", { name: "Add routine" }));
 
-    fireEvent.change(screen.getByLabelText("Kind"), {
+    fireEvent.change(screen.getByTestId("routine-kind-select"), {
       target: { value: "ci_watch" },
     });
     fireEvent.change(screen.getByLabelText("Daily time"), {
@@ -157,6 +193,10 @@ describe("RoutinesSettings", () => {
 
     render(<RoutinesSettings projectId="p1" />);
     const enabled = await screen.findByLabelText("Enable Night run");
+    const time = screen.getByLabelText("Daily time");
+    const config = screen.getByLabelText("Configuration (JSON)");
+    fireEvent.change(time, { target: { value: "21:30" } });
+    fireEvent.change(config, { target: { value: '{"includeBacklog":true}' } });
     fireEvent.click(enabled);
 
     await waitFor(() =>
@@ -165,6 +205,8 @@ describe("RoutinesSettings", () => {
         expect.objectContaining({ method: "PATCH" })
       )
     );
+    expect(time).toHaveValue("21:30");
+    expect(config).toHaveValue('{"includeBacklog":true}');
 
     fireEvent.click(screen.getByRole("button", { name: "Delete Night run" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));

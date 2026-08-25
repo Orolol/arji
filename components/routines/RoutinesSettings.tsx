@@ -1,9 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AVAILABLE_ROUTINE_KINDS,
@@ -152,12 +161,18 @@ function RoutineEditor({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const preserveDraftOnNextRoutineUpdate = useRef(false);
   const isNew = routine === null;
   const selectedKind =
     kindOptions.find((option) => option.kind === kind) ?? kindOptions[0];
 
   useEffect(() => {
     if (!routine) return;
+    if (preserveDraftOnNextRoutineUpdate.current) {
+      preserveDraftOnNextRoutineUpdate.current = false;
+      setEnabled(routine.enabled);
+      return;
+    }
     setKind(routine.kind);
     setEnabled(routine.enabled);
     setTimeOfDay(routine.timeOfDay);
@@ -231,6 +246,7 @@ function RoutineEditor({
       if (!response.ok || !payload.data) {
         throw new Error(payload.error || "Failed to update routine.");
       }
+      preserveDraftOnNextRoutineUpdate.current = true;
       onSaved(payload.data);
     } catch (toggleError) {
       setEnabled(previous);
@@ -305,16 +321,21 @@ function RoutineEditor({
           </p>
         </div>
 
-        <label className="flex cursor-pointer items-center gap-[7px] text-[12.5px] font-medium">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-[7px]">
+          <Checkbox
+            id={`enabled-${routine?.id ?? "new"}`}
             checked={enabled}
             disabled={saving || deleting}
             aria-label={`Enable ${selectedKind?.label ?? "routine"}`}
-            onChange={(event) => void toggleEnabled(event.target.checked)}
+            onCheckedChange={(checked) => void toggleEnabled(checked === true)}
           />
-          Enabled
-        </label>
+          <label
+            className="cursor-pointer text-[12.5px] font-medium"
+            htmlFor={`enabled-${routine?.id ?? "new"}`}
+          >
+            Enabled
+          </label>
+        </div>
       </div>
 
       <div className="mt-[16px] grid gap-[14px] md:grid-cols-[minmax(180px,0.7fr)_160px_minmax(280px,1.3fr)]">
@@ -322,21 +343,27 @@ function RoutineEditor({
           <label className="text-[12px] font-medium" htmlFor={`kind-${routine?.id ?? "new"}`}>
             Kind
           </label>
-          <select
-            id={`kind-${routine?.id ?? "new"}`}
+          <Select
             value={kind}
             disabled={saving || deleting}
-            onChange={(event) =>
-              changeKind(event.target.value as AvailableRoutineKind)
-            }
-            className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            onValueChange={(value) => {
+              if (isAvailableRoutineKind(value)) changeKind(value);
+            }}
           >
-            {kindOptions.map((option) => (
-              <option key={option.kind} value={option.kind}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger
+              id={`kind-${routine?.id ?? "new"}`}
+              className="w-full"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {kindOptions.map((option) => (
+                <SelectItem key={option.kind} value={option.kind}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="space-y-[6px]">
@@ -373,7 +400,9 @@ function RoutineEditor({
           <p className="text-[11px] text-muted-foreground">
             {kind === "night_run"
               ? "Supports includeBacklog, failurePolicy, circuitBreaker, costCapUsd and namedAgentId."
-              : "intervalMinutes must be a positive integer."}
+              : kind === "github_issue_sync"
+                ? "intervalMinutes is a freshness TTL; the selected daily time remains the schedule."
+                : "intervalMinutes sets the polling cadence and must be a positive integer."}
           </p>
         </div>
       </div>
@@ -510,6 +539,14 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
     () => kindOptions.map((option) => option.label).join(", "),
     [kindOptions]
   );
+  const configuredKinds = useMemo(
+    () => new Set(routines.map((routine) => routine.kind)),
+    [routines]
+  );
+  const newRoutineKindOptions = useMemo(
+    () => kindOptions.filter((option) => !configuredKinds.has(option.kind)),
+    [configuredKinds, kindOptions]
+  );
 
   function upsertRoutine(next: RoutineRecord) {
     setRoutines((current) => {
@@ -579,7 +616,7 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
           <Button
             type="button"
             size="sm"
-            disabled={loading || creating || kindOptions.length === 0}
+            disabled={loading || creating || newRoutineKindOptions.length === 0}
             onClick={() => setCreating(true)}
           >
             <Plus className="h-3.5 w-3.5" />
@@ -588,18 +625,18 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      <div className="mt-[20px] border-b border-border" role="tablist" aria-label="Project settings">
-        <button
-          type="button"
-          role="tab"
-          aria-selected="true"
-          className="border-b-2 border-primary px-[12px] pb-[9px] text-[13px] font-medium"
+      <Tabs defaultValue="routines" className="mt-[20px] gap-0">
+        <TabsList
+          variant="line"
+          className="w-full justify-start border-b border-border px-0"
+          aria-label="Project settings"
         >
-          Routines
-        </button>
-      </div>
-
-      <section className="mt-[20px]" aria-labelledby="routines-heading">
+          <TabsTrigger value="routines" className="px-[12px] pb-[9px]">
+            Routines
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="routines">
+          <section className="mt-[20px]" aria-labelledby="routines-heading">
         <div className="flex flex-wrap items-start gap-[16px]">
           <div>
             <h3 id="routines-heading" className="text-[16px] font-semibold">
@@ -619,23 +656,25 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
         </div>
 
         <div className="mt-[16px] rounded-[12px] border border-border bg-band/40 px-[18px] py-[15px]">
-          <label className="flex cursor-pointer items-start gap-[9px] text-[13px]">
-            <input
-              type="checkbox"
+          <div className="flex items-start gap-[9px] text-[13px]">
+            <Checkbox
+              id="ci-autofix-enabled"
               className="mt-[2px]"
               checked={ciAutofixEnabled}
               disabled={savingAutofix}
               aria-label="Enable CI autofix"
-              onChange={(event) => void toggleAutofix(event.target.checked)}
+              onCheckedChange={(checked) =>
+                void toggleAutofix(checked === true)
+              }
             />
-            <span>
+            <label className="cursor-pointer" htmlFor="ci-autofix-enabled">
               <span className="font-medium">Enable CI autofix</span>
               <span className="block text-[12px] text-muted-foreground">
                 Off by default. When enabled, a newly failing PR head may queue
                 one normal fix session after CI watch sends its notification.
               </span>
-            </span>
-          </label>
+            </label>
+          </div>
           {autofixError && (
             <p className="mt-[8px] text-[12px] text-destructive" role="alert">
               {autofixError}
@@ -658,7 +697,7 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
               <RoutineEditor
                 projectId={projectId}
                 routine={null}
-                kindOptions={kindOptions}
+                kindOptions={newRoutineKindOptions}
                 serverTimezone={serverTimezone}
                 onSaved={upsertRoutine}
                 onDeleted={() => {}}
@@ -681,7 +720,11 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
                 key={routine.id}
                 projectId={projectId}
                 routine={routine}
-                kindOptions={kindOptions}
+                kindOptions={kindOptions.filter(
+                  (option) =>
+                    option.kind === routine.kind ||
+                    !configuredKinds.has(option.kind)
+                )}
                 serverTimezone={serverTimezone}
                 onSaved={upsertRoutine}
                 onDeleted={(routineId) =>
@@ -694,7 +737,9 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
             ))}
           </div>
         )}
-      </section>
+          </section>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

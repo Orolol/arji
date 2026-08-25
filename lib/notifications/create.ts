@@ -17,6 +17,7 @@ import {
   MEMORY_DREAMED_TITLE,
 } from "@/lib/workflow/dreaming-constants";
 import type { TicketExecutionStatus } from "@/lib/dependencies/scheduler";
+import { ROUTINE_KIND_LABELS } from "@/lib/routines/constants";
 
 const MAX_NOTIFICATIONS = 200;
 
@@ -95,13 +96,6 @@ export function buildAskedQuestionTitle(
 export function buildEpicTargetUrl(projectId: string, epicId: string): string {
   return `/projects/${projectId}?ticket=${epicId}`;
 }
-
-const ROUTINE_KIND_LABELS: Record<RoutineKind, string> = {
-  night_run: "Night run",
-  dreaming: "Dreaming",
-  github_issue_sync: "GitHub issue sync",
-  ci_watch: "CI watch",
-};
 
 /**
  * Persist the visible audit signal for one scheduled trigger. The routine

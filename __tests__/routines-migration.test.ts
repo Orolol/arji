@@ -62,4 +62,28 @@ describe("0033_routines migration", () => {
       sqlite.close();
     }
   });
+
+  it("allows only one routine of each kind per project", () => {
+    const { sqlite } = createTestDb();
+    try {
+      sqlite
+        .prepare("INSERT INTO projects (id, name) VALUES (?, ?)")
+        .run("project-1", "Project");
+      sqlite
+        .prepare(
+          "INSERT INTO routines (id, project_id, kind, time_of_day) VALUES (?, ?, ?, ?)"
+        )
+        .run("routine-1", "project-1", "ci_watch", "00:00");
+
+      expect(() =>
+        sqlite
+          .prepare(
+            "INSERT INTO routines (id, project_id, kind, time_of_day) VALUES (?, ?, ?, ?)"
+          )
+          .run("routine-2", "project-1", "ci_watch", "00:00")
+      ).toThrow();
+    } finally {
+      sqlite.close();
+    }
+  });
 });

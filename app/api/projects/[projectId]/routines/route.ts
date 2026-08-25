@@ -11,6 +11,7 @@ import {
 import {
   createProjectRoutine,
   listProjectRoutines,
+  RoutineConflictError,
   RoutineInputError,
 } from "@/lib/routines/crud";
 import { isCiAutofixEnabled } from "@/lib/routines/settings";
@@ -58,6 +59,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     const created = createProjectRoutine(projectId, validated.data);
     return NextResponse.json({ data: created }, { status: 201 });
   } catch (error) {
+    if (error instanceof RoutineConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     if (error instanceof RoutineInputError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

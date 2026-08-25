@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   mockJsonRequest,
   mockNextRequest,
@@ -46,6 +46,10 @@ beforeEach(() => {
       { id: "other-project", name: "Other" },
     ])
     .run();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("project routines CRUD routes", () => {
@@ -179,6 +183,71 @@ describe("project routines CRUD routes", () => {
       intervalMinutes: 30,
       ciWatchState: internalState,
     });
+  });
+
+  it("starts missed daily schedules tomorrow instead of firing immediately", async () => {
+    vi.useFakeTimers();
+    const now = new Date(2026, 7, 25, 23, 15, 0);
+    vi.setSystemTime(now);
+
+    const created = await POST(
+      mockJsonRequest({
+        kind: "night_run",
+        enabled: true,
+        timeOfDay: "22:00",
+        config: {},
+      }),
+      projectParams()
+    );
+    expect((await created.json()).data.lastRunAt).toBe(now.toISOString());
+
+    const disabled = await POST(
+      mockJsonRequest({
+        kind: "github_issue_sync",
+        enabled: false,
+        timeOfDay: "23:30",
+        config: {},
+      }),
+      projectParams()
+    );
+    const disabledRoutine = (await disabled.json()).data;
+    expect(disabledRoutine.lastRunAt).toBeNull();
+
+    const reenabled = await PATCH(
+      mockJsonRequest({ enabled: true, timeOfDay: "22:30" }),
+      routineParams(disabledRoutine.id)
+    );
+    expect((await reenabled.json()).data.lastRunAt).toBe(now.toISOString());
+  });
+
+  it("rejects duplicate routine kinds within one project", async () => {
+    const input = {
+      kind: "ci_watch",
+      enabled: true,
+      timeOfDay: "00:00",
+      config: { intervalMinutes: 15 },
+    };
+    expect((await POST(mockJsonRequest(input), projectParams())).status).toBe(201);
+
+    const duplicate = await POST(mockJsonRequest(input), projectParams());
+    expect(duplicate.status).toBe(409);
+    expect((await duplicate.json()).error).toContain("already exists");
+
+    const nightRun = await POST(
+      mockJsonRequest({
+        kind: "night_run",
+        enabled: false,
+        timeOfDay: "22:00",
+        config: {},
+      }),
+      projectParams()
+    );
+    const nightRunId = (await nightRun.json()).data.id;
+    const conflictingUpdate = await PATCH(
+      mockJsonRequest({ kind: "ci_watch", config: { intervalMinutes: 30 } }),
+      routineParams(nightRunId)
+    );
+    expect(conflictingUpdate.status).toBe(409);
   });
 
   it("rejects unavailable kinds, invalid times and malformed configs", async () => {

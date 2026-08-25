@@ -51,6 +51,10 @@ export const routines = sqliteTable(
     lastStatus: text("last_status"),
   },
   (table) => ({
+    projectKindUnique: uniqueIndex("routines_project_kind_unique").on(
+      table.projectId,
+      table.kind
+    ),
     projectIdx: index("routines_project_idx").on(table.projectId),
     enabledIdx: index("routines_enabled_idx").on(table.enabled),
   })

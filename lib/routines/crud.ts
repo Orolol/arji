@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { routines, type Routine } from "@/lib/db/schema";
 import {
+  isDailyRoutineKind,
   isAvailableRoutineKind,
   type AvailableRoutineKind,
 } from "@/lib/routines/constants";
@@ -41,6 +42,13 @@ export class RoutineNotFoundError extends Error {
   constructor() {
     super("Routine not found");
     this.name = "RoutineNotFoundError";
+  }
+}
+
+export class RoutineConflictError extends Error {
+  constructor(kind: AvailableRoutineKind) {
+    super(`A ${kind} routine already exists for this project.`);
+    this.name = "RoutineConflictError";
   }
 }
 
@@ -197,6 +205,65 @@ function findRoutine(projectId: string, routineId: string): Routine {
   return row;
 }
 
+function assertUniqueProjectKind(
+  projectId: string,
+  kind: AvailableRoutineKind,
+  currentRoutineId?: string
+): void {
+  const existing = db
+    .select({ id: routines.id })
+    .from(routines)
+    .where(and(eq(routines.projectId, projectId), eq(routines.kind, kind)))
+    .get();
+  if (existing && existing.id !== currentRoutineId) {
+    throw new RoutineConflictError(kind);
+  }
+}
+
+function isSameLocalDay(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+function missedDailySlot(input: RoutineWriteInput, now: Date): boolean {
+  if (!input.enabled || !isDailyRoutineKind(input.kind)) return false;
+  const [hours, minutes] = input.timeOfDay.split(":").map(Number);
+  return now.getHours() * 60 + now.getMinutes() > hours * 60 + minutes;
+}
+
+function seededLastRunAt(
+  input: RoutineWriteInput,
+  now: Date,
+  previous?: Routine
+): string | null {
+  const scheduleChanged =
+    !previous ||
+    previous.kind !== input.kind ||
+    previous.timeOfDay !== input.timeOfDay ||
+    (!previous.enabled && input.enabled);
+  if (!scheduleChanged || !missedDailySlot(input, now)) {
+    return previous?.lastRunAt ?? null;
+  }
+
+  const previousRun = previous?.lastRunAt
+    ? new Date(previous.lastRunAt)
+    : null;
+  if (
+    previousRun &&
+    !Number.isNaN(previousRun.getTime()) &&
+    isSameLocalDay(previousRun, now)
+  ) {
+    return previous?.lastRunAt ?? null;
+  }
+
+  // Claim today's already-missed slot so the minute sweep starts this daily
+  // routine tomorrow instead of immediately after creation/reconfiguration.
+  return now.toISOString();
+}
+
 export function listProjectRoutines(projectId: string): RoutineDto[] {
   return db
     .select()
@@ -213,7 +280,9 @@ export function createProjectRoutine(
   input: RoutineWriteInput
 ): RoutineDto {
   validateWrite(input);
+  assertUniqueProjectKind(projectId, input.kind);
   const id = createId();
+  const lastRunAt = seededLastRunAt(input, new Date());
   db.insert(routines)
     .values({
       id,
@@ -222,6 +291,7 @@ export function createProjectRoutine(
       enabled: input.enabled,
       timeOfDay: input.timeOfDay,
       config: persistedConfig(input.config),
+      lastRunAt,
     })
     .run();
   return toDto(findRoutine(projectId, id)) as RoutineDto;
@@ -243,6 +313,7 @@ export function updateProjectRoutine(
     config: patch.config ?? publicConfig(current.config),
   };
   validateWrite(next);
+  assertUniqueProjectKind(projectId, next.kind, routineId);
 
   db.update(routines)
     .set({
@@ -254,6 +325,7 @@ export function updateProjectRoutine(
         current.config,
         next.kind === "ci_watch"
       ),
+      lastRunAt: seededLastRunAt(next, new Date(), current),
     })
     .where(and(eq(routines.id, routineId), eq(routines.projectId, projectId)))
     .run();

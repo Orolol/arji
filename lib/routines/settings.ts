@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 
@@ -52,19 +52,11 @@ export function setCiAutofixEnabled(
   const key = ciAutofixEnabledSettingKey(projectId);
   const value = JSON.stringify(enabled);
   const updatedAt = new Date().toISOString();
-  const existing = db
-    .select({ key: settings.key })
-    .from(settings)
-    .where(eq(settings.key, key))
-    .get();
-
-  if (existing) {
-    db.update(settings)
-      .set({ value, updatedAt })
-      .where(eq(settings.key, key))
-      .run();
-    return;
-  }
-
-  db.insert(settings).values({ key, value, updatedAt }).run();
+  db.insert(settings)
+    .values({ key, value, updatedAt })
+    .onConflictDoUpdate({
+      target: settings.key,
+      set: { value, updatedAt },
+    })
+    .run();
 }

@@ -5,6 +5,7 @@ import {
 } from "@/lib/api/route-helpers";
 import {
   deleteProjectRoutine,
+  RoutineConflictError,
   RoutineInputError,
   RoutineNotFoundError,
   updateProjectRoutine,
@@ -19,6 +20,9 @@ type Params = {
 function routineError(error: unknown): NextResponse | null {
   if (error instanceof RoutineNotFoundError) {
     return NextResponse.json({ error: error.message }, { status: 404 });
+  }
+  if (error instanceof RoutineConflictError) {
+    return NextResponse.json({ error: error.message }, { status: 409 });
   }
   if (error instanceof RoutineInputError) {
     return NextResponse.json({ error: error.message }, { status: 400 });
