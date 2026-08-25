@@ -5,7 +5,8 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MarkdownContent } from "@/components/chat/MarkdownContent";
+import { TicketCommentContent } from "@/components/verify/TicketCommentContent";
+import { locateRegressionReport } from "@/lib/verify/regression-report";
 import {
   Send,
   User,
@@ -325,7 +326,11 @@ function TransitionGroupRow({
 
 function CommentRow({ comment }: { comment: TicketComment }) {
   const [expanded, setExpanded] = useState(false);
-  const long = isLongComment(comment.content);
+  // A verify report renders as a structured red/green block, not prose:
+  // a word-boundary preview would cut its JSON payload and drop it back to
+  // a raw blob, so report comments stay whole instead of collapsing.
+  const isReport = locateRegressionReport(comment.content) !== null;
+  const long = !isReport && isLongComment(comment.content);
   const showFull = !long || expanded;
   return (
     <div
@@ -354,7 +359,7 @@ function CommentRow({ comment }: { comment: TicketComment }) {
       {/* Long build outputs and logs collapse to a word-boundary preview so
           the feed stays scannable; the full text stays one click away. */}
       <div className="text-sm">
-        <MarkdownContent
+        <TicketCommentContent
           content={showFull ? comment.content : commentPreview(comment.content)}
         />
       </div>

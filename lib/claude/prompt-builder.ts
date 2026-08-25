@@ -81,6 +81,21 @@ export interface PromptUserStory {
   acceptanceCriteria?: string | null;
 }
 
+/**
+ * Dedicated instruction block appended by every build builder when the
+ * ticket's `type` is 'bug'. Encodes the RoboBun red → green rule: the
+ * regression test must exist, must fail before the fix, and must be
+ * committed with it — lib/verify/regression-check.ts re-verifies this
+ * mechanically after the build stage.
+ */
+export const BUG_RED_GREEN_SECTION = `## Bug-Fix Rule — mandatory red → green regression test
+
+This ticket is a **bug fix**. The pipeline runs a mechanical regression check on your branch, so follow this exact order:
+
+1. **Write the failing test first.** Add (or modify) a test that reproduces the reported bug and run it — it MUST fail against the unfixed code.
+2. **Then apply the fix.** Make the minimal change that makes the same test pass.
+3. **Commit the test file(s) together with the fix.** The check inspects the files added/modified on the branch and selects them with the project's configured test-file patterns — follow this repository's existing test layout and naming. A diff with no test file fails (\`no_test_in_diff\`), a test that already passes without the fix fails (\`test_passes_on_base\`), and a test still failing on the branch fails (\`test_fails_on_branch\`). Any of these sends the ticket back to a fix cycle.`;
+
 export interface PromptEpicStatus {
   id: string;
   title: string;
@@ -798,7 +813,7 @@ export function buildTitleGenerationPrompt(
  * `projectId`/`images` are picked from `PromptEpic` rather than redeclared so a
  * batch build cannot silently drop a bug's screenshots the way it once did.
  */
-export interface TeamEpic extends Pick<PromptEpic, "projectId" | "images"> {
+export interface TeamEpic extends Pick<PromptEpic, "projectId" | "images" | "type"> {
   title: string;
   description?: string | null;
   worktreePath: string;
@@ -847,6 +862,9 @@ export function buildTeamBuildPrompt(
     parts.push(ticketImagesSection(epic, { headingLevel: 4 }));
 
     parts.push(userStoriesSection(epic.userStories));
+    if (epic.type === "bug") {
+      parts.push(`${BUG_RED_GREEN_SECTION}\n`);
+    }
   }
 
   parts.push(`## Instructions — Team Lead Mode
@@ -939,6 +957,9 @@ Commit your changes with clear, descriptive commit messages that reference the e
 
 Work through the user stories in order. If a story depends on another, implement the dependency first.
 `);
+  if (epic.type === "bug") {
+    parts.push(BUG_RED_GREEN_SECTION);
+  }
 
   return parts.filter(Boolean).join("\n");
 }
@@ -1013,6 +1034,9 @@ Implement this ticket following the specification and acceptance criteria above.
 2. Ensure all acceptance criteria are met.
 3. Commit your changes with a clear, descriptive commit message referencing the ticket title.
 `);
+  if (epic.type === "bug") {
+    parts.push(BUG_RED_GREEN_SECTION);
+  }
 
   return parts.filter(Boolean).join("\n");
 }

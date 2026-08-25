@@ -25,6 +25,17 @@ import {
   parseNightCostCap,
 } from "@/lib/night/constants";
 import {
+  BUG_REGRESSION_CHECK_SETTING_KEY,
+  BUG_REGRESSION_COMMAND_SETTING_KEY,
+  TEST_FILE_PATTERNS_SETTING_KEY,
+  REGRESSION_COMMAND_FILE_PLACEHOLDER,
+  DEFAULT_BUG_REGRESSION_COMMAND,
+  DEFAULT_TEST_FILE_PATTERNS,
+  parseBugRegressionCommand,
+  parseTestFilePatterns,
+  parseBugRegressionSetting,
+} from "@/lib/verify/regression-constants";
+import {
   OPENAI_API_KEY_SETTING_KEY,
   OPENAI_BASE_URL_SETTING_KEY,
   OPENAI_MODEL_SETTING_KEY,
@@ -105,6 +116,13 @@ export default function SettingsPage() {
   );
   const [pipelineMaxFixCycles, setPipelineMaxFixCycles] = useState(
     DEFAULT_PIPELINE_MAX_FIX_CYCLES
+  );
+  const [bugRegressionCheck, setBugRegressionCheck] = useState(false);
+  const [bugRegressionCommand, setBugRegressionCommand] = useState(
+    DEFAULT_BUG_REGRESSION_COMMAND
+  );
+  const [testFilePatterns, setTestFilePatterns] = useState(
+    DEFAULT_TEST_FILE_PATTERNS.join(", ")
   );
   const [savingPipeline, setSavingPipeline] = useState(false);
   const [pipelineMessage, setPipelineMessage] = useState<string | null>(null);
@@ -189,6 +207,27 @@ export default function SettingsPage() {
           parsePipelineMaxFixCycles(
             d.data?.[PIPELINE_MAX_FIX_CYCLES_SETTING_KEY]
           ) ?? DEFAULT_PIPELINE_MAX_FIX_CYCLES
+        );
+        // Bug regression gate: tri-state, default OFF — absent key means
+        // every existing ticket behaves as before.
+        setBugRegressionCheck(
+          parseBugRegressionSetting(
+            d.data?.[BUG_REGRESSION_CHECK_SETTING_KEY]
+          ) ?? false
+        );
+        // Command and patterns show the effective value: an absent or
+        // unusable key renders the built-in default rather than an empty
+        // box that would read as "nothing configured".
+        setBugRegressionCommand(
+          parseBugRegressionCommand(
+            d.data?.[BUG_REGRESSION_COMMAND_SETTING_KEY]
+          ) ?? DEFAULT_BUG_REGRESSION_COMMAND
+        );
+        setTestFilePatterns(
+          (
+            parseTestFilePatterns(d.data?.[TEST_FILE_PATTERNS_SETTING_KEY]) ??
+            DEFAULT_TEST_FILE_PATTERNS
+          ).join(", ")
         );
         // Night defaults: absent keys stay empty, meaning "engine default"
         // for the breaker and "unlimited" for the cost cap.
@@ -281,6 +320,52 @@ export default function SettingsPage() {
       next === 0
         ? "Fix cycles disabled: blocking findings end the run immediately."
         : `Pipelines now run up to ${next} review → fix cycle${next === 1 ? "" : "s"}.`
+    );
+  }
+
+  async function handleToggleBugRegression(next: boolean) {
+    setBugRegressionCheck(next);
+    await savePipelineSettings(
+      { [BUG_REGRESSION_CHECK_SETTING_KEY]: next },
+      () => setBugRegressionCheck(!next),
+      next
+        ? "Mandatory red → green regression test enforced on bug tickets."
+        : "Mandatory bug regression test disabled."
+    );
+  }
+
+  /**
+   * Saves the regression command template. A template without `{files}`
+   * would run the whole suite on every check, so it is refused here rather
+   * than silently falling back at gate time.
+   */
+  async function handleSaveBugRegressionCommand() {
+    const parsed = parseBugRegressionCommand(bugRegressionCommand);
+    if (!parsed) {
+      setPipelineMessage(
+        `The command must contain ${REGRESSION_COMMAND_FILE_PLACEHOLDER} — it is replaced with the detected test files.`
+      );
+      return;
+    }
+    await savePipelineSettings(
+      { [BUG_REGRESSION_COMMAND_SETTING_KEY]: parsed },
+      () => {},
+      `Regression command set to \`${parsed}\`.`
+    );
+  }
+
+  /** Saves the test-file globs used to pick test files out of the branch diff. */
+  async function handleSaveTestFilePatterns() {
+    const parsed = parseTestFilePatterns(testFilePatterns);
+    if (!parsed) {
+      setPipelineMessage("Enter at least one glob pattern.");
+      return;
+    }
+    setTestFilePatterns(parsed.join(", "));
+    await savePipelineSettings(
+      { [TEST_FILE_PATTERNS_SETTING_KEY]: parsed },
+      () => {},
+      `Test files detected with ${parsed.join(", ")}.`
     );
   }
 
@@ -1022,6 +1107,80 @@ export default function SettingsPage() {
             </p>
           </div>
         </div>
+
+        <label className="flex items-start gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            data-testid="bug-regression-toggle"
+            checked={bugRegressionCheck}
+            disabled={savingPipeline}
+            onChange={(e) => handleToggleBugRegression(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium">
+              Mandatory regression test on bug tickets
+            </span>
+            <span className="block text-muted-foreground">
+              RoboBun rule: a bug fix only passes the verify stage when its
+              branch carries a test that fails without the fix (red) and
+              passes with it (green). Off by default.
+            </span>
+          </span>
+        </label>
+
+        {bugRegressionCheck && (
+          <div className="ml-6 space-y-3 border-l border-border pl-4">
+            <div className="space-y-1">
+              <label
+                className="text-sm font-medium"
+                htmlFor="bug-regression-command"
+              >
+                Regression test command
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="bug-regression-command"
+                  data-testid="bug-regression-command"
+                  className="flex-1 rounded-md border border-border bg-background px-2 py-1 text-sm font-mono"
+                  value={bugRegressionCommand}
+                  disabled={savingPipeline}
+                  onChange={(e) => setBugRegressionCommand(e.target.value)}
+                  onBlur={handleSaveBugRegressionCommand}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Run once on the branch and once on the merge-base.{" "}
+                <code>{REGRESSION_COMMAND_FILE_PLACEHOLDER}</code> is replaced
+                with the detected test files. Change it for any project that
+                does not use vitest (default{" "}
+                <code>{DEFAULT_BUG_REGRESSION_COMMAND}</code>).
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <label
+                className="text-sm font-medium"
+                htmlFor="test-file-patterns"
+              >
+                Test file patterns
+              </label>
+              <input
+                id="test-file-patterns"
+                data-testid="test-file-patterns"
+                className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm font-mono"
+                value={testFilePatterns}
+                disabled={savingPipeline}
+                onChange={(e) => setTestFilePatterns(e.target.value)}
+                onBlur={handleSaveTestFilePatterns}
+              />
+              <p className="text-xs text-muted-foreground">
+                Comma-separated globs selecting the test files in the branch
+                diff (default {DEFAULT_TEST_FILE_PATTERNS.join(", ")}).
+              </p>
+            </div>
+          </div>
+        )}
 
         {pipelineMessage && (
           <p className="text-xs text-muted-foreground">{pipelineMessage}</p>

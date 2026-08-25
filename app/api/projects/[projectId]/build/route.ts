@@ -285,6 +285,10 @@ export async function POST(
           // other dispatch; solo mode gets them by passing the row whole.
           projectId: epic.projectId,
           images: epic.images,
+          // Without this, the bug red→green prompt section is dead in
+          // every production team build — the optional field silently
+          // defaults to undefined.
+          type: epic.type,
         });
 
         epicRecords.push({ id: epicId, branchName });

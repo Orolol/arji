@@ -1,5 +1,7 @@
 import type { PipelineStage, PipelineState } from "./constants";
 import { PIPELINE_REASONS } from "./constants";
+import type { VerifyGate, VerifyGateOutcome } from "./verify";
+import type { RegressionReportPayload } from "@/lib/verify/regression-report";
 
 /**
  * Autonomous pipeline state machine (build → review → auto-fix → forensic).
@@ -74,6 +76,12 @@ export interface PipelineStageRequest {
    * previous fix). Fix stages resume it on attempt 1.
    */
   lastCodeSessionId: string | null;
+  /**
+   * Set on a fix dispatch triggered by the mechanical regression gate
+   * (bug tickets): the exact red→green verdict so the fix prompt carries
+   * the precise failure reason. Null/absent for every other dispatch.
+   */
+  verifyFailure?: RegressionReportPayload | null;
 }
 
 /** Verdict of the blocking-findings assessment after a successful review. */
@@ -182,6 +190,28 @@ export interface RunPipelineOptions {
    */
   cancelPollIntervalMs?: number;
   callbacks?: PipelineRunnerCallbacks;
+  /**
+   * Mechanical verify gate run after each successful code stage, before
+   * review (lib/pipeline/verify.ts). Absent → no gate: behaviour identical
+   * to pre-regression runs.
+   */
+  runVerifyGate?: VerifyGate;
+  /**
+   * Parks a gate-rejected bug back to in_progress (guarded review →
+   * in_progress) before the run terminates on regression exhaustion — the
+   * board counterpart of the terminal failure. Receives the last code
+   * session id for the transition's audit trail. Absent → the ticket keeps
+   * whatever status the code stage left it in.
+   */
+  /**
+   * Moves a ticket the code stage already promoted to review back to
+   * in_progress. `reason` is written verbatim to the activity log, so each
+   * call site passes what actually happened rather than one shared string.
+   */
+  parkRejectedTicket?: (
+    lastCodeSessionId: string | null,
+    reason: string
+  ) => void;
 }
 
 const RUNNING_STATE_BY_STAGE: Record<PipelineStageKind, PipelineState> = {
@@ -480,9 +510,116 @@ export async function runPipeline(
       continue;
     }
 
-    // Success: code stages flow into review.
+    // Success: mechanical verify gate (bug tickets), then code stages flow
+    // into review. The gate never throws for check outcomes; an unhandled
+    // rejection is an infrastructure crash and fails the run.
     if (stage === "build" || stage === "fix") {
       lastCodeSessionId = handle.sessionId ?? lastCodeSessionId;
+      let gate: VerifyGateOutcome = { ran: false, passed: null, result: null };
+      try {
+        if (options.runVerifyGate) {
+          gate = await options.runVerifyGate(lastCodeSessionId);
+        }
+      } catch (error) {
+        console.warn(
+          "[pipeline] Regression gate crashed:",
+          error instanceof Error ? error.message : error
+        );
+        callbacks.onTrace?.(
+          PIPELINE_REASONS.failedRegressionGateCrashed,
+          handle.sessionId
+        );
+        try {
+          options.parkRejectedTicket?.(
+            lastCodeSessionId,
+            "Regression gate crashed before it could verify the branch"
+          );
+        } catch (parkError) {
+          console.warn(
+            "[pipeline] Failed to park regression-crashed ticket:",
+            parkError instanceof Error ? parkError.message : parkError
+          );
+        }
+        return finish("failed", "regression gate crashed");
+      }
+      if (gate.ran && !gate.passed && gate.result) {
+        const payload: RegressionReportPayload = {
+          regression: {
+            status: gate.result.status,
+            reason: gate.result.reason,
+            testFiles: gate.result.testFiles,
+            detail: gate.result.detail,
+            checkedAt: new Date().toISOString(),
+          },
+        };
+
+        // command_error means the command failed to execute (environment or
+        // configuration fault, e.g. runner missing or timeout). An agent in
+        // a fix cycle cannot fix an environment fault — fail immediately
+        // rather than burning the fix budget.
+        if (gate.result.reason === "command_error") {
+          callbacks.onTrace?.(
+            PIPELINE_REASONS.failedRegressionCommandError,
+            handle.sessionId
+          );
+          try {
+            options.parkRejectedTicket?.(
+              lastCodeSessionId,
+              "Regression test command could not run — the branch was never verified"
+            );
+          } catch (parkError) {
+            console.warn(
+              "[pipeline] Failed to park regression-rejected ticket:",
+              parkError instanceof Error ? parkError.message : parkError
+            );
+          }
+          return finish(
+            "failed",
+            `regression command error: ${gate.result.detail ?? "could not run command"}`
+          );
+        }
+
+        if (fixCycles >= options.maxFixCycles) {
+          callbacks.onTrace?.(
+            PIPELINE_REASONS.failedRegression(fixCycles),
+            handle.sessionId
+          );
+          // The code stage already moved the ticket to review; a gate
+          // rejection is the opposite of approval-ready. Park it back in
+          // in_progress like the negative-review path does — best effort,
+          // it must not change how the run terminates.
+          try {
+            options.parkRejectedTicket?.(
+              lastCodeSessionId,
+              "Mandatory regression test rejected the branch (red → green)"
+            );
+          } catch (parkError) {
+            console.warn(
+              "[pipeline] Failed to park regression-rejected ticket:",
+              parkError instanceof Error ? parkError.message : parkError
+            );
+          }
+          return finish(
+            "failed",
+            `mandatory regression test still failing after ${fixCycles} fix cycles`
+          );
+        }
+        fixCycles += 1;
+        callbacks.onTrace?.(
+          PIPELINE_REASONS.regressionFailed(fixCycles, options.maxFixCycles),
+          handle.sessionId
+        );
+        const summary = await dispatch({
+          stage: "fix",
+          attempt: 1,
+          fixCycle: fixCycles,
+          previousAttemptSessionId: null,
+          lastCodeSessionId,
+          verifyFailure: payload,
+        });
+        if (summary) return summary;
+        continue;
+      }
       const summary = await dispatch({
         stage: "review",
         attempt: 1,

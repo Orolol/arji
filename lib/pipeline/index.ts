@@ -1,10 +1,12 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { epics, settings } from "@/lib/db/schema";
+import { epics, settings, userStories } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { logTransition } from "@/lib/workflow/log";
 import type { AgentProvider } from "@/lib/agent-config/constants";
+import { transitionReviewRejected } from "@/lib/workflow/automatic-transitions";
 import { runForensic } from "./forensic";
+import { createVerifyGate } from "./verify";
 import {
   DEFAULT_PIPELINE_MAX_ATTEMPTS,
   DEFAULT_PIPELINE_MAX_FIX_CYCLES,
@@ -222,9 +224,56 @@ export function startPipelineRun(input: StartPipelineRunInput): {
       settled: input.buildSettled,
     },
     launchStage: driver.launchStage,
+    runVerifyGate: createVerifyGate({
+      projectId: input.projectId,
+      scope: input.scope,
+      epicId: input.epicId,
+      userStoryId: input.userStoryId,
+    }),
     assessReview: driver.assessReview,
     readSessionStatus: driver.readSessionStatus,
     checkGuards: driver.checkGuards,
+    parkRejectedTicket: (lastCodeSessionId, reason) => {
+      // Mirror of the negative-review path: a gate-rejected bug must not
+      // stay in the approval-ready column. Only a ticket actually sitting
+      // in review/done is moved; anything else is left untouched. The
+      // caller supplies `reason` because the three park paths — rejection,
+      // unrunnable command, crashed gate — are not the same event.
+      if (input.scope === "story") {
+        const story = input.userStoryId
+          ? db
+              .select()
+              .from(userStories)
+              .where(eq(userStories.id, input.userStoryId))
+              .get()
+          : null;
+        if (!story) return;
+        if (story.status !== "review" && story.status !== "done") return;
+        transitionReviewRejected({
+          projectId: input.projectId,
+          epicId: input.epicId,
+          scope: "story",
+          userStoryId: input.userStoryId,
+          sessionId: lastCodeSessionId ?? "",
+          reason,
+        });
+        return;
+      }
+      const epic = db
+        .select()
+        .from(epics)
+        .where(eq(epics.id, input.epicId))
+        .get();
+      if (!epic) return;
+      if (epic.status !== "review" && epic.status !== "done") return;
+      transitionReviewRejected({
+        projectId: input.projectId,
+        epicId: input.epicId,
+        scope: "epic",
+        sessionId: lastCodeSessionId ?? "",
+        reason,
+      });
+    },
     runForensic: (forensicInput) =>
       runForensic({
         projectId: input.projectId,
