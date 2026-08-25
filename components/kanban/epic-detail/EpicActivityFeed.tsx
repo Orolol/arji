@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
@@ -19,6 +19,7 @@ import {
   Workflow,
 } from "lucide-react";
 import type { TicketComment } from "@/hooks/useTicketComments";
+import { useFeedAutoScroll } from "@/hooks/useFeedAutoScroll";
 import {
   useEpicActivity,
   type EpicActivityEntry,
@@ -431,14 +432,9 @@ export function EpicActivityFeed({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to bottom when new items arrive
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [feed.length]);
+  // Follows the newest entry; see useFeedAutoScroll for the viewport it
+  // actually scrolls and when it declines to follow.
+  const scrollRef = useFeedAutoScroll(feed.length);
 
   async function handleSubmit() {
     if (!input.trim() || sending) return;
@@ -459,7 +455,7 @@ export function EpicActivityFeed({
   return (
     <div className="flex flex-col h-full">
       {/* Header + kind filter (comments vs. system events) */}
-      <div className="border-b border-border-soft px-[24px] py-[12px]">
+      <div className="shrink-0 border-b border-border-soft px-[24px] py-[12px]">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-[12px] uppercase tracking-[.08em] text-meta">
             Activity ({comments.length + entries.length})
@@ -491,8 +487,13 @@ export function EpicActivityFeed({
         </div>
       </div>
 
-      {/* Feed */}
-      <ScrollArea className="flex-1">
+      {/* Feed — the only scrolling box of the panel.
+          `min-h-0` is what makes it one: a flex item defaults to
+          `min-height: auto`, so without it the ScrollArea root is floored at
+          its content height, grows past the panel instead of scrolling, and
+          the feed (plus the composer under it) gets clipped by the panel's
+          `overflow-hidden` with no scrollbar anywhere. */}
+      <ScrollArea className="min-h-0 flex-1" data-testid="activity-scroll-area">
         <div ref={scrollRef} className="space-y-3 px-[24px] py-[18px]">
           {loading && feed.length === 0 ? (
             <div className="flex items-center justify-center py-8">
@@ -538,8 +539,11 @@ export function EpicActivityFeed({
         </div>
       </ScrollArea>
 
-      {/* Input */}
-      <div className="border-t border-border-soft px-[18px] py-[14px]">
+      {/* Input — pinned outside the scrolling viewport. */}
+      <div
+        className="shrink-0 border-t border-border-soft px-[18px] py-[14px]"
+        data-testid="activity-composer"
+      >
         {error && <p className="mb-2 text-[12px] text-destructive">{error}</p>}
         <div className="flex gap-2">
           <MentionTextarea

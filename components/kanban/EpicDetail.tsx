@@ -782,7 +782,10 @@ export function EpicDetail({
 
             {/* Activity Tab */}
             <TabsContent value="activity" className="min-h-0 flex-1">
-              <div className="h-full min-h-[200px]">
+              {/* No min-height: a floor taller than the space left would push
+                  the composer out of the panel, which clips it away for good
+                  under the panel's overflow-hidden. The feed scrolls instead. */}
+              <div className="h-full">
                 <EpicActivityFeed
                   projectId={projectId}
                   epicId={epicId}
