@@ -37,6 +37,24 @@ class ActivityRegistry {
     return true;
   }
 
+  /**
+   * Cancels an activity only when it belongs to `projectId`.
+   *
+   * For the project-scoped API routes: an id alone must not be enough to kill
+   * a run registered under a different project. A `projectId`-less activity
+   * (nothing associates it with a project in the first place) is cancellable
+   * from anywhere, which is the only behaviour that leaves it cancellable at
+   * all.
+   */
+  cancelInProject(id: string, projectId: string): boolean {
+    const activity = this.activities.get(id);
+    if (!activity) return false;
+    if (activity.projectId !== null && activity.projectId !== projectId) {
+      return false;
+    }
+    return this.cancel(id);
+  }
+
   listByProject(projectId: string): Activity[] {
     return Array.from(this.activities.values()).filter(
       (a) => a.projectId === projectId,
