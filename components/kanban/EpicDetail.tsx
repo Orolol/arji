@@ -352,6 +352,15 @@ export function EpicDetail({
     ? ticketStatusOptions(epic.status, { hasRunningSession: isRunning })
     : [];
 
+  // Radix portals the selected item's ItemText children into the trigger's
+  // value node whenever <SelectValue> has no children of its own. The
+  // dropdown items carry a "(current)" marker inside ItemText, so without
+  // an explicit value the closed trigger would read "Review (current)".
+  // Passing the plain label here disables the portal (valueNodeHasChildren)
+  // and keeps the trigger on the bare column name.
+  const currentStatusLabel =
+    statusOptions.find((option) => option.isCurrent)?.label ?? epic?.status ?? "";
+
   return (
     <div
       className="flex h-full flex-col overflow-hidden"
@@ -495,7 +504,7 @@ export function EpicDetail({
                     aria-label="Status"
                     className="h-[29px] w-auto gap-2 rounded-[7px] border-0 bg-transparent px-2 text-[13px] shadow-none hover:bg-band"
                   >
-                    <SelectValue />
+                    <SelectValue>{currentStatusLabel}</SelectValue>
                   </SelectTrigger>
                   <SelectContent className="min-w-[250px]">
                     {statusOptions.map((option) => (

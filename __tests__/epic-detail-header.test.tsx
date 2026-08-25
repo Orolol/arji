@@ -233,6 +233,23 @@ describe("EpicDetail sticky header — frequent actions", () => {
 });
 
 describe("EpicDetail sticky header — workflow-aware status control", () => {
+  it("shows the plain column label in the collapsed status trigger, without the (current) marker", () => {
+    setupHooks(baseEpic({ status: "review" }));
+    renderSubject();
+
+    // The (current) marker belongs to the dropdown item only. Radix
+    // portals the selected item's ItemText children into the trigger's
+    // value node, so the closed control must carry the bare column label —
+    // asserted as an exact match, not a substring.
+    const trigger = screen.getByTestId("epic-status-select");
+    expect(trigger).toHaveTextContent(/^Review$/);
+    expect(trigger).not.toHaveTextContent("(current)");
+
+    // The marker is still shown on the current option inside the dropdown.
+    openStatusSelect();
+    expect(option(/Review/)).toHaveTextContent("(current)");
+  });
+
   it("only enables the transitions the workflow engine allows from review, with Done approval-gated", () => {
     setupHooks(baseEpic({ status: "review" }));
     renderSubject();
@@ -303,9 +320,11 @@ describe("EpicDetail sticky header — workflow-aware status control", () => {
       );
     });
     expect(mockUpdateEpic).toHaveBeenCalledWith({ status: "in_progress" });
-    // Optimistic state was not applied: the control still shows Review.
+    // Optimistic state was not applied: the control still shows exactly
+    // the Review label (exact match: a ported "(current)" marker or any
+    // suffix would fail this assertion).
     expect(screen.getByTestId("epic-status-select")).toHaveTextContent(
-      "Review"
+      /^Review$/
     );
   });
 });
