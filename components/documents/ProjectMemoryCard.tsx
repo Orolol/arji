@@ -219,7 +219,11 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
         </p>
       )}
       {message && <p className="text-[12px] text-agent">{message}</p>}
-      {error && <p className="text-[12px] text-destructive">{error}</p>}
+      {/* Only ACTION errors (save, dream) belong here. A load failure already
+          owns the whole body above, and printing it twice reads as two faults. */}
+      {error && loaded && (
+        <p className="text-[12px] text-destructive">{error}</p>
+      )}
     </div>
   );
 }
