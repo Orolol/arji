@@ -6,7 +6,7 @@ const SQLITE_TIMESTAMP_RE =
  * SQLite CURRENT_TIMESTAMP values. Date.parse treats the latter as local
  * time, so make their UTC origin explicit before comparing them.
  */
-function parseStoredTimestamp(value: string): number | null {
+export function parseStoredTimestamp(value: string): number | null {
   const trimmed = value.trim();
   const sqliteMatch = trimmed.match(SQLITE_TIMESTAMP_RE);
   const normalized = sqliteMatch

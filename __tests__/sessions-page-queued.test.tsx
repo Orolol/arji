@@ -6,10 +6,45 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import SessionsPage from "@/app/projects/[projectId]/sessions/page";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "proj-1" }),
+}));
+
+// Radix Select's portal/pointer plumbing is covered by the shared UI
+// component. Render it as a native select here so this page test can drive
+// the controlled value and assert the resulting session order in jsdom.
+vi.mock("@/components/ui/select", () => ({
+  Select: ({
+    value,
+    onValueChange,
+    children,
+  }: {
+    value: string;
+    onValueChange: (value: string) => void;
+    children: ReactNode;
+  }) => (
+    <select
+      aria-label="Sort sessions"
+      data-testid="sessions-sort"
+      value={value}
+      onChange={(event) => onValueChange(event.target.value)}
+    >
+      {children}
+    </select>
+  ),
+  SelectTrigger: () => null,
+  SelectValue: () => null,
+  SelectContent: ({ children }: { children: ReactNode }) => <>{children}</>,
+  SelectItem: ({
+    value,
+    children,
+  }: {
+    value: string;
+    children: ReactNode;
+  }) => <option value={value}>{children}</option>,
 }));
 
 // The dialog owns its own rendering matrix in night-run-summary-dialog.test.tsx.
@@ -360,6 +395,10 @@ describe("SessionsPage — sorting", () => {
     expect(
       screen.getByRole("option", { name: "Last activity" })
     ).toBeInTheDocument();
+    expect(screen.getByText("Activity", { selector: "span" })).toBeInTheDocument();
+    expect(
+      screen.getByTestId("session-activity-sess-created-oldest")
+    ).toHaveAttribute("title", "2026-02-10T00:00:00.000Z");
     expect(visibleSessionIds()).toEqual([
       "conv-created-newest",
       "sess-created-middle",
@@ -372,6 +411,37 @@ describe("SessionsPage — sorting", () => {
       "sess-created-oldest",
       "sess-created-middle",
       "conv-created-newest",
+    ]);
+  });
+
+  it("keeps sessions with missing or invalid activity deterministic", async () => {
+    mockSessions([
+      agentSession({
+        id: "sess-z-invalid",
+        createdAt: "invalid",
+        lastActivityAt: "invalid",
+      }),
+      agentSession({
+        id: "sess-y-missing",
+        createdAt: "invalid",
+        lastActivityAt: null,
+      }),
+      agentSession({
+        id: "sess-a-valid",
+        createdAt: "2026-02-01T00:00:00.000Z",
+        lastActivityAt: "2026-02-10T00:00:00.000Z",
+      }),
+    ]);
+    await renderPage();
+
+    fireEvent.change(screen.getByLabelText("Sort sessions"), {
+      target: { value: "last_activity" },
+    });
+
+    expect(visibleSessionIds()).toEqual([
+      "sess-a-valid",
+      "sess-y-missing",
+      "sess-z-invalid",
     ]);
   });
 });

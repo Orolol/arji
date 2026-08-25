@@ -281,6 +281,19 @@ describe("threshold settings", () => {
     expect(isSessionStale(minutesAgo(5), "build", NOW)).toBe(true);
   });
 
+  it("treats SQLite timestamps as UTC on a non-UTC host", () => {
+    const originalTimezone = process.env.TZ;
+    process.env.TZ = "Europe/Paris";
+    try {
+      // 11:58 UTC is only two minutes before NOW. Parsing the space form as
+      // Paris local time would incorrectly make it more than two hours old.
+      expect(isSessionStale("2026-08-16 11:58:00", "build", NOW)).toBe(false);
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
+  });
+
   it("honors the global setting", () => {
     setSetting("watchdog_threshold_minutes", 2);
 

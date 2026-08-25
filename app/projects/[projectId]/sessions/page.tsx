@@ -4,11 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
+  ArrowUpDown,
   Ban,
   Circle,
   CircleCheck,
   Clock,
-  ListFilter,
   LoaderCircle,
   MessageSquare,
   Moon,
@@ -29,6 +29,14 @@ import { formatCostUsd } from "@/lib/utils/format-usage";
 import { formatTime } from "@/lib/utils/format-date";
 import { isNightRunId, type NightRunListEntry } from "@/lib/night/constants";
 import { cn } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { parseStoredTimestamp } from "@/lib/agent-sessions/last-activity";
 
 // --- Discriminated union types ---
 
@@ -55,7 +63,7 @@ interface AgentSession {
   totalCostUsd?: number | null;
   /** Batch run tag — `night_*` for epics dispatched by a night run. */
   batchRunId?: string | null;
-  createdAt: string;
+  createdAt: string | null;
   lastActivityAt: string | null;
 }
 
@@ -71,7 +79,7 @@ interface ChatSession {
   namedAgentName?: string | null;
   messageCount: number;
   lastMessagePreview: string | null;
-  createdAt: string;
+  createdAt: string | null;
   lastActivityAt: string | null;
 }
 
@@ -114,12 +122,13 @@ type StateFilter = "all" | "running" | "failed" | "night";
 type ProviderFilter = "claude-code" | "codex" | null;
 type SortOption = "created" | "last_activity";
 
-const TABLE_GRID = "grid-cols-[1.6fr_1fr_0.9fr_0.6fr_0.6fr]";
+const TABLE_GRID = "grid-cols-[1.5fr_0.9fr_0.75fr_0.8fr_0.55fr_0.4fr]";
 
-function isToday(iso: string | undefined): boolean {
+function isToday(iso: string | null | undefined): boolean {
   if (!iso) return false;
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return false;
+  const timestamp = parseStoredTimestamp(iso);
+  if (timestamp === null) return false;
+  const date = new Date(timestamp);
   const now = new Date();
   return (
     date.getFullYear() === now.getFullYear() &&
@@ -254,8 +263,12 @@ export default function SessionsPage() {
     if (sortBy === "created") return filtered;
 
     return filtered.sort((a, b) => {
-      const activityA = Date.parse(a.lastActivityAt ?? a.createdAt);
-      const activityB = Date.parse(b.lastActivityAt ?? b.createdAt);
+      const activityA = a.lastActivityAt
+        ? (parseStoredTimestamp(a.lastActivityAt) ?? Number.NEGATIVE_INFINITY)
+        : Number.NEGATIVE_INFINITY;
+      const activityB = b.lastActivityAt
+        ? (parseStoredTimestamp(b.lastActivityAt) ?? Number.NEGATIVE_INFINITY)
+        : Number.NEGATIVE_INFINITY;
       if (activityA !== activityB) return activityB - activityA;
       return a.id.localeCompare(b.id);
     });
@@ -367,20 +380,26 @@ export default function SessionsPage() {
           Codex
         </FilterChip>
 
-        <label className="ml-auto flex items-center gap-[7px] text-[12.5px] text-muted-foreground">
-          <ListFilter className="h-[13px] w-[13px] shrink-0" />
-          <span className="sr-only">Sort sessions</span>
-          <select
-            aria-label="Sort sessions"
-            data-testid="sessions-sort"
+        <div className="ml-auto flex items-center gap-[7px] text-[12.5px] text-muted-foreground">
+          <ArrowUpDown className="h-[13px] w-[13px] shrink-0" />
+          <Select
             value={sortBy}
-            onChange={(event) => setSortBy(event.target.value as SortOption)}
-            className="bg-transparent text-[12.5px] text-foreground focus:outline-none"
+            onValueChange={(value) => setSortBy(value as SortOption)}
           >
-            <option value="created">Created</option>
-            <option value="last_activity">Last activity</option>
-          </select>
-        </label>
+            <SelectTrigger
+              aria-label="Sort sessions"
+              data-testid="sessions-sort"
+              size="sm"
+              className="h-7 min-w-[116px] border-0 px-1.5 text-[12.5px] shadow-none focus-visible:ring-1"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="created">Created</SelectItem>
+              <SelectItem value="last_activity">Last activity</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
         <span className="mx-[5px] h-4 w-px bg-border" />
 
@@ -476,6 +495,9 @@ export default function SessionsPage() {
             </span>
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
               Duration
+            </span>
+            <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
+              Activity
             </span>
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
               Cost
@@ -699,6 +721,7 @@ function AgentSessionRow({
       <span className="truncate font-mono text-[12px] text-muted-foreground">
         {getDuration(session)}
       </span>
+      <LastActivity value={session.lastActivityAt} sessionId={session.id} />
       <span
         className="truncate font-mono text-[12px] text-muted-foreground"
         title="Session cost (when reported by the provider)"
@@ -767,10 +790,29 @@ function ChatSessionRow({
         {isGenerating ? "Generating" : "Chat"}
       </span>
       <span className="font-mono text-[12px] text-muted-foreground">—</span>
+      <LastActivity value={session.lastActivityAt} sessionId={session.id} />
       <span className="font-mono text-[12px] text-muted-foreground">—</span>
       <span className="justify-self-end text-[12.5px] text-muted-foreground">
         Open
       </span>
     </Link>
+  );
+}
+
+function LastActivity({
+  value,
+  sessionId,
+}: {
+  value: string | null;
+  sessionId: string;
+}) {
+  return (
+    <span
+      data-testid={`session-activity-${sessionId}`}
+      className="truncate font-mono text-[12px] text-muted-foreground"
+      title={value ?? undefined}
+    >
+      {value ? formatTime(value) : "—"}
+    </span>
   );
 }
