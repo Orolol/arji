@@ -289,6 +289,48 @@ describe("dispatchMemoryDistillSession", () => {
     ).toHaveLength(0);
   });
 
+  /**
+   * The boundary check is not the route's: every caller reaches a session row
+   * through this function, so it refuses an ineligible source itself.
+   */
+  it.each(["dreaming", "memory_distill"])(
+    "refuses to distill a %s session and creates no row",
+    async (agentType) => {
+      const { projectId } = seedProject();
+      const writerId = seedSourceSession(projectId, null, {
+        agentType,
+        status: "completed",
+      });
+
+      await expect(
+        dispatchMemoryDistillSession({
+          projectId,
+          sourceSessionId: writerId,
+        })
+      ).rejects.toThrow(/cannot itself be distilled/i);
+      await flushBackground();
+
+      expect(distillSessions(projectId)).toHaveLength(
+        agentType === "memory_distill" ? 1 : 0 // only the seeded source itself
+      );
+    }
+  );
+
+  it("refuses a source that never completed", async () => {
+    const { projectId, epicId } = seedProject();
+    const runningId = seedSourceSession(projectId, epicId, {
+      status: "running",
+      outcome: null,
+    });
+
+    await expect(
+      dispatchMemoryDistillSession({ projectId, sourceSessionId: runningId })
+    ).rejects.toThrow(/completed/i);
+    await flushBackground();
+
+    expect(distillSessions(projectId)).toHaveLength(0);
+  });
+
   it("throws for an unknown project", async () => {
     await expect(
       dispatchMemoryDistillSession({ projectId: "nope" })

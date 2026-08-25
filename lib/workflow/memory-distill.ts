@@ -202,6 +202,75 @@ export function evaluateAutoDistillGuards(input: {
   return { allowed: true, reason: "eligible" };
 }
 
+// ---------------------------------------------------------------------------
+// Source eligibility (shared by the manual route and the dispatch boundary)
+// ---------------------------------------------------------------------------
+
+/** Thrown when a caller names a session that may not be a distill source. */
+export class MemoryDistillSourceError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "MemoryDistillSourceError";
+  }
+}
+
+export function isMemoryDistillSourceError(error: unknown): boolean {
+  return error instanceof MemoryDistillSourceError;
+}
+
+export interface DistillSourceCandidate {
+  agentType: string | null;
+  status: string | null;
+}
+
+export interface DistillSourceEligibility {
+  eligible: boolean;
+  /** Empty when eligible; otherwise the message the caller reports. */
+  reason: string;
+}
+
+/**
+ * Whether a session may be handed to a distill as its context source.
+ *
+ * The auto-trigger has always enforced this (evaluateAutoDistillGuards) and
+ * the UI only offers the button where it holds, but the manual endpoint took
+ * any session id belonging to the project — so a direct POST could distill a
+ * dream, or a run that never finished. Two rules, deliberately looser than the
+ * auto matrix because the manual button IS offered on reviews and QA runs:
+ *
+ *   - never a memory WRITER. Its output is the memory document itself, so
+ *     distilling it would feed the memory back into the memory;
+ *   - only a COMPLETED run. A queued or running session has no learnings yet,
+ *     and a failed one has no delivered output to read.
+ *
+ * `null` means the session does not exist (or belongs to another project) —
+ * the caller's own 404 case.
+ */
+export function evaluateDistillSourceEligibility(
+  session: DistillSourceCandidate | null
+): DistillSourceEligibility {
+  if (!session) {
+    return { eligible: false, reason: "Source session not found" };
+  }
+  if (
+    session.agentType &&
+    MEMORY_WRITER_AGENT_TYPES.includes(session.agentType)
+  ) {
+    return {
+      eligible: false,
+      reason:
+        "A memory distill or dream session cannot itself be distilled — its output IS the project memory.",
+    };
+  }
+  if (session.status !== "completed") {
+    return {
+      eligible: false,
+      reason: `Only a completed session can be distilled (this one is '${session.status ?? "unknown"}').`,
+    };
+  }
+  return { eligible: true, reason: "" };
+}
+
 /**
  * True when this session's completion should stand down for the cross-session
  * dream the night run will fire when it ends.
@@ -322,6 +391,31 @@ interface SourceSessionContext {
   batchRunId: string | null;
 }
 
+/**
+ * The two columns `evaluateDistillSourceEligibility` judges, project-scoped so
+ * a session id from another project reads as "not found".
+ */
+export function loadDistillSourceCandidate(
+  projectId: string,
+  sourceSessionId: string
+): DistillSourceCandidate | null {
+  return (
+    db
+      .select({
+        agentType: agentSessions.agentType,
+        status: agentSessions.status,
+      })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.id, sourceSessionId),
+          eq(agentSessions.projectId, projectId)
+        )
+      )
+      .get() ?? null
+  );
+}
+
 function loadSourceSessionContext(
   projectId: string,
   sourceSessionId: string
@@ -333,6 +427,7 @@ function loadSourceSessionContext(
       epicId: agentSessions.epicId,
       userStoryId: agentSessions.userStoryId,
       agentType: agentSessions.agentType,
+      status: agentSessions.status,
       outcome: agentSessions.outcome,
       lastNonEmptyText: agentSessions.lastNonEmptyText,
       logsPath: agentSessions.logsPath,
@@ -424,6 +519,18 @@ export async function dispatchMemoryDistillSession(
     .get();
   if (!project) {
     throw new Error("Project not found");
+  }
+
+  // Enforced HERE, not only in the route: this is the boundary every caller
+  // goes through, so an ineligible source cannot reach a session row by
+  // arriving from somewhere the route's checks do not cover.
+  if (input.sourceSessionId) {
+    const eligibility = evaluateDistillSourceEligibility(
+      loadDistillSourceCandidate(input.projectId, input.sourceSessionId)
+    );
+    if (!eligibility.eligible) {
+      throw new MemoryDistillSourceError(eligibility.reason);
+    }
   }
 
   const sourceContext = input.sourceSessionId

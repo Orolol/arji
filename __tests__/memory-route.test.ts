@@ -194,6 +194,84 @@ describe("POST /api/projects/[projectId]/memory/distill", () => {
     });
   });
 
+  /**
+   * The UI only offers "Distill learnings" on a completed, non-memory-writer
+   * session — but the endpoint must not depend on the UI for that. A direct
+   * POST could otherwise distill a dream (whose output IS the memory) or a run
+   * that never finished.
+   */
+  it.each(["dreaming", "memory_distill"])(
+    "400s when the source is a %s session",
+    async (agentType) => {
+      const projectId = seedProject();
+      db.insert(agentSessions)
+        .values({
+          id: `src-writer-${agentType}`,
+          projectId,
+          status: "completed",
+          agentType,
+        })
+        .run();
+
+      const res = await DISTILL(
+        mockJsonRequest({ sourceSessionId: `src-writer-${agentType}` }),
+        mockRouteContext({ projectId })
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.code).toBe("MEMORY_DISTILL_SOURCE_INVALID");
+      expect(json.error).toContain("cannot itself be distilled");
+      expect(dispatchMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["queued", "running", "failed", "cancelled"])(
+    "400s when the source session is %s rather than completed",
+    async (status) => {
+      const projectId = seedProject();
+      db.insert(agentSessions)
+        .values({
+          id: `src-${status}`,
+          projectId,
+          status,
+          agentType: "build",
+        })
+        .run();
+
+      const res = await DISTILL(
+        mockJsonRequest({ sourceSessionId: `src-${status}` }),
+        mockRouteContext({ projectId })
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.code).toBe("MEMORY_DISTILL_SOURCE_INVALID");
+      expect(json.error).toContain(status);
+      expect(dispatchMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("still accepts a completed review as a source — the manual button is offered there", async () => {
+    const projectId = seedProject();
+    db.insert(agentSessions)
+      .values({
+        id: "src-review",
+        projectId,
+        status: "completed",
+        agentType: "review_code",
+      })
+      .run();
+
+    const res = await DISTILL(
+      mockJsonRequest({ sourceSessionId: "src-review" }),
+      mockRouteContext({ projectId })
+    );
+
+    expect(res.status).toBe(200);
+    expect(dispatchMock).toHaveBeenCalled();
+  });
+
   it("404s when the source session belongs to another project", async () => {
     const projectId = seedProject();
     const otherProjectId = seedProject();

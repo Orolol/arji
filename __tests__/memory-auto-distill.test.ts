@@ -16,6 +16,7 @@ import { describe, it, expect } from "vitest";
 import {
   AUTO_DISTILL_SOURCE_AGENT_TYPES,
   evaluateAutoDistillGuards,
+  evaluateDistillSourceEligibility,
   type AutoDistillCandidateSession,
 } from "@/lib/workflow/memory-distill";
 import { parseMemoryAutoDistillSetting } from "@/lib/documents/memory-constants";
@@ -130,6 +131,54 @@ describe("evaluateAutoDistillGuards", () => {
       true
     );
   });
+});
+
+/**
+ * The manual endpoint used to take any session id belonging to the project,
+ * so a direct POST could distill a dream or a run that never finished. The
+ * rule lives here, next to the auto matrix, because both paths must ask the
+ * same question — and it is deliberately LOOSER than the auto matrix, since
+ * the manual button is offered on reviews and QA runs too.
+ */
+describe("evaluateDistillSourceEligibility", () => {
+  it("rejects a missing source (the caller's 404 case)", () => {
+    const result = evaluateDistillSourceEligibility(null);
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toContain("not found");
+  });
+
+  it.each(["dreaming", "memory_distill"])(
+    "rejects the %s memory writer, however it ended",
+    (agentType) => {
+      const result = evaluateDistillSourceEligibility({
+        agentType,
+        status: "completed",
+      });
+      expect(result.eligible).toBe(false);
+      expect(result.reason).toContain("cannot itself be distilled");
+    }
+  );
+
+  it.each(["queued", "running", "failed", "cancelled", null])(
+    "rejects a source whose status is %s",
+    (status) => {
+      const result = evaluateDistillSourceEligibility({
+        agentType: "build",
+        status,
+      });
+      expect(result.eligible).toBe(false);
+      expect(result.reason).toContain("completed");
+    }
+  );
+
+  it.each(["build", "ticket_build", "team_build", "review_code", "tech_check", null])(
+    "accepts a completed %s session",
+    (agentType) => {
+      expect(
+        evaluateDistillSourceEligibility({ agentType, status: "completed" })
+      ).toEqual({ eligible: true, reason: "" });
+    }
+  );
 });
 
 /**
