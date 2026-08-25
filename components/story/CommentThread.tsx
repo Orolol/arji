@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MarkdownContent } from "@/components/chat/MarkdownContent";
+import { RegressionReportBlock } from "@/components/verify/RegressionReportBlock";
 import { Send, User, Bot, Loader2, Hammer } from "lucide-react";
 import type { TicketComment } from "@/hooks/useTicketComments";
 import { formatTime } from "@/lib/utils/format-date";
@@ -101,7 +101,7 @@ export function CommentThread({
                   </span>
                 </div>
                 <div className="text-sm">
-                  <MarkdownContent content={comment.content} />
+                  <RegressionReportBlock content={comment.content} />
                 </div>
               </div>
             ))

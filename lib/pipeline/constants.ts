@@ -187,6 +187,15 @@ export const PIPELINE_REASONS = {
    */
   failedTicketNotInReview:
     "Pipeline failed: ticket left review before the review stage",
+  /**
+   * Mechanical regression gate (bug tickets) rejected the branch; the run
+   * enters a fix cycle with the exact reason injected into the prompt.
+   */
+  regressionFailed: (cycle: number, max: number) =>
+    `Pipeline verify: regression gate failed — fix cycle ${cycle}/${max}`,
+  /** Regression gate still red after the fix-cycle budget ran out. */
+  failedRegression: (cycles: number) =>
+    `Pipeline failed: mandatory regression test still failing after ${cycles} fix cycles`,
 } as const;
 
 /** True when an activity-log reason belongs to the pipeline trace. */

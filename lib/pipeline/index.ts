@@ -5,6 +5,7 @@ import { createId } from "@/lib/utils/nanoid";
 import { logTransition } from "@/lib/workflow/log";
 import type { AgentProvider } from "@/lib/agent-config/constants";
 import { runForensic } from "./forensic";
+import { createVerifyGate } from "./verify";
 import {
   DEFAULT_PIPELINE_MAX_ATTEMPTS,
   DEFAULT_PIPELINE_MAX_FIX_CYCLES,
@@ -222,6 +223,12 @@ export function startPipelineRun(input: StartPipelineRunInput): {
       settled: input.buildSettled,
     },
     launchStage: driver.launchStage,
+    runVerifyGate: createVerifyGate({
+      projectId: input.projectId,
+      scope: input.scope,
+      epicId: input.epicId,
+      userStoryId: input.userStoryId,
+    }),
     assessReview: driver.assessReview,
     readSessionStatus: driver.readSessionStatus,
     checkGuards: driver.checkGuards,

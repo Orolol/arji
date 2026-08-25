@@ -51,6 +51,7 @@ import {
   buildTicketBuildPrompt,
   type PromptComment,
 } from "@/lib/claude/prompt-builder";
+import { buildRegressionFixSection } from "@/lib/verify/regression-report";
 import {
   enrichPromptWithDocumentMentions,
   userAuthoredTexts,
@@ -560,6 +561,11 @@ async function dispatchPipelineStage(
     }
     if (request.stage === "fix") {
       prompt = prompt + "\n\n" + PIPELINE_FIX_INSTRUCTIONS_SECTION;
+      // A regression-gate rejection carries its exact red→green verdict so
+      // the agent repairs the real problem instead of guessing.
+      if (request.verifyFailure) {
+        prompt = prompt + "\n\n" + buildRegressionFixSection(request.verifyFailure);
+      }
     }
   }
 

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MarkdownContent } from "@/components/chat/MarkdownContent";
+import { RegressionReportBlock } from "@/components/verify/RegressionReportBlock";
 import {
   Send,
   User,
@@ -283,7 +283,7 @@ function CommentRow({ comment }: { comment: TicketComment }) {
         </span>
       </div>
       <div className="text-sm">
-        <MarkdownContent content={comment.content} />
+        <RegressionReportBlock content={comment.content} />
       </div>
     </div>
   );

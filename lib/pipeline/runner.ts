@@ -1,5 +1,7 @@
 import type { PipelineStage, PipelineState } from "./constants";
 import { PIPELINE_REASONS } from "./constants";
+import type { VerifyGate, VerifyGateOutcome } from "./verify";
+import type { RegressionReportPayload } from "@/lib/verify/regression-report";
 
 /**
  * Autonomous pipeline state machine (build → review → auto-fix → forensic).
@@ -74,6 +76,12 @@ export interface PipelineStageRequest {
    * previous fix). Fix stages resume it on attempt 1.
    */
   lastCodeSessionId: string | null;
+  /**
+   * Set on a fix dispatch triggered by the mechanical regression gate
+   * (bug tickets): the exact red→green verdict so the fix prompt carries
+   * the precise failure reason. Null/absent for every other dispatch.
+   */
+  verifyFailure?: RegressionReportPayload | null;
 }
 
 /** Verdict of the blocking-findings assessment after a successful review. */
@@ -182,6 +190,12 @@ export interface RunPipelineOptions {
    */
   cancelPollIntervalMs?: number;
   callbacks?: PipelineRunnerCallbacks;
+  /**
+   * Mechanical verify gate run after each successful code stage, before
+   * review (lib/pipeline/verify.ts). Absent → no gate: behaviour identical
+   * to pre-regression runs.
+   */
+  runVerifyGate?: VerifyGate;
 }
 
 const RUNNING_STATE_BY_STAGE: Record<PipelineStageKind, PipelineState> = {
@@ -480,9 +494,59 @@ export async function runPipeline(
       continue;
     }
 
-    // Success: code stages flow into review.
+    // Success: mechanical verify gate (bug tickets), then code stages flow
+    // into review. The gate never throws for check outcomes; a rejection is
+    // an infrastructure bug and fails the run like a crashed stage would.
     if (stage === "build" || stage === "fix") {
       lastCodeSessionId = handle.sessionId ?? lastCodeSessionId;
+      let gate: VerifyGateOutcome = { ran: false, passed: null, result: null };
+      try {
+        if (options.runVerifyGate) {
+          gate = await options.runVerifyGate(lastCodeSessionId);
+        }
+      } catch (error) {
+        console.warn(
+          "[pipeline] Regression gate crashed:",
+          error instanceof Error ? error.message : error
+        );
+        return finish("failed", "regression gate crashed");
+      }
+      if (gate.ran && !gate.passed && gate.result) {
+        const payload: RegressionReportPayload = {
+          regression: {
+            status: gate.result.status,
+            reason: gate.result.reason,
+            testFiles: gate.result.testFiles,
+            detail: gate.result.detail,
+            checkedAt: new Date().toISOString(),
+          },
+        };
+        if (fixCycles >= options.maxFixCycles) {
+          callbacks.onTrace?.(
+            PIPELINE_REASONS.failedRegression(fixCycles),
+            handle.sessionId
+          );
+          return finish(
+            "failed",
+            `mandatory regression test still failing after ${fixCycles} fix cycles`
+          );
+        }
+        fixCycles += 1;
+        callbacks.onTrace?.(
+          PIPELINE_REASONS.regressionFailed(fixCycles, options.maxFixCycles),
+          handle.sessionId
+        );
+        const summary = await dispatch({
+          stage: "fix",
+          attempt: 1,
+          fixCycle: fixCycles,
+          previousAttemptSessionId: null,
+          lastCodeSessionId,
+          verifyFailure: payload,
+        });
+        if (summary) return summary;
+        continue;
+      }
       const summary = await dispatch({
         stage: "review",
         attempt: 1,

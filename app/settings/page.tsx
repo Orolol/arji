@@ -25,6 +25,10 @@ import {
   parseNightCostCap,
 } from "@/lib/night/constants";
 import {
+  BUG_REGRESSION_CHECK_SETTING_KEY,
+  parseBugRegressionSetting,
+} from "@/lib/verify/regression-constants";
+import {
   OPENAI_API_KEY_SETTING_KEY,
   OPENAI_BASE_URL_SETTING_KEY,
   OPENAI_MODEL_SETTING_KEY,
@@ -99,6 +103,7 @@ export default function SettingsPage() {
   const [pipelineMaxFixCycles, setPipelineMaxFixCycles] = useState(
     DEFAULT_PIPELINE_MAX_FIX_CYCLES
   );
+  const [bugRegressionCheck, setBugRegressionCheck] = useState(false);
   const [savingPipeline, setSavingPipeline] = useState(false);
   const [pipelineMessage, setPipelineMessage] = useState<string | null>(null);
   // Night-run defaults. Kept as raw strings: an empty cost cap means
@@ -175,6 +180,13 @@ export default function SettingsPage() {
           parsePipelineMaxFixCycles(
             d.data?.[PIPELINE_MAX_FIX_CYCLES_SETTING_KEY]
           ) ?? DEFAULT_PIPELINE_MAX_FIX_CYCLES
+        );
+        // Bug regression gate: tri-state, default OFF — absent key means
+        // every existing ticket behaves as before.
+        setBugRegressionCheck(
+          parseBugRegressionSetting(
+            d.data?.[BUG_REGRESSION_CHECK_SETTING_KEY]
+          ) ?? false
         );
         // Night defaults: absent keys stay empty, meaning "engine default"
         // for the breaker and "unlimited" for the cost cap.
@@ -267,6 +279,17 @@ export default function SettingsPage() {
       next === 0
         ? "Fix cycles disabled: blocking findings end the run immediately."
         : `Pipelines now run up to ${next} review → fix cycle${next === 1 ? "" : "s"}.`
+    );
+  }
+
+  async function handleToggleBugRegression(next: boolean) {
+    setBugRegressionCheck(next);
+    await savePipelineSettings(
+      { [BUG_REGRESSION_CHECK_SETTING_KEY]: next },
+      () => setBugRegressionCheck(!next),
+      next
+        ? "Mandatory red → green regression test enforced on bug tickets."
+        : "Mandatory bug regression test disabled."
     );
   }
 
@@ -956,6 +979,27 @@ export default function SettingsPage() {
             </p>
           </div>
         </div>
+
+        <label className="flex items-start gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            data-testid="bug-regression-toggle"
+            checked={bugRegressionCheck}
+            disabled={savingPipeline}
+            onChange={(e) => handleToggleBugRegression(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium">
+              Mandatory regression test on bug tickets
+            </span>
+            <span className="block text-muted-foreground">
+              RoboBun rule: a bug fix only passes the verify stage when its
+              branch carries a test that fails without the fix (red) and
+              passes with it (green). Off by default.
+            </span>
+          </span>
+        </label>
 
         {pipelineMessage && (
           <p className="text-xs text-muted-foreground">{pipelineMessage}</p>
