@@ -73,10 +73,11 @@ function deps(row: Routine): CiWatchDeps {
       status: "launched" as const,
       sessionId: "session-fix-1",
     })),
-    persistState: vi.fn((_id, state) => {
+    persistState: vi.fn((_id, state, errorState) => {
       row.config = JSON.stringify({
         ...JSON.parse(row.config),
         ciWatchState: state,
+        ciWatchErrorState: errorState,
       });
     }),
     notifyFailure: vi.fn(),
@@ -168,6 +169,39 @@ describe("CI watch", () => {
     );
     expect(result.message).toContain("Checked 1 of 2 open pull requests");
     expect(result.message).toContain("1 could not be processed (PR #11)");
+    expect(result.status).toBe("failed");
+  });
+
+  it("notifies an unchanged PR processing error only once", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.fetchPullRequestCi).mockRejectedValue(
+      new Error("Bad credentials"),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const first = await runCiWatchRoutine(row, watchDeps);
+    const repeated = await runCiWatchRoutine(row, watchDeps);
+
+    expect(first).toMatchObject({ status: "failed", shouldNotify: true });
+    expect(repeated).toMatchObject({ status: "failed", shouldNotify: false });
+    expect(JSON.parse(row.config).ciWatchErrorState).toEqual({
+      "epic-open": "error:Bad credentials",
+    });
+    errorSpy.mockRestore();
+  });
+
+  it("notifies a missing project connection once until it changes", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.getGitHubOwnerRepo).mockReturnValue(null);
+
+    const first = await runCiWatchRoutine(row, watchDeps);
+    const repeated = await runCiWatchRoutine(row, watchDeps);
+
+    expect(first).toMatchObject({ status: "failed", shouldNotify: true });
+    expect(repeated).toMatchObject({ status: "failed", shouldNotify: false });
+    expect(watchDeps.fetchPullRequestCi).not.toHaveBeenCalled();
   });
 
   it("preserves a public config edit made while a sweep is running", async () => {

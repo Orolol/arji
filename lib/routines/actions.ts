@@ -9,7 +9,7 @@ import { runCiWatchRoutine } from "@/lib/routines/ci-watch";
 
 /** Result persisted and surfaced by the routine scheduler. */
 export interface RoutineActionResult {
-  status: "completed" | "skipped";
+  status: "completed" | "skipped" | "failed";
   message: string;
   targetUrl: string;
   /**

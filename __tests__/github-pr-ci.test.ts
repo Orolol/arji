@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const githubMocks = vi.hoisted(() => ({
   pullsGet: vi.fn(),
   checksListForRef: vi.fn(),
-  combinedStatus: vi.fn(),
+  listCommitStatuses: vi.fn(),
   downloadJobLogs: vi.fn(),
   paginate: vi.fn(),
 }));
@@ -13,7 +13,7 @@ vi.mock("@/lib/github/client", () => ({
   createGitHubClient: vi.fn(() => ({
     pulls: { get: githubMocks.pullsGet },
     checks: { listForRef: githubMocks.checksListForRef },
-    repos: { getCombinedStatusForRef: githubMocks.combinedStatus },
+    repos: { listCommitStatusesForRef: githubMocks.listCommitStatuses },
     actions: {
       downloadJobLogsForWorkflowRun: githubMocks.downloadJobLogs,
     },
@@ -42,11 +42,8 @@ describe("classifyPullRequestCi", () => {
         params,
       ) => {
         const response = await method(params);
-        const data = response.data as {
-          check_runs?: unknown[];
-          statuses?: unknown[];
-        };
-        return data.check_runs ?? data.statuses ?? [];
+        const data = response.data as unknown[] | { check_runs?: unknown[] };
+        return Array.isArray(data) ? data : (data.check_runs ?? []);
       },
     );
   });
@@ -101,6 +98,23 @@ describe("classifyPullRequestCi", () => {
     ).toEqual({ state: "pending", failedChecks: [] });
   });
 
+  it("treats cancelled-only and stale-only checks as pending", () => {
+    for (const conclusion of ["cancelled", "stale"]) {
+      expect(
+        classifyPullRequestCi({
+          checkRuns: [
+            {
+              name: `matrix ${conclusion}`,
+              status: "completed",
+              conclusion,
+            },
+          ],
+          commitStatuses: [],
+        }),
+      ).toEqual({ state: "pending", failedChecks: [] });
+    }
+  });
+
   it("reads checks and commit statuses for the exact PR head SHA", async () => {
     githubMocks.pullsGet.mockResolvedValue({
       data: { head: { sha: "head-123" } },
@@ -117,7 +131,7 @@ describe("classifyPullRequestCi", () => {
         ],
       },
     });
-    githubMocks.combinedStatus.mockResolvedValue({ data: { statuses: [] } });
+    githubMocks.listCommitStatuses.mockResolvedValue({ data: [] });
 
     await expect(
       fetchPullRequestCiStatus("acme", "widgets", 42),
@@ -135,9 +149,63 @@ describe("classifyPullRequestCi", () => {
     expect(githubMocks.checksListForRef).toHaveBeenCalledWith(
       expect.objectContaining({ ref: "head-123", filter: "latest" }),
     );
-    expect(githubMocks.combinedStatus).toHaveBeenCalledWith(
+    expect(githubMocks.listCommitStatuses).toHaveBeenCalledWith(
       expect.objectContaining({ ref: "head-123" }),
     );
+  });
+
+  it("uses the newest status per context and preserves third-party check names", async () => {
+    githubMocks.pullsGet.mockResolvedValue({
+      data: { head: { sha: "head-statuses" } },
+    });
+    githubMocks.checksListForRef.mockResolvedValue({
+      data: { check_runs: [] },
+    });
+    githubMocks.listCommitStatuses.mockResolvedValue({
+      data: [
+        { context: "circleci/test", state: "success" },
+        { context: "circleci/test", state: "failure" },
+        { context: "codecov/project", state: "failure" },
+      ],
+    });
+
+    await expect(
+      fetchPullRequestCiStatus("acme", "widgets", 42),
+    ).resolves.toEqual({
+      headSha: "head-statuses",
+      state: "failing",
+      failedChecks: ["codecov/project"],
+      failedCheckRuns: [],
+    });
+  });
+
+  it("returns passing for realistic successful check and status responses", async () => {
+    githubMocks.pullsGet.mockResolvedValue({
+      data: { head: { sha: "head-green" } },
+    });
+    githubMocks.checksListForRef.mockResolvedValue({
+      data: {
+        check_runs: [
+          {
+            id: 701,
+            name: "unit",
+            status: "completed",
+            conclusion: "success",
+          },
+        ],
+      },
+    });
+    githubMocks.listCommitStatuses.mockResolvedValue({
+      data: [{ context: "codecov/project", state: "success" }],
+    });
+
+    await expect(
+      fetchPullRequestCiStatus("acme", "widgets", 42),
+    ).resolves.toMatchObject({
+      headSha: "head-green",
+      state: "passing",
+      failedChecks: [],
+    });
   });
 
   it("paginates checks and statuses so a failure after page one is visible", async () => {
@@ -175,7 +243,7 @@ describe("classifyPullRequestCi", () => {
     );
     expect(githubMocks.paginate).toHaveBeenNthCalledWith(
       2,
-      githubMocks.combinedStatus,
+      githubMocks.listCommitStatuses,
       expect.objectContaining({ ref: "head-many", per_page: 100 }),
     );
   });

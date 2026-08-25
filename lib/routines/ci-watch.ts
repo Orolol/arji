@@ -26,6 +26,8 @@ export {
 
 export const DEFAULT_CI_WATCH_INTERVAL_MINUTES = 15;
 const CI_WATCH_STATE_CONFIG_KEY = "ciWatchState";
+const CI_WATCH_ERROR_STATE_CONFIG_KEY = "ciWatchErrorState";
+const PROJECT_ERROR_SCOPE = "$project";
 
 export interface CiWatchEpic {
   id: string;
@@ -46,6 +48,7 @@ export interface StoredCiObservation {
 }
 
 type StoredCiWatchState = Record<string, StoredCiObservation>;
+type StoredCiWatchErrorState = Record<string, string>;
 
 export interface CiWatchDeps {
   listOpenPullRequestEpics(projectId: string): CiWatchEpic[];
@@ -68,7 +71,11 @@ export interface CiWatchDeps {
     headSha: string;
     failures: PullRequestCiFailureEvidence[];
   }): Promise<CiAutofixLaunchResult>;
-  persistState(routineId: string, state: StoredCiWatchState): void;
+  persistState(
+    routineId: string,
+    state: StoredCiWatchState,
+    errorState: StoredCiWatchErrorState,
+  ): void;
   notifyFailure(input: {
     projectId: string;
     epicId: string;
@@ -109,7 +116,7 @@ export const defaultCiWatchDeps: CiWatchDeps = {
   isAutofixEnabled: isCiAutofixEnabled,
   fetchFailureEvidence: fetchPullRequestCiFailureEvidence,
   launchAutofix: launchCiAutofixSession,
-  persistState: (routineId, state) => {
+  persistState: (routineId, state, errorState) => {
     db.transaction((tx) => {
       const current = tx
         .select({ config: routines.config })
@@ -123,6 +130,7 @@ export const defaultCiWatchDeps: CiWatchDeps = {
           config: JSON.stringify({
             ...config,
             [CI_WATCH_STATE_CONFIG_KEY]: state,
+            [CI_WATCH_ERROR_STATE_CONFIG_KEY]: errorState,
           }),
         })
         .where(eq(routines.id, routineId))
@@ -187,6 +195,34 @@ function parseStoredState(value: unknown): StoredCiWatchState {
   return state;
 }
 
+function parseStoredErrorState(value: unknown): StoredCiWatchErrorState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const state: StoredCiWatchErrorState = {};
+  for (const [scope, signature] of Object.entries(value)) {
+    if (typeof signature === "string" && signature.length > 0) {
+      state[scope] = signature;
+    }
+  }
+  return state;
+}
+
+function ciWatchErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "CI watch request failed";
+}
+
+/** Stable enough to suppress a persistent GitHub/configuration error. */
+function ciWatchErrorSignature(error: unknown): string {
+  const status =
+    error &&
+    typeof error === "object" &&
+    "status" in error &&
+    typeof error.status === "number"
+      ? String(error.status)
+      : "error";
+  return `${status}:${ciWatchErrorMessage(error)}`.slice(0, 1_000);
+}
+
 /**
  * CI failures are notified once for each (PR, head SHA). A pending or passing
  * first observation is retained so a later failure on the same SHA is still
@@ -237,13 +273,33 @@ export async function runCiWatchRoutine(
     };
   }
 
-  const ownerRepo = deps.getGitHubOwnerRepo(routine.projectId);
-  if (!ownerRepo) {
-    throw new Error("Project is not connected to a GitHub repository");
-  }
-  const { owner, repo } = parseOwnerRepo(ownerRepo);
   const config = parseConfig(routine);
   const previousState = parseStoredState(config[CI_WATCH_STATE_CONFIG_KEY]);
+  const previousErrorState = parseStoredErrorState(
+    config[CI_WATCH_ERROR_STATE_CONFIG_KEY],
+  );
+  const nextErrorState: StoredCiWatchErrorState = { ...previousErrorState };
+  let owner: string;
+  let repo: string;
+  try {
+    const ownerRepo = deps.getGitHubOwnerRepo(routine.projectId);
+    if (!ownerRepo) {
+      throw new Error("Project is not connected to a GitHub repository");
+    }
+    ({ owner, repo } = parseOwnerRepo(ownerRepo));
+    delete nextErrorState[PROJECT_ERROR_SCOPE];
+  } catch (error) {
+    const signature = ciWatchErrorSignature(error);
+    const shouldNotify = previousErrorState[PROJECT_ERROR_SCOPE] !== signature;
+    nextErrorState[PROJECT_ERROR_SCOPE] = signature;
+    deps.persistState(routine.id, previousState, nextErrorState);
+    return {
+      status: "failed",
+      message: ciWatchErrorMessage(error),
+      targetUrl: `/projects/${routine.projectId}`,
+      shouldNotify,
+    };
+  }
   // Preserve still-unprocessed observations if one GitHub request fails
   // halfway through the sweep; otherwise the following retry could replay an
   // alert for an epic whose durable entry was accidentally dropped.
@@ -254,6 +310,7 @@ export async function runCiWatchRoutine(
   let autofixesLaunched = 0;
   let autofixesSkipped = 0;
   let processedPullRequests = 0;
+  let newProcessingErrors = 0;
   const failedPullRequestNumbers: number[] = [];
   const autofixEnabled = deps.isAutofixEnabled(routine.projectId);
 
@@ -270,11 +327,12 @@ export async function runCiWatchRoutine(
         snapshot,
       );
       nextState[epic.id] = decision.observation;
+      delete nextErrorState[epic.id];
       if (snapshot.state === "failing") failingPullRequests += 1;
 
       // Persist the SHA guard before ringing the bell. This makes a process
       // restart immediately after the notification unable to replay it.
-      deps.persistState(routine.id, nextState);
+      deps.persistState(routine.id, nextState, nextErrorState);
 
       if (decision.shouldNotify) {
         deps.notifyFailure({
@@ -301,7 +359,7 @@ export async function runCiWatchRoutine(
           ...decision.observation,
           autofixAttempted: true,
         };
-        deps.persistState(routine.id, nextState);
+        deps.persistState(routine.id, nextState, nextErrorState);
 
         let failures: PullRequestCiFailureEvidence[];
         try {
@@ -340,12 +398,15 @@ export async function runCiWatchRoutine(
           autofixAttempted: !targetWasBusy,
           autofixSessionId: targetWasBusy ? null : launch.sessionId,
         };
-        deps.persistState(routine.id, nextState);
+        deps.persistState(routine.id, nextState, nextErrorState);
       }
 
       processedPullRequests += 1;
     } catch (error) {
       failedPullRequestNumbers.push(epic.prNumber);
+      const signature = ciWatchErrorSignature(error);
+      if (previousErrorState[epic.id] !== signature) newProcessingErrors += 1;
+      nextErrorState[epic.id] = signature;
       console.error(
         `[ci-watch] Failed to process PR #${epic.prNumber}; continuing the sweep`,
         error,
@@ -356,10 +417,15 @@ export async function runCiWatchRoutine(
   for (const epicId of Object.keys(nextState)) {
     if (!eligibleEpicIds.has(epicId)) delete nextState[epicId];
   }
-  deps.persistState(routine.id, nextState);
+  for (const scope of Object.keys(nextErrorState)) {
+    if (scope !== PROJECT_ERROR_SCOPE && !eligibleEpicIds.has(scope)) {
+      delete nextErrorState[scope];
+    }
+  }
+  deps.persistState(routine.id, nextState, nextErrorState);
 
   return {
-    status: "completed",
+    status: failedPullRequestNumbers.length > 0 ? "failed" : "completed",
     message: `Checked ${processedPullRequests} of ${openPullRequests.length} open pull request${
       openPullRequests.length === 1 ? "" : "s"
     }; ${failingPullRequests} failing, ${newFailures} newly reported${
@@ -373,8 +439,6 @@ export async function runCiWatchRoutine(
     }.`,
     targetUrl: `/projects/${routine.projectId}`,
     shouldNotify:
-      newFailures > 0 ||
-      autofixesLaunched > 0 ||
-      failedPullRequestNumbers.length > 0,
+      newFailures > 0 || autofixesLaunched > 0 || newProcessingErrors > 0,
   };
 }

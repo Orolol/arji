@@ -9,7 +9,7 @@ import {
 import { createId } from "@/lib/utils/nanoid";
 
 const TIME_OF_DAY_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-const INTERNAL_CONFIG_KEYS = new Set(["ciWatchState"]);
+const INTERNAL_CONFIG_KEYS = new Set(["ciWatchState", "ciWatchErrorState"]);
 
 export interface RoutineDto {
   id: string;

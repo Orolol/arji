@@ -164,6 +164,7 @@ describe("project routines CRUD routes", () => {
         config: JSON.stringify({
           intervalMinutes: 15,
           ciWatchState: internalState,
+          ciWatchErrorState: { "epic-2": "403:Forbidden" },
         }),
       })
       .run();
@@ -182,6 +183,7 @@ describe("project routines CRUD routes", () => {
     expect(JSON.parse(stored?.config ?? "{}")).toEqual({
       intervalMinutes: 30,
       ciWatchState: internalState,
+      ciWatchErrorState: { "epic-2": "403:Forbidden" },
     });
   });
 

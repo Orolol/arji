@@ -104,13 +104,13 @@ interface CommitStatusSignal {
   state: string;
 }
 
-const FAILING_CHECK_CONCLUSIONS = new Set([
-  "cancelled",
+const ACTIONABLE_FAILURE_CONCLUSIONS = new Set([
   "failure",
-  "stale",
   "startup_failure",
   "timed_out",
 ]);
+
+const RELATED_FAILURE_CONCLUSIONS = new Set(["cancelled", "stale"]);
 
 const FAILURE_LOG_PRIORITY = new Map([
   ["failure", 0],
@@ -173,15 +173,30 @@ export function classifyPullRequestCi(input: {
   commitStatuses: CommitStatusSignal[];
 }): Omit<PullRequestCiStatus, "headSha"> {
   const failedChecks = new Set<string>();
+  const hasActionableFailure =
+    input.checkRuns.some(
+      (check) =>
+        check.conclusion !== null &&
+        ACTIONABLE_FAILURE_CONCLUSIONS.has(check.conclusion),
+    ) ||
+    input.commitStatuses.some(
+      (status) => status.state === "error" || status.state === "failure",
+    );
 
-  for (const check of input.checkRuns) {
-    if (check.conclusion && FAILING_CHECK_CONCLUSIONS.has(check.conclusion)) {
-      failedChecks.add(check.name);
+  if (hasActionableFailure) {
+    for (const check of input.checkRuns) {
+      if (
+        check.conclusion &&
+        (ACTIONABLE_FAILURE_CONCLUSIONS.has(check.conclusion) ||
+          RELATED_FAILURE_CONCLUSIONS.has(check.conclusion))
+      ) {
+        failedChecks.add(check.name);
+      }
     }
-  }
-  for (const status of input.commitStatuses) {
-    if (status.state === "error" || status.state === "failure") {
-      failedChecks.add(status.context);
+    for (const status of input.commitStatuses) {
+      if (status.state === "error" || status.state === "failure") {
+        failedChecks.add(status.context);
+      }
     }
   }
 
@@ -197,7 +212,10 @@ export function classifyPullRequestCi(input: {
   const hasPendingSignal =
     input.checkRuns.some(
       (check) =>
-        check.status !== "completed" || check.conclusion === "action_required",
+        check.status !== "completed" ||
+        check.conclusion === "action_required" ||
+        (check.conclusion !== null &&
+          RELATED_FAILURE_CONCLUSIONS.has(check.conclusion)),
     ) || input.commitStatuses.some((status) => status.state === "pending");
   const hasAnySignal =
     input.checkRuns.length > 0 || input.commitStatuses.length > 0;
@@ -297,7 +315,7 @@ export async function fetchPullRequestCiStatus(
   });
   const headSha = pullRequest.head.sha;
 
-  const [checkRuns, commitStatuses] = await Promise.all([
+  const [checkRuns, rawCommitStatuses] = await Promise.all([
     octokit.paginate(octokit.checks.listForRef, {
       owner,
       repo,
@@ -305,7 +323,7 @@ export async function fetchPullRequestCiStatus(
       filter: "latest",
       per_page: 100,
     }),
-    octokit.paginate(octokit.repos.getCombinedStatusForRef, {
+    octokit.paginate(octokit.repos.listCommitStatusesForRef, {
       owner,
       repo,
       ref: headSha,
@@ -313,29 +331,59 @@ export async function fetchPullRequestCiStatus(
     }),
   ]);
 
-  const checkRunSignals = checkRuns.map((check) => ({
-    id: check.id,
-    name: check.name,
-    status: check.status,
-    conclusion: check.conclusion,
-  }));
+  const checkRunSignals = checkRuns.flatMap((check) => {
+    if (
+      !Number.isInteger(check.id) ||
+      typeof check.name !== "string" ||
+      check.name.trim().length === 0 ||
+      typeof check.status !== "string"
+    ) {
+      return [];
+    }
+    return [
+      {
+        id: check.id,
+        name: check.name.trim(),
+        status: check.status,
+        conclusion:
+          typeof check.conclusion === "string" ? check.conclusion : null,
+      },
+    ];
+  });
+  // The list endpoint is newest-first and may contain historical entries for
+  // the same context. Keep the current signal only. Unlike the combined-status
+  // response, this endpoint has a top-level array that Octokit's paginator can
+  // safely concatenate across every page.
+  const seenCommitStatusContexts = new Set<string>();
+  const commitStatuses: CommitStatusSignal[] = [];
+  for (const status of rawCommitStatuses) {
+    if (
+      typeof status.context !== "string" ||
+      typeof status.state !== "string"
+    ) {
+      continue;
+    }
+    const context = status.context.trim();
+    if (!context || seenCommitStatusContexts.has(context)) continue;
+    seenCommitStatusContexts.add(context);
+    commitStatuses.push({ context, state: status.state });
+  }
   const classification = classifyPullRequestCi({
     checkRuns: checkRunSignals.map((check) => ({
       name: check.name,
       status: check.status,
       conclusion: check.conclusion,
     })),
-    commitStatuses: commitStatuses.map((status) => ({
-      context: status.context,
-      state: status.state,
-    })),
+    commitStatuses,
   });
 
   const failedCheckRuns = new Map<string, PullRequestFailedCheckRun>();
   for (const check of checkRunSignals) {
     if (
       check.conclusion &&
-      FAILING_CHECK_CONCLUSIONS.has(check.conclusion) &&
+      classification.failedChecks.includes(check.name) &&
+      (ACTIONABLE_FAILURE_CONCLUSIONS.has(check.conclusion) ||
+        RELATED_FAILURE_CONCLUSIONS.has(check.conclusion)) &&
       !failedCheckRuns.has(check.name)
     ) {
       failedCheckRuns.set(check.name, {
