@@ -868,10 +868,12 @@ export default function SettingsPage() {
             <span className="font-medium">Dream after each night run</span>
             <span className="block text-muted-foreground">
               When a night run finishes, run a plan-mode agent that reads the
-              run&apos;s sessions — successes and failures alike — and rewrites
-              the project memory around recurring mistakes, codebase traps and
-              strategies that worked. Counts against the run&apos;s cost cap.
-              Off by default.
+              project&apos;s recent sessions since the last dream — successes
+              and failures alike — and rewrites the project memory around
+              recurring mistakes, codebase traps and strategies that worked.
+              The run only decides WHEN it fires and pays for it (its cost
+              counts against the run&apos;s cap); the sessions it reads are
+              project-wide, not limited to that run. Off by default.
             </span>
           </span>
         </label>
