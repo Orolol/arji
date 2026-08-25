@@ -15,7 +15,7 @@ import {
 } from "@/lib/api/route-helpers";
 import { createId } from "@/lib/utils/nanoid";
 import { isBuildableStatus } from "@/lib/types/kanban";
-import { createWorktree, isGitRepo } from "@/lib/git/manager";
+import { attachWorktree, createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import {
   buildBuildPrompt,
@@ -142,6 +142,17 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  let ciAutofixBranchName: string | null = null;
+  if (ciAutofix) {
+    if (!epic.branchName) {
+      return NextResponse.json(
+        { error: "CI autofix requires the epic's persisted pull request branch" },
+        { status: 400 }
+      );
+    }
+    ciAutofixBranchName = epic.branchName;
+  }
+
   // Get project
   const foundProject = getProjectOr404(projectId, { requireGitRepo: true });
   if (isErrorResponse(foundProject)) return foundProject;
@@ -226,13 +237,14 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const buildSystemPrompt = await resolveAgentPrompt("build", projectId);
 
-  // Create worktree
-  const { worktreePath, branchName } = await createWorktree(
-    gitRepoPath,
-    epic.id,
-    epic.title,
-    { defaultBranch: project.defaultBranch }
-  );
+  // A CI autofix must modify the exact branch behind the PR. Deriving a
+  // branch from the current epic title could silently cut a new branch from
+  // the base branch after the title has been edited.
+  const { worktreePath, branchName } = ciAutofixBranchName
+    ? await attachWorktree(gitRepoPath, ciAutofixBranchName)
+    : await createWorktree(gitRepoPath, epic.id, epic.title, {
+        defaultBranch: project.defaultBranch,
+      });
 
   // Build prompt — append review context if present
   let prompt = ciAutofix
@@ -344,10 +356,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // Branch metadata is not a status transition and stays a plain update.
-  db.update(epics)
-    .set({ branchName, updatedAt: now })
-    .where(eq(epics.id, epicId))
-    .run();
+  // Autofix deliberately preserves the PR branch recorded on the epic.
+  if (!ciAutofix) {
+    db.update(epics)
+      .set({ branchName, updatedAt: now })
+      .where(eq(epics.id, epicId))
+      .run();
+  }
 
   createQueuedSession({
     id: sessionId,

@@ -29,6 +29,10 @@ vi.mock("@/lib/db", async () => {
 });
 
 vi.mock("@/lib/git/manager", () => ({
+  attachWorktree: vi.fn(async (_repo: string, branchName: string) => ({
+    worktreePath: `/tmp/worktree-${branchName.replace(/\//g, "-")}`,
+    branchName,
+  })),
   createWorktree: vi.fn(async (_repo: string, epicId: string) => ({
     worktreePath: `/tmp/worktree-${epicId}`,
     branchName: `feature/${epicId}`,
@@ -78,6 +82,7 @@ vi.mock("fs", () => ({
 }));
 
 const { db } = await import("@/lib/db");
+const { attachWorktree, createWorktree } = await import("@/lib/git/manager");
 const {
   projects,
   epics,
@@ -147,6 +152,8 @@ function sessionsByStatus(projectId: string) {
       prompt: agentSessions.prompt,
       agentType: agentSessions.agentType,
       batchRunId: agentSessions.batchRunId,
+      branchName: agentSessions.branchName,
+      worktreePath: agentSessions.worktreePath,
     })
     .from(agentSessions)
     .where(eq(agentSessions.projectId, projectId))
@@ -285,6 +292,17 @@ describe("scheduler-integrated batch build", () => {
     );
     expect(occupyingResponse.status).toBe(200);
 
+    const persistedPrBranch = `feature/${epicIds[1]}-original-title`;
+    db.update(epics)
+      .set({
+        title: "Renamed after opening the PR",
+        branchName: persistedPrBranch,
+      })
+      .where(eq(epics.id, epicIds[1]))
+      .run();
+    vi.mocked(attachWorktree).mockClear();
+    vi.mocked(createWorktree).mockClear();
+
     const ciAutofix = {
       prNumber: 42,
       headSha: "abc123",
@@ -298,6 +316,11 @@ describe("scheduler-integrated batch build", () => {
     expect(response.status).toBe(200);
     expect(json.data.ciAutofix).toEqual({ launched: true });
     expect(json.data.pipeline).toBeNull();
+    expect(attachWorktree).toHaveBeenCalledWith(
+      "/repos/sched",
+      persistedPrBranch
+    );
+    expect(createWorktree).not.toHaveBeenCalled();
 
     let state = sessionsByStatus(projectId);
     const autofixRow = state.queued.find((row) => row.id === json.data.sessionId);
@@ -306,6 +329,8 @@ describe("scheduler-integrated batch build", () => {
       status: "queued",
       agentType: "build",
       batchRunId: `ci-autofix:${epicIds[1]}:pr-42:abc123`,
+      branchName: persistedPrBranch,
+      worktreePath: `/tmp/worktree-${persistedPrBranch.replace(/\//g, "-")}`,
     });
     expect(autofixRow?.prompt).toContain("### unit");
     expect(autofixRow?.prompt).toContain("Expected 2, received 1");
@@ -362,8 +387,31 @@ describe("scheduler-integrated batch build", () => {
       targetUrl: `/projects/${projectId}/sessions/${json.data.sessionId}`,
     });
     expect(autofixNotification?.title).toContain(
-      `push feature/${epicIds[1]} for PR #42`
+      `push ${persistedPrBranch} for PR #42`
     );
+  });
+
+  it("refuses CI autofix when the epic has no persisted PR branch", async () => {
+    const { projectId, epicIds } = seedProject(1);
+
+    const response = await epicBuildPost(
+      mockJsonRequest({
+        pipeline: false,
+        ciAutofix: {
+          prNumber: 42,
+          headSha: "abc123",
+          failures: [{ name: "unit", logTail: "failed" }],
+        },
+      }),
+      mockRouteContext({ projectId, epicId: epicIds[0] })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "CI autofix requires the epic's persisted pull request branch",
+    });
+    expect(sessionsByStatus(projectId).rows).toHaveLength(0);
+    expect(attachWorktree).not.toHaveBeenCalled();
   });
 
   it("cancelling a queued session removes it from the queue and it never starts", async () => {
