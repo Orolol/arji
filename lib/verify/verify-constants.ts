@@ -42,6 +42,23 @@ export interface VerificationReport {
   commands: VerifyCommandResult[];
 }
 
+/** Runtime guard for one persisted command outcome. */
+export function isVerifyCommandResult(
+  entry: unknown,
+): entry is VerifyCommandResult {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return false;
+  }
+  const command = entry as Record<string, unknown>;
+  return (
+    typeof command.name === "string" &&
+    typeof command.command === "string" &&
+    (typeof command.exitCode === "number" || command.exitCode === null) &&
+    typeof command.durationMs === "number" &&
+    typeof command.tail === "string"
+  );
+}
+
 /** Runtime guard for the JSON report returned to client components. */
 export function isVerificationReport(value: unknown): value is VerificationReport {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -60,17 +77,7 @@ export function isVerificationReport(value: unknown): value is VerificationRepor
     return false;
   }
 
-  return report.commands.every((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
-    const command = entry as Record<string, unknown>;
-    return (
-      typeof command.name === "string" &&
-      typeof command.command === "string" &&
-      (typeof command.exitCode === "number" || command.exitCode === null) &&
-      typeof command.durationMs === "number" &&
-      typeof command.tail === "string"
-    );
-  });
+  return report.commands.every(isVerifyCommandResult);
 }
 
 /**

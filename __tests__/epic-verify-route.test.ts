@@ -295,6 +295,23 @@ describe("POST /api/projects/[projectId]/epics/[epicId]/verify", () => {
     expect(verifyMocks.runVerification).not.toHaveBeenCalled();
   });
 
+  it("returns a readable 409 pointing at Settings when verification is not configured", async () => {
+    seedSession(worktreePath);
+    verifyMocks.resolveConfig.mockReturnValue({
+      enabled: false,
+      commands: [],
+      timeoutMs: 600_000,
+    });
+
+    const response = await callPost();
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.error).toMatch(/not configured/i);
+    expect(body.error).toMatch(/Settings/);
+    expect(verifyMocks.runVerification).not.toHaveBeenCalled();
+  });
+
   it("refuses a second manual verification in the same worktree", async () => {
     seedSession(worktreePath);
     let releaseFirst!: (report: unknown) => void;

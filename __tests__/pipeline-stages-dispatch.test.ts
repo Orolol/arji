@@ -1070,7 +1070,7 @@ describe("deterministic verification driver", () => {
     });
   });
 
-  it("refuses the repository checkout recorded as a session worktree", async () => {
+  it("skips verification for a repository checkout recorded as a session worktree", async () => {
     const { projectId, epicId } = seed("review");
     const codeSessionId = `verify-main-checkout-${counter}`;
     insertSession({
@@ -1094,9 +1094,12 @@ describe("deterministic verification driver", () => {
       buildNamedAgentId: null,
     });
 
+    // Hard constraint intact — nothing runs outside a managed epic
+    // worktree — but the stage is TOTAL: an applicability fault resolves
+    // to "did not apply" instead of crashing into the runner's park path.
     await expect(
       driver.runDeterministicVerification(codeSessionId)
-    ).rejects.toThrow(/managed epic worktree/i);
+    ).resolves.toEqual({ ran: false, result: null });
     expect(verificationMocks.runVerification).not.toHaveBeenCalled();
   });
 });

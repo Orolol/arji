@@ -8,7 +8,7 @@
  * Verification reports are not agent sessions. The maxSessions=2 happy path
  * below only has room for the initial build and review and must still pass.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { PIPELINE_REASONS } from "@/lib/pipeline/constants";
 import {
@@ -57,6 +57,8 @@ interface HarnessOptions {
     result: VerificationResult | null;
   }>;
   maxSessions?: number;
+  /** Simulate the driver crashing instead of returning an outcome. */
+  verificationThrows?: boolean;
 }
 
 function runHarness(options: HarnessOptions = {}) {
@@ -65,11 +67,13 @@ function runHarness(options: HarnessOptions = {}) {
   const verificationSessionIds: Array<string | null> = [];
   let stageNumber = 0;
   let verificationNumber = 0;
+  const park = vi.fn();
 
   const promise = runPipeline({
     maxAttempts: 2,
     maxFixCycles: 1,
     maxSessions: options.maxSessions ?? 12,
+    parkRejectedTicket: park,
     initialBuild: {
       sessionId: "s-build",
       settled: Promise.resolve<PipelineStageResult>({
@@ -109,12 +113,15 @@ function runHarness(options: HarnessOptions = {}) {
         error: null,
       }),
     }),
-    ...(options.verification
+    ...(options.verification || options.verificationThrows
       ? {
           runDeterministicVerification: async (
             lastCodeSessionId: string | null
           ) => {
             verificationSessionIds.push(lastCodeSessionId);
+            if (options.verificationThrows) {
+              throw new Error("verify driver exploded");
+            }
             const index = Math.min(
               verificationNumber++,
               options.verification!.length - 1
@@ -126,7 +133,7 @@ function runHarness(options: HarnessOptions = {}) {
     callbacks: { onTrace: (reason) => traces.push(reason) },
   });
 
-  return { promise, requests, traces, verificationSessionIds };
+  return { promise, requests, traces, verificationSessionIds, park };
 }
 
 describe("runPipeline — deterministic verification stage", () => {
@@ -202,6 +209,59 @@ describe("runPipeline — deterministic verification stage", () => {
     });
     expect(harness.traces).toContain(
       PIPELINE_REASONS.deterministicVerificationPassed(1)
+    );
+  });
+
+  it("parks the ticket and fails the run when verification exhausts the fix budget", async () => {
+    const failedBuild = report("fail", "build");
+    const failedFix = report("fail", "fix");
+    const harness = runHarness({
+      verification: [
+        { ran: true, result: failedBuild },
+        { ran: true, result: failedFix },
+      ],
+    });
+
+    const summary = await harness.promise;
+
+    expect(summary).toMatchObject({
+      state: "failed",
+      reason: expect.stringMatching(/deterministic verification/i),
+    });
+    // One fix cycle was spent before exhaustion (maxFixCycles: 1).
+    expect(harness.requests.map((request) => request.stage)).toEqual(["fix"]);
+    expect(harness.verificationSessionIds).toEqual(["s-build", "s-fix-1"]);
+    expect(harness.park).toHaveBeenCalledWith(
+      "s-fix-1",
+      "Deterministic verification rejected the branch"
+    );
+    expect(harness.traces).toContain(
+      PIPELINE_REASONS.failedDeterministicVerification(1)
+    );
+  });
+
+  it("parks the ticket and fails the run when the verification driver crashes", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const harness = runHarness({ verificationThrows: true });
+
+    const summary = await harness.promise;
+
+    expect(summary).toMatchObject({
+      state: "failed",
+      reason: "deterministic verification crashed",
+    });
+    expect(harness.park).toHaveBeenCalledWith(
+      "s-build",
+      "Deterministic verification crashed before it could verify the branch"
+    );
+    expect(harness.traces).toContain(
+      PIPELINE_REASONS.failedDeterministicVerificationCrashed
+    );
+    // No review was dispatched after the crash.
+    expect(harness.requests).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      "[pipeline] Deterministic verification crashed:",
+      "verify driver exploded"
     );
   });
 });

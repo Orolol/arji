@@ -15,6 +15,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 import {
+  VERIFY_CLOSE_GRACE_MS,
   VERIFY_KILL_GRACE_MS,
   VERIFY_OUTPUT_LIMIT_BYTES,
   runVerification,
@@ -37,6 +38,10 @@ class FakeChild extends EventEmitter {
 
   close(code: number | null): void {
     this.emit("close", code);
+  }
+
+  exit(code: number | null): void {
+    this.emit("exit", code);
   }
 }
 
@@ -211,5 +216,121 @@ describe("runVerification", () => {
     );
     expect(tail).not.toContain("BEGIN-OF-DISCARDED-OUTPUT");
     expect(tail.endsWith(ending)).toBe(true);
+  });
+
+  it("settles via the exit grace when a descendant holds the stdio pipes open", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-25T10:00:00.000Z"));
+    const child = new FakeChild(4501);
+    mockSpawn.mockImplementationOnce(() => child);
+
+    const pending = runVerification(
+      input({
+        commands: [{ name: "test", command: "npm test" }],
+        timeoutMs: 60_000,
+      })
+    );
+    child.stdout.write("done\n");
+    // Process exited cleanly, but a setsid descendant keeps stdout open so
+    // `close` never fires.
+    child.exit(0);
+    await vi.advanceTimersByTimeAsync(VERIFY_CLOSE_GRACE_MS);
+
+    const report = await pending;
+    expect(report.status).toBe("pass");
+    expect(report.commands[0].exitCode).toBe(0);
+    // Duration is measured at process exit, not at settlement.
+    expect(report.commands[0].durationMs).toBeLessThan(VERIFY_CLOSE_GRACE_MS);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles unconditionally after the SIGKILL escalation when no close arrives", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-25T10:00:00.000Z"));
+    const child = new FakeChild(4601);
+    mockSpawn.mockImplementationOnce(() => child);
+    const killGroup = vi.spyOn(process, "kill").mockReturnValue(true);
+
+    const pending = runVerification(input({ timeoutMs: 250 }));
+    await vi.advanceTimersByTimeAsync(250 + VERIFY_KILL_GRACE_MS);
+    expect(killGroup).toHaveBeenCalledWith(-4601, "SIGKILL");
+
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(VERIFY_KILL_GRACE_MS - 1);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const report = await pending;
+    expect(settled).toBe(true);
+    expect(report.status).toBe("fail");
+    expect(report.commands[0].exitCode).toBeNull();
+    expect(report.commands[0].tail).toContain("timed out after 250 ms");
+  });
+
+  it("marks the command failed when the process cannot be started", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockSpawn.mockImplementationOnce(() => {
+      throw new Error("spawn ENOENT");
+    });
+
+    const report = await runVerification(
+      input({ commands: [{ name: "test", command: "npm test" }] })
+    );
+    expect(report.status).toBe("fail");
+    expect(report.commands[0].exitCode).toBeNull();
+    expect(report.commands[0].tail).toContain(
+      "Could not start verification command: spawn ENOENT"
+    );
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty command list instead of persisting a vacuous pass", async () => {
+    await expect(
+      runVerification(input({ commands: [] }))
+    ).rejects.toThrow(/at least one configured command/);
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it("still returns the report when persisting it fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const child = new FakeChild(4701);
+    mockSpawn.mockImplementationOnce(() => child);
+    const failingDb = {
+      insert: () => {
+        throw new Error("disk full");
+      },
+    } as unknown as ArijDatabase;
+
+    const pending = runVerification(
+      input({
+        database: failingDb,
+        commands: [{ name: "test", command: "npm test" }],
+      })
+    );
+    child.close(0);
+
+    const report = await pending;
+    expect(report.status).toBe("pass");
+    expect(warn).toHaveBeenCalledWith(
+      "[verify] Failed to persist verification report:",
+      "disk full"
+    );
+  });
+
+  it("does not leak NODE_ENV into the spawned environment", async () => {
+    const child = new FakeChild(4801);
+    mockSpawn.mockImplementationOnce(() => child);
+
+    const pending = runVerification(
+      input({ commands: [{ name: "test", command: "npm test" }] })
+    );
+    child.close(0);
+    await pending;
+
+    const spawnEnv = mockSpawn.mock.calls[0][1].env as Record<string, unknown>;
+    expect("NODE_ENV" in spawnEnv).toBe(false);
   });
 });

@@ -22,9 +22,10 @@ import {
 } from "@/lib/verify/execution-lock";
 import { runVerification } from "@/lib/verify/runner";
 import { isManagedEpicWorktreePath } from "@/lib/verify/worktree";
-import type {
-  VerificationReport,
-  VerifyCommandResult,
+import {
+  isVerifyCommandResult,
+  type VerificationReport,
+  type VerifyCommandResult,
 } from "@/lib/verify/verify-constants";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
@@ -37,19 +38,7 @@ function parseCommandResults(value: string): VerifyCommandResult[] {
     const parsed: unknown = JSON.parse(value);
     if (!Array.isArray(parsed)) return [];
 
-    return parsed.filter((entry): entry is VerifyCommandResult => {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-        return false;
-      }
-      const command = entry as Record<string, unknown>;
-      return (
-        typeof command.name === "string" &&
-        typeof command.command === "string" &&
-        (typeof command.exitCode === "number" || command.exitCode === null) &&
-        typeof command.durationMs === "number" &&
-        typeof command.tail === "string"
-      );
-    });
+    return parsed.filter(isVerifyCommandResult);
   } catch {
     return [];
   }

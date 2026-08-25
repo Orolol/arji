@@ -242,53 +242,76 @@ async function runPipelineVerification(
   init: PipelineStageDriverInit,
   lastCodeSessionId: string | null
 ): Promise<PipelineDeterministicVerificationOutcome> {
-  const config = resolveVerifyConfigForProject(init.projectId);
-  if (!config.enabled) return { ran: false, result: null };
-  if (!lastCodeSessionId) {
-    throw new Error("Deterministic verification requires a code session");
-  }
+  // Applicability is decided by plain DB reads plus a path check. They are
+  // wrapped together so the stage is TOTAL: a fault here must resolve to
+  // "did not apply", never to a thrown verification. The runner's crash
+  // path would otherwise fail the run and park the ticket — possibly a
+  // fully green branch — for a fault that says nothing about the branch.
+  // This mirrors the regression gate's stance (lib/pipeline/verify.ts).
+  try {
+    const config = resolveVerifyConfigForProject(init.projectId);
+    if (!config.enabled) return { ran: false, result: null };
+    if (!lastCodeSessionId) {
+      console.warn(
+        "[pipeline verify] Skipping: deterministic verification requires a code session"
+      );
+      return { ran: false, result: null };
+    }
 
-  const codeSession = db
-    .select({ worktreePath: agentSessions.worktreePath })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.id, lastCodeSessionId),
-        eq(agentSessions.projectId, init.projectId),
-        eq(agentSessions.epicId, init.epicId)
+    const codeSession = db
+      .select({ worktreePath: agentSessions.worktreePath })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.id, lastCodeSessionId),
+          eq(agentSessions.projectId, init.projectId),
+          eq(agentSessions.epicId, init.epicId)
+        )
       )
-    )
-    .get();
-  if (!codeSession?.worktreePath) {
-    throw new Error(
-      "Deterministic verification requires the epic worktree from the last code session"
+      .get();
+    if (!codeSession?.worktreePath) {
+      console.warn(
+        "[pipeline verify] Skipping: no epic worktree recorded by the last code session"
+      );
+      return { ran: false, result: null };
+    }
+    const worktreePath = codeSession.worktreePath;
+
+    const project = db
+      .select({ gitRepoPath: projects.gitRepoPath })
+      .from(projects)
+      .where(eq(projects.id, init.projectId))
+      .get();
+    if (!project?.gitRepoPath) {
+      console.warn(
+        "[pipeline verify] Skipping: deterministic verification requires a Git repository"
+      );
+      return { ran: false, result: null };
+    }
+    // Hard constraint: never execute in the repository checkout or any
+    // unmanaged path, even when durable session state records one.
+    assertManagedEpicWorktreePath(worktreePath, project.gitRepoPath);
+
+    const result = await withVerificationWorktreeLock(
+      worktreePath,
+      () =>
+        executeVerification({
+          projectId: init.projectId,
+          epicId: init.epicId,
+          agentSessionId: lastCodeSessionId,
+          worktreePath,
+          commands: config.commands,
+          timeoutMs: config.timeoutMs,
+        })
     );
+    return { ran: true, result };
+  } catch (error) {
+    console.warn(
+      "[pipeline verify] Skipping: applicability check failed:",
+      error instanceof Error ? error.message : error
+    );
+    return { ran: false, result: null };
   }
-  const worktreePath = codeSession.worktreePath;
-
-  const project = db
-    .select({ gitRepoPath: projects.gitRepoPath })
-    .from(projects)
-    .where(eq(projects.id, init.projectId))
-    .get();
-  if (!project?.gitRepoPath) {
-    throw new Error("Deterministic verification requires a Git repository");
-  }
-  assertManagedEpicWorktreePath(worktreePath, project.gitRepoPath);
-
-  const result = await withVerificationWorktreeLock(
-    worktreePath,
-    () =>
-      executeVerification({
-        projectId: init.projectId,
-        epicId: init.epicId,
-        agentSessionId: lastCodeSessionId,
-        worktreePath,
-        commands: config.commands,
-        timeoutMs: config.timeoutMs,
-      })
-  );
-  return { ran: true, result };
 }
 
 /**
