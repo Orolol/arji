@@ -16,15 +16,15 @@
 -- and for every legacy row — which is exactly what selects the prose
 -- fallback.
 --
--- Numbered 0033 because main already assigned 0032_review_comment_session.
--- Drizzle uses the journal `when` as a single high-water mark, so sharing
--- 0032's timestamp would make databases that already ran it skip this ALTER
--- silently and leave the application reading and writing a missing column.
+-- Numbered 0034 because main already assigned 0033_grading_reports. Drizzle
+-- uses the journal `when` as a single high-water mark, so sharing 0033's
+-- timestamp would make databases that already ran it skip this ALTER silently
+-- and leave the application reading and writing a missing column.
 --
 -- SQLite has no ADD COLUMN IF NOT EXISTS, so like 0023/0024/0026/0028/0030/
--- 0031/0032 this is not an idempotent no-op, and re-running it on a database that
--- already has the column throws. A database can reach that state by losing
--- its drizzle bookkeeping, so the column is listed in
+-- 0031/0032 this is not an idempotent no-op, and re-running it on a database
+-- that already has the column throws. A database can reach that state by
+-- losing its drizzle bookkeeping, so the column is listed in
 -- POST_BASELINE_COLUMN_MIGRATIONS (lib/db/init.ts), which stamps this
 -- migration as applied when it exists.
 ALTER TABLE agent_sessions ADD COLUMN review_verdict text;

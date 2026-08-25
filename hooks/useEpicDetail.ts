@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { usePolling } from "@/hooks/usePolling";
+import type { GradingReportData } from "@/lib/grading/report";
 
 interface UserStory {
   id: string;
@@ -37,25 +38,30 @@ interface EpicDetail {
 export function useEpicDetail(projectId: string, epicId: string | null) {
   const [epic, setEpic] = useState<EpicDetail | null>(null);
   const [userStories, setUserStories] = useState<UserStory[]>([]);
+  const [gradingReport, setGradingReport] =
+    useState<GradingReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
 
   const fetchData = useCallback(async () => {
     if (!epicId) return;
     try {
-      const [epicRes, usRes] = await Promise.all([
+      const [epicRes, usRes, gradingRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/epics`),
         fetch(`/api/projects/${projectId}/user-stories?epicId=${epicId}`),
+        fetch(`/api/projects/${projectId}/epics/${epicId}/grading`),
       ]);
 
       const epicData = await epicRes.json();
       const usData = await usRes.json();
+      const gradingData = await gradingRes.json();
 
       const foundEpic = (epicData.data || []).find(
         (e: EpicDetail) => e.id === epicId
       );
       if (foundEpic) setEpic(foundEpic);
       setUserStories(usData.data || []);
+      setGradingReport(gradingRes.ok ? gradingData.data ?? null : null);
     } catch {
       // silently fail on poll
     }
@@ -153,6 +159,7 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
   return {
     epic,
     userStories,
+    gradingReport,
     loading,
     updateEpic,
     addUserStory,

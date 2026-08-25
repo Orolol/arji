@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import {
   agentSessions,
   epics,
+  gradingReports,
   projects,
   reviewComments,
   ticketComments,
@@ -53,6 +54,11 @@ import {
 } from "@/lib/claude/prompt-builder";
 import { buildRegressionFixSection } from "@/lib/verify/regression-report";
 import { readRegressionConfig } from "@/lib/pipeline/verify";
+import { dispatchGradingSession } from "@/lib/grading/dispatch";
+import {
+  buildGradingFixSection,
+  parseGradingEntries,
+} from "@/lib/grading/report";
 import {
   enrichPromptWithDocumentMentions,
   userAuthoredTexts,
@@ -79,6 +85,7 @@ import { PIPELINE_REVIEW_TYPE } from "./constants";
 import { assessReviewOutcome, resolveReviewVerdict } from "./findings";
 import type {
   PipelineGuardCheck,
+  PipelineGradingAssessment,
   PipelineReviewAssessment,
   PipelineStageHandle,
   PipelineStageRequest,
@@ -155,6 +162,10 @@ export interface PipelineStageDriver {
     sessionId: string;
     stageStartedAt: string;
   }): Promise<PipelineReviewAssessment>;
+  assessGrading(input: {
+    sessionId: string;
+    reportId: string;
+  }): Promise<PipelineGradingAssessment>;
   readSessionStatus(sessionId: string): string | null;
   checkGuards(ownSessionIds: string[]): PipelineGuardCheck;
 }
@@ -172,6 +183,9 @@ export function createPipelineStageDriver(
   return {
     launchStage: async (request) => {
       try {
+        if (request.stage === "grading") {
+          return await dispatchPipelineGradingStage(init);
+        }
         return await dispatchPipelineStage(init, request, reviewOutputs);
       } catch (error) {
         const message =
@@ -212,6 +226,30 @@ export function createPipelineStageDriver(
       };
     },
 
+    assessGrading: async ({ sessionId, reportId }) => {
+      const report = db
+        .select()
+        .from(gradingReports)
+        .where(
+          and(
+            eq(gradingReports.id, reportId),
+            eq(gradingReports.epicId, init.epicId),
+            eq(gradingReports.agentSessionId, sessionId),
+          ),
+        )
+        .get();
+      const gradings = parseGradingEntries(report?.gradings);
+      if (!report || !gradings) {
+        throw new Error("Grading report is missing or malformed");
+      }
+      return {
+        reportId: report.id,
+        summary: report.summary,
+        gradings,
+        missed: gradings.filter((entry) => entry.status === "missed"),
+      };
+    },
+
     readSessionStatus: (sessionId) =>
       db
         .select({ status: agentSessions.status })
@@ -220,6 +258,46 @@ export function createPipelineStageDriver(
         .get()?.status ?? null,
 
     checkGuards: (ownSessionIds) => checkPipelineGuards(init, ownSessionIds),
+  };
+}
+
+/** Adapts the reusable grader dispatcher to the pipeline stage contract. */
+async function dispatchPipelineGradingStage(
+  init: PipelineStageDriverInit,
+): Promise<PipelineStageHandle> {
+  const result = await dispatchGradingSession({
+    projectId: init.projectId,
+    epicId: init.epicId,
+    userStoryId: init.scope === "story" ? init.userStoryId : null,
+    batchRunId: init.batchRunId ?? null,
+  });
+
+  if (result.skipped) {
+    return {
+      sessionId: null,
+      settled: Promise.resolve({
+        sessionId: "",
+        success: true,
+        outcome: "answered",
+        error: null,
+        gradingReportId: null,
+        gradingSkipped: true,
+      }),
+      escalatedToProvider: null,
+    };
+  }
+
+  return {
+    sessionId: result.sessionId,
+    settled: result.settled.then((terminal) => ({
+      sessionId: terminal.sessionId,
+      success: terminal.success,
+      outcome: terminal.outcome,
+      error: terminal.error,
+      gradingReportId: terminal.reportId,
+      gradingSkipped: false,
+    })),
+    escalatedToProvider: null,
   };
 }
 
@@ -564,7 +642,17 @@ async function dispatchPipelineStage(
       prompt = prompt + "\n\n" + reviewContext;
     }
     if (request.stage === "fix") {
-      prompt = prompt + "\n\n" + PIPELINE_FIX_INSTRUCTIONS_SECTION;
+      // A grading-only fix must not be described as a code-review rejection.
+      // When open review findings also exist, retain both instruction blocks.
+      if (!request.gradingFailure || reviewContext) {
+        prompt = prompt + "\n\n" + PIPELINE_FIX_INSTRUCTIONS_SECTION;
+      }
+      if (request.gradingFailure) {
+        prompt =
+          prompt +
+          "\n\n" +
+          buildGradingFixSection(request.gradingFailure);
+      }
       // A regression-gate rejection carries its exact red→green verdict so
       // the agent repairs the real problem instead of guessing.
       if (request.verifyFailure) {

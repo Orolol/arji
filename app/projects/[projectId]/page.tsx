@@ -494,6 +494,7 @@ export default function KanbanPage() {
                       projectId={projectId}
                       epicId={activeDetailTicketId}
                       open
+                      refreshTrigger={refreshTrigger}
                       onClose={handleCloseDetailPanel}
                       onAgentConflict={({ message, sessionUrl }) =>
                         addToast(

@@ -1,5 +1,5 @@
 /**
- * Migration 0033_agent_session_review_verdict: the `review_verdict` column on
+ * Migration 0034_agent_session_review_verdict: the `review_verdict` column on
  * `agent_sessions` (the structured verdict submit_findings persists), the
  * hand-written journal entry, its POST_BASELINE_COLUMN_MIGRATIONS
  * registration, and the guarantee that existing sessions keep a NULL verdict
@@ -16,10 +16,10 @@ import { initDb } from "@/lib/db/init";
 import { agentSessions } from "@/lib/db/schema";
 
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "lib", "db", "migrations");
-const PREVIOUS_MIGRATION_TAG = "0032_review_comment_session";
-const PREVIOUS_MIGRATION_WHEN = 1786712900000;
-const MIGRATION_TAG = "0033_agent_session_review_verdict";
-const MIGRATION_WHEN = 1786713000000;
+const PREVIOUS_MIGRATION_TAG = "0033_grading_reports";
+const PREVIOUS_MIGRATION_WHEN = 1786713000000;
+const MIGRATION_TAG = "0034_agent_session_review_verdict";
+const MIGRATION_WHEN = 1786713100000;
 
 const journal = JSON.parse(
   fs.readFileSync(
@@ -61,7 +61,7 @@ function columnNames(conn: Database.Database, table: string): string[] {
   ).map((row) => row.name);
 }
 
-describe("0033_agent_session_review_verdict — migration file", () => {
+describe("0034_agent_session_review_verdict — migration file", () => {
   it("adds the column with an ALTER TABLE statement", () => {
     const sql = fs.readFileSync(
       path.join(MIGRATIONS_FOLDER, `${MIGRATION_TAG}.sql`),
@@ -73,11 +73,11 @@ describe("0033_agent_session_review_verdict — migration file", () => {
     );
   });
 
-  it("owns a new journal slot after main's 0032 migration", () => {
+  it("owns a new journal slot after main's 0033 migration", () => {
     const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);
 
     expect(entry).toBeDefined();
-    expect(entry?.idx).toBe(32);
+    expect(entry?.idx).toBe(33);
     expect(entry?.when).toBe(MIGRATION_WHEN);
     // Drizzle applies only migrations whose `when` strictly exceeds its one
     // high-water mark. Equality is a collision, not valid ordering.
@@ -85,11 +85,11 @@ describe("0033_agent_session_review_verdict — migration file", () => {
     expect(
       whens.every((when, index) => index === 0 || when > whens[index - 1]),
     ).toBe(true);
-    expect(journal.entries[31]).toMatchObject({
+    expect(journal.entries[32]).toMatchObject({
       tag: PREVIOUS_MIGRATION_TAG,
       when: PREVIOUS_MIGRATION_WHEN,
     });
-    expect(journal.entries[32]?.tag).toBe(MIGRATION_TAG);
+    expect(journal.entries[33]?.tag).toBe(MIGRATION_TAG);
   });
 
   it("is listed in POST_BASELINE_COLUMN_MIGRATIONS for bookkeeping-less recovery", () => {
@@ -98,7 +98,7 @@ describe("0033_agent_session_review_verdict — migration file", () => {
       "utf-8",
     );
     expect(initSource).toMatch(
-      /folderMillis:\s*1786713000000,\s*table:\s*"agent_sessions",\s*column:\s*"review_verdict"/,
+      /folderMillis:\s*1786713100000,\s*table:\s*"agent_sessions",\s*column:\s*"review_verdict"/,
     );
   });
 
@@ -110,12 +110,12 @@ describe("0033_agent_session_review_verdict — migration file", () => {
 
     // The snapshots stop at 0013 while the journal runs far ahead;
     // regenerating them would diff against stale state and emit wrong DDL.
-    expect(snapshots).not.toContain("0033_snapshot.json");
+    expect(snapshots).not.toContain("0034_snapshot.json");
     expect(snapshots[snapshots.length - 1]).toBe("0013_snapshot.json");
   });
 });
 
-describe("0033_agent_session_review_verdict — applied schema", () => {
+describe("0034_agent_session_review_verdict — applied schema", () => {
   it("creates the column on a fresh database", () => {
     withDb(tempDbPath(), (conn) => {
       initDb(conn);
@@ -185,12 +185,12 @@ describe("0033_agent_session_review_verdict — applied schema", () => {
     });
   });
 
-  it("applies after an existing database has already run main's 0032", () => {
+  it("applies after an existing database has already run main's 0033", () => {
     const file = tempDbPath();
 
-    // Build the full schema, then leave the database precisely at main's 0032
-    // high-water mark. Reusing 0032's `when` would make Drizzle skip the new
-    // ALTER forever; 0033 must remain strictly newer.
+    // Build the full schema, then leave the database precisely at main's 0033
+    // high-water mark. Reusing 0033's `when` would make Drizzle skip the new
+    // ALTER forever; 0034 must remain strictly newer.
     withDb(file, (conn) => {
       initDb(conn);
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
@@ -208,6 +208,13 @@ describe("0033_agent_session_review_verdict — applied schema", () => {
       expect(columnNames(conn, "review_comments")).toContain(
         "agent_session_id",
       );
+      expect(
+        conn
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'grading_reports'",
+          )
+          .get(),
+      ).toBeDefined();
 
       conn
         .prepare("INSERT INTO projects (id, name) VALUES (?, ?)")
@@ -232,7 +239,7 @@ describe("0033_agent_session_review_verdict — applied schema", () => {
     });
   });
 
-  it("stamps 0033 on a bookkeeping-less database that already has the column", () => {
+  it("stamps 0034 on a bookkeeping-less database that already has the column", () => {
     const file = tempDbPath();
 
     withDb(file, (conn) => {

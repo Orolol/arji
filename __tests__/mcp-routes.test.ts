@@ -1,5 +1,5 @@
 /**
- * Tests for the five /api/mcp/* routes (the HTTP backend of the agent tool
+ * Tests for the /api/mcp/* routes (the HTTP backend of the agent tool
  * channel).
  *
  * Real handlers against an isolated in-memory database built from the real
@@ -15,6 +15,7 @@ import { mockNextRequest } from "@/__tests__/helpers/db-mock";
 import {
   agentSessions,
   epics,
+  gradingReports,
   projects,
   reviewComments,
   ticketActivityLog,
@@ -53,6 +54,7 @@ import { POST as updateStatusPost } from "@/app/api/mcp/update-ticket-status/rou
 import { POST as postCommentPost } from "@/app/api/mcp/post-comment/route";
 import { POST as askQuestionPost } from "@/app/api/mcp/ask-question/route";
 import { POST as submitFindingsPost } from "@/app/api/mcp/submit-findings/route";
+import { POST as submitGradingPost } from "@/app/api/mcp/submit-grading/route";
 
 type RouteHandler = (request: NextRequest) => Promise<Response>;
 
@@ -203,6 +205,21 @@ describe("MCP route auth", () => {
       "submit-findings",
       submitFindingsPost,
       { verdict: "approved", summary: "ok", findings: [] },
+    ],
+    [
+      "submit-grading",
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId: "story-id",
+            criterion: "It works",
+            status: "met",
+            evidence: "Covered by a test",
+          },
+        ],
+        summary: "ok",
+      },
     ],
   ];
 
@@ -1224,5 +1241,203 @@ describe("POST /api/mcp/submit-findings", () => {
     );
 
     expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// submit-grading
+// ---------------------------------------------------------------------------
+
+describe("POST /api/mcp/submit-grading", () => {
+  function seedStory(storyId: string, parentEpicId = epicId) {
+    db()
+      .insert(userStories)
+      .values({
+        id: storyId,
+        epicId: parentEpicId,
+        title: `Story ${storyId}`,
+        acceptanceCriteria: "The criterion",
+        status: "in_progress",
+      })
+      .run();
+  }
+
+  it("stores one atomic report with strict grading statuses", async () => {
+    const storyId = createId();
+    seedStory(storyId);
+    const gradings = [
+      {
+        storyId,
+        criterion: "The happy path works",
+        status: "met",
+        evidence: "__tests__/feature.test.ts covers it",
+      },
+      {
+        storyId,
+        criterion: "The edge case is explained",
+        status: "partial",
+        evidence: "Implementation exists but lacks a regression test",
+      },
+      {
+        storyId,
+        criterion: "The fallback is implemented",
+        status: "missed",
+        evidence: "No fallback exists in the worktree",
+      },
+    ];
+
+    const res = await call(
+      submitGradingPost,
+      { gradings, summary: "One criterion still needs work." },
+      token
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.reportId).toEqual(expect.any(String));
+
+    const reports = db().select().from(gradingReports).all();
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      id: json.data.reportId,
+      epicId,
+      agentSessionId: sessionId,
+      summary: "One criterion still needs work.",
+    });
+    expect(JSON.parse(reports[0].gradings)).toEqual(gradings);
+  });
+
+  it("rejects an unknown status without persisting a report", async () => {
+    const storyId = createId();
+    seedStory(storyId);
+
+    const res = await call(
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId,
+            criterion: "The criterion",
+            status: "almost",
+            evidence: "Some evidence",
+          },
+        ],
+        summary: "Invalid",
+      },
+      token
+    );
+
+    expect(res.status).toBe(400);
+    expect(db().select().from(gradingReports).all()).toHaveLength(0);
+  });
+
+  it("rejects unknown payload keys at both levels", async () => {
+    const storyId = createId();
+    seedStory(storyId);
+
+    const res = await call(
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId,
+            criterion: "The criterion",
+            status: "met",
+            evidence: "Some evidence",
+            confidence: 0.9,
+          },
+        ],
+        summary: "Invalid",
+        verdict: "approved",
+      },
+      token
+    );
+
+    expect(res.status).toBe(400);
+    expect(db().select().from(gradingReports).all()).toHaveLength(0);
+  });
+
+  it("rejects a story outside the token epic with a readable error and no partial write", async () => {
+    const validStoryId = createId();
+    const outsideStoryId = createId();
+    seedStory(validStoryId);
+    seedStory(outsideStoryId, todoEpicId);
+
+    const res = await call(
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId: validStoryId,
+            criterion: "Valid criterion",
+            status: "met",
+            evidence: "Valid evidence",
+          },
+          {
+            storyId: outsideStoryId,
+            criterion: "Outside criterion",
+            status: "missed",
+            evidence: "Must not be written",
+          },
+        ],
+        summary: "Mixed scope",
+      },
+      token
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.code).toBe("STORY_NOT_IN_EPIC");
+    expect(json.error).toContain(outsideStoryId);
+    expect(json.error).toContain("does not belong to ticket");
+    expect(db().select().from(gradingReports).all()).toHaveLength(0);
+  });
+
+  it("always targets the token epic — ticket_id is rejected", async () => {
+    const storyId = createId();
+    seedStory(storyId);
+
+    const res = await call(
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId,
+            criterion: "The criterion",
+            status: "met",
+            evidence: "Some evidence",
+          },
+        ],
+        summary: "ok",
+        ticket_id: todoEpicId,
+      },
+      token
+    );
+
+    expect(res.status).toBe(400);
+    expect(db().select().from(gradingReports).all()).toHaveLength(0);
+  });
+
+  it("400s MISSING_TICKET for a ticketless session", async () => {
+    const res = await call(
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId: createId(),
+            criterion: "The criterion",
+            status: "met",
+            evidence: "Some evidence",
+          },
+        ],
+        summary: "ok",
+      },
+      noEpicToken
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.code).toBe("MISSING_TICKET");
+    expect(db().select().from(gradingReports).all()).toHaveLength(0);
   });
 });

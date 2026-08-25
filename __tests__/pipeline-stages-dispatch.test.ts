@@ -342,6 +342,48 @@ describe("fix stage dispatch (epic scope)", () => {
     );
   });
 
+  it("injects missed grading criteria and their evidence into the fix prompt", async () => {
+    const { projectId, epicId, storyId } = seed("review");
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+
+    const handle = await driver.launchStage({
+      stage: "fix",
+      attempt: 1,
+      fixCycle: 1,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+      gradingFailure: {
+        reportId: "grading-report-1",
+        summary: "The card outcome is missing.",
+        missed: [
+          {
+            storyId,
+            criterion: "The Kanban card shows aggregate grading",
+            status: "missed",
+            evidence: "EpicCard renders no grading badge.",
+          },
+        ],
+      },
+    });
+
+    const row = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, handle.sessionId!))
+      .get()!;
+    expect(row.prompt).toContain("## Acceptance grading gaps");
+    expect(row.prompt).not.toContain("A code review found blocking findings");
+    expect(row.prompt).toContain("The Kanban card shows aggregate grading");
+    expect(row.prompt).toContain("EpicCard renders no grading badge.");
+    await handle.settled;
+  });
+
   it("settles a successful provider run even if the terminal session write fails", async () => {
     // The session row is left 'running' (forced write failure), but the
     // terminal handler acts for that owning session — its in_progress →
@@ -1012,6 +1054,50 @@ describe("story scope", () => {
       { purpose: "review", projectId, epicId, storyId }
     );
     await handle.settled;
+  });
+});
+
+describe("grading stage dispatch", () => {
+  it("returns a successful journalled skip without creating a session when no stories exist", async () => {
+    const { projectId, epicId, storyId } = seed("review");
+    db.delete(userStories).where(eq(userStories.id, storyId)).run();
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+
+    const handle = await driver.launchStage({
+      stage: "grading",
+      attempt: 1,
+      fixCycle: 0,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: "build-complete",
+    });
+
+    expect(handle.sessionId).toBeNull();
+    await expect(handle.settled).resolves.toMatchObject({
+      success: true,
+      gradingSkipped: true,
+    });
+    expect(
+      db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.epicId, epicId))
+        .all(),
+    ).toHaveLength(0);
+    expect(
+      db
+        .select()
+        .from(ticketActivityLog)
+        .where(eq(ticketActivityLog.epicId, epicId))
+        .all(),
+    ).toContainEqual(
+      expect.objectContaining({ reason: expect.stringContaining("Grading skipped") }),
+    );
   });
 });
 

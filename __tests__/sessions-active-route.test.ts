@@ -360,7 +360,8 @@ describe("sessions/active route activity typing", () => {
     expect(json.data[0]).toMatchObject({ id: "sess-chat", stale: false });
   });
 
-  it("gives queued sessions and registry activities null lastActivityAt and stale false", async () => {
+  it("gives queued sessions enqueue activity while registry activity stays unknown", async () => {
+    const queuedAt = new Date(Date.now() - 30 * 60_000).toISOString();
     dbMockState.allRows = [
       {
         id: "sess-queued-activity",
@@ -373,7 +374,7 @@ describe("sessions/active route activity typing", () => {
         agentType: "build",
         prompt: null,
         startedAt: null,
-        createdAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+        createdAt: queuedAt,
         epicTitle: "Queued",
         storyTitle: null,
       },
@@ -396,7 +397,10 @@ describe("sessions/active route activity typing", () => {
     const json = await response.json();
 
     const queued = json.data.find((a: { id: string }) => a.id === "sess-queued-activity");
-    expect(queued).toMatchObject({ lastActivityAt: null, stale: false });
+    expect(queued).toMatchObject({
+      lastActivityAt: queuedAt,
+      stale: false,
+    });
     expect(mockLastChunkAt).not.toHaveBeenCalledWith("sess-queued-activity");
 
     const registry = json.data.find((a: { id: string }) => a.id === "chat-reg");
@@ -445,6 +449,42 @@ describe("sessions/active route activity typing", () => {
       id: `sess-${agentType}`,
       type: "memory",
       label,
+      mode: "plan",
+    });
+  });
+
+  it("classifies plan-mode grading sessions explicitly", async () => {
+    dbMockState.allRows = [
+      {
+        id: "sess-grading",
+        epicId: "epic-grade",
+        userStoryId: null,
+        status: "running",
+        mode: "plan",
+        orchestrationMode: "solo",
+        provider: "codex",
+        agentType: "grading",
+        prompt: "Evaluate acceptance criteria",
+        startedAt: "2026-02-12T10:12:00.000Z",
+        epicTitle: "Structured outcomes",
+        storyTitle: null,
+      },
+    ];
+
+    const { GET } = await import(
+      "@/app/api/projects/[projectId]/sessions/active/route"
+    );
+    const response = await GET(
+      mockNextRequest(),
+      mockRouteContext({ projectId: "proj-1" })
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.data[0]).toMatchObject({
+      id: "sess-grading",
+      type: "grading",
+      label: "Grading: Structured outcomes",
       mode: "plan",
     });
   });

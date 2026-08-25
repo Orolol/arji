@@ -139,6 +139,7 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "mcp__arij__post_comment",
       "mcp__arij__ask_question",
       "mcp__arij__submit_findings",
+      "mcp__arij__submit_grading",
     ]);
   });
 
@@ -464,6 +465,14 @@ describe("arijToolsSection", () => {
     );
   });
 
+  it("tells grading sessions to submit the structured grading report", () => {
+    const text = arijToolsSection("grading");
+    expect(text).toContain("submit_grading");
+    expect(text).toContain("every acceptance criterion");
+    expect(text).not.toContain("submit_findings");
+    expect(text).not.toContain("You may move the ticket you are building");
+  });
+
   it.each([null, "chat", "merge", "memory_distill"])(
     "keeps the base section for non-review agent type %s",
     (agentType) => {
@@ -563,6 +572,7 @@ describe("buildMcpSpawnConfig", () => {
     // no agent-only tools leak into the chat allowlist
     expect(config.allowedToolNames).not.toContain("mcp__arij__ask_question");
     expect(config.allowedToolNames).not.toContain("mcp__arij__submit_findings");
+    expect(config.allowedToolNames).not.toContain("mcp__arij__submit_grading");
   });
 });
 

@@ -332,6 +332,17 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       updatedAt: "updated_at",
     },
   },
+  gradingReports: {
+    sqlName: "grading_reports",
+    columns: {
+      id: "id",
+      epicId: "epic_id",
+      agentSessionId: "agent_session_id",
+      gradings: "gradings",
+      summary: "summary",
+      createdAt: "created_at",
+    },
+  },
   gitSyncLog: {
     sqlName: "git_sync_log",
     columns: {
@@ -586,6 +597,9 @@ const NOT_NULL: [string, string][] = [
   ["reviewComments", "filePath"],
   ["reviewComments", "lineNumber"],
   ["reviewComments", "body"],
+  ["gradingReports", "epicId"],
+  ["gradingReports", "gradings"],
+  ["gradingReports", "summary"],
   ["ticketActivityLog", "fromStatus"],
   ["ticketActivityLog", "toStatus"],
   ["ticketActivityLog", "actor"],
@@ -641,6 +655,7 @@ const NULLABLE: [string, string][] = [
   ["chatConversations", "namedAgentId"],
   ["notifications", "sessionId"],
   ["notifications", "agentType"],
+  ["gradingReports", "agentSessionId"],
 ];
 
 describe("db schema: nullable columns", () => {
@@ -743,6 +758,18 @@ const INDEXES: Record<string, IndexSpec[]> = {
       columns: ["epic_id", "file_path"],
     },
   ],
+  gradingReports: [
+    {
+      name: "grading_reports_epic_created_at_idx",
+      unique: false,
+      columns: ["epic_id", "created_at"],
+    },
+    {
+      name: "grading_reports_session_idx",
+      unique: false,
+      columns: ["agent_session_id"],
+    },
+  ],
   githubIssues: [
     {
       name: "github_issues_project_issue_unique",
@@ -838,6 +865,10 @@ const FOREIGN_KEYS: Record<string, ForeignKeySpec[]> = {
   ],
   reviewComments: [
     { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "cascade" },
+  ],
+  gradingReports: [
+    { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "cascade" },
+    { columns: ["agent_session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "set null" },
   ],
   notifications: [
     { columns: ["project_id"], foreignTable: "projects", foreignColumns: ["id"], onDelete: "cascade" },

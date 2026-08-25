@@ -77,10 +77,10 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
     table: "review_comments",
     column: "agent_session_id",
   },
-  // 0033_agent_session_review_verdict. This must remain after 0032 with its
-  // own `when`, otherwise databases that already ran main's 0032 skip it.
+  // 0034_agent_session_review_verdict. This must remain after main's 0033
+  // with its own `when`, otherwise databases that already ran 0033 skip it.
   {
-    folderMillis: 1786713000000,
+    folderMillis: 1786713100000,
     table: "agent_sessions",
     column: "review_verdict",
   },

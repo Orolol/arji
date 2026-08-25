@@ -232,5 +232,12 @@ export function arijToolsSection(agentType: string | null): string {
         "when no submit_findings verdict was recorded."
       : "";
 
-  return section("Arij tools", base + buildExtra + reviewExtra);
+  const gradingExtra =
+    agentType === "grading"
+      ? " Grade every acceptance criterion and submit the complete structured " +
+        "report with submit_grading before ending the session; prose is not " +
+        "a substitute for the tool call."
+      : "";
+
+  return section("Arij tools", base + buildExtra + reviewExtra + gradingExtra);
 }
