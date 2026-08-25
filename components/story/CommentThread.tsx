@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MarkdownContent } from "@/components/chat/MarkdownContent";
 import { Send, User, Bot, Loader2, Hammer } from "lucide-react";
 import type { TicketComment } from "@/hooks/useTicketComments";
+import { useFeedAutoScroll } from "@/hooks/useFeedAutoScroll";
 import { formatTime } from "@/lib/utils/format-date";
 
 interface CommentThreadProps {
@@ -34,14 +35,9 @@ export function CommentThread({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to bottom when new comments arrive
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [comments.length]);
+  // Follows the newest comment; see useFeedAutoScroll for the viewport it
+  // actually scrolls and when it declines to follow.
+  const scrollRef = useFeedAutoScroll(comments.length);
 
   async function handleSubmit() {
     if (!input.trim() || sending) return;
@@ -60,14 +56,19 @@ export function CommentThread({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-4 py-2 border-b border-border">
+      <div className="shrink-0 px-4 py-2 border-b border-border">
         <h3 className="text-sm font-medium">
           Comments ({comments.length})
         </h3>
       </div>
 
-      {/* Comments list */}
-      <ScrollArea className="flex-1">
+      {/* Comments list — the only scrolling box of the thread.
+          `min-h-0` is what makes it one: a flex item defaults to
+          `min-height: auto`, so without it the ScrollArea root is floored at
+          its content height, grows past the panel instead of scrolling, and
+          the thread (plus the composer under it) gets clipped by the page's
+          `overflow-hidden` with no scrollbar anywhere. */}
+      <ScrollArea className="min-h-0 flex-1" data-testid="comment-scroll-area">
         <div ref={scrollRef} className="p-4 space-y-4">
           {loading && comments.length === 0 ? (
             <div className="flex items-center justify-center py-8">
@@ -109,8 +110,8 @@ export function CommentThread({
         </div>
       </ScrollArea>
 
-      {/* Input */}
-      <div className="p-4 border-t border-border">
+      {/* Input — pinned outside the scrolling viewport. */}
+      <div className="shrink-0 p-4 border-t border-border" data-testid="comment-composer">
         {error && <p className="text-xs text-destructive mb-2">{error}</p>}
         <div className="flex gap-2">
           <MentionTextarea
