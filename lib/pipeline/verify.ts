@@ -7,6 +7,7 @@ import {
   ticketComments,
 } from "@/lib/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
+import { worktreesRootFor } from "@/lib/projects/workspace";
 import { createId } from "@/lib/utils/nanoid";
 import {
   BUG_REGRESSION_CHECK_SETTING_KEY,
@@ -187,7 +188,10 @@ export function createVerifyGate(identity: VerifyGateIdentity): VerifyGate {
     if (!session?.worktreePath) return notRun();
 
     const project = db
-      .select({ defaultBranch: projects.defaultBranch })
+      .select({
+        defaultBranch: projects.defaultBranch,
+        gitRepoPath: projects.gitRepoPath,
+      })
       .from(projects)
       .where(eq(projects.id, identity.projectId))
       .get();
@@ -198,7 +202,13 @@ export function createVerifyGate(identity: VerifyGateIdentity): VerifyGate {
         repoPath: session.worktreePath,
         headBranch: session.branchName,
         baseBranch: project?.defaultBranch ?? null,
-        patterns: config.patterns,
+        // Compute the red worktree's home from the MAIN repository: the
+        // green cwd is itself `<root>/.arij-worktrees/<branch>`, and a
+        // naive sibling computation would nest `.arij-worktrees` inside
+        // `.arij-worktrees`.
+        worktreeRoot: project?.gitRepoPath
+          ? worktreesRootFor(project.gitRepoPath)
+          : null,
         commandTemplate: config.commandTemplate,
       });
     } catch (error) {

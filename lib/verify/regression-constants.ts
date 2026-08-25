@@ -47,6 +47,25 @@ export const DEFAULT_BUG_REGRESSION_COMMAND = `npx vitest run {files}`;
 /** Directory prefix of the temporary detached worktree the red run uses. */
 export const REGRESSION_WORKTREE_PREFIX = "regression-check-";
 
+/** Ten minutes covers a targeted vitest run comfortably. */
+export const DEFAULT_BUG_REGRESSION_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Output signatures of a red-run failure that is ENVIRONMENTAL rather than
+ * a genuine reproduction: the command could not start, resolve its runner
+ * or its imports, or find the tests at all. A non-zero exit matching one of
+ * these proves nothing about the test and is reported as `command_error`
+ * instead of counting as the required red.
+ */
+export const REGRESSION_STARTUP_FAILURE_PATTERNS: readonly RegExp[] = [
+  /cannot find module/i,
+  /cannot find package/i,
+  /err_module_not_found/i,
+  /module_not_found/i,
+  /no test files found/i,
+  /failed to load config/i,
+];
+
 /** Normalized failure reasons reported when the red → green cycle breaks. */
 export type RegressionFailureReason =
   | "no_test_in_diff"

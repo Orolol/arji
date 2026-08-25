@@ -15,6 +15,7 @@ import {
   fileMatchesAnyPattern,
   globToRegExp,
   buildRegressionCommand,
+  looksLikeStartupFailure,
   type RegressionCommandOutcome,
 } from "@/lib/verify/regression-check";
 import { DEFAULT_TEST_FILE_PATTERNS } from "@/lib/verify/regression-constants";
@@ -25,23 +26,33 @@ import { DEFAULT_TEST_FILE_PATTERNS } from "@/lib/verify/regression-constants";
  *
  * Each scenario builds a throwaway git repo whose committed `tools/probe.js`
  * plays the role of the targeted test runner: it exits 0 only under the
- * conditions named by the scenario. The branch adds a fix marker plus test
- * files; the check's red run copies ONLY the test files onto the merge-base,
- * so the marker is absent there — exactly how a real regression test fails
- * against unfixed source.
+ * conditions named by the scenario.
  */
 
-const PROBE_SCRIPTS: Record<"redgreen" | "always-pass" | "always-fail", string> =
-  {
-    redgreen: [
-      "const fs = require('fs');",
-      "if (!fs.existsSync('src/fix.marker')) process.exit(1);",
-      "process.exit(0);",
-      "",
-    ].join("\n"),
-    "always-pass": ["process.exit(0);", ""].join("\n"),
-    "always-fail": ["process.exit(1);", ""].join("\n"),
-  };
+const PROBE_SCRIPTS: Record<
+  "redgreen" | "always-pass" | "always-fail" | "envfail",
+  string
+> = {
+  redgreen: [
+    "const fs = require('fs');",
+    "if (!fs.existsSync('src/fix.marker')) process.exit(1);",
+    "process.exit(0);",
+    "",
+  ].join("\n"),
+  "always-pass": ["process.exit(0);", ""].join("\n"),
+  "always-fail": ["process.exit(1);", ""].join("\n"),
+  // Fails WITHOUT the fix, but its output mimics an unresolved dependency:
+  // a non-zero exit that proves nothing about the test itself.
+  envfail: [
+    "const fs = require('fs');",
+    "if (!fs.existsSync('src/fix.marker')) {",
+    "  console.error(\"Error: Cannot find module 'left-pad'\");",
+    "  process.exit(1);",
+    "}",
+    "process.exit(0);",
+    "",
+  ].join("\n"),
+};
 
 let root: string;
 
@@ -229,7 +240,7 @@ describe("runRegressionCheck — real repositories", () => {
 
     expect(result.status).toBe("failed");
     expect(result.reason).toBe("test_fails_on_branch");
-    expect(result.detail).toContain("1");
+    expect(result.detail).toContain("exit code 1");
   }, 30_000);
 
   it("fails with command_error when the regression command cannot execute at all", async () => {
@@ -274,11 +285,123 @@ describe("runRegressionCheck — real repositories", () => {
             if (cwd !== repoPath) throw new Error("runner exploded during red run");
             return ok();
           },
-        },
+          },
       })
     ).rejects.toThrow("runner exploded during red run");
 
     expect(calls).toBe(2);
     await assertNoRedWorktreeLeft(repoPath);
   }, 30_000);
+
+  it("reports command_error — not a passed gate — when the red run dies on a missing import", async () => {
+    const { repoPath } = await initRepo("envfail");
+    await commitOnBranch(repoPath, {
+      "src/bug.test.js": "// reproduces the bug\n",
+      "src/fix.marker": "fixed\n",
+    });
+
+    const result = await runRegressionCheck({
+      repoPath,
+      commandTemplate: "node tools/probe.js {files}",
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("command_error");
+    expect(result.detail).toContain("environmental reasons");
+  }, 30_000);
+
+  it("links the epic worktree's node_modules into the red worktree", async () => {
+    const { repoPath } = await initRepo("redgreen");
+    // Present on disk (gitignored in real projects), never committed.
+    mkdirSync(path.join(repoPath, "node_modules"));
+    writeFileSync(path.join(repoPath, "node_modules", ".keep"), "");
+    await commitOnBranch(repoPath, {
+      "src/bug.test.js": "// reproduces the bug\n",
+      "src/fix.marker": "fixed\n",
+    });
+
+    let redWorktreeHadNodeModules: boolean | null = null;
+    const result = await runRegressionCheck({
+      repoPath,
+      commandTemplate: "node tools/probe.js {files}",
+      deps: {
+        runCommand: async (cwd) => {
+          if (cwd !== repoPath) {
+            redWorktreeHadNodeModules = existsSync(path.join(cwd, "node_modules"));
+            return { code: 1 }; // genuine red
+          }
+          return { code: 0 };
+        },
+      },
+    });
+
+    expect(result.status).toBe("passed");
+    expect(redWorktreeHadNodeModules).toBe(true);
+    await assertNoRedWorktreeLeft(repoPath);
+  }, 30_000);
+
+  it("creates the red worktree under worktreeRoot when one is given", async () => {
+    const { repoPath } = await initRepo("redgreen");
+    await commitOnBranch(repoPath, {
+      "src/bug.test.js": "// reproduces the bug\n",
+      "src/fix.marker": "fixed\n",
+    });
+    const customRoot = path.join(root, "custom-worktrees");
+
+    const result = await runRegressionCheck({
+      repoPath,
+      worktreeRoot: customRoot,
+      commandTemplate: "node tools/probe.js {files}",
+    });
+
+    expect(result.status).toBe("passed");
+    // Nothing leaked into the default sibling location, and the custom
+    // root holds no leftover worktree (the root itself may persist).
+    const sibling = path.join(repoPath, "..", ".arij-worktrees");
+    expect(existsSync(sibling)).toBe(false);
+    const leftovers = existsSync(customRoot)
+      ? readdirSync(customRoot).filter((name) =>
+          name.startsWith("regression-check-")
+        )
+      : [];
+    expect(leftovers).toEqual([]);
+  }, 30_000);
+
+  // Deliberate exception to the no-real-timers rule: this exercises exec's
+  // own kill-on-timeout against the platform clock — fake timers cannot
+  // drive a child process. The child sleeps far longer than the timeout,
+  // so wall time stays at ~the 500ms threshold.
+  it("reports command_error when the command exceeds the configured timeout", async () => {
+    const { repoPath } = await initRepo("redgreen");
+    await commitOnBranch(repoPath, {
+      "src/bug.test.js": "// hangs instead of asserting\n",
+      "tools/probe.js": [
+        "setTimeout(() => process.exit(0), 30_000);",
+        "",
+      ].join("\n"),
+    });
+
+    const result = await runRegressionCheck({
+      repoPath,
+      commandTimeoutMs: 500,
+      commandTemplate: "node tools/probe.js {files}",
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("command_error");
+    expect(result.detail).toContain("timed out");
+  }, 30_000);
+});
+
+describe("looksLikeStartupFailure", () => {
+  it("matches module-resolution and runner-startup signatures", () => {
+    expect(looksLikeStartupFailure("Error: Cannot find module 'vitest'")).toBe(true);
+    expect(looksLikeStartupFailure("ERR_MODULE_NOT_FOUND")).toBe(true);
+    expect(looksLikeStartupFailure("No test files found, exiting with code 1")).toBe(true);
+    expect(
+      looksLikeStartupFailure("FAIL src/bug.test.js — expected 1 to be 2")
+    ).toBe(false);
+    expect(looksLikeStartupFailure(undefined)).toBe(false);
+    expect(looksLikeStartupFailure("   ")).toBe(false);
+  });
 });

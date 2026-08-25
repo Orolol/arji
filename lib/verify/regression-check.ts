@@ -5,8 +5,10 @@ import path from "path";
 import { resolveBaseBranch } from "@/lib/git/base-branch";
 import {
   DEFAULT_BUG_REGRESSION_COMMAND,
+  DEFAULT_BUG_REGRESSION_TIMEOUT_MS,
   DEFAULT_TEST_FILE_PATTERNS,
   REGRESSION_COMMAND_FILE_PLACEHOLDER,
+  REGRESSION_STARTUP_FAILURE_PATTERNS,
   REGRESSION_WORKTREE_PREFIX,
   type RegressionFailureReason,
 } from "./regression-constants";
@@ -114,25 +116,29 @@ export interface RegressionCheckDeps {
 }
 
 export interface RunRegressionCheckInput {
-  /**
-   * The epic worktree holding the bug-fix branch checked out — the green
-   * run happens here. The temporary red worktree is created NEXT TO it
-   * (`<parent>/.arij-worktrees/regression-check-*`) via the same repo.
-   */
+/**
+ * The epic worktree holding the bug-fix branch checked out — the green
+ * run happens here.
+ */
   repoPath: string;
+  /**
+   * Where the temporary red worktree is created. Callers pass the managed
+   * root (`worktreesRootFor(project.gitRepoPath)`) so a worktree-backed
+   * `repoPath` does not nest `.arij-worktrees` inside `.arij-worktrees`.
+   * Default: `<repoPath parent>/.arij-worktrees`, i.e. the layout the unit
+   * tests see when handed a plain repository.
+   */
+  worktreeRoot?: string | null;
   /** Branch carrying the fix; defaults to the worktree's current branch. */
   headBranch?: string | null;
   /** Base to diff against; resolved through resolveBaseBranch when null. */
   baseBranch?: string | null;
   patterns?: readonly string[];
   commandTemplate?: string;
+  /** Kill threshold for the green/red commands (default ten minutes). */
+  commandTimeoutMs?: number;
   deps?: Partial<RegressionCheckDeps>;
 }
-
-/* ------------------------------------------------------------------ */
-/* Command construction                                                */
-/* ------------------------------------------------------------------ */
-
 /** Shell-quotes one path for the regression command line. */
 function quotePath(filePath: string): string {
   return `'${filePath.replaceAll("'", "'\\''")}'`;
@@ -147,23 +153,35 @@ export function buildRegressionCommand(
   return template.split(REGRESSION_COMMAND_FILE_PLACEHOLDER).join(list);
 }
 
-function defaultRunCommand(
+
+export function defaultRunCommand(
   cwd: string,
-  command: string
+  command: string,
+  timeoutMs: number = DEFAULT_BUG_REGRESSION_TIMEOUT_MS
 ): Promise<RegressionCommandOutcome> {
   const { promise, resolve } = Promise.withResolvers<RegressionCommandOutcome>();
   exec(
     command,
-    // Ten minutes covers a targeted vitest run comfortably; a hung
-    // command fails the check instead of hanging the pipeline stage.
-    { cwd, timeout: 10 * 60_000, windowsHide: true },
+    {
+      cwd,
+      timeout: timeoutMs,
+      windowsHide: true,
+      // Verbose test reporters and failure dumps exceed the 1 MiB default
+      // routinely; a truncated kill would masquerade as a verdict.
+      maxBuffer: 16 * 1024 * 1024,
+    },
     (error, stdout, stderr) => {
       if (error !== null && typeof error.code !== "number") {
-        // Spawn-level failure (ENOENT, EACCES…): the command never ran.
+        // No numeric exit code: either the process was killed by a signal
+        // (timeout → SIGTERM, error.signal set) or it never started at all
+        // (ENOENT, EACCES). Neither produces a red/green verdict.
+        const timedOut = error.killed === true || typeof error.signal === "string";
         resolve({
           code: 1,
           failedToRun: true,
-          output: `${error.message}`,
+          output: timedOut
+            ? `the regression command timed out after ${Math.round(timeoutMs / 1000)}s`
+            : `${error.message}`,
         });
         return;
       }
@@ -173,6 +191,17 @@ function defaultRunCommand(
     }
   );
   return promise;
+}
+
+/** True when a failed run's output matches an environmental-startup signature. */
+export function looksLikeStartupFailure(
+  output: string | undefined
+): boolean {
+  const trimmed = output?.trim() ?? "";
+  if (!trimmed) return false;
+  return REGRESSION_STARTUP_FAILURE_PATTERNS.some((pattern) =>
+    pattern.test(trimmed)
+  );
 }
 
 function outputTail(output: string | undefined): string | null {
@@ -187,16 +216,22 @@ function outputTail(output: string | undefined): string | null {
 
 /**
  * Resolves the merge-base of base and head in the repo backing `repoPath`,
- * then runs the whole red → green cycle. Never throws for check outcomes —
- * degraded situations are reported as failed results with a reason.
+ * then runs the whole red → green cycle. Check outcomes — including every
+ * degraded case — are reported as failed results, never thrown. True
+ * infrastructure errors (unresolvable refs, vanished files) MAY still
+ * throw; cleanup of the temporary worktree runs either way.
  */
 export async function runRegressionCheck(
   input: RunRegressionCheckInput
 ): Promise<RegressionCheckResult> {
-  const deps: RegressionCheckDeps = {
-    runCommand: defaultRunCommand,
-    ...input.deps,
-  };
+  const runCommand = input.deps?.runCommand
+    ? input.deps.runCommand
+    : (cwd: string, command: string) =>
+        defaultRunCommand(
+          cwd,
+          command,
+          input.commandTimeoutMs ?? DEFAULT_BUG_REGRESSION_TIMEOUT_MS
+        );
   const patterns = input.patterns ?? DEFAULT_TEST_FILE_PATTERNS;
   const template = input.commandTemplate ?? DEFAULT_BUG_REGRESSION_COMMAND;
   const git = simpleGit(input.repoPath);
@@ -234,7 +269,7 @@ export async function runRegressionCheck(
 
   // --- GREEN: same command must pass in the epic worktree ------------
   const greenCommand = buildRegressionCommand(template, testFiles);
-  const green = await deps.runCommand(input.repoPath, greenCommand);
+  const green = await runCommand(input.repoPath, greenCommand);
   if (green.failedToRun) {
     return failed(
       "command_error",
@@ -251,7 +286,8 @@ export async function runRegressionCheck(
   }
 
   // --- RED: copy ONLY the test files onto the merge-base -------------
-  const worktreeBase = path.join(input.repoPath, "..", ".arij-worktrees");
+  const worktreeBase =
+    input.worktreeRoot ?? path.join(input.repoPath, "..", ".arij-worktrees");
   fs.mkdirSync(worktreeBase, { recursive: true });
   const tempPath = path.join(
     worktreeBase,
@@ -269,13 +305,25 @@ export async function runRegressionCheck(
       mergeBase,
     ]);
 
+    // The merge-base checkout has no installed dependencies (gitignored),
+    // so without this link the command fails for environmental reasons and
+    // a spurious red would masquerade as proof of reproduction.
+    const nodeModules = path.join(input.repoPath, "node_modules");
+    if (fs.existsSync(nodeModules)) {
+      try {
+        fs.symlinkSync(nodeModules, path.join(tempPath, "node_modules"), "dir");
+      } catch {
+        // A missing link degrades to the startup-failure check below.
+      }
+    }
+
     for (const relPath of testFiles) {
       const destination = path.join(tempPath, relPath);
       fs.mkdirSync(path.dirname(destination), { recursive: true });
       fs.copyFileSync(path.join(input.repoPath, relPath), destination);
     }
 
-    const red = await deps.runCommand(tempPath, greenCommand);
+    const red = await runCommand(tempPath, greenCommand);
     if (red.failedToRun) {
       return failed(
         "command_error",
@@ -288,6 +336,17 @@ export async function runRegressionCheck(
         "test_passes_on_base",
         testFiles,
         "the test command already passes on the merge-base — the test does not reproduce the bug"
+      );
+    }
+    // A non-zero exit that smells like the runner or an import never came
+    // up is not evidence of reproduction — do not count it as red.
+    if (looksLikeStartupFailure(red.output)) {
+      return failed(
+        "command_error",
+        testFiles,
+        `the red run failed for environmental reasons rather than because of the test: ${
+          outputTail(red.output) ?? "no output"
+        }`
       );
     }
     return { status: "passed", reason: null, testFiles, detail: null };
