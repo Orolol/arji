@@ -11,8 +11,9 @@
  * Toolsets (ARIJ_MCP_TOOLSET): "agent" (default) is the ticket-scoped set for
  * build/review sessions launched on a ticket. "chat" is the board-scoped set
  * for CLI chat conversations — parity with the fast-mode board tools
- * (lib/chat/board-tools.ts): no ask_question/submit_findings (nothing holds a
- * chat turn), ticket_id always explicit (a chat token has no launch ticket).
+ * (lib/chat/board-tools.ts): no ask_question/submit_findings/submit_grading
+ * (nothing holds a chat turn), ticket_id always explicit (a chat token has no
+ * launch ticket).
  * Only the active toolset's tools are listed AND callable.
  *
  * Deliberate constraints:
@@ -191,6 +192,58 @@ const AGENT_TOOLS = [
         },
       },
       required: ["verdict", "summary", "findings"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "submit_grading",
+    description:
+      "(Grading sessions) Submit one evidence-backed met, partial, or missed result for each acceptance criterion. Every storyId must belong to this session's ticket.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        gradings: {
+          type: "array",
+          minItems: 1,
+          maxItems: 100,
+          description: "Acceptance-criterion results for this ticket.",
+          items: {
+            type: "object",
+            properties: {
+              storyId: {
+                type: "string",
+                minLength: 1,
+                description: "User story id returned by get_ticket.",
+              },
+              criterion: {
+                type: "string",
+                minLength: 1,
+                maxLength: 4000,
+                description: "The acceptance criterion being evaluated.",
+              },
+              status: {
+                type: "string",
+                enum: ["met", "partial", "missed"],
+              },
+              evidence: {
+                type: "string",
+                minLength: 1,
+                maxLength: 4000,
+                description: "Concrete evidence for the grading decision.",
+              },
+            },
+            required: ["storyId", "criterion", "status", "evidence"],
+            additionalProperties: false,
+          },
+        },
+        summary: {
+          type: "string",
+          minLength: 1,
+          maxLength: 4000,
+          description: "Overall acceptance-criteria grading summary.",
+        },
+      },
+      required: ["gradings", "summary"],
       additionalProperties: false,
     },
   },

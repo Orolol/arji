@@ -139,6 +139,7 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "mcp__arij__post_comment",
       "mcp__arij__ask_question",
       "mcp__arij__submit_findings",
+      "mcp__arij__submit_grading",
     ]);
   });
 
@@ -542,6 +543,7 @@ describe("buildMcpSpawnConfig", () => {
     // no agent-only tools leak into the chat allowlist
     expect(config.allowedToolNames).not.toContain("mcp__arij__ask_question");
     expect(config.allowedToolNames).not.toContain("mcp__arij__submit_findings");
+    expect(config.allowedToolNames).not.toContain("mcp__arij__submit_grading");
   });
 });
 
