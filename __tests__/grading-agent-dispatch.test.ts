@@ -78,7 +78,7 @@ const {
   ticketActivityLog,
 } = await import("@/lib/db/schema");
 const { processManager } = await import("@/lib/claude/process-manager");
-const { POST } = await import(
+const { GET, POST } = await import(
   "@/app/api/projects/[projectId]/epics/[epicId]/grading/route"
 );
 const { dispatchGradingSession } = await import("@/lib/grading/dispatch");
@@ -140,6 +140,42 @@ describe("manual grading dispatch", () => {
   it("registers grading as a first-class agent type", () => {
     expect(isAgentType("grading")).toBe(true);
     expect(AGENT_TYPE_LABELS.grading).toBe("Acceptance Grading");
+  });
+
+  it("returns the latest report with parsed criterion entries for the UI", async () => {
+    const { projectId, epicId, storyIds } = seedEpic(["- The flow works"]);
+    db.insert(gradingReports)
+      .values({
+        id: `report-ui-${counter}`,
+        epicId,
+        agentSessionId: null,
+        gradings: JSON.stringify([
+          {
+            storyId: storyIds[0],
+            criterion: "The flow works",
+            status: "met",
+            evidence: "A focused test passed.",
+          },
+        ]),
+        summary: "All met.",
+        createdAt: "2026-08-25T12:00:00.000Z",
+      })
+      .run();
+
+    const response = await GET(
+      mockJsonRequest({}),
+      mockRouteContext({ projectId, epicId }),
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.data).toMatchObject({
+      id: `report-ui-${counter}`,
+      summary: "All met.",
+      gradings: [
+        expect.objectContaining({ storyId: storyIds[0], status: "met" }),
+      ],
+    });
   });
 
   it.each([

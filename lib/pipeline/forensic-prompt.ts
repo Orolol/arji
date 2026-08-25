@@ -30,7 +30,7 @@ export const FORENSIC_MAX_WORDS = 400;
 export interface ForensicPromptInput {
   project: PromptProject;
   ticketTitle: string | null;
-  /** Pipeline stage that died ('build' | 'review' | 'fix'). */
+  /** Pipeline stage that died ('build' | 'grading' | 'review' | 'fix'). */
   stage: string;
   /** Attempts burned on that stage before giving up. */
   attempts: number;

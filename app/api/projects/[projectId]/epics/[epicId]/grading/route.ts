@@ -1,11 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
+import { desc, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { gradingReports } from "@/lib/db/schema";
 import {
   dispatchGradingSession,
   GradingDispatchError,
 } from "@/lib/grading/dispatch";
-import { errorResponse } from "@/lib/api/route-helpers";
+import {
+  errorResponse,
+  getEpicOr404,
+  isErrorResponse,
+} from "@/lib/api/route-helpers";
+import { parseGradingEntries } from "@/lib/grading/report";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
+
+/** Latest atomic report used by the detail badges. */
+export async function GET(_request: NextRequest, { params }: Params) {
+  const { projectId, epicId } = await params;
+  const found = getEpicOr404(projectId, epicId);
+  if (isErrorResponse(found)) return found;
+
+  const report = db
+    .select()
+    .from(gradingReports)
+    .where(eq(gradingReports.epicId, epicId))
+    .orderBy(desc(gradingReports.createdAt), desc(gradingReports.id))
+    .limit(1)
+    .get();
+  if (!report) return NextResponse.json({ data: null });
+
+  const gradings = parseGradingEntries(report.gradings);
+  if (!gradings) {
+    return NextResponse.json(
+      { error: "Latest grading report is malformed" },
+      { status: 500 },
+    );
+  }
+  return NextResponse.json({ data: { ...report, gradings } });
+}
 
 /** Manual acceptance-grading dispatch. Grading never changes ticket status. */
 export async function POST(request: NextRequest, { params }: Params) {

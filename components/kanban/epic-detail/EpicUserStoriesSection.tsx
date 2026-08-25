@@ -8,16 +8,24 @@ import { UserStoryQuickActions } from "@/components/epic/UserStoryQuickActions";
 import { Plus, Trash2, Check, Circle, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { GradingStatusBadge } from "@/components/grading/GradingStatusBadge";
+import {
+  findCriterionGrading,
+  parseAcceptanceCriteria,
+  type GradingReportData,
+} from "@/lib/grading/report";
 
 interface UserStory {
   id: string;
   title: string;
   status: string;
+  acceptanceCriteria: string | null;
 }
 
 interface EpicUserStoriesSectionProps {
   projectId: string;
   userStories: UserStory[];
+  gradingReport: GradingReportData | null;
   newStoryTitle: string;
   onNewStoryTitleChange: (value: string) => void;
   onAddStory: () => void;
@@ -49,6 +57,7 @@ const statusIcon = (status: string) => {
 export function EpicUserStoriesSection({
   projectId,
   userStories,
+  gradingReport,
   newStoryTitle,
   onNewStoryTitleChange,
   onAddStory,
@@ -78,53 +87,84 @@ export function EpicUserStoriesSection({
 
       <TooltipProvider>
         <div className="flex flex-col">
-          {userStories.map((us) => (
-            <div
-              key={us.id}
-              className="group flex items-center gap-2 rounded-[7px] px-1 py-[7px] hover:bg-band"
-            >
-              <button
-                type="button"
-                aria-label="Toggle story status"
-                onClick={() => {
-                  const next =
-                    us.status === "done"
-                      ? "todo"
-                      : us.status === "todo"
-                        ? "in_progress"
-                        : "done";
-                  onUpdateStory(us.id, { status: next });
-                }}
+          {userStories.map((us) => {
+            const criteria = parseAcceptanceCriteria(us.acceptanceCriteria);
+            return (
+              <div
+                key={us.id}
+                className="group rounded-[7px] px-1 py-[7px] hover:bg-band"
               >
-                {statusIcon(us.status)}
-              </button>
-              <Link
-                href={`/projects/${projectId}/stories/${us.id}`}
-                className={cn(
-                  "flex-1 text-[13px] hover:underline",
-                  us.status === "done" && "text-muted-foreground line-through",
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    aria-label="Toggle story status"
+                    onClick={() => {
+                      const next =
+                        us.status === "done"
+                          ? "todo"
+                          : us.status === "todo"
+                            ? "in_progress"
+                            : "done";
+                      onUpdateStory(us.id, { status: next });
+                    }}
+                  >
+                    {statusIcon(us.status)}
+                  </button>
+                  <Link
+                    href={`/projects/${projectId}/stories/${us.id}`}
+                    className={cn(
+                      "flex-1 text-[13px] hover:underline",
+                      us.status === "done" &&
+                        "text-muted-foreground line-through",
+                    )}
+                  >
+                    {us.title}
+                  </Link>
+                  <UserStoryQuickActions
+                    projectId={projectId}
+                    story={us}
+                    onRefresh={onRefresh}
+                    isLocked={actionsLocked}
+                    lockReason="Another agent is already running for this epic."
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                    onClick={() => onDeleteStory(us.id)}
+                    aria-label="Delete story"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+
+                {criteria.length > 0 && (
+                  <ul className="ml-[22px] mt-2 flex flex-col gap-1.5">
+                    {criteria.map((criterion, index) => {
+                      const grading = findCriterionGrading(
+                        gradingReport?.gradings,
+                        us.id,
+                        criterion,
+                      );
+                      return (
+                        <li
+                          key={`${us.id}-criterion-${index}`}
+                          className="flex items-start justify-between gap-3 text-[12px] leading-[1.45] text-muted-foreground"
+                        >
+                          <span className="min-w-0 flex-1">{criterion}</span>
+                          <GradingStatusBadge
+                            status={grading?.status ?? null}
+                            evidence={grading?.evidence}
+                            testId={`criterion-grading-${us.id}-${index}`}
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
                 )}
-              >
-                {us.title}
-              </Link>
-              <UserStoryQuickActions
-                projectId={projectId}
-                story={us}
-                onRefresh={onRefresh}
-                isLocked={actionsLocked}
-                lockReason="Another agent is already running for this epic."
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                onClick={() => onDeleteStory(us.id)}
-                aria-label="Delete story"
-              >
-                <Trash2 className="h-3 w-3" />
-              </Button>
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       </TooltipProvider>
 

@@ -98,6 +98,8 @@ export class GradingDispatchError extends Error {
 export interface DispatchGradingInput {
   projectId: string;
   epicId: string;
+  /** Pipeline story runs grade only their own rubric; manual runs grade the epic. */
+  userStoryId?: string | null;
   namedAgentId?: string | null;
   batchRunId?: string | null;
 }
@@ -170,25 +172,43 @@ export async function dispatchGradingSession(
   input: DispatchGradingInput,
 ): Promise<DispatchGradingResult> {
   const { project, epic, stories } = loadScope(input);
-  const skipReason = gradingSkipReason(stories);
+  const scopedStories = input.userStoryId
+    ? stories.filter((story) => story.id === input.userStoryId)
+    : stories;
+  if (input.userStoryId && scopedStories.length === 0) {
+    throw new GradingDispatchError(
+      "Story not found in this epic",
+      404,
+      "STORY_NOT_FOUND",
+    );
+  }
+  const skipReason = gradingSkipReason(scopedStories);
   if (skipReason) {
     journalSkip(input.projectId, epic, skipReason);
     return { skipped: true, reason: skipReason };
   }
 
-  if (epic.status !== "review" && epic.status !== "done") {
+  const gradingTarget = input.userStoryId ? scopedStories[0] : epic;
+  if (gradingTarget.status !== "review" && gradingTarget.status !== "done") {
     throw new GradingDispatchError(
-      "Epic must be in review or done status for acceptance grading",
+      `${input.userStoryId ? "Story" : "Epic"} must be in review or done status for acceptance grading`,
       400,
-      "INVALID_EPIC_STATUS",
+      input.userStoryId ? "INVALID_STORY_STATUS" : "INVALID_EPIC_STATUS",
     );
   }
 
-  const target = {
-    scope: "epic" as const,
-    projectId: input.projectId,
-    epicId: input.epicId,
-  };
+  const target = input.userStoryId
+    ? {
+        scope: "story" as const,
+        projectId: input.projectId,
+        storyId: input.userStoryId,
+        epicId: input.epicId,
+      }
+    : {
+        scope: "epic" as const,
+        projectId: input.projectId,
+        epicId: input.epicId,
+      };
   const conflict = getRunningSessionForTarget(target);
   if (conflict) {
     const payload = createAgentAlreadyRunningPayload(
@@ -214,7 +234,7 @@ export async function dispatchGradingSession(
     );
   }
 
-  const rubric = gradableStories(stories);
+  const rubric = gradableStories(scopedStories);
   const systemPrompt = await resolveAgentPrompt(GRADING_AGENT_TYPE, input.projectId);
   const prompt = buildGradingPrompt(project, [], epic, rubric, systemPrompt);
   const resolvedAgent = await resolveAgentForDispatch(
@@ -225,6 +245,7 @@ export async function dispatchGradingSession(
       purpose: "grading",
       projectId: input.projectId,
       epicId: input.epicId,
+      ...(input.userStoryId ? { storyId: input.userStoryId } : {}),
     },
   );
 
@@ -248,6 +269,7 @@ export async function dispatchGradingSession(
     id: sessionId,
     projectId: input.projectId,
     epicId: input.epicId,
+    userStoryId: input.userStoryId ?? null,
     mode: "plan",
     provider: resolvedAgent.provider,
     prompt,

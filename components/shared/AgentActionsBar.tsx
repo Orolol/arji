@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Loader2,
   Workflow,
+  ClipboardCheck,
 } from "lucide-react";
 import { AgentDispatchDialog } from "@/components/shared/AgentDispatchDialog";
 import { ReviewTypesPicker } from "@/components/shared/ReviewTypesPicker";
@@ -96,6 +97,7 @@ interface AgentActionsBarProps {
     pipeline?: boolean
   ) => Promise<unknown>;
   onSendToReview: (types: string[], namedAgentId?: string | null, resumeSessionId?: string) => Promise<unknown>;
+  onSendToGrading?: (namedAgentId?: string | null) => Promise<unknown>;
   onApprove: () => Promise<unknown>;
   onActionError?: (error: unknown) => void;
 }
@@ -108,14 +110,17 @@ export function AgentActionsBar({
   activeSessionId,
   onSendToDev,
   onSendToReview,
+  onSendToGrading,
   onApprove,
   onActionError,
 }: AgentActionsBarProps) {
   const [sendToDevOpen, setSendToDevOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [gradingOpen, setGradingOpen] = useState(false);
   const [devComment, setDevComment] = useState("");
   const [devAgentId, setDevAgentId] = useState<string | null>(null);
   const [reviewAgentId, setReviewAgentId] = useState<string | null>(null);
+  const [gradingAgentId, setGradingAgentId] = useState<string | null>(null);
   const [reviewTypes, setReviewTypes] = useState<Set<string>>(new Set(["feature_review"]));
   const [approving, setApproving] = useState(false);
   const [resumeSessionId, setResumeSessionId] = useState<string | undefined>();
@@ -222,6 +227,7 @@ export function AgentActionsBar({
   const canSendToDev = config.sendToDevStatuses.includes(status);
   const canSendToDevFromReview = status === "review";
   const canReview = status === "review" || status === "done";
+  const canGrade = target.kind === "epic" && canReview && !!onSendToGrading;
   const canApprove = status === "review";
   const actionsLocked = dispatching || isRunning;
   const lockMessage =
@@ -286,6 +292,16 @@ export function AgentActionsBar({
       setReviewOpen(false);
       setReviewTypes(new Set());
       setReviewResumeSessionId(undefined);
+    } catch (error) {
+      onActionError?.(error);
+    }
+  }
+
+  async function handleGrading() {
+    if (!onSendToGrading) return;
+    try {
+      await onSendToGrading(gradingAgentId);
+      setGradingOpen(false);
     } catch (error) {
       onActionError?.(error);
     }
@@ -359,6 +375,19 @@ export function AgentActionsBar({
         >
           <Search className="h-3 w-3 mr-1" />
           Agent Review
+        </Button>
+      )}
+
+      {canGrade && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setGradingOpen(true)}
+          disabled={actionsLocked}
+          className="h-7 text-xs"
+        >
+          <ClipboardCheck className="h-3 w-3 mr-1" />
+          Grade Criteria
         </Button>
       )}
 
@@ -485,6 +514,25 @@ export function AgentActionsBar({
         confirmDisabled={actionsLocked || reviewTypes.size === 0}
         onConfirm={handleReview}
         onCancel={() => setReviewOpen(false)}
+      />
+
+      <AgentDispatchDialog
+        open={gradingOpen}
+        onOpenChange={setGradingOpen}
+        title="Acceptance Criteria Grading"
+        description="Evaluate each story criterion against concrete evidence. Grading does not approve or move the ticket."
+        projectId={projectId}
+        agentProps={{
+          value: gradingAgentId,
+          onChange: setGradingAgentId,
+          dispatchRole: "review",
+        }}
+        confirmLabel="Run Grading"
+        confirmIcon={<ClipboardCheck className="h-4 w-4 mr-1" />}
+        busy={dispatching}
+        confirmDisabled={actionsLocked}
+        onConfirm={handleGrading}
+        onCancel={() => setGradingOpen(false)}
       />
     </div>
     </TooltipProvider>
