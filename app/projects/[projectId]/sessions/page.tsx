@@ -8,6 +8,7 @@ import {
   Circle,
   CircleCheck,
   Clock,
+  ListFilter,
   LoaderCircle,
   MessageSquare,
   Moon,
@@ -55,6 +56,7 @@ interface AgentSession {
   /** Batch run tag — `night_*` for epics dispatched by a night run. */
   batchRunId?: string | null;
   createdAt: string;
+  lastActivityAt: string | null;
 }
 
 interface ChatSession {
@@ -70,6 +72,7 @@ interface ChatSession {
   messageCount: number;
   lastMessagePreview: string | null;
   createdAt: string;
+  lastActivityAt: string | null;
 }
 
 type UnifiedSession = AgentSession | ChatSession;
@@ -109,6 +112,7 @@ const STATUS_CONFIG: Record<
 /** State chips (single-select) and provider chips (toggle) of the filter bar. */
 type StateFilter = "all" | "running" | "failed" | "night";
 type ProviderFilter = "claude-code" | "codex" | null;
+type SortOption = "created" | "last_activity";
 
 const TABLE_GRID = "grid-cols-[1.6fr_1fr_0.9fr_0.6fr_0.6fr]";
 
@@ -138,6 +142,7 @@ export default function SessionsPage() {
   const [stateFilter, setStateFilter] = useState<StateFilter>("all");
   const [providerFilter, setProviderFilter] = useState<ProviderFilter>(null);
   const [ticketQuery, setTicketQuery] = useState("");
+  const [sortBy, setSortBy] = useState<SortOption>("created");
   const [summaryRunId, setSummaryRunId] = useState<string | null>(null);
 
   /**
@@ -212,7 +217,7 @@ export default function SessionsPage() {
 
   const visible = useMemo(() => {
     const query = ticketQuery.trim().toLowerCase();
-    return items.filter((item) => {
+    const filtered = items.filter((item) => {
       if (item.kind === "agent_session") {
         if (stateFilter === "running" && item.status !== "running") return false;
         if (stateFilter === "failed" && item.status !== "failed") return false;
@@ -243,7 +248,18 @@ export default function SessionsPage() {
       }
       return true;
     });
-  }, [items, stateFilter, providerFilter, ticketQuery]);
+
+    // The API's existing creation-time order remains the default. Selecting
+    // Last activity explicitly reorders the already-filtered unified list.
+    if (sortBy === "created") return filtered;
+
+    return filtered.sort((a, b) => {
+      const activityA = Date.parse(a.lastActivityAt ?? a.createdAt);
+      const activityB = Date.parse(b.lastActivityAt ?? b.createdAt);
+      if (activityA !== activityB) return activityB - activityA;
+      return a.id.localeCompare(b.id);
+    });
+  }, [items, stateFilter, providerFilter, ticketQuery, sortBy]);
 
   if (loading) {
     return <div className="p-6 text-muted-foreground">Loading sessions...</div>;
@@ -352,6 +368,23 @@ export default function SessionsPage() {
         </FilterChip>
 
         <label className="ml-auto flex items-center gap-[7px] text-[12.5px] text-muted-foreground">
+          <ListFilter className="h-[13px] w-[13px] shrink-0" />
+          <span className="sr-only">Sort sessions</span>
+          <select
+            aria-label="Sort sessions"
+            data-testid="sessions-sort"
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value as SortOption)}
+            className="bg-transparent text-[12.5px] text-foreground focus:outline-none"
+          >
+            <option value="created">Created</option>
+            <option value="last_activity">Last activity</option>
+          </select>
+        </label>
+
+        <span className="mx-[5px] h-4 w-px bg-border" />
+
+        <label className="flex items-center gap-[7px] text-[12.5px] text-muted-foreground">
           <Search className="h-[13px] w-[13px] shrink-0" />
           <span className="sr-only">Filter by ticket</span>
           <input

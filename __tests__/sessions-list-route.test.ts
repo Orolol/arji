@@ -6,8 +6,8 @@ import {
   mockRouteContext,
 } from "@/__tests__/helpers/db-mock";
 
-// The route runs two sequential queries (agent sessions, then chat
-// conversations); the shared chain mock serves them from allQueue in order.
+// The route runs three sequential queries (agent sessions, latest chunks,
+// then chat conversations); the shared chain mock serves them from allQueue in order.
 // Real drizzle-orm + real @/lib/db/schema, so no fake column maps.
 vi.mock("@/lib/db", async () => {
   const { dbModuleMock } = await import("@/__tests__/helpers/db-mock");
@@ -23,6 +23,10 @@ function setupSessionsChain(data: unknown[]) {
 }
 
 function setupConversationsChain(data: unknown[]) {
+  dbMockState.allQueue[2] = data;
+}
+
+function setupLatestChunksChain(data: unknown[] = []) {
   dbMockState.allQueue[1] = data;
 }
 
@@ -41,6 +45,7 @@ describe("sessions list route (unified)", () => {
         createdAt: "2026-02-12T00:00:00.000Z",
       },
     ]);
+    setupLatestChunksChain();
     setupConversationsChain([]);
 
     const { GET } = await import("@/app/api/projects/[projectId]/sessions/route");
@@ -55,6 +60,7 @@ describe("sessions list route (unified)", () => {
 
   it("returns chat conversations with kind='chat_session'", async () => {
     setupSessionsChain([]);
+    setupLatestChunksChain();
     setupConversationsChain([
       {
         id: "conv-1",
@@ -65,6 +71,7 @@ describe("sessions list route (unified)", () => {
         namedAgentName: null,
         messageCount: 5,
         lastMessagePreview: "Hello world",
+        lastMessageAt: "2026-02-12T02:00:00.000Z",
         createdAt: "2026-02-12T01:00:00.000Z",
       },
     ]);
@@ -78,6 +85,8 @@ describe("sessions list route (unified)", () => {
     expect(json.data[0].label).toBe("My Chat");
     expect(json.data[0].messageCount).toBe(5);
     expect(json.data[0].lastMessagePreview).toBe("Hello world");
+    expect(json.data[0].lastActivityAt).toBe("2026-02-12T02:00:00.000Z");
+    expect(json.data[0]).not.toHaveProperty("lastMessageAt");
   });
 
   it("merges and sorts both types by createdAt descending", async () => {
@@ -93,6 +102,7 @@ describe("sessions list route (unified)", () => {
         createdAt: "2026-02-12T03:00:00.000Z",
       },
     ]);
+    setupLatestChunksChain();
     setupConversationsChain([
       {
         id: "conv-1",
@@ -133,6 +143,7 @@ describe("sessions list route (unified)", () => {
         createdAt: "2026-02-12T00:00:00.000Z",
       },
     ]);
+    setupLatestChunksChain();
     setupConversationsChain([]);
 
     const { GET } = await import("@/app/api/projects/[projectId]/sessions/route");
@@ -145,5 +156,51 @@ describe("sessions list route (unified)", () => {
     expect(session.agentType).toBe("build");
     expect(session.branchName).toBe("feat/test");
     expect(session.model).toBe("opus-4");
+  });
+
+  it("derives agent last activity from output and lifecycle timestamps", async () => {
+    setupSessionsChain([
+      {
+        id: "sess-output",
+        status: "running",
+        createdAt: "2026-02-12 00:00:00",
+        startedAt: "2026-02-12T01:00:00.000Z",
+        endedAt: null,
+        completedAt: null,
+      },
+      {
+        id: "sess-terminal",
+        status: "completed",
+        createdAt: "2026-02-12T00:00:00.000Z",
+        startedAt: "2026-02-12T01:00:00.000Z",
+        endedAt: "2026-02-12T04:00:00.000Z",
+        completedAt: "2026-02-12T04:00:00.000Z",
+      },
+    ]);
+    setupLatestChunksChain([
+      {
+        sessionId: "sess-output",
+        lastChunkAt: "2026-02-12T05:00:00.000Z",
+      },
+      {
+        sessionId: "sess-terminal",
+        lastChunkAt: "2026-02-12T03:00:00.000Z",
+      },
+    ]);
+    setupConversationsChain([]);
+
+    const { GET } = await import("@/app/api/projects/[projectId]/sessions/route");
+    const response = await GET(
+      mockNextRequest(),
+      mockRouteContext({ projectId: "proj-1" })
+    );
+
+    const json = await response.json();
+    expect(
+      json.data.find((item: { id: string }) => item.id === "sess-output")
+    ).toMatchObject({ lastActivityAt: "2026-02-12T05:00:00.000Z" });
+    expect(
+      json.data.find((item: { id: string }) => item.id === "sess-terminal")
+    ).toMatchObject({ lastActivityAt: "2026-02-12T04:00:00.000Z" });
   });
 });

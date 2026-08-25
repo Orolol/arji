@@ -25,6 +25,10 @@ vi.mock("@/components/night/NightRunSummaryDialog", () => ({
 }));
 
 function agentSession(overrides: Record<string, unknown>) {
+  const createdAt =
+    typeof overrides.createdAt === "string"
+      ? overrides.createdAt
+      : new Date().toISOString();
   return {
     kind: "agent_session",
     id: "sess-x",
@@ -32,7 +36,28 @@ function agentSession(overrides: Record<string, unknown>) {
     mode: "code",
     provider: "claude-code",
     // "today" so the band's Today/Success-rate cells see it
-    createdAt: new Date().toISOString(),
+    createdAt,
+    lastActivityAt: createdAt,
+    ...overrides,
+  };
+}
+
+function chatSession(overrides: Record<string, unknown>) {
+  const createdAt =
+    typeof overrides.createdAt === "string"
+      ? overrides.createdAt
+      : new Date().toISOString();
+  return {
+    kind: "chat_session",
+    id: "conv-x",
+    type: "brainstorm",
+    label: "Chat",
+    status: "active",
+    provider: "claude-code",
+    messageCount: 1,
+    lastMessagePreview: "Hello",
+    createdAt,
+    lastActivityAt: createdAt,
     ...overrides,
   };
 }
@@ -296,6 +321,58 @@ describe("SessionsPage — filters", () => {
     expect(
       screen.queryByTestId("session-row-sess-night")
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("SessionsPage — sorting", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    mockSessions([
+      chatSession({
+        id: "conv-created-newest",
+        createdAt: "2026-02-05T00:00:00.000Z",
+        lastActivityAt: "2026-02-06T00:00:00.000Z",
+      }),
+      agentSession({
+        id: "sess-created-middle",
+        createdAt: "2026-02-04T00:00:00.000Z",
+        lastActivityAt: "2026-02-09T00:00:00.000Z",
+      }),
+      agentSession({
+        id: "sess-created-oldest",
+        createdAt: "2026-02-01T00:00:00.000Z",
+        lastActivityAt: "2026-02-10T00:00:00.000Z",
+      }),
+    ]);
+  });
+
+  function visibleSessionIds(): string[] {
+    return screen
+      .getAllByTestId(/^session-row-/)
+      .map((row) => row.getAttribute("data-testid")!.replace("session-row-", ""));
+  }
+
+  it("offers Last activity and sorts the most recently active sessions first", async () => {
+    await renderPage();
+
+    const sort = screen.getByLabelText("Sort sessions");
+    expect(sort).toHaveValue("created");
+    expect(
+      screen.getByRole("option", { name: "Last activity" })
+    ).toBeInTheDocument();
+    expect(visibleSessionIds()).toEqual([
+      "conv-created-newest",
+      "sess-created-middle",
+      "sess-created-oldest",
+    ]);
+
+    fireEvent.change(sort, { target: { value: "last_activity" } });
+
+    expect(visibleSessionIds()).toEqual([
+      "sess-created-oldest",
+      "sess-created-middle",
+      "conv-created-newest",
+    ]);
   });
 });
 
