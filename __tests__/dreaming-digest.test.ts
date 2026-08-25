@@ -13,6 +13,7 @@ import {
   allocateFairBudgets,
   assembleDreamDigest,
   extractReviewVerdict,
+  parseTimestampMs,
   renderSessionDigest,
   resolveDreamWindow,
   tailText,
@@ -85,6 +86,42 @@ describe("resolveDreamWindow", () => {
       windowDays: 3,
     });
     expect(Date.parse(window.sinceIso)).toBe(NOW.getTime() - 3 * DAY_MS);
+  });
+});
+
+/**
+ * Two timestamp shapes coexist in these columns: ISO strings the app writes,
+ * and SQLite CURRENT_TIMESTAMP defaults. `Date.parse` reads the second as
+ * LOCAL time while SQLite emits UTC, so a default-stamped row would drift by
+ * the host's offset and could land on the wrong side of a dream's cutoff.
+ */
+describe("parseTimestampMs", () => {
+  it("reads a SQLite CURRENT_TIMESTAMP string as UTC", () => {
+    expect(parseTimestampMs("2026-08-25 12:00:00")).toBe(
+      Date.parse("2026-08-25T12:00:00.000Z")
+    );
+    expect(parseTimestampMs("2026-08-25 12:00:00.500")).toBe(
+      Date.parse("2026-08-25T12:00:00.500Z")
+    );
+  });
+
+  it("agrees with the ISO form for the same instant", () => {
+    expect(parseTimestampMs("2026-08-25 12:00:00")).toBe(
+      parseTimestampMs("2026-08-25T12:00:00.000Z")
+    );
+  });
+
+  it("leaves explicit offsets alone", () => {
+    expect(parseTimestampMs("2026-08-25T14:00:00+02:00")).toBe(
+      Date.parse("2026-08-25T12:00:00.000Z")
+    );
+  });
+
+  it("is null for anything undateable", () => {
+    expect(parseTimestampMs(null)).toBeNull();
+    expect(parseTimestampMs(undefined)).toBeNull();
+    expect(parseTimestampMs("")).toBeNull();
+    expect(parseTimestampMs("not-a-date")).toBeNull();
   });
 });
 

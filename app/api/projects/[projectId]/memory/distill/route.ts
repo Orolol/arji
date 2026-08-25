@@ -65,10 +65,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
   }
 
+  // The guard covers BOTH memory writers, so the message must too: saying
+  // "a distillation is in progress" when a dream holds the document sends the
+  // user looking for a session that does not exist.
   if (hasPendingMemoryDistill(projectId)) {
     return NextResponse.json(
       {
-        error: "A memory distillation is already in progress for this project.",
+        error: "A memory rewrite is already in progress for this project.",
         code: "MEMORY_DISTILL_PENDING",
       },
       { status: 409 }

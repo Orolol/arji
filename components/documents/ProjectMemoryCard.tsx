@@ -22,6 +22,9 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
   const [content, setContent] = useState("");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Distinct from `!loading`: a finished load that FAILED must not present an
+  // editable, saveable textarea over content nobody ever read.
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dreaming, setDreaming] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -31,6 +34,8 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoaded(false);
+    setError(null);
     fetch(`/api/projects/${projectId}/memory`)
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
@@ -47,6 +52,7 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
         setContent(data.data?.content ?? "");
         setUpdatedAt(data.data?.updatedAt ?? null);
         setDirty(false);
+        setLoaded(true);
       })
       .catch((err: Error) => {
         if (!cancelled) {
@@ -146,6 +152,14 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
       </p>
       {loading ? (
         <p className="text-[13px] text-muted-foreground">Loading...</p>
+      ) : !loaded ? (
+        // Load failed: show the error and nothing editable. An empty textarea
+        // here would read as "this project has no memory", and one Save would
+        // replace a memory that simply never arrived.
+        <p className="text-[13px] text-destructive">
+          {error ?? "Failed to load project memory."} Reload the page to try
+          again.
+        </p>
       ) : (
         <>
           <Textarea
@@ -192,7 +206,7 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
           </div>
         </>
       )}
-      {dirty && !loading && (
+      {dirty && loaded && (
         <p className="text-[12px] text-muted-foreground">
           Dreaming reads the saved memory and replaces it wholesale — save or
           discard your edits first, or they will be lost.

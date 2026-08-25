@@ -23,9 +23,26 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Parses a stored timestamp to epoch ms, treating SQLite's own format as UTC.
+ *
+ * Two shapes coexist in these columns: explicit ISO strings written by the app
+ * ("2026-08-25T12:00:00.000Z") and SQLite CURRENT_TIMESTAMP defaults
+ * ("2026-08-25 12:00:00"). `Date.parse` reads the second as LOCAL time, while
+ * SQLite emits it in UTC — so a default-stamped row would drift by the host's
+ * offset and could land on the wrong side of a dream's cutoff. Normalizing the
+ * SQLite form to explicit UTC before parsing keeps both shapes on one clock.
+ */
+const SQLITE_TIMESTAMP_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}(?:\.\d+)?)$/;
+
 export function parseTimestampMs(value: string | null | undefined): number | null {
   if (!value) return null;
-  const parsed = Date.parse(value);
+  const trimmed = value.trim();
+  const sqliteMatch = trimmed.match(SQLITE_TIMESTAMP_RE);
+  const normalized = sqliteMatch
+    ? `${sqliteMatch[1]}T${sqliteMatch[2]}Z`
+    : trimmed;
+  const parsed = Date.parse(normalized);
   return Number.isNaN(parsed) ? null : parsed;
 }
 

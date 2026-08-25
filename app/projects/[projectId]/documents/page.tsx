@@ -191,6 +191,12 @@ export default function DocumentsPage() {
           )}
         </div>
 
+        {/* Below `lg` the aside is hidden, so the memory card — and with it the
+            only manual Dream button — renders in the main column instead. */}
+        <div className="lg:hidden">
+          <ProjectMemoryCard projectId={projectId} />
+        </div>
+
         <aside className="hidden w-[340px] flex-none flex-col gap-[16px] lg:flex">
           <ProjectMemoryCard projectId={projectId} />
           <div className="flex flex-col gap-[10px] rounded-[12px] border border-border p-[16px]">
