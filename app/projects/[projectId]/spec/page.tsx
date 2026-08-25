@@ -36,7 +36,11 @@ interface SessionDetailResponse {
   error?: string;
 }
 
-export default function SpecPage() {
+export default function SpecPage({
+  pollIntervalMs = 2000,
+}: {
+  pollIntervalMs?: number;
+} = {}) {
   const params = useParams();
   const projectId = params.projectId as string;
   const [spec, setSpec] = useState("");
@@ -122,6 +126,7 @@ export default function SpecPage() {
     }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let consecutiveErrors = 0;
     // Self-rescheduling: a queued/running answer arms the next tick, so the
     // poll keeps going until the session reaches a terminal state.
     const poll = async () => {
@@ -129,18 +134,32 @@ export default function SpecPage() {
         const res = await fetch(
           `/api/projects/${projectId}/sessions/${updateSessionId}`,
         );
+        if (res.status === 404) {
+          // Terminal failure: session does not exist (e.g. deleted or cancelled).
+          // Halt polling so the editor and Save button are unlocked.
+          setUpdateStatus("failed");
+          setUpdateError("Session not found");
+          return;
+        }
         if (!res.ok) {
-          // Non-200 HTTP response (e.g. dev server recompile, temporary network glitch)
-          // must NOT falsely report failure while the agent run continues.
+          consecutiveErrors++;
+          if (consecutiveErrors >= 10) {
+            setUpdateStatus("failed");
+            setUpdateError(
+              "Unable to reach server to monitor session progress.",
+            );
+            return;
+          }
           if (!cancelled) {
-            timer = setTimeout(poll, 2000);
+            timer = setTimeout(poll, pollIntervalMs);
           }
           return;
         }
+        consecutiveErrors = 0;
         const json = await res.json().catch(() => null);
         if (cancelled || !json?.data) {
           if (!cancelled) {
-            timer = setTimeout(poll, 2000);
+            timer = setTimeout(poll, pollIntervalMs);
           }
           return;
         }
@@ -153,7 +172,7 @@ export default function SpecPage() {
         );
         const status = data.status;
         if (status === "queued" || status === "running") {
-          timer = setTimeout(poll, 2000);
+          timer = setTimeout(poll, pollIntervalMs);
           return;
         }
         setUpdateResponse(data.logs?.result ?? data.lastNonEmptyText ?? null);
@@ -165,18 +184,28 @@ export default function SpecPage() {
           setUpdateStatus("failed");
         }
       } catch {
+        consecutiveErrors++;
+        if (consecutiveErrors >= 10) {
+          if (!cancelled) {
+            setUpdateStatus("failed");
+            setUpdateError(
+              "Unable to reach server to monitor session progress.",
+            );
+          }
+          return;
+        }
         // Network exception during fetch — keep polling on next tick.
         if (!cancelled) {
-          timer = setTimeout(poll, 2000);
+          timer = setTimeout(poll, pollIntervalMs);
         }
       }
     };
-    timer = setTimeout(poll, 2000);
+    timer = setTimeout(poll, pollIntervalMs);
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [updateSessionId, updateStatus, projectId, refreshSpec]);
+  }, [updateSessionId, updateStatus, projectId, refreshSpec, pollIntervalMs]);
 
   function handleUpdateStarted(data: { sessionId: string }) {
     setUpdateSessionId(data.sessionId);
@@ -194,6 +223,11 @@ export default function SpecPage() {
     setUpdateError(null);
   }
 
+  async function handleBeforeUpdateStart() {
+    if (spec !== savedSpec) {
+      await handleSave();
+    }
+  }
   const sections = useMemo(() => outline(spec), [spec]);
 
   return (
@@ -311,6 +345,7 @@ export default function SpecPage() {
         open={updateDialogOpen}
         onOpenChange={setUpdateDialogOpen}
         onStarted={handleUpdateStarted}
+        onBeforeStart={handleBeforeUpdateStart}
       />
     </Tabs>
   );

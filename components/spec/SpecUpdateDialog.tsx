@@ -10,9 +10,9 @@ interface SpecUpdateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onStarted: (data: { sessionId: string }) => void;
+  onBeforeStart?: () => Promise<void>;
   onError?: (message: string) => void;
 }
-
 /**
  * "Mettre à jour la spec" dialog: pick an agent (the same global
  * NamedAgentSelect used across the app — empty selection resolves to the
@@ -25,6 +25,7 @@ export function SpecUpdateDialog({
   open,
   onOpenChange,
   onStarted,
+  onBeforeStart,
   onError,
 }: SpecUpdateDialogProps) {
   const [namedAgentId, setNamedAgentId] = useState<string | null>(null);
@@ -48,6 +49,7 @@ export function SpecUpdateDialog({
     setStarting(true);
     setError(null);
     try {
+      await onBeforeStart?.();
       const res = await fetch(`/api/projects/${projectId}/spec/update`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

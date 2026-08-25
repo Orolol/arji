@@ -11,7 +11,7 @@
 
 import fs from "fs";
 import path from "path";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentSessions, epics, namedAgents, projects, releases, userStories } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
@@ -161,6 +161,7 @@ export async function dispatchSpecUpdateSession(
         .select({ id: epics.id, title: epics.title, status: epics.status })
         .from(epics)
         .where(eq(epics.projectId, input.projectId))
+        .orderBy(asc(epics.position))
         .all(),
       db
         .select({
@@ -171,6 +172,7 @@ export async function dispatchSpecUpdateSession(
         .from(userStories)
         .innerJoin(epics, eq(userStories.epicId, epics.id))
         .where(eq(epics.projectId, input.projectId))
+        .orderBy(asc(userStories.position))
         .all(),
       db
         .select({
@@ -180,6 +182,7 @@ export async function dispatchSpecUpdateSession(
         })
         .from(releases)
         .where(eq(releases.projectId, input.projectId))
+        .orderBy(desc(releases.createdAt))
         .all()
     )
   );

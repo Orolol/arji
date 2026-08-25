@@ -29,7 +29,7 @@ const specUpdateSchema = z.object({
  * for the project, and if so, its session id and status. Used for page reload
  * recovery.
  */
-export async function GET(request: NextRequest, { params }: Params) {
+export async function GET(_request: NextRequest, { params }: Params) {
   const { projectId } = await params;
 
   const found = getProjectOr404(projectId);

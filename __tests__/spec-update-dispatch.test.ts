@@ -216,7 +216,7 @@ describe("dispatchSpecUpdateSession", () => {
     });
     await flushBackground();
     const sessions = specUpdateSessions(projectId);
-    expect(sessions[0].prompt).toContain("focus on architecture");
+    expect(sessions[0].prompt ?? "").toContain("focus on architecture");
   });
 
   it("reports a pending spec update while a session is queued", () => {
@@ -350,7 +350,7 @@ describe("dispatchSpecUpdateSession", () => {
     });
     await flushBackground();
 
-    const prompt = specUpdateSessions(projectId)[0].prompt;
+    const prompt = specUpdateSessions(projectId)[0].prompt ?? "";
     expect(prompt).toContain("## Current Project State");
     expect(prompt).toContain("**Auth Epic** — in_progress");
     expect(prompt).toContain("- Login form — done");
@@ -358,6 +358,60 @@ describe("dispatchSpecUpdateSession", () => {
     expect(prompt).toContain("- login works");
   });
 
+  it("orders releases newest-first and epics by position when building prompt", async () => {
+    const projectId = seedProject("# Spec");
+    // Insert releases in arbitrary order with distinct createdAt dates
+    for (let i = 0; i < 15; i++) {
+      db.insert(releases)
+        .values({
+          id: `rel-order-${counter}-${i}`,
+          projectId,
+          version: `2.${i}.0`,
+          title: `Release ${i}`,
+          createdAt: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`,
+        })
+        .run();
+    }
+
+    // Insert epics with explicit positions out of creation order
+    db.insert(epics)
+      .values({
+        id: `epic-pos-2-${counter}`,
+        projectId,
+        title: "Second Position Epic",
+        position: 20,
+      })
+      .run();
+    db.insert(epics)
+      .values({
+        id: `epic-pos-1-${counter}`,
+        projectId,
+        title: "First Position Epic",
+        position: 10,
+      })
+      .run();
+
+    await dispatchSpecUpdateSession({
+      projectId,
+      instruction: null,
+      namedAgentId: null,
+    });
+    await flushBackground();
+
+    const prompt = specUpdateSessions(projectId)[0].prompt ?? "";
+    // Newest release (2.14.0) must appear in prompt
+    expect(prompt).toContain("**2.14.0** — Release 14");
+    // Oldest releases (e.g. 2.0.0) should be truncated under the 10-item cap
+    expect(prompt).not.toContain("**2.0.0** — Release 0");
+    expect(prompt).toContain("- _... and 5 older releases (truncated)_");
+
+    // Epic with position 10 must appear before epic with position 20
+    const pos1Idx = prompt.indexOf("First Position Epic");
+    const pos2Idx = prompt.indexOf("Second Position Epic");
+    expect(pos1Idx).toBeGreaterThan(-1);
+    expect(pos2Idx).toBeGreaterThan(-1);
+    expect(pos1Idx).toBeLessThan(pos2Idx);
+  });
   it("returns the pending session or null via getPendingSpecUpdateSession", () => {
     const projectId = seedProject("# Spec");
     expect(getPendingSpecUpdateSession(projectId)).toBeNull();

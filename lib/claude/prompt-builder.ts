@@ -389,7 +389,7 @@ ${instruction.trim()}
 Your ENTIRE response must be ONLY the complete updated specification in raw
 markdown. Nothing else.
 
-- Do NOT wrap the document in \\\`\\\`\\\` code fences.
+- Do NOT wrap the document in \`\`\` code fences.
 - Do NOT add commentary, summaries, or explanations before or after it.
 - Do NOT output a diff — output the full replacement document.
 - If you output ANYTHING besides the markdown document, the automated parser
