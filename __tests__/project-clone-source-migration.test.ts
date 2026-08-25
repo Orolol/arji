@@ -175,8 +175,9 @@ describe("0028_project_clone_source — applied schema", () => {
     // dropping the columns and un-stamping 0028 *and everything after it* —
     // the migrator replays entries strictly newer than the last stamped one,
     // so a stray later stamp would legitimately mask 0028. The later
-    // migrations are safe to replay: 0029 is an idempotent rebuild and 0030's
-    // columns are dropped here too.
+    // migrations are safe to replay: 0029 is an idempotent rebuild, and the
+    // ADD COLUMN migrations after 0028 (0030, 0031) have their columns dropped
+    // here too — replaying an ALTER over an existing column would throw.
     withDb(file, (conn) => {
       initDb(conn);
       for (const column of NEW_COLUMNS) {
@@ -184,6 +185,7 @@ describe("0028_project_clone_source — applied schema", () => {
       }
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
+      conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')

@@ -1,0 +1,28 @@
+-- Record WHICH review session filed a finding.
+--
+-- `review_comments` has always been keyed by epic alone. That is enough for the
+-- pipeline, which asks "are there open [critical]/[major] rows on this epic
+-- since the stage started?" — a question about the ticket, not about a session.
+--
+-- The Dreaming digest asks a different question: "what did THIS session get
+-- wrong?" With only an epic and a timestamp it had to match findings to
+-- sessions by time window, and two reviewers running on the same epic at once
+-- would each be handed the other's findings — so the cross-session memory
+-- would learn a lesson from the wrong run.
+--
+-- `agent_session_id` is what the MCP submit_findings route always knew and
+-- never wrote: its bearer token is already scoped to the submitting session.
+-- Nullable, and NOT backfilled: rows written before this migration genuinely
+-- have no recorded author, and inventing one from timestamps is exactly the
+-- guess this column exists to replace. The digest keeps the time-window
+-- heuristic for those, and uses the exact link whenever it is present.
+--
+-- No foreign key: a finding must outlive the session that filed it (sessions
+-- are pruned, findings are the ticket's record), and ON DELETE SET NULL would
+-- silently downgrade an exact link back to a guess.
+--
+-- SQLite has no ADD COLUMN IF NOT EXISTS, so like 0023/0024/0026/0028/0030 this
+-- is not an idempotent no-op; the column is listed in
+-- POST_BASELINE_COLUMN_MIGRATIONS (lib/db/init.ts) so a database that lost its
+-- drizzle bookkeeping stamps it as applied instead of throwing.
+ALTER TABLE review_comments ADD COLUMN agent_session_id text;
