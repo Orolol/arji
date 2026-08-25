@@ -203,6 +203,17 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       createdAt: "created_at",
     },
   },
+  sessionArtifacts: {
+    sqlName: "session_artifacts",
+    columns: {
+      id: "id",
+      agentSessionId: "agent_session_id",
+      epicId: "epic_id",
+      filename: "filename",
+      caption: "caption",
+      createdAt: "created_at",
+    },
+  },
   ticketComments: {
     sqlName: "ticket_comments",
     columns: {
@@ -582,6 +593,10 @@ const NOT_NULL: [string, string][] = [
   ["agentSessionChunks", "streamType"],
   ["agentSessionChunks", "sequence"],
   ["agentSessionChunks", "content"],
+  ["sessionArtifacts", "agentSessionId"],
+  ["sessionArtifacts", "epicId"],
+  ["sessionArtifacts", "filename"],
+  ["sessionArtifacts", "caption"],
   ["releases", "version"],
   ["pullRequests", "number"],
   ["pullRequests", "url"],
@@ -698,6 +713,18 @@ const INDEXES: Record<string, IndexSpec[]> = {
       name: "agent_session_chunks_session_stream_sequence_idx",
       unique: false,
       columns: ["session_id", "stream_type", "sequence"],
+    },
+  ],
+  sessionArtifacts: [
+    {
+      name: "session_artifacts_session_created_at_idx",
+      unique: false,
+      columns: ["agent_session_id", "created_at"],
+    },
+    {
+      name: "session_artifacts_epic_created_at_idx",
+      unique: false,
+      columns: ["epic_id", "created_at"],
     },
   ],
   agentPrompts: [
@@ -876,6 +903,10 @@ const FOREIGN_KEYS: Record<string, ForeignKeySpec[]> = {
   ],
   agentSessionChunks: [
     { columns: ["session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "cascade" },
+  ],
+  sessionArtifacts: [
+    { columns: ["agent_session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "cascade" },
+    { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "cascade" },
   ],
 };
 

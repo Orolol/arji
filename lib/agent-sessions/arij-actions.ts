@@ -10,6 +10,7 @@
  *        - ticket_activity_log rows (actor "agent")  -> status changes
  *        - ticket_comments rows (author "agent")     -> comments / questions /
  *                                                       review-findings summaries
+ *        - session_artifacts rows                     -> visual proofs
  *   2. mcp__arij__* `tool_use` records parsed out of the session's raw chunk
  *      stream — the supplement. The Claude Code provider returns a single
  *      final envelope (no per-turn stream), so for it this list is usually
@@ -26,7 +27,11 @@
 
 import { and, asc, eq } from "drizzle-orm";
 import { db as defaultDb, type ArijDatabase } from "@/lib/db";
-import { ticketActivityLog, ticketComments } from "@/lib/db/schema";
+import {
+  sessionArtifacts,
+  ticketActivityLog,
+  ticketComments,
+} from "@/lib/db/schema";
 import { MCP_CREATE_BUG_ACTIVITY_PREFIX } from "@/lib/mcp/create-bug-contract";
 import { listSessionChunks } from "./chunks";
 
@@ -45,6 +50,7 @@ export type ArijActionKind =
   | "comment"
   | "question"
   | "findings"
+  | "artifact"
   | "tool_call";
 
 export interface ArijAction {
@@ -69,6 +75,7 @@ const TOOL_ARTIFACT_KIND: Record<string, ArijActionKind> = {
   post_comment: "comment",
   ask_question: "question",
   submit_findings: "findings",
+  attach_artifact: "artifact",
   create_bug: "tool_call",
 };
 
@@ -379,6 +386,25 @@ export function collectArijActions(
 
   for (const row of comments) {
     dbActions.push(commentToAction(row.content, row.createdAt ?? null));
+  }
+
+  const artifacts = db
+    .select({
+      caption: sessionArtifacts.caption,
+      createdAt: sessionArtifacts.createdAt,
+    })
+    .from(sessionArtifacts)
+    .where(eq(sessionArtifacts.agentSessionId, sessionId))
+    .orderBy(asc(sessionArtifacts.createdAt))
+    .all();
+
+  for (const row of artifacts) {
+    dbActions.push({
+      kind: "artifact",
+      summary: "Attached visual proof",
+      detail: excerpt(row.caption),
+      at: row.createdAt ?? null,
+    });
   }
 
   let chunks = opts.chunks;

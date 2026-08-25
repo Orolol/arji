@@ -120,6 +120,30 @@ const AGENT_TOOLS = [
     },
   },
   {
+    name: "attach_artifact",
+    description:
+      "Attach a PNG, JPEG, or WebP screenshot as durable visual proof for this session. The path may be absolute or relative to the session worktree; the file must be inside that worktree, no larger than 5 MiB, and one of at most 10 artifacts for the session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          minLength: 1,
+          description:
+            "Path to the screenshot inside this session's worktree (absolute or worktree-relative).",
+        },
+        caption: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2000,
+          description: "Short explanation of what the screenshot demonstrates.",
+        },
+      },
+      required: ["path", "caption"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "create_bug",
     description:
       "Create a standalone, non-blocking bug ticket in this session's current Arij project when you discover an adjacent problem. The bug is attributed to this session, duplicate open titles are refused, and each session may create at most 5 bugs.",

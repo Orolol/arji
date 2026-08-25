@@ -137,6 +137,7 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "mcp__arij__get_ticket",
       "mcp__arij__update_ticket_status",
       "mcp__arij__post_comment",
+      "mcp__arij__attach_artifact",
       "mcp__arij__create_bug",
       "mcp__arij__ask_question",
       "mcp__arij__submit_findings",
@@ -573,6 +574,7 @@ describe("buildMcpSpawnConfig", () => {
     expect(config.allowedToolNames).toEqual([...ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES]);
     // no agent-only tools leak into the chat allowlist
     expect(config.allowedToolNames).not.toContain("mcp__arij__ask_question");
+    expect(config.allowedToolNames).not.toContain("mcp__arij__attach_artifact");
     expect(config.allowedToolNames).not.toContain("mcp__arij__submit_findings");
     expect(config.allowedToolNames).not.toContain("mcp__arij__submit_grading");
   });

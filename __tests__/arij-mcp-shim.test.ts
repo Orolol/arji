@@ -27,6 +27,7 @@ const EXPECTED_TOOL_NAMES = [
   "get_ticket",
   "update_ticket_status",
   "post_comment",
+  "attach_artifact",
   "create_bug",
   "ask_question",
   "submit_findings",
@@ -290,6 +291,10 @@ describe("tools/list", () => {
       submitGrading.inputSchema.properties.gradings.items.properties.status.enum
     ).toEqual(["met", "partial", "missed"]);
 
+    const attachArtifact: any = byName.get("attach_artifact");
+    expect(attachArtifact.inputSchema.required).toEqual(["path", "caption"]);
+    expect(attachArtifact.inputSchema.properties.caption.maxLength).toBe(2000);
+
     const getTicket: any = byName.get("get_ticket");
     expect(getTicket.inputSchema.properties.ticket_id.type).toBe("string");
   });
@@ -360,6 +365,26 @@ describe("tools/call → HTTP bridge", () => {
     expect(result.isError).toBeFalsy();
     expect(capturedRequests[0]).toMatchObject({
       url: "/api/mcp/submit-grading",
+      authorization: "Bearer test-token",
+      body: payload,
+    });
+  });
+
+  it("bridges attach_artifact to the kebab-case endpoint without reshaping the payload", async () => {
+    nextResponse = {
+      status: 200,
+      body: { data: { artifact: { id: "artifact-1", filename: "artifact-1.png" } } },
+    };
+    const payload = {
+      path: "artifacts/settings-page.png",
+      caption: "Settings page after saving the new preference",
+    };
+
+    const result = await client.callTool("attach_artifact", payload);
+
+    expect(result.isError).toBeFalsy();
+    expect(capturedRequests[0]).toMatchObject({
+      url: "/api/mcp/attach-artifact",
       authorization: "Bearer test-token",
       body: payload,
     });
@@ -529,7 +554,13 @@ describe("chat toolset (ARIJ_MCP_TOOLSET=chat)", () => {
   });
 
   it("rejects agent-only tools without calling the backend", async () => {
-    for (const name of ["create_bug", "ask_question", "submit_findings", "submit_grading"]) {
+    for (const name of [
+      "create_bug",
+      "ask_question",
+      "attach_artifact",
+      "submit_findings",
+      "submit_grading",
+    ]) {
       const result = await chatClient.callTool(name, {});
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("UNKNOWN_TOOL");

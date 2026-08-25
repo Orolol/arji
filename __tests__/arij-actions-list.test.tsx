@@ -39,6 +39,12 @@ const actions: ArijActionItem[] = [
     summary: "Submitted review findings (changes requested)",
     at: "2026-08-17T10:04:00.000Z",
   },
+  {
+    kind: "artifact",
+    summary: "Attached visual proof",
+    detail: "Checkout confirmation after payment",
+    at: "2026-08-17T10:05:00.000Z",
+  },
 ];
 
 describe("ArijActionsList", () => {
@@ -62,6 +68,9 @@ describe("ArijActionsList", () => {
     );
     expect(screen.getByTestId("arij-action-findings")).toHaveTextContent(
       "Submitted review findings (changes requested)"
+    );
+    expect(screen.getByTestId("arij-action-artifact")).toHaveTextContent(
+      "Checkout confirmation after payment"
     );
   });
 

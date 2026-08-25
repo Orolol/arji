@@ -16,6 +16,7 @@ import {
   projects,
   epics,
   agentSessions,
+  sessionArtifacts,
   ticketComments,
 } from "@/lib/db/schema";
 import { logTransition } from "@/lib/workflow/log";
@@ -435,6 +436,58 @@ describe("collectArijActions", () => {
       summary: "Ticket moved in_progress → review",
       detail: "Agent MCP: update_ticket_status",
     });
+  });
+
+  it("lists each durable visual proof with its caption and dedupes its tool call", () => {
+    db.insert(sessionArtifacts)
+      .values([
+        {
+          id: createId(),
+          agentSessionId: sessionId,
+          epicId,
+          filename: "proof-one.png",
+          caption: "Checkout confirmation after payment",
+          createdAt: "2026-08-25T10:00:00.000Z",
+        },
+        {
+          id: createId(),
+          agentSessionId: sessionId,
+          epicId,
+          filename: "proof-two.webp",
+          caption: "Responsive checkout on mobile",
+          createdAt: "2026-08-25T10:01:00.000Z",
+        },
+      ])
+      .run();
+
+    const chunks = [
+      {
+        content:
+          JSON.stringify({
+            type: "tool_use",
+            id: "attach-1",
+            name: "mcp__arij__attach_artifact",
+          }) + "\n",
+        createdAt: "2026-08-25T10:00:00.000Z",
+      },
+    ];
+
+    const actions = collectArijActions({ sessionId, database: db, chunks });
+
+    expect(actions).toEqual([
+      {
+        kind: "artifact",
+        summary: "Attached visual proof",
+        detail: "Checkout confirmation after payment",
+        at: "2026-08-25T10:00:00.000Z",
+      },
+      {
+        kind: "artifact",
+        summary: "Attached visual proof",
+        detail: "Responsive checkout on mobile",
+        at: "2026-08-25T10:01:00.000Z",
+      },
+    ]);
   });
 
   it("surfaces create_bug's same-state audit row as a durable tool action", () => {

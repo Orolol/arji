@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { usePolling } from "@/hooks/usePolling";
 import type { GradingReportData } from "@/lib/grading/report";
+import type { SessionArtifactSummary } from "@/lib/agent-sessions/artifact-view";
 
 interface UserStory {
   id: string;
@@ -40,21 +41,24 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
   const [userStories, setUserStories] = useState<UserStory[]>([]);
   const [gradingReport, setGradingReport] =
     useState<GradingReportData | null>(null);
+  const [artifacts, setArtifacts] = useState<SessionArtifactSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
 
   const fetchData = useCallback(async () => {
     if (!epicId) return;
     try {
-      const [epicRes, usRes, gradingRes] = await Promise.all([
+      const [epicRes, usRes, gradingRes, artifactsRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/epics`),
         fetch(`/api/projects/${projectId}/user-stories?epicId=${epicId}`),
         fetch(`/api/projects/${projectId}/epics/${epicId}/grading`),
+        fetch(`/api/projects/${projectId}/epics/${epicId}/artifacts`),
       ]);
 
       const epicData = await epicRes.json();
       const usData = await usRes.json();
       const gradingData = await gradingRes.json();
+      const artifactsData = await artifactsRes.json();
 
       const foundEpic = (epicData.data || []).find(
         (e: EpicDetail) => e.id === epicId
@@ -62,6 +66,11 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
       if (foundEpic) setEpic(foundEpic);
       setUserStories(usData.data || []);
       setGradingReport(gradingRes.ok ? gradingData.data ?? null : null);
+      setArtifacts(
+        artifactsRes.ok && Array.isArray(artifactsData.data)
+          ? artifactsData.data
+          : []
+      );
     } catch {
       // silently fail on poll
     }
@@ -160,6 +169,7 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
     epic,
     userStories,
     gradingReport,
+    artifacts,
     loading,
     updateEpic,
     addUserStory,
