@@ -411,6 +411,32 @@ describe("applyTransition — owning session exemption", () => {
     expect(result.valid).toBe(false);
     expect(result.error).toContain("queued or running");
   });
+
+  it("refuses a story-scoped session on an epic-scoped move (ownership stops at the story)", async () => {
+    // The sole live build on the epic is a story build: it owns its story,
+    // never the parent epic. Epic promotion must stay with the terminal
+    // handler's sibling-story rule.
+    const { applyTransition } = await import(
+      "@/lib/workflow/transition-service"
+    );
+    await seedRunningSessions([
+      { id: "s1", status: "running", agentType: "ticket_build", userStoryId: "st1" },
+    ]);
+
+    const result = applyTransition({
+      projectId: "p1",
+      epicId: "e1",
+      fromStatus: "in_progress",
+      toStatus: "review",
+      actor: "agent",
+      source: "api",
+      sessionId: "s1",
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("queued or running");
+    expect(updateCalls.find((c) => c.table === "epics")).toBeUndefined();
+  });
 });
 
 describe("applyStoryTransition — owning session exemption", () => {

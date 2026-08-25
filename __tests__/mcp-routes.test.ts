@@ -623,6 +623,179 @@ describe("POST /api/mcp/update-ticket-status", () => {
 });
 
 // ---------------------------------------------------------------------------
+// update-ticket-status — story-scoped sessions
+//
+// A ticket_build session's own ticket is its story. The default target must
+// be the story (story-scoped context), and the parent epic must stay subject
+// to the sibling-story rule that transitionBuildCompleted enforces — the
+// in_progress lock used to be the only thing keeping that bypass unreachable.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/mcp/update-ticket-status — story-scoped sessions", () => {
+  let storyId1: string; // in_progress, the session's own story
+  let storyId2: string; // todo, the sibling
+  let storySessionId: string;
+  let storyToken: string;
+
+  beforeEach(() => {
+    const now = new Date().toISOString();
+    storyId1 = createId();
+    storyId2 = createId();
+    db()
+      .insert(userStories)
+      .values([
+        {
+          id: storyId1,
+          epicId,
+          title: "Story one",
+          description: "The built story",
+          status: "in_progress",
+          position: 0,
+          createdAt: now,
+        },
+        {
+          id: storyId2,
+          epicId,
+          title: "Story two",
+          description: "The sibling story",
+          status: "todo",
+          position: 1,
+          createdAt: now,
+        },
+      ])
+      .run();
+    storySessionId = createId();
+    db()
+      .insert(agentSessions)
+      .values({
+        id: storySessionId,
+        projectId,
+        epicId,
+        userStoryId: storyId1,
+        status: "running",
+        agentType: "ticket_build",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    storyToken = mintMcpToken({
+      sessionId: storySessionId,
+      projectId,
+      epicId,
+      userStoryId: storyId1,
+      agentType: "ticket_build",
+    });
+  });
+
+  function storyStatus(storyId: string) {
+    return db()
+      .select()
+      .from(userStories)
+      .where(eq(userStories.id, storyId))
+      .get()?.status;
+  }
+
+  it("lets the story build move its own story to review, holding the epic", async () => {
+    const res = await call(updateStatusPost, { status: "review" }, storyToken);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data).toEqual({
+      ticketId: storyId1,
+      fromStatus: "in_progress",
+      toStatus: "review",
+    });
+
+    // The story moved; the epic stays in_progress while its sibling story
+    // is still todo — epic promotion belongs to the terminal handler.
+    expect(storyStatus(storyId1)).toBe("review");
+    expect(storyStatus(storyId2)).toBe("todo");
+    expect(
+      db().select().from(epics).where(eq(epics.id, epicId)).get()?.status
+    ).toBe("in_progress");
+
+    // The story move is audited on the epic's activity feed.
+    const logs = db()
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, epicId))
+      .all();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      fromStatus: "in_progress",
+      toStatus: "review",
+      actor: "agent",
+      sessionId: storySessionId,
+    });
+    expect(logs[0].reason).toContain(storyId1);
+  });
+
+  it("refuses the story build moving its parent epic while its build is live", async () => {
+    // Explicit ticket_id targets the epic (epic-scoped context); a
+    // story-scoped session never grants the owning-session exemption there.
+    const res = await call(
+      updateStatusPost,
+      { status: "review", ticket_id: epicId },
+      storyToken
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.code).toBe("INVALID_TRANSITION");
+
+    expect(storyStatus(storyId1)).toBe("in_progress");
+    expect(
+      db().select().from(epics).where(eq(epics.id, epicId)).get()?.status
+    ).toBe("in_progress");
+  });
+
+  it("refuses Backlog for a story target (stories have no backlog column)", async () => {
+    const res = await call(updateStatusPost, { status: "backlog" }, storyToken);
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.code).toBe("INVALID_TRANSITION");
+    expect(json.error).toContain("Backlog");
+    expect(storyStatus(storyId1)).toBe("in_progress");
+  });
+
+  it("refuses a second live build on the same story from moving it", async () => {
+    // Two concurrent story builds: neither is the sole owner, so the story
+    // stays locked until one of them settles.
+    const secondStorySessionId = createId();
+    db()
+      .insert(agentSessions)
+      .values({
+        id: secondStorySessionId,
+        projectId,
+        epicId,
+        userStoryId: storyId1,
+        status: "running",
+        agentType: "ticket_build",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    const secondStoryToken = mintMcpToken({
+      sessionId: secondStorySessionId,
+      projectId,
+      epicId,
+      userStoryId: storyId1,
+      agentType: "ticket_build",
+    });
+
+    const res = await call(
+      updateStatusPost,
+      { status: "review" },
+      secondStoryToken
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.code).toBe("INVALID_TRANSITION");
+    expect(storyStatus(storyId1)).toBe("in_progress");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // post-comment
 // ---------------------------------------------------------------------------
 
