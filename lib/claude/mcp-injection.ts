@@ -23,8 +23,8 @@
  * they have no agent_sessions row, so the chat stream route wires its own
  * per-turn channel through lib/chat/cli-tool-channel.ts — same gates 1 and 2,
  * project scope from the route params, and the "chat" toolset (board tools,
- * no ask_question/submit_findings/submit_grading) instead of the agent
- * toolset.
+ * no ask_question/report_friction/submit_findings/submit_grading) instead of
+ * the agent toolset.
  */
 
 import fs from "fs";
@@ -53,6 +53,7 @@ export const ARIJ_MCP_ALLOWED_TOOL_NAMES = [
   "mcp__arij__get_ticket",
   "mcp__arij__update_ticket_status",
   "mcp__arij__post_comment",
+  "mcp__arij__report_friction",
   "mcp__arij__ask_question",
   "mcp__arij__submit_findings",
   "mcp__arij__submit_grading",
@@ -61,9 +62,9 @@ export const ARIJ_MCP_ALLOWED_TOOL_NAMES = [
 /**
  * The chat-toolset tools (CLI chat conversations), as exact allowlist
  * entries. Mirrors the fast-mode board tools (lib/chat/board-tools.ts);
- * ask_question/submit_findings/submit_grading are deliberately absent —
- * nothing holds a chat turn, and chat tokens are rejected by those routes
- * anyway.
+ * ask_question/report_friction/submit_findings/submit_grading are deliberately
+ * absent — nothing holds a chat turn, chat turns have no durable session, and
+ * chat tokens are rejected by those routes anyway.
  */
 export const ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES = [
   "mcp__arij__list_tickets",

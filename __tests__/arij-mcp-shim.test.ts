@@ -27,6 +27,7 @@ const EXPECTED_TOOL_NAMES = [
   "get_ticket",
   "update_ticket_status",
   "post_comment",
+  "report_friction",
   "ask_question",
   "submit_findings",
   "submit_grading",
@@ -289,6 +290,20 @@ describe("tools/list", () => {
       submitGrading.inputSchema.properties.gradings.items.properties.status.enum
     ).toEqual(["met", "partial", "missed"]);
 
+    const reportFriction: any = byName.get("report_friction");
+    expect(reportFriction.inputSchema.required).toEqual([
+      "category",
+      "description",
+    ]);
+    expect(reportFriction.inputSchema.properties.category.enum).toEqual([
+      "broken_tooling",
+      "misleading_docs",
+      "flaky_test",
+      "unclear_convention",
+      "other",
+    ]);
+    expect(reportFriction.inputSchema.properties.filePath.type).toBe("string");
+
     const getTicket: any = byName.get("get_ticket");
     expect(getTicket.inputSchema.properties.ticket_id.type).toBe("string");
   });
@@ -359,6 +374,33 @@ describe("tools/call → HTTP bridge", () => {
     expect(result.isError).toBeFalsy();
     expect(capturedRequests[0]).toMatchObject({
       url: "/api/mcp/submit-grading",
+      authorization: "Bearer test-token",
+      body: payload,
+    });
+  });
+
+  it("bridges report_friction to the kebab-case endpoint without adding scope fields", async () => {
+    nextResponse = {
+      status: 200,
+      body: {
+        data: {
+          frictionId: "friction-1",
+          occurrences: 1,
+          deduplicated: false,
+        },
+      },
+    };
+    const payload = {
+      category: "broken_tooling",
+      description: "The local lint wrapper exits without diagnostics.",
+      filePath: "scripts/lint.sh",
+    };
+
+    const result = await client.callTool("report_friction", payload);
+
+    expect(result.isError).toBeFalsy();
+    expect(capturedRequests[0]).toMatchObject({
+      url: "/api/mcp/report-friction",
       authorization: "Bearer test-token",
       body: payload,
     });
@@ -528,7 +570,12 @@ describe("chat toolset (ARIJ_MCP_TOOLSET=chat)", () => {
   });
 
   it("rejects agent-only tools without calling the backend", async () => {
-    for (const name of ["ask_question", "submit_findings", "submit_grading"]) {
+    for (const name of [
+      "ask_question",
+      "report_friction",
+      "submit_findings",
+      "submit_grading",
+    ]) {
       const result = await chatClient.callTool(name, {});
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("UNKNOWN_TOOL");

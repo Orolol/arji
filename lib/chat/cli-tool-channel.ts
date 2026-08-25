@@ -18,7 +18,8 @@
  * The minted token is project-scoped with epicId null and agentType "chat",
  * exactly like the fast-mode per-turn token: ticket-scoped routes require an
  * explicit ticket_id (resolveTicketForToken), and ask_question /
- * submit_findings / submit_grading reject chat tokens outright. The spawn
+ * report_friction / submit_findings / submit_grading reject chat tokens
+ * outright. The spawn
  * config selects the shim's "chat" toolset, so the CLI sees the board tools
  * instead of the agent toolset.
  *

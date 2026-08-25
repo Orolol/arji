@@ -202,6 +202,21 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       createdAt: "created_at",
     },
   },
+  frictions: {
+    sqlName: "frictions",
+    columns: {
+      id: "id",
+      projectId: "project_id",
+      epicId: "epic_id",
+      agentSessionId: "agent_session_id",
+      category: "category",
+      description: "description",
+      filePath: "file_path",
+      occurrences: "occurrences",
+      status: "status",
+      createdAt: "created_at",
+    },
+  },
   ticketComments: {
     sqlName: "ticket_comments",
     columns: {
@@ -545,6 +560,8 @@ const DEFAULTS: [string, string, unknown][] = [
   ["agentSessions", "orchestrationMode", "solo"],
   ["agentSessions", "provider", "claude-code"],
   ["agentSessionSequences", "nextSequence", 1],
+  ["frictions", "occurrences", 1],
+  ["frictions", "status", "new"],
   ["pullRequests", "status", "open"],
   ["pullRequests", "baseBranch", "main"],
   ["customReviewAgents", "position", 0],
@@ -581,6 +598,13 @@ const NOT_NULL: [string, string][] = [
   ["agentSessionChunks", "streamType"],
   ["agentSessionChunks", "sequence"],
   ["agentSessionChunks", "content"],
+  ["frictions", "projectId"],
+  ["frictions", "agentSessionId"],
+  ["frictions", "category"],
+  ["frictions", "description"],
+  ["frictions", "occurrences"],
+  ["frictions", "status"],
+  ["frictions", "createdAt"],
   ["releases", "version"],
   ["pullRequests", "number"],
   ["pullRequests", "url"],
@@ -655,6 +679,8 @@ const NULLABLE: [string, string][] = [
   ["notifications", "sessionId"],
   ["notifications", "agentType"],
   ["gradingReports", "agentSessionId"],
+  ["frictions", "epicId"],
+  ["frictions", "filePath"],
 ];
 
 describe("db schema: nullable columns", () => {
@@ -697,6 +723,23 @@ const INDEXES: Record<string, IndexSpec[]> = {
       name: "agent_session_chunks_session_stream_sequence_idx",
       unique: false,
       columns: ["session_id", "stream_type", "sequence"],
+    },
+  ],
+  frictions: [
+    {
+      name: "frictions_project_status_occurrences_idx",
+      unique: false,
+      columns: ["project_id", "status", "occurrences"],
+    },
+    {
+      name: "frictions_open_dedupe_idx",
+      unique: false,
+      columns: ["project_id", "category", "file_path", "status"],
+    },
+    {
+      name: "frictions_session_idx",
+      unique: false,
+      columns: ["agent_session_id"],
     },
   ],
   agentPrompts: [
@@ -876,6 +919,10 @@ const FOREIGN_KEYS: Record<string, ForeignKeySpec[]> = {
   agentSessionChunks: [
     { columns: ["session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "cascade" },
   ],
+  frictions: [
+    { columns: ["project_id"], foreignTable: "projects", foreignColumns: ["id"], onDelete: "cascade" },
+    { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "set null" },
+  ],
 };
 
 describe("db schema: foreign keys", () => {
@@ -900,6 +947,31 @@ describe("db schema: foreign keys", () => {
 // ---------------------------------------------------------------------------
 
 describe("db schema: exported types", () => {
+  it("Friction select and insert shapes", () => {
+    const selected: schema.Friction = {
+      id: "friction-1",
+      projectId: "project-1",
+      epicId: "epic-1",
+      agentSessionId: "session-1",
+      category: "broken_tooling",
+      description: "Lint wrapper fails silently",
+      filePath: "scripts/lint.sh",
+      occurrences: 2,
+      status: "triaged",
+      createdAt: "2026-08-25T10:00:00.000Z",
+    };
+    const inserted: schema.NewFriction = {
+      id: "friction-2",
+      projectId: "project-1",
+      epicId: null,
+      agentSessionId: "session-2",
+      category: "other",
+      description: "A recurring inconvenience",
+    };
+    expect(selected.occurrences).toBe(2);
+    expect(inserted.epicId).toBeNull();
+  });
+
   it("GitSyncLog select shape", () => {
     const log: schema.GitSyncLog = {
       id: "sl_1",

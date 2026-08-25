@@ -261,6 +261,19 @@ const CALL_MATRIX: ReadonlyArray<{
     data: { commentId: "comment-1" },
   },
   {
+    tool: "report_friction",
+    args: {
+      category: "unclear_convention",
+      description: "The branch naming convention is ambiguous.",
+      filePath: "CONTRIBUTING.md",
+    },
+    data: {
+      frictionId: "friction-1",
+      occurrences: 1,
+      deduplicated: false,
+    },
+  },
+  {
     tool: "ask_question",
     args: { question: "Should retries be capped at 3 or configurable?" },
     data: { acknowledged: true, holds_ticket: true },

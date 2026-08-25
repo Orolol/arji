@@ -232,6 +232,13 @@
       "when": 1786713000000,
       "tag": "0033_grading_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1786713100000,
+      "tag": "0034_frictions",
+      "breakpoints": true
     }
   ]
 }
