@@ -2,12 +2,9 @@ import { inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import {
-  DEFAULT_VERIFY_COMMANDS,
-  DEFAULT_VERIFY_TIMEOUT_MS,
   VERIFY_COMMANDS_SETTING_KEY,
   VERIFY_TIMEOUT_MS_SETTING_KEY,
-  parseVerifyCommands,
-  parseVerifyTimeoutMs,
+  resolveVerifyConfig,
   verifyCommandsSettingKey,
   verifyTimeoutMsSettingKey,
   type VerifyConfig,
@@ -22,11 +19,9 @@ import {
  * default. No configured commands means verification is disabled.
  */
 export function resolveVerifyConfigForProject(projectId: string): VerifyConfig {
-  const commandKeys = [
+  const keys = [
     verifyCommandsSettingKey(projectId),
     VERIFY_COMMANDS_SETTING_KEY,
-  ];
-  const timeoutKeys = [
     verifyTimeoutMsSettingKey(projectId),
     VERIFY_TIMEOUT_MS_SETTING_KEY,
   ];
@@ -34,36 +29,11 @@ export function resolveVerifyConfigForProject(projectId: string): VerifyConfig {
   const rows = db
     .select({ key: settings.key, value: settings.value })
     .from(settings)
-    .where(inArray(settings.key, [...commandKeys, ...timeoutKeys]))
+    .where(inArray(settings.key, keys))
     .all();
-  const map = new Map(rows.map((row) => [row.key, row.value]));
 
-  const firstParsed = <T>(
-    keys: readonly string[],
-    parse: (value: unknown) => T | null,
-    fallback: T
-  ): T => {
-    for (const key of keys) {
-      if (!map.has(key)) continue;
-      const parsed = parse(map.get(key));
-      if (parsed !== null) return parsed;
-    }
-    return fallback;
-  };
-
-  const commands = firstParsed(
-    commandKeys,
-    parseVerifyCommands,
-    DEFAULT_VERIFY_COMMANDS
+  return resolveVerifyConfig(
+    Object.fromEntries(rows.map((row) => [row.key, row.value])),
+    projectId
   );
-
-  return {
-    enabled: commands.length > 0,
-    commands,
-    timeoutMs: firstParsed(
-      timeoutKeys,
-      parseVerifyTimeoutMs,
-      DEFAULT_VERIFY_TIMEOUT_MS
-    ),
-  };
 }

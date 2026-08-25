@@ -170,30 +170,32 @@ export interface VerifyConfig {
 }
 
 /**
- * Client-side resolver over a settings map returned by GET /api/settings:
- * per-project value, then global value, then the built-in default, one key at
- * a time. The server-side database twin lives in lib/verify/config.ts.
+ * Client-safe resolver over a settings map returned by GET /api/settings.
+ * With a project id it walks project value → global value → built-in default;
+ * without one it resolves the global Settings form against the defaults.
  */
 export function resolveVerifyConfig(
   settings: Record<string, unknown> | null | undefined,
-  projectId: string
+  projectId?: string | null
 ): VerifyConfig {
   const map = settings ?? {};
 
   const pick = <T>(
-    projectKey: string,
+    projectKey: string | null,
     globalKey: string,
     parse: (value: unknown) => T | null,
     fallback: T
   ): T => {
-    const projectValue = parse(map[projectKey]);
-    if (projectValue !== null) return projectValue;
+    if (projectKey !== null) {
+      const projectValue = parse(map[projectKey]);
+      if (projectValue !== null) return projectValue;
+    }
     const globalValue = parse(map[globalKey]);
     return globalValue ?? fallback;
   };
 
   const commands = pick(
-    verifyCommandsSettingKey(projectId),
+    projectId ? verifyCommandsSettingKey(projectId) : null,
     VERIFY_COMMANDS_SETTING_KEY,
     parseVerifyCommands,
     DEFAULT_VERIFY_COMMANDS
@@ -203,7 +205,7 @@ export function resolveVerifyConfig(
     enabled: commands.length > 0,
     commands,
     timeoutMs: pick(
-      verifyTimeoutMsSettingKey(projectId),
+      projectId ? verifyTimeoutMsSettingKey(projectId) : null,
       VERIFY_TIMEOUT_MS_SETTING_KEY,
       parseVerifyTimeoutMs,
       DEFAULT_VERIFY_TIMEOUT_MS

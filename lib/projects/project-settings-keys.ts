@@ -12,6 +12,10 @@ import {
   dreamingAfterNightRunSettingKey,
   dreamingLastCutoffSettingKey,
 } from "@/lib/workflow/dreaming-constants";
+import {
+  verifyCommandsSettingKey,
+  verifyTimeoutMsSettingKey,
+} from "@/lib/verify/verify-constants";
 import { webhookSettingKey } from "@/lib/webhooks/send";
 
 /**
@@ -33,6 +37,8 @@ export function perProjectSettingKeys(projectId: string): string[] {
     pipelineEnabledSettingKey(projectId),
     pipelineMaxAttemptsSettingKey(projectId),
     pipelineMaxFixCyclesSettingKey(projectId),
+    verifyCommandsSettingKey(projectId),
+    verifyTimeoutMsSettingKey(projectId),
     nightCircuitBreakerSettingKey(projectId),
     nightCostCapSettingKey(projectId),
     dreamingAfterNightRunSettingKey(projectId),
