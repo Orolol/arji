@@ -12,6 +12,7 @@ interface QaReport {
   id: string;
   projectId: string;
   status: string;
+  agentSessionId?: string | null;
   summary: string | null;
   reportContent: string | null;
   checkType?: string;
@@ -358,8 +359,12 @@ export function ReportDetail({
   }
 
   const duration = formatDuration(report.createdAt, report.completedAt);
+  const isEmptyFailureDigest =
+    report.checkType === "failure_digest" && report.agentSessionId === null;
   const canCreateEpics =
-    report.status === "completed" && Boolean(report.reportContent);
+    report.status === "completed" &&
+    Boolean(report.reportContent) &&
+    !isEmptyFailureDigest;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-[16px] rounded-[12px] border border-border bg-card px-[24px] py-[22px]">

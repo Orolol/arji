@@ -154,8 +154,15 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
         reportContent:
           "## Cluster: Worker exits\n\nFrequency: 7\n\nAffected tickets: ARIJ-12, ARIJ-29",
         namedAgentId: null,
-        agentSessionId: null,
+        agentSessionId: "digest-session-1",
         checkType: "failure_digest",
+      },
+      {
+        provider: "claude-code",
+        model: "claude-opus",
+        cliSessionId: null,
+        claudeSessionId: null,
+        namedAgentId: null,
       },
       { max: 2 },
     ];
@@ -202,6 +209,38 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
       }),
     );
     expect((db as unknown as { transaction: ReturnType<typeof vi.fn> }).transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a successful no-op for an empty failure digest report", async () => {
+    dbMockState.getQueue = [
+      { id: "proj-1", gitRepoPath: "/tmp/repo" },
+      {
+        id: "digest-empty",
+        projectId: "proj-1",
+        reportContent:
+          "# Recurring Failure Digest\n\nNo recurring failure evidence was found.",
+        namedAgentId: null,
+        agentSessionId: null,
+        checkType: "failure_digest",
+      },
+    ];
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/qa/reports/[reportId]/create-epics/route"
+    );
+    const res = await POST(
+      mockNextRequest(),
+      mockRouteContext({ projectId: "proj-1", reportId: "digest-empty" }),
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data).toEqual({ epics: [], noOp: true });
+    expect(mockResolveAgent).not.toHaveBeenCalled();
+    expect(mockSpawnClaude).not.toHaveBeenCalled();
+    expect(mockGetProvider).not.toHaveBeenCalled();
+    expect(dbMockState.insertCalls).toHaveLength(0);
+    expect((db as unknown as { transaction: ReturnType<typeof vi.fn> }).transaction).not.toHaveBeenCalled();
   });
 
   it("returns parse error with raw snippet when extracted JSON is non-object", async () => {
@@ -540,7 +579,6 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
       "@/app/api/projects/[projectId]/qa/reports/[reportId]/create-epics/route"
     );
     const res = await POST(mockNextRequest(), mockRouteContext({ projectId: "proj-1", reportId: "report-1" }));
-    const json = await res.json();
 
     expect(res.status).toBe(200);
 
@@ -591,7 +629,6 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
       "@/app/api/projects/[projectId]/qa/reports/[reportId]/create-epics/route"
     );
     const res = await POST(mockNextRequest(), mockRouteContext({ projectId: "proj-1", reportId: "report-1" }));
-    const json = await res.json();
 
     expect(res.status).toBe(200);
 

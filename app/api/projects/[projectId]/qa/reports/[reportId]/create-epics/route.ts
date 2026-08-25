@@ -153,6 +153,14 @@ export async function POST(_request: NextRequest, { params }: Params) {
 
   const isE2e = report.checkType === "e2e_test";
   const isFailureDigest = report.checkType === "failure_digest";
+
+  // Empty failure-digest windows are persisted as completed reports without
+  // an agent session. They are useful audit records, but contain no cluster
+  // that could become a ticket, so do not spend another agent run on them.
+  if (isFailureDigest && report.agentSessionId === null) {
+    return NextResponse.json({ data: { epics: [], noOp: true } });
+  }
+
   const reportTitle = isE2e
     ? "# E2E Test Report"
     : isFailureDigest

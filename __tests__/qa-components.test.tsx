@@ -164,4 +164,35 @@ describe("ReportDetail", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Cluster: Worker exits")).toBeInTheDocument();
   });
+
+  it("does not offer ticket creation for an empty failure digest report", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: {
+              id: "digest-empty",
+              projectId: "proj-1",
+              status: "completed",
+              agentSessionId: null,
+              checkType: "failure_digest",
+              summary: "No recurring failure evidence",
+              reportContent: "No recurring failure evidence was found.",
+              createdAt: "2026-08-25T10:00:00.000Z",
+              completedAt: "2026-08-25T10:00:00.000Z",
+            },
+          }),
+      }) as Promise<Response>,
+    ) as typeof fetch;
+
+    render(<ReportDetail projectId="proj-1" reportId="digest-empty" />);
+
+    expect(
+      await screen.findByText("No recurring failure evidence was found."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Create Epics From Report" }),
+    ).not.toBeInTheDocument();
+  });
 });

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Activity, Plus, RefreshCw } from "lucide-react";
 import { ReportDetail } from "@/components/qa/ReportDetail";
 import { StartQaCheckDialog } from "@/components/qa/StartQaCheckDialog";
@@ -34,15 +34,41 @@ function checkTypeBadgeLabel(checkType: string): string {
 
 export default function QAPage() {
   const params = useParams();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
   const { reports, loading, error, refresh } = useQaReports(projectId);
   const [startDialogOpen, setStartDialogOpen] = useState(false);
-  const [selectedReportId, setSelectedReportId] = useState<string | null>(
-    searchParams.get("reportId"),
-  );
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [filterCheckType, setFilterCheckType] = useState<FilterCheckType>(null);
+
+  // Source links from generated tickets select the referenced report once,
+  // then remove the transient parameter so later navigation does not restore
+  // a stale selection.
+  useEffect(() => {
+    const reportId = searchParams.get("reportId");
+    if (!reportId) return;
+
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("reportId");
+    const query = next.toString();
+
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setSelectedReportId(reportId);
+      router.replace(
+        query
+          ? `/projects/${projectId}/qa?${query}`
+          : `/projects/${projectId}/qa`,
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, router, searchParams]);
 
   const filteredReports = useMemo(() => {
     if (!filterCheckType) return reports;
