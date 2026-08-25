@@ -128,6 +128,36 @@ export function saveProjectMemory(
   return { doc, truncated };
 }
 
+export interface ReplaceProjectMemoryResult extends SaveProjectMemoryResult {
+  /** The snapshot row written, or null when there was nothing to snapshot. */
+  archive: MemoryDocRecord | null;
+}
+
+/**
+ * Replaces the memory document and snapshots what it replaced, ATOMICALLY.
+ *
+ * The two writes have to commit together or not at all. Archiving first and
+ * saving second looks safe but is not: a save that throws (a disk error, the
+ * unique-filename constraint) would leave the archive already overwritten with
+ * the text that is STILL the live memory — burning the one snapshot the user
+ * has, in exchange for a rewrite that never happened. One transaction makes
+ * the failure mode honest: nothing moves, and the previous snapshot survives.
+ *
+ * Callers get the same throw-on-failure contract as `saveProjectMemory`.
+ */
+export function replaceProjectMemoryWithSnapshot(
+  projectId: string,
+  content: string,
+  database: ArijDatabase = defaultDb
+): ReplaceProjectMemoryResult {
+  return database.transaction((tx) => {
+    const previous = getProjectMemoryContent(projectId, tx);
+    const archive = archiveProjectMemory(projectId, previous, tx);
+    const saved = saveProjectMemory(projectId, content, tx);
+    return { ...saved, archive };
+  });
+}
+
 /** The project's pre-dream memory snapshot row, or null when none exists. */
 export function getProjectMemoryArchiveDoc(
   projectId: string,
