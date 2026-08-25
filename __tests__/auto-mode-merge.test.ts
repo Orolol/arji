@@ -14,7 +14,7 @@
  *   - POST .../approve is never involved (it would bulk-resolve the very
  *     findings that must stop an auto-merge).
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
 const gitMocks = vi.hoisted(() => ({
@@ -97,6 +97,8 @@ const {
   ticketComments,
   ticketActivityLog,
   notifications,
+  settings,
+  verifyReports,
 } = await import("@/lib/db/schema");
 const { tryAutoMerge } = await import("@/lib/auto-mode/merge");
 const { autoModeRegistry } = await import("@/lib/auto-mode/registry");
@@ -716,3 +718,128 @@ describe("tryAutoMerge — merge conflict", () => {
     ).toBe(false);
   });
 });
+
+
+/* ------------------------------------------------------------------ */
+/* The deterministic-verification gate                                 */
+/* ------------------------------------------------------------------ */
+  // The file-level beforeEach does not reset these two tables.
+  afterEach(() => {
+    db.delete(verifyReports).run();
+    db.delete(settings).run();
+  });
+
+  function configureVerification(): void {
+    db.insert(settings)
+      .values({
+        key: "verify_commands",
+        value: JSON.stringify([{ name: "test", command: "npm test" }]),
+      })
+      .run();
+  }
+  function insertReport(status: "pass" | "fail", finishedMinute: number): void {
+    db.insert(verifyReports)
+      .values({
+        id: `report-${status}-${finishedMinute}`,
+        projectId: PROJECT_ID,
+        epicId: EPIC_ID,
+        status,
+        startedAt: isoAt(finishedMinute - 1),
+        finishedAt: isoAt(finishedMinute),
+        commands: JSON.stringify([
+          {
+            name: "test",
+            command: "npm test",
+            exitCode: status === "pass" ? 0 : 1,
+            durationMs: 1_000,
+            tail: "output",
+          },
+        ]),
+      })
+      .run();
+  }
+
+  it("merges without a gate when verification is not configured", async () => {
+    seed();
+    gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
+
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    expect(outcome.status).toBe("merged");
+  });
+
+  it("refuses to merge when verification is configured but has never run", async () => {
+    seed();
+    configureVerification();
+    gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
+
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    // The mode that lands code on the default branch unattended may not do
+    // so on agent prose alone — and the refusal must be visible.
+    expect(outcome).toMatchObject({
+      status: "skipped",
+      reason: expect.stringMatching(/never run/i),
+    });
+    expect(gitMocks.mergeWorktree).not.toHaveBeenCalled();
+    expect(activityReasons()).toContainEqual(
+      expect.stringMatching(/Auto mode skipped merge.*never run/i)
+    );
+    // Not parked: the next passing report unlocks the merge.
+    expect(db.select().from(epics).get()!.status).toBe("review");
+  });
+
+  it("merges when a passing report is newer than the last build session", async () => {
+    seed(); // build session ends at isoAt(2)
+    configureVerification();
+    insertReport("pass", 5);
+    gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
+
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    expect(outcome.status).toBe("merged");
+    expect(gitMocks.mergeWorktree).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to merge when the latest report did not pass", async () => {
+    seed();
+    configureVerification();
+    insertReport("fail", 5);
+    gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
+
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    expect(outcome).toMatchObject({
+      status: "skipped",
+      reason: expect.stringMatching(/did not pass/i),
+    });
+    expect(gitMocks.mergeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("refuses to merge when the passing report predates a later code session", async () => {
+    seed(); // build session ends at isoAt(2)
+    configureVerification();
+    seq += 1;
+    db.insert(agentSessions)
+      .values({
+        id: `fix-${seq}`,
+        projectId: PROJECT_ID,
+        epicId: EPIC_ID,
+        status: "completed",
+        agentType: "fix",
+        worktreePath: "/tmp/worktrees/landable",
+        createdAt: isoAt(6),
+        endedAt: isoAt(7),
+      })
+      .run();
+    insertReport("pass", 5); // verified a tree the fix has since changed
+    gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
+
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    expect(outcome).toMatchObject({
+      status: "skipped",
+      reason: expect.stringMatching(/predates/i),
+    });
+    expect(gitMocks.mergeWorktree).not.toHaveBeenCalled();
+  });

@@ -128,6 +128,7 @@ const {
 } = await import("@/lib/db/schema");
 const { processManager } = await import("@/lib/claude/process-manager");
 const { emitTicketUpdated } = await import("@/lib/events/emit");
+const fsMock = await import("fs");
 const { createPipelineStageDriver } = await import("@/lib/pipeline/stages");
 const { PIPELINE_FIX_INSTRUCTIONS_SECTION } = await import(
   "@/lib/pipeline/stages"
@@ -1026,7 +1027,12 @@ describe("deterministic verification driver", () => {
         { key: verifyTimeoutMsSettingKey(projectId), value: "45000" },
       ])
       .run();
-
+    // The applicability path now stats the recorded worktree; the global
+    // mock reports nothing exists, so mark this one as present.
+    (fsMock.default.existsSync as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      (candidate: unknown) =>
+        candidate === "/repos/.arij-worktrees/exact-epic-worktree"
+    );
     const expected = {
       id: "verify-report",
       projectId,
@@ -1127,6 +1133,40 @@ describe("deterministic verification driver", () => {
     expect(outcome.skipReason).toMatch(/managed epic worktree/i);
     expect(verificationMocks.runVerification).not.toHaveBeenCalled();
     expect(emitTicketUpdated).not.toHaveBeenCalled();
+  });
+
+  it("skips with a visible reason when the recorded worktree was pruned", async () => {
+    const { projectId, epicId } = seed("review");
+    const codeSessionId = `verify-pruned-${counter}`;
+    insertSession({
+      id: codeSessionId,
+      projectId,
+      epicId,
+      // Managed path, but the global fs mock stats nothing as existing —
+      // exactly the pruned-worktree situation.
+      worktreePath: "/repos/.arij-worktrees/vanished",
+    });
+    db.insert(settings)
+      .values({
+        key: verifyCommandsSettingKey(projectId),
+        value: JSON.stringify([{ name: "test", command: "npm test" }]),
+      })
+      .run();
+
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+
+    // Spawning into a missing cwd would read as a phantom failing command
+    // and burn a fix cycle; it must surface as a traced skip instead.
+    const outcome = await driver.runDeterministicVerification(codeSessionId);
+    expect(outcome).toMatchObject({ ran: false, result: null });
+    expect(outcome.skipReason).toMatch(/no longer exists/i);
+    expect(verificationMocks.runVerification).not.toHaveBeenCalled();
   });
 });
 

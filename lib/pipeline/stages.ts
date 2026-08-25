@@ -54,6 +54,7 @@ import {
   type PromptComment,
 } from "@/lib/claude/prompt-builder";
 import { resolveVerifyConfigForProject } from "@/lib/verify/config";
+import type { VerifyConfig } from "@/lib/verify/verify-constants";
 import { withVerificationWorktreeLock } from "@/lib/verify/execution-lock";
 import { buildRegressionFixSection } from "@/lib/verify/regression-report";
 import { runVerification as executeVerification } from "@/lib/verify/runner";
@@ -243,13 +244,11 @@ async function runPipelineVerification(
   init: PipelineStageDriverInit,
   lastCodeSessionId: string | null
 ): Promise<PipelineDeterministicVerificationOutcome> {
-  // Applicability is decided by plain DB reads plus a path check. They are
-  // wrapped together so the stage is TOTAL: a fault here must resolve to
-  // "did not apply", never to a thrown verification. The runner's crash
-  // path would otherwise fail the run and park the ticket — possibly a
-  // fully green branch — for a fault that says nothing about the branch.
-  // This mirrors the regression gate's stance (lib/pipeline/verify.ts).
-  // Every non-disabled skip carries a reason: the runner traces it into
+  // Applicability is decided by plain DB reads plus path checks. ONLY those
+  // reads sit inside the try: the stage must be TOTAL for faults that say
+  // nothing about the branch (mirroring lib/pipeline/verify.ts), while a
+  // genuine execution fault still reaches the runner's crash path. Every
+  // non-disabled skip carries a reason: the runner traces it into
   // ticket_activity_log, because a silent skip would be indistinguishable
   // from "the configured checks passed".
   const notRun = (): PipelineDeterministicVerificationOutcome => ({
@@ -261,6 +260,11 @@ async function runPipelineVerification(
     return { ran: false, result: null, skipReason: reason };
   };
 
+  let plan: {
+    worktreePath: string;
+    commands: VerifyConfig["commands"];
+    timeoutMs: number;
+  } | null = null;
   try {
     const config = resolveVerifyConfigForProject(init.projectId);
     if (!config.enabled) return notRun();
@@ -296,31 +300,49 @@ async function runPipelineVerification(
     // unmanaged path, even when durable session state records one.
     assertManagedEpicWorktreePath(worktreePath, project.gitRepoPath);
 
-    const result = await withVerificationWorktreeLock(
-      worktreePath,
-      () =>
-        executeVerification({
-          projectId: init.projectId,
-          epicId: init.epicId,
-          agentSessionId: lastCodeSessionId,
-          worktreePath,
-          commands: config.commands,
-          timeoutMs: config.timeoutMs,
-        })
-    );
+    // A session row can outlive a worktree pruned after a merge. Spawning
+    // into a missing cwd would surface as a spawn error — a phantom
+    // "failing command" that burns a real fix cycle.
+    if (!fs.existsSync(worktreePath)) {
+      return skip(
+        "the recorded epic worktree no longer exists on disk (pruned?)"
+      );
+    }
 
-    // The manual route emits this too. Without it the board and the open
-    // EpicDetail panel never learn that an autonomous run's checks have
-    // finished (or failed) until the panel is closed and reopened.
-    emitTicketUpdated(init.projectId, init.epicId, {
-      verifyReportId: result.id,
-      verifyStatus: result.status,
-    });
-    return { ran: true, result };
+    plan = {
+      worktreePath,
+      commands: config.commands,
+      timeoutMs: config.timeoutMs,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return skip(`applicability check failed: ${message}`);
   }
+
+  // Deliberately OUTSIDE the applicability try: from here on a thrown fault
+  // is an execution fault, and it belongs to the runner's crash path rather
+  // than to a "skipped" trace.
+  const result = await withVerificationWorktreeLock(
+    plan.worktreePath,
+    () =>
+      executeVerification({
+        projectId: init.projectId,
+        epicId: init.epicId,
+        agentSessionId: lastCodeSessionId,
+        worktreePath: plan.worktreePath,
+        commands: plan.commands,
+        timeoutMs: plan.timeoutMs,
+      })
+  );
+
+  // The manual route emits this too. Without it the board and the open
+  // EpicDetail panel never learn that an autonomous run's checks have
+  // finished (or failed) until the panel is closed and reopened.
+  emitTicketUpdated(init.projectId, init.epicId, {
+    verifyReportId: result.id,
+    verifyStatus: result.status,
+  });
+  return { ran: true, result };
 }
 
 /**

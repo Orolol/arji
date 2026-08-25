@@ -1,12 +1,13 @@
 import fs from "fs";
 import path from "path";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   agentSessions,
   epics,
   projects,
   ticketComments,
+  verifyReports,
 } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { agentScheduler } from "@/lib/agents/scheduler";
@@ -38,6 +39,7 @@ import {
 } from "@/lib/git/manager";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { applyTransition } from "@/lib/workflow/transition-service";
+import { resolveVerifyConfigForProject } from "@/lib/verify/config";
 import { logTransition } from "@/lib/workflow/log";
 import { createAutoModeMergeParkedNotification } from "@/lib/notifications/create";
 import type { KanbanStatus } from "@/lib/types/kanban";
@@ -281,6 +283,68 @@ export async function tryAutoMerge(
   }
 }
 
+/**
+ * Refusal reason when deterministic verification is configured but cannot
+ * vouch for this epic's branch, or null when the merge may proceed.
+ *
+ * The gate compares the newest `verify_reports` row for the epic against
+ * the epic's last code-changing session (build/fix): a report that predates
+ * that session describes a tree that no longer exists, and a failed or
+ * missing report means nothing was proven. Verification not configured is
+ * deliberately silent — the feature is off, not unsatisfied.
+ */
+function verificationGateReason(
+  projectId: string,
+  epicId: string
+): string | null {
+  const config = resolveVerifyConfigForProject(projectId);
+  if (!config.enabled) return null;
+
+  const latestReport = db
+    .select({
+      status: verifyReports.status,
+      finishedAt: verifyReports.finishedAt,
+    })
+    .from(verifyReports)
+    .where(
+      and(
+        eq(verifyReports.projectId, projectId),
+        eq(verifyReports.epicId, epicId)
+      )
+    )
+    .orderBy(desc(verifyReports.finishedAt), desc(verifyReports.id))
+    .get();
+  if (!latestReport) {
+    return "deterministic verification has never run for this epic";
+  }
+  if (latestReport.status !== "pass") {
+    return "the latest deterministic verification did not pass";
+  }
+
+  const lastCodeSession = db
+    .select({
+      createdAt: agentSessions.createdAt,
+      endedAt: agentSessions.endedAt,
+    })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.projectId, projectId),
+        eq(agentSessions.epicId, epicId),
+        inArray(agentSessions.agentType, ["build", "fix"])
+      )
+    )
+    .orderBy(desc(agentSessions.createdAt))
+    .get();
+  if (!lastCodeSession) return null;
+
+  const codeEndedAt = lastCodeSession.endedAt ?? lastCodeSession.createdAt;
+  if (codeEndedAt && latestReport.finishedAt < codeEndedAt) {
+    return "the passing verification predates the most recent code session";
+  }
+  return null;
+}
+
 async function runAutoMerge(
   projectId: string,
   epicId: string,
@@ -312,6 +376,24 @@ async function runAutoMerge(
   }
 
   const fromStatus = (epic.status ?? "review") as KanbanStatus;
+
+  // Mechanical-evidence gate. With verify_commands configured, the mode
+  // that merges to the default branch unattended must not do so on agent
+  // prose alone: require a PASSING deterministic verification produced no
+  // earlier than the last code-changing session ended. A block is logged
+  // and skipped (never parked) — the next passing report unlocks it.
+  const verificationBlock = verificationGateReason(projectId, epicId);
+  if (verificationBlock) {
+    logTransition({
+      projectId,
+      epicId,
+      fromStatus,
+      toStatus: fromStatus,
+      actor: "system",
+      reason: AUTO_MODE_REASONS.mergeRefused(verificationBlock),
+    });
+    return { status: "skipped", reason: verificationBlock, sessionId: null };
+  }
 
   // Pre-flight the workflow guards. A refusal here is the "review is not
   // actually OK" answer (no completed review, or an open review comment) —
