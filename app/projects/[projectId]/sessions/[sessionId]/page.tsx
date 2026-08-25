@@ -16,6 +16,7 @@ import {
   Brain,
 } from "lucide-react";
 import { PROVIDER_LABELS } from "@/lib/agent-config/constants";
+import { MEMORY_WRITER_AGENT_TYPES } from "@/lib/workflow/dreaming-constants";
 import { SessionOutcomeBadge } from "@/components/shared/SessionOutcomeBadge";
 import {
   ArijActionsList,
@@ -68,6 +69,7 @@ const AGENT_TYPE_LABELS: Record<string, string> = {
   merge: "Merge",
   tech_check: "Tech Check",
   memory_distill: "Memory Distill",
+  dreaming: "Dreaming",
   forensic: "Forensic",
 };
 
@@ -267,8 +269,10 @@ export default function SessionDetailPage() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Never offer to distill a session that WROTE the memory — a
+              distill of a distill (or of a dream) has no source learnings. */}
           {session.status === "completed" &&
-            session.agentType !== "memory_distill" && (
+            !MEMORY_WRITER_AGENT_TYPES.includes(session.agentType ?? "") && (
               <Button
                 variant="outline"
                 size="sm"

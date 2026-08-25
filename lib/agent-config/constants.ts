@@ -13,6 +13,7 @@ export const AGENT_TYPES = [
   "e2e_test",
   "release_notes",
   "memory_distill",
+  "dreaming",
   "forensic",
 ] as const;
 
@@ -42,6 +43,7 @@ export const AGENT_TYPE_LABELS: Record<AgentType, string> = {
   e2e_test: "E2E Test",
   release_notes: "Release Notes",
   memory_distill: "Memory Distill",
+  dreaming: "Dreaming",
   forensic: "Forensic",
 };
 
@@ -71,6 +73,7 @@ export const BUILTIN_AGENT_PROMPTS: Record<AgentType, string> = {
   e2e_test: "",
   release_notes: "",
   memory_distill: "",
+  dreaming: "",
   forensic: "",
 };
 

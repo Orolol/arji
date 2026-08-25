@@ -12,6 +12,8 @@ import { db as defaultDb, type ArijDatabase } from "@/lib/db";
 import { documents } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import {
+  MEMORY_ARCHIVE_DOC_FILENAME,
+  MEMORY_ARCHIVE_DOC_KIND,
   MEMORY_DOC_FILENAME,
   MEMORY_DOC_KIND,
   PROJECT_MEMORY_MAX_CHARS,
@@ -124,4 +126,80 @@ export function saveProjectMemory(
     throw new Error("Failed to persist project memory document");
   }
   return { doc, truncated };
+}
+
+/** The project's pre-dream memory snapshot row, or null when none exists. */
+export function getProjectMemoryArchiveDoc(
+  projectId: string,
+  database: ArijDatabase = defaultDb
+): MemoryDocRecord | null {
+  return (
+    database
+      .select()
+      .from(documents)
+      .where(
+        and(
+          eq(documents.projectId, projectId),
+          eq(documents.kind, MEMORY_ARCHIVE_DOC_KIND)
+        )
+      )
+      .get() ?? null
+  );
+}
+
+/**
+ * Snapshots the memory a dream is about to overwrite (see
+ * MEMORY_ARCHIVE_DOC_KIND for why exactly one row is kept).
+ *
+ * Empty/absent content is a no-op: there is nothing to lose, and writing an
+ * empty archive would only hide the previous, real snapshot. Returns the
+ * archive row when one was written.
+ */
+export function archiveProjectMemory(
+  projectId: string,
+  content: string | null | undefined,
+  database: ArijDatabase = defaultDb
+): MemoryDocRecord | null {
+  const body = content?.trim();
+  if (!body) return null;
+
+  const capped = enforceMemoryCap(body);
+  const now = new Date().toISOString();
+  const existing = getProjectMemoryArchiveDoc(projectId, database);
+
+  if (existing) {
+    database
+      .update(documents)
+      .set({ markdownContent: capped, sizeBytes: capped.length, updatedAt: now })
+      .where(eq(documents.id, existing.id))
+      .run();
+    return (
+      database
+        .select()
+        .from(documents)
+        .where(eq(documents.id, existing.id))
+        .get() ?? { ...existing, markdownContent: capped }
+    );
+  }
+
+  const id = createId();
+  database
+    .insert(documents)
+    .values({
+      id,
+      projectId,
+      originalFilename: MEMORY_ARCHIVE_DOC_FILENAME,
+      kind: MEMORY_ARCHIVE_DOC_KIND,
+      markdownContent: capped,
+      imagePath: null,
+      mimeType: "text/markdown",
+      sizeBytes: capped.length,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+
+  return (
+    database.select().from(documents).where(eq(documents.id, id)).get() ?? null
+  );
 }

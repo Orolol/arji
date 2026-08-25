@@ -26,10 +26,36 @@ export const MEMORY_DOC_FILENAME = "Project memory";
 
 /**
  * Hard cap on the memory doc body, enforced on every write path (manual
- * editor rejects, distillation truncates). Keeps the prompt injection
- * token-cheap by construction.
+ * editor rejects, distillation and dreaming truncate). Keeps the prompt
+ * injection token-cheap by construction.
+ *
+ * Raised 4000 → 8000 for Dreaming (lib/workflow/dreaming.ts): a memory
+ * distilled from ONE session is a handful of conventions, but one dreamed
+ * across dozens of sessions carries four sections (codebase traps, recurring
+ * agent mistakes, strategies that work, build instructions) and was being cut
+ * mid-sentence at 4000. The cost is bounded and known: `memorySection()`
+ * injects this document into every agent prompt for the project (~10 builders
+ * in lib/claude/prompt-builder.ts plus the forensic prompt), so the ceiling
+ * moves from ~1k to ~2k tokens of prompt per session — still an order of
+ * magnitude under the spec and board context that ride alongside it.
  */
-export const PROJECT_MEMORY_MAX_CHARS = 4000;
+export const PROJECT_MEMORY_MAX_CHARS = 8000;
+
+/**
+ * `documents.kind` of the pre-dream memory snapshot.
+ *
+ * A dream REPLACES the whole memory document, so the text it overwrites is
+ * kept as exactly one archive row per project — the previous version, not a
+ * history. One row was the deliberate call: a growing archive would need its
+ * own pruning policy and a UI to be worth anything, while "undo the last
+ * dream" is the only recovery anyone actually needs. Its own kind (rather than
+ * 'text') keeps it out of `listProjectTextDocuments`, so an archived memory is
+ * never injected into a prompt as a reference document.
+ */
+export const MEMORY_ARCHIVE_DOC_KIND = "memory_archive";
+
+/** Display name stored in `documents.original_filename` for the snapshot. */
+export const MEMORY_ARCHIVE_DOC_FILENAME = "Project memory (pre-dream snapshot)";
 
 /**
  * Settings key for the optional auto-distillation mode: when the stored

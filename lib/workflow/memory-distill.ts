@@ -66,6 +66,7 @@ import {
   MEMORY_AUTO_DISTILL_SETTING_KEY,
   parseMemoryAutoDistillSetting,
 } from "@/lib/documents/memory-constants";
+import { MEMORY_WRITER_AGENT_TYPES } from "./dreaming-constants";
 import { logTransition } from "./log";
 
 const POLL_INTERVAL_MS = 2000;
@@ -78,8 +79,8 @@ export const MEMORY_UPDATED_REASON = "Project memory updated";
 
 /**
  * Source agent types eligible for auto-distillation: the build flavors.
- * Reviews, QA, merges and (critically) 'memory_distill' itself never
- * auto-trigger.
+ * Reviews, QA, merges and (critically) the memory writers themselves
+ * ('memory_distill', 'dreaming') never auto-trigger.
  */
 export const AUTO_DISTILL_SOURCE_AGENT_TYPES: readonly string[] = [
   "build",
@@ -125,7 +126,8 @@ export interface AutoDistillDecision {
  *   - setting off (default),
  *   - unknown session,
  *   - non-completed status (failures/cancellations never distill),
- *   - 'memory_distill' source (never distill a distill),
+ *   - a memory WRITER source ('memory_distill' or 'dreaming' — never distill
+ *     a distill, never distill a dream),
  *   - non-build agent types,
  *   - asked_question outcome (the build is still awaiting the user — its
  *     learnings are not settled yet),
@@ -148,7 +150,10 @@ export function evaluateAutoDistillGuards(input: {
       reason: `session status is '${input.session.status ?? "unknown"}', not 'completed'`,
     };
   }
-  if (input.session.agentType === "memory_distill") {
+  if (
+    input.session.agentType &&
+    MEMORY_WRITER_AGENT_TYPES.includes(input.session.agentType)
+  ) {
     return { allowed: false, reason: "never distill a distill session" };
   }
   if (
