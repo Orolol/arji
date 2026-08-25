@@ -27,7 +27,11 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dreaming, setDreaming] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  // The last text the server confirmed (load or save). `dirty` is DERIVED from
+  // it rather than latched by keystrokes: typing a character and deleting it
+  // again left the card claiming unsaved edits, which disabled Dream and told
+  // the user to "save or discard" something that no longer differed.
+  const [savedContent, setSavedContent] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,8 +54,8 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
       .then((data) => {
         if (cancelled) return;
         setContent(data.data?.content ?? "");
+        setSavedContent(data.data?.content ?? "");
         setUpdatedAt(data.data?.updatedAt ?? null);
-        setDirty(false);
         setLoaded(true);
       })
       .catch((err: Error) => {
@@ -68,6 +72,7 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
   }, [projectId]);
 
   const overCap = content.length > PROJECT_MEMORY_MAX_CHARS;
+  const dirty = content !== savedContent;
 
   async function handleSave() {
     setSaving(true);
@@ -85,7 +90,7 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
         return;
       }
       setUpdatedAt(data.data?.updatedAt ?? null);
-      setDirty(false);
+      setSavedContent(content);
       setMessage("Project memory saved.");
     } catch {
       setError("Failed to save project memory.");
@@ -166,19 +171,36 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
             value={content}
             onChange={(event) => {
               setContent(event.target.value);
-              setDirty(true);
               setMessage(null);
             }}
             placeholder="No project memory yet. Write durable conventions here, or distill them from a completed session."
             className="min-h-[160px] rounded-[10px] border-agent-border bg-card font-mono text-[12px] leading-[1.6]"
           />
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-[11px] text-agent">
+          {/* Wraps: in the narrow Docs aside a locale timestamp plus two
+              buttons does not fit on one line, and a non-wrapping row pushed
+              the controls out of the card entirely. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0 truncate font-mono text-[11px] text-agent">
               {updatedAt
                 ? `last updated ${new Date(updatedAt).toLocaleString()}`
                 : "never updated"}
             </span>
-            <div className="flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-2">
+              {dirty && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-[29px] rounded-[8px] text-[12.5px]"
+                  onClick={() => {
+                    setContent(savedContent);
+                    setMessage(null);
+                  }}
+                  disabled={saving}
+                  title="Restore the saved memory, discarding your edits"
+                >
+                  Discard
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
