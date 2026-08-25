@@ -39,6 +39,7 @@ import {
   buildUnresolvedMentionsTitle,
   createUnresolvedMentionsNotification,
   createRoutineRunNotification,
+  createCiWatchFailureNotification,
 } from "@/lib/notifications/create";
 
 // ---- Tests ----
@@ -341,6 +342,39 @@ describe("createRoutineRunNotification()", () => {
       title: "Night run routine triggered",
       message: "Night run night-1 started.",
       targetUrl: "/projects/p1?nightRun=night-1",
+    });
+  });
+});
+
+describe("createCiWatchFailureNotification()", () => {
+  beforeEach(() => {
+    resetDbMockState();
+    mockSqliteState.pruneCount = { cnt: 5 };
+  });
+
+  it("lists failed checks and deep-links to the affected epic", () => {
+    dbMockState.getQueue.push({ name: "My Project" });
+
+    createCiWatchFailureNotification({
+      projectId: "p1",
+      epicId: "e1",
+      epicTitle: "Checkout",
+      epicReadableId: "E-shop-004",
+      prNumber: 42,
+      headSha: "1234567890abcdef",
+      failedChecks: ["lint", "unit"],
+    });
+
+    expect(dbMockState.insertCalls).toContainEqual({
+      id: "notif-123",
+      projectId: "p1",
+      projectName: "My Project",
+      sessionId: null,
+      agentType: "ci_watch",
+      status: "failed",
+      title: "CI failed on PR #42 — E-shop-004: Checkout",
+      message: "Failing checks: lint, unit. Head 1234567890ab.",
+      targetUrl: "/projects/p1?ticket=e1",
     });
   });
 });

@@ -39,6 +39,11 @@ function deps(): RoutineActionDeps {
     })),
     isGitHubIssueSyncDue: vi.fn(() => true),
     syncProjectGitHubIssues: vi.fn(async () => ({ synced: 3 })),
+    runCiWatch: vi.fn(async () => ({
+      status: "completed" as const,
+      message: "CI checked",
+      targetUrl: "/projects/project-1",
+    })),
   };
 }
 
@@ -149,5 +154,14 @@ describe("executeRoutineAction", () => {
 
     expect(result.status).toBe("skipped");
     expect(actionDeps.syncProjectGitHubIssues).not.toHaveBeenCalled();
+  });
+
+  it("delegates CI watch to its polling service", async () => {
+    const row = routine({ kind: "ci_watch" });
+
+    const result = await executeRoutineAction(row, actionDeps);
+
+    expect(actionDeps.runCiWatch).toHaveBeenCalledWith(row);
+    expect(result.message).toBe("CI checked");
   });
 });

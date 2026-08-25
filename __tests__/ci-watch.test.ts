@@ -1,0 +1,190 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { dbMockState, resetDbMockState } from "@/__tests__/helpers/db-mock";
+import type { Routine } from "@/lib/db/schema";
+
+vi.mock("@/lib/db", async () => {
+  const { dbModuleMock } = await import("@/__tests__/helpers/db-mock");
+  return dbModuleMock();
+});
+
+import {
+  isCiAutofixEnabled,
+  nextCiObservation,
+  runCiWatchRoutine,
+  type CiWatchDeps,
+  type CiWatchEpic,
+} from "@/lib/routines/ci-watch";
+
+function routine(overrides: Partial<Routine> = {}): Routine {
+  return {
+    id: "routine-1",
+    projectId: "project-1",
+    kind: "ci_watch",
+    enabled: true,
+    timeOfDay: "00:00",
+    config: JSON.stringify({ intervalMinutes: 10 }),
+    lastRunAt: null,
+    lastStatus: null,
+    ...overrides,
+  };
+}
+
+const EPICS: CiWatchEpic[] = [
+  {
+    id: "epic-open",
+    title: "Open PR",
+    readableId: "E-proj-001",
+    prNumber: 11,
+    prStatus: "open",
+  },
+  {
+    id: "epic-closed",
+    title: "Closed PR",
+    readableId: "E-proj-002",
+    prNumber: 12,
+    prStatus: "closed",
+  },
+  {
+    id: "epic-no-pr",
+    title: "No PR",
+    readableId: "E-proj-003",
+    prNumber: null,
+    prStatus: "open",
+  },
+];
+
+function deps(row: Routine): CiWatchDeps {
+  return {
+    listOpenPullRequestEpics: vi.fn(() => EPICS),
+    getGitHubOwnerRepo: vi.fn(() => "acme/widgets"),
+    fetchPullRequestCi: vi.fn(async () => ({
+      headSha: "sha-1",
+      state: "failing" as const,
+      failedChecks: ["lint", "unit"],
+    })),
+    persistConfig: vi.fn((_id, config) => {
+      row.config = config;
+    }),
+    notifyFailure: vi.fn(),
+  };
+}
+
+describe("CI watch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetDbMockState();
+  });
+
+  it("polls only open PRs with a PR number", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+
+    await runCiWatchRoutine(row, watchDeps);
+
+    expect(watchDeps.fetchPullRequestCi).toHaveBeenCalledTimes(1);
+    expect(watchDeps.fetchPullRequestCi).toHaveBeenCalledWith(
+      "acme",
+      "widgets",
+      11
+    );
+  });
+
+  it("notifies a failing SHA once and includes the failed check names", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+
+    await runCiWatchRoutine(row, watchDeps);
+    await runCiWatchRoutine(row, watchDeps);
+
+    expect(watchDeps.notifyFailure).toHaveBeenCalledTimes(1);
+    expect(watchDeps.notifyFailure).toHaveBeenCalledWith({
+      projectId: "project-1",
+      epicId: "epic-open",
+      epicTitle: "Open PR",
+      epicReadableId: "E-proj-001",
+      prNumber: 11,
+      headSha: "sha-1",
+      failedChecks: ["lint", "unit"],
+    });
+  });
+
+  it("reports a red transition after an initial green observation", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.fetchPullRequestCi)
+      .mockResolvedValueOnce({
+        headSha: "sha-1",
+        state: "passing",
+        failedChecks: [],
+      })
+      .mockResolvedValueOnce({
+        headSha: "sha-1",
+        state: "failing",
+        failedChecks: ["e2e"],
+      });
+
+    await runCiWatchRoutine(row, watchDeps);
+    expect(watchDeps.notifyFailure).not.toHaveBeenCalled();
+    await runCiWatchRoutine(row, watchDeps);
+
+    expect(watchDeps.notifyFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows one new alert after the PR receives a new head SHA", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.fetchPullRequestCi)
+      .mockResolvedValueOnce({
+        headSha: "sha-1",
+        state: "failing",
+        failedChecks: ["unit"],
+      })
+      .mockResolvedValueOnce({
+        headSha: "sha-2",
+        state: "failing",
+        failedChecks: ["unit"],
+      });
+
+    await runCiWatchRoutine(row, watchDeps);
+    await runCiWatchRoutine(row, watchDeps);
+
+    expect(watchDeps.notifyFailure).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a SHA notified even if the same SHA temporarily turns green", () => {
+    const first = nextCiObservation(undefined, 11, {
+      headSha: "sha-1",
+      state: "failing",
+      failedChecks: ["unit"],
+    });
+    const green = nextCiObservation(first.observation, 11, {
+      headSha: "sha-1",
+      state: "passing",
+      failedChecks: [],
+    });
+    const redAgain = nextCiObservation(green.observation, 11, {
+      headSha: "sha-1",
+      state: "failing",
+      failedChecks: ["unit"],
+    });
+
+    expect(first.shouldNotify).toBe(true);
+    expect(green.shouldNotify).toBe(false);
+    expect(redAgain.shouldNotify).toBe(false);
+  });
+
+  it("defaults CI autofix to OFF and honors explicit tri-state overrides", () => {
+    expect(isCiAutofixEnabled("project-1")).toBe(false);
+
+    dbMockState.allRows = [
+      { key: "ci_autofix_enabled", value: "true" },
+      { key: "ci_autofix_enabled:project-1", value: "false" },
+    ];
+    expect(isCiAutofixEnabled("project-1")).toBe(false);
+
+    dbMockState.allRows = [
+      { key: "ci_autofix_enabled", value: "true" },
+    ];
+    expect(isCiAutofixEnabled("project-1")).toBe(true);
+  });
+});

@@ -147,6 +147,45 @@ export function createRoutineRunNotification(input: {
   pruneNotifications();
 }
 
+/** One durable, ticket-scoped alarm for a failing PR head SHA. */
+export function createCiWatchFailureNotification(input: {
+  projectId: string;
+  epicId: string;
+  epicTitle: string;
+  epicReadableId: string | null;
+  prNumber: number;
+  headSha: string;
+  failedChecks: string[];
+}): void {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  const ticket = input.epicReadableId
+    ? `${input.epicReadableId}: ${input.epicTitle}`
+    : input.epicTitle;
+  const failedChecks = input.failedChecks.join(", ") || "unknown check";
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: null,
+      agentType: "ci_watch",
+      status: "failed",
+      title: `CI failed on PR #${input.prNumber} — ${ticket}`,
+      message: `Failing checks: ${failedChecks}. Head ${input.headSha.slice(0, 12)}.`,
+      targetUrl: buildEpicTargetUrl(input.projectId, input.epicId),
+    })
+    .run();
+
+  pruneNotifications();
+}
+
 /**
  * Title for a watchdog "agent seems stalled" notification.
  *

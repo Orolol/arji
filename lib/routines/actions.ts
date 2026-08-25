@@ -5,8 +5,9 @@ import {
   isGitHubIssueSyncDue,
   syncProjectGitHubIssues,
 } from "@/lib/github/issues";
+import { runCiWatchRoutine } from "@/lib/routines/ci-watch";
 
-/** Result persisted and surfaced by the daily routine scheduler. */
+/** Result persisted and surfaced by the routine scheduler. */
 export interface RoutineActionResult {
   status: "completed" | "skipped";
   message: string;
@@ -38,6 +39,7 @@ export interface RoutineActionDeps {
   }>;
   isGitHubIssueSyncDue(projectId: string, intervalMinutes: number): boolean;
   syncProjectGitHubIssues(projectId: string): Promise<{ synced: number }>;
+  runCiWatch(routine: Routine): Promise<RoutineActionResult>;
 }
 
 /**
@@ -99,6 +101,7 @@ export const defaultRoutineActionDeps: RoutineActionDeps = {
   launchNightRun: launchNightRunThroughBuildRoute,
   isGitHubIssueSyncDue,
   syncProjectGitHubIssues,
+  runCiWatch: runCiWatchRoutine,
 };
 
 function parseConfig(routine: Pick<Routine, "id" | "config">): Record<string, unknown> {
@@ -244,7 +247,7 @@ async function runGitHubIssueSyncRoutine(
   };
 }
 
-/** Execute one currently supported daily kind through its canonical service. */
+/** Execute one currently supported routine kind through its canonical service. */
 export async function executeRoutineAction(
   routine: Routine,
   deps: RoutineActionDeps = defaultRoutineActionDeps
@@ -254,8 +257,9 @@ export async function executeRoutineAction(
       return runNightRoutine(routine, deps);
     case "github_issue_sync":
       return runGitHubIssueSyncRoutine(routine, deps);
-    case "dreaming":
     case "ci_watch":
+      return deps.runCiWatch(routine);
+    case "dreaming":
       throw new Error(`Routine kind ${routine.kind} is not available yet`);
   }
 }

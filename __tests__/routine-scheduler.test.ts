@@ -70,7 +70,7 @@ describe("isRoutineDue", () => {
     expect(isRoutineDue(row, localDate(25, 18, 0))).toBe(true);
   });
 
-  it("ignores disabled, invalid-time, and not-yet-daily kinds", () => {
+  it("ignores disabled, invalid-time, and unavailable daily kinds", () => {
     expect(isRoutineDue(routine({ enabled: false }), localDate(25, 12, 0))).toBe(
       false
     );
@@ -78,8 +78,22 @@ describe("isRoutineDue", () => {
       isRoutineDue(routine({ timeOfDay: "25:00" }), localDate(25, 12, 0))
     ).toBe(false);
     expect(
-      isRoutineDue(routine({ kind: "ci_watch" }), localDate(25, 12, 0))
+      isRoutineDue(routine({ kind: "dreaming" }), localDate(25, 12, 0))
     ).toBe(false);
+  });
+
+  it("runs CI watch on its configured interval and survives restart state", () => {
+    const row = routine({
+      kind: "ci_watch",
+      config: JSON.stringify({ intervalMinutes: 10 }),
+      lastRunAt: localDate(25, 9, 20).toISOString(),
+    });
+
+    expect(isRoutineDue(row, localDate(25, 9, 29))).toBe(false);
+    expect(isRoutineDue(row, localDate(25, 9, 30))).toBe(true);
+    expect(isRoutineDue({ ...row, lastRunAt: null }, localDate(25, 1, 0))).toBe(
+      true
+    );
   });
 });
 

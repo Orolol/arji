@@ -6,6 +6,7 @@ import {
   executeRoutineAction,
   type RoutineActionResult,
 } from "@/lib/routines/actions";
+import { DEFAULT_CI_WATCH_INTERVAL_MINUTES } from "@/lib/routines/ci-watch";
 
 export const ROUTINE_SWEEP_INTERVAL_MS = 60_000;
 
@@ -25,11 +26,34 @@ export function isSameLocalDay(left: Date, right: Date): boolean {
 }
 
 /**
- * Pure daily-dueness decision. `lastRunAt` is durable, so a new scheduler
+ * Pure dueness decision. Daily routines compare local calendar days; CI watch
+ * compares its minute interval. `lastRunAt` is durable, so a new scheduler
  * instance after a server restart reaches the same answer as the old one.
  */
 export function isRoutineDue(routine: Routine, now: Date = new Date()): boolean {
-  if (!routine.enabled || !DAILY_KINDS.has(routine.kind)) return false;
+  if (!routine.enabled) return false;
+
+  if (routine.kind === "ci_watch") {
+    let intervalMinutes = DEFAULT_CI_WATCH_INTERVAL_MINUTES;
+    try {
+      const config = JSON.parse(routine.config) as { intervalMinutes?: unknown };
+      if (
+        Number.isInteger(config?.intervalMinutes) &&
+        (config.intervalMinutes as number) > 0
+      ) {
+        intervalMinutes = config.intervalMinutes as number;
+      }
+    } catch {
+      // Let the action report malformed config after the default interval.
+    }
+
+    if (!routine.lastRunAt) return true;
+    const lastRunAt = new Date(routine.lastRunAt);
+    if (Number.isNaN(lastRunAt.getTime())) return true;
+    return now.getTime() - lastRunAt.getTime() >= intervalMinutes * 60_000;
+  }
+
+  if (!DAILY_KINDS.has(routine.kind)) return false;
   if (!TIME_OF_DAY_PATTERN.test(routine.timeOfDay)) return false;
 
   const [hours, minutes] = routine.timeOfDay.split(":").map(Number);
