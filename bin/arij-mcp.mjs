@@ -142,14 +142,15 @@ const AGENT_TOOLS = [
   {
     name: "submit_findings",
     description:
-      "(Review sessions) File structured review findings: each finding anchors to file_path+line and becomes an open review comment that blocks approval until resolved; include an overall verdict and summary. Still end your final message with the required '**Overall Verdict: …**' line.",
+      "(Review sessions) Submit your review: the verdict here is what Arij acts on — it decides whether the ticket goes back for changes. Each finding anchors to file_path+line and becomes an open review comment that blocks approval until resolved, so an 'approved' verdict alongside an open critical/major finding still blocks. Call this once, at the end, then still end your final message with the required '**Overall Verdict: …**' line (the fallback Arij reads only when no verdict was submitted).",
     inputSchema: {
       type: "object",
       properties: {
         verdict: {
           type: "string",
           enum: ["approved", "approved_with_minor_issues", "changes_requested"],
-          description: "Overall review verdict.",
+          description:
+            "Overall review verdict. Persisted on this session and read as the authoritative signal for the ticket's next transition.",
         },
         summary: {
           type: "string",

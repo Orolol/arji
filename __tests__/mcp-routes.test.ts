@@ -29,7 +29,7 @@ import {
   revokeMcpTokensForSession,
   wasQuestionAskedViaMcp,
 } from "@/lib/mcp/token-store";
-import { eq } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 
 const testDb = vi.hoisted(() => ({
   instance: null as ReturnType<
@@ -1091,6 +1091,71 @@ describe("POST /api/mcp/submit-findings", () => {
         "**Review findings (changes requested)**\n\nTwo issues to address before approval.",
       agentSessionId: sessionId,
     });
+  });
+
+  it("persists the verdict on the calling session row", async () => {
+    // The structured verdict is what the transition drivers read
+    // (lib/pipeline/findings.ts); a summary-only review still has one.
+    const res = await call(
+      submitFindingsPost,
+      {
+        verdict: "changes_requested",
+        summary: "The retry path is still unbounded.",
+        findings: [],
+      },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    const session = db()
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .get();
+    expect(session?.reviewVerdict).toBe("changes_requested");
+  });
+
+  it("lets a second call overwrite the verdict — the last word wins", async () => {
+    await call(
+      submitFindingsPost,
+      { verdict: "changes_requested", summary: "First pass.", findings: [] },
+      token
+    );
+    await call(
+      submitFindingsPost,
+      {
+        verdict: "approved",
+        summary: "Re-read it; the concern was mine, not the code's.",
+        findings: [],
+      },
+      token
+    );
+
+    const session = db()
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .get();
+    expect(session?.reviewVerdict).toBe("approved");
+  });
+
+  it("leaves the verdict of every OTHER session untouched", async () => {
+    const res = await call(
+      submitFindingsPost,
+      { verdict: "approved", summary: "ok", findings: [] },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    const others = db()
+      .select()
+      .from(agentSessions)
+      .where(ne(agentSessions.id, sessionId))
+      .all();
+    expect(others.length).toBeGreaterThan(0);
+    for (const row of others) {
+      expect(row.reviewVerdict).toBeNull();
+    }
   });
 
   it("accepts an empty findings list (summary-only review)", async () => {

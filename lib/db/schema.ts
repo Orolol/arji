@@ -169,6 +169,13 @@ export const agentSessions = sqliteTable("agent_sessions", {
   // answered | asked_question | silent | error. NULL while running/queued,
   // for user-cancelled sessions, and for legacy rows.
   outcome: text("outcome"),
+  // Structured review verdict submitted through the MCP `submit_findings`
+  // tool: approved | approved_with_minor_issues | changes_requested. The
+  // authoritative transition signal for a review stage — see
+  // lib/pipeline/findings.ts. NULL for non-review sessions, for reviewers
+  // that never called the tool (providers without MCP), and for legacy rows;
+  // NULL is what selects the prose-verdict fallback.
+  reviewVerdict: text("review_verdict"),
   // Usage reported by the CLI at session end. NULL for legacy rows,
   // non-terminal sessions, and providers that do not report usage.
   inputTokens: integer("input_tokens"),

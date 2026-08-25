@@ -8,19 +8,28 @@
  * bulk-resolves them. One summary ticket comment mirrors the verdict into the
  * activity feed (same mirror pattern as the review-comments route).
  *
- * The verdict does NOT drive ticket status server-side in v1: the review
- * revert driver remains the prose parse of the session output, so the tool
- * description orders agents to still end with the "**Overall Verdict: …**"
- * line.
+ * The verdict is persisted on the CALLING SESSION's row
+ * (agent_sessions.review_verdict) and is the authoritative transition signal
+ * for that review: lib/pipeline/findings.ts reads it first and only falls
+ * back to the prose scan when it is NULL — which is what a provider without
+ * MCP support leaves behind. The tool description still asks for the
+ * "**Overall Verdict: …**" line so a session whose verdict never reaches the
+ * database (crash between the tool call and the write, MCP-less reviewer)
+ * remains decidable.
+ *
+ * A reviewer calling the tool twice overwrites the verdict: the last call is
+ * the reviewer's final word, while the findings of both calls accumulate as
+ * separate rows (each one still has to be resolved).
  *
  * No ticket_id: findings always attach to the ticket the session was
  * launched for.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { reviewComments, ticketComments } from "@/lib/db/schema";
+import { agentSessions, reviewComments, ticketComments } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { isErrorResponse } from "@/lib/api/route-helpers";
 import { validateBody } from "@/lib/validation/validate";
@@ -95,6 +104,14 @@ export async function POST(request: NextRequest) {
       .run();
     findingIds.push(id);
   }
+
+  // The verdict belongs to the session, not to a finding — a summary-only
+  // review files zero findings and still delivered a verdict. Scoped to the
+  // token's own session id, so a review can only ever speak for itself.
+  db.update(agentSessions)
+    .set({ reviewVerdict: body.verdict })
+    .where(eq(agentSessions.id, auth.sessionId))
+    .run();
 
   const commentId = createId();
   db.insert(ticketComments)
