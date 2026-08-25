@@ -18,6 +18,7 @@ import {
 } from "@/components/kanban/epic-detail/EpicActivityFeed";
 import type { TicketComment } from "@/hooks/useTicketComments";
 import type { EpicActivityEntry } from "@/hooks/useEpicActivity";
+import { MCP_CREATE_BUG_ACTIVITY_PREFIX } from "@/lib/mcp/create-bug-contract";
 
 const mockUseEpicActivity = vi.hoisted(() => vi.fn());
 
@@ -113,7 +114,7 @@ function renderFeed(
 }
 
 const FEED_ITEM_SELECTOR =
-  '[data-testid="activity-comment"], [data-testid="activity-transition"], [data-testid="activity-transition-group"]';
+  '[data-testid="activity-comment"], [data-testid="activity-transition"], [data-testid="activity-bug-created"], [data-testid="activity-transition-group"]';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -259,6 +260,30 @@ describe("EpicActivityFeed", () => {
     expect(links[0]).toHaveAttribute(
       "href",
       "/projects/p1/sessions/sess-42"
+    );
+  });
+
+  it("renders an agent-created bug as a sourced creation, not a no-op move", () => {
+    const sessionId = "session-that-reported-the-bug";
+    renderFeed([
+      transition("created", at(0), {
+        actor: "agent",
+        fromStatus: "backlog",
+        toStatus: "backlog",
+        sessionId,
+        reason: `${MCP_CREATE_BUG_ACTIVITY_PREFIX} reported from E-arij-014; source session ${sessionId}`,
+      }),
+    ]);
+
+    const row = screen.getByTestId("activity-bug-created");
+    expect(row).toHaveTextContent("Agent");
+    expect(row).toHaveTextContent("created this bug");
+    expect(row).toHaveTextContent("reported from E-arij-014");
+    expect(row).not.toHaveTextContent("moved");
+    expect(screen.queryByTestId("activity-transition")).not.toBeInTheDocument();
+    expect(screen.getByText("View source session")).toHaveAttribute(
+      "href",
+      `/projects/p1/sessions/${sessionId}`,
     );
   });
 

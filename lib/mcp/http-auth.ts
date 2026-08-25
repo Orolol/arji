@@ -23,6 +23,19 @@ type Epic = typeof epics.$inferSelect;
 const BEARER_PATTERN = /^Bearer\s+(.+)$/i;
 
 /**
+ * Resolve an MCP bearer when one is present, without turning absence into an
+ * HTTP error. Canonical UI routes use this only for optional, authenticated
+ * provenance metadata; /api/mcp routes must keep using requireMcpToken.
+ */
+export function resolveOptionalMcpToken(
+  request: Request
+): McpTokenRecord | null {
+  const header = request.headers.get("authorization") ?? "";
+  const token = BEARER_PATTERN.exec(header)?.[1]?.trim();
+  return token ? resolveMcpToken(token) : null;
+}
+
+/**
  * Authenticate an MCP request from its `Authorization: Bearer` header.
  * Returns the token record, or a ready-to-return 401 response for missing,
  * unknown, and revoked tokens alike (indistinguishable on purpose).
@@ -30,9 +43,7 @@ const BEARER_PATTERN = /^Bearer\s+(.+)$/i;
 export function requireMcpToken(
   request: Request
 ): McpTokenRecord | NextResponse {
-  const header = request.headers.get("authorization") ?? "";
-  const token = BEARER_PATTERN.exec(header)?.[1]?.trim();
-  const record = token ? resolveMcpToken(token) : null;
+  const record = resolveOptionalMcpToken(request);
   if (!record) {
     return NextResponse.json(
       { error: "Invalid or expired MCP token", code: "UNAUTHORIZED" },
