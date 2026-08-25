@@ -20,19 +20,32 @@ export type AgentType = (typeof AGENT_TYPES)[number];
 
 /**
  * Agent types that produce code and own the in_progress column of the ticket
- * they are building. The workflow engine's in_progress lock
- * (lib/workflow/context.ts) and the "you may move your own ticket" prompt
- * sentence (lib/claude/prompt-sections.ts) must agree on this membership —
- * a new build type added to one but not the other recreates the "board
- * transition refused" bug for that type. The similar lists in
- * review-segregation, dispatch-reliability and auto-mode select for
- * different purposes and must stay separate.
+ * they are building. Drives the workflow engine's in_progress lock and
+ * owning-session exemption (lib/workflow/context.ts) and the terminal
+ * rollback sweeps (lib/agent-sessions/boot-cleanup.ts, lib/agents/scheduler.ts).
+ * The "you may move your own ticket" prompt sentence
+ * (lib/claude/prompt-sections.ts) uses this list minus team_build: a team
+ * session row carries no epicId, so its MCP token has no ticket and the move
+ * would 400 — promising it recreates the "board transition refused" bug for
+ * that type. The similar lists in review-segregation, dispatch-reliability
+ * and auto-mode select for different purposes and must stay separate.
  */
 export const CODE_PRODUCING_AGENT_TYPES = [
   "build",
   "ticket_build",
   "team_build",
 ] as const;
+
+/** True for the code-producing agent types; rows without a type are not. */
+export function isCodeProducingAgentType(
+  value: string | null | undefined
+): boolean {
+  return (
+    value !== null &&
+    value !== undefined &&
+    (CODE_PRODUCING_AGENT_TYPES as readonly string[]).includes(value)
+  );
+}
 
 export const BUILTIN_REVIEW_TYPES = [
   "security",

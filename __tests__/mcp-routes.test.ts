@@ -620,6 +620,39 @@ describe("POST /api/mcp/update-ticket-status", () => {
       .get();
     expect(epic?.status).toBe("todo");
   });
+
+  it("400s MISSING_TICKET for a ticket-less team_build session", async () => {
+    // Team builds are dispatched ticket-less: the session row has no epicId,
+    // so the token carries none and the route cannot address a ticket at
+    // all — the move the prompt no longer promises team_build.
+    const teamSessionId = createId();
+    db()
+      .insert(agentSessions)
+      .values({
+        id: teamSessionId,
+        projectId,
+        status: "running",
+        agentType: "team_build",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    const teamToken = mintMcpToken({
+      sessionId: teamSessionId,
+      projectId,
+      agentType: "team_build",
+    });
+
+    const res = await call(updateStatusPost, { status: "review" }, teamToken);
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.code).toBe("MISSING_TICKET");
+
+    // Nothing moved.
+    expect(
+      db().select().from(epics).where(eq(epics.id, epicId)).get()?.status
+    ).toBe("in_progress");
+  });
 });
 
 // ---------------------------------------------------------------------------

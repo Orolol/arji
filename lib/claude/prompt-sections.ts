@@ -202,8 +202,17 @@ export function arijToolsSection(agentType: string | null): string {
   // allowed to move it out of In Progress — the orchestrator also promotes
   // the ticket when the session ends, but moving it as soon as the work is
   // committed keeps the board honest while the session is still live.
+  // team_build is deliberately NOT offered the move: a team session row is
+  // dispatched ticket-less (no epicId), so its MCP token cannot address a
+  // ticket and update_ticket_status 400s with MISSING_TICKET. Promising the
+  // capability the tool channel cannot deliver recreates the "board
+  // transition refused" bug for that type. If team builds ever get a
+  // ticketed session row, add them back here.
+  const ticketMovingTypes = (CODE_PRODUCING_AGENT_TYPES as readonly string[]).filter(
+    (type) => type !== "team_build"
+  );
   const buildExtra =
-    agentType && (CODE_PRODUCING_AGENT_TYPES as readonly string[]).includes(agentType)
+    agentType && ticketMovingTypes.includes(agentType)
       ? " You may move the ticket you are building: once the work is " +
         "complete and committed, call update_ticket_status to move it to " +
         "Review. If the move is refused for any reason, post your result " +
