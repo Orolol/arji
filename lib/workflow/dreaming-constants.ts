@@ -222,6 +222,18 @@ export const DREAM_DIGEST_MAX_CHARS = 60_000;
 /** Per-session cap on the tail of the final response, before fair truncation. */
 export const DREAM_FINAL_TEXT_MAX_CHARS = 1200;
 
+/**
+ * How much of a session's final-response STREAM the collector reads before the
+ * render cap above trims it further.
+ *
+ * Wider than the render cap on purpose: the review verdict is scraped from the
+ * whole resolved text, and a report can carry a closing paragraph after its
+ * `**Overall Verdict: …**` line. Reading a comfortable tail keeps the scrape
+ * reliable at negligible cost, since only the last DREAM_FINAL_TEXT_MAX_CHARS
+ * ever reach the prompt.
+ */
+export const DREAM_FINAL_TEXT_SOURCE_MAX_CHARS = 4000;
+
 /** Per-session cap on an attached forensic diagnostic. */
 export const DREAM_FORENSIC_MAX_CHARS = 900;
 

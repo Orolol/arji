@@ -54,7 +54,10 @@ import {
   extractSessionUsage,
   resolveSessionOutput,
 } from "@/lib/claude/resolve-session-output";
-import { listSessionChunks } from "@/lib/agent-sessions/chunks";
+import {
+  listSessionChunks,
+  type AgentSessionStreamType,
+} from "@/lib/agent-sessions/chunks";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
@@ -155,7 +158,7 @@ function refused(error: string): RunForensicResult {
  */
 export function readChunkTail(
   sessionId: string,
-  streamType: "raw" | "output",
+  streamType: AgentSessionStreamType,
   maxChars: number
 ): string | null {
   let joined: string;

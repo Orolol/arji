@@ -43,6 +43,7 @@ const {
 const { FORENSIC_COMMENT_HEADING, forensicDeadSessionMarker } = await import(
   "@/lib/pipeline/forensic"
 );
+const { appendSessionChunk } = await import("@/lib/agent-sessions/chunks");
 
 const NOW = new Date("2026-08-25T12:00:00.000Z");
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -438,6 +439,130 @@ describe("collectDreamDigest — per-session record", () => {
     ]);
   });
 
+  /**
+   * Two reviewers on the same epic at once are indistinguishable by timestamp,
+   * so the time-window match handed each of them the other's findings — and the
+   * dream would then learn a lesson from the wrong run. Since migration 0031
+   * submit_findings records the filing session, and that link decides.
+   */
+  it("attributes findings by the recorded session, not by overlapping time", () => {
+    const reviewA = seedSession({
+      agentType: "review_code",
+      startedAt: minutesAgo(30),
+      createdAt: minutesAgo(30),
+      endedAt: minutesAgo(10),
+      completedAt: minutesAgo(10),
+    });
+    const reviewB = seedSession({
+      agentType: "review_security",
+      startedAt: minutesAgo(28),
+      createdAt: minutesAgo(28),
+      endedAt: minutesAgo(12),
+      completedAt: minutesAgo(12),
+    });
+
+    // Both windows cover both rows — only the recorded session separates them.
+    db.insert(reviewComments)
+      .values({
+        id: `f-a-${counter}`,
+        epicId,
+        filePath: "lib/a.ts",
+        lineNumber: 1,
+        body: "[critical] BELONGS TO A",
+        author: "agent",
+        status: "open",
+        agentSessionId: reviewA,
+        createdAt: minutesAgo(20),
+      })
+      .run();
+    db.insert(reviewComments)
+      .values({
+        id: `f-b-${counter}`,
+        epicId,
+        filePath: "lib/b.ts",
+        lineNumber: 2,
+        body: "[major] BELONGS TO B",
+        author: "agent",
+        status: "open",
+        agentSessionId: reviewB,
+        createdAt: minutesAgo(19),
+      })
+      .run();
+
+    const { sessions } = collectDreamDigest(projectId, { now: NOW });
+    expect(sessions.find((s) => s.sessionId === reviewA)!.findings).toEqual([
+      "[critical] BELONGS TO A",
+    ]);
+    expect(sessions.find((s) => s.sessionId === reviewB)!.findings).toEqual([
+      "[major] BELONGS TO B",
+    ]);
+  });
+
+  it("never lets a time-window match steal a finding that names another session", () => {
+    const linked = seedSession({
+      agentType: "review_code",
+      startedAt: minutesAgo(30),
+      createdAt: minutesAgo(30),
+      endedAt: minutesAgo(10),
+      completedAt: minutesAgo(10),
+    });
+    // A build whose window also covers the row, but which filed nothing.
+    const bystander = seedSession({
+      agentType: "build",
+      startedAt: minutesAgo(29),
+      createdAt: minutesAgo(29),
+      endedAt: minutesAgo(11),
+      completedAt: minutesAgo(11),
+    });
+    db.insert(reviewComments)
+      .values({
+        id: `f-linked-${counter}`,
+        epicId,
+        filePath: "lib/a.ts",
+        lineNumber: 1,
+        body: "[critical] LINKED FINDING",
+        author: "agent",
+        status: "open",
+        agentSessionId: linked,
+        createdAt: minutesAgo(20),
+      })
+      .run();
+
+    const { sessions } = collectDreamDigest(projectId, { now: NOW });
+    expect(sessions.find((s) => s.sessionId === bystander)!.findings).toEqual([]);
+    expect(sessions.find((s) => s.sessionId === linked)!.findings).toEqual([
+      "[critical] LINKED FINDING",
+    ]);
+  });
+
+  it("falls back to the time window for rows filed before the session link existed", () => {
+    const reviewId = seedSession({
+      agentType: "review_code",
+      startedAt: minutesAgo(30),
+      createdAt: minutesAgo(30),
+      endedAt: minutesAgo(20),
+      completedAt: minutesAgo(20),
+    });
+    db.insert(reviewComments)
+      .values({
+        id: `f-legacy-${counter}`,
+        epicId,
+        filePath: "lib/legacy.ts",
+        lineNumber: 3,
+        body: "[major] LEGACY FINDING",
+        author: "agent",
+        status: "open",
+        // agentSessionId deliberately absent — a pre-0031 row.
+        createdAt: minutesAgo(25),
+      })
+      .run();
+
+    const entry = collectDreamDigest(projectId, { now: NOW }).sessions.find(
+      (s) => s.sessionId === reviewId
+    )!;
+    expect(entry.findings).toEqual(["[major] LEGACY FINDING"]);
+  });
+
   it("keeps resolved findings too — a fixed defect is still a mistake made", () => {
     const reviewId = seedSession({
       agentType: "review_security",
@@ -796,6 +921,79 @@ describe("collectDreamDigest — per-session record", () => {
     expect(
       sessions.find((s) => s.sessionId === storySession)!.forensic
     ).toBeNull();
+  });
+
+  /**
+   * `agent_sessions.last_non_empty_text` holds only the last non-empty LINE of
+   * the newest chunk. Preferring it collapsed a whole review report to one
+   * line, and the mandated `**Overall Verdict: …**` survived only when it
+   * happened to BE that line — so most verdicts silently vanished from the
+   * digest. The persisted chunk streams are the real record.
+   */
+  it("reads the final response from the chunk stream, not the one-line column", () => {
+    const reviewId = seedSession({
+      agentType: "review_code",
+      // What the column actually stores: the report's LAST line only.
+      lastNonEmptyText: "Report filed.",
+    });
+    appendSessionChunk({
+      sessionId: reviewId,
+      streamType: "response",
+      content:
+        "## Findings\n\n- token logged in plain text\n\n" +
+        "**Overall Verdict: Changes Requested**\n\nReport filed.",
+    });
+
+    const entry = collectDreamDigest(projectId, { now: NOW }).sessions.find(
+      (s) => s.sessionId === reviewId
+    )!;
+    // The verdict is only reachable because the WHOLE response was resolved.
+    expect(entry.reviewVerdict).toBe("Changes Requested");
+    expect(entry.finalText).toContain("token logged in plain text");
+  });
+
+  it("falls back to the output stream when there is no response stream", () => {
+    const buildId = seedSession({ lastNonEmptyText: "Done." });
+    appendSessionChunk({
+      sessionId: buildId,
+      streamType: "output",
+      content: "Rewrote the parser.\n\n**Overall Verdict: Approved**\nDone.",
+    });
+
+    const entry = collectDreamDigest(projectId, { now: NOW }).sessions.find(
+      (s) => s.sessionId === buildId
+    )!;
+    expect(entry.reviewVerdict).toBe("Approved");
+    expect(entry.finalText).toContain("Rewrote the parser.");
+  });
+
+  it("prefers the response stream over the output stream", () => {
+    const sessionId = seedSession();
+    appendSessionChunk({
+      sessionId,
+      streamType: "output",
+      content: "OUTPUT STREAM TEXT",
+    });
+    appendSessionChunk({
+      sessionId,
+      streamType: "response",
+      content: "RESPONSE STREAM TEXT",
+    });
+
+    const entry = collectDreamDigest(projectId, { now: NOW }).sessions.find(
+      (s) => s.sessionId === sessionId
+    )!;
+    expect(entry.finalText).toContain("RESPONSE STREAM TEXT");
+    expect(entry.finalText).not.toContain("OUTPUT STREAM TEXT");
+  });
+
+  it("still uses the one-line column when a session streamed no chunks", () => {
+    const sessionId = seedSession({ lastNonEmptyText: "ONLY THE COLUMN" });
+
+    const entry = collectDreamDigest(projectId, { now: NOW }).sessions.find(
+      (s) => s.sessionId === sessionId
+    )!;
+    expect(entry.finalText).toBe("ONLY THE COLUMN");
   });
 
   it("carries the tail of the final response, never the raw chunk stream", () => {

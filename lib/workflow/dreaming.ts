@@ -14,10 +14,11 @@
  *   scheduler closure → guarded memory replacement.
  *
  * Notable choices, all load-bearing:
- *   - the digest NEVER embeds raw chunk streams. Only the signals that carry a
- *     lesson, each capped, and the whole thing cut to DREAM_DIGEST_MAX_CHARS
- *     by a fair (water-filling) allocation so one verbose session cannot
- *     starve the rest — see lib/workflow/dreaming-digest.ts;
+ *   - the digest NEVER embeds a session's raw CLI stream. What it reads is the
+ *     TAIL of the final response (the `response`/`output` chunks, not `raw`),
+ *     plus the signals that carry a lesson — each capped, and the whole thing
+ *     cut to DREAM_DIGEST_MAX_CHARS by a fair (water-filling) allocation so one
+ *     verbose session cannot starve the rest — see lib/workflow/dreaming-digest.ts;
  *   - NO epicId on the session row (same trick as lib/pipeline/forensic.ts):
  *     a background project-level pass must never occupy an epic's concurrency
  *     slot, so it can never block a ticket;
@@ -73,6 +74,7 @@ import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-ca
 import {
   FORENSIC_COMMENT_HEADING,
   parseForensicDeadSessionId,
+  readChunkTail,
 } from "@/lib/pipeline/forensic";
 import {
   enforceMemoryCap,
@@ -88,6 +90,7 @@ import {
   DREAMING_AGENT_TYPE,
   DREAMING_LOG_PREFIX,
   DREAM_DIGEST_MAX_CHARS,
+  DREAM_FINAL_TEXT_SOURCE_MAX_CHARS,
   DREAM_FORENSIC_ATTACH_SLACK_MS,
   DREAM_MAX_SESSIONS,
   DREAM_SOURCE_AGENT_TYPES,
@@ -347,13 +350,22 @@ interface DatedRow {
   userStoryId?: string | null;
   /** Session the row explicitly names as its subject (forensic comments). */
   deadSessionId?: string | null;
+  /** Session that FILED the row (review findings, since migration 0031). */
+  agentSessionId?: string | null;
 }
 
 /**
- * Agent-authored `[critical]`/`[major]` findings per epic. Unlike the
- * pipeline's blocking assessment (lib/pipeline/findings.ts) this keeps
- * RESOLVED rows too: a finding that was fixed still records a mistake the
- * agents made, which is exactly what a dream is looking for.
+ * Agent-authored `[critical]`/`[major]` findings per epic.
+ *
+ * Two differences from the pipeline's blocking assessment
+ * (lib/pipeline/findings.ts):
+ *   - RESOLVED rows are kept: a finding that was fixed still records a mistake
+ *     the agents made, which is exactly what a dream is looking for;
+ *   - `agentSessionId` comes along. Since migration 0031 the MCP
+ *     submit_findings route records which review session filed each row, so a
+ *     finding can be attributed EXACTLY. Two reviewers running on the same epic
+ *     at once used to be indistinguishable by timestamp, and each would be
+ *     handed the other's findings.
  */
 function loadBlockingFindingsByEpic(epicIds: string[]): Map<string, DatedRow[]> {
   const byEpic = new Map<string, DatedRow[]>();
@@ -365,6 +377,7 @@ function loadBlockingFindingsByEpic(epicIds: string[]): Map<string, DatedRow[]> 
       epicId: reviewComments.epicId,
       body: reviewComments.body,
       createdAt: reviewComments.createdAt,
+      agentSessionId: reviewComments.agentSessionId,
     })
     .from(reviewComments)
     .where(
@@ -377,7 +390,12 @@ function loadBlockingFindingsByEpic(epicIds: string[]): Map<string, DatedRow[]> 
     const body = row.body.trim();
     if (!/^\[(critical|major)\]/i.test(body)) continue;
     const list = byEpic.get(row.epicId) ?? [];
-    list.push({ id: row.id, body, createdMs: parseTimestampMs(row.createdAt) });
+    list.push({
+      id: row.id,
+      body,
+      createdMs: parseTimestampMs(row.createdAt),
+      agentSessionId: row.agentSessionId ?? null,
+    });
     byEpic.set(row.epicId, list);
   }
   return byEpic;
@@ -526,16 +544,43 @@ function assignForensicComments(
   return assigned;
 }
 
-/** Final response of a session: streamed column first, then the logs file. */
+/**
+ * The tail of a session's final response.
+ *
+ * Resolution order matters, and the obvious first choice is the wrong one:
+ * `agent_sessions.last_non_empty_text` holds only the last non-empty LINE of
+ * the newest chunk (see `extractLastNonEmptyText`). Preferring it collapsed a
+ * whole review report to one line — and a report's mandated
+ * `**Overall Verdict: …**` only survived when it happened to BE that line, so
+ * the digest silently lost most verdicts and every closing paragraph.
+ *
+ * So the persisted chunk streams come first:
+ *   - `response` — the final assistant text for streaming providers;
+ *   - `output` — where Claude Code's result envelope is persisted
+ *     (`result-<sessionId>`) and where other providers put their final output;
+ *   - the logs file, then the one-line column, only as last resorts.
+ *
+ * A TAIL rather than the whole stream: a conclusion (and the verdict line)
+ * lives at the end, and the renderer trims it again to its own per-field cap.
+ */
 function resolveFinalText(row: DreamCandidateRow): string | null {
-  if (row.lastNonEmptyText && row.lastNonEmptyText.trim()) {
-    return row.lastNonEmptyText;
+  for (const streamType of ["response", "output"] as const) {
+    const tail = readChunkTail(
+      row.id,
+      streamType,
+      DREAM_FINAL_TEXT_SOURCE_MAX_CHARS
+    );
+    if (tail && tail.trim()) return tail;
   }
   try {
-    return extractLastNonEmptyTextFromFile(row.logsPath);
+    const fromLogs = extractLastNonEmptyTextFromFile(row.logsPath);
+    if (fromLogs && fromLogs.trim()) return fromLogs;
   } catch {
-    return null;
+    // Best-effort: an unreadable log file must not break the digest.
   }
+  return row.lastNonEmptyText && row.lastNonEmptyText.trim()
+    ? row.lastNonEmptyText
+    : null;
 }
 
 /**
@@ -589,13 +634,19 @@ export function collectDreamDigest(
     const endMs = sessionTerminalMs(row);
     const finalText = resolveFinalText(row);
 
+    // Exact attribution when the filing session was recorded; the time window
+    // only for rows written before migration 0031. Mixing the two would be
+    // wrong in the case that matters: with two reviewers on one epic, a
+    // LINKED row belongs to its session and to no other, so an unlinked
+    // fallback must never claim it.
     const findings = row.epicId
       ? (findingsByEpic.get(row.epicId) ?? [])
-          .filter(
-            (finding) =>
-              finding.createdMs !== null &&
-              (startMs === null || finding.createdMs >= startMs) &&
-              (endMs === null || finding.createdMs <= endMs)
+          .filter((finding) =>
+            finding.agentSessionId
+              ? finding.agentSessionId === row.id
+              : finding.createdMs !== null &&
+                (startMs === null || finding.createdMs >= startMs) &&
+                (endMs === null || finding.createdMs <= endMs)
           )
           .map((finding) => finding.body)
       : [];
