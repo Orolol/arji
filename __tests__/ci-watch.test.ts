@@ -284,24 +284,35 @@ describe("CI watch", () => {
     );
   });
 
-  it("does not retry a busy target until GitHub reports a new head SHA", async () => {
+  it("defers a busy target and retries the same SHA after its agent finishes", async () => {
     const row = routine();
     const watchDeps = deps(row);
     vi.mocked(watchDeps.isAutofixEnabled).mockReturnValue(true);
-    vi.mocked(watchDeps.launchAutofix).mockResolvedValue({
-      status: "skipped",
-      reason: "target_busy",
-      sessionId: "busy-session",
+    vi.mocked(watchDeps.launchAutofix)
+      .mockResolvedValueOnce({
+        status: "skipped",
+        reason: "target_busy",
+        sessionId: "busy-session",
+      })
+      .mockResolvedValueOnce({
+        status: "launched",
+        sessionId: "fix-session",
+      });
+
+    await runCiWatchRoutine(row, watchDeps);
+    expect(JSON.parse(row.config).ciWatchState["epic-open"]).toMatchObject({
+      headSha: "sha-1",
+      autofixAttempted: false,
+      autofixSessionId: null,
     });
 
     await runCiWatchRoutine(row, watchDeps);
-    await runCiWatchRoutine(row, watchDeps);
 
-    expect(watchDeps.launchAutofix).toHaveBeenCalledTimes(1);
+    expect(watchDeps.launchAutofix).toHaveBeenCalledTimes(2);
     expect(JSON.parse(row.config).ciWatchState["epic-open"]).toMatchObject({
       headSha: "sha-1",
       autofixAttempted: true,
-      autofixSessionId: "busy-session",
+      autofixSessionId: "fix-session",
     });
   });
 });

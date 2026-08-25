@@ -25,6 +25,11 @@ import {
   fetchPullRequestCiStatus,
   tailCiJobLog,
 } from "@/lib/github/pull-requests";
+import {
+  CI_AUTOFIX_MAX_EVIDENCE_BYTES,
+  CI_AUTOFIX_MAX_LOGGED_FAILURES,
+  ciAutofixEvidenceBytes,
+} from "@/lib/routines/ci-autofix-limits";
 
 describe("classifyPullRequestCi", () => {
   beforeEach(() => {
@@ -149,5 +154,42 @@ describe("classifyPullRequestCi", () => {
         failedCheckRuns: [{ id: 999, name: "third-party" }],
       })
     ).resolves.toEqual([{ name: "third-party", logTail: null }]);
+  });
+
+  it("bounds combined evidence and downloads logs for only a limited check set", async () => {
+    const failedChecks = Array.from(
+      { length: CI_AUTOFIX_MAX_LOGGED_FAILURES + 8 },
+      (_, index) => `matrix-${index}`
+    );
+    githubMocks.downloadJobLogs.mockResolvedValue({
+      data: "x".repeat(8_000),
+    });
+
+    const evidence = await fetchPullRequestCiFailureEvidence(
+      "acme",
+      "widgets",
+      {
+        headSha: "head-123",
+        state: "failing",
+        failedChecks,
+        failedCheckRuns: failedChecks.map((name, index) => ({
+          id: index + 1,
+          name,
+        })),
+      }
+    );
+
+    expect(evidence.map((failure) => failure.name)).toEqual(failedChecks);
+    expect(githubMocks.downloadJobLogs).toHaveBeenCalledTimes(
+      CI_AUTOFIX_MAX_LOGGED_FAILURES
+    );
+    expect(ciAutofixEvidenceBytes(evidence)).toBeLessThanOrEqual(
+      CI_AUTOFIX_MAX_EVIDENCE_BYTES
+    );
+    expect(
+      evidence
+        .slice(CI_AUTOFIX_MAX_LOGGED_FAILURES)
+        .every((failure) => failure.logTail === null)
+    ).toBe(true);
   });
 });

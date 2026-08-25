@@ -20,6 +20,7 @@ import {
   launchCiAutofixSession,
   type CiAutofixLaunchResult,
 } from "@/lib/routines/ci-autofix";
+import { boundCiAutofixEvidence } from "@/lib/routines/ci-autofix-limits";
 import { isCiAutofixEnabled } from "@/lib/routines/settings";
 
 export {
@@ -298,16 +299,20 @@ export async function runCiWatchRoutine(
 
         let failures: PullRequestCiFailureEvidence[];
         try {
-          failures = await deps.fetchFailureEvidence(owner, repo, snapshot);
+          failures = boundCiAutofixEvidence(
+            await deps.fetchFailureEvidence(owner, repo, snapshot)
+          );
         } catch (error) {
           console.warn(
             `[ci-watch] Could not fetch CI log tails for PR #${epic.prNumber}`,
             error
           );
-          failures = snapshot.failedChecks.map((name) => ({
-            name,
-            logTail: null,
-          }));
+          failures = boundCiAutofixEvidence(
+            snapshot.failedChecks.map((name) => ({
+              name,
+              logTail: null,
+            }))
+          );
         }
 
         const launch = await deps.launchAutofix({
@@ -319,9 +324,15 @@ export async function runCiWatchRoutine(
         });
         if (launch.status === "launched") autofixesLaunched += 1;
         else autofixesSkipped += 1;
+        const targetWasBusy =
+          launch.status === "skipped" && launch.reason === "target_busy";
         nextState[epic.id] = {
           ...nextState[epic.id],
-          autofixSessionId: launch.sessionId,
+          // A busy target is a transient deferral, not an attempt. Release
+          // the pre-dispatch claim so the same SHA is retried on a later
+          // poll after the owning agent has finished.
+          autofixAttempted: !targetWasBusy,
+          autofixSessionId: targetWasBusy ? null : launch.sessionId,
         };
         deps.persistConfig(
           routine.id,

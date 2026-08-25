@@ -1,4 +1,10 @@
 import { getGitHubTokenFromSettings, createGitHubClient } from "@/lib/github/client";
+import {
+  CI_AUTOFIX_MAX_FAILURES,
+  CI_AUTOFIX_MAX_LOGGED_FAILURES,
+  CI_AUTOFIX_MAX_LOG_TAIL_CHARS,
+  boundCiAutofixEvidence,
+} from "@/lib/routines/ci-autofix-limits";
 
 interface EpicForPr {
   title: string;
@@ -105,7 +111,7 @@ const FAILING_CHECK_CONCLUSIONS = new Set([
   "timed_out",
 ]);
 
-export const CI_JOB_LOG_TAIL_CHARS = 8_000;
+export const CI_JOB_LOG_TAIL_CHARS = CI_AUTOFIX_MAX_LOG_TAIL_CHARS;
 
 async function logPayloadToText(payload: unknown): Promise<string | null> {
   if (typeof payload === "string") return payload;
@@ -328,10 +334,10 @@ export async function fetchPullRequestCiStatus(
 }
 
 /**
- * Fetch the log tail for every failed GitHub Actions check. GitHub exposes
- * legacy commit statuses and third-party check runs without an Actions job
- * log, so those checks remain present with `logTail: null`. One unavailable
- * log never hides evidence from the other failed checks.
+ * Fetch bounded log tails for failed GitHub Actions checks. Every failed
+ * check name remains present, but only a limited number of Actions logs are
+ * downloaded and their combined evidence stays within the build-route byte
+ * budget. Legacy/third-party checks remain present with `logTail: null`.
  */
 export async function fetchPullRequestCiFailureEvidence(
   owner: string,
@@ -347,27 +353,36 @@ export async function fetchPullRequestCiFailureEvidence(
     (snapshot.failedCheckRuns ?? []).map((check) => [check.name, check])
   );
 
-  return Promise.all(
-    snapshot.failedChecks.map(async (name) => {
-      const checkRun = runByName.get(name);
-      if (!checkRun) return { name, logTail: null };
+  const loggedCheckNames = new Set(
+    (snapshot.failedCheckRuns ?? [])
+      .slice(0, CI_AUTOFIX_MAX_LOGGED_FAILURES)
+      .map((check) => check.name)
+  );
+  const evidence = await Promise.all(
+    snapshot.failedChecks
+      .slice(0, CI_AUTOFIX_MAX_FAILURES)
+      .map(async (name) => {
+        const checkRun = runByName.get(name);
+        if (!checkRun || !loggedCheckNames.has(name)) {
+          return { name, logTail: null };
+        }
 
-      try {
-        const response =
-          await octokit.actions.downloadJobLogsForWorkflowRun({
+        try {
+          const response = await octokit.actions.downloadJobLogsForWorkflowRun({
             owner,
             repo,
             job_id: checkRun.id,
           });
-        const payload = (response as unknown as { data?: unknown }).data;
-        const text = await logPayloadToText(payload);
-        return { name, logTail: text === null ? null : tailCiJobLog(text) };
-      } catch {
-        // A non-Actions check run, expired redirect, or missing permission is
-        // expected to have no downloadable log. The check name is still
-        // useful evidence and the autofix must continue with the rest.
-        return { name, logTail: null };
-      }
-    })
+          const payload = (response as unknown as { data?: unknown }).data;
+          const text = await logPayloadToText(payload);
+          return { name, logTail: text === null ? null : tailCiJobLog(text) };
+        } catch {
+          // A non-Actions check run, expired redirect, or missing permission is
+          // expected to have no downloadable log. The check name is still
+          // useful evidence and the autofix must continue with the rest.
+          return { name, logTail: null };
+        }
+      })
   );
+  return boundCiAutofixEvidence(evidence);
 }

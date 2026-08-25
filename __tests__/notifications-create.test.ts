@@ -40,6 +40,7 @@ import {
   createUnresolvedMentionsNotification,
   createRoutineRunNotification,
   createCiWatchFailureNotification,
+  createCiAutofixReadyNotification,
 } from "@/lib/notifications/create";
 
 // ---- Tests ----
@@ -375,6 +376,44 @@ describe("createCiWatchFailureNotification()", () => {
       title: "CI failed on PR #42 — E-shop-004: Checkout",
       message: "Failing checks: lint, unit. Head 1234567890ab.",
       targetUrl: "/projects/p1?ticket=e1",
+    });
+  });
+});
+
+describe("createCiAutofixReadyNotification()", () => {
+  beforeEach(() => {
+    resetDbMockState();
+    mockSqliteState.pruneCount = { cnt: 5 };
+  });
+
+  it("makes the unpushed branch explicit and links to the completed session", () => {
+    dbMockState.getQueue.push(
+      undefined,
+      { name: "My Project" },
+      { title: "Checkout", readableId: "E-shop-004" }
+    );
+
+    createCiAutofixReadyNotification({
+      projectId: "p1",
+      epicId: "e1",
+      sessionId: "session-fix",
+      branchName: "feature/checkout",
+      prNumber: 42,
+      headSha: "1234567890abcdef",
+    });
+
+    expect(dbMockState.insertCalls).toContainEqual({
+      id: "notif-123",
+      projectId: "p1",
+      projectName: "My Project",
+      sessionId: "session-fix",
+      agentType: "ci_autofix",
+      status: "completed",
+      title:
+        "CI autofix completed locally — push feature/checkout for PR #42 — E-shop-004: Checkout",
+      message:
+        "The branch contains a fix for head 1234567890ab, but Arij did not push it automatically. Push the branch to rerun CI.",
+      targetUrl: "/projects/p1/sessions/session-fix",
     });
   });
 });

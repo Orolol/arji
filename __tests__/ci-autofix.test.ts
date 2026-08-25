@@ -11,6 +11,7 @@ import {
   launchCiAutofixSession,
   parseCiAutofixPayload,
 } from "@/lib/routines/ci-autofix";
+import { CI_AUTOFIX_MAX_LOG_TAIL_CHARS } from "@/lib/routines/ci-autofix-limits";
 
 describe("CI autofix hand-off", () => {
   beforeEach(() => {
@@ -45,6 +46,19 @@ describe("CI autofix hand-off", () => {
         prNumber: 42,
         headSha: "abc",
         failures: [{ name: "unit", logTail: 123 }],
+      })
+    ).toBeNull();
+  });
+
+  it("rejects CI evidence that exceeds the global argv-safe budget", () => {
+    expect(
+      parseCiAutofixPayload({
+        prNumber: 42,
+        headSha: "abc123",
+        failures: Array.from({ length: 8 }, (_, index) => ({
+          name: `matrix-${index}`,
+          logTail: "x".repeat(CI_AUTOFIX_MAX_LOG_TAIL_CHARS),
+        })),
       })
     ).toBeNull();
   });

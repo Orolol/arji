@@ -47,6 +47,7 @@ import {
 } from "@/lib/documents/mentions";
 import {
   buildEpicTargetUrl,
+  createCiAutofixReadyNotification,
   createUnresolvedMentionsNotification,
 } from "@/lib/notifications/create";
 import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
@@ -425,7 +426,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       outcome,
       error: result?.error,
       reason: ciAutofix
-        ? `CI autofix completed for PR #${ciAutofix.prNumber} at ${ciAutofix.headSha.slice(0, 12)}`
+        ? `CI autofix completed locally for PR #${ciAutofix.prNumber}; ` +
+          `branch ${branchName} carries an unpushed fix for head ${ciAutofix.headSha.slice(0, 12)} and requires a manual push`
         : undefined,
     });
     if (terminal.kind !== "failed" && terminal.kind !== "refused") {
@@ -439,6 +441,23 @@ export async function POST(request: NextRequest, { params }: Params) {
           ? terminal.error
           : result?.error || "Build failed"
       );
+    }
+    if (ciAutofix && terminal.kind === "promoted") {
+      try {
+        createCiAutofixReadyNotification({
+          projectId,
+          epicId,
+          sessionId,
+          branchName,
+          prNumber: ciAutofix.prNumber,
+          headSha: ciAutofix.headSha,
+        });
+      } catch (error) {
+        console.warn(
+          `[epic build] Failed to notify that CI autofix ${sessionId} is ready to push`,
+          error
+        );
+      }
     }
 
     // Post output as epic comment

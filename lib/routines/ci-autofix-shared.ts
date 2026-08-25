@@ -1,4 +1,11 @@
 import type { PullRequestCiFailureEvidence } from "@/lib/github/pull-requests";
+import {
+  CI_AUTOFIX_MAX_EVIDENCE_BYTES,
+  CI_AUTOFIX_MAX_FAILURES,
+  CI_AUTOFIX_MAX_FAILURE_NAME_BYTES,
+  CI_AUTOFIX_MAX_LOG_TAIL_CHARS,
+  ciAutofixEvidenceBytes,
+} from "@/lib/routines/ci-autofix-limits";
 
 export const CI_AUTOFIX_ATTEMPT_PREFIX = "ci-autofix";
 
@@ -23,9 +30,11 @@ function parseFailure(value: unknown): PullRequestCiFailureEvidence | null {
   if (
     typeof candidate.name !== "string" ||
     candidate.name.trim().length === 0 ||
-    candidate.name.length > 256 ||
+    Buffer.byteLength(candidate.name, "utf8") >
+      CI_AUTOFIX_MAX_FAILURE_NAME_BYTES ||
     (candidate.logTail !== null && typeof candidate.logTail !== "string") ||
-    (typeof candidate.logTail === "string" && candidate.logTail.length > 20_000)
+    (typeof candidate.logTail === "string" &&
+      candidate.logTail.length > CI_AUTOFIX_MAX_LOG_TAIL_CHARS)
   ) {
     return null;
   }
@@ -51,16 +60,20 @@ export function parseCiAutofixPayload(value: unknown): CiAutofixPayload | null {
     candidate.headSha.length > 128 ||
     !Array.isArray(candidate.failures) ||
     candidate.failures.length === 0 ||
-    candidate.failures.length > 100
+    candidate.failures.length > CI_AUTOFIX_MAX_FAILURES
   ) {
     return null;
   }
 
   const failures = candidate.failures.map(parseFailure);
   if (failures.some((failure) => failure === null)) return null;
+  const parsedFailures = failures as PullRequestCiFailureEvidence[];
+  if (ciAutofixEvidenceBytes(parsedFailures) > CI_AUTOFIX_MAX_EVIDENCE_BYTES) {
+    return null;
+  }
   return {
     prNumber: candidate.prNumber as number,
     headSha: candidate.headSha.trim(),
-    failures: failures as PullRequestCiFailureEvidence[],
+    failures: parsedFailures,
   };
 }

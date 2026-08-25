@@ -187,6 +187,64 @@ export function createCiWatchFailureNotification(input: {
 }
 
 /**
+ * A successful autofix only changes the local epic branch. Make the required
+ * manual push explicit instead of letting the generic "Build completed"
+ * notification imply that GitHub has already received the fix.
+ */
+export function createCiAutofixReadyNotification(input: {
+  projectId: string;
+  epicId: string;
+  sessionId: string;
+  branchName: string;
+  prNumber: number;
+  headSha: string;
+}): void {
+  const existing = db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.sessionId, input.sessionId),
+        isNotNull(notifications.message)
+      )
+    )
+    .limit(1)
+    .get();
+  if (existing) return;
+
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  const epic = db
+    .select({ title: epics.title, readableId: epics.readableId })
+    .from(epics)
+    .where(eq(epics.id, input.epicId))
+    .get();
+  if (!project || !epic) return;
+
+  const ticket = epic.readableId
+    ? `${epic.readableId}: ${epic.title}`
+    : epic.title;
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: input.sessionId,
+      agentType: "ci_autofix",
+      status: "completed",
+      title: `CI autofix completed locally — push ${input.branchName} for PR #${input.prNumber} — ${ticket}`,
+      message: `The branch contains a fix for head ${input.headSha.slice(0, 12)}, but Arij did not push it automatically. Push the branch to rerun CI.`,
+      targetUrl: buildTargetUrl(input.projectId, input.sessionId, "build"),
+    })
+    .run();
+
+  pruneNotifications();
+}
+
+/**
  * Title for a watchdog "agent seems stalled" notification.
  *
  * Examples:
@@ -352,9 +410,9 @@ function loadSessionNotificationContext(
  * Idempotent per session: the terminal hook (instrumentation.ts) creates
  * the notification the moment the session row is finalized, and the
  * dispatch routes' emitSessionFailed/emitSessionCompleted then call this
- * same function. Rows created here always carry a non-NULL message for
- * failures, so "a row for this session with a message" is exactly "the
- * failure notification already exists" — other session rows (stalled-watchdog
+ * same function. A message-bearing row means a terminal path already supplied
+ * full context — either a failure or a specialized completion signal such as
+ * a local CI autofix awaiting a push. Other session rows (stalled-watchdog
  * alarms, merge-parked, …) carry NULL and never suppress it.
  *
  * Sessions whose delivery verdict is `asked_question` are skipped here: the

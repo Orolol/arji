@@ -78,9 +78,14 @@ vi.mock("fs", () => ({
 }));
 
 const { db } = await import("@/lib/db");
-const { projects, epics, agentSessions, settings, ticketActivityLog } = await import(
-  "@/lib/db/schema"
-);
+const {
+  projects,
+  epics,
+  agentSessions,
+  settings,
+  ticketActivityLog,
+  notifications,
+} = await import("@/lib/db/schema");
 const { POST: batchBuildPost } = await import(
   "@/app/api/projects/[projectId]/build/route"
 );
@@ -338,7 +343,27 @@ describe("scheduler-integrated batch build", () => {
       .from(ticketActivityLog)
       .where(eq(ticketActivityLog.epicId, epicIds[1]))
       .all();
-    expect(activity.some((row) => row.reason?.includes("CI autofix"))).toBe(true);
+    expect(
+      activity.some(
+        (row) =>
+          row.reason?.includes("CI autofix") &&
+          row.reason.includes("unpushed fix") &&
+          row.reason.includes("manual push")
+      )
+    ).toBe(true);
+    const autofixNotification = db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.sessionId, json.data.sessionId))
+      .all()
+      .find((notification) => notification.agentType === "ci_autofix");
+    expect(autofixNotification).toMatchObject({
+      status: "completed",
+      targetUrl: `/projects/${projectId}/sessions/${json.data.sessionId}`,
+    });
+    expect(autofixNotification?.title).toContain(
+      `push feature/${epicIds[1]} for PR #42`
+    );
   });
 
   it("cancelling a queued session removes it from the queue and it never starts", async () => {
