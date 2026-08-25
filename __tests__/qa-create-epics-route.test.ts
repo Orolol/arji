@@ -130,6 +130,80 @@ describe("POST /api/projects/[projectId]/qa/reports/[reportId]/create-epics", ()
     expect((db as unknown as { transaction: ReturnType<typeof vi.fn> }).transaction).toHaveBeenCalledTimes(1);
   });
 
+  it("creates a bug ticket from a failure digest cluster and references the source report", async () => {
+    mockExtractJson.mockReturnValue([
+      {
+        title: "Stabilize recurring worker exits",
+        description:
+          "Observed 7 worker exits across tickets ARIJ-12 and ARIJ-29. Harden process cleanup and retry handling.",
+        priority: 3,
+        userStories: [
+          {
+            title: "Prevent the recurring worker exit cluster",
+            description: "Implement and verify the proposed remediation.",
+            acceptanceCriteria: "- [ ] Worker exits no longer recur",
+          },
+        ],
+      },
+    ]);
+    dbMockState.getQueue = [
+      { id: "proj-1", gitRepoPath: "/tmp/repo" },
+      {
+        id: "digest-report-1",
+        projectId: "proj-1",
+        reportContent:
+          "## Cluster: Worker exits\n\nFrequency: 7\n\nAffected tickets: ARIJ-12, ARIJ-29",
+        namedAgentId: null,
+        agentSessionId: null,
+        checkType: "failure_digest",
+      },
+      { max: 2 },
+    ];
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/qa/reports/[reportId]/create-epics/route"
+    );
+    const res = await POST(
+      mockNextRequest(),
+      mockRouteContext({ projectId: "proj-1", reportId: "digest-report-1" }),
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.epics).toEqual([
+      { id: "epic-1", title: "Stabilize recurring worker exits" },
+    ]);
+    expect(mockResolveAgent).toHaveBeenCalledWith(
+      "failure_digest",
+      "proj-1",
+      null,
+    );
+    expect(mockSpawnClaude).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "plan",
+        prompt: expect.stringContaining(
+          "generate one bug-fix ticket for each named failure cluster",
+        ),
+      }),
+    );
+    expect((dbMockState.insertCalls[0] as Array<Record<string, unknown>>)[0]).toEqual(
+      expect.objectContaining({
+        id: "epic-1",
+        type: "bug",
+        description: expect.stringContaining(
+          "Source: [Failure digest report `digest-report-1`](/projects/proj-1/qa?reportId=digest-report-1)",
+        ),
+      }),
+    );
+    expect((dbMockState.insertCalls[1] as Array<Record<string, unknown>>)[0]).toEqual(
+      expect.objectContaining({
+        id: "story-1",
+        epicId: "epic-1",
+      }),
+    );
+    expect((db as unknown as { transaction: ReturnType<typeof vi.fn> }).transaction).toHaveBeenCalledTimes(1);
+  });
+
   it("returns parse error with raw snippet when extracted JSON is non-object", async () => {
     const longOutput = "x".repeat(1301);
     mockSpawnClaude.mockReturnValue({

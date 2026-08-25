@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { Activity, Plus, RefreshCw } from "lucide-react";
 import { ReportDetail } from "@/components/qa/ReportDetail";
 import { StartQaCheckDialog } from "@/components/qa/StartQaCheckDialog";
@@ -34,10 +34,13 @@ function checkTypeBadgeLabel(checkType: string): string {
 
 export default function QAPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const projectId = params.projectId as string;
   const { reports, loading, error, refresh } = useQaReports(projectId);
   const [startDialogOpen, setStartDialogOpen] = useState(false);
-  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(
+    searchParams.get("reportId"),
+  );
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [filterCheckType, setFilterCheckType] = useState<FilterCheckType>(null);
 

@@ -84,6 +84,15 @@ function normalizePriority(value: unknown): number {
   return clamped;
 }
 
+function withFailureDigestSource(
+  description: string,
+  projectId: string,
+  reportId: string,
+): string {
+  const reportHref = `/projects/${encodeURIComponent(projectId)}/qa?reportId=${encodeURIComponent(reportId)}`;
+  return `${description.trim()}\n\n---\nSource: [Failure digest report \`${reportId}\`](${reportHref})`;
+}
+
 function toGeneratedEpics(value: unknown, epicType: "feature" | "bug" = "feature"): GeneratedEpic[] {
   const rows =
     Array.isArray(value)
@@ -143,13 +152,22 @@ export async function POST(_request: NextRequest, { params }: Params) {
   }
 
   const isE2e = report.checkType === "e2e_test";
-  const reportTitle = isE2e ? "# E2E Test Report" : "# Tech Check Report";
+  const isFailureDigest = report.checkType === "failure_digest";
+  const reportTitle = isE2e
+    ? "# E2E Test Report"
+    : isFailureDigest
+      ? "# Recurring Failure Digest"
+      : "# Tech Check Report";
   const taskDescription = isE2e
     ? "Based on the E2E test report above, generate bug-fix epics from test failures. Group related failures into cohesive epics. Prioritize by severity."
-    : "Based on the tech check report above, generate a list of epics to address the findings. Group related findings into cohesive epics. Prioritize by severity.";
+    : isFailureDigest
+      ? "Based on the recurring failure digest above, generate one bug-fix ticket for each named failure cluster. Preserve its observed frequency, affected tickets, root-cause hypothesis, and proposed remediation. Do not combine distinct clusters."
+      : "Based on the tech check report above, generate a list of epics to address the findings. Group related findings into cohesive epics. Prioritize by severity.";
   const epicTypeRule = isE2e
     ? '- All items are bug-fix epics (type "bug") — create bug tickets from test failures'
-    : '- All items are epics (type "feature") — do NOT create bug tickets';
+    : isFailureDigest
+      ? '- Each item is one bug ticket (type "bug") for exactly one failure cluster'
+      : '- All items are epics (type "feature") — do NOT create bug tickets';
 
   const prompt = `${reportTitle}
 
@@ -181,12 +199,16 @@ Return ONLY a JSON array with the following structure:
 Rules:
 - Priority: 0=low, 1=medium, 2=high, 3=critical
 ${epicTypeRule}
-- Group related findings into cohesive epics with user stories
+- ${isFailureDigest ? "Keep distinct failure clusters in distinct tickets" : "Group related findings into cohesive epics with user stories"}
 - Each epic should have 1-5 user stories
 - Be specific and reference file paths and concrete changes
 `;
 
-  const agentType: AgentType = isE2e ? "e2e_test" : "tech_check";
+  const agentType: AgentType = isE2e
+    ? "e2e_test"
+    : isFailureDigest
+      ? "failure_digest"
+      : "tech_check";
 
   // Look up the original QA session to reuse its provider, model, and CLI session
   const originalSession = report.agentSessionId
@@ -287,7 +309,10 @@ ${epicTypeRule}
     );
   }
 
-  const generatedEpics = toGeneratedEpics(extracted, isE2e ? "bug" : "feature");
+  const generatedEpics = toGeneratedEpics(
+    extracted,
+    isE2e || isFailureDigest ? "bug" : "feature",
+  );
   if (generatedEpics.length === 0) {
     const rawSnippet = toSnippet(result.result);
     console.error("[qa/create-epics] JSON payload could not be normalized into epics", {
@@ -315,7 +340,9 @@ ${epicTypeRule}
     id: createId(),
     projectId,
     title: generatedEpic.title,
-    description: generatedEpic.description,
+    description: isFailureDigest
+      ? withFailureDigestSource(generatedEpic.description, projectId, reportId)
+      : generatedEpic.description,
     priority: generatedEpic.priority,
     status: "backlog",
     position: maxPosition + 1 + epicIndex,
