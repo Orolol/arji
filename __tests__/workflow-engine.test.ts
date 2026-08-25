@@ -224,6 +224,88 @@ describe("validateTransition — active build ownership", () => {
       ).valid
     ).toBe(true);
   });
+
+  // The session that owns the ticket is the session the lock protects: it
+  // may move its own ticket out of in_progress while it is still live.
+  it("allows the owning session to move its own ticket to review", () => {
+    const result = validateTransition(
+      ctx("in_progress", "review", {
+        hasRunningSession: true,
+        ownsInProgress: true,
+        actor: "agent",
+      })
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("allows the owning session to move its own ticket to other reachable columns", () => {
+    expect(
+      validateTransition(
+        ctx("in_progress", "todo", { hasRunningSession: true, ownsInProgress: true })
+      ).valid
+    ).toBe(true);
+    expect(
+      validateTransition(
+        ctx("in_progress", "backlog", { hasRunningSession: true, ownsInProgress: true })
+      ).valid
+    ).toBe(true);
+  });
+
+  it("keeps the lock for a non-owning session (explicit false)", () => {
+    const result = validateTransition(
+      ctx("in_progress", "review", {
+        hasRunningSession: true,
+        ownsInProgress: false,
+        actor: "agent",
+      })
+    );
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("queued or running");
+  });
+
+  it("keeps the lock when no ownership signal is present at all", () => {
+    const result = validateTransition(
+      ctx("in_progress", "review", { hasRunningSession: true, actor: "agent" })
+    );
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("queued or running");
+  });
+
+  it("never lets the exemption bypass the review→done approval guard", () => {
+    const result = validateTransition(
+      ctx("review", "done", {
+        hasRunningSession: true,
+        ownsInProgress: true,
+        hasCompletedReview: true,
+        actor: "agent",
+        source: "api",
+      })
+    );
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("manual approval is required");
+  });
+
+  it("never lets the exemption bypass the completed-review guard", () => {
+    const result = validateTransition(
+      ctx("review", "done", {
+        hasRunningSession: true,
+        ownsInProgress: true,
+        hasCompletedReview: false,
+        actor: "agent",
+        source: "approve",
+      })
+    );
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("no completed review");
+  });
+
+  it("never lets the exemption open structurally invalid edges", () => {
+    const result = validateTransition(
+      ctx("in_progress", "done", { hasRunningSession: true, ownsInProgress: true })
+    );
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("Invalid transition");
+  });
 });
 
 // ---------------------------------------------------------------------------

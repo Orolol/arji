@@ -409,12 +409,24 @@ describe("arijToolsSection", () => {
     expect(text).not.toContain("Overall Verdict");
   });
 
+  it.each(["build", "ticket_build", "team_build"])(
+    "tells %s sessions they may move their own ticket to Review",
+    (agentType) => {
+      const text = arijToolsSection(agentType);
+      expect(text).toContain("You may move the ticket you are building");
+      expect(text).toContain("move it to Review");
+      expect(text).toContain("update_ticket_status");
+      expect(text).toContain("pending");
+    }
+  );
+
   it.each(["review_security", "review_code", "review_compliance", "review_feature"])(
     "adds the submit_findings + Overall Verdict sentence for %s",
     (agentType) => {
       const text = arijToolsSection(agentType);
       expect(text).toContain("submit_findings");
       expect(text).toContain("'**Overall Verdict: …**'");
+      expect(text).not.toContain("You may move the ticket you are building");
     },
   );
 
@@ -424,6 +436,7 @@ describe("arijToolsSection", () => {
       const text = arijToolsSection(agentType);
       expect(text).toContain("mcp__arij__*");
       expect(text).not.toContain("submit_findings");
+      expect(text).not.toContain("You may move the ticket you are building");
     },
   );
 });

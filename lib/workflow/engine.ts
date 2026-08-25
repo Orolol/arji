@@ -44,6 +44,14 @@ export interface TransitionContext {
   requireResolvedComments?: boolean;
   /** Whether there is a queued/running code-producing session on this ticket */
   hasRunningSession: boolean;
+  /**
+   * True only when the acting session is itself the sole queued/running
+   * code-producing session on the ticket — i.e. the owner the in_progress
+   * lock exists to protect. The owner may move its own ticket out of
+   * in_progress (typically to review once the work is committed); any other
+   * actor, and any ticket with a second live session, stays locked.
+   */
+  ownsInProgress?: boolean;
   /** The actor initiating the transition */
   actor: "user" | "agent" | "system";
   /** The source route/action triggering this transition */
@@ -54,11 +62,16 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
   // A build session owns in_progress until its terminal handler promotes or
   // holds the ticket. Letting a concurrent drag move it would recreate the
   // active-session/orphaned-column state this engine is meant to prevent.
+  // The owning session itself is exempt: it is the owner the lock protects,
+  // so it may move its own ticket (e.g. in_progress → review once the work
+  // is committed). A ticket with a second live session, or a move by anyone
+  // else, is still refused.
   (ctx) => {
     if (
       ctx.fromStatus === "in_progress" &&
       ctx.toStatus !== "in_progress" &&
-      ctx.hasRunningSession
+      ctx.hasRunningSession &&
+      !ctx.ownsInProgress
     ) {
       return "Cannot move an in-progress ticket while an agent session is queued or running.";
     }

@@ -421,7 +421,9 @@ describe("POST /api/mcp/update-ticket-status", () => {
     expect(logs[0]?.reason).toBe("Implementation started");
   });
 
-  it("refuses to move the ticket away while its build session is active", async () => {
+  it("lets the owning build session move its own in-progress ticket to review", async () => {
+    // The session calling the tool is the build session that owns the
+    // ticket — the lock protects against CONCURRENT movers, not the owner.
     db()
       .update(agentSessions)
       .set({ agentType: "build" })
@@ -431,8 +433,60 @@ describe("POST /api/mcp/update-ticket-status", () => {
     const res = await call(updateStatusPost, { status: "review" }, token);
     const json = await res.json();
 
+    expect(res.status).toBe(200);
+    expect(json.data).toEqual({
+      ticketId: epicId,
+      fromStatus: "in_progress",
+      toStatus: "review",
+    });
+
+    const epic = db()
+      .select()
+      .from(epics)
+      .where(eq(epics.id, epicId))
+      .get();
+    expect(epic?.status).toBe("review");
+
+    const logs = db()
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, epicId))
+      .all();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      fromStatus: "in_progress",
+      toStatus: "review",
+      actor: "agent",
+      sessionId,
+    });
+  });
+
+  it("refuses a move by a different session while a build owns the ticket", async () => {
+    // The main session is a live build on epicId; a second, non-owning
+    // session must stay locked out of the in-progress ticket.
+    db()
+      .update(agentSessions)
+      .set({ agentType: "build" })
+      .where(eq(agentSessions.id, sessionId))
+      .run();
+
+    const res = await call(
+      updateStatusPost,
+      { status: "review", ticket_id: epicId },
+      noEpicToken
+    );
+    const json = await res.json();
+
     expect(res.status).toBe(409);
+    expect(json.code).toBe("INVALID_TRANSITION");
     expect(json.error).toContain("session is queued or running");
+
+    const epic = db()
+      .select()
+      .from(epics)
+      .where(eq(epics.id, epicId))
+      .get();
+    expect(epic?.status).toBe("in_progress");
 
     const logs = db()
       .select()
@@ -444,11 +498,45 @@ describe("POST /api/mcp/update-ticket-status", () => {
       fromStatus: "in_progress",
       toStatus: "in_progress",
       actor: "agent",
-      sessionId,
+      sessionId: noEpicSessionId,
     });
     expect(logs[0].reason).toContain(
       "Transition in_progress → review refused"
     );
+  });
+
+  it("refuses the owning session's move while a second build is also live", async () => {
+    // Two concurrent code-producing sessions: neither is the sole owner, so
+    // the ticket stays locked until one of them settles.
+    db()
+      .update(agentSessions)
+      .set({ agentType: "build" })
+      .where(eq(agentSessions.id, sessionId))
+      .run();
+    db()
+      .insert(agentSessions)
+      .values({
+        id: createId(),
+        projectId,
+        epicId,
+        status: "running",
+        agentType: "ticket_build",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    const res = await call(updateStatusPost, { status: "review" }, token);
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.code).toBe("INVALID_TRANSITION");
+
+    const epic = db()
+      .select()
+      .from(epics)
+      .where(eq(epics.id, epicId))
+      .get();
+    expect(epic?.status).toBe("in_progress");
   });
 
   it("treats same-status as a no-op (no log entry)", async () => {

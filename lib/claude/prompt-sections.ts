@@ -197,6 +197,20 @@ export function arijToolsSection(agentType: string | null): string {
     "on the user — it reliably holds the ticket and marks the session as " +
     "awaiting a reply, so prefer it over ending with a question in text.";
 
+  // Code-producing sessions own the ticket they are building, so they are
+  // allowed to move it out of In Progress — the orchestrator also promotes
+  // the ticket when the session ends, but moving it as soon as the work is
+  // committed keeps the board honest while the session is still live.
+  const buildExtra =
+    agentType && ["build", "ticket_build", "team_build"].includes(agentType)
+      ? " You may move the ticket you are building: once the work is " +
+        "complete and committed, call update_ticket_status to move it to " +
+        "Review. If the move is refused for any reason, post your result " +
+        "comment anyway and say plainly that the transition is still " +
+        "pending — the orchestrator promotes the ticket when the session " +
+        "ends."
+      : "";
+
   const reviewExtra =
     agentType && agentType.startsWith("review_")
       ? " File review findings with submit_findings (file+line anchored; " +
@@ -204,5 +218,5 @@ export function arijToolsSection(agentType: string | null): string {
         "with the required '**Overall Verdict: …**' line."
       : "";
 
-  return section("Arij tools", base + reviewExtra);
+  return section("Arij tools", base + buildExtra + reviewExtra);
 }

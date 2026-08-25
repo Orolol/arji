@@ -125,8 +125,16 @@ export function applyTransition(opts: ApplyTransitionOpts): ApplyTransitionResul
     return { valid: true };
   }
 
-  // 1. Build context & validate
-  const ctx = buildTransitionContext({ epicId, fromStatus, toStatus, actor });
+  // 1. Build context & validate. The acting session id feeds the engine's
+  //  owning-session exemption: a live build may move the ticket it owns
+  //  itself, while every concurrent actor stays locked out.
+  const ctx = buildTransitionContext({
+    epicId,
+    fromStatus,
+    toStatus,
+    actor,
+    sessionId,
+  });
   ctx.source = source;
   if (assumeReviewCommentsResolved) {
     ctx.hasOpenReviewComments = false;
@@ -209,6 +217,7 @@ export function applyStoryTransition(
     fromStatus,
     toStatus,
     actor,
+    sessionId,
     requireCompletedReview,
     requireResolvedComments,
   });

@@ -272,7 +272,11 @@ describe("epic build route — asked_question workflow effects", () => {
     expect(activity.some((a) => a.actor === "system")).toBe(false);
   });
 
-  it("preserves agent output when session finalization leaves the build running", async () => {
+  it("advances the ticket and preserves agent output when finalization leaves the build running", async () => {
+    // The session row is left 'running' because the terminal write failed.
+    // The terminal handler acts for that owning session, whose
+    // in_progress → review promotion is now permitted: the work is committed
+    // and no other mover is live on the ticket.
     const { projectId, epicId } = seedEpic();
     processManagerState.result = {
       success: true,
@@ -302,7 +306,7 @@ describe("epic build route — asked_question workflow effects", () => {
       ).toMatchObject({ status: "running" });
       expect(
         db.select().from(epics).where(eq(epics.id, epicId)).get()?.status
-      ).toBe("in_progress");
+      ).toBe("review");
 
       const comments = db
         .select()
@@ -324,20 +328,17 @@ describe("epic build route — asked_question workflow effects", () => {
       expect(activity).toContainEqual(
         expect.objectContaining({
           sessionId,
-          reason: expect.stringContaining("review promotion was refused"),
+          reason: "Build completed successfully",
+          fromStatus: "in_progress",
+          toStatus: "review",
         })
       );
-      expect(emitSessionFailed).toHaveBeenCalledWith(
-        projectId,
-        epicId,
-        sessionId,
-        expect.stringContaining("queued or running")
-      );
-      expect(emitSessionCompleted).not.toHaveBeenCalledWith(
+      expect(emitSessionCompleted).toHaveBeenCalledWith(
         projectId,
         epicId,
         sessionId
       );
+      expect(emitSessionFailed).not.toHaveBeenCalled();
     } finally {
       sqlite.exec("DROP TRIGGER IF EXISTS fail_completed_session_update");
       errorSpy.mockRestore();

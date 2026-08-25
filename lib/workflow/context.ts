@@ -14,6 +14,8 @@ export function buildTransitionContext(opts: {
   fromStatus: KanbanStatus;
   toStatus: KanbanStatus;
   actor: "user" | "agent" | "system";
+  /** The session initiating the transition, when any (agent tool channel). */
+  sessionId?: string;
   requireCompletedReview?: boolean;
   requireResolvedComments?: boolean;
 }): TransitionContext {
@@ -23,6 +25,7 @@ export function buildTransitionContext(opts: {
     fromStatus,
     toStatus,
     actor,
+    sessionId,
     requireCompletedReview = true,
     requireResolvedComments = true,
   } = opts;
@@ -90,6 +93,13 @@ export function buildTransitionContext(opts: {
     requireCompletedReview,
     requireResolvedComments,
     hasRunningSession: runningSessions.length > 0,
+    // The acting session owns the ticket only when it is the sole live
+    // code-producing session on it — a second concurrent build keeps the
+    // lock in place (e.g. the epic while a sibling story is still building).
+    ownsInProgress:
+      sessionId !== undefined &&
+      runningSessions.length === 1 &&
+      runningSessions[0].id === sessionId,
     actor,
   };
 }
