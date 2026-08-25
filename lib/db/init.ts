@@ -67,9 +67,11 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
   // columns are always present or absent together on real databases)
   { folderMillis: 1786712700000, table: "chat_attachments", column: "project_id" },
   { folderMillis: 1786712700000, table: "chat_attachments", column: "epic_id" },
-  // 0031_review_comment_session
+  // 0032_review_comment_session. Numbered past main's 0031_notification_message
+  // (when=1786712800000), whose own entry arrives with the merge — the `when`
+  // is the migrator's identity, so two migrations must never share one.
   {
-    folderMillis: 1786712800000,
+    folderMillis: 1786712900000,
     table: "review_comments",
     column: "agent_session_id",
   },

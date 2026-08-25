@@ -350,7 +350,7 @@ interface DatedRow {
   userStoryId?: string | null;
   /** Session the row explicitly names as its subject (forensic comments). */
   deadSessionId?: string | null;
-  /** Session that FILED the row (review findings, since migration 0031). */
+  /** Session that FILED the row (review findings, since migration 0032). */
   agentSessionId?: string | null;
 }
 
@@ -361,7 +361,7 @@ interface DatedRow {
  * (lib/pipeline/findings.ts):
  *   - RESOLVED rows are kept: a finding that was fixed still records a mistake
  *     the agents made, which is exactly what a dream is looking for;
- *   - `agentSessionId` comes along. Since migration 0031 the MCP
+ *   - `agentSessionId` comes along. Since migration 0032 the MCP
  *     submit_findings route records which review session filed each row, so a
  *     finding can be attributed EXACTLY. Two reviewers running on the same epic
  *     at once used to be indistinguishable by timestamp, and each would be
@@ -635,7 +635,7 @@ export function collectDreamDigest(
     const finalText = resolveFinalText(row);
 
     // Exact attribution when the filing session was recorded; the time window
-    // only for rows written before migration 0031. Mixing the two would be
+    // only for rows written before migration 0032. Mixing the two would be
     // wrong in the case that matters: with two reviewers on one epic, a
     // LINKED row belongs to its session and to no other, so an unlinked
     // fallback must never claim it.

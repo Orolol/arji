@@ -442,7 +442,7 @@ describe("collectDreamDigest — per-session record", () => {
   /**
    * Two reviewers on the same epic at once are indistinguishable by timestamp,
    * so the time-window match handed each of them the other's findings — and the
-   * dream would then learn a lesson from the wrong run. Since migration 0031
+   * dream would then learn a lesson from the wrong run. Since migration 0032
    * submit_findings records the filing session, and that link decides.
    */
   it("attributes findings by the recorded session, not by overlapping time", () => {
@@ -552,7 +552,7 @@ describe("collectDreamDigest — per-session record", () => {
         body: "[major] LEGACY FINDING",
         author: "agent",
         status: "open",
-        // agentSessionId deliberately absent — a pre-0031 row.
+        // agentSessionId deliberately absent — a pre-0032 row.
         createdAt: minutesAgo(25),
       })
       .run();

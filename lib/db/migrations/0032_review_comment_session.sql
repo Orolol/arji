@@ -21,6 +21,14 @@
 -- are pruned, findings are the ticket's record), and ON DELETE SET NULL would
 -- silently downgrade an exact link back to a guess.
 --
+-- Numbered 0032, not 0031: `main` already owns 0031 (`0031_notification_message`)
+-- at when=1786712800000. The `when` timestamp IS the migrator's identity — it
+-- applies only entries strictly newer than the last one recorded in the
+-- database — so reusing that slot would make every database that already ran
+-- main's 0031 SKIP this one silently, leaving `agent_session_id` missing while
+-- the code reads and writes it. idx 30 is deliberately left free for main's
+-- entry to occupy when this branch merges.
+--
 -- SQLite has no ADD COLUMN IF NOT EXISTS, so like 0023/0024/0026/0028/0030 this
 -- is not an idempotent no-op; the column is listed in
 -- POST_BASELINE_COLUMN_MIGRATIONS (lib/db/init.ts) so a database that lost its
