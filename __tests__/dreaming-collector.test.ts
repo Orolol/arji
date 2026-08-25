@@ -40,7 +40,9 @@ const {
   recordDreamCutoff,
   selectDreamCandidates,
 } = await import("@/lib/workflow/dreaming");
-const { FORENSIC_COMMENT_HEADING } = await import("@/lib/pipeline/forensic");
+const { FORENSIC_COMMENT_HEADING, forensicDeadSessionMarker } = await import(
+  "@/lib/pipeline/forensic"
+);
 
 const NOW = new Date("2026-08-25T12:00:00.000Z");
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -589,6 +591,86 @@ describe("collectDreamDigest — per-session record", () => {
     expect(sessions.find((s) => s.sessionId === sessionB)!.forensic).toContain(
       "INVOICES DIAGNOSIS"
     );
+  });
+
+  /**
+   * The exact link. A forensic agent can sit in the scheduler queue for a long
+   * time before it writes, so a time-window match either misses its diagnostic
+   * or hands it to a rerun. The marker the pipeline stamps into the comment
+   * makes the attribution independent of when it landed.
+   */
+  it("uses the dead-session marker, however late the diagnostic lands", () => {
+    const dead = seedSession({
+      status: "failed",
+      outcome: "error",
+      startedAt: minutesAgo(200),
+      createdAt: minutesAgo(200),
+      endedAt: minutesAgo(190),
+      completedAt: minutesAgo(190),
+    });
+    const laterRun = seedSession({
+      startedAt: minutesAgo(60),
+      createdAt: minutesAgo(60),
+      endedAt: minutesAgo(50),
+      completedAt: minutesAgo(50),
+    });
+    // Written 3 hours after the run it diagnoses — far outside the slack, and
+    // squarely inside the later run's window.
+    db.insert(ticketComments)
+      .values({
+        id: `forensic-late-${counter}`,
+        epicId,
+        userStoryId: null,
+        author: "agent",
+        content: `${FORENSIC_COMMENT_HEADING}\n${forensicDeadSessionMarker(dead)}\n\nLATE DIAGNOSIS`,
+        createdAt: minutesAgo(45),
+      })
+      .run();
+
+    const { sessions } = collectDreamDigest(projectId, { now: NOW });
+    expect(sessions.find((s) => s.sessionId === dead)!.forensic).toContain(
+      "LATE DIAGNOSIS"
+    );
+    expect(sessions.find((s) => s.sessionId === laterRun)!.forensic).toBeNull();
+  });
+
+  it("keeps the marker itself out of the digest", () => {
+    const dead = seedSession({ status: "failed", outcome: "error" });
+    db.insert(ticketComments)
+      .values({
+        id: `forensic-marker-${counter}`,
+        epicId,
+        userStoryId: null,
+        author: "agent",
+        content: `${FORENSIC_COMMENT_HEADING}\n${forensicDeadSessionMarker(dead)}\n\nCLEAN BODY`,
+        createdAt: minutesAgo(49),
+      })
+      .run();
+
+    const result = collectDreamDigest(projectId, { now: NOW });
+    expect(result.sessions.find((s) => s.sessionId === dead)!.forensic).toBe(
+      "CLEAN BODY"
+    );
+    expect(result.text).not.toContain("arij:dead-session");
+  });
+
+  it("attaches nothing when the marker names a session outside the window", () => {
+    seedSession({ status: "failed", outcome: "error" });
+    db.insert(ticketComments)
+      .values({
+        id: `forensic-orphan-${counter}`,
+        epicId,
+        userStoryId: null,
+        author: "agent",
+        content: `${FORENSIC_COMMENT_HEADING}\n${forensicDeadSessionMarker("sess-from-last-month")}\n\nORPHAN DIAGNOSIS`,
+        createdAt: minutesAgo(49),
+      })
+      .run();
+
+    const { sessions } = collectDreamDigest(projectId, { now: NOW });
+    // No fallback to the heuristic: a marked comment belongs to the session it
+    // names, and that one is not here.
+    expect(sessions.every((s) => s.forensic === null)).toBe(true);
   });
 
   /**
