@@ -258,27 +258,47 @@ function markdownHeadings(text: string): string[] {
   return headings;
 }
 
+/** Everything before the first `## ` line — must be empty. */
+function preambleBeforeFirstHeading(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const first = lines.findIndex((line) => /^##\s+.+$/.test(line));
+  return (first === -1 ? lines : lines.slice(0, first)).join("\n").trim();
+}
+
 /**
  * Checks that a dreamed document really carries the imposed structure.
  *
- * Two failures this catches, both of which would otherwise be stored AND mark
+ * Three failures this catches, all of which would otherwise be stored AND mark
  * the digest window as learned:
  *   - the agent ignored the section contract (the prompt asks for it, but a
  *     prompt is not a guarantee);
+ *   - it wrapped the document in conversation — "Here is the rewritten
+ *     memory:" — which the output contract explicitly forbids, because the
+ *     response is written VERBATIM into a document every prompt reads;
  *   - the response was longer than the memory cap, so the truncation that
  *     `saveProjectMemory` applies silently lopped the tail off — leaving a
  *     document that stops mid-sentence and has lost its last section. This is
  *     why the CALLER must validate the cap-effective text, not the raw output.
  *
- * Required: all four headings, each exactly once, in the prescribed order.
- * EXTRA `##` sections are tolerated on purpose — a dream that answered the four
- * questions and added one of its own is still a good document, and discarding
- * it would cost a real rewrite to enforce a cosmetic rule.
+ * The rule matches the prompt exactly: the `##` headings must EQUAL
+ * DREAMING_MEMORY_SECTIONS — same four, same order, no extras, no duplicates —
+ * and nothing but whitespace may precede the first one. Deeper headings
+ * (`###`) inside a section are content, not structure, and are ignored.
  */
 export function validateDreamedMemoryStructure(
   text: string,
   requiredSections: readonly string[] = DREAMING_MEMORY_SECTIONS
 ): DreamedMemoryValidation {
+  const preamble = preambleBeforeFirstHeading(text);
+  if (preamble.length > 0) {
+    return {
+      valid: false,
+      reason: `content before the first section: ${JSON.stringify(
+        preamble.slice(0, 80)
+      )}`,
+    };
+  }
+
   const headings = markdownHeadings(text);
 
   const missing = requiredSections.filter(
@@ -288,6 +308,16 @@ export function validateDreamedMemoryStructure(
     return {
       valid: false,
       reason: `missing required section(s): ${missing.join(", ")}`,
+    };
+  }
+
+  const unexpected = headings.filter(
+    (heading) => !requiredSections.includes(heading)
+  );
+  if (unexpected.length > 0) {
+    return {
+      valid: false,
+      reason: `unexpected section(s): ${[...new Set(unexpected)].join(", ")}`,
     };
   }
 
@@ -301,9 +331,10 @@ export function validateDreamedMemoryStructure(
     };
   }
 
-  const positions = requiredSections.map((title) => headings.indexOf(title));
-  const ordered = positions.every(
-    (position, index) => index === 0 || position > positions[index - 1]
+  // Equality, not merely "present and ascending": after the checks above the
+  // multiset matches, so a plain sequence comparison is what pins the order.
+  const ordered = headings.every(
+    (heading, index) => heading === requiredSections[index]
   );
   if (!ordered) {
     return {

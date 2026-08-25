@@ -200,19 +200,41 @@ describe("validateDreamedMemoryStructure", () => {
       "Here is my summary of the sessions I read."
     );
     expect(result.valid).toBe(false);
-    expect(result.reason).toContain("missing required section");
+    // Caught by the preamble rule — with no headings at all, the whole answer
+    // IS content before the first section.
+    expect(result.reason).toContain("content before the first section");
   });
 
   /**
-   * Deliberately tolerated: a dream that answered the four questions and added
-   * one of its own is still a good document, and discarding it would cost a
-   * real rewrite to enforce a cosmetic rule.
+   * The prompt says EXACTLY these four sections. A bonus heading is a document
+   * that did not follow the contract, and the memory is read by every future
+   * prompt — so the structure is enforced as written rather than approximated.
    */
-  it("tolerates an EXTRA section alongside the four", () => {
-    expect(
-      validateDreamedMemoryStructure(`${wellFormed}\n\n## Open questions\n\n- x`)
-        .valid
-    ).toBe(true);
+  it("rejects an EXTRA section alongside the four", () => {
+    const result = validateDreamedMemoryStructure(
+      `${wellFormed}\n\n## Open questions\n\n- x`
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("Open questions");
+  });
+
+  /**
+   * The "Here is the rewritten memory:" failure mode. The response is written
+   * VERBATIM into the document, so a conversational preamble becomes the first
+   * thing every future prompt reads.
+   */
+  it("rejects prose before the first section", () => {
+    const result = validateDreamedMemoryStructure(
+      `Here is the rewritten project memory:\n\n${wellFormed}`
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("content before the first section");
+  });
+
+  it("tolerates blank lines before the first section", () => {
+    expect(validateDreamedMemoryStructure(`\n\n  \n${wellFormed}`).valid).toBe(
+      true
+    );
   });
 
   it("ignores deeper headings and bold text that only look like sections", () => {
