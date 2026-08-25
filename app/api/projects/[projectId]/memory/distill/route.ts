@@ -13,6 +13,7 @@ import {
   dispatchMemoryDistillSession,
   hasPendingMemoryDistill,
 } from "@/lib/workflow/memory-distill";
+import { isMemoryWriterBusyError } from "@/lib/workflow/memory-writer-lock";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -31,8 +32,9 @@ const distillSchema = z.object({
  * per-project scheduler with the normal session lifecycle — see
  * lib/workflow/memory-distill.ts.
  *
- * 409 when a distill session is already queued/running for the project:
- * two concurrent rewrites of the same document would race, last-write-wins.
+ * 409 when ANY memory writer — another distill, or a dream — is already
+ * queued/running for the project: two concurrent rewrites of the same document
+ * would race, last-write-wins.
  */
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
@@ -81,6 +83,14 @@ export async function POST(request: NextRequest, { params }: Params) {
     });
     return NextResponse.json({ data: { sessionId } });
   } catch (error) {
+    // Lost the race for the document between the check above and the insert —
+    // a conflict, not a fault.
+    if (isMemoryWriterBusyError(error)) {
+      return NextResponse.json(
+        { error: (error as Error).message, code: "MEMORY_DISTILL_PENDING" },
+        { status: 409 }
+      );
+    }
     return errorResponse(error, "Failed to dispatch memory distillation");
   }
 }

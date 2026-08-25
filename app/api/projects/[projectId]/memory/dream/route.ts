@@ -6,10 +6,8 @@ import {
   errorResponse,
 } from "@/lib/api/route-helpers";
 import { validateBody, isValidationError } from "@/lib/validation/validate";
-import {
-  dispatchDreamingSession,
-  hasPendingDream,
-} from "@/lib/workflow/dreaming";
+import { dispatchDreamingSession } from "@/lib/workflow/dreaming";
+import { hasPendingMemoryWriter } from "@/lib/workflow/memory-writer-lock";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -26,8 +24,9 @@ const dreamSchema = z.object({
  * tickets (see lib/workflow/dreaming.ts). The other trigger is the end of a
  * night run, behind the `dreaming_after_night_run` setting.
  *
- * 409 when a dream is already queued/running for the project: two concurrent
- * rewrites of the same document would race, last-write-wins.
+ * 409 when ANY memory writer — a dream, or a distill — is already
+ * queued/running for the project: both replace the whole document, so two at
+ * once would race, last-write-wins.
  *
  * 200 with `sessionId: null` when the window turned up nothing new — the
  * journalled no-op. Deliberately NOT an error: "nothing changed since the last
@@ -43,10 +42,10 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (isValidationError(validated)) return validated;
   const { namedAgentId } = validated.data;
 
-  if (hasPendingDream(projectId)) {
+  if (hasPendingMemoryWriter(projectId)) {
     return NextResponse.json(
       {
-        error: "A dreaming session is already in progress for this project.",
+        error: "A memory rewrite is already in progress for this project.",
         code: "DREAMING_PENDING",
       },
       { status: 409 }

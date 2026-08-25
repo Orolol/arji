@@ -73,6 +73,8 @@ import {
   saveProjectMemory,
 } from "@/lib/documents/memory";
 import { createMemoryDreamedNotification } from "@/lib/notifications/create";
+// Client-safe constants module (no db import) — no cycle back into the engine.
+import { NIGHT_STOPPED_ABORT_REASON } from "@/lib/night/constants";
 import {
   DREAMING_AFTER_NIGHT_RUN_SETTING_KEY,
   DREAMING_AGENT_TYPE,
@@ -83,8 +85,10 @@ import {
   DREAM_SOURCE_AGENT_TYPES,
   DREAM_WINDOW_DAYS,
   dreamingAfterNightRunSettingKey,
+  dreamingLastCutoffSettingKey,
   parseDreamingAfterNightRunSetting,
 } from "./dreaming-constants";
+import { hasPendingMemoryWriter } from "./memory-writer-lock";
 import {
   assembleDreamDigest,
   extractReviewVerdict,
@@ -112,10 +116,18 @@ export interface CollectDreamDigestOptions {
 }
 
 export interface DreamDigestResult extends AssembledDreamDigest {
-  /** Inclusive lower bound of the collection window. */
+  /** Inclusive lower bound of the collection window (terminal time). */
   sinceIso: string;
-  /** Timestamp of the dream this window follows, or null for a first dream. */
-  lastDreamAt: string | null;
+  /**
+   * The moment this collection happened — what `recordDreamCutoff` persists
+   * once the dream has actually rewritten the memory, and therefore where the
+   * NEXT window opens. Deliberately the collection instant and not the dream's
+   * end: a session that reaches a terminal state while the dream is still
+   * running was not in this digest and must stay readable by the next one.
+   */
+  collectedAtIso: string;
+  /** Cutoff this window follows, or null for a first dream. */
+  lastCutoffAt: string | null;
   /** Candidates inside the window before the session-count cap. */
   candidateCount: number;
   /** Per-session records that were rendered (chronological order). */
@@ -123,58 +135,53 @@ export interface DreamDigestResult extends AssembledDreamDigest {
 }
 
 /**
- * When the project last DELIVERED a dream.
+ * Where the project's next dream window opens: the collection cutoff of the
+ * last dream that actually REPLACED the memory document.
  *
- * Deliberately keyed on delivery, not on dispatch: a dream that failed or
- * stayed silent never folded its window into the memory, so the next dream
- * must read that evidence again rather than skip it.
+ * Read from a settings row rather than derived from dream sessions on purpose.
+ * A session row can only say "this dream finished and answered", which is a
+ * strictly worse question on two counts: it moves the window past sessions
+ * that ended while the dream was running, and it counts a dream whose memory
+ * write threw as if it had landed. The cutoff row is written at exactly one
+ * place — after a successful save — so its presence means the evidence up to
+ * that instant really is inside the stored memory.
  */
-export function findLastDreamAt(projectId: string): string | null {
-  const rows = db
-    .select({
-      createdAt: agentSessions.createdAt,
-      endedAt: agentSessions.endedAt,
-      completedAt: agentSessions.completedAt,
-    })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.projectId, projectId),
-        eq(agentSessions.agentType, DREAMING_AGENT_TYPE),
-        eq(agentSessions.status, "completed"),
-        eq(agentSessions.outcome, "answered")
-      )
-    )
-    .all();
-
-  let latest: number | null = null;
-  let latestIso: string | null = null;
-  for (const row of rows) {
-    const iso = row.completedAt ?? row.endedAt ?? row.createdAt;
-    const ms = parseTimestampMs(iso);
-    if (ms === null) continue;
-    if (latest === null || ms > latest) {
-      latest = ms;
-      latestIso = iso;
-    }
+export function findLastDreamCutoff(projectId: string): string | null {
+  const raw = readSettingValue(dreamingLastCutoffSettingKey(projectId));
+  if (!raw) return null;
+  // The settings PATCH route JSON-encodes values; a hand-written row may be
+  // raw. Accept both, reject anything undateable.
+  let value: unknown = raw;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    // raw (non-JSON) string — use as-is
   }
-  return latestIso;
+  if (typeof value !== "string") return null;
+  return parseTimestampMs(value) === null ? null : value;
 }
 
-/** True when a dream is already queued/running for the project. */
-export function hasPendingDream(projectId: string): boolean {
-  const row = db
-    .select({ id: agentSessions.id })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.projectId, projectId),
-        eq(agentSessions.agentType, DREAMING_AGENT_TYPE),
-        inArray(agentSessions.status, ["queued", "running"])
-      )
-    )
+/**
+ * Persists the collection cutoff. Called ONLY after the dreamed memory was
+ * successfully stored — see the guard rails in `dispatchDreamingSession`.
+ */
+export function recordDreamCutoff(projectId: string, cutoffIso: string): void {
+  const key = dreamingLastCutoffSettingKey(projectId);
+  const value = JSON.stringify(cutoffIso);
+  const now = new Date().toISOString();
+  const existing = db
+    .select({ key: settings.key })
+    .from(settings)
+    .where(eq(settings.key, key))
     .get();
-  return !!row;
+  if (existing) {
+    db.update(settings)
+      .set({ value, updatedAt: now })
+      .where(eq(settings.key, key))
+      .run();
+    return;
+  }
+  db.insert(settings).values({ key, value, updatedAt: now }).run();
 }
 
 interface DreamCandidateRow {
@@ -196,12 +203,21 @@ interface DreamCandidateRow {
   totalCostUsd: number | null;
 }
 
-/** Sort key of a session: when it actually started, else when it was queued. */
+/** When the run began: its start, else when it was queued. */
 function sessionAt(row: DreamCandidateRow): string | null {
   return row.startedAt ?? row.createdAt;
 }
 
-function sessionEndMs(row: DreamCandidateRow): number | null {
+/**
+ * When the run BECAME EVIDENCE — the moment it reached a terminal state.
+ *
+ * This, not the start, is what places a session in a dream's window: a build
+ * that started before the previous dream and ended after it was never in that
+ * digest, and keying on `startedAt` would hide it from every dream that
+ * follows. Falls back to the start only for legacy rows with no terminal
+ * timestamp at all.
+ */
+function sessionTerminalMs(row: DreamCandidateRow): number | null {
   return (
     parseTimestampMs(row.endedAt) ??
     parseTimestampMs(row.completedAt) ??
@@ -212,6 +228,9 @@ function sessionEndMs(row: DreamCandidateRow): number | null {
 /**
  * Terminal source sessions of the project inside the window, newest first,
  * capped at `maxSessions`.
+ *
+ * "Inside the window" means the session REACHED a terminal state at/after
+ * `sinceIso` — see `sessionTerminalMs`.
  *
  * Timestamps are compared with Date.parse in JS rather than in SQL because
  * `created_at` mixes explicit ISO strings with SQLite CURRENT_TIMESTAMP
@@ -255,16 +274,16 @@ export function selectDreamCandidates(
     .all();
 
   const inWindow = rows.filter((row) => {
-    const ms = parseTimestampMs(sessionAt(row));
+    const ms = sessionTerminalMs(row);
     // A session we cannot date cannot be placed in the window — leaving it out
     // is the choice that keeps consecutive dreams from re-reading it forever.
     if (ms === null) return false;
     return sinceMs === null || ms >= sinceMs;
   });
 
+  // Newest-terminal first, so the count cap keeps the freshest evidence.
   inWindow.sort(
-    (a, b) =>
-      (parseTimestampMs(sessionAt(b)) ?? 0) - (parseTimestampMs(sessionAt(a)) ?? 0)
+    (a, b) => (sessionTerminalMs(b) ?? 0) - (sessionTerminalMs(a) ?? 0)
   );
 
   return {
@@ -315,6 +334,8 @@ interface DatedRow {
   id: string;
   body: string;
   createdMs: number | null;
+  /** Story the row was filed against; null for epic-scoped rows. */
+  userStoryId?: string | null;
 }
 
 /**
@@ -351,7 +372,13 @@ function loadBlockingFindingsByEpic(epicIds: string[]): Map<string, DatedRow[]> 
   return byEpic;
 }
 
-/** Forensic diagnostic comments per epic (lib/pipeline/forensic.ts files them). */
+/**
+ * Forensic diagnostic comments per epic (lib/pipeline/forensic.ts files them).
+ *
+ * `userStoryId` comes along because an epic can carry several story-scoped
+ * runs at once: the post-mortem of story A must not be pinned onto the session
+ * that built story B just because their run windows overlap.
+ */
 function loadForensicCommentsByEpic(epicIds: string[]): Map<string, DatedRow[]> {
   const byEpic = new Map<string, DatedRow[]>();
   if (epicIds.length === 0) return byEpic;
@@ -360,6 +387,7 @@ function loadForensicCommentsByEpic(epicIds: string[]): Map<string, DatedRow[]> 
     .select({
       id: ticketComments.id,
       epicId: ticketComments.epicId,
+      userStoryId: ticketComments.userStoryId,
       content: ticketComments.content,
       createdAt: ticketComments.createdAt,
     })
@@ -378,6 +406,7 @@ function loadForensicCommentsByEpic(epicIds: string[]): Map<string, DatedRow[]> 
       id: row.id,
       body: row.content.slice(FORENSIC_COMMENT_HEADING.length).trim(),
       createdMs: parseTimestampMs(row.createdAt),
+      userStoryId: row.userStoryId ?? null,
     });
     byEpic.set(row.epicId, list);
   }
@@ -409,9 +438,9 @@ export function collectDreamDigest(
   options: CollectDreamDigestOptions = {}
 ): DreamDigestResult {
   const now = options.now ?? new Date();
-  const lastDreamAt = findLastDreamAt(projectId);
+  const lastCutoffAt = findLastDreamCutoff(projectId);
   const window = resolveDreamWindow({
-    lastDreamAt,
+    lastCutoffAt,
     now,
     windowDays: options.windowDays ?? DREAM_WINDOW_DAYS,
   });
@@ -444,7 +473,7 @@ export function collectDreamDigest(
 
   const sessions: DreamSessionDigest[] = ordered.map((row) => {
     const startMs = parseTimestampMs(sessionAt(row));
-    const endMs = sessionEndMs(row);
+    const endMs = sessionTerminalMs(row);
     const finalText = resolveFinalText(row);
 
     const findings = row.epicId
@@ -463,6 +492,11 @@ export function collectDreamDigest(
       const candidate = (forensicByEpic.get(row.epicId) ?? []).find(
         (comment) =>
           !claimedForensic.has(comment.id) &&
+          // Same scope, exactly: a story-scoped session only claims its own
+          // story's post-mortem, an epic-scoped one only claims epic-scoped
+          // ones (both sides null). The pipeline files the comment with the
+          // dead session's own userStoryId, so equality is the honest test.
+          (comment.userStoryId ?? null) === (row.userStoryId ?? null) &&
           comment.createdMs !== null &&
           (startMs === null || comment.createdMs >= startMs) &&
           (endMs === null ||
@@ -510,7 +544,8 @@ export function collectDreamDigest(
   return {
     ...assembled,
     sinceIso: window.sinceIso,
-    lastDreamAt,
+    collectedAtIso: now.toISOString(),
+    lastCutoffAt,
     candidateCount,
     sessions,
   };
@@ -529,25 +564,61 @@ export interface DreamDecision {
  * Pure guard matrix — exported for exhaustive testing.
  *
  * Denials, in evaluation order:
- *   - a dream is already queued/running for the project (two concurrent
- *     rewrites of one document would race, last-write-wins);
+ *   - a memory writer is already queued/running for the project. Both a dream
+ *     and a distill replace the WHOLE document, so either one in flight blocks
+ *     this dream — two concurrent rewrites would race, last-write-wins;
  *   - the window turned up nothing new (the silent, journalled no-op: paying
  *     for a dream that would re-derive the memory it already has is waste).
  */
 export function evaluateDreamGuards(input: {
-  hasPendingDream: boolean;
+  hasPendingMemoryWriter: boolean;
   sessionCount: number;
 }): DreamDecision {
-  if (input.hasPendingDream) {
+  if (input.hasPendingMemoryWriter) {
     return {
       allowed: false,
-      reason: "a dreaming session is already pending for this project",
+      reason:
+        "a memory rewrite (distill or dream) is already pending for this project",
     };
   }
   if (input.sessionCount <= 0) {
     return {
       allowed: false,
       reason: "no new sessions since the last dream",
+    };
+  }
+  return { allowed: true, reason: "eligible" };
+}
+
+/**
+ * Pure guard matrix for the night-run trigger — exported for testing.
+ *
+ * The dream is dispatched from the run's terminal choke point, which is AFTER
+ * the wave engine's last cost-cap check. The cap therefore cannot stop the
+ * dream on its own, so it is re-evaluated here: a run that already spent its
+ * budget does not get to spend more on a dream just because the dream comes
+ * last. Same reasoning for an explicit user stop — "stop this run" plainly
+ * means "stop spending on it".
+ *
+ * A circuit-breaker abort is deliberately NOT a denial: a run that failed its
+ * way to a breaker trip is exactly the run whose lessons are worth distilling.
+ */
+export function evaluateNightRunDreamGuards(input: {
+  enabled: boolean;
+  abortReason: string | null;
+  costCapUsd: number | null;
+  spentUsd: number;
+}): DreamDecision {
+  if (!input.enabled) {
+    return { allowed: false, reason: "dreaming_after_night_run is off" };
+  }
+  if (input.abortReason === NIGHT_STOPPED_ABORT_REASON) {
+    return { allowed: false, reason: "night run was stopped by the user" };
+  }
+  if (input.costCapUsd !== null && input.spentUsd >= input.costCapUsd) {
+    return {
+      allowed: false,
+      reason: `night run cost cap reached ($${input.spentUsd.toFixed(2)} of $${input.costCapUsd.toFixed(2)})`,
     };
   }
   return { allowed: true, reason: "eligible" };
@@ -587,21 +658,55 @@ export function isDreamingAfterNightRunEnabled(projectId: string): boolean {
   return false;
 }
 
+export interface NightRunDreamContext {
+  /** The run's abort reason, verbatim from the engine (null = normal finish). */
+  abortReason?: string | null;
+  /** Effective cost cap of the run, or null when it ran uncapped. */
+  costCapUsd?: number | null;
+  /** What the run had spent when it closed (SUM over its tagged sessions). */
+  spentUsd?: number;
+}
+
 /**
  * Night-run trigger, invoked (fire-and-forget) from the night engine's
  * terminal choke point. Best-effort by design: it must never throw into the
  * run's finish path, and every denial is silent except for the journal line.
  *
- * The run id is inherited as `batch_run_id` so the dream's spend lands inside
- * the run's cost cap and morning summary instead of escaping both.
+ * Cost accounting, precisely:
+ *   - the run id is inherited as `batch_run_id`, so the dream's spend shows up
+ *     in every DB-derived total for the run (the summary dialog, the run
+ *     detail, `sumNightRunCost`);
+ *   - the wave engine's own cap check cannot stop it (the run is already
+ *     over), so the cap is re-applied HERE, before dispatch, from the numbers
+ *     the caller measured at finish time;
+ *   - the one number it cannot appear in is the morning-summary NOTIFICATION,
+ *     which is sent before the dream starts. That is the accepted trade: the
+ *     summary must not wait minutes for a dream, and the deep link it carries
+ *     opens the detail view, which re-derives the total from the database and
+ *     therefore does include it.
  */
 export async function maybeDreamAfterNightRun(
   projectId: string,
-  runId: string
+  runId: string,
+  context: NightRunDreamContext = {}
 ): Promise<DreamDecision> {
   try {
-    if (!isDreamingAfterNightRunEnabled(projectId)) {
-      return { allowed: false, reason: "dreaming_after_night_run is off" };
+    const decision = evaluateNightRunDreamGuards({
+      enabled: isDreamingAfterNightRunEnabled(projectId),
+      abortReason: context.abortReason ?? null,
+      costCapUsd: context.costCapUsd ?? null,
+      spentUsd: context.spentUsd ?? 0,
+    });
+    if (!decision.allowed) {
+      // Only the cost/stop denials are worth a journal line; "the setting is
+      // off" is the default state of every project and would be pure noise.
+      if (isDreamingAfterNightRunEnabled(projectId)) {
+        console.info(
+          `${DREAMING_LOG_PREFIX} skipped for project ${projectId}` +
+            ` (night_run ${runId}): ${decision.reason}`
+        );
+      }
+      return decision;
     }
     const result = await dispatchDreamingSession({
       projectId,
@@ -677,13 +782,13 @@ export async function dispatchDreamingSession(
     throw new Error("Project not found");
   }
 
-  const pending = hasPendingDream(input.projectId);
+  const pending = hasPendingMemoryWriter(input.projectId);
   const digest = pending
     ? null
     : collectDreamDigest(input.projectId, input.collect ?? {});
 
   const decision = evaluateDreamGuards({
-    hasPendingDream: pending,
+    hasPendingMemoryWriter: pending,
     sessionCount: digest?.includedCount ?? 0,
   });
 
@@ -740,12 +845,13 @@ export async function dispatchDreamingSession(
 
   // Re-check under NO await: the guard above ran before `resolveAgentPrompt`,
   // and two triggers firing together (the Docs button while a night run
-  // finishes) could both have passed it during that suspension. From here to
-  // the insert everything is synchronous, so on Node's single thread this
-  // second look is the one that actually makes "never two dreams at once"
-  // true rather than merely likely.
-  if (hasPendingDream(input.projectId)) {
-    const reason = "a dreaming session is already pending for this project";
+  // finishes, or an auto-distill racing this dream) could both have passed it
+  // during that suspension. From here to the insert everything is synchronous,
+  // so on Node's single thread this second look is the one that actually makes
+  // "never two memory rewrites at once" true rather than merely likely.
+  if (hasPendingMemoryWriter(input.projectId)) {
+    const reason =
+      "a memory rewrite (distill or dream) is already pending for this project";
     console.info(
       `${DREAMING_LOG_PREFIX} skipped for project ${input.projectId}` +
         ` (${input.trigger ?? "manual"}): ${reason} (raced)`
@@ -837,8 +943,27 @@ export async function dispatchDreamingSession(
       archiveProjectMemory(input.projectId, previous);
       saveProjectMemory(input.projectId, output);
     } catch (error) {
+      // The window deliberately does NOT advance here. A dream that produced
+      // text but failed to store it taught the project nothing, so the next
+      // dream must read the same sessions again rather than skip past them.
       console.error(`${DREAMING_LOG_PREFIX} Failed to save dreamed memory`, error);
       return;
+    }
+
+    // The single place the window advances — after, and only after, the memory
+    // document actually changed. Stamped with the COLLECTION instant, so
+    // sessions that reached a terminal state while this dream was running stay
+    // inside the next window instead of falling through the crack between
+    // "collected" and "finished".
+    try {
+      recordDreamCutoff(input.projectId, collected.collectedAtIso);
+    } catch (error) {
+      // Losing the cutoff costs a re-read, never a loss — leave it noisy but
+      // non-fatal.
+      console.warn(
+        `${DREAMING_LOG_PREFIX} Failed to record the dream cutoff`,
+        error
+      );
     }
 
     try {

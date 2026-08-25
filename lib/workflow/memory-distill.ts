@@ -29,7 +29,7 @@
 
 import fs from "fs";
 import path from "path";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   agentSessions,
@@ -67,6 +67,10 @@ import {
   parseMemoryAutoDistillSetting,
 } from "@/lib/documents/memory-constants";
 import { MEMORY_WRITER_AGENT_TYPES } from "./dreaming-constants";
+import {
+  MEMORY_WRITER_BUSY_MESSAGE,
+  hasPendingMemoryWriter,
+} from "./memory-writer-lock";
 import { logTransition } from "./log";
 
 const POLL_INTERVAL_MS = 2000;
@@ -131,7 +135,8 @@ export interface AutoDistillDecision {
  *   - non-build agent types,
  *   - asked_question outcome (the build is still awaiting the user — its
  *     learnings are not settled yet),
- *   - a distill already queued/running for the project (dedup under waves).
+ *   - a memory writer (distill OR dream) already queued/running for the
+ *     project — both rewrite the whole document, so they must not overlap.
  */
 export function evaluateAutoDistillGuards(input: {
   enabled: boolean;
@@ -174,26 +179,24 @@ export function evaluateAutoDistillGuards(input: {
   if (input.hasPendingDistill) {
     return {
       allowed: false,
-      reason: "a memory distill session is already pending for this project",
+      reason:
+        "a memory rewrite (distill or dream) is already pending for this project",
     };
   }
   return { allowed: true, reason: "eligible" };
 }
 
-/** True when a 'memory_distill' session is queued/running for the project. */
+/**
+ * True when ANY memory writer is queued/running for the project — a distill OR
+ * a dream.
+ *
+ * Deliberately wider than its name suggests, and kept under that name because
+ * it is the distill flow's guard: the two writers replace the SAME whole
+ * document, so a distill must stand down for a running dream exactly as it
+ * stands down for another distill. See lib/workflow/memory-writer-lock.ts.
+ */
 export function hasPendingMemoryDistill(projectId: string): boolean {
-  const row = db
-    .select({ id: agentSessions.id })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.projectId, projectId),
-        eq(agentSessions.agentType, "memory_distill"),
-        inArray(agentSessions.status, ["queued", "running"])
-      )
-    )
-    .get();
-  return !!row;
+  return hasPendingMemoryWriter(projectId);
 }
 
 /**
@@ -420,6 +423,15 @@ export async function dispatchMemoryDistillSession(
   const cliSessionId = providerAcceptsAssignedSessionId(resolvedAgent.provider)
     ? crypto.randomUUID()
     : undefined;
+
+  // Last-resort race guard, under NO await: the callers' pending checks ran
+  // before `resolveAgentPrompt` above, so a dream (or another distill) could
+  // have taken the document during that suspension. Everything from here to
+  // the insert is synchronous, which on Node's single thread is what makes the
+  // shared memory-writer lock hold instead of merely usually holding.
+  if (hasPendingMemoryWriter(input.projectId)) {
+    throw new Error(MEMORY_WRITER_BUSY_MESSAGE);
+  }
 
   // Deliberately no epicId on the distill session row: epic-scoped
   // concurrency guards must not treat a background distill as "an agent is
