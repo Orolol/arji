@@ -54,6 +54,13 @@ export interface TransitionContext {
    * strand its work outside the columns the terminal handlers understand.
    */
   ownsInProgress?: boolean;
+  /**
+   * True when the lock fires because the sole live code-producing session
+   * is a story build and the context targets its parent epic: ownership
+   * stops at the story, so no concurrency wording applies — the refusal
+   * is about scope, not about another session.
+   */
+  storyOwnershipBoundary?: boolean;
   /** The actor initiating the transition */
   actor: "user" | "agent" | "system";
   /** The source route/action triggering this transition */
@@ -79,6 +86,9 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
       if (ctx.ownsInProgress && ctx.toStatus === "review") return null;
       if (ctx.ownsInProgress) {
         return "The owning session may only move its in-progress ticket to review while a session is live on it.";
+      }
+      if (ctx.storyOwnershipBoundary) {
+        return "A story build may only move its own story; the parent epic is promoted once every sibling story reaches review.";
       }
       return "Cannot move an in-progress ticket while another agent session is queued or running.";
     }

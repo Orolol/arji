@@ -90,6 +90,18 @@ export function buildTransitionContext(opts: {
         activeBuildTypes.has(session.agentType ?? "")
     );
 
+  // The acting session owns the ticket only when it is the sole live
+  // code-producing session on it — a second concurrent build keeps the
+  // lock in place (e.g. the epic while a sibling story is still building).
+  // A story-scoped session's ownership stops at its story: on an
+  // epic-scoped context (no userStoryId) it must never unlock the parent
+  // epic, or a story agent could promote the epic past the sibling-story
+  // rule that transitionBuildCompleted enforces.
+  const soleActingSession =
+    sessionId !== undefined &&
+    runningSessions.length === 1 &&
+    runningSessions[0].id === sessionId;
+
   return {
     epicId,
     fromStatus,
@@ -99,17 +111,12 @@ export function buildTransitionContext(opts: {
     requireCompletedReview,
     requireResolvedComments,
     hasRunningSession: runningSessions.length > 0,
-    // The acting session owns the ticket only when it is the sole live
-    // code-producing session on it — a second concurrent build keeps the
-    // lock in place (e.g. the epic while a sibling story is still building).
-    // A story-scoped session's ownership stops at its story: on an
-    // epic-scoped context (no userStoryId) it must never unlock the parent
-    // epic, or a story agent could promote the epic past the sibling-story
-    // rule that transitionBuildCompleted enforces.
+    storyOwnershipBoundary:
+      soleActingSession &&
+      userStoryId === undefined &&
+      runningSessions[0].userStoryId !== null,
     ownsInProgress:
-      sessionId !== undefined &&
-      runningSessions.length === 1 &&
-      runningSessions[0].id === sessionId &&
+      soleActingSession &&
       (userStoryId !== undefined || !runningSessions[0].userStoryId),
     actor,
   };

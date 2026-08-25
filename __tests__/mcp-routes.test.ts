@@ -774,7 +774,10 @@ describe("POST /api/mcp/update-ticket-status — story-scoped sessions", () => {
 
     expect(res.status).toBe(409);
     expect(json.code).toBe("INVALID_TRANSITION");
-
+    // The refusal names the scope rule, not a phantom concurrent session —
+    // there is no "another agent session" here.
+    expect(json.error).toContain("may only move its own story");
+    expect(json.error).not.toContain("another agent session");
     expect(storyStatus(storyId1)).toBe("in_progress");
     expect(
       db().select().from(epics).where(eq(epics.id, epicId)).get()?.status
@@ -788,6 +791,24 @@ describe("POST /api/mcp/update-ticket-status — story-scoped sessions", () => {
     expect(res.status).toBe(409);
     expect(json.code).toBe("INVALID_TRANSITION");
     expect(json.error).toContain("Backlog");
+    expect(storyStatus(storyId1)).toBe("in_progress");
+  });
+
+  it("404s when the story build echoes the returned story id back as ticket_id", async () => {
+    // Pins the current ticket_id contract: the story branch returns the
+    // story id it moved, but resolveTicketForToken resolves epics only —
+    // an agent echoing that id into either tool's ticket_id gets a clean
+    // 404, not a silent mis-target. If the routes ever converge on story
+    // ids, flip this expectation.
+    const res = await call(
+      updateStatusPost,
+      { status: "review", ticket_id: storyId1 },
+      storyToken
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(404);
+    expect(json.code).toBe("TICKET_NOT_FOUND");
     expect(storyStatus(storyId1)).toBe("in_progress");
   });
 

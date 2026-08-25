@@ -434,7 +434,9 @@ describe("applyTransition — owning session exemption", () => {
     });
 
     expect(result.valid).toBe(false);
-    expect(result.error).toContain("queued or running");
+    // The refusal names the scope rule, not a phantom concurrent session.
+    expect(result.error).toContain("may only move its own story");
+    expect(result.error).not.toContain("queued or running");
     expect(updateCalls.find((c) => c.table === "epics")).toBeUndefined();
   });
 });
