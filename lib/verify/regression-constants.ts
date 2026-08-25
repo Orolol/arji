@@ -64,6 +64,8 @@ export const REGRESSION_STARTUP_FAILURE_PATTERNS: readonly RegExp[] = [
   /module_not_found/i,
   /no test files found/i,
   /failed to load config/i,
+  /command not found/i,
+  /:\s*not found/i,
 ];
 
 /** Normalized failure reasons reported when the red → green cycle breaks. */
@@ -102,30 +104,25 @@ export function parseBugRegressionSetting(value: unknown): boolean | null {
  * {@link DEFAULT_TEST_FILE_PATTERNS}.
  */
 export function parseTestFilePatterns(value: unknown): string[] | null {
-  let raw: string[] | null = null;
-  if (Array.isArray(value)) {
-    raw = value.filter((p): p is string => typeof p === "string");
-  } else if (typeof value === "string") {
-    // The settings table stores JSON; accept both a JSON-encoded array
-    // and a bare comma/newline-separated list.
-    const trimmed = value.trim();
-    if (trimmed.startsWith("[")) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (Array.isArray(parsed)) {
-          raw = parsed.filter((p): p is string => typeof p === "string");
-        }
-      } catch {
-        // fall through to split
-      }
-    }
-    if (raw === null) {
-      raw = trimmed
-        .split(/[\n,]/)
-        .map((p) => p.trim())
-        .filter(Boolean);
+  let parsed: unknown = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      // raw (non-JSON) string — handled below
     }
   }
+
+  let raw: string[] | null = null;
+  if (Array.isArray(parsed)) {
+    raw = parsed.filter((p): p is string => typeof p === "string");
+  } else if (typeof parsed === "string") {
+    raw = parsed
+      .split(/[\n,]/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+  }
+
   const cleaned = (raw ?? [])
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
@@ -139,8 +136,16 @@ export function parseTestFilePatterns(value: unknown): string[] | null {
  * {@link DEFAULT_BUG_REGRESSION_COMMAND}.
  */
 export function parseBugRegressionCommand(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
+  let parsed: unknown = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      // raw (non-JSON) string — handled below
+    }
+  }
+  if (typeof parsed !== "string") return null;
+  const trimmed = parsed.trim();
   if (!trimmed.includes(REGRESSION_COMMAND_FILE_PLACEHOLDER)) return null;
   return trimmed;
 }

@@ -68,12 +68,9 @@ export interface VerifyGateOutcome {
   result: RegressionCheckResult | null;
 }
 
-
-
 function notRun(): VerifyGateOutcome {
   return { ran: false, passed: null, result: null };
 }
-
 /**
  * Reads the three regression settings from the key/value table —
  * per-project key first (`<key>:<projectId>`), global key second, built-in
@@ -81,7 +78,7 @@ function notRun(): VerifyGateOutcome {
  * effect on the next stage without a restart, same posture as
  * resolveAutoModeConfigForProject.
  */
-function readRegressionConfig(projectId: string): {
+export function readRegressionConfig(projectId: string): {
   enabled: boolean;
   patterns: readonly string[];
   commandTemplate: string;
@@ -131,16 +128,17 @@ function readRegressionConfig(projectId: string): {
 /** Persists the report as an agent-authored ticket comment on the verified ticket. */
 function persistReportComment(
   identity: VerifyGateIdentity,
-  payload: RegressionReportPayload
+  payload: RegressionReportPayload,
+  agentSessionId?: string | null
 ): void {
   try {
     db.insert(ticketComments)
       .values({
         id: createId(),
-        epicId: identity.epicId,
         ...(identity.scope === "story" && identity.userStoryId
           ? { userStoryId: identity.userStoryId }
-          : {}),
+          : { epicId: identity.epicId }),
+        ...(agentSessionId ? { agentSessionId } : {}),
         author: "agent",
         content: formatRegressionReportComment(payload),
         createdAt: new Date().toISOString(),
@@ -220,15 +218,19 @@ export function createVerifyGate(identity: VerifyGateIdentity): VerifyGate {
       };
     }
 
-    persistReportComment(identity, {
-      regression: {
-        status: result.status,
-        reason: result.reason,
-        testFiles: result.testFiles,
-        detail: result.detail,
-        checkedAt: new Date().toISOString(),
+    persistReportComment(
+      identity,
+      {
+        regression: {
+          status: result.status,
+          reason: result.reason,
+          testFiles: result.testFiles,
+          detail: result.detail,
+          checkedAt: new Date().toISOString(),
+        },
       },
-    });
+      lastCodeSessionId
+    );
 
     return { ran: true, passed: result.status === "passed", result };
   };

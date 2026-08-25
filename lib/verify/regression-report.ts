@@ -87,15 +87,40 @@ export function parseRegressionReportComment(
   if (start === -1 || end <= start) return null;
   try {
     const parsed = JSON.parse(content.slice(start, end + 1));
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      parsed.regression &&
-      typeof parsed.regression.status === "string" &&
-      Array.isArray(parsed.regression.testFiles)
-    ) {
-      return parsed as RegressionReportPayload;
-    }
+    if (!parsed || typeof parsed !== "object") return null;
+    const r = (parsed as { regression?: unknown }).regression;
+    if (!r || typeof r !== "object") return null;
+    const { status, reason, testFiles, detail, checkedAt } = r as {
+      status?: unknown;
+      reason?: unknown;
+      testFiles?: unknown;
+      detail?: unknown;
+      checkedAt?: unknown;
+    };
+    if (status !== "passed" && status !== "failed") return null;
+    if (!Array.isArray(testFiles)) return null;
+
+    const validReason =
+      reason === "no_test_in_diff" ||
+      reason === "test_passes_on_base" ||
+      reason === "test_fails_on_branch" ||
+      reason === "command_error" ||
+      reason === null
+        ? reason
+        : null;
+
+    if (status === "failed" && !validReason) return null;
+
+    return {
+      regression: {
+        status,
+        reason: status === "passed" ? null : validReason,
+        testFiles: testFiles.filter((f): f is string => typeof f === "string"),
+        detail: typeof detail === "string" ? detail : null,
+        checkedAt:
+          typeof checkedAt === "string" ? checkedAt : new Date().toISOString(),
+      },
+    };
   } catch {
     // Malformed payload — treat as a plain comment.
   }

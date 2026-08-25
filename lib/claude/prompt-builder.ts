@@ -648,7 +648,6 @@ export interface TeamEpic extends Pick<PromptEpic, "projectId" | "images" | "typ
   description?: string | null;
   worktreePath: string;
   userStories: PromptUserStory[];
-
 }
 
 /**

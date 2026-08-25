@@ -206,7 +206,6 @@ export interface RunPipelineOptions {
   parkRejectedTicket?: (lastCodeSessionId: string | null) => void;
 }
 
-
 const RUNNING_STATE_BY_STAGE: Record<PipelineStageKind, PipelineState> = {
   build: "running_build",
   review: "running_review",
@@ -504,8 +503,8 @@ export async function runPipeline(
     }
 
     // Success: mechanical verify gate (bug tickets), then code stages flow
-    // into review. The gate never throws for check outcomes; a rejection is
-    // an infrastructure bug and fails the run like a crashed stage would.
+    // into review. The gate never throws for check outcomes; an unhandled
+    // rejection is an infrastructure crash and fails the run.
     if (stage === "build" || stage === "fix") {
       lastCodeSessionId = handle.sessionId ?? lastCodeSessionId;
       let gate: VerifyGateOutcome = { ran: false, passed: null, result: null };
@@ -522,6 +521,14 @@ export async function runPipeline(
           PIPELINE_REASONS.failedRegressionGateCrashed,
           handle.sessionId
         );
+        try {
+          options.parkRejectedTicket?.(lastCodeSessionId);
+        } catch (parkError) {
+          console.warn(
+            "[pipeline] Failed to park regression-crashed ticket:",
+            parkError instanceof Error ? parkError.message : parkError
+          );
+        }
         return finish("failed", "regression gate crashed");
       }
       if (gate.ran && !gate.passed && gate.result) {
@@ -534,6 +541,30 @@ export async function runPipeline(
             checkedAt: new Date().toISOString(),
           },
         };
+
+        // command_error means the command failed to execute (environment or
+        // configuration fault, e.g. runner missing or timeout). An agent in
+        // a fix cycle cannot fix an environment fault — fail immediately
+        // rather than burning the fix budget.
+        if (gate.result.reason === "command_error") {
+          callbacks.onTrace?.(
+            PIPELINE_REASONS.failedRegressionCommandError,
+            handle.sessionId
+          );
+          try {
+            options.parkRejectedTicket?.(lastCodeSessionId);
+          } catch (parkError) {
+            console.warn(
+              "[pipeline] Failed to park regression-rejected ticket:",
+              parkError instanceof Error ? parkError.message : parkError
+            );
+          }
+          return finish(
+            "failed",
+            `regression command error: ${gate.result.detail ?? "could not run command"}`
+          );
+        }
+
         if (fixCycles >= options.maxFixCycles) {
           callbacks.onTrace?.(
             PIPELINE_REASONS.failedRegression(fixCycles),

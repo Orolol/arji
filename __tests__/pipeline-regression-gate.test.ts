@@ -228,14 +228,40 @@ describe("runPipeline — regression verify gate", () => {
     expect(h.requests.map((r) => r.stage)).toEqual(["review"]);
   });
 
-  it("fails the run when the gate itself crashes", async () => {
+  it("fails immediately on command_error without wasting fix cycles, parking the ticket", async () => {
+    const parked: Array<string | null> = [];
+    const commandErrorResult: RegressionCheckResult = {
+      status: "failed",
+      reason: "command_error",
+      testFiles: ["src/a.test.ts"],
+      detail: "npx vitest: command not found",
+    };
+    const h = runWithGate({
+      maxFixCycles: 3,
+      gateOutcomes: [{ ran: true, passed: false, result: commandErrorResult }],
+      onParkRejectedTicket: (sessionId) => parked.push(sessionId),
+    });
+    const summary = await h.promise;
+
+    expect(summary.state).toBe("failed");
+    expect(summary.reason).toContain("regression command error");
+    expect(h.requests).toEqual([]); // Zero fix cycles dispatched
+    expect(h.traces).toContain(PIPELINE_REASONS.failedRegressionCommandError);
+    expect(parked).toEqual(["s-build"]);
+  });
+
+  it("fails the run when the gate itself crashes, parking the ticket and tracing the crash", async () => {
+    const parked: Array<string | null> = [];
     const h = runWithGate({
       gateOutcomes: [{ throwOnCall: true }],
+      onParkRejectedTicket: (sessionId) => parked.push(sessionId),
     });
     const summary = await h.promise;
 
     expect(summary.state).toBe("failed");
     expect(summary.reason).toBe("regression gate crashed");
     expect(h.requests).toEqual([]);
+    expect(h.traces).toContain(PIPELINE_REASONS.failedRegressionGateCrashed);
+    expect(parked).toEqual(["s-build"]);
   });
 });
