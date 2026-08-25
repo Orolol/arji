@@ -337,6 +337,23 @@ describe("pickAlternativeReviewProvider — multiple exclusions", () => {
       pickAlternativeReviewProvider("claude-code", ["codex"])
     ).resolves.toBeNull();
   });
+
+  it("applies an eligibility filter after excluding builder and reviewer", async () => {
+    availabilityState.available.add("claude-code");
+    availabilityState.available.add("codex");
+    availabilityState.available.add("gemini-cli");
+
+    const { pickAlternativeReviewProvider } = await import(
+      "@/lib/agent-config/review-segregation"
+    );
+    await expect(
+      pickAlternativeReviewProvider(
+        "gemini-cli",
+        ["claude-code"],
+        (provider) => provider === "codex"
+      )
+    ).resolves.toBe("codex");
+  });
 });
 
 describe("isReviewProviderSegregationEnabled", () => {

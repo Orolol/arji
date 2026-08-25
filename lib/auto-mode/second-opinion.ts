@@ -39,6 +39,11 @@ import {
   emitSessionFailed,
   emitSessionStarted,
 } from "@/lib/events/emit";
+import {
+  isMcpToolsEnabled,
+  providerSupportsMcp,
+} from "@/lib/claude/mcp-injection";
+import type { AgentProvider } from "@/lib/agent-config/constants";
 import { autoRunId } from "./constants";
 
 /** Free-form session type: settings/schema migrations are not needed. */
@@ -68,13 +73,16 @@ export interface SecondOpinionDispatchResult {
   skipReason?: string | null;
 }
 
-function timestamp(value: string | null | undefined): number {
-  if (!value) return Number.NEGATIVE_INFINITY;
+function timestamp(value: string | null | undefined): number | null {
+  if (!value) return null;
   const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
-function latestOrdinaryReviewAt(projectId: string, epicId: string): number {
+function latestOrdinaryReviewAt(
+  projectId: string,
+  epicId: string
+): number | null {
   const row = db
     .select({
       createdAt: agentSessions.createdAt,
@@ -95,26 +103,39 @@ function latestOrdinaryReviewAt(projectId: string, epicId: string): number {
     .limit(1)
     .get();
   return row
-    ? timestamp(row.endedAt ?? row.completedAt ?? row.createdAt)
-    : Number.POSITIVE_INFINITY;
+    ? timestamp(row.endedAt) ??
+        timestamp(row.completedAt) ??
+        timestamp(row.createdAt)
+    : null;
 }
 
 function structuredVerdictForSession(sessionId: string): string | null {
   const comments = db
-    .select({ content: ticketComments.content })
+    .select({
+      content: ticketComments.content,
+      createdAt: ticketComments.createdAt,
+    })
     .from(ticketComments)
     .where(eq(ticketComments.agentSessionId, sessionId))
+    .orderBy(desc(ticketComments.createdAt))
     .all();
+  let newestVerdict: string | null = null;
   for (const comment of comments) {
-    const verdict = comment.content.match(STRUCTURED_VERDICT_RE)?.[1];
-    if (verdict) return verdict.toLowerCase();
+    const verdict = comment.content
+      .match(STRUCTURED_VERDICT_RE)?.[1]
+      ?.toLowerCase();
+    if (!verdict) continue;
+    // The prompt requires exactly one submission. If an agent submits more
+    // than once, a negative verdict must never be hidden by a stale approval.
+    if (verdict === "changes requested") return verdict;
+    newestVerdict ??= verdict;
   }
-  return null;
+  return newestVerdict;
 }
 
-function blockingFindingCount(sessionId: string): number {
+function openFindingCount(sessionId: string): number {
   return db
-    .select({ body: reviewComments.body })
+    .select({ id: reviewComments.id })
     .from(reviewComments)
     .where(
       and(
@@ -122,11 +143,7 @@ function blockingFindingCount(sessionId: string): number {
         eq(reviewComments.status, "open")
       )
     )
-    .all()
-    .filter(
-      (row) =>
-        row.body.startsWith("[critical]") || row.body.startsWith("[major]")
-    ).length;
+    .all().length;
 }
 
 /**
@@ -139,7 +156,7 @@ export function readSecondOpinionState(
   epicId: string
 ): SecondOpinionState {
   const reviewedAt = latestOrdinaryReviewAt(projectId, epicId);
-  if (!Number.isFinite(reviewedAt)) return { status: "missing", sessionId: null };
+  if (reviewedAt === null) return { status: "missing", sessionId: null };
 
   const session = db
     .select()
@@ -153,7 +170,10 @@ export function readSecondOpinionState(
     )
     .orderBy(desc(agentSessions.createdAt))
     .all()
-    .find((row) => timestamp(row.createdAt) >= reviewedAt);
+    .find(
+      (row) =>
+        (timestamp(row.createdAt) ?? Number.NEGATIVE_INFINITY) >= reviewedAt
+    );
 
   if (!session) return { status: "missing", sessionId: null };
   if (ACTIVE_SESSION_STATUSES.has(session.status ?? "")) {
@@ -176,7 +196,10 @@ export function readSecondOpinionState(
     };
   }
 
-  const blocking = blockingFindingCount(session.id);
+  // Full Auto's merge selector and workflow completion guard treat every open
+  // finding as blocking, irrespective of its advisory severity label. Match
+  // that rule here so a minor finding cannot leave an epic silently stranded.
+  const blocking = openFindingCount(session.id);
   if (verdict === "changes requested" || blocking > 0) {
     return {
       status: "rejected",
@@ -189,6 +212,22 @@ export function readSecondOpinionState(
   }
 
   return { status: "approved", sessionId: session.id };
+}
+
+/**
+ * A structured second opinion needs the per-spawn MCP channel that carries
+ * submit_findings. Keep the general segregation picker, but restrict this
+ * gate to providers that can actually produce its authoritative evidence.
+ */
+export function pickSecondOpinionProvider(
+  builderProvider: AgentProvider,
+  reviewerProvider: AgentProvider
+): Promise<AgentProvider | null> {
+  return pickAlternativeReviewProvider(
+    builderProvider,
+    [reviewerProvider],
+    providerSupportsMcp
+  );
 }
 
 function existingWorktreePath(projectId: string, epicId: string): string | null {
@@ -253,13 +292,27 @@ export async function dispatchSecondOpinion(input: {
       throw new Error("Could not identify both the builder and reviewer providers");
     }
 
-    const provider = await pickAlternativeReviewProvider(builderProvider, [
-      reviewerProvider,
-    ]);
+    if (!isMcpToolsEnabled()) {
+      return {
+        sessionId: null,
+        error: null,
+        conflictSessionId: null,
+        skipReason: "structured MCP tools are disabled",
+      };
+    }
+
+    const provider = await pickSecondOpinionProvider(
+      builderProvider,
+      reviewerProvider
+    );
     if (!provider) {
-      throw new Error(
-        "No installed provider differs from both the builder and reviewer"
-      );
+      return {
+        sessionId: null,
+        error: null,
+        conflictSessionId: null,
+        skipReason:
+          "no installed MCP-capable provider differs from both the builder and reviewer",
+      };
     }
 
     const worktreePath =

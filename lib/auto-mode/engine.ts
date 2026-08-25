@@ -498,15 +498,15 @@ function parkRejectedSecondOpinion(
   deps: AutoModeEngineDeps,
   result: AutoModeSweepResult
 ): void {
-  if (autoModeRegistry.isParked(projectId, epicId)) return;
-
   autoModeRegistry.removeInFlight(projectId, state.sessionId);
-  autoModeRegistry.park(
-    projectId,
-    epicId,
-    epicId,
-    `second opinion rejected merge: ${state.reason}`
-  );
+  if (!autoModeRegistry.isParked(projectId, epicId)) {
+    autoModeRegistry.park(
+      projectId,
+      epicId,
+      epicId,
+      `second opinion rejected merge: ${state.reason}`
+    );
+  }
   if (!result.parked.includes(epicId)) result.parked.push(epicId);
   trace(
     deps,

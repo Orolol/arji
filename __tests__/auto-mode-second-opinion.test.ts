@@ -1,10 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const availabilityState = vi.hoisted(() => ({
+  available: new Set<string>(),
+}));
+
 vi.mock("@/lib/db", async () => {
   const { createTestDb } = await import("@/lib/db/test-utils");
   const created = createTestDb();
   return { db: created.db, sqlite: created.sqlite, ensureDbReady: vi.fn() };
 });
+
+vi.mock("@/lib/providers", () => ({
+  getProvider: (type: string) => ({
+    isAvailable: async () => availabilityState.available.has(type),
+  }),
+}));
 
 const { db } = await import("@/lib/db");
 const {
@@ -15,7 +25,7 @@ const {
   reviewComments,
   ticketComments,
 } = await import("@/lib/db/schema");
-const { readSecondOpinionState } = await import(
+const { pickSecondOpinionProvider, readSecondOpinionState } = await import(
   "@/lib/auto-mode/second-opinion"
 );
 const { buildSecondOpinionPrompt } = await import(
@@ -102,6 +112,7 @@ function addSecondOpinion(input: {
 }
 
 beforeEach(() => {
+  availabilityState.available.clear();
   db.delete(notifications).run();
   db.delete(reviewComments).run();
   db.delete(ticketComments).run();
@@ -172,6 +183,50 @@ describe("second-opinion structured gate", () => {
     });
   });
 
+  it("treats every open finding as merge-blocking", () => {
+    addOrdinaryReview("review-1", 1);
+    addSecondOpinion({ id: "opinion-1", minute: 3, verdict: "approved" });
+    db.insert(reviewComments)
+      .values({
+        id: "finding-minor",
+        epicId: EPIC_ID,
+        filePath: "lib/gate.ts",
+        lineNumber: 18,
+        body: "[minor] Cleanup remains before merge",
+        author: "agent",
+        status: "open",
+        agentSessionId: "opinion-1",
+      })
+      .run();
+
+    expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
+      status: "rejected",
+      sessionId: "opinion-1",
+      reason: "1 blocking finding",
+    });
+  });
+
+  it("never lets an earlier approval hide a later negative submission", () => {
+    addOrdinaryReview("review-1", 1);
+    addSecondOpinion({ id: "opinion-1", minute: 3, verdict: "approved" });
+    db.insert(ticketComments)
+      .values({
+        id: "verdict-negative",
+        epicId: EPIC_ID,
+        author: "agent",
+        content: "**Review findings (changes requested)**\n\nFinal result",
+        agentSessionId: "opinion-1",
+        createdAt: at(5),
+      })
+      .run();
+
+    expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
+      status: "rejected",
+      sessionId: "opinion-1",
+      reason: "changes requested",
+    });
+  });
+
   it("never treats prose without submit_findings as approval", () => {
     addOrdinaryReview("review-1", 1);
     addSecondOpinion({ id: "opinion-1", minute: 3 });
@@ -191,6 +246,25 @@ describe("second-opinion structured gate", () => {
       status: "missing",
       sessionId: null,
     });
+  });
+});
+
+describe("second-opinion provider selection", () => {
+  it("selects only an MCP-capable provider distinct from builder and reviewer", async () => {
+    availabilityState.available.add("codex");
+    availabilityState.available.add("gemini-cli");
+
+    await expect(
+      pickSecondOpinionProvider("gemini-cli", "claude-code")
+    ).resolves.toBe("codex");
+  });
+
+  it("does not select an installed provider that cannot submit findings", async () => {
+    availabilityState.available.add("gemini-cli");
+
+    await expect(
+      pickSecondOpinionProvider("claude-code", "codex")
+    ).resolves.toBeNull();
   });
 });
 

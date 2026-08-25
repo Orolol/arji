@@ -119,13 +119,16 @@ export function findLastSuccessfulReviewProvider(
  * Picks a deterministic alternative to `builderProvider`: the first provider
  * in stable PROVIDER_OPTIONS order that differs from the builder and whose
  * CLI is available. Returns null when no alternative CLI is installed.
+ * Callers with a stricter capability requirement can supply `isEligible`;
+ * providers that fail it are skipped before their CLI is probed.
  *
  * `lib/providers` is imported lazily so pure resolution code paths (and
  * their tests) never instantiate the provider classes.
  */
 export async function pickAlternativeReviewProvider(
   builderProvider: AgentProvider,
-  additionallyExcluded: readonly AgentProvider[] = []
+  additionallyExcluded: readonly AgentProvider[] = [],
+  isEligible: (provider: AgentProvider) => boolean = () => true
 ): Promise<AgentProvider | null> {
   const { getProvider } = await import("@/lib/providers");
   const excluded = new Set<AgentProvider>([
@@ -134,7 +137,7 @@ export async function pickAlternativeReviewProvider(
   ]);
 
   for (const provider of PROVIDER_OPTIONS) {
-    if (excluded.has(provider)) continue;
+    if (excluded.has(provider) || !isEligible(provider)) continue;
     try {
       if (await getProvider(provider).isAvailable()) {
         return provider;

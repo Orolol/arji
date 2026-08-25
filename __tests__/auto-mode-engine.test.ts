@@ -920,6 +920,29 @@ describe("merge step", () => {
     expect(result.inFlight.review).toBe(1);
   });
 
+  it("holds the merge without parking when no structured-verdict provider is available", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true, reviewConcurrency: 1 });
+    seedMergeable();
+    fakes.deps.dispatchSecondOpinion = async () => ({
+      sessionId: null,
+      error: null,
+      conflictSessionId: null,
+      skipReason:
+        "no installed MCP-capable provider differs from both the builder and reviewer",
+    });
+    fakes.mergeOutcome({ status: "merged", commitHash: "forbidden", sessionId: null });
+
+    const result = await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.merges).toEqual([]);
+    expect(result.secondOpinionsDispatched).toEqual([]);
+    expect(result.parked).toEqual([]);
+    expect(autoReasons("m1")).toContain(
+      "Auto mode skipped second opinion: no installed MCP-capable provider differs from both the builder and reviewer"
+    );
+  });
+
   it("merges only after a fresh structured second opinion approves", async () => {
     const fakes = makeFakes();
     fakes.setConfig({ secondOpinion: true });
