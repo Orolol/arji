@@ -238,11 +238,11 @@ export interface ResolvedAgent {
 }
 
 /**
- * Dispatch context for {@link resolveAgentForDispatch}. Only review
- * dispatch routes pass this; build routes are unaffected.
+ * Dispatch context for {@link resolveAgentForDispatch}. Review and grading
+ * dispatches pass this; build routes are unaffected.
  */
 export interface AgentResolutionContext {
-  purpose: "review";
+  purpose: "review" | "grading";
   projectId: string;
   epicId?: string;
   storyId?: string;
@@ -360,8 +360,8 @@ export function resolveAgentByNamedId(
  *   1. An explicitly picked named agent ALWAYS wins — review-provider
  *      segregation never overrides the user's explicit choice.
  *   2. Standard default resolution (project → global → builtin chain).
- *   3. When `context.purpose === 'review'`, the global
- *      'review_provider_segregation' setting is enabled, and the default
+ *   3. For review/grading contexts, when the global
+ *      `review_provider_segregation` setting is enabled and the default
  *      resolution lands on the same provider that produced the target's
  *      last successful build (agentType build/ticket_build), the provider
  *      is redirected to the first available alternative in stable
@@ -398,7 +398,10 @@ export async function resolveAgentForDispatch(
   // 2. Default resolution chain.
   const base = resolveAgent(agentType, projectId);
 
-  if (!context || context.purpose !== "review") {
+  if (
+    !context ||
+    (context.purpose !== "review" && context.purpose !== "grading")
+  ) {
     return base;
   }
 

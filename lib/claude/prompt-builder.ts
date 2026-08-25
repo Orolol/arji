@@ -86,6 +86,12 @@ export interface PromptCiFailure {
   logTail: string | null;
 }
 
+/** Story projection used by the acceptance-criteria grader. */
+export interface PromptGradingStory extends PromptUserStory {
+  /** Stable database id required by submit_grading's scoped payload. */
+  id: string;
+}
+
 /**
  * Dedicated instruction block appended by every build builder when the
  * ticket's `type` is 'bug'. Encodes the RoboBun red → green rule: the
@@ -100,6 +106,21 @@ This ticket is a **bug fix**. The pipeline runs a mechanical regression check on
 1. **Write the failing test first.** Add (or modify) a test that reproduces the reported bug and run it — it MUST fail against the unfixed code.
 2. **Then apply the fix.** Make the minimal change that makes the same test pass.
 3. **Commit the test file(s) together with the fix.** The check inspects the files added/modified on the branch and selects them with the project's configured test-file patterns — follow this repository's existing test layout and naming. A diff with no test file fails (\`no_test_in_diff\`), a test that already passes without the fix fails (\`test_passes_on_base\`), and a test still failing on the branch fails (\`test_fails_on_branch\`). Any of these sends the ticket back to a fix cycle.`;
+
+/**
+ * Best-effort visual demo guidance for ticket-scoped code sessions. This is
+ * appended only when the caller resolved visual_proof_enabled to true.
+ */
+export const VISUAL_PROOF_SECTION = `## Optional visual proof
+
+If this project has a UI, a browser is available, and the \`attach_artifact\` tool is available, run the application, exercise the functionality you implemented, capture 1 to 3 screenshots, and attach each screenshot with \`attach_artifact\` using a clear caption.
+
+Visual proof is best-effort and is never a completion requirement. If the application or browser cannot be run, the tool is unavailable, or no useful screenshot can be produced, complete the session normally. Missing visual proof must never make the build fail.`;
+
+export interface BuildPromptOptions {
+  /** Effective value of the global visual_proof_enabled setting. */
+  visualProofEnabled?: boolean;
+}
 
 export interface PromptEpicStatus {
   id: string;
@@ -917,6 +938,7 @@ export function buildBuildPrompt(
   userStories: PromptUserStory[],
   systemPrompt?: string | null,
   comments?: PromptComment[],
+  options: BuildPromptOptions = {},
 ): string {
   project = withProjectMemory(project);
   const parts: string[] = [];
@@ -964,6 +986,9 @@ Work through the user stories in order. If a story depends on another, implement
 `);
   if (epic.type === "bug") {
     parts.push(BUG_RED_GREEN_SECTION);
+  }
+  if (options.visualProofEnabled) {
+    parts.push(VISUAL_PROOF_SECTION);
   }
 
   return parts.filter(Boolean).join("\n");
@@ -1049,6 +1074,7 @@ export function buildTicketBuildPrompt(
   story: PromptUserStory,
   comments: PromptComment[],
   systemPrompt?: string | null,
+  options: BuildPromptOptions = {},
 ): string {
   project = withProjectMemory(project);
   const parts: string[] = [];
@@ -1099,6 +1125,9 @@ Implement this ticket following the specification and acceptance criteria above.
 `);
   if (epic.type === "bug") {
     parts.push(BUG_RED_GREEN_SECTION);
+  }
+  if (options.visualProofEnabled) {
+    parts.push(VISUAL_PROOF_SECTION);
   }
 
   return parts.filter(Boolean).join("\n");
@@ -1342,6 +1371,79 @@ You are performing a **${reviewType.replace("_", " ")}** on the code changes for
 Your response should be a well-formatted markdown report.
 `);
   }
+
+  return parts.filter(Boolean).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Acceptance-criteria grading
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the plan-mode grader prompt for an epic.
+ *
+ * Unlike a feature/code review, grading has one narrow rubric: the user
+ * stories' acceptance criteria. The durable deliverable is the
+ * submit_grading call, not prose that a later stage would have to parse.
+ * Dispatch skips epics without a non-empty rubric, so this builder only sees
+ * stories that carry acceptance criteria.
+ */
+export function buildGradingPrompt(
+  project: PromptProject,
+  documents: PromptDocument[],
+  epic: PromptEpic,
+  stories: PromptGradingStory[],
+  systemPrompt?: string | null,
+): string {
+  project = withProjectMemory(project);
+  const parts: string[] = [];
+
+  parts.push(systemSection(systemPrompt));
+  parts.push(projectHeader(project.name));
+  parts.push(specSection(project.spec));
+  parts.push(memorySection(project.memory));
+  parts.push(documentsSection(documents));
+
+  parts.push(`## Epic to Grade\n`);
+  parts.push(`### ${epic.title}\n`);
+  if (epic.description) {
+    parts.push(`${epic.description.trim()}\n`);
+  }
+
+  parts.push(`## Acceptance-Criteria Rubric\n`);
+  for (const story of stories) {
+    parts.push(`### ${story.title}\n`);
+    parts.push(`- **storyId:** \`${story.id}\`\n`);
+    if (story.description) {
+      parts.push(`${story.description.trim()}\n`);
+    }
+    parts.push(`**Acceptance criteria (verbatim):**\n`);
+    parts.push(`${story.acceptanceCriteria?.trim() ?? ""}\n`);
+  }
+
+  parts.push(`## Role Boundary
+
+You are an acceptance-criteria grader, not a general code reviewer. Evaluate only whether the implementation satisfies each criterion above. Do not judge general code quality, style, architecture, or unrelated defects; those belong to review agents.
+
+Inspect the current worktree and its diff, read the relevant implementation and tests, and run focused read-only checks when they materially strengthen the evidence. Evidence must cite concrete files, tests, commands, or observed behavior. An implementation claim in an agent comment is not proof.
+
+## Mandatory Structured Submission
+
+Before ending the session, you **MUST call** \`mcp__arij__submit_grading\` exactly once. A prose report or final message is not a substitute for this tool call.
+
+Submit this shape:
+
+\`{ gradings: [{ storyId, criterion, status, evidence }], summary }\`
+
+- Include exactly one grading entry for every acceptance criterion in the rubric.
+- Use the exact \`storyId\` shown above and copy the corresponding criterion verbatim into \`criterion\`.
+- \`status\` must be one of: \`met | partial | missed\`.
+- \`evidence\` must explain the observed proof or the concrete gap; never leave it empty.
+- Use \`met\` only when the criterion is fully demonstrated, \`partial\` when only part is demonstrated, and \`missed\` when it is absent or contradicted.
+- Keep \`summary\` concise and outcome-focused.
+
+Do not call \`submit_findings\`; grading does not create review findings and introduces no ticket transition. After \`submit_grading\` succeeds, briefly summarize that the structured report was filed.
+`);
 
   return parts.filter(Boolean).join("\n");
 }

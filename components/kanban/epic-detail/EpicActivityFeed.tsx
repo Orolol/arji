@@ -18,6 +18,7 @@ import {
   ChevronRight,
   ChevronDown,
   Workflow,
+  Bug,
 } from "lucide-react";
 import type { TicketComment } from "@/hooks/useTicketComments";
 import { useFeedAutoScroll } from "@/hooks/useFeedAutoScroll";
@@ -33,6 +34,10 @@ import {
   type PipelineReasonTone,
 } from "@/lib/pipeline/constants";
 import { cn } from "@/lib/utils";
+import {
+  isMcpCreateBugActivityReason,
+  MCP_CREATE_BUG_ACTIVITY_PREFIX,
+} from "@/lib/mcp/create-bug-contract";
 
 /* ------------------------------------------------------------------ */
 /* Feed construction (pure, exported for tests)                        */
@@ -45,6 +50,7 @@ export type FeedItem =
   | { kind: "comment"; ts: string; comment: TicketComment }
   | { kind: "transition"; ts: string; entry: EpicActivityEntry }
   | { kind: "pipeline"; ts: string; entry: EpicActivityEntry }
+  | { kind: "bug-created"; ts: string; entry: EpicActivityEntry }
   | { kind: "transition-group"; ts: string; entries: EpicActivityEntry[] };
 
 /**
@@ -72,7 +78,9 @@ export function buildActivityFeed(
     ...entries.map((entry) => ({
       kind: isPipelineActivityReason(entry.reason)
         ? ("pipeline" as const)
-        : ("transition" as const),
+        : isMcpCreateBugActivityReason(entry.reason)
+          ? ("bug-created" as const)
+          : ("transition" as const),
       ts: entry.createdAt ?? "",
       entry,
     })),
@@ -281,6 +289,45 @@ function PipelineRow({
         >
           View session
         </Link>
+      )}
+    </div>
+  );
+}
+
+function BugCreatedRow({
+  entry,
+  projectId,
+}: {
+  entry: EpicActivityEntry;
+  projectId: string;
+}) {
+  const detail = entry.reason
+    ?.slice(MCP_CREATE_BUG_ACTIVITY_PREFIX.length)
+    .trim();
+  return (
+    <div
+      data-testid="activity-bug-created"
+      data-actor={entry.actor}
+      data-kind="system"
+      className="flex flex-wrap items-center gap-1.5 rounded-[8px] border border-destructive/20 bg-destructive/5 px-2 py-1.5 text-[12px]"
+    >
+      <Bug className="h-3.5 w-3.5 shrink-0 text-destructive" />
+      <span className="font-medium text-agent">Agent</span>
+      <span className="text-foreground">created this bug</span>
+      <span className="text-muted-foreground">{timeAgo(entry.createdAt)}</span>
+      {entry.sessionId && (
+        <Link
+          data-testid="activity-session-link"
+          href={`/projects/${projectId}/sessions/${entry.sessionId}`}
+          className="text-primary underline-offset-2 hover:underline"
+        >
+          View source session
+        </Link>
+      )}
+      {detail && (
+        <span className="w-full pl-5 italic text-muted-foreground">
+          {detail}
+        </span>
       )}
     </div>
   );
@@ -521,6 +568,12 @@ export function EpicActivityFeed({
                 <CommentRow key={item.comment.id} comment={item.comment} />
               ) : item.kind === "pipeline" ? (
                 <PipelineRow
+                  key={item.entry.id}
+                  entry={item.entry}
+                  projectId={projectId}
+                />
+              ) : item.kind === "bug-created" ? (
+                <BugCreatedRow
                   key={item.entry.id}
                   entry={item.entry}
                   projectId={projectId}

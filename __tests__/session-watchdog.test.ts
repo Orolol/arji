@@ -221,6 +221,27 @@ describe("SessionWatchdog.sweep detection", () => {
     expect(notificationsFor(sessionId)).toHaveLength(0);
   });
 
+  it("watches grading sessions and classifies their stalled notification", () => {
+    const { sessionId, epicId } = seedSession({
+      agentType: "grading",
+      epicStatus: "review",
+      startedAt: minutesAgo(8),
+    });
+
+    const flagged = new SessionWatchdog().sweep(NOW);
+
+    expect(flagged).toHaveLength(1);
+    expect(notificationsFor(sessionId)[0]).toMatchObject({
+      agentType: "grading",
+      title: `Agent seems stalled on E-wd-${counter}: Epic ${counter} — no output for 8m`,
+    });
+    expect(activityFor(epicId!)[0]).toMatchObject({
+      fromStatus: "review",
+      toStatus: "review",
+      sessionId,
+    });
+  });
+
   it("notifies without an activity-log entry for epic-less sessions", () => {
     const { sessionId } = seedSession({
       withEpic: false,
@@ -279,6 +300,19 @@ describe("threshold settings", () => {
     // 4m59s silent: fine. 5m: stale.
     expect(isSessionStale(minutesAgo(4), "build", NOW)).toBe(false);
     expect(isSessionStale(minutesAgo(5), "build", NOW)).toBe(true);
+  });
+
+  it("treats SQLite timestamps as UTC on a non-UTC host", () => {
+    const originalTimezone = process.env.TZ;
+    process.env.TZ = "Europe/Paris";
+    try {
+      // 11:58 UTC is only two minutes before NOW. Parsing the space form as
+      // Paris local time would incorrectly make it more than two hours old.
+      expect(isSessionStale("2026-08-16 11:58:00", "build", NOW)).toBe(false);
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
   });
 
   it("honors the global setting", () => {

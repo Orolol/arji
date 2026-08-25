@@ -230,14 +230,35 @@
       "idx": 32,
       "version": "6",
       "when": 1786713000000,
-      "tag": "0033_routines",
+      "tag": "0033_grading_reports",
       "breakpoints": true
     },
     {
       "idx": 33,
       "version": "6",
       "when": 1786713100000,
-      "tag": "0034_routines_project_kind_unique",
+      "tag": "0034_agent_session_review_verdict",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1786713200000,
+      "tag": "0035_session_artifacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1786713300000,
+      "tag": "0036_routines",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1786713400000,
+      "tag": "0037_routines_project_kind_unique",
       "breakpoints": true
     }
   ]

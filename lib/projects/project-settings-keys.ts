@@ -5,6 +5,7 @@ import {
 } from "@/lib/night/constants";
 import {
   pipelineEnabledSettingKey,
+  pipelineGraderEnabledSettingKey,
   pipelineMaxAttemptsSettingKey,
   pipelineMaxFixCyclesSettingKey,
 } from "@/lib/pipeline/constants";
@@ -32,6 +33,7 @@ export function perProjectSettingKeys(projectId: string): string[] {
     agentMaxConcurrentSettingKey(projectId),
     webhookSettingKey(projectId),
     pipelineEnabledSettingKey(projectId),
+    pipelineGraderEnabledSettingKey(projectId),
     pipelineMaxAttemptsSettingKey(projectId),
     pipelineMaxFixCyclesSettingKey(projectId),
     nightCircuitBreakerSettingKey(projectId),

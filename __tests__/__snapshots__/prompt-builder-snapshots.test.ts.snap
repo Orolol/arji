@@ -1,5 +1,74 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`Prompt builder snapshot regression > buildBuildPrompt - visual proof enabled 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epic to Implement
+
+### Agent Configuration
+
+Add agent config side panel
+
+### User Stories
+- [ ] **As a dev I can configure prompts**
+  Add prompt editors for agent types
+  **Acceptance criteria:**
+  - [ ] Editors are persisted
+  - [ ] Changes apply immediately
+
+## Comment History
+
+**User:**
+Please focus on security
+
+**Agent:**
+Will add input validation
+
+## Instructions
+
+Implement this epic following the specification above. For each user story:
+
+1. Create or modify the necessary files.
+2. Write tests that verify the acceptance criteria.
+3. Ensure all acceptance criteria are met before moving to the next story.
+
+Consider all comments in the history — they may contain clarifications, feedback, or specific instructions.
+
+Commit your changes with clear, descriptive commit messages that reference the epic and user story titles. Use conventional commit format when possible.
+
+Work through the user stories in order. If a story depends on another, implement the dependency first.
+
+## Optional visual proof
+
+If this project has a UI, a browser is available, and the \`attach_artifact\` tool is available, run the application, exercise the functionality you implemented, capture 1 to 3 screenshots, and attach each screenshot with \`attach_artifact\` using a clear caption.
+
+Visual proof is best-effort and is never a completion requirement. If the application or browser cannot be run, the tool is unavailable, or no useful screenshot can be produced, complete the session normally. Missing visual proof must never make the build fail."
+`;
+
 exports[`Prompt builder snapshot regression > buildBuildPrompt 1`] = `
 "# System Instructions
 
@@ -1186,6 +1255,73 @@ Produce a detailed markdown report with:
 
 Your response should be a well-formatted markdown report.
 "
+`;
+
+exports[`Prompt builder snapshot regression > buildTicketBuildPrompt - visual proof enabled 1`] = `
+"# System Instructions
+
+Follow strict TypeScript conventions
+
+
+# Project: TestProject
+
+## Project Specification
+
+## Spec
+Use Next.js and SQLite
+
+## Reference Documents
+
+### README.md
+
+# Readme
+Project docs
+
+---
+
+### design.md
+
+# Design
+Architecture notes
+
+## Epic Context
+
+### Agent Configuration
+
+Add agent config side panel
+
+## Ticket to Implement
+
+### As a dev I can configure prompts
+
+Add prompt editors for agent types
+
+**Acceptance Criteria:**
+
+- [ ] Editors are persisted
+- [ ] Changes apply immediately
+
+## Comment History
+
+**User:**
+Please focus on security
+
+**Agent:**
+Will add input validation
+
+## Instructions
+
+Implement this ticket following the specification and acceptance criteria above. Consider all comments in the history — they may contain clarifications, feedback, or specific instructions.
+
+1. Create or modify the necessary files.
+2. Ensure all acceptance criteria are met.
+3. Commit your changes with a clear, descriptive commit message referencing the ticket title.
+
+## Optional visual proof
+
+If this project has a UI, a browser is available, and the \`attach_artifact\` tool is available, run the application, exercise the functionality you implemented, capture 1 to 3 screenshots, and attach each screenshot with \`attach_artifact\` using a clear caption.
+
+Visual proof is best-effort and is never a completion requirement. If the application or browser cannot be run, the tool is unavailable, or no useful screenshot can be produced, complete the session normally. Missing visual proof must never make the build fail."
 `;
 
 exports[`Prompt builder snapshot regression > buildTicketBuildPrompt 1`] = `

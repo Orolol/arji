@@ -1,5 +1,5 @@
 /**
- * Client-safe constants for the "Reviewer must differ from builder"
+ * Client-safe constants for the "Reviewer/grader must differ from builder"
  * feature. Server-side helpers live in ./review-segregation.ts (which
  * imports the db and must not be pulled into client bundles).
  */

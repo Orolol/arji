@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createTestDb } from "@/lib/db/test-utils";
 import { projects, routines } from "@/lib/db/schema";
 
-describe("0033_routines migration", () => {
+describe("0036_routines migration", () => {
   it("persists routine state and cascades it with the project", () => {
     const { db, sqlite } = createTestDb();
     try {

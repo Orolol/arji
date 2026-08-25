@@ -181,6 +181,7 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       lastNonEmptyText: "last_non_empty_text",
       error: "error",
       outcome: "outcome",
+      reviewVerdict: "review_verdict",
       inputTokens: "input_tokens",
       outputTokens: "output_tokens",
       totalCostUsd: "total_cost_usd",
@@ -212,6 +213,17 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       sequence: "sequence",
       chunkKey: "chunk_key",
       content: "content",
+      createdAt: "created_at",
+    },
+  },
+  sessionArtifacts: {
+    sqlName: "session_artifacts",
+    columns: {
+      id: "id",
+      agentSessionId: "agent_session_id",
+      epicId: "epic_id",
+      filename: "filename",
+      caption: "caption",
       createdAt: "created_at",
     },
   },
@@ -342,6 +354,17 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       agentSessionId: "agent_session_id",
       createdAt: "created_at",
       updatedAt: "updated_at",
+    },
+  },
+  gradingReports: {
+    sqlName: "grading_reports",
+    columns: {
+      id: "id",
+      epicId: "epic_id",
+      agentSessionId: "agent_session_id",
+      gradings: "gradings",
+      summary: "summary",
+      createdAt: "created_at",
     },
   },
   gitSyncLog: {
@@ -590,6 +613,10 @@ const NOT_NULL: [string, string][] = [
   ["agentSessionChunks", "streamType"],
   ["agentSessionChunks", "sequence"],
   ["agentSessionChunks", "content"],
+  ["sessionArtifacts", "agentSessionId"],
+  ["sessionArtifacts", "epicId"],
+  ["sessionArtifacts", "filename"],
+  ["sessionArtifacts", "caption"],
   ["releases", "version"],
   ["pullRequests", "number"],
   ["pullRequests", "url"],
@@ -605,6 +632,9 @@ const NOT_NULL: [string, string][] = [
   ["reviewComments", "filePath"],
   ["reviewComments", "lineNumber"],
   ["reviewComments", "body"],
+  ["gradingReports", "epicId"],
+  ["gradingReports", "gradings"],
+  ["gradingReports", "summary"],
   ["ticketActivityLog", "fromStatus"],
   ["ticketActivityLog", "toStatus"],
   ["ticketActivityLog", "actor"],
@@ -662,6 +692,7 @@ const NULLABLE: [string, string][] = [
   ["chatConversations", "namedAgentId"],
   ["notifications", "sessionId"],
   ["notifications", "agentType"],
+  ["gradingReports", "agentSessionId"],
 ];
 
 describe("db schema: nullable columns", () => {
@@ -723,6 +754,18 @@ const INDEXES: Record<string, IndexSpec[]> = {
       columns: ["session_id", "stream_type", "sequence"],
     },
   ],
+  sessionArtifacts: [
+    {
+      name: "session_artifacts_session_created_at_idx",
+      unique: false,
+      columns: ["agent_session_id", "created_at"],
+    },
+    {
+      name: "session_artifacts_epic_created_at_idx",
+      unique: false,
+      columns: ["epic_id", "created_at"],
+    },
+  ],
   agentPrompts: [
     {
       name: "agent_prompts_agent_type_scope_unique",
@@ -779,6 +822,18 @@ const INDEXES: Record<string, IndexSpec[]> = {
       name: "review_comments_epic_file_idx",
       unique: false,
       columns: ["epic_id", "file_path"],
+    },
+  ],
+  gradingReports: [
+    {
+      name: "grading_reports_epic_created_at_idx",
+      unique: false,
+      columns: ["epic_id", "created_at"],
+    },
+    {
+      name: "grading_reports_session_idx",
+      unique: false,
+      columns: ["agent_session_id"],
     },
   ],
   githubIssues: [
@@ -880,12 +935,20 @@ const FOREIGN_KEYS: Record<string, ForeignKeySpec[]> = {
   reviewComments: [
     { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "cascade" },
   ],
+  gradingReports: [
+    { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "cascade" },
+    { columns: ["agent_session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "set null" },
+  ],
   notifications: [
     { columns: ["project_id"], foreignTable: "projects", foreignColumns: ["id"], onDelete: "cascade" },
     { columns: ["session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "set null" },
   ],
   agentSessionChunks: [
     { columns: ["session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "cascade" },
+  ],
+  sessionArtifacts: [
+    { columns: ["agent_session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "cascade" },
+    { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "cascade" },
   ],
 };
 

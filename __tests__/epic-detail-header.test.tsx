@@ -97,15 +97,17 @@ function setupHooks(
     comments = [],
   }: { isRunning?: boolean; comments?: unknown[] } = {}
 ) {
+  const refresh = vi.fn();
   mockUseEpicDetail.mockReturnValue({
     epic,
     userStories: [],
+    gradingReport: null,
     loading: false,
     updateEpic: mockUpdateEpic,
     addUserStory: vi.fn(),
     updateUserStory: vi.fn(),
     deleteUserStory: vi.fn(),
-    refresh: vi.fn(),
+    refresh,
     setPolling: vi.fn(),
   });
   mockUseTicketComments.mockReturnValue({
@@ -119,6 +121,7 @@ function setupHooks(
     isRunning,
     sendToDev: vi.fn(),
     sendToReview: vi.fn(),
+    sendToGrading: vi.fn(),
     resolveMerge: vi.fn(),
     approve: vi.fn(),
   });
@@ -143,6 +146,7 @@ function setupHooks(
   });
   mockUseProjectEpicsList.mockReturnValue({ epics: [] });
   mockUseEpicActivity.mockReturnValue({ entries: [], loading: false });
+  return refresh;
 }
 
 function renderSubject() {
@@ -204,6 +208,31 @@ describe("EpicDetail sticky header — critical information", () => {
 });
 
 describe("EpicDetail sticky header — frequent actions", () => {
+  it("refreshes detail data when the project SSE counter changes", async () => {
+    const refresh = setupHooks(baseEpic({ status: "review" }));
+    const { rerender } = render(
+      <EpicDetail
+        projectId="proj-1"
+        epicId="epic-1"
+        open
+        refreshTrigger={0}
+        onClose={vi.fn()}
+      />,
+    );
+
+    rerender(
+      <EpicDetail
+        projectId="proj-1"
+        epicId="epic-1"
+        open
+        refreshTrigger={1}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
   it("exposes the status control, the priority control and the quick comment in the header", () => {
     setupHooks(baseEpic({ status: "backlog" }));
     renderSubject();

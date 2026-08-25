@@ -204,6 +204,13 @@ export const agentSessions = sqliteTable("agent_sessions", {
   // answered | asked_question | silent | error. NULL while running/queued,
   // for user-cancelled sessions, and for legacy rows.
   outcome: text("outcome"),
+  // Structured review verdict submitted through the MCP `submit_findings`
+  // tool: approved | approved_with_minor_issues | changes_requested. The
+  // authoritative transition signal for a review stage — see
+  // lib/pipeline/findings.ts. NULL for non-review sessions, for reviewers
+  // that never called the tool (providers without MCP), and for legacy rows;
+  // NULL is what selects the prose-verdict fallback.
+  reviewVerdict: text("review_verdict"),
   // Usage reported by the CLI at session end. NULL for legacy rows,
   // non-terminal sessions, and providers that do not report usage.
   inputTokens: integer("input_tokens"),
@@ -255,6 +262,37 @@ export const agentSessionChunks = sqliteTable(
     sessionStreamSequenceIdx: index(
       "agent_session_chunks_session_stream_sequence_idx"
     ).on(table.sessionId, table.streamType, table.sequence),
+  })
+);
+
+/**
+ * A durable visual proof copied out of a session worktree while it still
+ * exists. `filename` is the generated basename below
+ * data/sessions/<session-id>/artifacts/; source paths are never persisted.
+ */
+export const sessionArtifacts = sqliteTable(
+  "session_artifacts",
+  {
+    id: text("id").primaryKey(),
+    agentSessionId: text("agent_session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    epicId: text("epic_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    caption: text("caption").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    sessionCreatedAtIdx: index("session_artifacts_session_created_at_idx").on(
+      table.agentSessionId,
+      table.createdAt
+    ),
+    epicCreatedAtIdx: index("session_artifacts_epic_created_at_idx").on(
+      table.epicId,
+      table.createdAt
+    ),
   })
 );
 
@@ -440,6 +478,38 @@ export const reviewComments = sqliteTable(
   })
 );
 
+/**
+ * One atomic acceptance-criteria grading submitted by a grader session.
+ *
+ * `gradings` is the validated JSON array accepted by submit_grading. Keeping
+ * the array together preserves the report boundary: downstream pipeline and
+ * UI consumers can select the latest report without reconstructing one from
+ * independently timestamped criterion rows.
+ */
+export const gradingReports = sqliteTable(
+  "grading_reports",
+  {
+    id: text("id").primaryKey(),
+    epicId: text("epic_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "cascade" }),
+    agentSessionId: text("agent_session_id").references(
+      () => agentSessions.id,
+      { onDelete: "set null" }
+    ),
+    gradings: text("gradings").notNull(), // JSON: GradingEntry[]
+    summary: text("summary").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    epicCreatedAtIdx: index("grading_reports_epic_created_at_idx").on(
+      table.epicId,
+      table.createdAt
+    ),
+    sessionIdx: index("grading_reports_session_idx").on(table.agentSessionId),
+  })
+);
+
 export const gitSyncLog = sqliteTable("git_sync_log", {
   id: text("id").primaryKey(),
   // Nullable since 0029_git_sync_log_nullable_project: a clone is logged
@@ -552,6 +622,12 @@ export type NewTicketDependency = typeof ticketDependencies.$inferInsert;
 
 export type ReviewComment = typeof reviewComments.$inferSelect;
 export type NewReviewComment = typeof reviewComments.$inferInsert;
+
+export type GradingReport = typeof gradingReports.$inferSelect;
+export type NewGradingReport = typeof gradingReports.$inferInsert;
+
+export type SessionArtifact = typeof sessionArtifacts.$inferSelect;
+export type NewSessionArtifact = typeof sessionArtifacts.$inferInsert;
 
 export const ticketActivityLog = sqliteTable(
   "ticket_activity_log",

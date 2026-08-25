@@ -21,6 +21,7 @@ import {
   buildBuildPrompt,
   buildCiFixPrompt,
 } from "@/lib/claude/prompt-builder";
+import { isVisualProofEnabled } from "@/lib/claude/visual-proof";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import {
   classifySessionOutcome,
@@ -255,7 +256,8 @@ export async function POST(request: NextRequest, { params }: Params) {
         epic,
         us,
         buildSystemPrompt,
-        promptComments
+        promptComments,
+        { visualProofEnabled: isVisualProofEnabled() }
       );
   if (reviewContext) {
     prompt = prompt + "\n\n" + reviewContext;

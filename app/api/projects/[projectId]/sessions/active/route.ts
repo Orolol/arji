@@ -24,7 +24,8 @@ export interface UnifiedActivity {
     | "chat"
     | "spec_generation"
     | "release"
-    | "memory";
+    | "memory"
+    | "grading";
   label: string;
   status: string;
   mode: string;
@@ -34,10 +35,9 @@ export interface UnifiedActivity {
   source: "db" | "registry";
   cancellable: boolean;
   /**
-   * Freshest output signal for running DB sessions: newest chunk createdAt,
-   * falling back to startedAt. Null for queued sessions (no output yet by
-   * definition) and registry activities (they stream outside the chunk
-   * store).
+   * Freshest lifecycle/output signal for DB sessions, using the same
+   * definition as the sessions list. Registry activities return null because
+   * they stream outside the durable session/chunk stores.
    */
   lastActivityAt: string | null;
   /**
@@ -57,6 +57,10 @@ function inferDbActivityType(row: {
 }): UnifiedActivity["type"] {
   if (row.agentType === "release_notes") {
     return "release";
+  }
+
+  if (row.agentType === "grading") {
+    return "grading";
   }
 
   // Before the mode heuristic below: both memory writers run in plan mode, so
@@ -111,6 +115,12 @@ function buildDbActivityLabel(
     return row.agentType === DREAMING_AGENT_TYPE
       ? "Dreaming: rewriting project memory"
       : "Distilling project memory";
+  }
+
+  if (type === "grading") {
+    return row.epicTitle
+      ? `Grading: ${row.epicTitle}`
+      : "Grading acceptance criteria";
   }
 
   if (type === "merge") {
@@ -181,7 +191,7 @@ export async function GET(
     // Staleness only means something for sessions that should be
     // producing output — queued sessions are silent by design.
     const isRunning = row.status === "running";
-    const lastActivityAt = isRunning ? getSessionLastActivityAt(row) : null;
+    const lastActivityAt = getSessionLastActivityAt(row);
 
     return {
       id: row.id,

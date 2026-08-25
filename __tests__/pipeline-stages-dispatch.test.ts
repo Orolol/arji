@@ -14,6 +14,9 @@
  *     resolveAgentForDispatch purpose 'review', labeled '**Code Review**'
  *     comment, negative-prose revert to in_progress, output cached for the
  *     driver's prose-fallback assessment,
+ *   - review verdict channels: a structured submit_findings verdict on the
+ *     session row outranks the prose scan in BOTH directions, and the
+ *     activity trail records which channel decided,
  *   - escalation (attempt >= 3): alternative provider, namedAgentId null,
  *   - guard probe: foreign active session flagged, own sessions ignored,
  *     scope-correct review-target status.
@@ -337,6 +340,48 @@ describe("fix stage dispatch (epic scope)", () => {
         toStatus: "review",
       })
     );
+  });
+
+  it("injects missed grading criteria and their evidence into the fix prompt", async () => {
+    const { projectId, epicId, storyId } = seed("review");
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+
+    const handle = await driver.launchStage({
+      stage: "fix",
+      attempt: 1,
+      fixCycle: 1,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+      gradingFailure: {
+        reportId: "grading-report-1",
+        summary: "The card outcome is missing.",
+        missed: [
+          {
+            storyId,
+            criterion: "The Kanban card shows aggregate grading",
+            status: "missed",
+            evidence: "EpicCard renders no grading badge.",
+          },
+        ],
+      },
+    });
+
+    const row = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, handle.sessionId!))
+      .get()!;
+    expect(row.prompt).toContain("## Acceptance grading gaps");
+    expect(row.prompt).not.toContain("A code review found blocking findings");
+    expect(row.prompt).toContain("The Kanban card shows aggregate grading");
+    expect(row.prompt).toContain("EpicCard renders no grading badge.");
+    await handle.settled;
   });
 
   it("settles a successful provider run even if the terminal session write fails", async () => {
@@ -730,7 +775,11 @@ describe("review stage dispatch", () => {
       .where(eq(ticketActivityLog.epicId, epicId))
       .all()
       .map((a) => a.reason);
-    expect(reasons).toContain("Review verdict: changes requested (Code Review)");
+    // No submit_findings verdict on the session → the prose channel decided,
+    // and the activity trail says so.
+    expect(reasons).toContain(
+      "Review verdict: changes requested (Code Review) [verdict source: prose]"
+    );
 
     // Zero findings rows → the driver's assessment uses the cached output.
     const assessment = await driver.assessReview({
@@ -741,6 +790,139 @@ describe("review stage dispatch", () => {
       blocking: true,
       usedProseFallback: true,
       agentCommentCount: 0,
+      verdictSource: "prose",
+      structuredVerdict: null,
+    });
+  });
+
+  it("reverts on a structured changes_requested verdict even when the prose reads clean", async () => {
+    const { projectId, epicId, storyId } = seed("review");
+    // The reviewer's markdown says the work is done; its submit_findings call
+    // says otherwise. The structured channel is authoritative.
+    processManagerState.result = {
+      success: true,
+      result: claudeEnvelope("**Overall Verdict: Complete** — ship it."),
+      duration: 900,
+    };
+    // Stands in for the mid-session submit_findings write.
+    vi.mocked(processManager.start).mockImplementationOnce(
+      ((sid: string) => {
+        db.update(agentSessions)
+          .set({ reviewVerdict: "changes_requested" })
+          .where(eq(agentSessions.id, sid))
+          .run();
+      }) as unknown as typeof processManager.start
+    );
+
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+    const stageStartedAt = new Date().toISOString();
+    const handle = await driver.launchStage({
+      stage: "review",
+      attempt: 1,
+      fixCycle: 0,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+    });
+    await handle.settled;
+
+    expect(
+      db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
+    ).toBe("in_progress");
+    expect(
+      db.select().from(userStories).where(eq(userStories.id, storyId)).get()!
+        .status
+    ).toBe("in_progress");
+
+    // Traceability: the activity trail names the channel that decided.
+    const reasons = db
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, epicId))
+      .all()
+      .map((a) => a.reason);
+    expect(reasons).toContain(
+      "Review verdict: changes requested (Code Review) [verdict source: structured]"
+    );
+
+    const assessment = await driver.assessReview({
+      sessionId: handle.sessionId!,
+      stageStartedAt,
+    });
+    expect(assessment).toMatchObject({
+      blocking: true,
+      verdictSource: "structured",
+      structuredVerdict: "changes_requested",
+      usedProseFallback: false,
+    });
+  });
+
+  it("holds the ticket in review on a structured approved verdict even when the prose reads negative", async () => {
+    const { projectId, epicId, storyId } = seed("review");
+    processManagerState.result = {
+      success: true,
+      result: claudeEnvelope(
+        "I first thought changes requested, but everything checks out."
+      ),
+      duration: 900,
+    };
+    vi.mocked(processManager.start).mockImplementationOnce(
+      ((sid: string) => {
+        db.update(agentSessions)
+          .set({ reviewVerdict: "approved" })
+          .where(eq(agentSessions.id, sid))
+          .run();
+      }) as unknown as typeof processManager.start
+    );
+
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+    const stageStartedAt = new Date().toISOString();
+    const handle = await driver.launchStage({
+      stage: "review",
+      attempt: 1,
+      fixCycle: 0,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+    });
+    await handle.settled;
+
+    // No revert: the prose scan does not get a vote here.
+    expect(
+      db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
+    ).toBe("review");
+    expect(
+      db.select().from(userStories).where(eq(userStories.id, storyId)).get()!
+        .status
+    ).toBe("review");
+    const reasons = db
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, epicId))
+      .all()
+      .map((a) => a.reason);
+    expect(
+      reasons.some((reason) => reason?.startsWith("Review verdict:"))
+    ).toBe(false);
+
+    const assessment = await driver.assessReview({
+      sessionId: handle.sessionId!,
+      stageStartedAt,
+    });
+    expect(assessment).toMatchObject({
+      blocking: false,
+      verdictSource: "structured",
+      structuredVerdict: "approved",
     });
   });
 
@@ -872,6 +1054,50 @@ describe("story scope", () => {
       { purpose: "review", projectId, epicId, storyId }
     );
     await handle.settled;
+  });
+});
+
+describe("grading stage dispatch", () => {
+  it("returns a successful journalled skip without creating a session when no stories exist", async () => {
+    const { projectId, epicId, storyId } = seed("review");
+    db.delete(userStories).where(eq(userStories.id, storyId)).run();
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+
+    const handle = await driver.launchStage({
+      stage: "grading",
+      attempt: 1,
+      fixCycle: 0,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: "build-complete",
+    });
+
+    expect(handle.sessionId).toBeNull();
+    await expect(handle.settled).resolves.toMatchObject({
+      success: true,
+      gradingSkipped: true,
+    });
+    expect(
+      db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.epicId, epicId))
+        .all(),
+    ).toHaveLength(0);
+    expect(
+      db
+        .select()
+        .from(ticketActivityLog)
+        .where(eq(ticketActivityLog.epicId, epicId))
+        .all(),
+    ).toContainEqual(
+      expect.objectContaining({ reason: expect.stringContaining("Grading skipped") }),
+    );
   });
 });
 

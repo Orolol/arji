@@ -106,6 +106,8 @@ function addSession(input: {
   agentType?: string | null;
   /** Defaults to "answered" for completed sessions — what a real run stores. */
   outcome?: string | null;
+  /** Structured submit_findings verdict persisted on the session row. */
+  reviewVerdict?: string | null;
   createdAt: string;
   endedAt?: string | null;
 }): string {
@@ -124,6 +126,7 @@ function addSession(input: {
           : input.status === "completed"
             ? "answered"
             : null,
+      reviewVerdict: input.reviewVerdict ?? null,
       createdAt: input.createdAt,
       endedAt: input.endedAt ?? null,
     })
@@ -903,6 +906,85 @@ describe("selectMergeCandidates", () => {
     seedCleanlyReviewedEpic();
     expect(selectReviewCandidates(PROJECT_ID)).toEqual([]);
     expect(selectMergeCandidates(PROJECT_ID)).toHaveLength(1);
+  });
+
+  it("never merges on an explicit changes_requested verdict, even with zero findings", () => {
+    addEpic({ id: "e1", status: "review", branchName: "feat/e1" });
+    addSession({
+      epicId: "e1",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(10),
+      endedAt: at(11),
+    });
+    addSession({
+      epicId: "e1",
+      status: "completed",
+      agentType: "review_code",
+      reviewVerdict: "changes_requested",
+      createdAt: at(20),
+      endedAt: at(21),
+    });
+
+    // The reviewer said NO through the structured channel. Zero findings
+    // must not launder that into a clean review — and the epic must stay
+    // reviewable rather than stranded.
+    expect(selectMergeCandidates(PROJECT_ID)).toEqual([]);
+    expect(selectReviewCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([
+      "e1",
+    ]);
+  });
+
+  it("still merges on an explicit approved or approved_with_minor_issues verdict", () => {
+    for (const verdict of ["approved", "approved_with_minor_issues"]) {
+      db.delete(agentSessions).run();
+      db.delete(epics).run();
+      addEpic({ id: "e1", status: "review", branchName: "feat/e1" });
+      addSession({
+        epicId: "e1",
+        status: "completed",
+        agentType: "build",
+        createdAt: at(10),
+        endedAt: at(11),
+      });
+      addSession({
+        epicId: "e1",
+        status: "completed",
+        agentType: "review_code",
+        reviewVerdict: verdict,
+        createdAt: at(20),
+        endedAt: at(21),
+      });
+
+      expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([
+        "e1",
+      ]);
+    }
+  });
+
+  it("keeps a NULL-verdict review clean (MCP-less providers)", () => {
+    addEpic({ id: "e1", status: "review", branchName: "feat/e1" });
+    addSession({
+      epicId: "e1",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(10),
+      endedAt: at(11),
+    });
+    // A provider without MCP support can never call submit_findings; its
+    // prose verdict is the only signal, so the row stays NULL and the old
+    // temporal gate applies unchanged.
+    addSession({
+      epicId: "e1",
+      status: "completed",
+      agentType: "review_compliance",
+      createdAt: at(20),
+      endedAt: at(21),
+    });
+
+    expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([
+      "e1",
+    ]);
   });
 });
 

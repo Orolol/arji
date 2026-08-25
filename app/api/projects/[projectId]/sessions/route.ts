@@ -5,10 +5,12 @@ import {
   chatConversations,
   namedAgents,
 } from "@/lib/db/schema";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getSessionStatusForApi } from "@/lib/agent-sessions/lifecycle";
 import { resolveCliSessionId } from "@/lib/db/resolve-cli-session-id";
 import { runBackfillRecentSessionLastNonEmptyTextOnce } from "@/lib/agent-sessions/backfill";
+import { latestActivityTimestamp } from "@/lib/agent-sessions/last-activity";
+import { getSessionLastActivityAt } from "@/lib/agents/watchdog";
 
 export async function GET(
   _request: NextRequest,
@@ -28,6 +30,7 @@ export async function GET(
     ...session,
     kind: "agent_session" as const,
     status: getSessionStatusForApi(session.status),
+    lastActivityAt: getSessionLastActivityAt(session),
     // Legacy-row fallback handled inside resolveCliSessionId().
     cliSessionId: resolveCliSessionId(session),
   }));
@@ -54,16 +57,23 @@ export async function GET(
         WHERE chat_messages.conversation_id = ${chatConversations.id}
         ORDER BY created_at DESC LIMIT 1
       )`.as("last_message_preview"),
+      lastMessageAt: sql<string | null>`(
+        SELECT MAX(created_at) FROM chat_messages
+        WHERE chat_messages.conversation_id = ${chatConversations.id}
+      )`.as("last_message_at"),
     })
     .from(chatConversations)
     .leftJoin(namedAgents, eq(chatConversations.namedAgentId, namedAgents.id))
     .where(eq(chatConversations.projectId, projectId))
     .all();
 
-  const normalizedConversations = conversations.map((conv) => ({
-    ...conv,
-    kind: "chat_session" as const,
-  }));
+  const normalizedConversations = conversations.map(
+    ({ lastMessageAt, ...conv }) => ({
+      ...conv,
+      kind: "chat_session" as const,
+      lastActivityAt: latestActivityTimestamp(conv.createdAt, lastMessageAt),
+    })
+  );
 
   // Merge and sort by createdAt desc, with id as tiebreaker
   const unified = [
