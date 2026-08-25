@@ -196,7 +196,10 @@ export function arijToolsSection(agentType: string | null): string {
     "update_ticket_status to move the ticket (transitions are validated — " +
     "review→done requires human approval); ask_question when you are blocked " +
     "on the user — it reliably holds the ticket and marks the session as " +
-    "awaiting a reply, so prefer it over ending with a question in text.";
+    "awaiting a reply, so prefer it over ending with a question in text. " +
+    "When something is broken, misleading, flaky, or unclear, call " +
+    "report_friction and then continue working — it is fire-and-forget, " +
+    "never a reason to stop or leave the task unfinished.";
 
   // Code-producing sessions own the ticket they are building, so they are
   // allowed to move it out of In Progress — the orchestrator also promotes

@@ -230,6 +230,8 @@ describe("processManager.start() — MCP injection gating", () => {
     const prompt = pmState.spawnedOptions[0].prompt as string;
     expect(prompt.startsWith("BASE PROMPT\n## Arij tools\n\n")).toBe(true);
     expect(prompt).toContain("mcp__arij__*");
+    expect(prompt).toContain("report_friction and then continue working");
+    expect(prompt).toContain("fire-and-forget");
     expect(prompt).not.toContain("submit_findings");
 
     // The token resolves to the session row's identity — the cross-project
@@ -302,6 +304,10 @@ describe("processManager.start() — MCP injection gating", () => {
     expect(mcp).toBeDefined();
     expect(mcp!.serverName).toBe("arij");
     expect(options.prompt as string).toContain("## Arij tools");
+    expect(options.prompt as string).toContain(
+      "report_friction and then continue working",
+    );
+    expect(options.prompt as string).toContain("fire-and-forget");
   });
 
   it("survives a broken db lookup and spawns without injection", () => {

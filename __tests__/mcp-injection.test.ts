@@ -408,6 +408,9 @@ describe("arijToolsSection", () => {
     expect(text).toContain("mcp__arij__*");
     expect(text).toContain("ask_question");
     expect(text).toContain("update_ticket_status");
+    expect(text).toContain("report_friction and then continue working");
+    expect(text).toContain("fire-and-forget");
+    expect(text).toContain("never a reason to stop or leave the task unfinished");
     expect(text).not.toContain("submit_findings");
     expect(text).not.toContain("Overall Verdict");
   });
