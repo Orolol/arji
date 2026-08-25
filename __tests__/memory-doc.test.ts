@@ -9,7 +9,9 @@
  *     (prompt reference documents filter kind = 'text'), so the memory doc
  *     cannot double-inject as a reference document,
  *   - replaceProjectMemoryWithSnapshot commits the snapshot and the
- *     replacement together or not at all.
+ *     replacement together or not at all,
+ *   - saveProjectMemoryGuarded runs the same optimistic guard WITHOUT
+ *     spending the single archive row a dream leaves behind.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
@@ -22,8 +24,10 @@ import {
   getProjectMemoryArchiveDoc,
   getProjectMemoryContent,
   getProjectMemoryDoc,
+  isProjectMemoryChangedError,
   replaceProjectMemoryWithSnapshot,
   saveProjectMemory,
+  saveProjectMemoryGuarded,
 } from "@/lib/documents/memory";
 import {
   MEMORY_ARCHIVE_DOC_KIND,
@@ -350,6 +354,97 @@ describe("replaceProjectMemoryWithSnapshot — optimistic guard", () => {
     saveProjectMemory(PROJECT_ID, "- WHATEVER", db);
     replaceProjectMemoryWithSnapshot(PROJECT_ID, "- FORCED", { database: db });
     expect(getProjectMemoryContent(PROJECT_ID, db)).toBe("- FORCED");
+  });
+});
+
+/**
+ * Per-session distillation has the same stale-write window as a dream — it
+ * captures the memory at prompt time and writes back after a long plan
+ * session — but must not touch the archive, which is the undo for the last
+ * DREAM and would be spent by an ordinary distill.
+ */
+describe("saveProjectMemoryGuarded", () => {
+  it("saves when the memory is still what the caller reasoned from", () => {
+    saveProjectMemory(PROJECT_ID, "- AS READ", db);
+
+    saveProjectMemoryGuarded(PROJECT_ID, "- DISTILLED", {
+      expectedPrevious: "- AS READ",
+      database: db,
+    });
+
+    expect(getProjectMemoryContent(PROJECT_ID, db)).toBe("- DISTILLED");
+  });
+
+  it("refuses — and changes nothing — when a human edit landed meanwhile", () => {
+    saveProjectMemory(PROJECT_ID, "- AS READ", db);
+    saveProjectMemory(PROJECT_ID, "- HUMAN EDIT", db);
+
+    expect(() =>
+      saveProjectMemoryGuarded(PROJECT_ID, "- DISTILLED", {
+        expectedPrevious: "- AS READ",
+        database: db,
+      })
+    ).toThrow(ProjectMemoryChangedError);
+
+    expect(getProjectMemoryContent(PROJECT_ID, db)).toBe("- HUMAN EDIT");
+  });
+
+  it("never writes an archive row, success or refusal", () => {
+    // A dream ran earlier and left the only snapshot anyone can undo to.
+    replaceProjectMemoryWithSnapshot(PROJECT_ID, "- DREAMED", {
+      expectedPrevious: null,
+      database: db,
+    });
+    saveProjectMemory(PROJECT_ID, "- PRE DREAM", db);
+    replaceProjectMemoryWithSnapshot(PROJECT_ID, "- DREAMED AGAIN", {
+      expectedPrevious: "- PRE DREAM",
+      database: db,
+    });
+    expect(getProjectMemoryArchiveDoc(PROJECT_ID, db)?.markdownContent).toBe(
+      "- PRE DREAM"
+    );
+
+    saveProjectMemoryGuarded(PROJECT_ID, "- DISTILLED", {
+      expectedPrevious: "- DREAMED AGAIN",
+      database: db,
+    });
+
+    // The distill replaced the live memory but left the dream's snapshot
+    // exactly where it was — otherwise "undo the last dream" would restore
+    // the text the dream itself produced.
+    expect(getProjectMemoryContent(PROJECT_ID, db)).toBe("- DISTILLED");
+    expect(getProjectMemoryArchiveDoc(PROJECT_ID, db)?.markdownContent).toBe(
+      "- PRE DREAM"
+    );
+  });
+
+  it("writes the first memory when nothing was read and nothing is stored", () => {
+    expect(() =>
+      saveProjectMemoryGuarded(PROJECT_ID, "- FIRST EVER", {
+        expectedPrevious: null,
+        database: db,
+      })
+    ).not.toThrow();
+    expect(getProjectMemoryContent(PROJECT_ID, db)).toBe("- FIRST EVER");
+  });
+
+  it("saves unconditionally when no expectation is given", () => {
+    saveProjectMemory(PROJECT_ID, "- WHATEVER", db);
+    saveProjectMemoryGuarded(PROJECT_ID, "- FORCED", { database: db });
+    expect(getProjectMemoryContent(PROJECT_ID, db)).toBe("- FORCED");
+  });
+
+  it("reports its conflict through the shared predicate", () => {
+    saveProjectMemory(PROJECT_ID, "- MOVED", db);
+    try {
+      saveProjectMemoryGuarded(PROJECT_ID, "- DISTILLED", {
+        expectedPrevious: "- AS READ",
+        database: db,
+      });
+      throw new Error("expected a conflict");
+    } catch (error) {
+      expect(isProjectMemoryChangedError(error)).toBe(true);
+    }
   });
 });
 

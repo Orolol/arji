@@ -169,6 +169,35 @@ export interface ReplaceProjectMemoryOptions {
 }
 
 /**
+ * Shared write primitive for the two agent-driven memory rewrites.
+ *
+ * Both read the memory to build a prompt, run a session for minutes, then
+ * write back — so both need the `expectedPrevious` comparison and the write to
+ * be one atomic step, or a concurrent manual save slips through the gap.
+ * They differ only in whether the overwritten text is snapshotted (see
+ * MEMORY_ARCHIVE_DOC_KIND: the single archive row means "undo the last
+ * dream", so a distill must not spend it).
+ */
+function writeProjectMemoryGuarded(
+  projectId: string,
+  content: string,
+  options: ReplaceProjectMemoryOptions,
+  archive: boolean
+): ReplaceProjectMemoryResult {
+  const database = options.database ?? defaultDb;
+  const guarded = "expectedPrevious" in options;
+  return database.transaction((tx) => {
+    const previous = getProjectMemoryContent(projectId, tx);
+    if (guarded && previous !== (options.expectedPrevious ?? null)) {
+      throw new ProjectMemoryChangedError();
+    }
+    const archived = archive ? archiveProjectMemory(projectId, previous, tx) : null;
+    const saved = saveProjectMemory(projectId, content, tx);
+    return { ...saved, archive: archived };
+  });
+}
+
+/**
  * Replaces the memory document and snapshots what it replaced, ATOMICALLY.
  *
  * The two writes have to commit together or not at all. Archiving first and
@@ -188,17 +217,38 @@ export function replaceProjectMemoryWithSnapshot(
   content: string,
   options: ReplaceProjectMemoryOptions = {}
 ): ReplaceProjectMemoryResult {
-  const database = options.database ?? defaultDb;
-  const guarded = "expectedPrevious" in options;
-  return database.transaction((tx) => {
-    const previous = getProjectMemoryContent(projectId, tx);
-    if (guarded && previous !== (options.expectedPrevious ?? null)) {
-      throw new ProjectMemoryChangedError();
-    }
-    const archive = archiveProjectMemory(projectId, previous, tx);
-    const saved = saveProjectMemory(projectId, content, tx);
-    return { ...saved, archive };
-  });
+  return writeProjectMemoryGuarded(projectId, content, options, true);
+}
+
+/**
+ * Saves the memory under the same optimistic guard, WITHOUT snapshotting.
+ *
+ * For per-session distillation, which has the identical stale-write window as
+ * a dream — it captures the memory at prompt time and writes back after a long
+ * plan session, so a manual save in between would otherwise be silently
+ * overwritten by text reasoned from the older version. Same resolution: the
+ * human edit is the newer intent and wins, and the distill can be re-run.
+ *
+ * It does NOT archive, on purpose. The archive is one row per project meaning
+ * "the memory before the last dream"; letting a distill (which rewrites the
+ * whole doc from a single session) overwrite it would destroy the only undo a
+ * dream leaves behind.
+ *
+ * Throws ProjectMemoryChangedError when the stored memory no longer matches
+ * `expectedPrevious`; omit that option to save unconditionally.
+ */
+export function saveProjectMemoryGuarded(
+  projectId: string,
+  content: string,
+  options: ReplaceProjectMemoryOptions = {}
+): SaveProjectMemoryResult {
+  const { archive: _unused, ...saved } = writeProjectMemoryGuarded(
+    projectId,
+    content,
+    options,
+    false
+  );
+  return saved;
 }
 
 /** The project's pre-dream memory snapshot row, or null when none exists. */

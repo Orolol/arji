@@ -60,7 +60,8 @@ import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import {
   getProjectMemoryContent,
-  saveProjectMemory,
+  isProjectMemoryChangedError,
+  saveProjectMemoryGuarded,
 } from "@/lib/documents/memory";
 import {
   MEMORY_AUTO_DISTILL_SETTING_KEY,
@@ -677,8 +678,24 @@ export async function dispatchMemoryDistillSession(
     }
 
     try {
-      saveProjectMemory(input.projectId, output);
+      // `expectedPrevious` is the memory this distill actually REASONED FROM,
+      // captured at prompt time above. A plan session runs long enough for
+      // someone to save an edit in the Docs tab meanwhile; writing blindly
+      // would throw that edit away in favour of text derived from the version
+      // before it. The human edit is the newer intent and wins — a distill can
+      // just be run again. (No snapshot: the single archive row is the undo
+      // for the last DREAM, and a distill must not spend it.)
+      saveProjectMemoryGuarded(input.projectId, output, {
+        expectedPrevious: currentMemory,
+      });
     } catch (error) {
+      if (isProjectMemoryChangedError(error)) {
+        console.info(
+          "[memory-distill] discarded: the memory was edited while the" +
+            ` distill ran (its output is still readable on session ${sessionId})`
+        );
+        return;
+      }
       console.error(
         "[memory-distill] Failed to save distilled memory",
         error

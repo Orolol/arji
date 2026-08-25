@@ -7,6 +7,9 @@
  *     completion REPLACES the memory document (cap-enforced) and writes the
  *     actor-'system' "Project memory updated" activity-log entry,
  *   - non-answered outcomes (asked_question) leave the memory doc untouched,
+ *   - a manual memory save landing WHILE the distill runs wins: the distill
+ *     discards its output rather than overwrite it with text reasoned from the
+ *     older version,
  *   - accidental full-document code fences are unwrapped,
  *   - the distill prompt embeds the current memory and the source session's
  *     ticket/outcome/result context,
@@ -73,6 +76,7 @@ const {
   sanitizeDistilledMemory,
   MEMORY_UPDATED_REASON,
 } = await import("@/lib/workflow/memory-distill");
+const { processManager } = await import("@/lib/claude/process-manager");
 const { getProjectMemoryContent, saveProjectMemory } = await import(
   "@/lib/documents/memory"
 );
@@ -254,6 +258,51 @@ describe("dispatchMemoryDistillSession", () => {
     await flushBackground();
 
     expect(getProjectMemoryContent(projectId)).toBe("- fenced rule");
+  });
+
+  it("discards its output when the memory was edited while it ran", async () => {
+    const { projectId, epicId } = seedProject();
+    saveProjectMemory(projectId, "- AS READ AT PROMPT TIME");
+    const sourceId = seedSourceSession(projectId, epicId);
+
+    // The human edit lands the instant the process starts — after the prompt
+    // captured the old memory, before the output is written back. That is the
+    // exact window a real plan session leaves open for minutes.
+    vi.mocked(processManager.start).mockImplementationOnce((id, _opts, provider) => {
+      saveProjectMemory(projectId, "- HUMAN EDIT");
+      return {
+        sessionId: id,
+        status: "running",
+        provider: provider ?? "claude-code",
+        startedAt: new Date(),
+      };
+    });
+
+    const { sessionId } = await dispatchMemoryDistillSession({
+      projectId,
+      sourceSessionId: sourceId,
+    });
+    await flushBackground();
+
+    // The run itself is a success — its output stays readable on the session
+    // row, so nothing is lost, it is simply not applied.
+    const session = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .get();
+    expect(session).toMatchObject({ status: "completed", outcome: "answered" });
+
+    // The newer human intent survives untouched...
+    expect(getProjectMemoryContent(projectId)).toBe("- HUMAN EDIT");
+    // ...and nothing claims the memory was updated.
+    expect(
+      db
+        .select()
+        .from(ticketActivityLog)
+        .where(eq(ticketActivityLog.epicId, epicId))
+        .all()
+    ).toHaveLength(0);
   });
 
   it("leaves the memory doc untouched when the distill run asked a question", async () => {
