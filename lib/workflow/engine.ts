@@ -47,9 +47,11 @@ export interface TransitionContext {
   /**
    * True only when the acting session is itself the sole queued/running
    * code-producing session on the ticket — i.e. the owner the in_progress
-   * lock exists to protect. The owner may move its own ticket out of
-   * in_progress (typically to review once the work is committed); any other
-   * actor, and any ticket with a second live session, stays locked.
+   * lock exists to protect. The owner may promote its own ticket to review
+   * (the move the terminal handler makes once the work is committed); any
+   * other target column — and any other actor, or any ticket with a second
+   * live session — stays locked, so a dead or cancelled run can never
+   * strand its work outside the columns the terminal handlers understand.
    */
   ownsInProgress?: boolean;
   /** The actor initiating the transition */
@@ -62,18 +64,23 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
   // A build session owns in_progress until its terminal handler promotes or
   // holds the ticket. Letting a concurrent drag move it would recreate the
   // active-session/orphaned-column state this engine is meant to prevent.
-  // The owning session itself is exempt: it is the owner the lock protects,
-  // so it may move its own ticket (e.g. in_progress → review once the work
-  // is committed). A ticket with a second live session, or a move by anyone
-  // else, is still refused.
+  // The owning session itself is the owner the lock protects — but only the
+  // promotion to review is exempt: the move the terminal handler makes once
+  // the work is committed. A demote to todo/backlog by the owner would leave
+  // the live run (and its eventual terminal handler) stranded in the wrong
+  // column, so it stays locked, as does any move by anyone else or by a
+  // ticket with a second live session.
   (ctx) => {
     if (
       ctx.fromStatus === "in_progress" &&
       ctx.toStatus !== "in_progress" &&
-      ctx.hasRunningSession &&
-      !ctx.ownsInProgress
+      ctx.hasRunningSession
     ) {
-      return "Cannot move an in-progress ticket while an agent session is queued or running.";
+      if (ctx.ownsInProgress && ctx.toStatus === "review") return null;
+      if (ctx.ownsInProgress) {
+        return "The owning session may only move its in-progress ticket to review while a session is live on it.";
+      }
+      return "Cannot move an in-progress ticket while another agent session is queued or running.";
     }
     return null;
   },

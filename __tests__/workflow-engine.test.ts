@@ -238,17 +238,31 @@ describe("validateTransition — active build ownership", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("allows the owning session to move its own ticket to other reachable columns", () => {
-    expect(
-      validateTransition(
-        ctx("in_progress", "todo", { hasRunningSession: true, ownsInProgress: true })
-      ).valid
-    ).toBe(true);
-    expect(
-      validateTransition(
-        ctx("in_progress", "backlog", { hasRunningSession: true, ownsInProgress: true })
-      ).valid
-    ).toBe(true);
+  it("refuses the owning session moving its own ticket anywhere but review", () => {
+    // The exemption is the promotion the terminal handler makes anyway;
+    // a demote by the live owner would strand the run's terminal handler.
+    for (const toStatus of ["todo", "backlog"]) {
+      const result = validateTransition(
+        ctx("in_progress", toStatus as KanbanStatus, {
+          hasRunningSession: true,
+          ownsInProgress: true,
+        })
+      );
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain("only move its in-progress ticket to review");
+    }
+  });
+
+  it("blames the other session in the lock refusal (not the acting one)", () => {
+    const result = validateTransition(
+      ctx("in_progress", "review", {
+        hasRunningSession: true,
+        actor: "agent",
+      })
+    );
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("another agent session");
+    expect(result.error).toContain("queued or running");
   });
 
   it("keeps the lock for a non-owning session (explicit false)", () => {
