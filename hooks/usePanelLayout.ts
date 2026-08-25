@@ -5,14 +5,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 const DEFAULT_PANEL_RATIO = 0.4;
 const MIN_PANEL_WIDTH = 300;
 const MIN_BOARD_WIDTH = 400;
-const DETAIL_PANEL_MIN_BOARD_WIDTH = 220;
 /**
- * The shared detail panel is a fixed 440px (design spec). It is a reading
- * column, not a proportional split: widening it with the viewport only
- * stretched the same text. It shrinks solely to keep the board usable on a
- * narrow window (see DETAIL_PANEL_MIN_BOARD_WIDTH).
+ * The shared ticket panel and the chat panel are the *same* container: they
+ * share one width (the persisted ratio) so switching between them never
+ * changes the layout. See MIN_BOARD_WIDTH / MIN_PANEL_WIDTH for the clamps
+ * that keep both the board and the panel usable on narrow windows.
  */
-const DETAIL_PANEL_WIDTH = 440;
 export const DIVIDER_WIDTH = 6;
 const MOBILE_BREAKPOINT = 768;
 
@@ -24,11 +22,6 @@ export type UnifiedPanelState = "collapsed" | "expanded" | "hidden";
 
 interface UsePanelLayoutOptions {
   projectId: string;
-  /**
-   * True while the divider drag should resize the chat panel — i.e. the panel
-   * currently shows chat content (not a shared detail view).
-   */
-  dragTargetsChat: boolean;
   /** Conversations used to validate the persisted active conversation id. */
   conversations: ReadonlyArray<{ id: string }>;
   activeId: string | null;
@@ -40,10 +33,13 @@ interface UsePanelLayoutOptions {
  * panel state, divider drag + ratio, mobile detection, and localStorage
  * persistence of the three per-project keys
  * (`arij.unified-chat-panel.{ratio,state,active}.<projectId>`).
+ *
+ * The panel width applies to BOTH the chat view and the shared ticket view —
+ * they are the same container, so resizing (or switching between them) never
+ * changes the width.
  */
 export function usePanelLayout({
   projectId,
-  dragTargetsChat,
   conversations,
   activeId,
   setActiveId,
@@ -96,17 +92,18 @@ export function usePanelLayout({
       const minRatio = MIN_PANEL_WIDTH / totalWidth;
       const maxRatio = (totalWidth - MIN_BOARD_WIDTH - DIVIDER_WIDTH) / totalWidth;
       const safeRatio = clamp(ratio, minRatio, maxRatio);
-      return Math.round(totalWidth * safeRatio);
+      const width = Math.round(totalWidth * safeRatio);
+      // Below ~706px the two minima collide (minRatio > maxRatio) and the
+      // clamp degenerates into a sub-usable — even negative — width. The
+      // desktop split never renders below MOBILE_BREAKPOINT (the mobile
+      // Sheet takes over), but floor the result anyway so a degenerate
+      // container can never emit an invalid `width` style.
+      return Math.max(MIN_PANEL_WIDTH, width);
     },
     [getContainerWidth],
   );
 
   const panelWidthPx = computePanelWidth(panelRatio);
-  const detailPanelWidthPx = useMemo(() => {
-    const totalWidth = getContainerWidth();
-    const maxWidth = Math.max(160, totalWidth - DETAIL_PANEL_MIN_BOARD_WIDTH);
-    return Math.round(Math.min(DETAIL_PANEL_WIDTH, maxWidth));
-  }, [getContainerWidth]);
 
   // Persist panelRatio — read on mount
   useEffect(() => {
@@ -168,7 +165,7 @@ export function usePanelLayout({
   }, [activeId, activeStorageKey]);
 
   useEffect(() => {
-    if (!isDragging || panelState !== "expanded" || !dragTargetsChat) {
+    if (!isDragging || panelState !== "expanded") {
       return;
     }
 
@@ -193,7 +190,7 @@ export function usePanelLayout({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [isDragging, panelState, dragTargetsChat, getContainerWidth]);
+  }, [isDragging, panelState, getContainerWidth]);
 
   const startDrag = useCallback(() => {
     setIsDragging(true);
@@ -212,6 +209,5 @@ export function usePanelLayout({
     startDrag,
     resetPanelRatio,
     panelWidthPx,
-    detailPanelWidthPx,
   };
 }

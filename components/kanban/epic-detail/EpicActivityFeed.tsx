@@ -30,6 +30,7 @@ import {
   pipelineReasonTone,
   type PipelineReasonTone,
 } from "@/lib/pipeline/constants";
+import { cn } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /* Feed construction (pure, exported for tests)                        */
@@ -114,6 +115,66 @@ export function buildActivityFeed(
 }
 
 /* ------------------------------------------------------------------ */
+/* Filtering (pure, exported for tests)                                */
+/* ------------------------------------------------------------------ */
+
+export type ActivityFilter = "all" | "comments" | "system";
+
+/** "comment" for human/agent comments, "system" for everything else. */
+export function feedItemKind(item: FeedItem): "comment" | "system" {
+  return item.kind === "comment" ? "comment" : "system";
+}
+
+export function matchesActivityFilter(
+  item: FeedItem,
+  filter: ActivityFilter
+): boolean {
+  if (filter === "all") return true;
+  const kind = feedItemKind(item);
+  return filter === "comments" ? kind === "comment" : kind === "system";
+}
+
+/**
+ * Apply the visible-kind filter to an already-built feed. Grouping is
+ * computed on the full feed (see buildActivityFeed) so a heavy system
+ * burst still collapses even when some of it is filtered out — filtering
+ * only hides, it never re-orders or re-groups.
+ */
+export function filterActivityFeed(
+  feed: FeedItem[],
+  filter: ActivityFilter
+): FeedItem[] {
+  return feed.filter((item) => matchesActivityFilter(item, filter));
+}
+
+/* ------------------------------------------------------------------ */
+/* Long-entry collapsing (pure, exported for tests)                    */
+/* ------------------------------------------------------------------ */
+
+/** Comments at or above this length collapse behind a preview. */
+export const LONG_COMMENT_THRESHOLD = 400;
+
+export function isLongComment(content: string): boolean {
+  return content.length >= LONG_COMMENT_THRESHOLD;
+}
+
+/**
+ * Truncate to `max` characters on a word boundary (no mid-word cuts) with
+ * an ellipsis. Used as the collapsed preview for long build outputs and
+ * logs so the feed stays scannable.
+ */
+export function commentPreview(
+  content: string,
+  max: number = LONG_COMMENT_THRESHOLD
+): string {
+  if (content.length <= max) return content;
+  const cut = content.slice(0, max);
+  const lastSpace = cut.lastIndexOf(" ");
+  const boundary = lastSpace > 0 ? lastSpace : max;
+  return `${cut.slice(0, boundary).trimEnd()}…`;
+}
+
+/* ------------------------------------------------------------------ */
 /* Presentational pieces                                               */
 /* ------------------------------------------------------------------ */
 
@@ -149,6 +210,7 @@ function TransitionRow({
     <div
       data-testid="activity-transition"
       data-actor={entry.actor}
+      data-kind="system"
       className="flex flex-wrap items-center gap-1.5 px-1 py-0.5 text-[12px]"
     >
       <Icon className={`h-3.5 w-3.5 shrink-0 ${actor.className}`} />
@@ -201,6 +263,7 @@ function PipelineRow({
     <div
       data-testid="activity-pipeline"
       data-tone={tone}
+      data-kind="system"
       className="flex flex-wrap items-center gap-1.5 border-l-2 border-agent-border px-1 py-0.5 pl-2 text-[12px]"
     >
       <Workflow className={`h-3.5 w-3.5 shrink-0 ${PIPELINE_TONE_STYLES[tone]}`} />
@@ -232,7 +295,7 @@ function TransitionGroupRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div>
+    <div data-kind="system">
       <button
         type="button"
         data-testid="activity-transition-group"
@@ -260,9 +323,14 @@ function TransitionGroupRow({
 }
 
 function CommentRow({ comment }: { comment: TicketComment }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = isLongComment(comment.content);
+  const showFull = !long || expanded;
   return (
     <div
       data-testid="activity-comment"
+      data-kind="comment"
+      data-long={long || undefined}
       className={`rounded-[11px] p-3 ${
         comment.author === "agent"
           ? "border border-agent-border bg-agent-bg"
@@ -282,9 +350,25 @@ function CommentRow({ comment }: { comment: TicketComment }) {
           {formatTime(comment.createdAt)}
         </span>
       </div>
+      {/* Long build outputs and logs collapse to a word-boundary preview so
+          the feed stays scannable; the full text stays one click away. */}
       <div className="text-sm">
-        <MarkdownContent content={comment.content} />
+        <MarkdownContent
+          content={showFull ? comment.content : commentPreview(comment.content)}
+        />
       </div>
+      {long && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          data-testid={
+            expanded ? "activity-comment-collapse" : "activity-comment-expand"
+          }
+          className="mt-2 text-[12px] font-medium text-primary hover:underline"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
     </div>
   );
 }
@@ -334,6 +418,16 @@ export function EpicActivityFeed({
     [comments, entries]
   );
 
+  const [filter, setFilter] = useState<ActivityFilter>("all");
+  const visibleFeed = useMemo(
+    () => filterActivityFeed(feed, filter),
+    [feed, filter]
+  );
+  const kindCounts = useMemo(() => {
+    const comments = feed.filter((item) => feedItemKind(item) === "comment").length;
+    return { all: feed.length, comments, system: feed.length - comments };
+  }, [feed]);
+
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -364,11 +458,37 @@ export function EpicActivityFeed({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
+      {/* Header + kind filter (comments vs. system events) */}
       <div className="border-b border-border-soft px-[24px] py-[12px]">
-        <h3 className="text-[12px] uppercase tracking-[.08em] text-meta">
-          Activity ({comments.length + entries.length})
-        </h3>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-[12px] uppercase tracking-[.08em] text-meta">
+            Activity ({comments.length + entries.length})
+          </h3>
+          <div
+            className="flex items-center gap-[4px]"
+            data-testid="activity-filter-bar"
+            role="group"
+            aria-label="Filter activity"
+          >
+            {(["all", "comments", "system"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFilter(f)}
+                aria-pressed={filter === f}
+                data-testid={`activity-filter-${f}`}
+                className={cn(
+                  "rounded-full px-[8px] text-[11px] leading-[20px]",
+                  filter === f
+                    ? "bg-band font-medium text-foreground"
+                    : "text-meta hover:text-foreground"
+                )}
+              >
+                {f === "all" ? "All" : f === "comments" ? "Comments" : "System"} ({kindCounts[f]})
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Feed */}
@@ -382,8 +502,15 @@ export function EpicActivityFeed({
             <p className="py-8 text-center text-[13px] text-muted-foreground">
               No activity yet. Start the conversation.
             </p>
+          ) : visibleFeed.length === 0 ? (
+            <p
+              className="py-8 text-center text-[13px] text-muted-foreground"
+              data-testid="activity-filter-empty"
+            >
+              Nothing here — try another filter.
+            </p>
           ) : (
-            feed.map((item) =>
+            visibleFeed.map((item) =>
               item.kind === "comment" ? (
                 <CommentRow key={item.comment.id} comment={item.comment} />
               ) : item.kind === "pipeline" ? (

@@ -26,10 +26,16 @@ import { AgentActionsBar } from "@/components/shared/AgentActionsBar";
 import { AgentDispatchDialog } from "@/components/shared/AgentDispatchDialog";
 import { TicketTypeBadge } from "@/components/shared/TicketTypeBadge";
 import { EpicActivityFeed } from "./epic-detail/EpicActivityFeed";
-import { PRIORITY_LABELS, KANBAN_COLUMNS, COLUMN_LABELS } from "@/lib/types/kanban";
+import { PRIORITY_LABELS } from "@/lib/types/kanban";
 import { useEpicPr } from "@/hooks/useEpicPr";
-import { Wrench, FileCode, MoreHorizontal, X } from "lucide-react";
-import { useState, useEffect } from "react";
+import {
+  Wrench,
+  FileCode,
+  MoreHorizontal,
+  X,
+  MessageSquare,
+} from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
 import { isAgentAlreadyRunningError } from "@/lib/agents/client-error";
 import { PermanentDeleteDialog } from "@/components/shared/PermanentDeleteDialog";
 import { DependencyEditor } from "@/components/dependencies/DependencyEditor";
@@ -41,7 +47,35 @@ import { TicketImagesSection } from "./epic-detail/TicketImagesSection";
 import { WhatTheAgentDid } from "./epic-detail/WhatTheAgentDid";
 import { formatCostUsd } from "@/lib/utils/format-usage";
 import { formatElapsed } from "@/lib/utils/format-elapsed";
+import { formatDateTime } from "@/lib/utils/format-date";
+import { ticketStatusOptions } from "@/lib/kanban/status-transitions";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+
+/**
+ * Always-visible ticket type chip for the sticky header: Bug keeps its
+ * destructive badge, features get a quiet neutral chip so the type is
+ * readable without leaving the panel.
+ */
+function EpicTypeChip({ type }: { type: string }) {
+  if (type === "bug") {
+    return (
+      <TicketTypeBadge
+        type="bug"
+        className="rounded-full px-[8px] text-[10.5px] leading-[18px]"
+        iconClassName="h-3 w-3"
+      />
+    );
+  }
+  return (
+    <Badge
+      data-testid="ticket-type-badge"
+      className="h-[18px] shrink-0 rounded-full border-0 bg-band px-[8px] text-[10.5px] font-medium leading-none text-muted-foreground"
+    >
+      Feature
+    </Badge>
+  );
+}
 
 /** Human label for the agent-state pill: "Build", "Review", "Merge"… */
 function agentTypeLabel(agentType?: string | null): string {
@@ -69,6 +103,21 @@ interface EpicDetailProps {
   onAgentConflict?: (args: { message: string; sessionUrl?: string }) => void;
 }
 
+/**
+ * Epic detail side panel (the "ticket" view).
+ *
+ * Layout contract (ticket-display overhaul):
+ * - the panel renders into the same container (and width) as the chat;
+ * - a sticky header carries the critical information (readable id, agent
+ *   state, type, title, status, priority, agent cost) and the frequent
+ *   actions (agent actions, quick comment, overflow);
+ * - the status control only enables transitions the workflow engine allows
+ *   (review → done stays approval-gated), with the reason shown inline;
+ * - secondary metadata (dates, raw ids, branch) is demoted to the bottom
+ *   of the Details tab;
+ * - the Details / Code Review / Activity tab bodies scroll independently
+ *   under the sticky header.
+ */
 export function EpicDetail({
   projectId,
   epicId,
@@ -131,6 +180,18 @@ export function EpicDetail({
   const { epics: projectEpics } = useProjectEpicsList(projectId, epicId, open);
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("details");
+
+  // Switching tickets resets the active section (the Code Review tab may
+  // not exist on the next ticket) and clears a stale status error —
+  // derived state, adjusted during render per React's reset pattern.
+  const [lastEpicId, setLastEpicId] = useState(epicId);
+  if (epicId !== lastEpicId) {
+    setLastEpicId(epicId);
+    setActiveTab("details");
+    setStatusError(null);
+  }
 
   const {
     merging,
@@ -226,6 +287,20 @@ export function EpicDetail({
     refresh();
   }
 
+  /**
+   * Status change from the sticky header. Disabled options are unselectable
+   * (Radix), but the workflow engine remains the source of truth — its
+   * rejection (e.g. "approval or merge required") surfaces inline.
+   */
+  const handleStatusChange = useCallback(
+    async (next: string) => {
+      setStatusError(null);
+      const result = await updateEpic({ status: next });
+      if (!result.ok) setStatusError(result.error ?? null);
+    },
+    [updateEpic]
+  );
+
   async function handleSendToDev(
     comment?: string,
     namedAgentId?: string | null,
@@ -273,9 +348,22 @@ export function EpicDetail({
         .join(" · ")
     : null;
 
+  const statusOptions = epic
+    ? ticketStatusOptions(epic.status, { hasRunningSession: isRunning })
+    : [];
+
+  // Radix portals the selected item's ItemText children into the trigger's
+  // value node whenever <SelectValue> has no children of its own. The
+  // dropdown items carry a "(current)" marker inside ItemText, so without
+  // an explicit value the closed trigger would read "Review (current)".
+  // Passing the plain label here disables the portal (valueNodeHasChildren)
+  // and keeps the trigger on the bare column name.
+  const currentStatusLabel =
+    statusOptions.find((option) => option.isCurrent)?.label ?? epic?.status ?? "";
+
   return (
     <div
-      className="flex h-full flex-col overflow-y-auto"
+      className="flex h-full flex-col overflow-hidden"
       data-testid="epic-detail-panel"
     >
       {loading || !epic ? (
@@ -288,127 +376,231 @@ export function EpicDetail({
           </div>
         </>
       ) : (
-        <>
-          {/* Header: id · agent pill · overflow · close */}
-          <div className="flex items-center gap-[10px] px-[24px] pt-[20px]">
-            {epic.readableId && (
-              <span className="shrink-0 font-mono text-[11.5px] text-meta">
-                {epic.readableId}
-              </span>
-            )}
-
-            {isRunning && agentPillLabel && (
-              <span
-                data-testid="epic-agent-pill"
-                className="inline-flex items-center gap-[7px] rounded-full bg-agent-bg px-[10px] py-[4px] text-[12px] text-agent"
-              >
-                <span className="breathing-dot h-[7px] w-[7px]" />
-                {agentPillLabel}
-              </span>
-            )}
-
-            <TicketTypeBadge type={epic.type} />
-
-            <div className="ml-auto flex items-center gap-[2px]">
-              {/* Non-modal: the delete item opens a dialog, and a modal menu
-                  would keep the body pointer-locked while it mounts. */}
-              <DropdownMenu modal={false}>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-meta"
-                    aria-label="Ticket actions"
-                    data-testid="epic-overflow-menu"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    variant="destructive"
-                    data-testid="epic-delete-menu-item"
-                    onClick={() => setDeleteDialogOpen(true)}
-                    disabled={deletingEpic}
-                  >
-                    Delete epic
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-meta"
-                onClick={onClose}
-                aria-label="Close ticket panel"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-
-          <div className="mt-[13px] px-[24px]">
-            <InlineEdit
-              value={epic.title}
-              onSave={(v) => updateEpic({ title: v })}
-              className="text-[20px] font-medium leading-[1.3] [text-wrap:pretty]"
-            />
-            {deleteEpicError && (
-              <p className="mt-2 text-[12px] text-destructive">
-                {deleteEpicError}
-              </p>
-            )}
-            {formatCostUsd(epic.sessionsCostUsd) && (
-              <p
-                className="mt-[6px] font-mono text-[11px] text-meta"
-                title="Cumulative cost of this ticket's agent sessions (when reported by the provider)"
-              >
-                Agent cost {formatCostUsd(epic.sessionsCostUsd)}
-              </p>
-            )}
-          </div>
-
-          {/* Agent action row (Retry / Reply / Diff equivalents). AgentActionsBar
-              is shared and frozen, so the 3a control grammar (29px / 13px /
-              radius 8) is applied from here instead of editing it. */}
-          <div className="px-[24px] pt-[18px] [&_button]:h-[29px] [&_button]:rounded-[8px] [&_button]:text-[13px]">
-            <AgentActionsBar
-              projectId={projectId}
-              target={{ kind: "epic", epic }}
-              dispatching={dispatching}
-              isRunning={isRunning}
-              activeSessionId={activeSession?.id || null}
-              onSendToDev={handleSendToDev}
-              onSendToReview={handleSendToReview}
-              onApprove={handleApprove}
-              onActionError={(error) => {
-                if (isAgentAlreadyRunningError(error)) {
-                  onAgentConflict?.({
-                    message: error.message,
-                    sessionUrl:
-                      error.sessionUrl ||
-                      `/projects/${projectId}/sessions/${error.activeSessionId}`,
-                  });
-                  return;
-                }
-                onAgentConflict?.({
-                  message:
-                    error instanceof Error
-                      ? error.message
-                      : "Failed to run agent action",
-                });
-              }}
-            />
-          </div>
-
-          <Tabs
-            defaultValue="details"
-            className="flex min-h-0 flex-1 flex-col gap-0"
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value)}
+          className="flex min-h-0 flex-1 flex-col gap-0"
+        >
+          {/* Sticky header: critical information + frequent actions. The
+              tab bodies below scroll independently, so this never
+              disappears under the feed. */}
+          <div
+            className="shrink-0 border-b border-border-soft bg-card"
+            data-testid="epic-detail-header"
           >
-            <TabsList className="h-auto w-full justify-start gap-[20px] rounded-none border-b border-border-soft bg-transparent px-[24px] pt-[20px] pb-0">
+            {/* Identity row: readable id · agent pill · type · actions */}
+            <div className="flex items-center gap-[10px] px-[24px] pt-[20px]">
+              {epic.readableId && (
+                <span className="shrink-0 font-mono text-[11.5px] text-meta">
+                  {epic.readableId}
+                </span>
+              )}
+
+              {isRunning && agentPillLabel && (
+                <span
+                  data-testid="epic-agent-pill"
+                  className="inline-flex items-center gap-[7px] rounded-full bg-agent-bg px-[10px] py-[4px] text-[12px] text-agent"
+                >
+                  <span className="breathing-dot h-[7px] w-[7px]" />
+                  {agentPillLabel}
+                </span>
+              )}
+
+              {/* Always-visible type chip: Bug keeps its destructive badge,
+                  features get a quiet neutral chip (the shared badge
+                  component renders nothing outside of bugs, which other
+                  surfaces rely on). */}
+              <EpicTypeChip type={epic.type} />
+
+              <div className="ml-auto flex items-center gap-[2px]">
+                {/* Quick comment: jump to the Activity tab, whose composer
+                    is pinned at the bottom of the panel. */}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-meta hover:text-foreground"
+                  onClick={() => setActiveTab("activity")}
+                  aria-label="Comment"
+                  data-testid="epic-comment-button"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                </Button>
+
+                {/* Non-modal: the delete item opens a dialog, and a modal menu
+                    would keep the body pointer-locked while it mounts. */}
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-meta"
+                      aria-label="Ticket actions"
+                      data-testid="epic-overflow-menu"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      variant="destructive"
+                      data-testid="epic-delete-menu-item"
+                      onClick={() => setDeleteDialogOpen(true)}
+                      disabled={deletingEpic}
+                    >
+                      Delete epic
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-meta"
+                  onClick={onClose}
+                  aria-label="Close ticket panel"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Title (inline-editable) + delete error + agent cost */}
+            <div className="mt-[13px] px-[24px]">
+              <InlineEdit
+                value={epic.title}
+                onSave={(v) => updateEpic({ title: v })}
+                className="text-[20px] font-medium leading-[1.3] [text-wrap:pretty]"
+              />
+              {deleteEpicError && (
+                <p className="mt-2 text-[12px] text-destructive">
+                  {deleteEpicError}
+                </p>
+              )}
+              {formatCostUsd(epic.sessionsCostUsd) && (
+                <p
+                  className="mt-[6px] font-mono text-[11px] text-meta"
+                  title="Cumulative cost of this ticket's agent sessions (when reported by the provider)"
+                >
+                  Agent cost {formatCostUsd(epic.sessionsCostUsd)}
+                </p>
+              )}
+            </div>
+
+            {/* Workflow row: status (workflow-aware) + priority */}
+            <div className="mt-[14px] flex flex-wrap items-center gap-x-[18px] gap-y-[8px] px-[24px]">
+              <div className="flex items-center gap-[8px]">
+                <span className="text-[12.5px] text-muted-foreground">
+                  Status
+                </span>
+                <Select
+                  value={epic.status}
+                  onValueChange={handleStatusChange}
+                >
+                  <SelectTrigger
+                    data-testid="epic-status-select"
+                    aria-label="Status"
+                    className="h-[29px] w-auto gap-2 rounded-[7px] border-0 bg-transparent px-2 text-[13px] shadow-none hover:bg-band"
+                  >
+                    <SelectValue>{currentStatusLabel}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="min-w-[250px]">
+                    {statusOptions.map((option) => (
+                      <SelectItem
+                        key={option.status}
+                        value={option.status}
+                        disabled={!option.enabled}
+                        title={
+                          option.isCurrent
+                            ? undefined
+                            : option.disabledReason ?? undefined
+                        }
+                      >
+                        <span className="flex items-center gap-[8px]">
+                          <span>{option.label}</span>
+                          {option.isCurrent && (
+                            <span className="text-[10px] font-normal text-meta">
+                              (current)
+                            </span>
+                          )}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-[8px]">
+                <span className="text-[12.5px] text-muted-foreground">
+                  Priority
+                </span>
+                <Select
+                  value={String(epic.priority)}
+                  onValueChange={(v) => updateEpic({ priority: Number(v) } as never)}
+                >
+                  <SelectTrigger
+                    data-testid="epic-priority-select"
+                    aria-label="Priority"
+                    className="h-[29px] w-auto gap-2 rounded-[7px] border-0 bg-transparent px-2 text-[13px] shadow-none hover:bg-band"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(PRIORITY_LABELS).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>
+                        {v}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {statusError && (
+              <p
+                data-testid="epic-status-error"
+                className="mt-[10px] px-[24px] text-[12px] leading-[1.5] text-destructive"
+              >
+                {statusError}
+              </p>
+            )}
+
+            {/* Frequent actions: dispatch/continue/re-run the agent.
+                AgentActionsBar is shared and frozen, so the 3a control
+                grammar (29px / 13px / radius 8) is applied from here. */}
+            <div className="px-[24px] pt-[16px] [&_button]:h-[29px] [&_button]:rounded-[8px] [&_button]:text-[13px]">
+              <AgentActionsBar
+                projectId={projectId}
+                target={{ kind: "epic", epic }}
+                dispatching={dispatching}
+                isRunning={isRunning}
+                activeSessionId={activeSession?.id || null}
+                onSendToDev={handleSendToDev}
+                onSendToReview={handleSendToReview}
+                onApprove={handleApprove}
+                onActionError={(error) => {
+                  if (isAgentAlreadyRunningError(error)) {
+                    onAgentConflict?.({
+                      message: error.message,
+                      sessionUrl:
+                        error.sessionUrl ||
+                        `/projects/${projectId}/sessions/${error.activeSessionId}`,
+                    });
+                    return;
+                  }
+                  onAgentConflict?.({
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : "Failed to run agent action",
+                  });
+                }}
+              />
+            </div>
+
+            {/* Section tabs — sticky with the header (the bodies scroll). */}
+            <TabsList className="h-auto w-full justify-start gap-[20px] rounded-none border-0 bg-transparent px-[24px] pt-[18px] pb-0">
               <TabsTrigger value="details" className={TAB_TRIGGER_CLASS}>
                 Details
               </TabsTrigger>
@@ -437,7 +629,10 @@ export function EpicDetail({
                 )}
               </TabsTrigger>
             </TabsList>
+          </div>
 
+          {/* Tab bodies: independent scroll under the sticky header. */}
+          <div className="flex min-h-0 flex-1 flex-col">
             <TabsContent
               value="details"
               className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-y-auto px-[24px] py-[22px]"
@@ -464,50 +659,8 @@ export function EpicDetail({
                 refreshToken={activeSession?.id ?? null}
               />
 
-              {/* Key / value rows */}
+              {/* Key / value rows (priority & status moved to the header) */}
               <div className="flex flex-col">
-                <div className="flex items-center justify-between gap-3 border-t border-border-soft py-[11px]">
-                  <span className="text-[12.5px] text-muted-foreground">
-                    Priority
-                  </span>
-                  <Select
-                    value={String(epic.priority)}
-                    onValueChange={(v) => updateEpic({ priority: Number(v) } as never)}
-                  >
-                    <SelectTrigger className="h-[29px] w-auto gap-2 rounded-[7px] border-0 bg-transparent px-2 text-[13px] shadow-none hover:bg-band">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(PRIORITY_LABELS).map(([k, v]) => (
-                        <SelectItem key={k} value={k}>
-                          {v}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex items-center justify-between gap-3 border-t border-border-soft py-[11px]">
-                  <span className="text-[12.5px] text-muted-foreground">
-                    Status
-                  </span>
-                  <Select
-                    value={epic.status}
-                    onValueChange={(v) => updateEpic({ status: v })}
-                  >
-                    <SelectTrigger className="h-[29px] w-auto gap-2 rounded-[7px] border-0 bg-transparent px-2 text-[13px] shadow-none hover:bg-band">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {KANBAN_COLUMNS.map((col) => (
-                        <SelectItem key={col} value={col}>
-                          {COLUMN_LABELS[col]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
                 {epic.type === "bug" && epic.linkedEpicId && (
                   <div className="flex items-center justify-between gap-3 border-t border-border-soft py-[11px]">
                     <span className="text-[12.5px] text-muted-foreground">
@@ -575,6 +728,38 @@ export function EpicDetail({
                   />
                 </div>
               )}
+
+              {/* Demoted secondary metadata: dates, raw ids, branch. */}
+              <div
+                className="flex flex-col gap-[10px] border-t border-border-soft pt-[16px]"
+                data-testid="ticket-metadata"
+              >
+                <span className={SECTION_LABEL_CLASS}>Metadata</span>
+                <div className="flex items-center justify-between gap-3 py-[4px]">
+                  <span className="text-[12.5px] text-muted-foreground">
+                    Created
+                  </span>
+                  <span className="font-mono text-[11.5px] text-meta">
+                    {formatDateTime(epic.createdAt)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 py-[4px]">
+                  <span className="text-[12.5px] text-muted-foreground">
+                    Updated
+                  </span>
+                  <span className="font-mono text-[11.5px] text-meta">
+                    {formatDateTime(epic.updatedAt)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 py-[4px]">
+                  <span className="text-[12.5px] text-muted-foreground">
+                    Ticket ID
+                  </span>
+                  <span className="font-mono text-[11.5px] text-meta">
+                    {epic.id}
+                  </span>
+                </div>
+              </div>
             </TabsContent>
 
             {/* Code Review Tab */}
@@ -626,8 +811,8 @@ export function EpicDetail({
                 />
               </div>
             </TabsContent>
-          </Tabs>
-        </>
+          </div>
+        </Tabs>
       )}
 
       <AgentDispatchDialog

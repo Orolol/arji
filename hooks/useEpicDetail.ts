@@ -28,6 +28,8 @@ interface EpicDetail {
   linkedEpicId: string | null;
   images: string | null;
   readableId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
   /** Sum of this epic's sessions' reported cost; null when never reported. */
   sessionsCostUsd?: number | null;
 }
@@ -81,14 +83,28 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
   }, [fetchData]);
 
   const updateEpic = useCallback(
-    async (updates: Partial<EpicDetail>) => {
-      if (!epicId) return;
-      await fetch(`/api/projects/${projectId}/epics/${epicId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
-      setEpic((prev) => (prev ? { ...prev, ...updates } : null));
+    async (updates: Partial<EpicDetail>): Promise<{ ok: boolean; error?: string }> => {
+      if (!epicId) return { ok: false, error: "No ticket selected" };
+      try {
+        const res = await fetch(`/api/projects/${projectId}/epics/${epicId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) {
+          // The workflow engine rejects invalid transitions server-side;
+          // surface its message instead of applying an optimistic state.
+          return {
+            ok: false,
+            error: data.error || "The update was rejected",
+          };
+        }
+        setEpic((prev) => (prev ? { ...prev, ...updates } : null));
+        return { ok: true };
+      } catch {
+        return { ok: false, error: "Network error — the update was not applied" };
+      }
     },
     [projectId, epicId]
   );
