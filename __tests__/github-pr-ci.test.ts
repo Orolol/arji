@@ -115,9 +115,26 @@ describe("classifyPullRequestCi", () => {
     }
   });
 
+  it("reports only actionable failures once one exists, not cancelled siblings", () => {
+    expect(
+      classifyPullRequestCi({
+        checkRuns: [
+          { name: "z-real", status: "completed", conclusion: "failure" },
+          { name: "a-sibling-0", status: "completed", conclusion: "cancelled" },
+          { name: "a-sibling-1", status: "completed", conclusion: "stale" },
+        ],
+        commitStatuses: [],
+      }),
+    ).toEqual({ state: "failing", failedChecks: ["z-real"] });
+  });
+
   it("reads checks and commit statuses for the exact PR head SHA", async () => {
     githubMocks.pullsGet.mockResolvedValue({
-      data: { head: { sha: "head-123" } },
+      data: {
+        head: { sha: "head-123" },
+        state: "open",
+        draft: false,
+      },
     });
     githubMocks.checksListForRef.mockResolvedValue({
       data: {
@@ -137,6 +154,7 @@ describe("classifyPullRequestCi", () => {
       fetchPullRequestCiStatus("acme", "widgets", 42),
     ).resolves.toEqual({
       headSha: "head-123",
+      prState: "open",
       state: "failing",
       failedChecks: ["unit"],
       failedCheckRuns: [{ id: 701, name: "unit", conclusion: "failure" }],
@@ -156,7 +174,11 @@ describe("classifyPullRequestCi", () => {
 
   it("uses the newest status per context and preserves third-party check names", async () => {
     githubMocks.pullsGet.mockResolvedValue({
-      data: { head: { sha: "head-statuses" } },
+      data: {
+        head: { sha: "head-statuses" },
+        state: "open",
+        draft: false,
+      },
     });
     githubMocks.checksListForRef.mockResolvedValue({
       data: { check_runs: [] },
@@ -173,6 +195,7 @@ describe("classifyPullRequestCi", () => {
       fetchPullRequestCiStatus("acme", "widgets", 42),
     ).resolves.toEqual({
       headSha: "head-statuses",
+      prState: "open",
       state: "failing",
       failedChecks: ["codecov/project"],
       failedCheckRuns: [],
@@ -181,7 +204,11 @@ describe("classifyPullRequestCi", () => {
 
   it("returns passing for realistic successful check and status responses", async () => {
     githubMocks.pullsGet.mockResolvedValue({
-      data: { head: { sha: "head-green" } },
+      data: {
+        head: { sha: "head-green" },
+        state: "open",
+        draft: false,
+      },
     });
     githubMocks.checksListForRef.mockResolvedValue({
       data: {
@@ -210,7 +237,11 @@ describe("classifyPullRequestCi", () => {
 
   it("paginates checks and statuses so a failure after page one is visible", async () => {
     githubMocks.pullsGet.mockResolvedValue({
-      data: { head: { sha: "head-many" } },
+      data: {
+        head: { sha: "head-many" },
+        state: "open",
+        draft: false,
+      },
     });
     githubMocks.paginate
       .mockResolvedValueOnce([

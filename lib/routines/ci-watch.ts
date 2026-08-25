@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { epics, projects, routines, type Routine } from "@/lib/db/schema";
 import {
@@ -86,6 +86,12 @@ export interface CiWatchDeps {
     headSha: string;
     failedChecks: string[];
   }): void;
+  /**
+   * Writes back the lifecycle Arij just observed so a merged or closed PR
+   * stops being polled every interval. Internal state only; never surfaced
+   * through the routine CRUD API.
+   */
+  setEpicPullRequestState(epicId: string, prStatus: string): void;
 }
 
 export const defaultCiWatchDeps: CiWatchDeps = {
@@ -102,7 +108,9 @@ export const defaultCiWatchDeps: CiWatchDeps = {
       .where(
         and(
           eq(epics.projectId, projectId),
-          eq(epics.prStatus, "open"),
+          // Drafts run CI too; only closed/merged PRs are dropped, and the
+          // sweep writes that state back through setEpicPullRequestState.
+          inArray(epics.prStatus, ["open", "draft"]),
           isNotNull(epics.prNumber),
         ),
       )
@@ -142,6 +150,12 @@ export const defaultCiWatchDeps: CiWatchDeps = {
     });
   },
   notifyFailure: createCiWatchFailureNotification,
+  setEpicPullRequestState: (epicId, prStatus) => {
+    db.update(epics)
+      .set({ prStatus, updatedAt: new Date().toISOString() })
+      .where(eq(epics.id, epicId))
+      .run();
+  },
 };
 
 function parseStoredState(value: unknown): StoredCiWatchState {
@@ -248,7 +262,8 @@ export async function runCiWatchRoutine(
     .listOpenPullRequestEpics(routine.projectId)
     .filter(
       (epic): epic is CiWatchEpic & { prNumber: number } =>
-        epic.prStatus === "open" && epic.prNumber !== null,
+        (epic.prStatus === "open" || epic.prStatus === "draft") &&
+        epic.prNumber !== null,
     );
   if (openPullRequests.length === 0) {
     return {
@@ -296,6 +311,7 @@ export async function runCiWatchRoutine(
   let autofixesLaunched = 0;
   let autofixesSkipped = 0;
   let processedPullRequests = 0;
+  let reconciledPullRequests = 0;
   let newProcessingErrors = 0;
   const failedPullRequestNumbers: number[] = [];
   const autofixEnabled = deps.isAutofixEnabled(routine.projectId);
@@ -307,6 +323,18 @@ export async function runCiWatchRoutine(
         repo,
         epic.prNumber,
       );
+
+      // A merged or closed PR has no living CI. Write the observed state
+      // back so it stops being polled, and drop its stale observation.
+      if (snapshot.prState === "closed" || snapshot.prState === "merged") {
+        deps.setEpicPullRequestState(epic.id, snapshot.prState);
+        delete nextState[epic.id];
+        delete nextErrorState[epic.id];
+        deps.persistState(routine.id, nextState, nextErrorState);
+        reconciledPullRequests += 1;
+        processedPullRequests += 1;
+        continue;
+      }
       const decision = nextCiObservation(
         previousState[epic.id],
         epic.prNumber,
@@ -417,6 +445,10 @@ export async function runCiWatchRoutine(
     }; ${failingPullRequests} failing, ${newFailures} newly reported${
       autofixesLaunched + autofixesSkipped > 0
         ? `; ${autofixesLaunched} autofix launched, ${autofixesSkipped} skipped`
+        : ""
+    }${
+      reconciledPullRequests > 0
+        ? `; ${reconciledPullRequests} closed or merged and no longer watched`
         : ""
     }${
       failedPullRequestNumbers.length > 0

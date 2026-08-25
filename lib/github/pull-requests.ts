@@ -85,6 +85,8 @@ export interface PullRequestCiStatus {
    * `failedChecks` only.
    */
   failedCheckRuns?: PullRequestFailedCheckRun[];
+  /** Lifecycle of the PR itself, so CI watch can stop polling merged PRs. */
+  prState?: "draft" | "open" | "closed" | "merged";
 }
 
 export interface PullRequestCiFailureEvidence {
@@ -184,11 +186,13 @@ export function classifyPullRequestCi(input: {
     );
 
   if (hasActionableFailure) {
+    // Only genuinely broken checks are reported: cancelled/stale matrix
+    // siblings stay pending signals and never join the alert or the fix
+    // prompt, where they would pad one real failure with empty work.
     for (const check of input.checkRuns) {
       if (
         check.conclusion &&
-        (ACTIONABLE_FAILURE_CONCLUSIONS.has(check.conclusion) ||
-          RELATED_FAILURE_CONCLUSIONS.has(check.conclusion))
+        ACTIONABLE_FAILURE_CONCLUSIONS.has(check.conclusion)
       ) {
         failedChecks.add(check.name);
       }
@@ -314,6 +318,13 @@ export async function fetchPullRequestCiStatus(
     pull_number: prNumber,
   });
   const headSha = pullRequest.head.sha;
+  const prState = pullRequest.merged
+    ? ("merged" as const)
+    : pullRequest.state === "closed"
+      ? ("closed" as const)
+      : pullRequest.draft
+        ? ("draft" as const)
+        : ("open" as const);
 
   const [checkRuns, rawCommitStatuses] = await Promise.all([
     octokit.paginate(octokit.checks.listForRef, {
@@ -380,10 +391,7 @@ export async function fetchPullRequestCiStatus(
   const failedCheckRuns = new Map<string, PullRequestFailedCheckRun>();
   for (const check of checkRunSignals) {
     if (
-      check.conclusion &&
       classification.failedChecks.includes(check.name) &&
-      (ACTIONABLE_FAILURE_CONCLUSIONS.has(check.conclusion) ||
-        RELATED_FAILURE_CONCLUSIONS.has(check.conclusion)) &&
       !failedCheckRuns.has(check.name)
     ) {
       failedCheckRuns.set(check.name, {
@@ -396,6 +404,7 @@ export async function fetchPullRequestCiStatus(
 
   return {
     headSha,
+    prState,
     ...classification,
     failedCheckRuns: [...failedCheckRuns.values()].sort(compareFailedCheckRuns),
   };

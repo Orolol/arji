@@ -81,6 +81,7 @@ function deps(row: Routine): CiWatchDeps {
       });
     }),
     notifyFailure: vi.fn(),
+    setEpicPullRequestState: vi.fn(),
   };
 }
 
@@ -384,5 +385,52 @@ describe("CI watch", () => {
       autofixAttempted: true,
       autofixSessionId: "fix-session",
     });
+  });
+
+  it("watches draft pull requests like open ones", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.listOpenPullRequestEpics).mockReturnValue([
+      {
+        id: "epic-draft",
+        title: "Draft PR",
+        readableId: "E-proj-004",
+        prNumber: 13,
+        prStatus: "draft",
+      },
+    ]);
+
+    const result = await runCiWatchRoutine(row, watchDeps);
+
+    expect(watchDeps.fetchPullRequestCi).toHaveBeenCalledWith(
+      "acme",
+      "widgets",
+      13,
+    );
+    expect(watchDeps.notifyFailure).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("completed");
+  });
+
+  it("reconciles a merged PR and stops watching it", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.fetchPullRequestCi).mockResolvedValue({
+      headSha: "sha-merged",
+      state: "passing",
+      failedChecks: [],
+      prState: "merged",
+    });
+
+    const result = await runCiWatchRoutine(row, watchDeps);
+
+    expect(watchDeps.setEpicPullRequestState).toHaveBeenCalledWith(
+      "epic-open",
+      "merged",
+    );
+    expect(watchDeps.notifyFailure).not.toHaveBeenCalled();
+    expect(watchDeps.fetchFailureEvidence).not.toHaveBeenCalled();
+    expect(result.message).toContain("1 closed or merged");
+    // The stale observation is dropped so a reopened PR starts fresh.
+    expect(JSON.parse(row.config).ciWatchState["epic-open"]).toBeUndefined();
   });
 });
