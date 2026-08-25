@@ -36,6 +36,31 @@ export const MEMORY_WRITER_AGENT_TYPES: readonly string[] = [
   DREAMING_AGENT_TYPE,
 ];
 
+/**
+ * Agent types that must NOT get the Arij MCP tool channel.
+ *
+ * Both memory writers are strict document-rewrite sessions: their ENTIRE
+ * response is written verbatim into the memory document, and neither carries
+ * an epicId (they are project-level passes). The MCP injection appends its
+ * "## Arij tools" section to the END of the prompt — after the output contract
+ * that says "respond with the document body and nothing else" — so the last
+ * thing such a session reads becomes "post comments, move the ticket", about a
+ * ticket it does not have. Skipping the channel entirely keeps the output
+ * contract final and the tool surface honest.
+ *
+ * Consumed by lib/claude/process-manager.ts, the single wiring point for agent
+ * sessions.
+ */
+export const MCP_EXEMPT_AGENT_TYPES: readonly string[] = [
+  ...MEMORY_WRITER_AGENT_TYPES,
+];
+
+export function isMcpExemptAgentType(
+  agentType: string | null | undefined
+): boolean {
+  return agentType != null && MCP_EXEMPT_AGENT_TYPES.includes(agentType);
+}
+
 /* ------------------------------------------------------------------ */
 /* Settings keys                                                       */
 /* ------------------------------------------------------------------ */
@@ -56,16 +81,35 @@ export function dreamingAfterNightRunSettingKey(projectId: string): string {
 }
 
 /**
- * Parses a raw settings value (boolean, or the literal strings
- * "true"/"false" as the settings PATCH route stores them) into a tri-state:
- * null means "not configured", so callers fall through to the next level of
- * the project → global → OFF chain. Mirrors parsePipelineEnabledSetting.
+ * Parses a raw settings value into a tri-state: null means "not configured",
+ * so callers fall through to the next level of the project → global → OFF
+ * chain.
+ *
+ * Accepts every shape the value can reach us in: a real boolean (client, after
+ * GET parsed the row), the JSON-encoded `"true"` the PATCH route writes, and
+ * the double-encoded `'"true"'` a string-valued PATCH produces. That last one
+ * matters: without the JSON pass, GET would report the setting enabled while
+ * the server resolved it OFF — a toggle that lies. Mirrors how
+ * parseMemoryAutoDistillSetting reads its row.
  */
 export function parseDreamingAfterNightRunSetting(
   value: unknown
 ): boolean | null {
-  if (value === true || value === "true") return true;
-  if (value === false || value === "false") return false;
+  let parsed: unknown = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      // raw (non-JSON) string — compare as-is below
+    }
+  }
+  if (parsed === true) return true;
+  if (parsed === false) return false;
+  if (typeof parsed === "string") {
+    const normalized = parsed.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
   return null;
 }
 

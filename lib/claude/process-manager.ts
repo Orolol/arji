@@ -14,6 +14,7 @@ import {
   cleanupMcpConfigFile,
 } from "./mcp-injection";
 import { arijToolsSection } from "./prompt-sections";
+import { isMcpExemptAgentType } from "@/lib/workflow/dreaming-constants";
 import {
   mintMcpToken,
   revokeMcpTokensForSession,
@@ -109,8 +110,9 @@ class ClaudeProcessManager {
     // their own chat-toolset channel from lib/chat/cli-tool-channel.ts.
     // Strictly best-effort: a session must never fail to spawn because
     // injection did. Gates: settings toggle (absent row = enabled),
-    // provider support (claude-code/codex), and an agent_sessions row —
-    // the row is the authority for the project scope the token binds to.
+    // provider support (claude-code/codex), an agent_sessions row — the row is
+    // the authority for the project scope the token binds to — and the agent
+    // type not being one of the strict document rewriters.
     try {
       if (providerSupportsMcp(provider) && isMcpToolsEnabled()) {
         const row = db
@@ -124,7 +126,12 @@ class ClaudeProcessManager {
           .where(eq(agentSessions.id, sessionId))
           .get();
 
-        if (row) {
+        // Strict document-rewrite agents opt out entirely (no token, no
+        // config, no section): the section is APPENDED, so for them it would
+        // land after the "respond with the document body and nothing else"
+        // contract and end the prompt with ticket-tool guidance for a session
+        // that owns no ticket. See MCP_EXEMPT_AGENT_TYPES.
+        if (row && !isMcpExemptAgentType(row.agentType)) {
           const token = mintMcpToken({
             sessionId,
             projectId: row.projectId,

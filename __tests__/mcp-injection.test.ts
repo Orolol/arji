@@ -35,6 +35,7 @@ vi.mock("child_process", () => {
 import { buildClaudeArgs, prepareClaudeSpawn, spawnClaude } from "@/lib/claude/spawn";
 import { CodexProvider } from "@/lib/providers/codex";
 import { arijToolsSection } from "@/lib/claude/prompt-sections";
+import { isMcpExemptAgentType } from "@/lib/workflow/dreaming-constants";
 import {
   ARIJ_MCP_ALLOWED_TOOL_NAMES,
   ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
@@ -426,6 +427,34 @@ describe("arijToolsSection", () => {
       expect(text).not.toContain("submit_findings");
     },
   );
+});
+
+/**
+ * The tools section is APPENDED to the prompt. For an agent whose entire
+ * response is written verbatim into a document, that would land after the
+ * "respond with the document body and nothing else" contract and end the
+ * prompt with ticket-tool guidance — for a session that owns no ticket.
+ */
+describe("isMcpExemptAgentType", () => {
+  it("exempts the memory writers", () => {
+    expect(isMcpExemptAgentType("dreaming")).toBe(true);
+    expect(isMcpExemptAgentType("memory_distill")).toBe(true);
+  });
+
+  it("leaves every ticket-scoped agent on the channel", () => {
+    for (const agentType of [
+      "build",
+      "ticket_build",
+      "team_build",
+      "review_code",
+      "merge",
+      "forensic",
+      null,
+      undefined,
+    ]) {
+      expect(isMcpExemptAgentType(agentType)).toBe(false);
+    }
+  });
 });
 
 describe("parseMcpToolsEnabledSetting — default ON", () => {
