@@ -81,6 +81,24 @@ export interface PromptUserStory {
   acceptanceCriteria?: string | null;
 }
 
+export interface PromptEpicStatus {
+  id: string;
+  title: string;
+  status?: string | null;
+}
+
+export interface PromptUserStoryStatus {
+  epicId: string;
+  title: string;
+  status?: string | null;
+}
+
+export interface PromptReleaseSummary {
+  version: string;
+  title?: string | null;
+  changelog?: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Local helpers (not extracted to prompt-sections)
 // ---------------------------------------------------------------------------
@@ -243,6 +261,155 @@ ABSOLUTE REQUIREMENTS:
 - Do NOT write any text, explanation, or summary before or after the JSON.
 - Do NOT say "Here is the spec" or any preamble — just output the raw JSON.
 - If you include ANY text outside the JSON object, the automated parser will FAIL.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// 2a. Spec Update Prompt
+// ---------------------------------------------------------------------------
+
+export const SPEC_UPDATE_MAX_EPICS = 30;
+export const SPEC_UPDATE_MAX_STORIES_PER_EPIC = 20;
+export const SPEC_UPDATE_MAX_RELEASES = 10;
+export const SPEC_UPDATE_MAX_CHANGELOG_CHARS = 1000;
+
+/**
+ * Renders the live board (epics + user stories with their statuses) and the
+ * release history as a compact markdown section. Pure: callers query the DB
+ * and pass plain projections, keeping every builder testable without a
+ * database.
+ */
+export function buildProjectStateSection(
+  epics: PromptEpicStatus[],
+  userStories: PromptUserStoryStatus[],
+  releases: PromptReleaseSummary[],
+): string {
+  const parts: string[] = [];
+
+  if (epics.length > 0) {
+    parts.push(`### Board\n`);
+    const storiesByEpic = new Map<string, PromptUserStoryStatus[]>();
+    for (const story of userStories) {
+      const list = storiesByEpic.get(story.epicId);
+      if (list) list.push(story);
+      else storiesByEpic.set(story.epicId, [story]);
+    }
+    const displayedEpics = epics.slice(0, SPEC_UPDATE_MAX_EPICS);
+    const epicLines = displayedEpics.map((epic) => {
+      const lines = [`- **${epic.title}** — ${epic.status || "backlog"}`];
+      const stories = storiesByEpic.get(epic.id) ?? [];
+      const displayedStories = stories.slice(0, SPEC_UPDATE_MAX_STORIES_PER_EPIC);
+      for (const story of displayedStories) {
+        lines.push(`  - ${story.title} — ${story.status || "todo"}`);
+      }
+      if (stories.length > SPEC_UPDATE_MAX_STORIES_PER_EPIC) {
+        lines.push(
+          `  - _... and ${stories.length - SPEC_UPDATE_MAX_STORIES_PER_EPIC} more stories (truncated)_`
+        );
+      }
+      return lines.join("\n");
+    });
+    if (epics.length > SPEC_UPDATE_MAX_EPICS) {
+      epicLines.push(
+        `- _... and ${epics.length - SPEC_UPDATE_MAX_EPICS} more epics (truncated)_`
+      );
+    }
+    parts.push(epicLines.join("\n") + "\n");
+  }
+
+  if (releases.length > 0) {
+    parts.push(`### Releases\n`);
+    const displayedReleases = releases.slice(0, SPEC_UPDATE_MAX_RELEASES);
+    const releaseLines = displayedReleases.map((release) => {
+      const lines = [`- **${release.version}**${release.title ? ` — ${release.title}` : ""}`];
+      if (release.changelog?.trim()) {
+        let cl = release.changelog.trim();
+        let wasTruncated = false;
+        if (cl.length > SPEC_UPDATE_MAX_CHANGELOG_CHARS) {
+          cl = cl.slice(0, SPEC_UPDATE_MAX_CHANGELOG_CHARS).trimEnd();
+          wasTruncated = true;
+        }
+        const clLines = cl
+          .split("\n")
+          .map((line) => `  ${line}`);
+        if (wasTruncated) {
+          clLines.push(`  _... [changelog truncated]_`);
+        }
+        lines.push(clLines.join("\n"));
+      }
+      return lines.join("\n");
+    });
+    if (releases.length > SPEC_UPDATE_MAX_RELEASES) {
+      releaseLines.push(
+        `- _... and ${releases.length - SPEC_UPDATE_MAX_RELEASES} older releases (truncated)_`
+      );
+    }
+    parts.push(releaseLines.join("\n") + "\n");
+  }
+
+  return parts.join("\n");
+}
+
+/**
+ * Builds the prompt for an agent-run update of the project specification.
+ * Like the distill flow, the agent runs in plan mode inside the project
+ * workspace and its ENTIRE response is the replacement document — nothing is
+ * persisted unless the session succeeds, so a failed run never touches the
+ * stored spec.
+ */
+export function buildSpecUpdatePrompt(
+  project: PromptProject,
+  instruction?: string | null,
+  systemPrompt?: string | null,
+  projectState?: string | null,
+): string {
+  project = withProjectMemory(project);
+  const parts: string[] = [];
+
+  parts.push(systemSection(systemPrompt));
+  parts.push(projectHeader(project.name));
+  parts.push(descriptionSection(project.description));
+  parts.push(specSection(project.spec));
+  parts.push(memorySection(project.memory));
+  if (projectState?.trim()) {
+    parts.push(`## Current Project State\n\n${projectState.trim()}`);
+  }
+
+  parts.push(`## Task: Update the Project Specification
+
+You are running in plan mode inside the project's workspace. Rewrite the
+project specification so it accurately reflects the current state of the
+project: combine the specification above, the board and release state, and
+what you find in the repository itself (code, docs, git history).
+
+- Keep what is still accurate; correct or drop what is not.
+- Cover: project overview, objectives, constraints, technical stack,
+  architecture, and key decisions.
+- Do not invent features that have no grounding in the project context.
+`);
+
+  if (instruction && instruction.trim()) {
+    parts.push(`## User Instruction
+
+The user asked for the following focus for this update. Follow it — it takes
+precedence over the general guidance above where they conflict:
+
+${instruction.trim()}
+`);
+  }
+
+  parts.push(`## CRITICAL OUTPUT FORMAT — YOU MUST FOLLOW THIS EXACTLY
+
+Your ENTIRE response must be ONLY the complete updated specification in raw
+markdown. Nothing else.
+
+- Do NOT wrap the document in \`\`\` code fences.
+- Do NOT add commentary, summaries, or explanations before or after it.
+- Do NOT output a diff — output the full replacement document.
+- If you output ANYTHING besides the markdown document, the automated parser
+  will FAIL and the update will be discarded.
 `);
 
   return parts.filter(Boolean).join("\n");

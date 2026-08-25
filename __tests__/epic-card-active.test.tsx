@@ -102,7 +102,11 @@ describe("EpicCard", () => {
 
     const errorBadge = screen.getByTestId("epic-error-epic-1");
     expect(errorBadge).toBeInTheDocument();
-    expect(errorBadge).toHaveAttribute("aria-label", "Agent session failed");
+    // The failure line is the entry point to the detail (the session view).
+    expect(errorBadge).toHaveAttribute(
+      "aria-label",
+      "Agent session failed — open session view for details"
+    );
   });
 
   it("does not render error badge when activeAgentActivity is present even with failedSession", () => {

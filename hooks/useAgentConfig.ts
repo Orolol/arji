@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { AgentType, AgentProvider } from "@/lib/agent-config/constants";
 
 type PromptSource = "builtin" | "global" | "project";
-type ProviderSource = "builtin" | "global" | "project";
+type AssignmentSource = "builtin" | "global" | "project";
 
 export interface ResolvedAgentPrompt {
   agentType: AgentType;
@@ -13,13 +13,11 @@ export interface ResolvedAgentPrompt {
   scope: string;
 }
 
-export interface ResolvedAgentProvider {
+export interface ResolvedAgentAssignment {
   agentType: AgentType;
   provider: AgentProvider;
   namedAgentId: string | null;
-  namedAgentName: string | null;
-  namedAgentModel: string | null;
-  source: ProviderSource;
+  source: AssignmentSource;
   scope: string;
   namedAgent?: {
     id: string;
@@ -28,6 +26,7 @@ export interface ResolvedAgentProvider {
     model: string;
   } | null;
 }
+
 
 export interface CustomReviewAgent {
   id: string;
@@ -108,11 +107,11 @@ export function useAgentPrompts(
   return { data, loading, refresh: load, updatePrompt, resetPrompt };
 }
 
-export function useAgentProviders(
+export function useAgentAssignments(
   scope: "global" | "project",
   projectId?: string
 ) {
-  const [data, setData] = useState<ResolvedAgentProvider[]>([]);
+  const [data, setData] = useState<ResolvedAgentAssignment[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -123,7 +122,7 @@ export function useAgentProviders(
       const json = await res.json();
       setData(json.data || []);
     } catch {
-      // ignore
+      setData([]);
     }
     setLoading(false);
   }, [scope, projectId]);
@@ -132,50 +131,36 @@ export function useAgentProviders(
     load();
   }, [load]);
 
-  const updateProvider = useCallback(
-    async (
-      agentType: AgentType,
-      provider: AgentProvider,
-      namedAgentId?: string | null
-    ) => {
+  const assignAgent = useCallback(
+    async (agentType: AgentType, namedAgentId: string | null) => {
       const url = buildUrl(
         `/agent-config/providers/${agentType}`,
         scope,
         projectId
       );
       const res = await fetch(url, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          namedAgentId: namedAgentId || null,
-        }),
+        method: namedAgentId ? "PUT" : "DELETE",
+        headers: namedAgentId
+          ? { "Content-Type": "application/json" }
+          : undefined,
+        body: namedAgentId ? JSON.stringify({ namedAgentId }) : undefined,
       });
+      const json = await res.json().catch(() => ({}));
       if (res.ok) await load();
-      return res.ok;
+      return {
+        ok: res.ok,
+        error:
+          typeof json.error === "string"
+            ? json.error
+            : res.ok
+              ? undefined
+              : "Could not update this assignment.",
+      };
     },
     [scope, projectId, load]
   );
 
-  const assignNamedAgent = useCallback(
-    async (agentType: AgentType, namedAgentId: string) => {
-      const url = buildUrl(
-        `/agent-config/providers/${agentType}`,
-        scope,
-        projectId
-      );
-      const res = await fetch(url, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ namedAgentId }),
-      });
-      if (res.ok) await load();
-      return res.ok;
-    },
-    [scope, projectId, load]
-  );
-
-  return { data, loading, refresh: load, updateProvider, assignNamedAgent };
+  return { data, loading, refresh: load, assignAgent };
 }
 
 export function useReviewAgents(
@@ -279,7 +264,7 @@ export function useNamedAgents() {
   }, [load]);
 
   const createNamedAgent = useCallback(
-    async (input: { name: string; provider: AgentProvider; model: string }) => {
+    async (input: { name: string; provider: AgentProvider; model?: string }) => {
       const res = await fetch("/api/agent-config/named-agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

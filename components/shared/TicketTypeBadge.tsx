@@ -34,6 +34,7 @@ export function TicketTypeBadge({
 
   return (
     <Badge
+      data-testid="ticket-type-badge"
       className={cn(
         "border-0 bg-destructive/10 text-xs text-destructive",
         className

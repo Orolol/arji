@@ -1,0 +1,21 @@
+-- The full error message behind a notification, so a failure is explained
+-- where the user already looks: the bell, not only a title.
+--
+-- Before this, a failed build produced a notification whose title carried a
+-- truncated one-liner and nothing else — the "Agent error" experience: the
+-- user knew something failed but had no idea why, and the real message
+-- (stderr, exit line, or the synthesized no-output explanation) was
+-- reachable only by digging into the session row. The session view shows the
+-- error in full; the bell should carry it too, because that is the
+-- cross-project surface for "what just went wrong".
+--
+-- NULL for non-session notifications and for completed ones. The column is
+-- plain text, mirroring agent_sessions.error.
+--
+-- SQLite has no ADD COLUMN IF NOT EXISTS, so like 0023/0024/0026/0028/0030
+-- this is not an idempotent no-op, and re-running it on a database that
+-- already has the column throws. A database can reach that state by losing
+-- its drizzle bookkeeping, so the column is listed in
+-- POST_BASELINE_COLUMN_MIGRATIONS (lib/db/init.ts), which stamps this
+-- migration as applied when it exists.
+ALTER TABLE notifications ADD COLUMN message text;

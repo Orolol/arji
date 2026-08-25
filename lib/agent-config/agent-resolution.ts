@@ -52,52 +52,6 @@ interface ProviderDefaultRow {
   namedAgentId: string | null;
 }
 
-function findScopedDefault(
-  agentType: AgentType,
-  scope: string
-): ProviderDefaultRow | null {
-  return (
-    db
-      .select({
-        agentType: agentProviderDefaults.agentType,
-        provider: agentProviderDefaults.provider,
-        scope: agentProviderDefaults.scope,
-        namedAgentId: agentProviderDefaults.namedAgentId,
-      })
-      .from(agentProviderDefaults)
-      .where(
-        and(
-          eq(agentProviderDefaults.agentType, agentType),
-          eq(agentProviderDefaults.scope, scope)
-        )
-      )
-      .get() ?? null
-  );
-}
-
-function resolveDefaultRow(
-  agentType: AgentType,
-  projectId?: string
-): { row: ProviderDefaultRow | null; source: ProviderSource; scope: string } {
-  if (projectId) {
-    const projectRow = findScopedDefault(agentType, projectId);
-    if (projectRow) {
-      return { row: projectRow, source: "project", scope: projectId };
-    }
-  }
-
-  const globalRow = findScopedDefault(agentType, "global");
-  if (globalRow) {
-    return { row: globalRow, source: "global", scope: "global" };
-  }
-
-  return {
-    row: null,
-    source: "builtin",
-    scope: "global",
-  };
-}
-
 function mapNamedAgentsById(namedAgentIds: Array<string | null | undefined>): Map<string, NamedAgentLite> {
   const uniqueIds = Array.from(
     new Set(
@@ -163,17 +117,16 @@ export async function listGlobalAgentProviders(): Promise<ResolvedAgentProvider[
 
   return AGENT_TYPES.map((agentType) => {
     const row = providersByType.get(agentType);
-    if (row) {
-      const namedAgent = row.namedAgentId
-        ? namedAgentMap.get(row.namedAgentId) ?? null
-        : null;
-
+    const namedAgent = row?.namedAgentId
+      ? namedAgentMap.get(row.namedAgentId) ?? null
+      : null;
+    if (row && namedAgent) {
       return {
         agentType,
-        provider: namedAgent?.provider ?? normalizeProvider(row.provider),
+        provider: namedAgent.provider,
         source: "global" as const,
         scope: "global",
-        namedAgentId: row.namedAgentId ?? null,
+        namedAgentId: namedAgent.id,
         namedAgent,
       };
     }
@@ -223,34 +176,32 @@ export async function listMergedProjectAgentProviders(
 
   return AGENT_TYPES.map((agentType) => {
     const projectRow = projectByType.get(agentType);
-    if (projectRow) {
-      const namedAgent = projectRow.namedAgentId
-        ? namedAgentMap.get(projectRow.namedAgentId) ?? null
-        : null;
-
+    const projectAgent = projectRow?.namedAgentId
+      ? namedAgentMap.get(projectRow.namedAgentId) ?? null
+      : null;
+    if (projectRow && projectAgent) {
       return {
         agentType,
-        provider: namedAgent?.provider ?? normalizeProvider(projectRow.provider),
+        provider: projectAgent.provider,
         source: "project" as const,
         scope: projectId,
-        namedAgentId: projectRow.namedAgentId ?? null,
-        namedAgent,
+        namedAgentId: projectAgent.id,
+        namedAgent: projectAgent,
       };
     }
 
     const globalRow = globalByType.get(agentType);
-    if (globalRow) {
-      const namedAgent = globalRow.namedAgentId
-        ? namedAgentMap.get(globalRow.namedAgentId) ?? null
-        : null;
-
+    const globalAgent = globalRow?.namedAgentId
+      ? namedAgentMap.get(globalRow.namedAgentId) ?? null
+      : null;
+    if (globalRow && globalAgent) {
       return {
         agentType,
-        provider: namedAgent?.provider ?? normalizeProvider(globalRow.provider),
+        provider: globalAgent.provider,
         source: "global" as const,
         scope: "global",
-        namedAgentId: globalRow.namedAgentId ?? null,
-        namedAgent,
+        namedAgentId: globalAgent.id,
+        namedAgent: globalAgent,
       };
     }
 
@@ -298,11 +249,13 @@ export interface AgentResolutionContext {
 }
 
 /**
- * Resolves the named agent for a given task type by looking up the
- * agentProviderDefaults chain (project → global → builtin).
+ * Resolves the named agent for a given task type by looking up saved role
+ * assignments (project → global → builtin).
  *
  * When a namedAgentId is set, returns the named agent's provider, model, and name.
- * When namedAgentId is null, falls back to the raw provider column (no model override).
+ * Legacy rows that only contain a raw provider are deliberately ignored: CLIs
+ * own their provider configuration, and there is no longer a provider-default
+ * setting in Arij's agent UI.
  */
 export function resolveAgent(
   agentType: AgentType,
@@ -510,9 +463,8 @@ function resolveFromRow(row: {
     }
   }
 
-  // namedAgentId is null or agent was deleted — use raw provider
-  return {
-    provider: normalizeProvider(row.provider),
-    namedAgentId: null,
-  };
+  // A legacy CLI-only default (or a deleted agent) is not an assignment.
+  // Continue through the global/builtin chain instead of invisibly pinning a
+  // role to configuration the user can no longer see or edit.
+  return null;
 }

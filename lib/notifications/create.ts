@@ -1,4 +1,4 @@
-import { eq, desc } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import {
   agentSessions,
@@ -250,6 +250,22 @@ function loadSessionNotificationContext(
  * Looks up the session, project, and optional epic context, then inserts
  * a notification row and prunes old entries beyond MAX_NOTIFICATIONS.
  *
+ * A FAILED notification carries the full error message (0031
+ * `notifications.message`) so the bell — the cross-project "what just went
+ * wrong" surface — explains the failure instead of showing a bare title.
+ * Thanks to the failure-message synthesis in
+ * lib/agent-sessions/lifecycle.ts, a new failed session always has a
+ * non-NULL error (explicit no-output wording included), so the message is
+ * never a bare label.
+ *
+ * Idempotent per session: the terminal hook (instrumentation.ts) creates
+ * the notification the moment the session row is finalized, and the
+ * dispatch routes' emitSessionFailed/emitSessionCompleted then call this
+ * same function. Rows created here always carry a non-NULL message for
+ * failures, so "a row for this session with a message" is exactly "the
+ * failure notification already exists" — other session rows (stalled-watchdog
+ * alarms, merge-parked, …) carry NULL and never suppress it.
+ *
  * Sessions whose delivery verdict is `asked_question` are skipped here: the
  * question-flavored notification is owned by
  * `createAskedQuestionNotificationFromSession` (invoked by the workflow's
@@ -257,6 +273,19 @@ function loadSessionNotificationContext(
  * for a run that actually stopped to ask the user something.
  */
 export function createNotificationFromSession(sessionId: string): void {
+  const existing = db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.sessionId, sessionId),
+        isNotNull(notifications.message)
+      )
+    )
+    .limit(1)
+    .get();
+  if (existing) return;
+
   const context = loadSessionNotificationContext(sessionId);
   if (!context) return;
   const { session, projectName, epicTitle, epicReadableId } = context;
@@ -278,6 +307,9 @@ export function createNotificationFromSession(sessionId: string): void {
       agentType: session.agentType,
       status: notifStatus,
       title,
+      // The full failure reason, not just the title — see the doc above.
+      // NULL for completed sessions: there is nothing to explain.
+      message: notifStatus === "failed" ? session.error : null,
       targetUrl,
     })
     .run();

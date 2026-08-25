@@ -562,6 +562,11 @@ export const notifications = sqliteTable(
     agentType: text("agent_type"),
     status: text("status").notNull(), // completed | failed
     title: text("title").notNull(),
+    // Full error message for failed session notifications (0031). NULL for
+    // completed sessions and non-session notifications — the title alone is
+    // not enough for a failure: it is the one place a cross-project user
+    // sees "what went wrong" without opening the session.
+    message: text("message"),
     targetUrl: text("target_url").notNull(),
     createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   },

@@ -18,13 +18,76 @@ import {
   PROVIDER_LABELS,
   type AgentProvider,
 } from "@/lib/agent-config/constants";
+import { Field } from "@/components/agent-config/Field";
+import {
+  useProvidersAvailable,
+  type ProvidersAvailability,
+} from "@/hooks/useProvidersAvailable";
+
+function CliSelect({
+  id,
+  value,
+  onChange,
+  availability,
+  availabilityLoading,
+  disabled,
+}: {
+  id: string;
+  value: AgentProvider;
+  onChange: (value: AgentProvider) => void;
+  availability: ProvidersAvailability["providers"];
+  availabilityLoading: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(v) => onChange(v as AgentProvider)}
+      disabled={disabled}
+    >
+      <SelectTrigger id={id} className="h-8 text-sm">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {PROVIDER_OPTIONS.map((p) => (
+          <SelectItem key={p} value={p}>
+            <span className="flex items-center gap-1.5">
+              <span
+                aria-hidden="true"
+                className={`inline-block size-1.5 shrink-0 rounded-full ${
+                  availabilityLoading
+                    ? "bg-muted-foreground/40"
+                    : availability[p]
+                      ? "bg-green-500"
+                      : "bg-red-500"
+                }`}
+              />
+              {PROVIDER_LABELS[p]}
+              <span className="sr-only">
+                {availabilityLoading
+                  ? " — checking availability"
+                  : availability[p]
+                    ? " — ready to use"
+                    : " — not detected"}
+              </span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
 
 function NamedAgentRow({
   agent,
+  availability,
+  availabilityLoading,
   onUpdate,
   onDelete,
 }: {
   agent: NamedAgent;
+  availability: ProvidersAvailability["providers"];
+  availabilityLoading: boolean;
   onUpdate: (
     agentId: string,
     payload: { name?: string; provider?: AgentProvider; model?: string }
@@ -36,54 +99,113 @@ function NamedAgentRow({
   const [model, setModel] = useState(agent.model);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const dirty = name !== agent.name || provider !== agent.provider || model !== agent.model;
+  const dirty =
+    name !== agent.name ||
+    provider !== agent.provider ||
+    model !== agent.model;
 
   async function handleSave() {
-    if (!dirty || !name.trim() || !model.trim()) return;
+    if (!dirty || !name.trim()) return;
+    const nextName = name.trim();
+    const nextModel = model.trim();
+    setError(null);
     setSaving(true);
-    await onUpdate(agent.id, {
-      name: name.trim(),
-      provider,
-      model: model.trim(),
-    });
-    setSaving(false);
+    try {
+      const result = await onUpdate(agent.id, {
+        name: nextName,
+        provider,
+        model: nextModel,
+      });
+      if (result.ok) {
+        setName(nextName);
+        setModel(nextModel);
+      } else {
+        setError(result.error || "Could not save this agent. Try again.");
+      }
+    } catch {
+      setError(
+        "Could not save this agent. Check the connection and try again."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleDelete() {
+    setError(null);
     setDeleting(true);
-    await onDelete(agent.id);
-    setDeleting(false);
+    try {
+      const deleted = await onDelete(agent.id);
+      if (!deleted) setError("Could not delete this agent. Try again.");
+    } catch {
+      setError(
+        "Could not delete this agent. Check the connection and try again."
+      );
+    } finally {
+      setDeleting(false);
+    }
   }
 
+  const availabilityHint = availabilityLoading
+    ? `Checking whether ${PROVIDER_LABELS[provider]} is ready on this machine.`
+    : availability[provider]
+      ? `${PROVIDER_LABELS[provider]} is ready to use on this machine.`
+      : `${PROVIDER_LABELS[provider]} was not detected. Install or sign in to the CLI before running this agent.`;
+
   return (
-    <div className="rounded-lg border border-border p-3 space-y-2">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Agent name"
-          className="h-8 text-sm"
-        />
-        <Select value={provider} onValueChange={(v) => setProvider(v as AgentProvider)}>
-          <SelectTrigger className="h-8 text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PROVIDER_OPTIONS.map((p) => (
-              <SelectItem key={p} value={p}>
-                {PROVIDER_LABELS[p]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Input
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder="Model (e.g. opus, gemini-2.0-pro)"
-          className="h-8 text-sm"
-        />
+    <div className="rounded-lg border border-border p-3 space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="md:col-span-2">
+          <Field
+            id={`named-agent-name-${agent.id}`}
+            label="Name"
+            hint="How you recognise this agent in menus and lists."
+          >
+            <Input
+              id={`named-agent-name-${agent.id}`}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Agent name"
+              className="h-8 text-sm"
+            />
+          </Field>
+        </div>
+        <Field
+          id={`named-agent-cli-${agent.id}`}
+          label="CLI"
+          hint={availabilityHint}
+        >
+          <CliSelect
+            id={`named-agent-cli-${agent.id}`}
+            value={provider}
+            onChange={setProvider}
+            availability={availability}
+            availabilityLoading={availabilityLoading}
+            disabled={saving || deleting}
+          />
+        </Field>
+        <Field
+          id={`named-agent-model-${agent.id}`}
+          label="Model"
+          hint="Optional — leave empty to use the CLI's own default model."
+        >
+          <Input
+            id={`named-agent-model-${agent.id}`}
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="CLI default"
+            className="h-8 text-sm"
+          />
+        </Field>
       </div>
+
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
 
       <div className="flex items-center justify-end gap-2">
         <Button
@@ -92,6 +214,7 @@ function NamedAgentRow({
           className="h-8 text-destructive"
           onClick={handleDelete}
           disabled={deleting || saving}
+          aria-label={`Delete ${agent.name}`}
         >
           {deleting ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -103,7 +226,7 @@ function NamedAgentRow({
           size="sm"
           className="h-8"
           onClick={handleSave}
-          disabled={!dirty || !name.trim() || !model.trim() || saving || deleting}
+          disabled={!dirty || !name.trim() || saving || deleting}
         >
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
         </Button>
@@ -113,27 +236,53 @@ function NamedAgentRow({
 }
 
 export function NamedAgentsTab() {
-  const { data, loading, createNamedAgent, updateNamedAgent, deleteNamedAgent } = useNamedAgents();
+  const {
+    data,
+    loading,
+    createNamedAgent,
+    updateNamedAgent,
+    deleteNamedAgent,
+  } = useNamedAgents();
+  const {
+    providers: availability,
+    loading: availabilityLoading,
+  } = useProvidersAvailable();
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<AgentProvider>("claude-code");
-  const [model, setModel] = useState("");
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   async function handleCreate() {
-    if (!name.trim() || !model.trim()) return;
+    if (!name.trim()) return;
+    setCreateError(null);
     setCreating(true);
-    const { ok } = await createNamedAgent({
-      name: name.trim(),
-      provider,
-      model: model.trim(),
-    });
-    if (ok) {
-      setName("");
-      setModel("");
-      setProvider("claude-code");
+    try {
+      const result = await createNamedAgent({
+        name: name.trim(),
+        provider,
+      });
+      if (result.ok) {
+        setName("");
+        setProvider("claude-code");
+      } else {
+        setCreateError(
+          result.error || "Could not create this agent. Try again."
+        );
+      }
+    } catch {
+      setCreateError(
+        "Could not create this agent. Check the connection and try again."
+      );
+    } finally {
+      setCreating(false);
     }
-    setCreating(false);
   }
+
+  const availabilityHint = availabilityLoading
+    ? `Checking whether ${PROVIDER_LABELS[provider]} is ready on this machine.`
+    : availability[provider]
+      ? `${PROVIDER_LABELS[provider]} is ready to use on this machine.`
+      : `${PROVIDER_LABELS[provider]} was not detected. Install or sign in to the CLI before running this agent.`;
 
   if (loading) {
     return (
@@ -145,63 +294,77 @@ export function NamedAgentsTab() {
 
   return (
     <div className="h-full flex flex-col gap-3">
-      <div className="rounded-lg border border-border p-3 space-y-2">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Name"
-            className="h-8 text-sm"
-          />
-          <Select value={provider} onValueChange={(v) => setProvider(v as AgentProvider)}>
-            <SelectTrigger className="h-8 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PROVIDER_OPTIONS.map((p) => (
-                <SelectItem key={p} value={p}>
-                  {PROVIDER_LABELS[p]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Input
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="Model"
-            className="h-8 text-sm"
-          />
+      <div className="px-1">
+        <h2 className="text-sm font-medium">Agents</h2>
+        <p className="text-xs text-muted-foreground">
+          Create the agents you will assign to work. A name and a CLI are all
+          it takes — everything runs with sensible defaults.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-border p-3 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field
+            id="new-agent-name"
+            label="Name"
+            hint="A short name you will recognise later."
+          >
+            <Input
+              id="new-agent-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Fast builder"
+              className="h-8 text-sm"
+            />
+          </Field>
+          <Field id="new-agent-cli" label="CLI" hint={availabilityHint}>
+            <CliSelect
+              id="new-agent-cli"
+              value={provider}
+              onChange={setProvider}
+              availability={availability}
+              availabilityLoading={availabilityLoading}
+              disabled={creating}
+            />
+          </Field>
         </div>
+        {createError && (
+          <p role="alert" className="text-xs text-destructive">
+            {createError}
+          </p>
+        )}
         <div className="flex justify-end">
           <Button
             size="sm"
             className="h-8"
             onClick={handleCreate}
-            disabled={!name.trim() || !model.trim() || creating}
+            disabled={!name.trim() || creating}
           >
             {creating ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <>
                 <Plus className="h-3.5 w-3.5 mr-1" />
-                Add Agent
+                Add agent
               </>
             )}
           </Button>
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="space-y-2 pr-2">
           {data.length === 0 && (
             <p className="text-sm text-muted-foreground px-1 py-3">
-              No named agents yet.
+              No agents yet — create your first one above.
             </p>
           )}
           {data.map((agent) => (
             <NamedAgentRow
               key={agent.id}
               agent={agent}
+              availability={availability}
+              availabilityLoading={availabilityLoading}
               onUpdate={updateNamedAgent}
               onDelete={deleteNamedAgent}
             />

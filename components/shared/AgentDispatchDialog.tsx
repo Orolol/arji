@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
 import { SessionPicker } from "@/components/shared/SessionPicker";
+import type { DispatchRole } from "@/lib/agent-config/dispatch-reliability-constants";
 
 interface AgentDispatchDialogProps {
   open: boolean;
@@ -26,6 +27,8 @@ interface AgentDispatchDialogProps {
     onChange: (namedAgentId: string) => void;
     disabled?: boolean;
     className?: string;
+    /** Task type of this dispatch — drives the per-agent reliability badge. */
+    dispatchRole?: DispatchRole;
   };
   /** When provided, renders a SessionPicker below the agent row. */
   sessionPicker?: {
@@ -93,6 +96,7 @@ export function AgentDispatchDialog({
             onChange={agentProps.onChange}
             disabled={agentProps.disabled}
             className={agentProps.className ?? "w-44 h-8 text-xs"}
+            dispatchRole={agentProps.dispatchRole}
           />
         </div>
         {sessionPicker && (

@@ -104,6 +104,7 @@ describe("createNotificationFromSession()", () => {
 
   it("creates notification for completed session with epic context", () => {
     dbMockState.getQueue.push(
+      undefined, // idempotency check: no message-bearing row for this session yet
       { id: "s1", projectId: "p1", epicId: "e1", status: "completed", agentType: "build" },
       { name: "My Project" },
       { title: "Login feature", readableId: "E-proj-003" }
@@ -120,12 +121,21 @@ describe("createNotificationFromSession()", () => {
     expect(payload.agentType).toBe("build");
     expect(payload.status).toBe("completed");
     expect(payload.title).toBe("Build completed \u2014 E-proj-003: Login feature");
+    expect(payload.message).toBeNull(); // completed: nothing to explain
     expect(payload.targetUrl).toBe("/projects/p1/sessions/s1");
   });
 
-  it("creates notification for failed session with QA target", () => {
+  it("creates notification for failed session with QA target, carrying the full error", () => {
     dbMockState.getQueue.push(
-      { id: "s2", projectId: "p1", epicId: null, status: "failed", agentType: "tech_check" },
+      undefined, // idempotency check
+      {
+        id: "s2",
+        projectId: "p1",
+        epicId: null,
+        status: "failed",
+        agentType: "tech_check",
+        error: "Command exited with code 127: claude: not found",
+      },
       { name: "My Project" }
     );
 
@@ -135,11 +145,37 @@ describe("createNotificationFromSession()", () => {
     const payload = dbMockState.insertCalls[0] as Record<string, unknown>;
     expect(payload.status).toBe("failed");
     expect(payload.title).toBe("Tech Check failed");
+    // The bell must carry the reason, not just the title (AC1).
+    expect(payload.message).toBe("Command exited with code 127: claude: not found");
     expect(payload.targetUrl).toBe("/projects/p1/qa");
   });
 
+  it("carries the synthesized no-output message for a silent failure", () => {
+    dbMockState.getQueue.push(
+      undefined, // idempotency check
+      {
+        id: "s2b",
+        projectId: "p1",
+        epicId: null,
+        status: "failed",
+        agentType: "build",
+        error: "The agent session failed without any error message and without any output — the process exited (or was lost) without writing stderr or text.",
+      },
+      { name: "My Project" }
+    );
+
+    createNotificationFromSession("s2b");
+
+    const payload = dbMockState.insertCalls[0] as Record<string, unknown>;
+    expect(payload.status).toBe("failed");
+    expect(payload.message).toMatch(/failed without any error message and without any output/i);
+  });
+
   it("does nothing when session not found", () => {
-    dbMockState.getQueue.push(undefined);
+    dbMockState.getQueue.push(
+      undefined, // idempotency check
+      undefined // session lookup
+    );
 
     createNotificationFromSession("missing");
 
@@ -148,6 +184,7 @@ describe("createNotificationFromSession()", () => {
 
   it("does nothing when project not found", () => {
     dbMockState.getQueue.push(
+      undefined, // idempotency check
       { id: "s1", projectId: "p-gone", epicId: null, status: "completed", agentType: "build" },
       undefined
     );
@@ -159,6 +196,7 @@ describe("createNotificationFromSession()", () => {
 
   it("creates notification without epic context when epicId is null", () => {
     dbMockState.getQueue.push(
+      undefined, // idempotency check
       { id: "s3", projectId: "p1", epicId: null, status: "completed", agentType: "review_security" },
       { name: "Security Proj" }
     );
@@ -171,8 +209,42 @@ describe("createNotificationFromSession()", () => {
     expect(payload.projectName).toBe("Security Proj");
   });
 
+  it("skips when a message-bearing notification for the session already exists (hook + route dedup)", () => {
+    dbMockState.getQueue.push(
+      { id: "existing-notif" } // idempotency check: the terminal hook already created it
+    );
+
+    createNotificationFromSession("s10");
+
+    // No second insert, and the session/project lookups are never reached.
+    expect(dbMockState.insertCalls).toHaveLength(0);
+    expect(dbMockState.getQueue).toHaveLength(0);
+  });
+
+  it("is not suppressed by message-less session rows (stalled watchdog, merge-parked, …)", () => {
+    dbMockState.getQueue.push(
+      undefined, // idempotency check: only the watcher's NULL-message row exists
+      {
+        id: "s11",
+        projectId: "p1",
+        epicId: null,
+        status: "failed",
+        agentType: "build",
+        error: "Killed after stall",
+      },
+      { name: "My Project" }
+    );
+
+    createNotificationFromSession("s11");
+
+    expect(dbMockState.insertCalls).toHaveLength(1);
+    const payload = dbMockState.insertCalls[0] as Record<string, unknown>;
+    expect(payload.message).toBe("Killed after stall");
+  });
+
   it("skips sessions with the asked_question verdict (owned by the question creator)", () => {
     dbMockState.getQueue.push(
+      undefined, // idempotency check
       {
         id: "s4",
         projectId: "p1",

@@ -558,6 +558,7 @@ export default function KanbanPage() {
                 <NamedAgentSelect
                   value={namedAgentId}
                   onChange={setNamedAgentId}
+                  dispatchRole="build"
                 />
 
                 <Select
