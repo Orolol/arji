@@ -3,8 +3,9 @@
  * real migrated schema.
  *
  * Covers the acceptance criteria of "Collecteur de digest cross-sessions":
- *   - the window opens at the last DELIVERED dream and is capped on both axes
- *     (~30 sessions / 14 days),
+ *   - the window opens at the cutoff recorded by the last dream that actually
+ *     rewrote the memory, is measured on TERMINAL time, and is capped on both
+ *     axes (~30 sessions / 14 days),
  *   - only terminal sessions of the dreamable types feed it,
  *   - each session's record carries metadata + review verdict +
  *     [critical]/[major] findings + forensic report + transition_refused +
@@ -31,9 +32,14 @@ const {
   agentSessions,
   reviewComments,
   ticketComments,
+  settings,
 } = await import("@/lib/db/schema");
-const { collectDreamDigest, findLastDreamAt, selectDreamCandidates } =
-  await import("@/lib/workflow/dreaming");
+const {
+  collectDreamDigest,
+  findLastDreamCutoff,
+  recordDreamCutoff,
+  selectDreamCandidates,
+} = await import("@/lib/workflow/dreaming");
 const { FORENSIC_COMMENT_HEADING } = await import("@/lib/pipeline/forensic");
 
 const NOW = new Date("2026-08-25T12:00:00.000Z");
@@ -74,11 +80,25 @@ function seedProject() {
 
 let sessionSeq = 0;
 
+/**
+ * Seeds one dreamable session.
+ *
+ * A test that moves the session in time by overriding `startedAt` gets its
+ * terminal timestamps moved with it unless it says otherwise: the collector
+ * places sessions by when they ENDED, so a seed that shifted only the start
+ * would silently test a session that ran backwards.
+ */
 function seedSession(
   overrides: Partial<typeof agentSessions.$inferInsert> = {}
 ): string {
   sessionSeq += 1;
   const id = `sess-${counter}-${sessionSeq}`;
+  const terminalDefault =
+    overrides.endedAt ??
+    overrides.completedAt ??
+    (overrides.startedAt as string | undefined) ??
+    (overrides.createdAt as string | undefined) ??
+    minutesAgo(50);
   db.insert(agentSessions)
     .values({
       id,
@@ -93,8 +113,8 @@ function seedSession(
       lastNonEmptyText: "Done: shipped the flow.",
       createdAt: minutesAgo(60),
       startedAt: minutesAgo(60),
-      endedAt: minutesAgo(50),
-      completedAt: minutesAgo(50),
+      endedAt: terminalDefault,
+      completedAt: terminalDefault,
       ...overrides,
     })
     .run();
@@ -179,62 +199,77 @@ describe("selectDreamCandidates", () => {
   });
 });
 
-describe("findLastDreamAt", () => {
-  it("is null before any dream", () => {
-    expect(findLastDreamAt(projectId)).toBeNull();
+describe("findLastDreamCutoff / recordDreamCutoff", () => {
+  it("is null before any dream delivered", () => {
+    expect(findLastDreamCutoff(projectId)).toBeNull();
   });
 
-  it("returns the most recent DELIVERED dream", () => {
-    seedSession({
-      agentType: "dreaming",
-      completedAt: daysAgo(5),
-      endedAt: daysAgo(5),
-    });
-    seedSession({
-      agentType: "dreaming",
-      completedAt: daysAgo(2),
-      endedAt: daysAgo(2),
-    });
-    expect(findLastDreamAt(projectId)).toBe(daysAgo(2));
+  it("round-trips the recorded cutoff and keeps the latest one", () => {
+    recordDreamCutoff(projectId, daysAgo(5));
+    expect(findLastDreamCutoff(projectId)).toBe(daysAgo(5));
+    recordDreamCutoff(projectId, daysAgo(2));
+    expect(findLastDreamCutoff(projectId)).toBe(daysAgo(2));
   });
 
-  it("ignores dreams that failed or stayed silent — their window is unread", () => {
+  it("is scoped per project", () => {
+    recordDreamCutoff(projectId, daysAgo(3));
+    expect(findLastDreamCutoff("some-other-project")).toBeNull();
+  });
+
+  /**
+   * The whole point of a persisted cutoff: a dream SESSION that finished and
+   * answered proves nothing about whether the memory changed. Only the row
+   * written after a successful save moves the window, so dream sessions alone
+   * — however they ended — leave it wide open.
+   */
+  it("ignores dream sessions entirely — only a recorded cutoff counts", () => {
+    seedSession({
+      agentType: "dreaming",
+      status: "completed",
+      outcome: "answered",
+      completedAt: daysAgo(1),
+      endedAt: daysAgo(1),
+    });
     seedSession({
       agentType: "dreaming",
       status: "failed",
       outcome: "error",
       completedAt: daysAgo(1),
     });
-    seedSession({
-      agentType: "dreaming",
-      status: "completed",
-      outcome: "silent",
-      completedAt: daysAgo(1),
-    });
-    expect(findLastDreamAt(projectId)).toBeNull();
+    expect(findLastDreamCutoff(projectId)).toBeNull();
+  });
+
+  it("rejects a stored value that is not a usable timestamp", () => {
+    db.insert(settings)
+      .values({
+        key: `dreaming_last_cutoff:${projectId}`,
+        value: JSON.stringify("not-a-date"),
+      })
+      .run();
+    expect(findLastDreamCutoff(projectId)).toBeNull();
   });
 });
 
 describe("collectDreamDigest — window", () => {
-  it("opens at the last delivered dream and skips everything before it", () => {
+  it("opens at the recorded cutoff and skips everything that ended before it", () => {
     const before = seedSession({
       createdAt: daysAgo(6),
       startedAt: daysAgo(6),
+      endedAt: daysAgo(6),
+      completedAt: daysAgo(6),
       lastNonEmptyText: "OLD SESSION",
     });
-    seedSession({
-      agentType: "dreaming",
-      completedAt: daysAgo(5),
-      endedAt: daysAgo(5),
-    });
+    recordDreamCutoff(projectId, daysAgo(5));
     const after = seedSession({
       createdAt: daysAgo(1),
       startedAt: daysAgo(1),
+      endedAt: daysAgo(1),
+      completedAt: daysAgo(1),
       lastNonEmptyText: "NEW SESSION",
     });
 
     const result = collectDreamDigest(projectId, { now: NOW });
-    expect(result.lastDreamAt).toBe(daysAgo(5));
+    expect(result.lastCutoffAt).toBe(daysAgo(5));
     expect(result.sinceIso).toBe(daysAgo(5));
     expect(result.sessions.map((s) => s.sessionId)).toEqual([after]);
     expect(result.sessions.map((s) => s.sessionId)).not.toContain(before);
@@ -242,12 +277,64 @@ describe("collectDreamDigest — window", () => {
     expect(result.text).not.toContain("OLD SESSION");
   });
 
-  it("never reaches past the age cap on a first dream", () => {
-    seedSession({ createdAt: daysAgo(20), startedAt: daysAgo(20) });
-    const recent = seedSession({ createdAt: daysAgo(3), startedAt: daysAgo(3) });
+  /**
+   * The boundary the review caught: a build that STARTED before the previous
+   * dream but only ENDED after it was never in that digest. Keyed on start it
+   * would fall in the crack between two windows and be lost forever; keyed on
+   * terminal time it is exactly what the next dream reads first.
+   */
+  it("includes a session that started before the cutoff but ended after it", () => {
+    const straddling = seedSession({
+      createdAt: daysAgo(6),
+      startedAt: daysAgo(6),
+      endedAt: daysAgo(4),
+      completedAt: daysAgo(4),
+      lastNonEmptyText: "STRADDLING SESSION",
+    });
+    recordDreamCutoff(projectId, daysAgo(5));
 
     const result = collectDreamDigest(projectId, { now: NOW });
-    expect(result.lastDreamAt).toBeNull();
+    expect(result.sessions.map((s) => s.sessionId)).toEqual([straddling]);
+    expect(result.text).toContain("STRADDLING SESSION");
+  });
+
+  it("excludes a session that had already ended when the cutoff was taken", () => {
+    seedSession({
+      createdAt: daysAgo(9),
+      startedAt: daysAgo(9),
+      endedAt: daysAgo(8),
+      completedAt: daysAgo(8),
+      lastNonEmptyText: "ALREADY DREAMED",
+    });
+    recordDreamCutoff(projectId, daysAgo(5));
+
+    const result = collectDreamDigest(projectId, { now: NOW });
+    expect(result.sessions).toHaveLength(0);
+    expect(result.text).not.toContain("ALREADY DREAMED");
+  });
+
+  it("reports the collection instant as the next window's cutoff", () => {
+    seedSession();
+    const result = collectDreamDigest(projectId, { now: NOW });
+    expect(result.collectedAtIso).toBe(NOW.toISOString());
+  });
+
+  it("never reaches past the age cap on a first dream", () => {
+    seedSession({
+      createdAt: daysAgo(20),
+      startedAt: daysAgo(20),
+      endedAt: daysAgo(20),
+      completedAt: daysAgo(20),
+    });
+    const recent = seedSession({
+      createdAt: daysAgo(3),
+      startedAt: daysAgo(3),
+      endedAt: daysAgo(3),
+      completedAt: daysAgo(3),
+    });
+
+    const result = collectDreamDigest(projectId, { now: NOW });
+    expect(result.lastCutoffAt).toBeNull();
     expect(result.sessions.map((s) => s.sessionId)).toEqual([recent]);
   });
 
@@ -435,6 +522,104 @@ describe("collectDreamDigest — per-session record", () => {
     expect(deadEntry.forensic).toContain("missing node_modules");
     expect(deadEntry.forensic).not.toContain("progress note");
     expect(laterEntry.forensic).toBeNull();
+  });
+
+  /**
+   * Two stories of the SAME epic, running at overlapping times. The pipeline
+   * files each post-mortem with the dead session's own userStoryId, so an
+   * epic+time-only match would hand story A's diagnosis to story B — the
+   * dream would then "learn" from a lesson that belongs to other code.
+   */
+  it("gives each story-scoped session its own forensic, not its neighbour's", () => {
+    const storyA = `story-a-${counter}`;
+    const storyB = `story-b-${counter}`;
+    db.insert(userStories)
+      .values({ id: storyA, epicId, title: "Refunds", position: 0 })
+      .run();
+    db.insert(userStories)
+      .values({ id: storyB, epicId, title: "Invoices", position: 1 })
+      .run();
+
+    const sessionA = seedSession({
+      userStoryId: storyA,
+      status: "failed",
+      outcome: "error",
+      startedAt: minutesAgo(60),
+      createdAt: minutesAgo(60),
+      endedAt: minutesAgo(40),
+      completedAt: minutesAgo(40),
+    });
+    const sessionB = seedSession({
+      userStoryId: storyB,
+      status: "failed",
+      outcome: "error",
+      startedAt: minutesAgo(55),
+      createdAt: minutesAgo(55),
+      endedAt: minutesAgo(35),
+      completedAt: minutesAgo(35),
+    });
+
+    // Story B's post-mortem lands FIRST in time — an epic-only match would let
+    // session A (which started earlier) claim it.
+    db.insert(ticketComments)
+      .values({
+        id: `forensic-b-${counter}`,
+        epicId,
+        userStoryId: storyB,
+        author: "agent",
+        content: `${FORENSIC_COMMENT_HEADING}\n\nINVOICES DIAGNOSIS`,
+        createdAt: minutesAgo(39),
+      })
+      .run();
+    db.insert(ticketComments)
+      .values({
+        id: `forensic-a-${counter}`,
+        epicId,
+        userStoryId: storyA,
+        author: "agent",
+        content: `${FORENSIC_COMMENT_HEADING}\n\nREFUNDS DIAGNOSIS`,
+        createdAt: minutesAgo(38),
+      })
+      .run();
+
+    const { sessions } = collectDreamDigest(projectId, { now: NOW });
+    expect(sessions.find((s) => s.sessionId === sessionA)!.forensic).toContain(
+      "REFUNDS DIAGNOSIS"
+    );
+    expect(sessions.find((s) => s.sessionId === sessionB)!.forensic).toContain(
+      "INVOICES DIAGNOSIS"
+    );
+  });
+
+  it("never hands an epic-scoped forensic to a story-scoped session", () => {
+    const storyId = `story-solo-${counter}`;
+    db.insert(userStories)
+      .values({ id: storyId, epicId, title: "Solo", position: 0 })
+      .run();
+    const storySession = seedSession({
+      userStoryId: storyId,
+      status: "failed",
+      outcome: "error",
+      startedAt: minutesAgo(60),
+      createdAt: minutesAgo(60),
+      endedAt: minutesAgo(50),
+      completedAt: minutesAgo(50),
+    });
+    db.insert(ticketComments)
+      .values({
+        id: `forensic-epic-${counter}`,
+        epicId,
+        userStoryId: null,
+        author: "agent",
+        content: `${FORENSIC_COMMENT_HEADING}\n\nEPIC LEVEL DIAGNOSIS`,
+        createdAt: minutesAgo(49),
+      })
+      .run();
+
+    const { sessions } = collectDreamDigest(projectId, { now: NOW });
+    expect(
+      sessions.find((s) => s.sessionId === storySession)!.forensic
+    ).toBeNull();
   });
 
   it("carries the tail of the final response, never the raw chunk stream", () => {

@@ -8,6 +8,10 @@ import {
   pipelineMaxAttemptsSettingKey,
   pipelineMaxFixCyclesSettingKey,
 } from "@/lib/pipeline/constants";
+import {
+  dreamingAfterNightRunSettingKey,
+  dreamingLastCutoffSettingKey,
+} from "@/lib/workflow/dreaming-constants";
 import { webhookSettingKey } from "@/lib/webhooks/send";
 
 /**
@@ -31,5 +35,7 @@ export function perProjectSettingKeys(projectId: string): string[] {
     pipelineMaxFixCyclesSettingKey(projectId),
     nightCircuitBreakerSettingKey(projectId),
     nightCostCapSettingKey(projectId),
+    dreamingAfterNightRunSettingKey(projectId),
+    dreamingLastCutoffSettingKey(projectId),
   ];
 }

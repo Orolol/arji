@@ -46,33 +46,33 @@ function entry(overrides: Partial<DreamSessionDigest> = {}): DreamSessionDigest 
 }
 
 describe("resolveDreamWindow", () => {
-  it("opens at the last dream when that is inside the age cap", () => {
-    const lastDreamAt = new Date(NOW.getTime() - 2 * DAY_MS).toISOString();
-    const window = resolveDreamWindow({ lastDreamAt, now: NOW });
-    expect(window.sinceIso).toBe(lastDreamAt);
-    expect(window.boundedByLastDream).toBe(true);
+  it("opens at the last dream's collection cutoff when it is inside the age cap", () => {
+    const lastCutoffAt = new Date(NOW.getTime() - 2 * DAY_MS).toISOString();
+    const window = resolveDreamWindow({ lastCutoffAt, now: NOW });
+    expect(window.sinceIso).toBe(lastCutoffAt);
+    expect(window.boundedByLastCutoff).toBe(true);
   });
 
   it("falls back to the age cap when there is no previous dream", () => {
-    const window = resolveDreamWindow({ lastDreamAt: null, now: NOW });
-    expect(window.boundedByLastDream).toBe(false);
+    const window = resolveDreamWindow({ lastCutoffAt: null, now: NOW });
+    expect(window.boundedByLastCutoff).toBe(false);
     expect(window.sinceIso).toBe(
       new Date(NOW.getTime() - DREAM_WINDOW_DAYS * DAY_MS).toISOString()
     );
   });
 
-  it("never reaches further back than the age cap, however old the last dream", () => {
+  it("never reaches further back than the age cap, however old the last cutoff", () => {
     const ancient = new Date(NOW.getTime() - 90 * DAY_MS).toISOString();
-    const window = resolveDreamWindow({ lastDreamAt: ancient, now: NOW });
-    expect(window.boundedByLastDream).toBe(false);
+    const window = resolveDreamWindow({ lastCutoffAt: ancient, now: NOW });
+    expect(window.boundedByLastCutoff).toBe(false);
     expect(Date.parse(window.sinceIso)).toBe(
       NOW.getTime() - DREAM_WINDOW_DAYS * DAY_MS
     );
   });
 
-  it("treats an unparseable last-dream timestamp as no dream at all", () => {
-    const window = resolveDreamWindow({ lastDreamAt: "not-a-date", now: NOW });
-    expect(window.boundedByLastDream).toBe(false);
+  it("treats an unparseable cutoff as no previous dream at all", () => {
+    const window = resolveDreamWindow({ lastCutoffAt: "not-a-date", now: NOW });
+    expect(window.boundedByLastCutoff).toBe(false);
     expect(Date.parse(window.sinceIso)).toBe(
       NOW.getTime() - DREAM_WINDOW_DAYS * DAY_MS
     );
@@ -80,7 +80,7 @@ describe("resolveDreamWindow", () => {
 
   it("honours a custom window length", () => {
     const window = resolveDreamWindow({
-      lastDreamAt: null,
+      lastCutoffAt: null,
       now: NOW,
       windowDays: 3,
     });

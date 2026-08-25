@@ -90,15 +90,38 @@ export function resolveDreamingAfterNightRunDefault(
   );
 }
 
+/**
+ * Per-project settings key holding the moment the last SUCCESSFUL dream
+ * collected its digest — the lower bound of the next dream's window.
+ *
+ * Why a persisted cutoff rather than "when the last dream session finished":
+ *   - a dream collects at T0 and finishes minutes later at T1. A session that
+ *     reached a terminal state in between was never in that digest, so a
+ *     window opening at T1 would skip it FOREVER. Opening at T0 re-reads at
+ *     worst a few sessions, which is the harmless direction;
+ *   - it is written only after the memory document was actually replaced, so a
+ *     dream that delivered text but failed to persist it does not advance the
+ *     window past evidence nothing ever learned from.
+ */
+export const DREAMING_LAST_CUTOFF_SETTING_KEY = "dreaming_last_cutoff";
+
+export function dreamingLastCutoffSettingKey(projectId: string): string {
+  return `${DREAMING_LAST_CUTOFF_SETTING_KEY}:${projectId}`;
+}
+
 /* ------------------------------------------------------------------ */
 /* Collection window                                                   */
 /* ------------------------------------------------------------------ */
 
 /**
  * Terminal sessions a single dream may look at. The window starts at the last
- * dream (so consecutive dreams never re-read the same evidence) but is capped
- * on BOTH axes — count and age — because a first dream on a busy project would
- * otherwise try to swallow the entire session history.
+ * dream's collection cutoff (so consecutive dreams never re-read the same
+ * evidence) but is capped on BOTH axes — count and age — because a first dream
+ * on a busy project would otherwise try to swallow the entire session history.
+ *
+ * A session belongs to the window by the moment it REACHED a terminal state,
+ * not by when it started: a long build running across a dream became evidence
+ * only when it ended, and that is when a dream may read it.
  */
 export const DREAM_MAX_SESSIONS = 30;
 

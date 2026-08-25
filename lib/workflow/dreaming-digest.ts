@@ -30,40 +30,47 @@ export function parseTimestampMs(value: string | null | undefined): number | nul
 }
 
 export interface DreamWindow {
-  /** Inclusive lower bound: sessions created at/after this are candidates. */
+  /**
+   * Inclusive lower bound: sessions that reached a TERMINAL state at/after
+   * this are candidates. Terminal time, not start time — a build running
+   * across the previous dream became evidence only when it ended.
+   */
   sinceIso: string;
-  /** True when the bound came from the previous dream rather than the age cap. */
-  boundedByLastDream: boolean;
+  /** True when the bound came from the previous cutoff rather than the age cap. */
+  boundedByLastCutoff: boolean;
 }
 
 /**
  * Resolves the collection window's start.
  *
- * The window opens at the last dream — a dream must never re-read evidence a
- * previous dream already folded into the memory — but never reaches further
- * back than `windowDays`, so a project's first dream (or one after a long
- * pause) does not try to swallow its whole history.
+ * The window opens at the previous dream's COLLECTION cutoff — a dream must
+ * never re-read evidence a previous dream already folded into the memory — but
+ * never reaches further back than `windowDays`, so a project's first dream (or
+ * one after a long pause) does not try to swallow its whole history.
  *
- * An unparseable/absent `lastDreamAt` falls back to the age cap, and a
- * `lastDreamAt` in the future is honoured as-is: a clock skew that makes the
- * window empty is a no-op dream, which is the safe direction.
+ * An unparseable/absent `lastCutoffAt` falls back to the age cap, and a
+ * cutoff in the future is honoured as-is: a clock skew that makes the window
+ * empty is a no-op dream, which is the safe direction.
  */
 export function resolveDreamWindow(input: {
-  lastDreamAt: string | null;
+  lastCutoffAt: string | null;
   now: Date;
   windowDays?: number;
 }): DreamWindow {
   const windowDays = input.windowDays ?? DREAM_WINDOW_DAYS;
   const floorMs = input.now.getTime() - windowDays * DAY_MS;
-  const lastDreamMs = parseTimestampMs(input.lastDreamAt);
+  const lastCutoffMs = parseTimestampMs(input.lastCutoffAt);
 
-  if (lastDreamMs !== null && lastDreamMs > floorMs) {
+  if (lastCutoffMs !== null && lastCutoffMs > floorMs) {
     return {
-      sinceIso: new Date(lastDreamMs).toISOString(),
-      boundedByLastDream: true,
+      sinceIso: new Date(lastCutoffMs).toISOString(),
+      boundedByLastCutoff: true,
     };
   }
-  return { sinceIso: new Date(floorMs).toISOString(), boundedByLastDream: false };
+  return {
+    sinceIso: new Date(floorMs).toISOString(),
+    boundedByLastCutoff: false,
+  };
 }
 
 /* ------------------------------------------------------------------ */

@@ -63,17 +63,30 @@ vi.mock("fs", () => ({
 }));
 
 const { db } = await import("@/lib/db");
-const { projects, epics, agentSessions, settings, notifications } = await import(
-  "@/lib/db/schema"
-);
+const {
+  projects,
+  epics,
+  agentSessions,
+  settings,
+  notifications,
+  documents,
+} = await import("@/lib/db/schema");
 const {
   dispatchDreamingSession,
   evaluateDreamGuards,
-  hasPendingDream,
+  evaluateNightRunDreamGuards,
+  findLastDreamCutoff,
   isDreamingAfterNightRunEnabled,
+  recordDreamCutoff,
   maybeDreamAfterNightRun,
   sanitizeDreamedMemory,
 } = await import("@/lib/workflow/dreaming");
+const { hasPendingMemoryWriter } = await import(
+  "@/lib/workflow/memory-writer-lock"
+);
+const { dispatchMemoryDistillSession } = await import(
+  "@/lib/workflow/memory-distill"
+);
 const {
   getProjectMemoryArchiveDoc,
   getProjectMemoryContent,
@@ -179,9 +192,9 @@ beforeEach(() => {
 });
 
 describe("evaluateDreamGuards", () => {
-  it("refuses while another dream is pending", () => {
+  it("refuses while any memory writer is pending", () => {
     const decision = evaluateDreamGuards({
-      hasPendingDream: true,
+      hasPendingMemoryWriter: true,
       sessionCount: 12,
     });
     expect(decision.allowed).toBe(false);
@@ -190,17 +203,79 @@ describe("evaluateDreamGuards", () => {
 
   it("refuses when the window turned up nothing", () => {
     const decision = evaluateDreamGuards({
-      hasPendingDream: false,
+      hasPendingMemoryWriter: false,
       sessionCount: 0,
     });
     expect(decision.allowed).toBe(false);
     expect(decision.reason).toContain("no new sessions");
   });
 
-  it("allows a project with fresh evidence and no dream in flight", () => {
+  it("allows a project with fresh evidence and no rewrite in flight", () => {
     expect(
-      evaluateDreamGuards({ hasPendingDream: false, sessionCount: 1 })
+      evaluateDreamGuards({ hasPendingMemoryWriter: false, sessionCount: 1 })
     ).toEqual({ allowed: true, reason: "eligible" });
+  });
+});
+
+/**
+ * The dream is dispatched from the run's terminal choke point, past the wave
+ * engine's last cost-cap check — so the cap has to be re-applied here or it
+ * simply does not apply to the dream at all.
+ */
+describe("evaluateNightRunDreamGuards", () => {
+  const base = {
+    enabled: true,
+    abortReason: null as string | null,
+    costCapUsd: null as number | null,
+    spentUsd: 0,
+  };
+
+  it("refuses when the setting is off", () => {
+    expect(evaluateNightRunDreamGuards({ ...base, enabled: false })).toEqual({
+      allowed: false,
+      reason: "dreaming_after_night_run is off",
+    });
+  });
+
+  it("refuses after a user stop — stopping a run means stopping its spend", () => {
+    const decision = evaluateNightRunDreamGuards({
+      ...base,
+      abortReason: "stopped by user",
+    });
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toContain("stopped by the user");
+  });
+
+  it("refuses once the run's cost cap is reached", () => {
+    const decision = evaluateNightRunDreamGuards({
+      ...base,
+      costCapUsd: 5,
+      spentUsd: 5.4,
+    });
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toContain("cost cap");
+  });
+
+  it("allows a run still under its cap", () => {
+    expect(
+      evaluateNightRunDreamGuards({ ...base, costCapUsd: 5, spentUsd: 4.99 })
+    ).toEqual({ allowed: true, reason: "eligible" });
+  });
+
+  it("allows an uncapped run whatever it spent", () => {
+    expect(
+      evaluateNightRunDreamGuards({ ...base, costCapUsd: null, spentUsd: 999 })
+        .allowed
+    ).toBe(true);
+  });
+
+  it("still dreams after a circuit-breaker trip — that run has the most to teach", () => {
+    expect(
+      evaluateNightRunDreamGuards({
+        ...base,
+        abortReason: "circuit breaker: 3 consecutive pipeline failures",
+      }).allowed
+    ).toBe(true);
   });
 });
 
@@ -414,6 +489,159 @@ describe("dispatchDreamingSession — the memory is only replaced on delivery", 
   });
 });
 
+/**
+ * The window may only advance when the memory REALLY changed. A dream that
+ * answered but whose write threw taught the project nothing, so the sessions
+ * it read must still be readable by the next dream.
+ */
+describe("dispatchDreamingSession — the window only advances on a real write", () => {
+  it("records the collection cutoff after a successful rewrite", async () => {
+    seedSourceSession();
+    expect(findLastDreamCutoff(projectId)).toBeNull();
+
+    await dispatchDreamingSession({ projectId });
+    await flushBackground();
+
+    const cutoff = findLastDreamCutoff(projectId);
+    expect(cutoff).not.toBeNull();
+    expect(Number.isNaN(Date.parse(cutoff!))).toBe(false);
+  });
+
+  it("does NOT record a cutoff when the dream did not deliver", async () => {
+    seedSourceSession();
+    processManagerState.result = {
+      success: true,
+      result: claudeEnvelope("Should I drop the legacy section?"),
+      endedWithQuestion: true,
+      duration: 1000,
+    };
+
+    await dispatchDreamingSession({ projectId });
+    await flushBackground();
+
+    expect(findLastDreamCutoff(projectId)).toBeNull();
+  });
+
+  it("does NOT record a cutoff when persisting the dreamed memory fails", async () => {
+    const sourceId = seedSourceSession();
+    // A real, un-mocked write failure: the memory document is created with the
+    // filename "Project memory", and documents are unique per (project, name).
+    // Squatting that name makes saveProjectMemory throw exactly as a disk or
+    // constraint error would.
+    db.insert(documents)
+      .values({
+        id: `squatter-${counter}`,
+        projectId,
+        originalFilename: "Project memory",
+        kind: "text",
+        markdownContent: "not the memory doc",
+        mimeType: "text/markdown",
+        sizeBytes: 19,
+      })
+      .run();
+
+    const result = await dispatchDreamingSession({ projectId });
+    await flushBackground();
+
+    // The session itself completed and answered...
+    const session = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, result.sessionId!))
+      .get();
+    expect(session!.outcome).toBe("answered");
+    // ...but nothing was stored, so the window stayed shut and no notification
+    // claimed otherwise.
+    expect(getProjectMemoryContent(projectId)).toBeNull();
+    expect(findLastDreamCutoff(projectId)).toBeNull();
+    expect(
+      db
+        .select()
+        .from(notifications)
+        .where(eq(notifications.projectId, projectId))
+        .all()
+        .filter((row) => row.agentType === DREAMING_AGENT_TYPE)
+    ).toHaveLength(0);
+
+    // And the evidence is still on the table for the next dream.
+    db.delete(documents)
+      .where(eq(documents.id, `squatter-${counter}`))
+      .run();
+    const retry = await dispatchDreamingSession({ projectId });
+    await flushBackground();
+    expect(retry.dispatched).toBe(true);
+    expect(retry.sessionsAnalyzed).toBe(1);
+    expect(retry.sessionId).not.toBe(result.sessionId);
+    expect(sourceId).toBeTruthy();
+  });
+});
+
+/**
+ * 'memory_distill' and 'dreaming' replace the SAME whole document. Their
+ * triggers are unrelated (a finished build auto-distills while a finished
+ * night run dreams), so without a shared lock the slower one silently
+ * overwrites the faster one.
+ */
+describe("memory writers exclude each other", () => {
+  it("refuses a dream while a distill is queued", async () => {
+    seedSourceSession();
+    seedSourceSession({
+      agentType: "memory_distill",
+      status: "queued",
+      outcome: null,
+      epicId: null,
+    });
+
+    expect(hasPendingMemoryWriter(projectId)).toBe(true);
+    const result = await dispatchDreamingSession({ projectId });
+    await flushBackground();
+
+    expect(result.dispatched).toBe(false);
+    expect(result.reason).toContain("already pending");
+    expect(dreamSessions()).toHaveLength(0);
+  });
+
+  it("refuses a distill while a dream is running", async () => {
+    seedSourceSession({
+      agentType: DREAMING_AGENT_TYPE,
+      status: "running",
+      outcome: null,
+      epicId: null,
+    });
+
+    await expect(
+      dispatchMemoryDistillSession({ projectId })
+    ).rejects.toThrow(/already in progress/i);
+  });
+
+  it("lets only ONE of a simultaneous dream and distill through", async () => {
+    seedSourceSession();
+
+    const [dream, distill] = await Promise.allSettled([
+      dispatchDreamingSession({ projectId }),
+      dispatchMemoryDistillSession({ projectId }),
+    ]);
+    await flushBackground();
+
+    const dreamWon =
+      dream.status === "fulfilled" && dream.value.dispatched === true;
+    const distillWon = distill.status === "fulfilled";
+    expect([dreamWon, distillWon].filter(Boolean)).toHaveLength(1);
+
+    const writers = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.projectId, projectId))
+      .all()
+      .filter(
+        (row) =>
+          row.agentType === DREAMING_AGENT_TYPE ||
+          row.agentType === "memory_distill"
+      );
+    expect(writers).toHaveLength(1);
+  });
+});
+
 describe("dispatchDreamingSession — guard rails", () => {
   it("never starts a second dream while one is in flight", async () => {
     seedSourceSession();
@@ -424,7 +652,7 @@ describe("dispatchDreamingSession — guard rails", () => {
       epicId: null,
     });
 
-    expect(hasPendingDream(projectId)).toBe(true);
+    expect(hasPendingMemoryWriter(projectId)).toBe(true);
     const result = await dispatchDreamingSession({ projectId });
     await flushBackground();
 
@@ -462,13 +690,8 @@ describe("dispatchDreamingSession — guard rails", () => {
       endedAt: past,
       completedAt: past,
     });
-    // A delivered dream that already read that window.
-    seedSourceSession({
-      agentType: DREAMING_AGENT_TYPE,
-      epicId: null,
-      completedAt: new Date().toISOString(),
-      endedAt: new Date().toISOString(),
-    });
+    // A previous dream already folded that window into the memory.
+    recordDreamCutoff(projectId, new Date().toISOString());
 
     const result = await dispatchDreamingSession({ projectId });
     await flushBackground();
@@ -476,7 +699,7 @@ describe("dispatchDreamingSession — guard rails", () => {
     expect(result.dispatched).toBe(false);
     expect(result.sessionId).toBeNull();
     expect(result.reason).toContain("no new sessions");
-    expect(dreamSessions()).toHaveLength(1); // only the seeded past dream
+    expect(dreamSessions()).toHaveLength(0);
   });
 
   it("no-ops on a project that never ran a dreamable session", async () => {
