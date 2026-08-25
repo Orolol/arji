@@ -16,7 +16,8 @@ import {
  * one project; omitted means "across all projects".
  *
  * Scope: EVERY agent_sessions row counts, regardless of agent type —
- * including background 'memory_distill' runs. This is deliberate: their
+ * including background 'memory_distill' and 'dreaming' runs. This is
+ * deliberate: their
  * tokens are real spend that must show up in cost totals, and the grouping
  * key is (named agent × provider), which already blends agent types (builds,
  * reviews, QA) for the same pair. Excluding one background type would make

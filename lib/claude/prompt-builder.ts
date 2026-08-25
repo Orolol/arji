@@ -21,6 +21,9 @@ import {
 } from "./prompt-sections";
 import { getProjectMemoryContent } from "@/lib/documents/memory";
 import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
+// The prompt asks for these headings and the workflow refuses to store a
+// document without them — one contract, one definition.
+import { DREAMING_MEMORY_SECTIONS } from "@/lib/workflow/dreaming-constants";
 
 // ---------------------------------------------------------------------------
 // Types — lightweight projections of the Drizzle schema rows
@@ -1516,6 +1519,121 @@ Rewrite the ENTIRE memory document, merging anything durable the just-finished s
 - MERGE, don't append: deduplicate against the current memory, rewrite entries to stay general, and drop entries the session proved wrong or obsolete.
 - If the session revealed nothing durable, return the current memory (cleaned up if useful) unchanged in substance.
 - Prefer short bullet points grouped under a few \`##\` headings.
+- HARD LIMIT: the document must stay under ${PROJECT_MEMORY_MAX_CHARS} characters. Cut the least valuable entries first if space runs out.
+
+### Output Format
+
+Your ENTIRE response must be ONLY the new memory document body, as raw markdown.
+
+- Do NOT wrap it in code fences.
+- Do NOT add any preamble, explanation, or summary before or after it.
+- Do NOT address the user — the response is written verbatim into the memory document.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// 12b. Dreaming Prompt (cross-session memory distillation)
+// ---------------------------------------------------------------------------
+
+/** The cross-session evidence a dream reasons over (lib/workflow/dreaming.ts). */
+export interface DreamingDigestContext {
+  /** Assembled per-session digest, already size-budgeted. */
+  digest: string;
+  /** Sessions the digest carries. */
+  sessionCount: number;
+  /** Start of the collection window (ISO). */
+  sinceIso: string;
+  /** Sessions cut to fit the digest budget. */
+  truncatedCount?: number;
+  /** Sessions the budget could not fit at all. */
+  droppedCount?: number;
+}
+
+/**
+ * Builds the prompt for the 'dreaming' agent: read the last N terminal
+ * sessions across the whole project — successes AND failures — and rewrite the
+ * memory document around what only the batch reveals.
+ *
+ * Like the distill and the spec rewrite, the current memory is the object
+ * being rewritten and gets its own framing instead of the standard injected
+ * section (callers pass `memory: null` so the builder-level injection cannot
+ * duplicate it).
+ */
+export function buildDreamingPrompt(
+  project: PromptProject,
+  currentMemory: string | null,
+  context: DreamingDigestContext,
+  systemPrompt?: string | null,
+): string {
+  const parts: string[] = [];
+
+  parts.push(systemSection(systemPrompt));
+  parts.push(projectHeader(project.name));
+  parts.push(descriptionSection(project.description));
+
+  parts.push(`## Current Project Memory\n`);
+  if (currentMemory && currentMemory.trim().length > 0) {
+    parts.push(currentMemory.trim() + "\n");
+  } else {
+    parts.push(`(The project memory is currently empty.)\n`);
+  }
+
+  const coverage: string[] = [
+    `- **Sessions analyzed:** ${context.sessionCount}`,
+    `- **Window start:** ${context.sinceIso}`,
+  ];
+  if (context.truncatedCount) {
+    coverage.push(
+      `- **Truncated to fit the size budget:** ${context.truncatedCount} session(s) — their records end with a cut marker.`
+    );
+  }
+  if (context.droppedCount) {
+    coverage.push(
+      `- **Omitted entirely (size budget):** ${context.droppedCount} session(s).`
+    );
+  }
+
+  parts.push(`## Recent Sessions Digest\n`);
+  parts.push(coverage.join("\n") + "\n");
+  parts.push(
+    context.digest.trim().length > 0
+      ? context.digest.trim() + "\n"
+      : "(No session records available.)\n"
+  );
+
+  parts.push(`## Task: Dream the Project Memory
+
+You are running a **dreaming** pass: a cross-session review of everything the agents on this project just lived through. A single session only ever shows its own story; the digest above shows dozens, successes and failures side by side. Your job is to find what NO single session could show — the mistakes that keep repeating, the traps this codebase keeps setting, the approaches that actually land — and rewrite the project's long-term memory around them.
+
+This memory document is injected into every agent prompt for this project. It is the one lever that makes the next session start smarter than the last.
+
+### How to read the digest
+
+- **Failures and refused transitions are the richest signal.** A run that failed, went silent, or had its ticket move refused tells you more than a clean success.
+- **Repetition is the whole point.** Something that went wrong ONCE is trivia. Something that went wrong three times across different tickets is a rule worth writing.
+- **Blocking findings and forensic reports name the actual defect** — generalize them into a rule, never copy the incident.
+- **Compare what worked with what did not**: same kind of ticket, different outcome, is where a strategy hides.
+
+### Required structure
+
+Rewrite the ENTIRE document using EXACTLY these four \`##\` sections, in this order, even if a section ends up short:
+
+${DREAMING_MEMORY_SECTIONS.map((title) => `## ${title}`).join("\n")}
+
+- **${DREAMING_MEMORY_SECTIONS[0]}** — non-obvious traps in this repository: files that regenerate themselves, commands that must not be run, structures that break when touched naively.
+- **${DREAMING_MEMORY_SECTIONS[1]}** — what agents on this project get wrong again and again, phrased as a correction.
+- **${DREAMING_MEMORY_SECTIONS[2]}** — approaches the digest shows actually working: how to scope work, where to put tests, what to verify before declaring done.
+- **${DREAMING_MEMORY_SECTIONS[3]}** — standing instructions for the next build session: conventions, workflow rules, ceilings it must respect.
+
+### Rules
+
+- KEEP the durable entries already in the current memory. Merge, deduplicate, sharpen — do NOT start from a blank page, and do not drop a rule just because this window did not exercise it.
+- DROP entries the digest proved wrong or obsolete.
+- NEVER include per-ticket trivia: ticket titles, ids, session ids, dates, costs, provider names, or one-off incident details. Every line must be true for the NEXT session too.
+- Prefer short, imperative bullet points. Give the reason when it is not obvious ("X, because Y").
+- If the digest supports nothing new for a section, keep whatever the current memory already had under it rather than inventing filler.
 - HARD LIMIT: the document must stay under ${PROJECT_MEMORY_MAX_CHARS} characters. Cut the least valuable entries first if space runs out.
 
 ### Output Format

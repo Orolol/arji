@@ -11,6 +11,10 @@ import { AGENT_TYPE_LABELS } from "@/lib/agent-config/constants";
 import { formatDocumentMention } from "@/lib/documents/mention-format";
 import { durationMsBetween, sendProjectWebhook } from "@/lib/webhooks/send";
 import { NIGHT_STOPPED_ABORT_REASON } from "@/lib/night/constants";
+import {
+  DREAMING_AGENT_TYPE,
+  MEMORY_DREAMED_TITLE,
+} from "@/lib/workflow/dreaming-constants";
 import type { TicketExecutionStatus } from "@/lib/dependencies/scheduler";
 
 const MAX_NOTIFICATIONS = 200;
@@ -559,6 +563,78 @@ export function createStalledSessionNotification(
       status: "failed",
       title: buildStalledTitle(staleMinutes, epicTitle, epicReadableId),
       targetUrl: `/projects/${session.projectId}/sessions/${session.id}`,
+    })
+    .run();
+
+  pruneNotifications();
+}
+
+export interface MemoryDreamedNotificationInput {
+  projectId: string;
+  /** The 'dreaming' session that rewrote the document. */
+  sessionId: string;
+  /** Sessions the digest carried. */
+  sessionsAnalyzed: number;
+  /** Length of the memory the dream replaced (0 when there was none). */
+  previousChars: number;
+  /** Length of the memory now stored. */
+  newChars: number;
+}
+
+/**
+ * Title for a memory rewritten by a dream — the "summary of the change" the
+ * user needs before deciding whether to open it.
+ *
+ * Examples:
+ *   "Project memory updated by Dreaming — 12 sessions analyzed, 3200 → 5100 chars"
+ *   "Project memory updated by Dreaming — 4 sessions analyzed, written from scratch (900 chars)"
+ */
+export function buildMemoryDreamedTitle(
+  input: Pick<
+    MemoryDreamedNotificationInput,
+    "sessionsAnalyzed" | "previousChars" | "newChars"
+  >
+): string {
+  const sessions = `${input.sessionsAnalyzed} session${
+    input.sessionsAnalyzed === 1 ? "" : "s"
+  } analyzed`;
+  const change =
+    input.previousChars > 0
+      ? `${input.previousChars} → ${input.newChars} chars`
+      : `written from scratch (${input.newChars} chars)`;
+  return `${MEMORY_DREAMED_TITLE} — ${sessions}, ${change}`;
+}
+
+/**
+ * Notification for a dream that actually replaced the project memory (a dream
+ * that failed, stayed silent or found nothing new never gets here — see
+ * lib/workflow/dreaming.ts).
+ *
+ * Deep-links to the project's Docs tab, where the memory card shows the new
+ * text and lets the user edit or revert it: the actionable place is the
+ * document, not the (already finished) session. Status "completed" — this is
+ * good news, not an alarm.
+ */
+export function createMemoryDreamedNotification(
+  input: MemoryDreamedNotificationInput
+): void {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: input.sessionId,
+      agentType: DREAMING_AGENT_TYPE,
+      status: "completed",
+      title: buildMemoryDreamedTitle(input),
+      targetUrl: `/projects/${input.projectId}/documents`,
     })
     .run();
 

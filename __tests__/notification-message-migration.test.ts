@@ -71,7 +71,18 @@ describe("0031_notification_message — migration file", () => {
     // increasing so 0031 runs after 0030_chat_attachment_ownership.
     const whens = journal.entries.map((e) => e.when);
     expect([...whens].sort((a, b) => a - b)).toEqual(whens);
-    expect(journal.entries[journal.entries.length - 1]?.tag).toBe(MIGRATION_TAG);
+    // Pinned to its NEIGHBOURS, not to the end of the journal: this migration
+    // is no longer the newest one and later work must not have to edit this
+    // assertion. What matters is that nothing was inserted between 0030 and
+    // it, and that its slot is exclusively its own — 0032 was renumbered off
+    // this exact `when` for that reason.
+    const tags = journal.entries.map((e) => e.tag);
+    expect(tags[tags.indexOf(MIGRATION_TAG) - 1]).toBe(
+      "0030_chat_attachment_ownership"
+    );
+    expect(
+      journal.entries.filter((e) => e.when === entry?.when).map((e) => e.tag)
+    ).toEqual([MIGRATION_TAG]);
   });
 
   it("is listed in POST_BASELINE_COLUMN_MIGRATIONS for bookkeeping-less recovery", () => {
@@ -188,6 +199,10 @@ describe("0031_notification_message — applied schema", () => {
     withDb(file, (conn) => {
       initDb(conn);
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      // Un-stamping from 0031 replays every LATER migration too, and an ADD
+      // COLUMN is not a no-op the second time — so 0032's column has to go
+      // back as well.
+      conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')

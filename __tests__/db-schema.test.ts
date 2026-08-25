@@ -324,6 +324,9 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       body: "body",
       author: "author",
       status: "status",
+      // 0032: the review session that filed the finding, so the Dreaming
+      // digest can attribute it exactly instead of guessing from timestamps.
+      agentSessionId: "agent_session_id",
       createdAt: "created_at",
       updatedAt: "updated_at",
     },

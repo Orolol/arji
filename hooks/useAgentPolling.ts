@@ -11,7 +11,14 @@ export interface UnifiedActivity {
   id: string;
   epicId?: string | null;
   userStoryId?: string | null;
-  type: "build" | "review" | "merge" | "chat" | "spec_generation" | "release";
+  type:
+    | "build"
+    | "review"
+    | "merge"
+    | "chat"
+    | "spec_generation"
+    | "release"
+    | "memory";
   label: string;
   status: string;
   mode: string;

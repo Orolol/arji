@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Bot } from "lucide-react";
+import { Bot, Moon } from "lucide-react";
 import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
 
 interface ProjectMemoryCardProps {
@@ -17,27 +18,50 @@ interface ProjectMemoryCardProps {
  * hard character cap.
  */
 export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
+  const router = useRouter();
   const [content, setContent] = useState("");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Distinct from `!loading`: a finished load that FAILED must not present an
+  // editable, saveable textarea over content nobody ever read.
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [dreaming, setDreaming] = useState(false);
+  // The last text the server confirmed (load or save). `dirty` is DERIVED from
+  // it rather than latched by keystrokes: typing a character and deleting it
+  // again left the card claiming unsaved edits, which disabled Dream and told
+  // the user to "save or discard" something that no longer differed.
+  const [savedContent, setSavedContent] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoaded(false);
+    setError(null);
     fetch(`/api/projects/${projectId}/memory`)
-      .then((res) => res.json())
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        // Without this check a 404/500 renders as an empty editor, which reads
+        // as "this project has no memory" — and saving from there would wipe a
+        // memory that merely failed to load.
+        if (!res.ok) {
+          throw new Error(data?.error || "Failed to load project memory.");
+        }
+        return data;
+      })
       .then((data) => {
         if (cancelled) return;
         setContent(data.data?.content ?? "");
+        setSavedContent(data.data?.content ?? "");
         setUpdatedAt(data.data?.updatedAt ?? null);
-        setDirty(false);
+        setLoaded(true);
       })
-      .catch(() => {
-        if (!cancelled) setError("Failed to load project memory.");
+      .catch((err: Error) => {
+        if (!cancelled) {
+          setError(err?.message || "Failed to load project memory.");
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -48,6 +72,7 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
   }, [projectId]);
 
   const overCap = content.length > PROJECT_MEMORY_MAX_CHARS;
+  const dirty = content !== savedContent;
 
   async function handleSave() {
     setSaving(true);
@@ -65,12 +90,49 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
         return;
       }
       setUpdatedAt(data.data?.updatedAt ?? null);
-      setDirty(false);
+      setSavedContent(content);
       setMessage("Project memory saved.");
     } catch {
       setError("Failed to save project memory.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Manual dream. A no-op answer (nothing new since the last dream) is a
+   * successful, informative outcome — reported inline, not as an error, and
+   * without navigating anywhere since no session was created.
+   */
+  async function handleDream() {
+    setDreaming(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/memory/dream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Failed to start the dreaming session.");
+        return;
+      }
+      const dreamSessionId = data.data?.sessionId;
+      if (!dreamSessionId) {
+        setMessage(
+          data.data?.reason
+            ? `Nothing to dream about: ${data.data.reason}.`
+            : "Nothing to dream about yet."
+        );
+        return;
+      }
+      router.push(`/projects/${projectId}/sessions/${dreamSessionId}`);
+    } catch {
+      setError("Failed to start the dreaming session.");
+    } finally {
+      setDreaming(false);
     }
   }
 
@@ -90,38 +152,87 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
       <p className="text-[13.5px] leading-[1.6]">
         Conventions learned from previous sessions. Injected into every agent
         prompt for this project. Use the &quot;Distill learnings&quot; action on
-        a completed session to let an agent update it.
+        a completed session to fold in one run, or &quot;Dream&quot; below to
+        rewrite it from the recent sessions of every ticket at once.
       </p>
       {loading ? (
         <p className="text-[13px] text-muted-foreground">Loading...</p>
+      ) : !loaded ? (
+        // Load failed: show the error and nothing editable. An empty textarea
+        // here would read as "this project has no memory", and one Save would
+        // replace a memory that simply never arrived.
+        <p className="text-[13px] text-destructive">
+          {error ?? "Failed to load project memory."} Reload the page to try
+          again.
+        </p>
       ) : (
         <>
           <Textarea
             value={content}
             onChange={(event) => {
               setContent(event.target.value);
-              setDirty(true);
               setMessage(null);
             }}
             placeholder="No project memory yet. Write durable conventions here, or distill them from a completed session."
             className="min-h-[160px] rounded-[10px] border-agent-border bg-card font-mono text-[12px] leading-[1.6]"
           />
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-[11px] text-agent">
+          {/* Wraps: in the narrow Docs aside a locale timestamp plus two
+              buttons does not fit on one line, and a non-wrapping row pushed
+              the controls out of the card entirely. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0 truncate font-mono text-[11px] text-agent">
               {updatedAt
                 ? `last updated ${new Date(updatedAt).toLocaleString()}`
                 : "never updated"}
             </span>
-            <Button
-              size="sm"
-              className="h-[29px] rounded-[8px] text-[12.5px]"
-              onClick={handleSave}
-              disabled={saving || overCap || !dirty}
-            >
-              {saving ? "Saving..." : "Save memory"}
-            </Button>
+            <div className="ml-auto flex items-center gap-2">
+              {dirty && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-[29px] rounded-[8px] text-[12.5px]"
+                  onClick={() => {
+                    setContent(savedContent);
+                    setMessage(null);
+                  }}
+                  disabled={saving}
+                  title="Restore the saved memory, discarding your edits"
+                >
+                  Discard
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-[29px] rounded-[8px] text-[12.5px]"
+                onClick={handleDream}
+                disabled={dreaming || saving || dirty}
+                title={
+                  dirty
+                    ? "Save or discard your edits first — the agent rewrites the SAVED memory"
+                    : "Rewrite this memory from the recent sessions of every ticket"
+                }
+              >
+                <Moon className="mr-1 h-3.5 w-3.5" />
+                {dreaming ? "Dreaming..." : "Dream"}
+              </Button>
+              <Button
+                size="sm"
+                className="h-[29px] rounded-[8px] text-[12.5px]"
+                onClick={handleSave}
+                disabled={saving || overCap || !dirty}
+              >
+                {saving ? "Saving..." : "Save memory"}
+              </Button>
+            </div>
           </div>
         </>
+      )}
+      {dirty && loaded && (
+        <p className="text-[12px] text-muted-foreground">
+          Dreaming reads the saved memory and replaces it wholesale — save or
+          discard your edits first, or they will be lost.
+        </p>
       )}
       {overCap && (
         <p className="text-[12px] text-destructive">
@@ -130,7 +241,11 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
         </p>
       )}
       {message && <p className="text-[12px] text-agent">{message}</p>}
-      {error && <p className="text-[12px] text-destructive">{error}</p>}
+      {/* Only ACTION errors (save, dream) belong here. A load failure already
+          owns the whole body above, and printing it twice reads as two faults. */}
+      {error && loaded && (
+        <p className="text-[12px] text-destructive">{error}</p>
+      )}
     </div>
   );
 }

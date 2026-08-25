@@ -8,12 +8,23 @@ import {
   getSessionLastActivityAt,
   isSessionStale,
 } from "@/lib/agents/watchdog";
+import {
+  DREAMING_AGENT_TYPE,
+  MEMORY_WRITER_AGENT_TYPES,
+} from "@/lib/workflow/dreaming-constants";
 
 export interface UnifiedActivity {
   id: string;
   epicId: string | null;
   userStoryId: string | null;
-  type: "build" | "review" | "merge" | "chat" | "spec_generation" | "release";
+  type:
+    | "build"
+    | "review"
+    | "merge"
+    | "chat"
+    | "spec_generation"
+    | "release"
+    | "memory";
   label: string;
   status: string;
   mode: string;
@@ -48,6 +59,13 @@ function inferDbActivityType(row: {
     return "release";
   }
 
+  // Before the mode heuristic below: both memory writers run in plan mode, so
+  // the `mode === "plan"` fallback would file them as reviews and the monitor
+  // would say "Reviewing" while an agent is rewriting the project memory.
+  if (row.agentType && MEMORY_WRITER_AGENT_TYPES.includes(row.agentType)) {
+    return "memory";
+  }
+
   if (row.agentType === "merge") {
     return "merge";
   }
@@ -77,10 +95,22 @@ function inferDbActivityType(row: {
 
 function buildDbActivityLabel(
   type: UnifiedActivity["type"],
-  row: { storyTitle: string | null; epicTitle: string | null }
+  row: {
+    storyTitle: string | null;
+    epicTitle: string | null;
+    agentType?: string | null;
+  }
 ): string {
   if (type === "release") {
     return "Generating release notes";
+  }
+
+  if (type === "memory") {
+    // Neither carries an epicId (both are project-level background passes), so
+    // there is no ticket to name — the agent type IS the whole story.
+    return row.agentType === DREAMING_AGENT_TYPE
+      ? "Dreaming: rewriting project memory"
+      : "Distilling project memory";
   }
 
   if (type === "merge") {

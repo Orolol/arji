@@ -69,6 +69,14 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
   { folderMillis: 1786712700000, table: "chat_attachments", column: "epic_id" },
   // 0031_notification_message (single column ALTER)
   { folderMillis: 1786712800000, table: "notifications", column: "message" },
+  // 0032_review_comment_session. Renumbered off 0031's slot, which main had
+  // already taken: the `when` IS the migrator's identity, so a database that
+  // ran main's 0031 would have skipped this one forever.
+  {
+    folderMillis: 1786712900000,
+    table: "review_comments",
+    column: "agent_session_id",
+  },
 ];
 
 /** Default on-disk location of the drizzle migration files. */

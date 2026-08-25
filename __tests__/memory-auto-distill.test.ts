@@ -16,6 +16,7 @@ import { describe, it, expect } from "vitest";
 import {
   AUTO_DISTILL_SOURCE_AGENT_TYPES,
   evaluateAutoDistillGuards,
+  evaluateDistillSourceEligibility,
   type AutoDistillCandidateSession,
 } from "@/lib/workflow/memory-distill";
 import { parseMemoryAutoDistillSetting } from "@/lib/documents/memory-constants";
@@ -29,6 +30,7 @@ function session(
     agentType: "build",
     status: "completed",
     outcome: "answered",
+    batchRunId: null,
     ...overrides,
   };
 }
@@ -37,11 +39,13 @@ function evaluate(input: {
   enabled?: boolean;
   session?: AutoDistillCandidateSession | null;
   hasPendingDistill?: boolean;
+  dreamWillFollow?: boolean;
 }) {
   return evaluateAutoDistillGuards({
     enabled: input.enabled ?? true,
     session: input.session === undefined ? session() : input.session,
     hasPendingDistill: input.hasPendingDistill ?? false,
+    dreamWillFollow: input.dreamWillFollow ?? false,
   });
 }
 
@@ -126,6 +130,124 @@ describe("evaluateAutoDistillGuards", () => {
     expect(evaluate({ session: session({ outcome: null }) }).allowed).toBe(
       true
     );
+  });
+});
+
+/**
+ * The manual endpoint used to take any session id belonging to the project,
+ * so a direct POST could distill a dream or a run that never finished. The
+ * rule lives here, next to the auto matrix, because both paths must ask the
+ * same question — and it is deliberately LOOSER than the auto matrix, since
+ * the manual button is offered on reviews and QA runs too.
+ */
+describe("evaluateDistillSourceEligibility", () => {
+  it("rejects a missing source (the caller's 404 case)", () => {
+    const result = evaluateDistillSourceEligibility(null);
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toContain("not found");
+  });
+
+  it.each(["dreaming", "memory_distill"])(
+    "rejects the %s memory writer, however it ended",
+    (agentType) => {
+      const result = evaluateDistillSourceEligibility({
+        agentType,
+        status: "completed",
+        outcome: "answered",
+      });
+      expect(result.eligible).toBe(false);
+      expect(result.reason).toContain("cannot itself be distilled");
+    }
+  );
+
+  it.each(["queued", "running", "failed", "cancelled", null])(
+    "rejects a source whose status is %s",
+    (status) => {
+      const result = evaluateDistillSourceEligibility({
+        agentType: "build",
+        status,
+        outcome: "answered",
+      });
+      expect(result.eligible).toBe(false);
+      expect(result.reason).toContain("completed");
+    }
+  );
+
+  /**
+   * `asked_question` sessions are `completed` too, so the status check alone
+   * lets them through — and the agent is still waiting for a reply that never
+   * came. Distilling one writes an unresolved question into a document
+   * injected in every future prompt.
+   */
+  it("rejects a completed session that stopped to ask a question", () => {
+    const result = evaluateDistillSourceEligibility({
+      agentType: "build",
+      status: "completed",
+      outcome: "asked_question",
+    });
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toContain("ask a question");
+  });
+
+  it.each(["answered", "silent", "transition_refused", null])(
+    "accepts a completed session whose outcome is %s",
+    (outcome) => {
+      expect(
+        evaluateDistillSourceEligibility({
+          agentType: "build",
+          status: "completed",
+          outcome,
+        }).eligible
+      ).toBe(true);
+    }
+  );
+
+  it.each(["build", "ticket_build", "team_build", "review_code", "tech_check", null])(
+    "accepts a completed %s session",
+    (agentType) => {
+      expect(
+        evaluateDistillSourceEligibility({
+          agentType,
+          status: "completed",
+          outcome: "answered",
+        })
+      ).toEqual({ eligible: true, reason: "" });
+    }
+  );
+});
+
+/**
+ * Both memory writers take the same exclusive lock, and the night-run dream is
+ * attempted EXACTLY ONCE at the run's terminal choke point. An auto-distill
+ * still holding the lock at that instant does not delay the dream — it cancels
+ * it, for good. So the distill stands down instead.
+ */
+describe("night-run dream vs auto-distill", () => {
+  it("denies the distill when a night-run dream will cover the run", () => {
+    const decision = evaluate({
+      session: session({ batchRunId: "night_abc" }),
+      dreamWillFollow: true,
+    });
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toContain("night-run dream");
+  });
+
+  it("allows the distill when no dream will follow", () => {
+    expect(
+      evaluate({
+        session: session({ batchRunId: "night_abc" }),
+        dreamWillFollow: false,
+      }).allowed
+    ).toBe(true);
+  });
+
+  it("stands down BEFORE the pending-writer check, so the reason is the real one", () => {
+    const decision = evaluate({
+      session: session({ batchRunId: "night_abc" }),
+      dreamWillFollow: true,
+      hasPendingDistill: true,
+    });
+    expect(decision.reason).toContain("night-run dream");
   });
 });
 

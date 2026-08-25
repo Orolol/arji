@@ -16,6 +16,7 @@ import {
   Brain,
 } from "lucide-react";
 import { PROVIDER_LABELS } from "@/lib/agent-config/constants";
+import { MEMORY_WRITER_AGENT_TYPES } from "@/lib/workflow/dreaming-constants";
 import { SessionOutcomeBadge } from "@/components/shared/SessionOutcomeBadge";
 import {
   ArijActionsList,
@@ -68,6 +69,7 @@ const AGENT_TYPE_LABELS: Record<string, string> = {
   merge: "Merge",
   tech_check: "Tech Check",
   memory_distill: "Memory Distill",
+  dreaming: "Dreaming",
   forensic: "Forensic",
 };
 
@@ -267,8 +269,15 @@ export default function SessionDetailPage() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Mirrors evaluateDistillSourceEligibility, which the endpoint
+              enforces: never a session that WROTE the memory (a distill of a
+              distill has no source learnings), and never one that stopped to
+              ask a question — those are `completed` too, but the agent is
+              still waiting for a reply, so there is nothing settled to fold
+              into a document every future prompt reads. */}
           {session.status === "completed" &&
-            session.agentType !== "memory_distill" && (
+            session.outcome !== "asked_question" &&
+            !MEMORY_WRITER_AGENT_TYPES.includes(session.agentType ?? "") && (
               <Button
                 variant="outline"
                 size="sm"
