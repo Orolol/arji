@@ -68,7 +68,7 @@ export interface CiWatchDeps {
     headSha: string;
     failures: PullRequestCiFailureEvidence[];
   }): Promise<CiAutofixLaunchResult>;
-  persistConfig(routineId: string, config: string): void;
+  persistState(routineId: string, state: StoredCiWatchState): void;
   notifyFailure(input: {
     projectId: string;
     epicId: string;
@@ -109,13 +109,32 @@ export const defaultCiWatchDeps: CiWatchDeps = {
   isAutofixEnabled: isCiAutofixEnabled,
   fetchFailureEvidence: fetchPullRequestCiFailureEvidence,
   launchAutofix: launchCiAutofixSession,
-  persistConfig: (routineId, config) => {
-    db.update(routines).set({ config }).where(eq(routines.id, routineId)).run();
+  persistState: (routineId, state) => {
+    db.transaction((tx) => {
+      const current = tx
+        .select({ config: routines.config })
+        .from(routines)
+        .where(eq(routines.id, routineId))
+        .get();
+      if (!current) return;
+      const config = parseConfig({ id: routineId, config: current.config });
+      tx.update(routines)
+        .set({
+          config: JSON.stringify({
+            ...config,
+            [CI_WATCH_STATE_CONFIG_KEY]: state,
+          }),
+        })
+        .where(eq(routines.id, routineId))
+        .run();
+    });
   },
   notifyFailure: createCiWatchFailureNotification,
 };
 
-function parseConfig(routine: Routine): Record<string, unknown> {
+function parseConfig(
+  routine: Pick<Routine, "id" | "config">,
+): Record<string, unknown> {
   try {
     const config = JSON.parse(routine.config) as unknown;
     if (!config || typeof config !== "object" || Array.isArray(config)) {
@@ -255,10 +274,7 @@ export async function runCiWatchRoutine(
 
       // Persist the SHA guard before ringing the bell. This makes a process
       // restart immediately after the notification unable to replay it.
-      deps.persistConfig(
-        routine.id,
-        JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState }),
-      );
+      deps.persistState(routine.id, nextState);
 
       if (decision.shouldNotify) {
         deps.notifyFailure({
@@ -285,10 +301,7 @@ export async function runCiWatchRoutine(
           ...decision.observation,
           autofixAttempted: true,
         };
-        deps.persistConfig(
-          routine.id,
-          JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState }),
-        );
+        deps.persistState(routine.id, nextState);
 
         let failures: PullRequestCiFailureEvidence[];
         try {
@@ -327,10 +340,7 @@ export async function runCiWatchRoutine(
           autofixAttempted: !targetWasBusy,
           autofixSessionId: targetWasBusy ? null : launch.sessionId,
         };
-        deps.persistConfig(
-          routine.id,
-          JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState }),
-        );
+        deps.persistState(routine.id, nextState);
       }
 
       processedPullRequests += 1;
@@ -346,10 +356,7 @@ export async function runCiWatchRoutine(
   for (const epicId of Object.keys(nextState)) {
     if (!eligibleEpicIds.has(epicId)) delete nextState[epicId];
   }
-  deps.persistConfig(
-    routine.id,
-    JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState }),
-  );
+  deps.persistState(routine.id, nextState);
 
   return {
     status: "completed",

@@ -1,4 +1,7 @@
-import { getGitHubTokenFromSettings, createGitHubClient } from "@/lib/github/client";
+import {
+  getGitHubTokenFromSettings,
+  createGitHubClient,
+} from "@/lib/github/client";
 import {
   CI_AUTOFIX_MAX_FAILURES,
   CI_AUTOFIX_MAX_LOGGED_FAILURES,
@@ -20,10 +23,7 @@ interface StoryForPr {
 /**
  * Generates a markdown PR body from an epic summary and its user stories.
  */
-export function generatePrBody(
-  epic: EpicForPr,
-  stories: StoryForPr[]
-): string {
+export function generatePrBody(epic: EpicForPr, stories: StoryForPr[]): string {
   const lines: string[] = [];
 
   lines.push("## Summary");
@@ -71,6 +71,8 @@ export type PullRequestCiState = "passing" | "pending" | "failing";
 export interface PullRequestFailedCheckRun {
   id: number;
   name: string;
+  /** Used to spend the bounded log budget on the actionable failure first. */
+  conclusion?: string | null;
 }
 
 export interface PullRequestCiStatus {
@@ -103,13 +105,30 @@ interface CommitStatusSignal {
 }
 
 const FAILING_CHECK_CONCLUSIONS = new Set([
-  "action_required",
   "cancelled",
   "failure",
   "stale",
   "startup_failure",
   "timed_out",
 ]);
+
+const FAILURE_LOG_PRIORITY = new Map([
+  ["failure", 0],
+  ["timed_out", 0],
+  ["startup_failure", 0],
+  ["cancelled", 1],
+  ["stale", 1],
+]);
+
+function compareFailedCheckRuns(
+  left: PullRequestFailedCheckRun,
+  right: PullRequestFailedCheckRun,
+): number {
+  const priorityDifference =
+    (FAILURE_LOG_PRIORITY.get(left.conclusion ?? "") ?? 2) -
+    (FAILURE_LOG_PRIORITY.get(right.conclusion ?? "") ?? 2);
+  return priorityDifference || left.name.localeCompare(right.name);
+}
 
 export const CI_JOB_LOG_TAIL_CHARS = CI_AUTOFIX_MAX_LOG_TAIL_CHARS;
 
@@ -120,7 +139,7 @@ async function logPayloadToText(payload: unknown): Promise<string | null> {
   }
   if (ArrayBuffer.isView(payload)) {
     return new TextDecoder().decode(
-      new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength)
+      new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength),
     );
   }
   if (
@@ -136,7 +155,7 @@ async function logPayloadToText(payload: unknown): Promise<string | null> {
 
 export function tailCiJobLog(
   log: string,
-  maxChars: number = CI_JOB_LOG_TAIL_CHARS
+  maxChars: number = CI_JOB_LOG_TAIL_CHARS,
 ): string {
   const normalized = log.replace(/\0/g, "").trimEnd();
   return normalized.length <= maxChars
@@ -156,10 +175,7 @@ export function classifyPullRequestCi(input: {
   const failedChecks = new Set<string>();
 
   for (const check of input.checkRuns) {
-    if (
-      check.conclusion &&
-      FAILING_CHECK_CONCLUSIONS.has(check.conclusion)
-    ) {
+    if (check.conclusion && FAILING_CHECK_CONCLUSIONS.has(check.conclusion)) {
       failedChecks.add(check.name);
     }
   }
@@ -173,14 +189,16 @@ export function classifyPullRequestCi(input: {
     return {
       state: "failing",
       failedChecks: [...failedChecks].sort((left, right) =>
-        left.localeCompare(right)
+        left.localeCompare(right),
       ),
     };
   }
 
   const hasPendingSignal =
-    input.checkRuns.some((check) => check.status !== "completed") ||
-    input.commitStatuses.some((status) => status.state === "pending");
+    input.checkRuns.some(
+      (check) =>
+        check.status !== "completed" || check.conclusion === "action_required",
+    ) || input.commitStatuses.some((status) => status.state === "pending");
   const hasAnySignal =
     input.checkRuns.length > 0 || input.commitStatuses.length > 0;
 
@@ -195,7 +213,7 @@ export function classifyPullRequestCi(input: {
  * Assumes the branch has already been pushed.
  */
 export async function createPullRequest(
-  params: CreatePullRequestParams
+  params: CreatePullRequestParams,
 ): Promise<PullRequestResult> {
   const token = getGitHubTokenFromSettings();
   if (!token) {
@@ -229,7 +247,7 @@ export async function createPullRequest(
 export async function fetchPrStatus(
   owner: string,
   repo: string,
-  prNumber: number
+  prNumber: number,
 ): Promise<{ status: "draft" | "open" | "closed" | "merged"; title: string }> {
   const token = getGitHubTokenFromSettings();
   if (!token) {
@@ -265,7 +283,7 @@ export async function fetchPrStatus(
 export async function fetchPullRequestCiStatus(
   owner: string,
   repo: string,
-  prNumber: number
+  prNumber: number,
 ): Promise<PullRequestCiStatus> {
   const token = getGitHubTokenFromSettings();
   if (!token) {
@@ -279,15 +297,15 @@ export async function fetchPullRequestCiStatus(
   });
   const headSha = pullRequest.head.sha;
 
-  const [{ data: checks }, { data: combinedStatus }] = await Promise.all([
-    octokit.checks.listForRef({
+  const [checkRuns, commitStatuses] = await Promise.all([
+    octokit.paginate(octokit.checks.listForRef, {
       owner,
       repo,
       ref: headSha,
       filter: "latest",
       per_page: 100,
     }),
-    octokit.repos.getCombinedStatusForRef({
+    octokit.paginate(octokit.repos.getCombinedStatusForRef, {
       owner,
       repo,
       ref: headSha,
@@ -295,7 +313,7 @@ export async function fetchPullRequestCiStatus(
     }),
   ]);
 
-  const checkRunSignals = checks.check_runs.map((check) => ({
+  const checkRunSignals = checkRuns.map((check) => ({
     id: check.id,
     name: check.name,
     status: check.status,
@@ -307,7 +325,7 @@ export async function fetchPullRequestCiStatus(
       status: check.status,
       conclusion: check.conclusion,
     })),
-    commitStatuses: combinedStatus.statuses.map((status) => ({
+    commitStatuses: commitStatuses.map((status) => ({
       context: status.context,
       state: status.state,
     })),
@@ -320,16 +338,18 @@ export async function fetchPullRequestCiStatus(
       FAILING_CHECK_CONCLUSIONS.has(check.conclusion) &&
       !failedCheckRuns.has(check.name)
     ) {
-      failedCheckRuns.set(check.name, { id: check.id, name: check.name });
+      failedCheckRuns.set(check.name, {
+        id: check.id,
+        name: check.name,
+        conclusion: check.conclusion,
+      });
     }
   }
 
   return {
     headSha,
     ...classification,
-    failedCheckRuns: [...failedCheckRuns.values()].sort((left, right) =>
-      left.name.localeCompare(right.name)
-    ),
+    failedCheckRuns: [...failedCheckRuns.values()].sort(compareFailedCheckRuns),
   };
 }
 
@@ -342,21 +362,24 @@ export async function fetchPullRequestCiStatus(
 export async function fetchPullRequestCiFailureEvidence(
   owner: string,
   repo: string,
-  snapshot: PullRequestCiStatus
+  snapshot: PullRequestCiStatus,
 ): Promise<PullRequestCiFailureEvidence[]> {
   const token = getGitHubTokenFromSettings();
   if (!token) {
     throw new Error("GitHub PAT not configured. Set it in Settings.");
   }
   const octokit = createGitHubClient(token);
+  const failedCheckRuns = [...(snapshot.failedCheckRuns ?? [])].sort(
+    compareFailedCheckRuns,
+  );
   const runByName = new Map(
-    (snapshot.failedCheckRuns ?? []).map((check) => [check.name, check])
+    failedCheckRuns.map((check) => [check.name, check]),
   );
 
   const loggedCheckNames = new Set(
-    (snapshot.failedCheckRuns ?? [])
+    failedCheckRuns
       .slice(0, CI_AUTOFIX_MAX_LOGGED_FAILURES)
-      .map((check) => check.name)
+      .map((check) => check.name),
   );
   const evidence = await Promise.all(
     snapshot.failedChecks
@@ -382,7 +405,7 @@ export async function fetchPullRequestCiFailureEvidence(
           // useful evidence and the autofix must continue with the rest.
           return { name, logTail: null };
         }
-      })
+      }),
   );
   return boundCiAutofixEvidence(evidence);
 }

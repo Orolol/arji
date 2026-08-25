@@ -73,8 +73,11 @@ function deps(row: Routine): CiWatchDeps {
       status: "launched" as const,
       sessionId: "session-fix-1",
     })),
-    persistConfig: vi.fn((_id, config) => {
-      row.config = config;
+    persistState: vi.fn((_id, state) => {
+      row.config = JSON.stringify({
+        ...JSON.parse(row.config),
+        ciWatchState: state,
+      });
     }),
     notifyFailure: vi.fn(),
   };
@@ -165,6 +168,26 @@ describe("CI watch", () => {
     );
     expect(result.message).toContain("Checked 1 of 2 open pull requests");
     expect(result.message).toContain("1 could not be processed (PR #11)");
+  });
+
+  it("preserves a public config edit made while a sweep is running", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.notifyFailure).mockImplementationOnce(() => {
+      row.config = JSON.stringify({ intervalMinutes: 45 });
+    });
+
+    await runCiWatchRoutine(row, watchDeps);
+
+    expect(JSON.parse(row.config)).toMatchObject({
+      intervalMinutes: 45,
+      ciWatchState: {
+        "epic-open": {
+          headSha: "sha-1",
+          failureNotified: true,
+        },
+      },
+    });
   });
 
   it("reports a red transition after an initial green observation", async () => {
