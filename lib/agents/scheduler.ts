@@ -1,11 +1,13 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { settings } from "@/lib/db/schema";
+import { agentSessions, settings } from "@/lib/db/schema";
+import { isCodeProducingAgentType } from "@/lib/agent-config/constants";
 import {
   isSessionLifecycleConflictError,
   isSessionNotFoundError,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
+import { pullTicketBackIfPromoted } from "@/lib/workflow/automatic-transitions";
 import {
   AGENT_MAX_CONCURRENT_GLOBAL_SETTING_KEY,
   DEFAULT_MAX_CONCURRENT_AGENTS,
@@ -263,6 +265,40 @@ export class AgentScheduler {
           finalizeError
         );
       }
+    }
+
+    // Board effect: the owning-session exemption can leave a code-producing
+    // session's ticket in Review while the session is live. A launch that
+    // never settles means no in-process terminal handler will undo that
+    // promotion, so the safety net does — the same pullback the boot sweep
+    // performs for restart orphans. No-op unless the ticket is actually in
+    // Review; a ticket-less row (team builds) has nothing to address.
+    try {
+      const row = db
+        .select({
+          projectId: agentSessions.projectId,
+          epicId: agentSessions.epicId,
+          userStoryId: agentSessions.userStoryId,
+          agentType: agentSessions.agentType,
+        })
+        .from(agentSessions)
+        .where(eq(agentSessions.id, sessionId))
+        .get();
+      if (row?.epicId && isCodeProducingAgentType(row.agentType)) {
+        pullTicketBackIfPromoted({
+          projectId: row.projectId,
+          epicId: row.epicId,
+          scope: row.userStoryId ? "story" : "epic",
+          userStoryId: row.userStoryId,
+          sessionId,
+          reason: "Build session launch failed; returning ticket to in_progress",
+        });
+      }
+    } catch (pullbackError) {
+      console.error(
+        `[agent-scheduler] Failed to pull back ticket of crashed session ${sessionId}`,
+        pullbackError
+      );
     }
   }
 

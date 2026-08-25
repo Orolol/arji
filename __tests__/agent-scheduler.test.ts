@@ -174,6 +174,81 @@ describe("AgentScheduler dispatch", () => {
     await settle();
   });
 
+  it("pulls a promoted epic back out of review when a build launch fails", async () => {
+    // The owning-session exemption can leave the ticket in Review while
+    // this session is live; a launch that never settles means no in-process
+    // terminal handler will undo that promotion, so the safety net does.
+    const scheduler = new AgentScheduler({ getMaxConcurrent: () => 1 });
+    const started: string[] = [];
+
+    const a = controlledLaunch(started, "a");
+    scheduler.submit("proj-1", "a", a.launch);
+
+    // The crashed session's row (as re-read by the safety net) and the epic
+    // it promoted to Review before the crash.
+    dbMockState.getQueue = [
+      {
+        id: "a",
+        projectId: "proj-1",
+        epicId: "epic-a",
+        userStoryId: null,
+        agentType: "build",
+      },
+      { status: "review" },
+    ];
+
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    a.reject(new Error("spawn exploded"));
+    await settle();
+    consoleError.mockRestore();
+
+    expect(lifecycleMocks.markSessionTerminal).toHaveBeenCalledWith("a", {
+      success: false,
+      error: "spawn exploded",
+    });
+    // The promotion was undone through the workflow engine.
+    expect(dbMockState.updateCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: "in_progress" }),
+      ])
+    );
+  });
+
+  it("does not touch the board when a ticket-less launch fails", async () => {
+    // Team builds are dispatched ticket-less: no epicId on the row, so the
+    // safety net has nothing to pull back.
+    const scheduler = new AgentScheduler({ getMaxConcurrent: () => 1 });
+    const started: string[] = [];
+
+    const a = controlledLaunch(started, "a");
+    scheduler.submit("proj-1", "a", a.launch);
+
+    dbMockState.getQueue = [
+      {
+        id: "a",
+        projectId: "proj-1",
+        epicId: null,
+        userStoryId: null,
+        agentType: "team_build",
+      },
+    ];
+
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    a.reject(new Error("spawn exploded"));
+    await settle();
+    consoleError.mockRestore();
+
+    expect(lifecycleMocks.markSessionTerminal).toHaveBeenCalledWith("a", {
+      success: false,
+      error: "spawn exploded",
+    });
+    expect(dbMockState.updateCalls).toHaveLength(0);
+  });
+
   it("funnels synchronous launch throws into the failure path without breaking submit", async () => {
     const scheduler = new AgentScheduler({ getMaxConcurrent: () => 1 });
     const started: string[] = [];
