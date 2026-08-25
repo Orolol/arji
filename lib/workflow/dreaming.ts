@@ -738,6 +738,21 @@ export async function dispatchDreamingSession(
     ? crypto.randomUUID()
     : undefined;
 
+  // Re-check under NO await: the guard above ran before `resolveAgentPrompt`,
+  // and two triggers firing together (the Docs button while a night run
+  // finishes) could both have passed it during that suspension. From here to
+  // the insert everything is synchronous, so on Node's single thread this
+  // second look is the one that actually makes "never two dreams at once"
+  // true rather than merely likely.
+  if (hasPendingDream(input.projectId)) {
+    const reason = "a dreaming session is already pending for this project";
+    console.info(
+      `${DREAMING_LOG_PREFIX} skipped for project ${input.projectId}` +
+        ` (${input.trigger ?? "manual"}): ${reason} (raced)`
+    );
+    return { sessionId: null, dispatched: false, reason, sessionsAnalyzed: 0 };
+  }
+
   // Deliberately no epicId (see the module docblock): a dream spans every
   // ticket, so pinning it to one would both lie and hold that epic's
   // concurrency slot for the whole run.

@@ -435,6 +435,25 @@ describe("dispatchDreamingSession — guard rails", () => {
     expect(dreamSessions()).toHaveLength(1);
   });
 
+  it("lets only ONE of two simultaneous dispatches through", async () => {
+    seedSourceSession();
+
+    // Both calls pass the first guard before either inserts a row — the
+    // synchronous re-check right before createQueuedSession is what settles it.
+    const [first, second] = await Promise.all([
+      dispatchDreamingSession({ projectId, trigger: "manual" }),
+      dispatchDreamingSession({ projectId, trigger: "night_run" }),
+    ]);
+    await flushBackground();
+
+    const dispatched = [first, second].filter((r) => r.dispatched);
+    expect(dispatched).toHaveLength(1);
+    expect(dreamSessions()).toHaveLength(1);
+    expect(
+      [first, second].find((r) => !r.dispatched)!.reason
+    ).toContain("already pending");
+  });
+
   it("no-ops (without spending a session) when nothing happened since the last dream", async () => {
     const past = new Date(Date.now() - 60_000).toISOString();
     seedSourceSession({
