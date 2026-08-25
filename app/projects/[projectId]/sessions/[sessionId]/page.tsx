@@ -16,6 +16,7 @@ import {
   Brain,
 } from "lucide-react";
 import { PROVIDER_LABELS } from "@/lib/agent-config/constants";
+import { MEMORY_WRITER_AGENT_TYPES } from "@/lib/workflow/dreaming-constants";
 import { SessionOutcomeBadge } from "@/components/shared/SessionOutcomeBadge";
 import {
   ArijActionsList,
@@ -68,6 +69,7 @@ const AGENT_TYPE_LABELS: Record<string, string> = {
   merge: "Merge",
   tech_check: "Tech Check",
   memory_distill: "Memory Distill",
+  dreaming: "Dreaming",
   forensic: "Forensic",
 };
 
@@ -267,8 +269,15 @@ export default function SessionDetailPage() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Mirrors evaluateDistillSourceEligibility, which the endpoint
+              enforces: never a session that WROTE the memory (a distill of a
+              distill has no source learnings), and never one that stopped to
+              ask a question — those are `completed` too, but the agent is
+              still waiting for a reply, so there is nothing settled to fold
+              into a document every future prompt reads. */}
           {session.status === "completed" &&
-            session.agentType !== "memory_distill" && (
+            session.outcome !== "asked_question" &&
+            !MEMORY_WRITER_AGENT_TYPES.includes(session.agentType ?? "") && (
               <Button
                 variant="outline"
                 size="sm"
@@ -400,6 +409,26 @@ export default function SessionDetailPage() {
           <ScrollPane className="max-h-[200px] text-destructive/80">
             {session.error}
           </ScrollPane>
+        </div>
+      )}
+
+      {/* Failed without a captured error message (legacy rows predating the
+          failure-message synthesis, or a loss that escaped it): say so
+          explicitly instead of showing nothing — and point at the Raw Logs
+          tab, which keeps whatever the process actually wrote. */}
+      {!session.error && session.status === "failed" && (
+        <div className="rounded-[11px] border border-destructive/50 bg-band p-[14px]">
+          <div className="mb-2 flex items-center gap-2">
+            <XCircle className="h-4 w-4 text-destructive" />
+            <h3 className="text-[13px] font-medium text-destructive">
+              Failed — no error message captured
+            </h3>
+          </div>
+          <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+            This session failed before Arij could record an error message: the
+            process exited (or was lost) without writing stderr or text.
+            Whatever it did produce is kept in the Raw Logs tab below.
+          </p>
         </div>
       )}
 

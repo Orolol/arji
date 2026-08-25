@@ -19,6 +19,7 @@ import {
   createNightRunSummaryNotification,
 } from "@/lib/notifications/create";
 import { durationMsBetween, sendProjectWebhook } from "@/lib/webhooks/send";
+import { maybeDreamAfterNightRun } from "@/lib/workflow/dreaming";
 import {
   startPipelineRun,
   type PipelineStageResult,
@@ -429,8 +430,10 @@ export function startNightRun(input: StartNightRunInput): StartNightRunHandle {
   /**
    * Single terminal choke point (normal finish AND the crash safety net):
    * final counts to both registries, night ring snapshot, monitor cleanup,
-   * then EXACTLY ONE summary notification and ONE webhook. Never fires for
-   * restart-interrupted runs — the process (and this closure) died with them.
+   * then EXACTLY ONE summary notification, ONE webhook and — behind the
+   * `dreaming_after_night_run` setting — ONE cross-session dream. Never fires
+   * for restart-interrupted runs — the process (and this closure) died with
+   * them.
    */
   let finished = false;
   const finishRun = (abortInfo: {
@@ -492,6 +495,23 @@ export function startNightRun(input: StartNightRunInput): StartNightRunHandle {
       durationMs,
       error: abortInfo.abortReason,
       path: `/projects/${projectId}?nightRun=${runId}`,
+    });
+
+    // Fire-and-forget cross-session distillation of everything this run just
+    // taught (OFF unless `dreaming_after_night_run` says otherwise). It runs
+    // AFTER the summary on purpose: the run is already closed and counted, so
+    // a dream can neither delay the morning summary nor fail it.
+    //
+    // Because it starts past the wave engine's last `shouldAbortRun` check,
+    // the cap can no longer stop it there — so the cap and the user's stop are
+    // handed over explicitly and re-applied by the trigger before it spends
+    // anything. The run id still rides along as batch_run_id, so every
+    // DB-derived total for the run (detail view, sumNightRunCost) includes the
+    // dream; only the summary notification above, already sent, does not.
+    void maybeDreamAfterNightRun(projectId, runId, {
+      abortReason: abortInfo.abortReason,
+      costCapUsd: costCap,
+      spentUsd: totalCostUsd,
     });
   };
 

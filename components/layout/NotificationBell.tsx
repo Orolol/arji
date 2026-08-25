@@ -39,6 +39,19 @@ function NotificationRow({
           {notification.projectName}
         </p>
         <p className="text-[13px] leading-snug">{notification.title}</p>
+        {/* The failure message, not just the title: the bell is the
+            cross-project "what just went wrong" surface, so a failed
+            session's reason is shown right here. Clamped for layout; the
+            full text is on hover (title) and one click away in the session
+            view (targetUrl). */}
+        {notification.status === "failed" && notification.message && (
+          <p
+            title={notification.message}
+            className="mt-1 max-w-full overflow-hidden text-ellipsis whitespace-pre-wrap break-words rounded-[6px] bg-band px-2 py-1 font-mono text-[11px] leading-snug text-destructive/90 line-clamp-4"
+          >
+            {notification.message}
+          </p>
+        )}
         <p className="text-[11px] font-mono text-meta mt-0.5">
           {timeAgo(notification.createdAt)}
         </p>

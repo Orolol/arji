@@ -26,6 +26,7 @@ const {
   AUTO_MODE_ENABLED_SETTING_KEY,
   AUTO_MODE_REASON_PREFIX,
   AUTO_MODE_REVIEW_CONCURRENCY_SETTING_KEY,
+  AUTO_MODE_SMART_DISPATCH_SETTING_KEY,
   AUTO_MODE_SWEEP_INTERVAL_MS,
   AUTO_RUN_ID_PREFIX,
   DEFAULT_AUTO_BUILD_CONCURRENCY,
@@ -35,6 +36,7 @@ const {
   autoModeEnabledSettingKey,
   autoModeReviewAgentSettingKey,
   autoModeReviewConcurrencySettingKey,
+  autoModeSmartDispatchSettingKey,
   autoRunId,
   isAutoModeActivityReason,
   isAutoRunId,
@@ -76,6 +78,12 @@ describe("auto-mode setting keys", () => {
     expect(autoModeReviewAgentSettingKey("p1")).toBe(
       "auto_mode_review_agent:p1"
     );
+    expect(autoModeSmartDispatchSettingKey("p1")).toBe(
+      "auto_mode_smart_dispatch:p1"
+    );
+    expect(AUTO_MODE_SMART_DISPATCH_SETTING_KEY).toBe(
+      "auto_mode_smart_dispatch"
+    );
     expect(autoModeReviewConcurrencySettingKey("p1")).toBe(
       "auto_mode_review_concurrency:p1"
     );
@@ -110,7 +118,9 @@ describe("auto-mode setting keys", () => {
     expect(isAutoModeActivityReason(AUTO_MODE_REASONS.merged)).toBe(true);
 
     const emitted = Object.values(AUTO_MODE_REASONS).map((reason) =>
-      typeof reason === "function" ? reason(1 as never, "x" as never) : reason
+      typeof reason === "function"
+        ? reason(1 as never, "x" as never, 1 as never, 1 as never)
+        : reason
     );
     for (const reason of emitted) {
       expect(isAutoModeActivityReason(reason)).toBe(true);
@@ -210,6 +220,7 @@ describe("resolveAutoModeConfig (client-side, settings map)", () => {
       buildConcurrency: DEFAULT_AUTO_BUILD_CONCURRENCY,
       reviewAgent: null,
       reviewConcurrency: DEFAULT_AUTO_REVIEW_CONCURRENCY,
+      smartDispatch: false,
     });
   });
 });
@@ -222,6 +233,9 @@ describe("resolveAutoModeConfigForProject (server-side)", () => {
       buildConcurrency: DEFAULT_AUTO_BUILD_CONCURRENCY,
       reviewAgent: null,
       reviewConcurrency: DEFAULT_AUTO_REVIEW_CONCURRENCY,
+      // Informed selection is opt-in: an unattended mode must keep dispatching
+      // the way it did yesterday until someone turns this on.
+      smartDispatch: false,
     });
   });
 
@@ -237,7 +251,20 @@ describe("resolveAutoModeConfigForProject (server-side)", () => {
       buildConcurrency: 6,
       reviewAgent: "reviewer-agent",
       reviewConcurrency: DEFAULT_AUTO_REVIEW_CONCURRENCY,
+      smartDispatch: false,
     });
+  });
+
+  it("resolves auto_mode_smart_dispatch per project → global → OFF", () => {
+    expect(resolveAutoModeConfigForProject("p1").smartDispatch).toBe(false);
+
+    putSetting(AUTO_MODE_SMART_DISPATCH_SETTING_KEY, true);
+    expect(resolveAutoModeConfigForProject("p1").smartDispatch).toBe(true);
+
+    // A project may opt out of a global ON, like every other flag here.
+    putSetting(autoModeSmartDispatchSettingKey("p1"), false);
+    expect(resolveAutoModeConfigForProject("p1").smartDispatch).toBe(false);
+    expect(resolveAutoModeConfigForProject("p2").smartDispatch).toBe(true);
   });
 
   it("clamps stored concurrency values on read", () => {

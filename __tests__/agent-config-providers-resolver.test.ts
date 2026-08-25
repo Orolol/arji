@@ -8,43 +8,96 @@ vi.mock("@/lib/db", async () => {
   return dbModuleMock();
 });
 
-describe("Agent provider resolver", () => {
+describe("Agent assignment resolver", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
   });
 
-  it("resolveAgent uses project override first", async () => {
+  it("ignores a legacy project CLI default and uses the global named assignment", async () => {
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
-    dbMockState.getQueue = [{ provider: "codex" }];
+    dbMockState.getQueue = [
+      { provider: "gemini-cli", namedAgentId: null },
+      { provider: "claude-code", namedAgentId: "global-agent" },
+      {
+        id: "global-agent",
+        name: "Global builder",
+        provider: "codex",
+        model: "gpt-5",
+      },
+    ];
 
     const resolved = await resolveAgent("build", "proj-1");
     expect(resolved.provider).toBe("codex");
+    expect(resolved.name).toBe("Global builder");
   });
 
-  it("resolveAgent falls back to global", async () => {
+  it("ignores a legacy global CLI default and uses the seeded agent", async () => {
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
-    dbMockState.getQueue = [null, { provider: "codex" }];
+    dbMockState.getQueue = [
+      { provider: "codex", namedAgentId: null },
+      {
+        id: "seeded-agent",
+        name: "Claude Code",
+        provider: "claude-code",
+        model: "claude-opus-4-6",
+      },
+    ];
 
-    const resolved = await resolveAgent("chat", "proj-1");
-    expect(resolved.provider).toBe("codex");
+    const resolved = await resolveAgent("chat");
+    expect(resolved.provider).toBe("claude-code");
+    expect(resolved.namedAgentId).toBe("seeded-agent");
   });
 
   it("resolveAgent falls back to claude-code", async () => {
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
-    dbMockState.getQueue = [null, null];
+    dbMockState.getQueue = [null, null, null];
 
     const resolved = await resolveAgent("ticket_build", "proj-1");
     expect(resolved.provider).toBe("claude-code");
   });
 
-  it("listMergedProjectAgentProviders merges project > global > fallback", async () => {
+  it("lists project > global > fallback using named assignments only", async () => {
     const { listMergedProjectAgentProviders } = await import(
       "@/lib/agent-config/agent-resolution"
     );
     dbMockState.allQueue = [
-      [{ agentType: "chat", provider: "codex", scope: "global" }],
-      [{ agentType: "build", provider: "codex", scope: "proj-1" }],
+      [
+        {
+          agentType: "chat",
+          provider: "claude-code",
+          namedAgentId: "global-agent",
+          scope: "global",
+        },
+      ],
+      [
+        {
+          agentType: "build",
+          provider: "claude-code",
+          namedAgentId: "project-agent",
+          scope: "proj-1",
+        },
+        {
+          agentType: "ticket_build",
+          provider: "codex",
+          namedAgentId: null,
+          scope: "proj-1",
+        },
+      ],
+      [
+        {
+          id: "global-agent",
+          name: "Global chat",
+          provider: "codex",
+          model: "gpt-5",
+        },
+        {
+          id: "project-agent",
+          name: "Project builder",
+          provider: "gemini-cli",
+          model: "gemini-2.5-pro",
+        },
+      ],
     ];
 
     const merged = await listMergedProjectAgentProviders("proj-1");
@@ -52,7 +105,7 @@ describe("Agent provider resolver", () => {
     const chat = merged.find((x) => x.agentType === "chat");
     const ticketBuild = merged.find((x) => x.agentType === "ticket_build");
 
-    expect(build?.provider).toBe("codex");
+    expect(build?.provider).toBe("gemini-cli");
     expect(build?.source).toBe("project");
     expect(chat?.provider).toBe("codex");
     expect(chat?.source).toBe("global");

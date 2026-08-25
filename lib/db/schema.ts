@@ -389,6 +389,11 @@ export const reviewComments = sqliteTable(
     body: text("body").notNull(),
     author: text("author").notNull().default("user"), // user | agent
     status: text("status").notNull().default("open"), // open | resolved
+    // Review session that filed this finding (MCP submit_findings). NULL for
+    // user-authored rows and for anything written before migration 0032 —
+    // deliberately not backfilled, see that migration. No FK: a finding
+    // outlives the session that filed it.
+    agentSessionId: text("agent_session_id"),
     createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
   },
@@ -557,6 +562,11 @@ export const notifications = sqliteTable(
     agentType: text("agent_type"),
     status: text("status").notNull(), // completed | failed
     title: text("title").notNull(),
+    // Full error message for failed session notifications (0031). NULL for
+    // completed sessions and non-session notifications — the title alone is
+    // not enough for a failure: it is the one place a cross-project user
+    // sees "what went wrong" without opening the session.
+    message: text("message"),
     targetUrl: text("target_url").notNull(),
     createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   },

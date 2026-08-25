@@ -54,7 +54,10 @@ import {
   extractSessionUsage,
   resolveSessionOutput,
 } from "@/lib/claude/resolve-session-output";
-import { listSessionChunks } from "@/lib/agent-sessions/chunks";
+import {
+  listSessionChunks,
+  type AgentSessionStreamType,
+} from "@/lib/agent-sessions/chunks";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
@@ -74,6 +77,29 @@ export const FORENSIC_OUTPUT_TAIL_MAX_CHARS = 4000;
 
 /** Heading the diagnostic comment is filed under. */
 export const FORENSIC_COMMENT_HEADING = "**Forensic diagnostic**";
+
+/**
+ * Machine-readable link from a diagnostic back to the session it diagnoses.
+ *
+ * `ticket_comments.agent_session_id` already points at the FORENSIC session —
+ * the one that wrote the comment — so nothing recorded which session died.
+ * Readers were left inferring it from timestamps, which breaks whenever the
+ * forensic agent is slow or queued: the comment lands long after the run it is
+ * about, and a time-window match either misses it or hands it to the wrong
+ * rerun. An HTML comment keeps the link durable and exact while staying
+ * invisible in rendered markdown.
+ *
+ * Consumed by the Dreaming digest (lib/workflow/dreaming.ts).
+ */
+export function forensicDeadSessionMarker(deadSessionId: string): string {
+  return `<!-- arij:dead-session=${deadSessionId} -->`;
+}
+
+/** Extracts the diagnosed session id from a comment body, or null. */
+export function parseForensicDeadSessionId(content: string): string | null {
+  const match = content.match(/<!--\s*arij:dead-session=([^\s>]+?)\s*-->/);
+  return match ? match[1] : null;
+}
 
 /**
  * Activity-log reason written once a diagnostic lands — the shared trace
@@ -132,7 +158,7 @@ function refused(error: string): RunForensicResult {
  */
 export function readChunkTail(
   sessionId: string,
-  streamType: "raw" | "output",
+  streamType: AgentSessionStreamType,
   maxChars: number
 ): string | null {
   let joined: string;
@@ -374,6 +400,7 @@ export async function runForensic(
           epicId: input.epicId,
           userStoryId: input.userStoryId,
           sessionId,
+          deadSessionId: input.deadSessionId,
           diagnostic,
           createdAt: completedAt,
         });
@@ -409,11 +436,17 @@ export function postForensicDiagnostic(input: {
   projectId: string;
   epicId: string;
   userStoryId: string | null;
+  /** The forensic session that produced the diagnostic. */
   sessionId: string;
+  /** The session the diagnostic is ABOUT (see forensicDeadSessionMarker). */
+  deadSessionId?: string | null;
   diagnostic: string;
   createdAt?: string;
 }): void {
   const createdAt = input.createdAt ?? new Date().toISOString();
+  const marker = input.deadSessionId
+    ? `\n${forensicDeadSessionMarker(input.deadSessionId)}`
+    : "";
   try {
     db.insert(ticketComments)
       .values({
@@ -421,7 +454,7 @@ export function postForensicDiagnostic(input: {
         epicId: input.epicId,
         userStoryId: input.userStoryId,
         author: "agent",
-        content: `${FORENSIC_COMMENT_HEADING}\n\n${input.diagnostic}`,
+        content: `${FORENSIC_COMMENT_HEADING}${marker}\n\n${input.diagnostic}`,
         agentSessionId: input.sessionId,
         createdAt,
       })

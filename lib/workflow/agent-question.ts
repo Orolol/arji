@@ -29,6 +29,13 @@ export interface AskedQuestionOutcomeInput {
    * Logged as a from == to entry: the decision NOT to advance.
    */
   ticketStatus?: string;
+  /**
+   * Per-epic override of `ticketStatus`, keyed by epic id. A team build
+   * holds several epics that can sit in different columns — a single
+   * status would put the same guess on every feed. Falls back to
+   * `ticketStatus` for epics absent from the map.
+   */
+  ticketStatusByEpicId?: Record<string, string | undefined>;
 }
 
 /**
@@ -51,9 +58,11 @@ export function handleAskedQuestionOutcome(
     );
   }
 
-  const heldStatus = input.ticketStatus ?? "in_progress";
+  const fallbackStatus = input.ticketStatus ?? "in_progress";
   for (const epicId of input.epicIds) {
     if (!epicId) continue;
+    const heldStatus =
+      input.ticketStatusByEpicId?.[epicId] ?? fallbackStatus;
     // logTransition is itself best-effort (catches internally).
     logTransition({
       projectId: input.projectId,

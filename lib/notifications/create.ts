@@ -1,4 +1,4 @@
-import { eq, desc } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import {
   agentSessions,
@@ -11,6 +11,10 @@ import { AGENT_TYPE_LABELS } from "@/lib/agent-config/constants";
 import { formatDocumentMention } from "@/lib/documents/mention-format";
 import { durationMsBetween, sendProjectWebhook } from "@/lib/webhooks/send";
 import { NIGHT_STOPPED_ABORT_REASON } from "@/lib/night/constants";
+import {
+  DREAMING_AGENT_TYPE,
+  MEMORY_DREAMED_TITLE,
+} from "@/lib/workflow/dreaming-constants";
 import type { TicketExecutionStatus } from "@/lib/dependencies/scheduler";
 
 const MAX_NOTIFICATIONS = 200;
@@ -246,6 +250,22 @@ function loadSessionNotificationContext(
  * Looks up the session, project, and optional epic context, then inserts
  * a notification row and prunes old entries beyond MAX_NOTIFICATIONS.
  *
+ * A FAILED notification carries the full error message (0031
+ * `notifications.message`) so the bell — the cross-project "what just went
+ * wrong" surface — explains the failure instead of showing a bare title.
+ * Thanks to the failure-message synthesis in
+ * lib/agent-sessions/lifecycle.ts, a new failed session always has a
+ * non-NULL error (explicit no-output wording included), so the message is
+ * never a bare label.
+ *
+ * Idempotent per session: the terminal hook (instrumentation.ts) creates
+ * the notification the moment the session row is finalized, and the
+ * dispatch routes' emitSessionFailed/emitSessionCompleted then call this
+ * same function. Rows created here always carry a non-NULL message for
+ * failures, so "a row for this session with a message" is exactly "the
+ * failure notification already exists" — other session rows (stalled-watchdog
+ * alarms, merge-parked, …) carry NULL and never suppress it.
+ *
  * Sessions whose delivery verdict is `asked_question` are skipped here: the
  * question-flavored notification is owned by
  * `createAskedQuestionNotificationFromSession` (invoked by the workflow's
@@ -253,6 +273,19 @@ function loadSessionNotificationContext(
  * for a run that actually stopped to ask the user something.
  */
 export function createNotificationFromSession(sessionId: string): void {
+  const existing = db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.sessionId, sessionId),
+        isNotNull(notifications.message)
+      )
+    )
+    .limit(1)
+    .get();
+  if (existing) return;
+
   const context = loadSessionNotificationContext(sessionId);
   if (!context) return;
   const { session, projectName, epicTitle, epicReadableId } = context;
@@ -274,6 +307,9 @@ export function createNotificationFromSession(sessionId: string): void {
       agentType: session.agentType,
       status: notifStatus,
       title,
+      // The full failure reason, not just the title — see the doc above.
+      // NULL for completed sessions: there is nothing to explain.
+      message: notifStatus === "failed" ? session.error : null,
       targetUrl,
     })
     .run();
@@ -527,6 +563,78 @@ export function createStalledSessionNotification(
       status: "failed",
       title: buildStalledTitle(staleMinutes, epicTitle, epicReadableId),
       targetUrl: `/projects/${session.projectId}/sessions/${session.id}`,
+    })
+    .run();
+
+  pruneNotifications();
+}
+
+export interface MemoryDreamedNotificationInput {
+  projectId: string;
+  /** The 'dreaming' session that rewrote the document. */
+  sessionId: string;
+  /** Sessions the digest carried. */
+  sessionsAnalyzed: number;
+  /** Length of the memory the dream replaced (0 when there was none). */
+  previousChars: number;
+  /** Length of the memory now stored. */
+  newChars: number;
+}
+
+/**
+ * Title for a memory rewritten by a dream — the "summary of the change" the
+ * user needs before deciding whether to open it.
+ *
+ * Examples:
+ *   "Project memory updated by Dreaming — 12 sessions analyzed, 3200 → 5100 chars"
+ *   "Project memory updated by Dreaming — 4 sessions analyzed, written from scratch (900 chars)"
+ */
+export function buildMemoryDreamedTitle(
+  input: Pick<
+    MemoryDreamedNotificationInput,
+    "sessionsAnalyzed" | "previousChars" | "newChars"
+  >
+): string {
+  const sessions = `${input.sessionsAnalyzed} session${
+    input.sessionsAnalyzed === 1 ? "" : "s"
+  } analyzed`;
+  const change =
+    input.previousChars > 0
+      ? `${input.previousChars} → ${input.newChars} chars`
+      : `written from scratch (${input.newChars} chars)`;
+  return `${MEMORY_DREAMED_TITLE} — ${sessions}, ${change}`;
+}
+
+/**
+ * Notification for a dream that actually replaced the project memory (a dream
+ * that failed, stayed silent or found nothing new never gets here — see
+ * lib/workflow/dreaming.ts).
+ *
+ * Deep-links to the project's Docs tab, where the memory card shows the new
+ * text and lets the user edit or revert it: the actionable place is the
+ * document, not the (already finished) session. Status "completed" — this is
+ * good news, not an alarm.
+ */
+export function createMemoryDreamedNotification(
+  input: MemoryDreamedNotificationInput
+): void {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: input.sessionId,
+      agentType: DREAMING_AGENT_TYPE,
+      status: "completed",
+      title: buildMemoryDreamedTitle(input),
+      targetUrl: `/projects/${input.projectId}/documents`,
     })
     .run();
 

@@ -1,11 +1,13 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
+import { isCodeProducingAgentType } from "@/lib/agent-config/constants";
 import {
   isSessionLifecycleConflictError,
   markSessionCancelled,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
+import { pullTicketBackIfPromoted } from "@/lib/workflow/automatic-transitions";
 
 /**
  * Reason string persisted on sessions cancelled by the boot sweep.
@@ -109,6 +111,22 @@ export function cancelOrphanedQueuedSessions(): number {
  * never produce chunks again, and the watchdog would flag it as stalled
  * forever. Mark them failed (outcome 'error') so the UI tells the truth.
  *
+ * Board effect: a zombie build may have promoted its own ticket to Review
+ * before the server died (owning-session exemption). The in-process
+ * terminal handler that would normally undo that on failure never ran, so
+ * the sweep pulls such a promotion back through pullTicketBackIfPromoted —
+ * the fourth terminal path, and the one that fires precisely when the
+ * in-process handler could not. Full Auto starts in the same boot and
+ * would otherwise pick the orphaned review ticket up as a review candidate.
+ *
+ * Known trade-off, deliberately accepted: `status = 'running'` cannot
+ * distinguish "the handler never ran" from "the handler promoted the
+ * ticket but its own lifecycle write failed" (the row then stays
+ * `running` while the board is already in Review). In the second case
+ * this sweep demotes delivered work; it errs toward `in_progress`
+ * because the alternative — trusting an unverifiable promotion — can
+ * feed unverified work into Full Auto's merge path.
+ *
  * Once per process, like `cancelOrphanedQueuedSessions`: a repeat call would
  * kill sessions started by live requests.
  */
@@ -118,7 +136,13 @@ export function failOrphanedRunningSessions(): number {
   state.runningSwept = true;
 
   const zombies = db
-    .select({ id: agentSessions.id })
+    .select({
+      id: agentSessions.id,
+      projectId: agentSessions.projectId,
+      epicId: agentSessions.epicId,
+      userStoryId: agentSessions.userStoryId,
+      agentType: agentSessions.agentType,
+    })
     .from(agentSessions)
     .where(eq(agentSessions.status, "running"))
     .all();
@@ -136,6 +160,32 @@ export function failOrphanedRunningSessions(): number {
       if (!isSessionLifecycleConflictError(error)) {
         console.error(
           `[boot-cleanup] Failed to mark zombie session ${zombie.id}`,
+          error
+        );
+      }
+      // A row that could not be marked terminal here was not marked by
+      // anyone else either (nothing else runs at boot) — leave the board
+      // untouched and let the next boot retry the whole sweep.
+      continue;
+    }
+    // Pull the zombie's mid-run review promotion back, if any — only for
+    // rows this sweep actually finalized. No-op unless the ticket is
+    // actually in Review; a code-producing zombie without an epicId
+    // (team builds) has nothing to address. One bad row must not abort
+    // the sweep, matching the loop's existing style.
+    if (zombie.epicId && isCodeProducingAgentType(zombie.agentType)) {
+      try {
+        pullTicketBackIfPromoted({
+          projectId: zombie.projectId,
+          epicId: zombie.epicId,
+          scope: zombie.userStoryId ? "story" : "epic",
+          userStoryId: zombie.userStoryId,
+          sessionId: zombie.id,
+          reason: `Build session was ${ORPHANED_BY_RESTART_REASON}; returning ticket to in_progress`,
+        });
+      } catch (error) {
+        console.error(
+          `[boot-cleanup] Failed to pull back ticket of zombie session ${zombie.id}`,
           error
         );
       }

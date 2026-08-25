@@ -39,6 +39,7 @@ describe("createNotificationFromSession() webhook emit point", () => {
 
   it("fires session.completed with epic, session, duration and deep-link path", () => {
     dbMockState.getQueue.push(
+      undefined, // idempotency check: no message-bearing row yet
       {
         id: "s1",
         projectId: "p1",
@@ -69,6 +70,7 @@ describe("createNotificationFromSession() webhook emit point", () => {
 
   it("fires session.failed with the session error and the QA deep link", () => {
     dbMockState.getQueue.push(
+      undefined, // idempotency check
       {
         id: "s2",
         projectId: "p1",
@@ -96,10 +98,14 @@ describe("createNotificationFromSession() webhook emit point", () => {
   });
 
   it("does not fire when the session or project is missing", () => {
-    dbMockState.getQueue.push(undefined);
+    dbMockState.getQueue.push(
+      undefined, // idempotency check
+      undefined // session lookup
+    );
     createNotificationFromSession("missing");
 
     dbMockState.getQueue.push(
+      undefined, // idempotency check
       {
         id: "s3",
         projectId: "p-gone",

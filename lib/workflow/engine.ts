@@ -44,6 +44,23 @@ export interface TransitionContext {
   requireResolvedComments?: boolean;
   /** Whether there is a queued/running code-producing session on this ticket */
   hasRunningSession: boolean;
+  /**
+   * True only when the acting session is itself the sole queued/running
+   * code-producing session on the ticket — i.e. the owner the in_progress
+   * lock exists to protect. The owner may promote its own ticket to review
+   * (the move the terminal handler makes once the work is committed); any
+   * other target column — and any other actor, or any ticket with a second
+   * live session — stays locked, so a dead or cancelled run can never
+   * strand its work outside the columns the terminal handlers understand.
+   */
+  ownsInProgress?: boolean;
+  /**
+   * True when the lock fires because the sole live code-producing session
+   * is a story build and the context targets its parent epic: ownership
+   * stops at the story, so no concurrency wording applies — the refusal
+   * is about scope, not about another session.
+   */
+  storyOwnershipBoundary?: boolean;
   /** The actor initiating the transition */
   actor: "user" | "agent" | "system";
   /** The source route/action triggering this transition */
@@ -54,13 +71,26 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
   // A build session owns in_progress until its terminal handler promotes or
   // holds the ticket. Letting a concurrent drag move it would recreate the
   // active-session/orphaned-column state this engine is meant to prevent.
+  // The owning session itself is the owner the lock protects — but only the
+  // promotion to review is exempt: the move the terminal handler makes once
+  // the work is committed. A demote to todo/backlog by the owner would leave
+  // the live run (and its eventual terminal handler) stranded in the wrong
+  // column, so it stays locked, as does any move by anyone else or by a
+  // ticket with a second live session.
   (ctx) => {
     if (
       ctx.fromStatus === "in_progress" &&
       ctx.toStatus !== "in_progress" &&
       ctx.hasRunningSession
     ) {
-      return "Cannot move an in-progress ticket while an agent session is queued or running.";
+      if (ctx.ownsInProgress && ctx.toStatus === "review") return null;
+      if (ctx.ownsInProgress) {
+        return "The owning session may only move its in-progress ticket to review while a session is live on it.";
+      }
+      if (ctx.storyOwnershipBoundary) {
+        return "A story build may only move its own story; the parent epic is promoted once every sibling story reaches review.";
+      }
+      return "Cannot move an in-progress ticket while another agent session is queued or running.";
     }
     return null;
   },

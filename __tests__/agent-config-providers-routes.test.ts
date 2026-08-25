@@ -87,6 +87,46 @@ describe("Agent provider default routes", () => {
     expect(json.data.provider).toBe("codex");
   });
 
+  it("PUT assigns a named agent to a global role", async () => {
+    const { PUT } = await import(
+      "@/app/api/agent-config/providers/[agentType]/route"
+    );
+    dbMockState.getQueue = [
+      { id: "agent-1", provider: "codex" },
+      null,
+      {
+        id: "apd-1",
+        agentType: "build",
+        provider: "codex",
+        namedAgentId: "agent-1",
+        scope: "global",
+      },
+    ];
+
+    const res = await PUT(
+      mockJsonRequest({ namedAgentId: "agent-1" }),
+      mockRouteContext({ agentType: "build" })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.namedAgentId).toBe("agent-1");
+  });
+
+  it("DELETE clears a global role assignment", async () => {
+    const { DELETE } = await import(
+      "@/app/api/agent-config/providers/[agentType]/route"
+    );
+
+    const res = await DELETE(
+      mockNextRequest({ method: "DELETE" }),
+      mockRouteContext({ agentType: "build" })
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.ok).toBe(true);
+  });
+
   it("GET /api/projects/[projectId]/agent-config/providers returns merged defaults", async () => {
     dbMockState.getQueue = [{ id: "proj-1" }];
     mockProviderHelpers.listMergedProjectAgentProviders.mockResolvedValue([
@@ -136,5 +176,20 @@ describe("Agent provider default routes", () => {
     expect(res.status).toBe(200);
     expect(json.data.scope).toBe("proj-1");
     expect(json.data.provider).toBe("codex");
+  });
+
+  it("DELETE clears a project role assignment", async () => {
+    const { DELETE } = await import(
+      "@/app/api/projects/[projectId]/agent-config/providers/[agentType]/route"
+    );
+    dbMockState.getQueue = [{ id: "proj-1" }];
+
+    const res = await DELETE(
+      mockNextRequest({ method: "DELETE" }),
+      mockRouteContext({ projectId: "proj-1", agentType: "chat" })
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.ok).toBe(true);
   });
 });

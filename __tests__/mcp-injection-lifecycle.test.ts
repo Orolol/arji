@@ -168,6 +168,48 @@ async function resetAll() {
 describe("processManager.start() — MCP injection gating", () => {
   beforeEach(resetAll);
 
+  /**
+   * The memory writers are strict document rewriters: their whole response is
+   * written verbatim into the memory document, and neither owns a ticket. The
+   * tools section is APPENDED, so injecting it would put "post comments, move
+   * the ticket" AFTER the "respond with the document body and nothing else"
+   * contract — the last thing the agent reads.
+   *
+   * The exemption constant has its own unit test; this one pins that
+   * processManager.start() actually consults it, with real session rows, so a
+   * regression that stopped calling it could not pass.
+   */
+  it.each(["dreaming", "memory_distill"])(
+    "injects nothing at all for the %s agent type",
+    (agentType) => {
+      pmState.sessionRow = sessionRow({ agentType, epicId: null });
+
+      processManager.start("s-mem", {
+        mode: "plan",
+        prompt: "BASE PROMPT ending with the output contract",
+      });
+
+      // No server config, so the CLI is spawned without the tool channel...
+      expect(spawnedMcp()).toBeUndefined();
+      // ...and the prompt still ENDS with its own contract.
+      const prompt = pmState.spawnedOptions[0].prompt as string;
+      expect(prompt).toBe("BASE PROMPT ending with the output contract");
+      expect(prompt).not.toContain("## Arij tools");
+      expect(prompt).not.toContain("mcp__arij__");
+    },
+  );
+
+  it("still injects for a ticket-scoped plan-mode session (the exemption is by agent type, not mode)", () => {
+    pmState.sessionRow = sessionRow({ agentType: "review_code" });
+
+    processManager.start("s-review", { mode: "plan", prompt: "BASE PROMPT" });
+
+    expect(spawnedMcp()).toBeDefined();
+    expect(pmState.spawnedOptions[0].prompt as string).toContain(
+      "## Arij tools"
+    );
+  });
+
   it("injects config + prompt section + resolvable token for claude-code (setting absent = on)", () => {
     pmState.sessionRow = sessionRow();
 

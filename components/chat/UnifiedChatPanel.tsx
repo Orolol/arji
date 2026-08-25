@@ -118,10 +118,8 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       startDrag,
       resetPanelRatio,
       panelWidthPx,
-      detailPanelWidthPx,
     } = usePanelLayout({
       projectId,
-      dragTargetsChat: panelContentMode === "chat",
       conversations,
       activeId,
       setActiveId,
@@ -396,14 +394,25 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     );
 
     if (panelState === "expanded") {
-      if (isMobile && panelContentMode === "chat") {
+      // On mobile the panel becomes a full-width Sheet in BOTH views (chat
+      // and shared ticket). The shared view must not fall through to the
+      // desktop split below the breakpoint: its width clamps assume a
+      // container of ~706px+ and would compute an unusable panel width
+      // (or a negative one), pushing the ticket out of the board row.
+      if (isMobile) {
         return (
           <div ref={containerRef} className="relative h-full w-full overflow-hidden">
             <div className="h-full w-full">{children}</div>
             <Sheet
               open
               onOpenChange={(open) => {
-                if (!open) {
+                if (open) return;
+                // Mirror the desktop Escape handling: dismissing the shared
+                // view closes the ticket (the parent syncs back to chat and
+                // collapses the panel); dismissing chat collapses the panel.
+                if (panelContentMode === "shared") {
+                  sharedPanelView?.onClose?.();
+                } else {
                   setPanelState("collapsed");
                 }
               }}
@@ -414,49 +423,46 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                 className="w-full max-w-none p-0 sm:max-w-none"
                 data-testid="unified-panel-mobile-sheet"
               >
-                {chatWorkspace}
+                {panelContentMode === "shared"
+                  ? sharedPanelView?.content
+                  : chatWorkspace}
               </SheetContent>
             </Sheet>
           </div>
         );
       }
 
-      const boardWidthStyle =
-        panelContentMode === "shared"
-          ? { width: `calc(100% - ${detailPanelWidthPx}px)` }
-          : { width: `calc(100% - ${panelWidthPx}px - ${DIVIDER_WIDTH}px)` };
-      const panelWidthStyle =
-        panelContentMode === "shared" ? detailPanelWidthPx : panelWidthPx;
+      // Chat and shared ticket views are the same container: one width for
+      // both, so back-and-forth switching never changes the layout.
+      const panelWidth = panelWidthPx;
+      const boardWidthStyle = {
+        width: `calc(100% - ${panelWidth}px - ${DIVIDER_WIDTH}px)`,
+      };
 
       return (
         <div ref={containerRef} className="flex h-full w-full overflow-hidden">
           <div
-            className={cn(
-              "h-full overflow-hidden",
-              panelContentMode === "shared" ? "min-w-0" : "min-w-[400px]",
-            )}
+            className="h-full min-w-[400px] overflow-hidden"
             style={boardWidthStyle}
           >
             {children}
           </div>
 
-          {panelContentMode === "chat" && (
-            <button
-              type="button"
-              aria-label="Resize panel"
-              data-testid="panel-divider"
-              onMouseDown={startDrag}
-              onDoubleClick={resetPanelRatio}
-              className={cn(
-                "h-full w-[6px] shrink-0 border-l border-r border-border bg-band transition-colors",
-                isDragging ? "bg-primary/30" : "hover:bg-primary/20",
-              )}
-            />
-          )}
+          <button
+            type="button"
+            aria-label="Resize panel"
+            data-testid="panel-divider"
+            onMouseDown={startDrag}
+            onDoubleClick={resetPanelRatio}
+            className={cn(
+              "h-full w-[6px] shrink-0 border-l border-r border-border bg-band transition-colors",
+              isDragging ? "bg-primary/30" : "hover:bg-primary/20",
+            )}
+          />
 
           <aside
             className="h-full min-h-0 shrink-0 border-l border-border bg-card transition-[width] duration-200 motion-reduce:transition-none"
-            style={{ width: panelWidthStyle }}
+            style={{ width: panelWidth }}
             data-testid={
               panelContentMode === "shared"
                 ? "unified-panel-shared"

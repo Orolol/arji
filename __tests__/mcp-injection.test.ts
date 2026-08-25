@@ -35,6 +35,7 @@ vi.mock("child_process", () => {
 import { buildClaudeArgs, prepareClaudeSpawn, spawnClaude } from "@/lib/claude/spawn";
 import { CodexProvider } from "@/lib/providers/codex";
 import { arijToolsSection } from "@/lib/claude/prompt-sections";
+import { isMcpExemptAgentType } from "@/lib/workflow/dreaming-constants";
 import {
   ARIJ_MCP_ALLOWED_TOOL_NAMES,
   ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
@@ -409,12 +410,36 @@ describe("arijToolsSection", () => {
     expect(text).not.toContain("Overall Verdict");
   });
 
+  it.each(["build", "ticket_build"])(
+    "tells %s sessions they may move their own ticket to Review",
+    (agentType) => {
+      const text = arijToolsSection(agentType);
+      expect(text).toContain("You may move the ticket you are building");
+      expect(text).toContain("move it to Review");
+      expect(text).toContain("update_ticket_status");
+      expect(text).toContain("pending");
+    }
+  );
+
+  it("does not promise the ticket move to team_build (its session row has no ticket)", () => {
+    // Team builds are dispatched ticket-less: the session row carries no
+    // epicId, so the MCP token cannot address a ticket and
+    // update_ticket_status would 400 with MISSING_TICKET. The prompt must
+    // not tell the team agent to make a move it cannot make — but the base
+    // tool documentation still applies.
+    const text = arijToolsSection("team_build");
+    expect(text).not.toContain("You may move the ticket you are building");
+    expect(text).toContain("mcp__arij__*");
+    expect(text).toContain("update_ticket_status");
+  });
+
   it.each(["review_security", "review_code", "review_compliance", "review_feature"])(
     "adds the submit_findings + Overall Verdict sentence for %s",
     (agentType) => {
       const text = arijToolsSection(agentType);
       expect(text).toContain("submit_findings");
       expect(text).toContain("'**Overall Verdict: …**'");
+      expect(text).not.toContain("You may move the ticket you are building");
     },
   );
 
@@ -424,8 +449,37 @@ describe("arijToolsSection", () => {
       const text = arijToolsSection(agentType);
       expect(text).toContain("mcp__arij__*");
       expect(text).not.toContain("submit_findings");
+      expect(text).not.toContain("You may move the ticket you are building");
     },
   );
+});
+
+/**
+ * The tools section is APPENDED to the prompt. For an agent whose entire
+ * response is written verbatim into a document, that would land after the
+ * "respond with the document body and nothing else" contract and end the
+ * prompt with ticket-tool guidance — for a session that owns no ticket.
+ */
+describe("isMcpExemptAgentType", () => {
+  it("exempts the memory writers", () => {
+    expect(isMcpExemptAgentType("dreaming")).toBe(true);
+    expect(isMcpExemptAgentType("memory_distill")).toBe(true);
+  });
+
+  it("leaves every ticket-scoped agent on the channel", () => {
+    for (const agentType of [
+      "build",
+      "ticket_build",
+      "team_build",
+      "review_code",
+      "merge",
+      "forensic",
+      null,
+      undefined,
+    ]) {
+      expect(isMcpExemptAgentType(agentType)).toBe(false);
+    }
+  });
 });
 
 describe("parseMcpToolsEnabledSetting — default ON", () => {

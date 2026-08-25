@@ -109,7 +109,7 @@ vi.mock("@/lib/workflow/log", () => ({ logTransition: vi.fn() }));
 vi.mock("@/lib/workflow/automatic-transitions", () => ({
   transitionBuildStarted: vi.fn(),
   finalizeBuildTerminalOutcome: vi.fn(() => ({ kind: "completed" })),
-  logBuildFailure: vi.fn(),
+  holdFailedBuild: vi.fn(),
   resolveBuildSessionResult: vi.fn(() => ({ success: true, error: null })),
   WorkflowTransitionError: class WorkflowTransitionError extends Error {},
 }));

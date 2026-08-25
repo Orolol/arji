@@ -93,11 +93,17 @@ describe("resolveAgentByNamedId", () => {
   it("falls through to resolveAgent when namedAgentId is invalid (not found)", async () => {
     // Named agent lookup: null (not found)
     // resolveAgent project scope: null
-    // resolveAgent global scope: has a default
+    // resolveAgent global scope: has a named assignment
     dbMockState.getQueue = [
       null, // named agent not found for "deleted-id"
       null, // project scope default not found
-      { provider: "codex", namedAgentId: null }, // global scope default
+      { provider: "codex", namedAgentId: "global-agent" },
+      {
+        id: "global-agent",
+        name: "Global Codex",
+        provider: "codex",
+        model: "",
+      },
     ];
 
     const { resolveAgentByNamedId } = await import(
@@ -106,8 +112,8 @@ describe("resolveAgentByNamedId", () => {
     const result = resolveAgentByNamedId("build", "proj-1", "deleted-id");
 
     expect(result.provider).toBe("codex");
-    expect(result.model).toBeUndefined();
-    expect(result.name).toBeUndefined();
+    expect(result.model).toBe("");
+    expect(result.name).toBe("Global Codex");
   });
 
   it("falls through to resolveAgent when namedAgentId is null", async () => {
@@ -138,9 +144,15 @@ describe("resolveAgentByNamedId", () => {
 
   it("falls through to resolveAgent when namedAgentId is undefined", async () => {
     // No named agent lookup — goes straight to resolveAgent
-    // resolveAgent global scope: has a default (no projectId provided)
+    // A legacy raw default is ignored in favour of the seeded agent.
     dbMockState.getQueue = [
       { provider: "gemini-cli", namedAgentId: null }, // global scope default
+      {
+        id: "seeded-cc",
+        name: "Claude Code",
+        provider: "claude-code",
+        model: "claude-sonnet-4-5",
+      },
     ];
 
     const { resolveAgentByNamedId } = await import(
@@ -148,15 +160,21 @@ describe("resolveAgentByNamedId", () => {
     );
     const result = resolveAgentByNamedId("chat", undefined, undefined);
 
-    expect(result.provider).toBe("gemini-cli");
-    expect(result.model).toBeUndefined();
+    expect(result.provider).toBe("claude-code");
+    expect(result.name).toBe("Claude Code");
   });
 
   it("falls through to resolveAgent when namedAgentId is empty string", async () => {
     // Empty string is falsy, so no named agent lookup
-    // resolveAgent: no project scope, global scope has default
+    // Legacy raw defaults no longer pin a role invisibly.
     dbMockState.getQueue = [
       { provider: "codex", namedAgentId: null }, // global scope default
+      {
+        id: "seeded-cc",
+        name: "Claude Code",
+        provider: "claude-code",
+        model: "claude-sonnet-4-5",
+      },
     ];
 
     const { resolveAgentByNamedId } = await import(
@@ -164,8 +182,8 @@ describe("resolveAgentByNamedId", () => {
     );
     const result = resolveAgentByNamedId("chat", undefined, "");
 
-    expect(result.provider).toBe("codex");
-    expect(result.model).toBeUndefined();
+    expect(result.provider).toBe("claude-code");
+    expect(result.name).toBe("Claude Code");
   });
 });
 
@@ -179,16 +197,23 @@ describe("resolveAgent fallback chain", () => {
     resetDbMockState();
   });
 
-  it("uses project default when available", async () => {
+  it("ignores a project default that has no named agent", async () => {
     dbMockState.getQueue = [
       { provider: "gemini-cli", namedAgentId: null }, // project scope
+      null, // global scope
+      {
+        id: "seeded-cc",
+        name: "Claude Code",
+        provider: "claude-code",
+        model: "claude-sonnet-4-5",
+      },
     ];
 
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
     const result = resolveAgent("build", "proj-1");
 
-    expect(result.provider).toBe("gemini-cli");
-    expect(result.model).toBeUndefined();
+    expect(result.provider).toBe("claude-code");
+    expect(result.name).toBe("Claude Code");
   });
 
   it("uses project default with named agent", async () => {
@@ -211,17 +236,23 @@ describe("resolveAgent fallback chain", () => {
     expect(result.name).toBe("Project Agent");
   });
 
-  it("falls to global default when project default is missing", async () => {
+  it("ignores a global default without a named agent", async () => {
     dbMockState.getQueue = [
       null, // project scope: not found
       { provider: "codex", namedAgentId: null }, // global scope
+      {
+        id: "seeded-cc",
+        name: "Claude Code",
+        provider: "claude-code",
+        model: "claude-sonnet-4-5",
+      },
     ];
 
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
     const result = resolveAgent("build", "proj-1");
 
-    expect(result.provider).toBe("codex");
-    expect(result.model).toBeUndefined();
+    expect(result.provider).toBe("claude-code");
+    expect(result.name).toBe("Claude Code");
   });
 
   it("falls to global default with named agent when project default is missing", async () => {
@@ -310,23 +341,30 @@ describe("resolveAgent fallback chain", () => {
     expect(result).toEqual({ provider: "claude-code", namedAgentId: null });
   });
 
-  it("falls back to raw provider when project default has deleted named agent", async () => {
+  it("falls through when a project assignment points to a deleted agent", async () => {
     // project scope: has default referencing a deleted named agent
     // named agent lookup: null (deleted)
     dbMockState.getQueue = [
       { provider: "codex", namedAgentId: "deleted-agent" },
       null, // named agent not found
+      { provider: "claude-code", namedAgentId: "global-agent" },
+      {
+        id: "global-agent",
+        name: "Global Agent",
+        provider: "gemini-cli",
+        model: "gemini-2.5-pro",
+      },
     ];
 
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
     const result = resolveAgent("build", "proj-1");
 
-    expect(result.provider).toBe("codex");
-    expect(result.model).toBeUndefined();
-    expect(result.name).toBeUndefined();
+    expect(result.provider).toBe("gemini-cli");
+    expect(result.model).toBe("gemini-2.5-pro");
+    expect(result.name).toBe("Global Agent");
   });
 
-  it("falls back to raw provider when global default has deleted named agent", async () => {
+  it("falls through when a global assignment points to a deleted agent", async () => {
     // project scope: null
     // global scope: has default referencing a deleted named agent
     // named agent lookup: null (deleted)
@@ -334,14 +372,20 @@ describe("resolveAgent fallback chain", () => {
       null, // project scope
       { provider: "gemini-cli", namedAgentId: "deleted-agent" },
       null, // named agent not found
+      {
+        id: "seeded-cc",
+        name: "Claude Code",
+        provider: "claude-code",
+        model: "claude-sonnet-4-5",
+      },
     ];
 
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
     const result = resolveAgent("build", "proj-1");
 
-    expect(result.provider).toBe("gemini-cli");
-    expect(result.model).toBeUndefined();
-    expect(result.name).toBeUndefined();
+    expect(result.provider).toBe("claude-code");
+    expect(result.model).toBe("claude-sonnet-4-5");
+    expect(result.name).toBe("Claude Code");
   });
 });
 

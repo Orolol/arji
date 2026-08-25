@@ -13,7 +13,13 @@ vi.mock("@/lib/db", async () => {
 });
 
 const { db, ensureDbReady } = await import("@/lib/db");
-const { projects, agentSessions } = await import("@/lib/db/schema");
+const {
+  agentSessions,
+  epics,
+  projects,
+  ticketActivityLog,
+  userStories,
+} = await import("@/lib/db/schema");
 const {
   cancelOrphanedQueuedSessions,
   failOrphanedRunningSessions,
@@ -153,6 +159,167 @@ describe("once-per-process guard", () => {
     // The running sweep has not run yet — its own flag is still unset.
     expect(failOrphanedRunningSessions()).toBe(1);
     logSpy.mockRestore();
+  });
+});
+
+describe("failOrphanedRunningSessions — mid-run promotion rollback", () => {
+  // The owning-session exemption lets a live build promote its own ticket
+  // to Review. If the server dies before the in-process terminal handler
+  // runs, the sweep is the last place that can undo that promotion —
+  // Full Auto starts in the same boot and would otherwise pick the
+  // orphaned review ticket up as a review-and-merge candidate.
+
+  function seedTicket(epicStatus: string, storyStatuses: string[] = []) {
+    counter += 1;
+    const projectId = `proj-pull-${counter}`;
+    const epicId = `epic-pull-${counter}`;
+    db.insert(projects)
+      .values({ id: projectId, name: "Pull", gitRepoPath: "/repos/pull" })
+      .run();
+    db.insert(epics)
+      .values({
+        id: epicId,
+        projectId,
+        title: "Promoted by a dead build",
+        status: epicStatus,
+        type: "feature",
+        position: 0,
+      })
+      .run();
+    const storyIds = storyStatuses.map((storyStatus, index) => {
+      const id = `story-pull-${counter}-${index + 1}`;
+      db.insert(userStories)
+        .values({ id, epicId, title: `Story ${index + 1}`, status: storyStatus })
+        .run();
+      return id;
+    });
+    return { projectId, epicId, storyIds };
+  }
+
+  function seedZombie(session: {
+    projectId: string;
+    epicId?: string;
+    userStoryId?: string;
+    agentType: string;
+  }) {
+    counter += 1;
+    const sessionId = `sess-pull-${counter}`;
+    db.insert(agentSessions)
+      .values({
+        id: sessionId,
+        projectId: session.projectId,
+        epicId: session.epicId ?? null,
+        userStoryId: session.userStoryId ?? null,
+        status: "running",
+        agentType: session.agentType,
+        startedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    return sessionId;
+  }
+
+  function epicStatus(epicId: string) {
+    return db.select().from(epics).where(eq(epics.id, epicId)).get()?.status;
+  }
+
+  function storyStatus(storyId: string) {
+    return db
+      .select()
+      .from(userStories)
+      .where(eq(userStories.id, storyId))
+      .get()?.status;
+  }
+
+  function epicActivity(epicId: string) {
+    return db
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, epicId))
+      .all();
+  }
+
+  it("pulls a zombie build's epic back out of review and logs it", () => {
+    const { projectId, epicId } = seedTicket("review");
+    const sessionId = seedZombie({ projectId, epicId, agentType: "build" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const failed = failOrphanedRunningSessions();
+    logSpy.mockRestore();
+
+    expect(failed).toBe(1);
+    expect(getSession(sessionId)!.status).toBe("failed");
+    expect(epicStatus(epicId)).toBe("in_progress");
+
+    // The rollback is audited on the epic's activity feed, naming the
+    // restart — no silent board write.
+    expect(epicActivity(epicId)).toContainEqual(
+      expect.objectContaining({
+        fromStatus: "review",
+        toStatus: "in_progress",
+        actor: "agent",
+        sessionId,
+        reason: expect.stringContaining("orphaned by restart"),
+      })
+    );
+  });
+
+  it("pulls a zombie story build's story back without touching the epic", () => {
+    const { projectId, epicId, storyIds } = seedTicket("in_progress", [
+      "review",
+      "todo",
+    ]);
+    const sessionId = seedZombie({
+      projectId,
+      epicId,
+      userStoryId: storyIds[0],
+      agentType: "ticket_build",
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const failed = failOrphanedRunningSessions();
+    logSpy.mockRestore();
+
+    expect(failed).toBe(1);
+    expect(getSession(sessionId)!.status).toBe("failed");
+    // The story comes back; the epic and its sibling never move — epic
+    // promotion belongs to the sibling-story rule, which the sweep never
+    // runs.
+    expect(storyStatus(storyIds[0])).toBe("in_progress");
+    expect(storyStatus(storyIds[1])).toBe("todo");
+    expect(epicStatus(epicId)).toBe("in_progress");
+  });
+
+  it("fails a zombie whose ticket never left in_progress without a board write", () => {
+    // No promotion to undo: the session is marked failed, but the epic
+    // keeps its status and no activity row is written.
+    const { projectId, epicId } = seedTicket("in_progress");
+    const sessionId = seedZombie({ projectId, epicId, agentType: "build" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const failed = failOrphanedRunningSessions();
+    logSpy.mockRestore();
+
+    expect(failed).toBe(1);
+    expect(getSession(sessionId)!.status).toBe("failed");
+    expect(epicStatus(epicId)).toBe("in_progress");
+    expect(epicActivity(epicId)).toHaveLength(0);
+  });
+
+  it("does not touch the board for a non-code-producing zombie", () => {
+    // A live reviewer on a review epic is expected; the sweep fails the
+    // session but must not demote the epic on its behalf.
+    const { projectId, epicId } = seedTicket("review");
+    const sessionId = seedZombie({ projectId, epicId, agentType: "review_code" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const failed = failOrphanedRunningSessions();
+    logSpy.mockRestore();
+
+    expect(failed).toBe(1);
+    expect(getSession(sessionId)!.status).toBe("failed");
+    expect(epicStatus(epicId)).toBe("review");
+    expect(epicActivity(epicId)).toHaveLength(0);
   });
 });
 

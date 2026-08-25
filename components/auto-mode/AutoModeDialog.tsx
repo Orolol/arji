@@ -110,6 +110,7 @@ export function AutoModeDialog({
   const [reviewConcurrency, setReviewConcurrency] = useState<string>(
     String(DEFAULT_AUTO_REVIEW_CONCURRENCY)
   );
+  const [smartDispatch, setSmartDispatch] = useState(false);
 
   const applyStatus = useCallback(
     (next: AutoModeStatus, fallbackAgent: string | null) => {
@@ -119,6 +120,7 @@ export function AutoModeDialog({
       setReviewAgent(next.reviewAgent);
       setBuildConcurrency(String(next.buildConcurrency));
       setReviewConcurrency(String(next.reviewConcurrency));
+      setSmartDispatch(next.smartDispatch);
     },
     []
   );
@@ -175,6 +177,7 @@ export function AutoModeDialog({
           reviewAgent,
           buildConcurrency: buildBudget,
           reviewConcurrency: reviewBudget,
+          smartDispatch,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -257,6 +260,7 @@ export function AutoModeDialog({
                 onChange={setBuildAgent}
                 aria-label="Build agent"
                 className="h-[28px] w-[186px] text-[13px]"
+                dispatchRole="build"
               />
             </OptionRow>
 
@@ -283,6 +287,7 @@ export function AutoModeDialog({
                 onChange={setReviewAgent}
                 aria-label="Review agent"
                 className="h-[28px] w-[186px] text-[13px]"
+                dispatchRole="review"
               />
             </OptionRow>
 
@@ -290,7 +295,6 @@ export function AutoModeDialog({
               label="Parallel reviews"
               htmlFor="auto-mode-review-concurrency"
               hint="Reviews always run at epic level — the branch is what merges."
-              last
             >
               <Input
                 id="auto-mode-review-concurrency"
@@ -301,6 +305,22 @@ export function AutoModeDialog({
                 className="h-[28px] w-[118px] rounded-[7px] text-right text-[13px]"
                 value={reviewConcurrency}
                 onChange={(e) => setReviewConcurrency(e.target.value)}
+              />
+            </OptionRow>
+
+            <OptionRow
+              label="Pick the agent by track record"
+              hint="Only for roles left empty above: dispatches the named agent with the best 30-day success rate, once it has at least 5 finished runs for that role."
+              last
+            >
+              <input
+                type="checkbox"
+                role="switch"
+                data-testid="auto-mode-smart-dispatch"
+                aria-label="Pick the agent by track record"
+                checked={smartDispatch}
+                onChange={(e) => setSmartDispatch(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-border"
               />
             </OptionRow>
           </div>

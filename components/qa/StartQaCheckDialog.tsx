@@ -228,6 +228,7 @@ export function StartQaCheckDialog({
                 value={namedAgentId}
                 onChange={setNamedAgentId}
                 className="w-56 h-[34px] rounded-[8px] text-[13px]"
+                dispatchRole="qa"
               />
               {namedAgentId && (
                 <Button

@@ -390,7 +390,11 @@ export function AgentActionsBar({
             : "Optionally add a comment for the agent before dispatching."
         }
         projectId={projectId}
-        agentProps={{ value: devAgentId, onChange: setDevAgentId }}
+        agentProps={{
+          value: devAgentId,
+          onChange: setDevAgentId,
+          dispatchRole: "build",
+        }}
         sessionPicker={{
           epicId: sessionEpicId,
           userStoryId: sessionUserStoryId,
@@ -457,7 +461,11 @@ export function AgentActionsBar({
         title={config.reviewDialogTitle}
         description={config.reviewDialogDescription}
         projectId={projectId}
-        agentProps={{ value: reviewAgentId, onChange: setReviewAgentId }}
+        agentProps={{
+          value: reviewAgentId,
+          onChange: setReviewAgentId,
+          dispatchRole: "review",
+        }}
         sessionPicker={{
           epicId: sessionEpicId,
           userStoryId: sessionUserStoryId,

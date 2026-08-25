@@ -39,6 +39,7 @@ function statusFixture(patch: Partial<AutoModeStatus> = {}): AutoModeStatus {
     buildConcurrency: 2,
     reviewAgent: null,
     reviewConcurrency: 1,
+    smartDispatch: false,
     effectiveSchedulerBudget: 3,
     running: false,
     lastSweepAt: null,
@@ -113,7 +114,7 @@ describe("AutoModeDialog", () => {
     );
   });
 
-  it("persists the five settings through PUT and reports the new state", async () => {
+  it("persists the six settings through PUT and reports the new state", async () => {
     const calls = installFetch(
       statusFixture(),
       statusFixture({ enabled: true, buildConcurrency: 3 })
@@ -144,6 +145,25 @@ describe("AutoModeDialog", () => {
       reviewAgent: null,
       buildConcurrency: 3,
       reviewConcurrency: 1,
+      smartDispatch: false,
+    });
+  });
+
+  it("sends the smart-dispatch toggle, and loads it back off by default", async () => {
+    const calls = installFetch(statusFixture());
+    render(<AutoModeDialog projectId="p1" open onOpenChange={() => {}} />);
+
+    const toggle = await screen.findByTestId("auto-mode-smart-dispatch");
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByTestId("auto-mode-save"));
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PUT")).toBe(true)
+    );
+    expect(calls.find((c) => c.method === "PUT")!.body).toMatchObject({
+      smartDispatch: true,
     });
   });
 

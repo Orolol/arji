@@ -48,6 +48,10 @@ import {
   parseProjectsRootSetting,
 } from "@/lib/projects/workspace-constants";
 import {
+  DREAMING_AFTER_NIGHT_RUN_SETTING_KEY,
+  parseDreamingAfterNightRunSetting,
+} from "@/lib/workflow/dreaming-constants";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -95,6 +99,9 @@ export default function SettingsPage() {
   const [autoDistillMessage, setAutoDistillMessage] = useState<string | null>(
     null
   );
+  const [dreamAfterNightRun, setDreamAfterNightRun] = useState(false);
+  const [savingDream, setSavingDream] = useState(false);
+  const [dreamMessage, setDreamMessage] = useState<string | null>(null);
   const [specAutoRewrite, setSpecAutoRewrite] = useState(false);
   const [savingSpecRewrite, setSavingSpecRewrite] = useState(false);
   const [specRewriteMessage, setSpecRewriteMessage] = useState<string | null>(
@@ -175,6 +182,13 @@ export default function SettingsPage() {
         );
         const autoDistill = d.data?.memory_auto_distill;
         setMemoryAutoDistill(autoDistill === true || autoDistill === "true");
+        // Dreaming after a night run: OFF unless explicitly enabled globally
+        // (a per-project override still wins at run time).
+        setDreamAfterNightRun(
+          parseDreamingAfterNightRunSetting(
+            d.data?.[DREAMING_AFTER_NIGHT_RUN_SETTING_KEY]
+          ) ?? false
+        );
         const specRewrite = d.data?.spec_auto_rewrite;
         setSpecAutoRewrite(specRewrite === true || specRewrite === "true");
         // Default ON: only an explicitly-false value disables the MCP tools.
@@ -534,6 +548,34 @@ export default function SettingsPage() {
       setAutoDistillMessage("Failed to save the auto-distill setting.");
     } finally {
       setSavingAutoDistill(false);
+    }
+  }
+
+  async function handleToggleDreamAfterNightRun(next: boolean) {
+    setDreamAfterNightRun(next);
+    setSavingDream(true);
+    setDreamMessage(null);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [DREAMING_AFTER_NIGHT_RUN_SETTING_KEY]: next }),
+      });
+      if (!response.ok) {
+        setDreamAfterNightRun(!next);
+        setDreamMessage("Failed to save the dreaming setting.");
+        return;
+      }
+      setDreamMessage(
+        next
+          ? "Dreaming enabled: each night run ends with a cross-session memory pass."
+          : "Dreaming after night runs disabled."
+      );
+    } catch {
+      setDreamAfterNightRun(!next);
+      setDreamMessage("Failed to save the dreaming setting.");
+    } finally {
+      setSavingDream(false);
     }
   }
 
@@ -898,6 +940,30 @@ export default function SettingsPage() {
         </label>
         {autoDistillMessage && (
           <p className="text-xs text-muted-foreground">{autoDistillMessage}</p>
+        )}
+        <label className="flex items-start gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={dreamAfterNightRun}
+            disabled={savingDream}
+            onChange={(e) => handleToggleDreamAfterNightRun(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium">Dream after each night run</span>
+            <span className="block text-muted-foreground">
+              When a night run finishes, run a plan-mode agent that reads the
+              project&apos;s recent sessions since the last dream — successes
+              and failures alike — and rewrites the project memory around
+              recurring mistakes, codebase traps and strategies that worked.
+              The run only decides WHEN it fires and pays for it (its cost
+              counts against the run&apos;s cap); the sessions it reads are
+              project-wide, not limited to that run. Off by default.
+            </span>
+          </span>
+        </label>
+        {dreamMessage && (
+          <p className="text-xs text-muted-foreground">{dreamMessage}</p>
         )}
       </section>
 

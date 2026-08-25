@@ -14,6 +14,7 @@ import {
   autoModeEnabledSettingKey,
   autoModeReviewAgentSettingKey,
   autoModeReviewConcurrencySettingKey,
+  autoModeSmartDispatchSettingKey,
   parseAutoModeAgent,
   parseAutoModeConcurrency,
   parseAutoModeEnabled,
@@ -32,7 +33,7 @@ import type { AutoModeStatus } from "@/lib/auto-mode/status";
 /**
  * GET/PUT /api/projects/[projectId]/auto-mode
  *
- * The dialog's whole contract: the five persisted settings, the scheduler
+ * The dialog's whole contract: the six persisted settings, the scheduler
  * budget they have to live inside, and a live picture of what the supervisor
  * is doing (in-flight counts, candidate counts, parked tickets, recent
  * dispatches).
@@ -69,6 +70,7 @@ function buildStatus(projectId: string): AutoModeStatus {
     buildConcurrency: config.buildConcurrency,
     reviewAgent: config.reviewAgent,
     reviewConcurrency: config.reviewConcurrency,
+    smartDispatch: config.smartDispatch,
     effectiveSchedulerBudget: (() => {
       // Unlimited is Infinity in-process, which JSON would silently turn
       // into null anyway — send the null contract explicitly.
@@ -193,6 +195,17 @@ export async function PUT(
       );
     }
     writes.push([autoModeReviewConcurrencySettingKey(projectId), value]);
+  }
+
+  if ("smartDispatch" in payload) {
+    const smartDispatch = parseAutoModeEnabled(payload.smartDispatch);
+    if (smartDispatch === null) {
+      return NextResponse.json(
+        { error: "`smartDispatch` must be a boolean." },
+        { status: 400 }
+      );
+    }
+    writes.push([autoModeSmartDispatchSettingKey(projectId), smartDispatch]);
   }
 
   try {

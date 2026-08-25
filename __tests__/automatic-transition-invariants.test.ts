@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
 const askedQuestion = vi.hoisted(() => vi.fn());
+const emitTicketMoved = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", async () => {
   const { createTestDb } = await import("@/lib/db/test-utils");
@@ -13,7 +14,7 @@ vi.mock("@/lib/db", async () => {
   return { db: created.db, sqlite: created.sqlite, ensureDbReady: vi.fn() };
 });
 
-vi.mock("@/lib/events/emit", () => ({ emitTicketMoved: vi.fn() }));
+vi.mock("@/lib/events/emit", () => ({ emitTicketMoved }));
 vi.mock("@/lib/workflow/agent-question", () => ({
   handleAskedQuestionOutcome: askedQuestion,
 }));
@@ -73,6 +74,7 @@ beforeEach(() => {
   db.delete(epics).run();
   db.delete(projects).run();
   askedQuestion.mockReset();
+  emitTicketMoved.mockReset();
 });
 
 describe("no orphaned build sessions", () => {
@@ -385,6 +387,218 @@ describe("deterministic build completion", () => {
     expect(epicStatus(epicId)).toBe("in_progress");
     expect(askedQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "asked-build", ticketStatus: "in_progress" })
+    );
+  });
+});
+
+describe("terminal rollback of mid-run review promotions", () => {
+  // The owning-session exemption lets a live build move its own ticket to
+  // Review before settling. When the run then ends without delivering, the
+  // ticket must not stay parked in Review and the hold entry must name the
+  // status it actually holds.
+
+  function seedRunningBuild(projectId: string, epicId: string, sessionId: string, userStoryId?: string) {
+    db.insert(agentSessions)
+      .values({
+        id: sessionId,
+        projectId,
+        epicId,
+        userStoryId: userStoryId ?? null,
+        status: "running",
+        agentType: userStoryId ? "ticket_build" : "build",
+        mode: "code",
+      })
+      .run();
+  }
+
+  it("pulls a failed epic build's ticket back out of review", () => {
+    const { projectId, epicId } = seedEpic("in_progress");
+    seedRunningBuild(projectId, epicId, "rolled-back-failure");
+    // The agent promoted its own ticket mid-run (owning-session exemption).
+    db.update(epics).set({ status: "review" }).where(eq(epics.id, epicId)).run();
+
+    const result = finalizeBuildTerminalOutcome({
+      projectId,
+      epicId,
+      scope: "epic",
+      sessionId: "rolled-back-failure",
+      success: false,
+      outcome: "error",
+      error: "tests exploded",
+    });
+
+    expect(result.kind).toBe("failed");
+    expect(epicStatus(epicId)).toBe("in_progress");
+
+    const activity = db
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, epicId))
+      .all();
+    // The pullback is audited as a real transition…
+    expect(activity).toContainEqual(
+      expect.objectContaining({
+        fromStatus: "review",
+        toStatus: "in_progress",
+        actor: "agent",
+        sessionId: "rolled-back-failure",
+        reason: expect.stringContaining("tests exploded"),
+      })
+    );
+    // …and the hold entry names the status it actually held.
+    expect(activity).toContainEqual(
+      expect.objectContaining({
+        fromStatus: "in_progress",
+        toStatus: "in_progress",
+        reason: expect.stringContaining("ticket held in in_progress"),
+      })
+    );
+  });
+
+  it("pulls a failed story build's story back out of review without touching the epic", () => {
+    const { projectId, epicId, storyIds } = seedEpic("in_progress", ["in_progress", "todo"]);
+    seedRunningBuild(projectId, epicId, "story-fail", storyIds[0]);
+    // The story agent promoted its own story mid-run.
+    db.update(userStories).set({ status: "review" }).where(eq(userStories.id, storyIds[0])).run();
+
+    const result = finalizeBuildTerminalOutcome({
+      projectId,
+      epicId,
+      scope: "story",
+      userStoryId: storyIds[0],
+      sessionId: "story-fail",
+      success: false,
+      outcome: "error",
+      error: "story tests exploded",
+    });
+
+    expect(result.kind).toBe("failed");
+    // The story comes back; the epic and its sibling never move.
+    expect(storyStatus(storyIds[0])).toBe("in_progress");
+    expect(storyStatus(storyIds[1])).toBe("todo");
+    expect(epicStatus(epicId)).toBe("in_progress");
+  });
+
+  it("returns the ticket before recording an open-question hold", () => {
+    const { projectId, epicId } = seedEpic("in_progress");
+    seedRunningBuild(projectId, epicId, "question-rollback");
+    db.update(epics).set({ status: "review" }).where(eq(epics.id, epicId)).run();
+
+    const result = finalizeBuildTerminalOutcome({
+      projectId,
+      epicId,
+      scope: "epic",
+      sessionId: "question-rollback",
+      success: true,
+      outcome: "asked_question",
+    });
+
+    expect(result.kind).toBe("awaiting_reply");
+    expect(epicStatus(epicId)).toBe("in_progress");
+    expect(askedQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "question-rollback", ticketStatus: "in_progress" })
+    );
+  });
+
+  it("survives a throwing pullback on the failure path", () => {
+    // The failure handler runs inside a background completion block that does
+    // not wrap it (see agent-question.ts): a throw here would reject
+    // runBuildSession and lose the agent's output comment. emitTicketMoved is
+    // the realistic thrower — applyTransition calls it unguarded after the
+    // status write.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { projectId, epicId } = seedEpic("in_progress");
+    seedRunningBuild(projectId, epicId, "emit-blows-up");
+    db.update(epics).set({ status: "review" }).where(eq(epics.id, epicId)).run();
+    emitTicketMoved.mockImplementationOnce(() => {
+      throw new Error("SSE bus down");
+    });
+
+    const result = finalizeBuildTerminalOutcome({
+      projectId,
+      epicId,
+      scope: "epic",
+      sessionId: "emit-blows-up",
+      success: false,
+      outcome: "error",
+      error: "tests exploded",
+    });
+
+    expect(result.kind).toBe("failed");
+    expect(warnSpy).toHaveBeenCalled();
+    // The status write landed before the emit threw, so the degraded reader
+    // reports the real column and the hold entry stays truthful.
+    expect(epicStatus(epicId)).toBe("in_progress");
+    const activity = db
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, epicId))
+      .all();
+    expect(activity).toContainEqual(
+      expect.objectContaining({
+        reason: expect.stringContaining("ticket held in in_progress"),
+      })
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("survives a throwing pullback on the open-question path", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { projectId, epicId } = seedEpic("in_progress");
+    seedRunningBuild(projectId, epicId, "question-emit-blows-up");
+    db.update(epics).set({ status: "review" }).where(eq(epics.id, epicId)).run();
+    emitTicketMoved.mockImplementationOnce(() => {
+      throw new Error("SSE bus down");
+    });
+
+    const result = finalizeBuildTerminalOutcome({
+      projectId,
+      epicId,
+      scope: "epic",
+      sessionId: "question-emit-blows-up",
+      success: true,
+      outcome: "asked_question",
+    });
+
+    // The reply hold and its notification still happen.
+    expect(result.kind).toBe("awaiting_reply");
+    expect(askedQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "question-emit-blows-up",
+        ticketStatus: "in_progress",
+      })
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("names the real status in the hold entry when the ticket never left its column", () => {
+    // A ticket found outside in_progress/review (weird pre-existing state)
+    // is left alone — and the hold entry says where it really is.
+    const { projectId, epicId } = seedEpic("todo");
+    seedRunningBuild(projectId, epicId, "odd-state-failure");
+
+    const result = finalizeBuildTerminalOutcome({
+      projectId,
+      epicId,
+      scope: "epic",
+      sessionId: "odd-state-failure",
+      success: false,
+      outcome: "error",
+      error: "CLI vanished",
+    });
+
+    expect(result.kind).toBe("failed");
+    expect(epicStatus(epicId)).toBe("todo");
+    const activity = db
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, epicId))
+      .all();
+    expect(activity).toContainEqual(
+      expect.objectContaining({ reason: expect.stringContaining("ticket held in todo") })
+    );
+    expect(activity).not.toContainEqual(
+      expect.objectContaining({ reason: expect.stringContaining("ticket held in in_progress") })
     );
   });
 });

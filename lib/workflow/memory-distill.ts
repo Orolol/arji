@@ -29,7 +29,7 @@
 
 import fs from "fs";
 import path from "path";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   agentSessions,
@@ -60,12 +60,20 @@ import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import {
   getProjectMemoryContent,
-  saveProjectMemory,
+  isProjectMemoryChangedError,
+  saveProjectMemoryGuarded,
 } from "@/lib/documents/memory";
 import {
   MEMORY_AUTO_DISTILL_SETTING_KEY,
   parseMemoryAutoDistillSetting,
 } from "@/lib/documents/memory-constants";
+import { isNightRunId } from "@/lib/night/constants";
+import { MEMORY_WRITER_AGENT_TYPES } from "./dreaming-constants";
+import { isDreamingAfterNightRunEnabled } from "./dreaming";
+import {
+  MEMORY_WRITER_BUSY_MESSAGE,
+  hasPendingMemoryWriter,
+} from "./memory-writer-lock";
 import { logTransition } from "./log";
 
 const POLL_INTERVAL_MS = 2000;
@@ -78,8 +86,8 @@ export const MEMORY_UPDATED_REASON = "Project memory updated";
 
 /**
  * Source agent types eligible for auto-distillation: the build flavors.
- * Reviews, QA, merges and (critically) 'memory_distill' itself never
- * auto-trigger.
+ * Reviews, QA, merges and (critically) the memory writers themselves
+ * ('memory_distill', 'dreaming') never auto-trigger.
  */
 export const AUTO_DISTILL_SOURCE_AGENT_TYPES: readonly string[] = [
   "build",
@@ -111,6 +119,8 @@ export interface AutoDistillCandidateSession {
   agentType: string | null;
   status: string | null;
   outcome: string | null;
+  /** Batch/night run that dispatched this session; null for standalone runs. */
+  batchRunId: string | null;
 }
 
 export interface AutoDistillDecision {
@@ -125,16 +135,24 @@ export interface AutoDistillDecision {
  *   - setting off (default),
  *   - unknown session,
  *   - non-completed status (failures/cancellations never distill),
- *   - 'memory_distill' source (never distill a distill),
+ *   - a memory WRITER source ('memory_distill' or 'dreaming' — never distill
+ *     a distill, never distill a dream),
  *   - non-build agent types,
  *   - asked_question outcome (the build is still awaiting the user — its
  *     learnings are not settled yet),
- *   - a distill already queued/running for the project (dedup under waves).
+ *   - a night-run dream will cover this session anyway (see
+ *     nightRunDreamWillFollow): the two writers share one lock and the dream
+ *     gets exactly one attempt, so a distill running at that moment would
+ *     cancel it outright,
+ *   - a memory writer (distill OR dream) already queued/running for the
+ *     project — both rewrite the whole document, so they must not overlap.
  */
 export function evaluateAutoDistillGuards(input: {
   enabled: boolean;
   session: AutoDistillCandidateSession | null;
   hasPendingDistill: boolean;
+  /** True when a night-run dream will cover this session — see below. */
+  dreamWillFollow?: boolean;
 }): AutoDistillDecision {
   if (!input.enabled) {
     return { allowed: false, reason: "auto-distill setting is off" };
@@ -148,7 +166,10 @@ export function evaluateAutoDistillGuards(input: {
       reason: `session status is '${input.session.status ?? "unknown"}', not 'completed'`,
     };
   }
-  if (input.session.agentType === "memory_distill") {
+  if (
+    input.session.agentType &&
+    MEMORY_WRITER_AGENT_TYPES.includes(input.session.agentType)
+  ) {
     return { allowed: false, reason: "never distill a distill session" };
   }
   if (
@@ -166,29 +187,136 @@ export function evaluateAutoDistillGuards(input: {
   if (!input.session.projectId) {
     return { allowed: false, reason: "session has no project" };
   }
+  if (input.dreamWillFollow) {
+    return {
+      allowed: false,
+      reason: "a night-run dream will distill this session's run instead",
+    };
+  }
   if (input.hasPendingDistill) {
     return {
       allowed: false,
-      reason: "a memory distill session is already pending for this project",
+      reason:
+        "a memory rewrite (distill or dream) is already pending for this project",
     };
   }
   return { allowed: true, reason: "eligible" };
 }
 
-/** True when a 'memory_distill' session is queued/running for the project. */
+// ---------------------------------------------------------------------------
+// Source eligibility (shared by the manual route and the dispatch boundary)
+// ---------------------------------------------------------------------------
+
+/** Thrown when a caller names a session that may not be a distill source. */
+export class MemoryDistillSourceError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "MemoryDistillSourceError";
+  }
+}
+
+export function isMemoryDistillSourceError(error: unknown): boolean {
+  return error instanceof MemoryDistillSourceError;
+}
+
+export interface DistillSourceCandidate {
+  agentType: string | null;
+  status: string | null;
+  /** Delivery verdict — 'asked_question' is completed but NOT settled. */
+  outcome: string | null;
+}
+
+export interface DistillSourceEligibility {
+  eligible: boolean;
+  /** Empty when eligible; otherwise the message the caller reports. */
+  reason: string;
+}
+
+/**
+ * Whether a session may be handed to a distill as its context source.
+ *
+ * The auto-trigger has always enforced this (evaluateAutoDistillGuards) and
+ * the UI only offers the button where it holds, but the manual endpoint took
+ * any session id belonging to the project. Three rules, deliberately looser
+ * than the auto matrix because the manual button IS offered on reviews and QA
+ * runs:
+ *
+ *   - never a memory WRITER. Its output is the memory document itself, so
+ *     distilling it would feed the memory back into the memory;
+ *   - only a COMPLETED run. A queued or running session has no learnings yet,
+ *     and a failed one has no delivered output to read;
+ *   - never an ASKED_QUESTION run. Those are `completed` too, so the status
+ *     check alone lets them through — but the agent stopped to ask the user
+ *     something and the answer never came. Distilling one writes an unresolved
+ *     question into a document injected in every future prompt, as if it were
+ *     a settled convention. The auto matrix has always refused it; the manual
+ *     path now agrees.
+ *
+ * `null` means the session does not exist (or belongs to another project) —
+ * the caller's own 404 case.
+ */
+export function evaluateDistillSourceEligibility(
+  session: DistillSourceCandidate | null
+): DistillSourceEligibility {
+  if (!session) {
+    return { eligible: false, reason: "Source session not found" };
+  }
+  if (
+    session.agentType &&
+    MEMORY_WRITER_AGENT_TYPES.includes(session.agentType)
+  ) {
+    return {
+      eligible: false,
+      reason:
+        "A memory distill or dream session cannot itself be distilled — its output IS the project memory.",
+    };
+  }
+  if (session.status !== "completed") {
+    return {
+      eligible: false,
+      reason: `Only a completed session can be distilled (this one is '${session.status ?? "unknown"}').`,
+    };
+  }
+  if (session.outcome === "asked_question") {
+    return {
+      eligible: false,
+      reason:
+        "This session stopped to ask a question — its learnings are not settled yet, so there is nothing durable to distill.",
+    };
+  }
+  return { eligible: true, reason: "" };
+}
+
+/**
+ * True when this session's completion should stand down for the cross-session
+ * dream the night run will fire when it ends.
+ *
+ * Both writers take the same exclusive lock on the memory document, and the
+ * dream is attempted EXACTLY ONCE at the run's terminal choke point. So an
+ * auto-distill still holding the lock at that instant does not merely delay
+ * the dream — it cancels it, permanently, for that run. Standing the distill
+ * down is the right way round: the dream reads the whole run (this session
+ * included) rather than one session of it, the user asked for it explicitly by
+ * enabling the setting, and it costs one session instead of one per build.
+ */
+export function nightRunDreamWillFollow(
+  session: AutoDistillCandidateSession | null
+): boolean {
+  if (!session?.projectId || !isNightRunId(session.batchRunId)) return false;
+  return isDreamingAfterNightRunEnabled(session.projectId);
+}
+
+/**
+ * True when ANY memory writer is queued/running for the project — a distill OR
+ * a dream.
+ *
+ * Deliberately wider than its name suggests, and kept under that name because
+ * it is the distill flow's guard: the two writers replace the SAME whole
+ * document, so a distill must stand down for a running dream exactly as it
+ * stands down for another distill. See lib/workflow/memory-writer-lock.ts.
+ */
 export function hasPendingMemoryDistill(projectId: string): boolean {
-  const row = db
-    .select({ id: agentSessions.id })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.projectId, projectId),
-        eq(agentSessions.agentType, "memory_distill"),
-        inArray(agentSessions.status, ["queued", "running"])
-      )
-    )
-    .get();
-  return !!row;
+  return hasPendingMemoryWriter(projectId);
 }
 
 /**
@@ -215,6 +343,7 @@ export async function maybeAutoDistillAfterSessionTerminal(
           agentType: agentSessions.agentType,
           status: agentSessions.status,
           outcome: agentSessions.outcome,
+          batchRunId: agentSessions.batchRunId,
         })
         .from(agentSessions)
         .where(eq(agentSessions.id, sessionId))
@@ -226,6 +355,7 @@ export async function maybeAutoDistillAfterSessionTerminal(
       hasPendingDistill: session?.projectId
         ? hasPendingMemoryDistill(session.projectId)
         : false,
+      dreamWillFollow: nightRunDreamWillFollow(session),
     });
 
     if (!decision.allowed) {
@@ -277,6 +407,32 @@ interface SourceSessionContext {
   batchRunId: string | null;
 }
 
+/**
+ * The two columns `evaluateDistillSourceEligibility` judges, project-scoped so
+ * a session id from another project reads as "not found".
+ */
+export function loadDistillSourceCandidate(
+  projectId: string,
+  sourceSessionId: string
+): DistillSourceCandidate | null {
+  return (
+    db
+      .select({
+        agentType: agentSessions.agentType,
+        status: agentSessions.status,
+        outcome: agentSessions.outcome,
+      })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.id, sourceSessionId),
+          eq(agentSessions.projectId, projectId)
+        )
+      )
+      .get() ?? null
+  );
+}
+
 function loadSourceSessionContext(
   projectId: string,
   sourceSessionId: string
@@ -288,6 +444,7 @@ function loadSourceSessionContext(
       epicId: agentSessions.epicId,
       userStoryId: agentSessions.userStoryId,
       agentType: agentSessions.agentType,
+      status: agentSessions.status,
       outcome: agentSessions.outcome,
       lastNonEmptyText: agentSessions.lastNonEmptyText,
       logsPath: agentSessions.logsPath,
@@ -381,6 +538,18 @@ export async function dispatchMemoryDistillSession(
     throw new Error("Project not found");
   }
 
+  // Enforced HERE, not only in the route: this is the boundary every caller
+  // goes through, so an ineligible source cannot reach a session row by
+  // arriving from somewhere the route's checks do not cover.
+  if (input.sourceSessionId) {
+    const eligibility = evaluateDistillSourceEligibility(
+      loadDistillSourceCandidate(input.projectId, input.sourceSessionId)
+    );
+    if (!eligibility.eligible) {
+      throw new MemoryDistillSourceError(eligibility.reason);
+    }
+  }
+
   const sourceContext = input.sourceSessionId
     ? loadSourceSessionContext(input.projectId, input.sourceSessionId)
     : null;
@@ -415,6 +584,15 @@ export async function dispatchMemoryDistillSession(
   const cliSessionId = providerAcceptsAssignedSessionId(resolvedAgent.provider)
     ? crypto.randomUUID()
     : undefined;
+
+  // Last-resort race guard, under NO await: the callers' pending checks ran
+  // before `resolveAgentPrompt` above, so a dream (or another distill) could
+  // have taken the document during that suspension. Everything from here to
+  // the insert is synchronous, which on Node's single thread is what makes the
+  // shared memory-writer lock hold instead of merely usually holding.
+  if (hasPendingMemoryWriter(input.projectId)) {
+    throw new Error(MEMORY_WRITER_BUSY_MESSAGE);
+  }
 
   // Deliberately no epicId on the distill session row: epic-scoped
   // concurrency guards must not treat a background distill as "an agent is
@@ -500,8 +678,24 @@ export async function dispatchMemoryDistillSession(
     }
 
     try {
-      saveProjectMemory(input.projectId, output);
+      // `expectedPrevious` is the memory this distill actually REASONED FROM,
+      // captured at prompt time above. A plan session runs long enough for
+      // someone to save an edit in the Docs tab meanwhile; writing blindly
+      // would throw that edit away in favour of text derived from the version
+      // before it. The human edit is the newer intent and wins — a distill can
+      // just be run again. (No snapshot: the single archive row is the undo
+      // for the last DREAM, and a distill must not spend it.)
+      saveProjectMemoryGuarded(input.projectId, output, {
+        expectedPrevious: currentMemory,
+      });
     } catch (error) {
+      if (isProjectMemoryChangedError(error)) {
+        console.info(
+          "[memory-distill] discarded: the memory was edited while the" +
+            ` distill ran (its output is still readable on session ${sessionId})`
+        );
+        return;
+      }
       console.error(
         "[memory-distill] Failed to save distilled memory",
         error

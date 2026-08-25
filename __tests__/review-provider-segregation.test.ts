@@ -57,11 +57,18 @@ const REVIEW_CONTEXT_STORY = {
   storyId: "us-1",
 };
 
-/** Seeds resolveAgent's chain: no project default, global raw provider. */
+/** Seeds resolveAgent's chain: no project override, global named assignment. */
 function seedDefaultResolution(provider: string) {
+  const namedAgentId = `default-${provider}`;
   dbMockState.getQueue.push(
     null, // project-scoped default: none
-    { provider, namedAgentId: null } // global default
+    { provider, namedAgentId }, // global assignment
+    {
+      id: namedAgentId,
+      name: `Default ${provider}`,
+      provider,
+      model: "",
+    },
   );
 }
 

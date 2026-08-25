@@ -324,6 +324,9 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       body: "body",
       author: "author",
       status: "status",
+      // 0032: the review session that filed the finding, so the Dreaming
+      // digest can attribute it exactly instead of guessing from timestamps.
+      agentSessionId: "agent_session_id",
       createdAt: "created_at",
       updatedAt: "updated_at",
     },
@@ -410,6 +413,7 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       agentType: "agent_type",
       status: "status",
       title: "title",
+      message: "message",
       targetUrl: "target_url",
       createdAt: "created_at",
     },
@@ -1000,6 +1004,7 @@ describe("db schema: exported types", () => {
       agentType: "build",
       status: "completed",
       title: "Build completed",
+      message: null,
       targetUrl: "/projects/p1/sessions/s1",
       createdAt: null,
     };

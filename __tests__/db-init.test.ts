@@ -251,6 +251,8 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE projects DROP COLUMN default_branch");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
+      conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
     });
 
     withDb(file, (conn) => {
@@ -262,11 +264,13 @@ describe("initDb", () => {
       expect(columnNames(conn, "agent_sessions")).toContain("output_tokens");
       expect(columnNames(conn, "agent_sessions")).toContain("total_cost_usd");
       expect(columnNames(conn, "agent_sessions")).toContain("batch_run_id");
+      expect(columnNames(conn, "review_comments")).toContain("agent_session_id");
       expect(columnNames(conn, "projects")).toContain("clone_source");
       expect(columnNames(conn, "projects")).toContain("git_remote_url");
       expect(columnNames(conn, "projects")).toContain("default_branch");
       expect(columnNames(conn, "chat_attachments")).toContain("project_id");
       expect(columnNames(conn, "chat_attachments")).toContain("epic_id");
+      expect(columnNames(conn, "notifications")).toContain("message");
       expect(appliedMigrationTimestamps(conn)).toHaveLength(TOTAL_MIGRATIONS);
       expectFullSchema(conn);
     });
@@ -326,6 +330,8 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE projects DROP COLUMN default_branch");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
+      conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       conn.exec("DROP TABLE ticket_read_cursors");
     });
 
@@ -338,6 +344,7 @@ describe("initDb", () => {
       expect(columnNames(conn, "agent_sessions")).toContain("output_tokens");
       expect(columnNames(conn, "agent_sessions")).toContain("total_cost_usd");
       expect(columnNames(conn, "agent_sessions")).toContain("batch_run_id");
+      expect(columnNames(conn, "review_comments")).toContain("agent_session_id");
       expect(columnNames(conn, "projects")).toContain("clone_source");
       expect(columnNames(conn, "projects")).toContain("git_remote_url");
       expect(columnNames(conn, "projects")).toContain("default_branch");
@@ -431,6 +438,8 @@ describe("migration journal", () => {
         .run(entry!.when);
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
+      conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
 
       expect(() => initDb(conn)).not.toThrow();
 
