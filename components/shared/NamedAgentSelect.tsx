@@ -8,6 +8,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useNamedAgentsList } from "@/hooks/useNamedAgentsList";
+import { useDispatchReliability } from "@/hooks/useDispatchReliability";
+import {
+  formatReliabilityBadge,
+  type DispatchRole,
+} from "@/lib/agent-config/dispatch-reliability-constants";
 
 /**
  * Sentinel for the "no agent" row. Radix forbids an empty `SelectItem`
@@ -40,6 +45,13 @@ interface NamedAgentSelectProps {
   allowClear?: boolean;
   /** Label of the clear row. */
   clearLabel?: string;
+  /**
+   * Task type this picker dispatches. When set, each agent row carries its
+   * measured success rate and median duration FOR THAT ROLE over the last 30
+   * days — an em-dash below the sample threshold, so a 2-run "100%" never
+   * reads as a recommendation. Omitted, the picker renders plain names.
+   */
+  dispatchRole?: DispatchRole;
 }
 
 export function NamedAgentSelect({
@@ -51,8 +63,10 @@ export function NamedAgentSelect({
   "aria-labelledby": ariaLabelledBy,
   allowClear = false,
   clearLabel = "No agent",
+  dispatchRole,
 }: NamedAgentSelectProps) {
   const { agents, loading } = useNamedAgentsList();
+  const reliability = useDispatchReliability(dispatchRole);
   const labelProps = {
     ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
     ...(ariaLabelledBy ? { "aria-labelledby": ariaLabelledBy } : {}),
@@ -93,11 +107,39 @@ export function NamedAgentSelect({
         {allowClear && (
           <SelectItem value={NO_AGENT_VALUE}>{clearLabel}</SelectItem>
         )}
-        {agents.map((agent) => (
-          <SelectItem key={agent.id} value={agent.id}>
-            {agent.name}
-          </SelectItem>
-        ))}
+        {agents.map((agent) => {
+          if (!dispatchRole) {
+            return (
+              <SelectItem key={agent.id} value={agent.id}>
+                {agent.name}
+              </SelectItem>
+            );
+          }
+          const badge = formatReliabilityBadge(
+            reliability.byAgentId.get(agent.id),
+            dispatchRole,
+            reliability.minSample,
+            reliability.windowDays
+          );
+          return (
+            <SelectItem key={agent.id} value={agent.id}>
+              <span className="flex w-full items-center justify-between gap-3">
+                <span>{agent.name}</span>
+                <span
+                  data-testid={`agent-reliability-${agent.id}`}
+                  title={badge.title}
+                  className={
+                    badge.hasSample
+                      ? "shrink-0 tabular-nums text-[11px] text-muted-foreground"
+                      : "shrink-0 tabular-nums text-[11px] text-meta"
+                  }
+                >
+                  {reliability.loading ? "" : badge.label}
+                </span>
+              </span>
+            </SelectItem>
+          );
+        })}
       </SelectContent>
     </Select>
   );

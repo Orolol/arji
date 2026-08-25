@@ -358,6 +358,7 @@ export default function GitSyncPage() {
                   value={namedAgentId}
                   onChange={(next: string) => setNamedAgentId(next)}
                   className="h-[31px] w-[220px] rounded-[8px] text-[12.5px]"
+                  dispatchRole="merge"
                 />
                 <SessionPicker
                   projectId={projectId}

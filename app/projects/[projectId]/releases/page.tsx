@@ -299,6 +299,7 @@ export default function ReleasesPage() {
                       setResumeSessionId(undefined);
                     }}
                     className="h-[34px] w-full rounded-[8px] text-[13px]"
+                    dispatchRole="release"
                   />
                 </div>
 
