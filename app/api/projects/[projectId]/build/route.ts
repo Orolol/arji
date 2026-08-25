@@ -64,6 +64,7 @@ import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-ca
 import {
   finalizeBuildTerminalOutcome,
   logBuildFailure,
+  pullTicketBackIfPromoted,
   resolveBuildSessionResult,
   transitionBuildStarted,
   WorkflowTransitionError,
@@ -414,8 +415,19 @@ export async function POST(
             });
           }
         } else if (result?.success) {
-          // asked_question: hold every coordinated epic, notify once, and
-          // log the decision on each epic's activity feed.
+          // asked_question: the work is not delivered, so a coordinated epic
+          // the agent promoted to Review mid-run comes back first; then hold
+          // every coordinated epic, notify once, and log on each feed.
+          for (const eid of allEpicIds) {
+            pullTicketBackIfPromoted({
+              projectId,
+              epicId: eid,
+              scope: "epic",
+              sessionId,
+              reason:
+                "The team build ended with an open question; returning ticket to in_progress",
+            });
+          }
           handleAskedQuestionOutcome({
             projectId,
             epicIds: allEpicIds,
