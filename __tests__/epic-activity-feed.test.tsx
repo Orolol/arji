@@ -9,6 +9,12 @@ import {
   EpicActivityFeed,
   buildActivityFeed,
   SYSTEM_GROUP_WINDOW_MS,
+  feedItemKind,
+  matchesActivityFilter,
+  filterActivityFeed,
+  isLongComment,
+  commentPreview,
+  LONG_COMMENT_THRESHOLD,
 } from "@/components/kanban/epic-detail/EpicActivityFeed";
 import type { TicketComment } from "@/hooks/useTicketComments";
 import type { EpicActivityEntry } from "@/hooks/useEpicActivity";
@@ -284,5 +290,247 @@ describe("EpicActivityFeed", () => {
     expect(
       screen.getByText("No activity yet. Start the conversation.")
     ).toBeInTheDocument();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* System vs. comment distinction (ticket-display overhaul, story 3)   */
+/* ------------------------------------------------------------------ */
+
+describe("EpicActivityFeed — system vs comment distinction", () => {
+  it("tags comments and system events with a machine-readable kind", () => {
+    const { container } = renderFeed(
+      [transition("t1", at(1000), { actor: "system" })],
+      [comment("c1", at(0))]
+    );
+
+    expect(
+      container
+        .querySelector('[data-testid="activity-comment"]')
+        ?.getAttribute("data-kind")
+    ).toBe("comment");
+    expect(
+      container
+        .querySelector('[data-testid="activity-transition"]')
+        ?.getAttribute("data-kind")
+    ).toBe("system");
+  });
+
+  it("tags pipeline rows and collapsed transition groups as system", () => {
+    const { container } = renderFeed([
+      transition("s1", at(0), { actor: "system" }),
+      transition("s2", at(1000), { actor: "system" }),
+      transition("s3", at(2000), {
+        actor: "system",
+        reason: "Pipeline finished: review passed, awaiting approval",
+      }),
+    ]);
+
+    expect(
+      container
+        .querySelector('[data-testid="activity-pipeline"]')
+        ?.getAttribute("data-kind")
+    ).toBe("system");
+    // The 2-transition burst collapsed into a group that is system-kind.
+    const group = container.querySelector(
+      '[data-testid="activity-transition-group"]'
+    );
+    expect(group?.closest('[data-kind="system"]')).toBe(group?.parentElement);
+  });
+
+  it("classifies feed items by kind for the filter", () => {
+    const feed = buildActivityFeed(
+      [comment("c1", at(0))],
+      [
+        transition("t1", at(1000), { actor: "system" }),
+        transition("t2", at(2000), {
+          actor: "system",
+          reason: "Pipeline finished: review passed, awaiting approval",
+        }),
+      ]
+    );
+    expect(feed.map(feedItemKind)).toEqual(["comment", "system", "system"]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Kind filter                                                         */
+/* ------------------------------------------------------------------ */
+
+describe("EpicActivityFeed — kind filter", () => {
+  it("shows counts per kind and filters comments / system events separately", () => {
+    renderFeed(
+      [
+        transition("t1", at(1000), { actor: "user" }),
+        transition("t2", at(2000), { actor: "system" }),
+      ],
+      [comment("c1", at(0))]
+    );
+
+    expect(screen.getByTestId("activity-filter-all")).toHaveTextContent("All (3)");
+    expect(screen.getByTestId("activity-filter-comments")).toHaveTextContent(
+      "Comments (1)"
+    );
+    expect(screen.getByTestId("activity-filter-system")).toHaveTextContent(
+      "System (2)"
+    );
+
+    // Comments only.
+    fireEvent.click(screen.getByTestId("activity-filter-comments"));
+    expect(screen.getAllByTestId("activity-comment")).toHaveLength(1);
+    expect(screen.queryAllByTestId("activity-transition")).toHaveLength(0);
+
+    // System only.
+    fireEvent.click(screen.getByTestId("activity-filter-system"));
+    expect(screen.queryAllByTestId("activity-comment")).toHaveLength(0);
+    expect(screen.getAllByTestId("activity-transition")).toHaveLength(2);
+
+    // Back to everything.
+    fireEvent.click(screen.getByTestId("activity-filter-all"));
+    expect(screen.getAllByTestId("activity-comment")).toHaveLength(1);
+    expect(screen.getAllByTestId("activity-transition")).toHaveLength(2);
+  });
+
+  it("shows an explanatory empty state when the filter matches nothing", () => {
+    renderFeed([transition("t1", at(0))], []);
+
+    fireEvent.click(screen.getByTestId("activity-filter-comments"));
+    expect(screen.getByTestId("activity-filter-empty")).toBeInTheDocument();
+    expect(
+      screen.queryByText("No activity yet. Start the conversation.")
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps chronological order inside the filtered view", () => {
+    const { container } = renderFeed(
+      [transition("t1", at(3000), { actor: "system" })],
+      [
+        comment("c1", at(0)),
+        comment("c2", at(1000)),
+        comment("c3", at(2000)),
+      ]
+    );
+
+    fireEvent.click(screen.getByTestId("activity-filter-comments"));
+    const order = Array.from(
+      container.querySelectorAll('[data-testid="activity-comment"]')
+    ).map((el) => el.textContent);
+    expect(order[0]).toContain("comment c1");
+    expect(order[1]).toContain("comment c2");
+    expect(order[2]).toContain("comment c3");
+  });
+
+  it("computes grouping on the full feed, then filters (heavy bursts stay collapsed)", () => {
+    // 10 system transitions + 1 comment placed before the burst.
+    const entries = Array.from({ length: 10 }, (_, i) =>
+      transition(`s${i}`, at(i * 1000), { actor: "system" })
+    );
+    const { container } = renderFeed(entries, [comment("c1", at(-1000))]);
+
+    // 10 transitions collapse into one group; the burst stays one row even
+    // under the system filter.
+    fireEvent.click(screen.getByTestId("activity-filter-system"));
+    const rows = container.querySelectorAll(FEED_ITEM_SELECTOR);
+    expect(rows).toHaveLength(1);
+    expect(
+      container.querySelector('[data-testid="activity-transition-group"]')
+    ).toHaveTextContent("10 automatic transitions");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Long entry collapsing                                               */
+/* ------------------------------------------------------------------ */
+
+const LONG_COMMENT = `HEAD-MARKER ${"lorem ipsum dolor sit amet ".repeat(20)}TAIL-MARKER`;
+
+describe("EpicActivityFeed — long entry collapsing", () => {
+  it("collapses a long comment behind a word-boundary preview, expandable on demand", () => {
+    renderFeed([], [comment("c1", at(0), { content: LONG_COMMENT })]);
+
+    // The preview shows the head and hides the tail.
+    expect(screen.getByTestId("activity-comment")).toHaveTextContent(
+      "HEAD-MARKER"
+    );
+    expect(screen.queryByText(/TAIL-MARKER/)).toBeNull();
+
+    const expand = screen.getByTestId("activity-comment-expand");
+    expect(expand).toHaveTextContent("Show more");
+    fireEvent.click(expand);
+
+    expect(screen.getByText(/TAIL-MARKER/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("activity-comment-collapse"));
+    expect(screen.queryByText(/TAIL-MARKER/)).toBeNull();
+  });
+
+  it("leaves short comments fully visible without an expand control", () => {
+    renderFeed([], [comment("c1", at(0), { content: "short build note" })]);
+
+    expect(screen.getByTestId("activity-comment")).toHaveTextContent(
+      "short build note"
+    );
+    expect(screen.queryByTestId("activity-comment-expand")).toBeNull();
+  });
+
+  it("keeps the comment composer pinned outside the scrolling feed", () => {
+    renderFeed(
+      Array.from({ length: 30 }, (_, i) =>
+        transition(`t${i}`, at(i * 1000), { actor: "system" })
+      ),
+      [comment("c1", at(-1000))]
+    );
+
+    const textarea = screen.getByTestId("mention-textarea");
+    const viewport = document.querySelector(
+      '[data-slot="scroll-area-viewport"]'
+    );
+    expect(viewport).not.toBeNull();
+    expect(viewport).not.toContainElement(textarea);
+  });
+});
+
+describe("long comment helpers (pure)", () => {
+  it("treats content at the threshold as long and below it as short", () => {
+    expect(isLongComment("x".repeat(LONG_COMMENT_THRESHOLD))).toBe(true);
+    expect(isLongComment("x".repeat(LONG_COMMENT_THRESHOLD - 1))).toBe(false);
+  });
+
+  it("truncates on a word boundary with an ellipsis, without mid-word cuts", () => {
+    const content = `aaa bbb ccc ddd ${"word ".repeat(100)}END`;
+    const preview = commentPreview(content);
+
+    expect(preview.length).toBeLessThan(content.length);
+    expect(preview.endsWith("…")).toBe(true);
+    // No fragment of a cut word: the preview is whole words plus the dot.
+    const body = preview.slice(0, -1).trimEnd();
+    expect(body.endsWith(" ")).toBe(false);
+    const lastWord = body.split(" ").at(-1);
+    expect(content).toContain(lastWord);
+  });
+
+  it("returns short content unchanged", () => {
+    expect(commentPreview("small note")).toBe("small note");
+  });
+
+  it("filters feed items by kind without reordering", () => {
+    const feed = buildActivityFeed(
+      [comment("c1", at(1000))],
+      [
+        transition("t1", at(0), { actor: "system" }),
+        transition("t2", at(2000), { actor: "user" }),
+      ]
+    );
+
+    expect(filterActivityFeed(feed, "all")).toHaveLength(3);
+    expect(filterActivityFeed(feed, "comments").map(feedItemKind)).toEqual([
+      "comment",
+    ]);
+    expect(
+      filterActivityFeed(feed, "system").map((item) =>
+        item.kind === "transition" ? item.entry.id : item.kind
+      )
+    ).toEqual(["t1", "t2"]);
+    expect(matchesActivityFilter(feed[0], "comments")).toBe(false);
   });
 });

@@ -26,7 +26,7 @@ import { AgentActionsBar } from "@/components/shared/AgentActionsBar";
 import { AgentDispatchDialog } from "@/components/shared/AgentDispatchDialog";
 import { TicketTypeBadge } from "@/components/shared/TicketTypeBadge";
 import { EpicActivityFeed } from "./epic-detail/EpicActivityFeed";
-import { PRIORITY_LABELS, COLUMN_LABELS } from "@/lib/types/kanban";
+import { PRIORITY_LABELS } from "@/lib/types/kanban";
 import { useEpicPr } from "@/hooks/useEpicPr";
 import {
   Wrench,
@@ -183,6 +183,16 @@ export function EpicDetail({
   const [statusError, setStatusError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("details");
 
+  // Switching tickets resets the active section (the Code Review tab may
+  // not exist on the next ticket) and clears a stale status error —
+  // derived state, adjusted during render per React's reset pattern.
+  const [lastEpicId, setLastEpicId] = useState(epicId);
+  if (epicId !== lastEpicId) {
+    setLastEpicId(epicId);
+    setActiveTab("details");
+    setStatusError(null);
+  }
+
   const {
     merging,
     mergeError,
@@ -225,13 +235,6 @@ export function EpicDetail({
     };
     void markRead();
   }, [open, epicId]);
-
-  // Switching tickets resets the active section (the Code Review tab may
-  // not exist on the next ticket) and clears a stale status error.
-  useEffect(() => {
-    setActiveTab("details");
-    setStatusError(null);
-  }, [epicId]);
 
   const [newUSTitle, setNewUSTitle] = useState("");
   const [resolvingMerge, setResolvingMerge] = useState(false);
