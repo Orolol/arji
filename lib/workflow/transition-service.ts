@@ -23,6 +23,12 @@ export interface ApplyTransitionOpts {
   actor: TransitionContext["actor"];
   source: NonNullable<TransitionContext["source"]>;
   reason?: string;
+  /**
+   * The ACTING session — the one performing this transition. Besides
+   * activity-log provenance it is the engine's owning-session exemption
+   * input (lib/workflow/engine.ts): never pass a session id for
+   * traceability alone.
+   */
   sessionId?: string;
   /** When true, only validate — skip DB update, emit, and log. */
   validateOnly?: boolean;
@@ -53,6 +59,10 @@ export interface ApplyStoryTransitionOpts {
   actor: TransitionContext["actor"];
   source: NonNullable<TransitionContext["source"]>;
   reason: string;
+  /**
+   * The ACTING session — see ApplyTransitionOpts.sessionId; the engine's
+   * owning-session exemption input as well as the activity-log provenance.
+   */
   sessionId?: string;
   validateOnly?: boolean;
   /** Epic approval may synchronize child stories using the epic review. */
@@ -125,8 +135,16 @@ export function applyTransition(opts: ApplyTransitionOpts): ApplyTransitionResul
     return { valid: true };
   }
 
-  // 1. Build context & validate
-  const ctx = buildTransitionContext({ epicId, fromStatus, toStatus, actor });
+  // 1. Build context & validate. The acting session id feeds the engine's
+  //  owning-session exemption: a live build may move the ticket it owns
+  //  itself, while every concurrent actor stays locked out.
+  const ctx = buildTransitionContext({
+    epicId,
+    fromStatus,
+    toStatus,
+    actor,
+    sessionId,
+  });
   ctx.source = source;
   if (assumeReviewCommentsResolved) {
     ctx.hasOpenReviewComments = false;
@@ -209,6 +227,7 @@ export function applyStoryTransition(
     fromStatus,
     toStatus,
     actor,
+    sessionId,
     requireCompletedReview,
     requireResolvedComments,
   });

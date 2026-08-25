@@ -481,19 +481,153 @@ export function transitionReviewRejected(opts: {
   }
 }
 
-export function logBuildFailure(opts: {
+/**
+ * Pull a ticket back out of Review after a non-delivering terminal outcome.
+ *
+ * The owning-session exemption lets a live build promote its own ticket to
+ * Review mid-run — so a build that then fails or ends on an open question
+ * must not leave the work parked in Review (Full Auto would pick it up as a
+ * review candidate). The target is the ticket the session could have moved:
+ * the epic for epic-scoped builds, the story for story-scoped ones — epic
+ * promotion belongs to transitionBuildCompleted's sibling-story rule, which
+ * a story terminal outcome never runs.
+ *
+ * Returns the status the ticket is held at afterwards: in_progress when the
+ * pullback landed (or the ticket was never out of it), the real status when
+ * the guarded pullback is refused or could not run — so the caller's hold
+ * entry stays truthful instead of hard-coding in_progress.
+ */
+export function pullTicketBackIfPromoted(
+  opts: TicketPullbackOpts
+): KanbanStatus {
+  try {
+    return applyTicketPullback(opts);
+  } catch (err) {
+    // Best-effort, like the rest of the terminal handlers: the failure and
+    // asked_question paths call this from background completion blocks that
+    // do not wrap it (see agent-question.ts), so a throw here would reject
+    // runBuildSession and lose the agent's output comment. Degrade to
+    // reporting the column the board is actually in.
+    console.warn(
+      "[workflow] Failed to pull the ticket back out of review:",
+      (err as Error).message
+    );
+    return readHeldStatus(opts);
+  }
+}
+
+export interface TicketPullbackOpts {
   projectId: string;
   epicId: string;
+  scope: BuildScope;
+  userStoryId?: string | null;
+  /** The terminal session, which owns the ticket back if it is still the sole live build. */
+  sessionId: string;
+  /** Activity-trail wording for why the ticket must not stay in Review. */
+  reason: string;
+}
+
+/**
+ * The column the ticket sits in when the pullback itself could not run.
+ * Never throws: a caller inside a completion block has nothing better to
+ * fall back to than in_progress, the status the build started from.
+ */
+function readHeldStatus(opts: TicketPullbackOpts): KanbanStatus {
+  try {
+    if (opts.scope === "story" && opts.userStoryId) {
+      return (db
+        .select({ status: userStories.status })
+        .from(userStories)
+        .where(eq(userStories.id, opts.userStoryId))
+        .get()?.status ?? "in_progress") as KanbanStatus;
+    }
+    return readEpicStatus(opts.epicId);
+  } catch {
+    return "in_progress";
+  }
+}
+
+function applyTicketPullback(opts: TicketPullbackOpts): KanbanStatus {
+  if (opts.scope === "story" && opts.userStoryId) {
+    const story = db
+      .select({ id: userStories.id, status: userStories.status })
+      .from(userStories)
+      .where(eq(userStories.id, opts.userStoryId))
+      .get();
+    if (!story || (story.status ?? "todo") !== "review") {
+      // No promotion to undo — report the real status, not a guess.
+      return (story?.status ?? "in_progress") as KanbanStatus;
+    }
+    const result = applyStoryTransition({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      userStoryId: story.id,
+      fromStatus: "review",
+      toStatus: "in_progress",
+      actor: "agent",
+      source: "build",
+      reason: opts.reason,
+      sessionId: opts.sessionId,
+    });
+    if (result.valid) return "in_progress";
+    return (
+      db
+        .select({ status: userStories.status })
+        .from(userStories)
+        .where(eq(userStories.id, story.id))
+        .get()?.status ?? "review"
+    ) as KanbanStatus;
+  }
+
+  const status = readEpicStatus(opts.epicId);
+  if (status !== "review") return status;
+  const result = applyTransition({
+    projectId: opts.projectId,
+    epicId: opts.epicId,
+    fromStatus: "review",
+    toStatus: "in_progress",
+    actor: "agent",
+    source: "build",
+    reason: opts.reason,
+    sessionId: opts.sessionId,
+  });
+  return result.valid ? "in_progress" : readEpicStatus(opts.epicId);
+}
+
+/**
+ * Failure path: the build never claimed the ticket, so it never reclaims it
+ * — except that the owning-session exemption may have promoted the ticket
+ * to Review mid-run, in which case the failure undoes that promotion first.
+ * The hold entry logs the status the ticket is actually held in.
+ *
+ * Named `hold*`, not `log*`: unlike logWorkflowDecision/logTransition this
+ * writes board state (the pullback), so a caller cannot treat it as a
+ * pure audit call.
+ */
+export function holdFailedBuild(opts: {
+  projectId: string;
+  epicId: string;
+  /** Which ticket to hold/rollback; defaults to the epic (batch/team callers). */
+  scope?: BuildScope;
+  userStoryId?: string | null;
   sessionId: string;
   error?: string | null;
 }) {
-  const status = "in_progress";
+  const detail = opts.error || "unknown error";
+  const status = pullTicketBackIfPromoted({
+    projectId: opts.projectId,
+    epicId: opts.epicId,
+    scope: opts.scope ?? "epic",
+    userStoryId: opts.userStoryId,
+    sessionId: opts.sessionId,
+    reason: `Build failed; returning ticket to in_progress: ${detail}`,
+  });
   logWorkflowDecision({
     projectId: opts.projectId,
     epicId: opts.epicId,
     status,
     actor: "agent",
-    reason: `Build failed; ticket held in ${status}: ${opts.error || "unknown error"}`,
+    reason: `Build failed; ticket held in ${status}: ${detail}`,
     sessionId: opts.sessionId,
   });
 }
@@ -553,15 +687,34 @@ export function finalizeBuildTerminalOutcome(opts: {
   }
 
   if (opts.success) {
+    // The agent stopped to ask a question: the work is not delivered, so a
+    // ticket it promoted to Review mid-run comes back BEFORE the reply hold
+    // is recorded — the hold entry must name the status it actually holds.
+    const heldStatus = pullTicketBackIfPromoted({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      scope: opts.scope,
+      userStoryId: opts.userStoryId,
+      sessionId: opts.sessionId,
+      reason:
+        "The build ended with an open question; returning ticket to in_progress",
+    });
     handleAskedQuestionOutcome({
       projectId: opts.projectId,
       epicIds: [opts.epicId],
       sessionId: opts.sessionId,
-      ticketStatus: "in_progress",
+      ticketStatus: heldStatus,
     });
     return { kind: "awaiting_reply" };
   }
 
-  logBuildFailure(opts);
+  holdFailedBuild({
+    projectId: opts.projectId,
+    epicId: opts.epicId,
+    scope: opts.scope,
+    userStoryId: opts.userStoryId,
+    sessionId: opts.sessionId,
+    error: opts.error,
+  });
   return { kind: "failed" };
 }

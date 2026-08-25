@@ -135,6 +135,34 @@ describe("handleAskedQuestionOutcome", () => {
     expect(epicIds).toEqual(["epic-1", "epic-2"]);
   });
 
+  it("logs each held epic with its own status (team builds straddling columns)", () => {
+    // A team session coordinates several epics; their pullbacks can land in
+    // different columns (one returned to in_progress, one whose guarded
+    // pullback was refused). A single shared status would stamp a false
+    // hold entry on every feed but the first.
+    seedSessionContext({ epicId: null });
+
+    handleAskedQuestionOutcome({
+      projectId: "proj-1",
+      epicIds: ["epic-1", "epic-2", "epic-3"],
+      sessionId: "sess-1",
+      ticketStatus: "in_progress",
+      ticketStatusByEpicId: { "epic-1": "in_progress", "epic-2": "review" },
+    });
+
+    const activity = dbMockState.insertCalls
+      .slice(1)
+      .map((call) => call as Record<string, unknown>);
+    expect(
+      activity.map((entry) => [entry.epicId, entry.fromStatus, entry.toStatus])
+    ).toEqual([
+      ["epic-1", "in_progress", "in_progress"],
+      ["epic-2", "review", "review"],
+      // epic-3 is absent from the map: falls back to ticketStatus.
+      ["epic-3", "in_progress", "in_progress"],
+    ]);
+  });
+
   it("defaults the held status to in_progress", () => {
     seedSessionContext();
 

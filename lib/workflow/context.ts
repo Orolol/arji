@@ -5,6 +5,7 @@
 import { db } from "@/lib/db";
 import { agentSessions, reviewComments } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import { CODE_PRODUCING_AGENT_TYPES } from "@/lib/agent-config/constants";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import type { TransitionContext } from "./engine";
 
@@ -14,6 +15,13 @@ export function buildTransitionContext(opts: {
   fromStatus: KanbanStatus;
   toStatus: KanbanStatus;
   actor: "user" | "agent" | "system";
+  /**
+   * The ACTING session — the one performing this transition. Besides
+   * activity-log provenance it is the engine's owning-session exemption
+   * input (lib/workflow/engine.ts): never pass a session id for
+   * traceability alone.
+   */
+  sessionId?: string;
   requireCompletedReview?: boolean;
   requireResolvedComments?: boolean;
 }): TransitionContext {
@@ -23,6 +31,7 @@ export function buildTransitionContext(opts: {
     fromStatus,
     toStatus,
     actor,
+    sessionId,
     requireCompletedReview = true,
     requireResolvedComments = true,
   } = opts;
@@ -64,7 +73,7 @@ export function buildTransitionContext(opts: {
 
   // Only code-producing sessions own the in_progress column. Review, chat,
   // merge and other auxiliary sessions legitimately run in other columns.
-  const activeBuildTypes = new Set(["build", "ticket_build", "team_build"]);
+  const activeBuildTypes = new Set<string>(CODE_PRODUCING_AGENT_TYPES);
   const runningSessions = db
     .select()
     .from(agentSessions)
@@ -81,6 +90,18 @@ export function buildTransitionContext(opts: {
         activeBuildTypes.has(session.agentType ?? "")
     );
 
+  // The acting session owns the ticket only when it is the sole live
+  // code-producing session on it — a second concurrent build keeps the
+  // lock in place (e.g. the epic while a sibling story is still building).
+  // A story-scoped session's ownership stops at its story: on an
+  // epic-scoped context (no userStoryId) it must never unlock the parent
+  // epic, or a story agent could promote the epic past the sibling-story
+  // rule that transitionBuildCompleted enforces.
+  const soleActingSession =
+    sessionId !== undefined &&
+    runningSessions.length === 1 &&
+    runningSessions[0].id === sessionId;
+
   return {
     epicId,
     fromStatus,
@@ -90,6 +111,13 @@ export function buildTransitionContext(opts: {
     requireCompletedReview,
     requireResolvedComments,
     hasRunningSession: runningSessions.length > 0,
+    storyOwnershipBoundary:
+      soleActingSession &&
+      userStoryId === undefined &&
+      runningSessions[0].userStoryId !== null,
+    ownsInProgress:
+      soleActingSession &&
+      (userStoryId !== undefined || !runningSessions[0].userStoryId),
     actor,
   };
 }

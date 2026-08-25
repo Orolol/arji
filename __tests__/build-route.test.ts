@@ -27,6 +27,9 @@ const mockResolveAgentByNamedId = vi.hoisted(() =>
 
 const mockHandleAskedQuestionOutcome = vi.hoisted(() => vi.fn());
 const mockMarkSessionTerminal = vi.hoisted(() => vi.fn());
+const mockPullTicketBackIfPromoted = vi.hoisted(() =>
+  vi.fn(() => "in_progress" as string)
+);
 
 vi.mock("@/lib/db", () => {
   const chain = {
@@ -145,6 +148,16 @@ vi.mock("@/lib/workflow/agent-question", () => ({
   handleAskedQuestionOutcome: mockHandleAskedQuestionOutcome,
 }));
 
+// Only the pullback is stubbed: the team asked_question branch must log each
+// coordinated epic with the status its own pullback actually left it in.
+vi.mock("@/lib/workflow/automatic-transitions", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/lib/workflow/automatic-transitions")
+    >();
+  return { ...actual, pullTicketBackIfPromoted: mockPullTicketBackIfPromoted };
+});
+
 vi.mock("fs", () => ({
   default: {
     mkdirSync: vi.fn(),
@@ -178,6 +191,8 @@ describe("Build Route", () => {
     mockResolveAgentByNamedId.mockReturnValue({ provider: "claude-code" });
     mockHandleAskedQuestionOutcome.mockClear();
     mockMarkSessionTerminal.mockClear();
+    mockPullTicketBackIfPromoted.mockClear();
+    mockPullTicketBackIfPromoted.mockReturnValue("in_progress");
   });
 
   it("rejects team mode when resolved provider is not claude-code", async () => {
@@ -306,6 +321,47 @@ describe("Build Route", () => {
       (u) => u.values.status === "review"
     );
     expect(reviewUpdates).toHaveLength(0);
+  });
+
+  it("holds a team build's coordinated epic at the status its pullback really left", async () => {
+    mockState.processManagerResult = {
+      success: true,
+      duration: 1000,
+      result: "Which auth provider should the team use?",
+      endedWithQuestion: true,
+    };
+    // The guarded pullback was refused, so the epic is still in review — the
+    // hold entry must say so rather than assume in_progress.
+    mockPullTicketBackIfPromoted.mockReturnValue("review");
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/build/route"
+    );
+
+    const res = await POST(
+      mockRequest({ epicIds: ["epic-1"], team: true, provider: "claude-code" }),
+      { params: Promise.resolve({ projectId: "proj-1" }) }
+    );
+
+    expect(res.status).toBe(200);
+    await flushBackground();
+
+    expect(mockPullTicketBackIfPromoted).toHaveBeenCalledWith(
+      expect.objectContaining({ epicId: "epic-1", scope: "epic" })
+    );
+    expect(mockHandleAskedQuestionOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "proj-1",
+        sessionId: "test-session-id",
+        ticketStatusByEpicId: { "epic-1": "review" },
+      })
+    );
+    // The old hardcoded hold status is gone, not merely shadowed.
+    const call = mockHandleAskedQuestionOutcome.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(call.ticketStatus).toBeUndefined();
   });
 
   it("persists the asked_question verdict and fires the workflow effects", async () => {
