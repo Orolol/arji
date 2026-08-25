@@ -1,28 +1,60 @@
 "use client";
 
 import { CheckCircle2, FlaskConical, XCircle } from "lucide-react";
+import type { RegressionFailureReason } from "@/lib/verify/regression-constants";
 import { MarkdownContent } from "@/components/chat/MarkdownContent";
 import {
-  parseRegressionReportComment,
+  locateRegressionReport,
   regressionReasonLabel,
 } from "@/lib/verify/regression-report";
 
 /**
- * The ticket's verify section for the mandatory bug-regression gate: when
- * a ticket comment carries a red→green verify report (posted by the
- * pipeline's mechanical check), it renders as a structured block — test
- * files detected, green/red verdict, failure reason — instead of the raw
- * markdown. Any other content renders as ordinary markdown.
+ * Renders one ticket comment. Ordinary comments are plain markdown; a
+ * comment carrying the pipeline's red→green verify report renders that
+ * report as a structured block — test files detected, green/red verdict,
+ * failure reason — in place of its JSON payload.
+ *
+ * Only the report REGION is replaced. Report comments are ordinary ticket
+ * comments and get injected verbatim into later prompts, so an agent
+ * quoting one back inside its own comment is a reachable case: swallowing
+ * the whole comment would drop everything that agent actually wrote.
  */
-export function RegressionReportBlock({ content }: { content: string }) {
-  const payload = parseRegressionReportComment(content);
-  if (!payload) {
+export function TicketCommentContent({ content }: { content: string }) {
+  const located = locateRegressionReport(content);
+  if (!located) {
     return <MarkdownContent content={content} />;
   }
 
+  const { payload, before, after } = located;
   const { regression } = payload;
   const passed = regression.status === "passed";
 
+  return (
+    <div className="space-y-2">
+      {before && <MarkdownContent content={before} />}
+      <RegressionReportBlock
+        passed={passed}
+        reason={regression.reason}
+        testFiles={regression.testFiles}
+        detail={regression.detail ?? null}
+      />
+      {after && <MarkdownContent content={after} />}
+    </div>
+  );
+}
+
+/** The structured red/green verdict block itself. */
+function RegressionReportBlock({
+  passed,
+  reason,
+  testFiles,
+  detail,
+}: {
+  passed: boolean;
+  reason: RegressionFailureReason | null;
+  testFiles: string[];
+  detail: string | null;
+}) {
   return (
     <div
       data-testid="regression-report-block"
@@ -53,24 +85,22 @@ export function RegressionReportBlock({ content }: { content: string }) {
       {!passed && (
         <p className="text-xs">
           <span className="text-muted-foreground">Reason: </span>
-          {regressionReasonLabel(regression.reason ?? "command_error")}
+          {regressionReasonLabel(reason ?? "command_error")}
         </p>
       )}
 
       <div className="text-xs">
         <span className="text-muted-foreground">Test files detected:</span>{" "}
-        {regression.testFiles.length > 0 ? (
-          <span className="font-mono">
-            {regression.testFiles.join(", ")}
-          </span>
+        {testFiles.length > 0 ? (
+          <span className="font-mono">{testFiles.join(", ")}</span>
         ) : (
           <span className="italic text-muted-foreground">none</span>
         )}
       </div>
 
-      {regression.detail && (
+      {detail && (
         <pre className="text-[11px] whitespace-pre-wrap break-all rounded bg-muted/60 p-2 max-h-40 overflow-y-auto">
-          {regression.detail.trim()}
+          {detail.trim()}
         </pre>
       )}
     </div>

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { RegressionReportBlock } from "@/components/verify/RegressionReportBlock";
+import { TicketCommentContent } from "@/components/verify/TicketCommentContent";
 import {
   formatRegressionReportComment,
   REGRESSION_REPORT_MARKER,
@@ -12,7 +12,7 @@ vi.mock("@/components/chat/MarkdownContent", () => ({
   ),
 }));
 
-describe("RegressionReportBlock", () => {
+describe("TicketCommentContent", () => {
   it("renders a passed regression report correctly", () => {
     const comment = formatRegressionReportComment({
       regression: {
@@ -24,7 +24,7 @@ describe("RegressionReportBlock", () => {
       },
     });
 
-    render(<RegressionReportBlock content={comment} />);
+    render(<TicketCommentContent content={comment} />);
 
     const block = screen.getByTestId("regression-report-block");
     expect(block).toBeInTheDocument();
@@ -44,7 +44,7 @@ describe("RegressionReportBlock", () => {
       },
     });
 
-    render(<RegressionReportBlock content={comment} />);
+    render(<TicketCommentContent content={comment} />);
 
     const block = screen.getByTestId("regression-report-block");
     expect(block).toBeInTheDocument();
@@ -66,7 +66,7 @@ describe("RegressionReportBlock", () => {
       },
     });
 
-    render(<RegressionReportBlock content={comment} />);
+    render(<TicketCommentContent content={comment} />);
 
     expect(screen.getByText("none")).toBeInTheDocument();
   });
@@ -74,7 +74,7 @@ describe("RegressionReportBlock", () => {
   it("delegates ordinary comments to MarkdownContent", () => {
     const comment = "This is a regular comment by a developer.";
 
-    render(<RegressionReportBlock content={comment} />);
+    render(<TicketCommentContent content={comment} />);
 
     expect(screen.queryByTestId("regression-report-block")).not.toBeInTheDocument();
     expect(screen.getByTestId("markdown-content")).toHaveTextContent(
@@ -82,10 +82,34 @@ describe("RegressionReportBlock", () => {
     );
   });
 
+  it("keeps an agent's own prose when its comment quotes a regression report", () => {
+    // Report comments are ordinary ticket comments and are replayed verbatim
+    // into later prompts, so an agent quoting one back is reachable: only the
+    // report region may be replaced by the block.
+    const report = formatRegressionReportComment({
+      regression: {
+        status: "failed",
+        reason: "test_passes_on_base",
+        testFiles: ["src/repro.test.ts"],
+        detail: null,
+        checkedAt: "2026-08-25T12:00:00.000Z",
+      },
+    });
+    const comment = `I re-read the gate verdict below.\n\n${report}\n\nRewriting the test so it actually reproduces the bug.`;
+
+    render(<TicketCommentContent content={comment} />);
+
+    expect(screen.getByTestId("regression-report-block")).toBeInTheDocument();
+    const markdown = screen.getAllByTestId("markdown-content");
+    const rendered = markdown.map((n) => n.textContent).join(" ");
+    expect(rendered).toContain("I re-read the gate verdict below.");
+    expect(rendered).toContain("Rewriting the test so it actually reproduces the bug.");
+  });
+
   it("delegates malformed regression reports to MarkdownContent without crashing", () => {
     const malformed = `${REGRESSION_REPORT_MARKER}\n\`\`\`json\n{ invalid json\n\`\`\``;
 
-    render(<RegressionReportBlock content={malformed} />);
+    render(<TicketCommentContent content={malformed} />);
 
     expect(screen.queryByTestId("regression-report-block")).not.toBeInTheDocument();
     expect(screen.getByTestId("markdown-content")).toBeInTheDocument();

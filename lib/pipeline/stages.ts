@@ -52,6 +52,7 @@ import {
   type PromptComment,
 } from "@/lib/claude/prompt-builder";
 import { buildRegressionFixSection } from "@/lib/verify/regression-report";
+import { readRegressionConfig } from "@/lib/pipeline/verify";
 import {
   enrichPromptWithDocumentMentions,
   userAuthoredTexts,
@@ -564,7 +565,15 @@ async function dispatchPipelineStage(
       // A regression-gate rejection carries its exact red→green verdict so
       // the agent repairs the real problem instead of guessing.
       if (request.verifyFailure) {
-        prompt = prompt + "\n\n" + buildRegressionFixSection(request.verifyFailure);
+        // Same patterns the gate filtered the diff with, so the prompt states
+        // the rule the agent actually has to satisfy.
+        prompt =
+          prompt +
+          "\n\n" +
+          buildRegressionFixSection(
+            request.verifyFailure,
+            readRegressionConfig(projectId).patterns
+          );
       }
     }
   }

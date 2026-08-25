@@ -42,8 +42,9 @@ const PROBE_SCRIPTS: Record<
   ].join("\n"),
   "always-pass": ["process.exit(0);", ""].join("\n"),
   "always-fail": ["process.exit(1);", ""].join("\n"),
-  // Fails WITHOUT the fix, but its output mimics an unresolved dependency:
-  // a non-zero exit that proves nothing about the test itself.
+  // Fails WITHOUT the fix, printing the module-resolution text that the
+  // merge-base genuinely produces when the branch adds the module the test
+  // imports. A correct red, not an environment fault.
   envfail: [
     "const fs = require('fs');",
     "if (!fs.existsSync('src/fix.marker')) {",
@@ -53,8 +54,8 @@ const PROBE_SCRIPTS: Record<
     "process.exit(0);",
     "",
   ].join("\n"),
-  // Fails ALWAYS with a module-resolution signature: the green run must
-  // blame the environment, not the agent's fix.
+  // Fails ALWAYS with a missing-RUNNER signature: the green run must blame
+  // the environment, not the agent's fix.
   "envfail-always": [
     "console.error(\"Error: Cannot find package 'vitest'\");",
     "process.exit(1);",
@@ -311,7 +312,14 @@ describe("runRegressionCheck — real repositories", () => {
     await assertNoRedWorktreeLeft(repoPath);
   }, 30_000);
 
-  it("reports command_error — not a passed gate — when the red run dies on a missing import", async () => {
+  it("passes when the red run fails with a module-resolution error — the commonest real red", async () => {
+    // The most ordinary bug fix there is adds a module and imports it from
+    // the new test: on the merge-base that module does not exist, so the red
+    // run says "Cannot find module". That IS the reproduction. Classifying it
+    // as an environment fault rejected correct branches, and once
+    // command_error became a terminal non-fix failure it killed the run
+    // outright. The green run passing with the identical command is the
+    // proof that the environment works.
     const { repoPath } = await initRepo("envfail");
     await commitOnBranch(repoPath, {
       "src/bug.test.js": "// reproduces the bug\n",
@@ -323,9 +331,103 @@ describe("runRegressionCheck — real repositories", () => {
       commandTemplate: "node tools/probe.js {files}",
     });
 
+    expect(result.status).toBe("passed");
+    expect(result.reason).toBeNull();
+    expect(result.testFiles).toEqual(["src/bug.test.js"]);
+  }, 30_000);
+
+  it("reports command_error when a node project's worktree has no dependencies, whatever the output says", async () => {
+    // Arij's createWorktree never installs dependencies, so this is the
+    // DEFAULT state of a fresh epic worktree. The verdict must come from the
+    // fact, not from whether the runner's phrasing happens to match a regex:
+    // this probe's output looks like an ordinary assertion failure.
+    const { repoPath } = await initRepo("always-fail");
+    writeFileSync(
+      path.join(repoPath, "package.json"),
+      JSON.stringify({ name: "fixture", private: true })
+    );
+    await commitOnBranch(repoPath, {
+      "src/bug.test.js": "// reproduces the bug\n",
+      "package.json": JSON.stringify({ name: "fixture", private: true }),
+    });
+
+    const result = await runRegressionCheck({
+      repoPath,
+      commandTemplate: "node tools/probe.js {files}",
+    });
+
     expect(result.status).toBe("failed");
     expect(result.reason).toBe("command_error");
-    expect(result.detail).toContain("environmental reasons");
+    expect(result.detail).toContain("no node_modules");
+  }, 30_000);
+
+  it("borrows the main checkout's node_modules so the green run has a runner", async () => {
+    const { repoPath } = await initRepo("redgreen");
+    writeFileSync(
+      path.join(repoPath, "package.json"),
+      JSON.stringify({ name: "fixture", private: true })
+    );
+    await commitOnBranch(repoPath, {
+      "src/bug.test.js": "// reproduces the bug\n",
+      "src/fix.marker": "fixed\n",
+      "package.json": JSON.stringify({ name: "fixture", private: true }),
+    });
+
+    // Dependencies live only in the main checkout, exactly as in production.
+    const mainRepoPath = path.join(root, "main-checkout");
+    mkdirSync(path.join(mainRepoPath, "node_modules"), { recursive: true });
+    writeFileSync(path.join(mainRepoPath, "node_modules", ".keep"), "");
+
+    const result = await runRegressionCheck({
+      repoPath,
+      mainRepoPath,
+      commandTemplate: "node tools/probe.js {files}",
+    });
+
+    expect(existsSync(path.join(repoPath, "node_modules"))).toBe(true);
+    expect(result.status).toBe("passed");
+    expect(result.reason).toBeNull();
+  }, 30_000);
+
+  it("reports command_error — not no_test_in_diff — when there is no branch to diff", async () => {
+    // An unborn HEAD is infrastructure, not a missing test. Routed to
+    // no_test_in_diff it would dispatch a fix agent told to "write a test
+    // that reproduces the bug" for a repository that has no commits at all.
+    const repoPath = path.join(root, "empty-repo");
+    mkdirSync(repoPath);
+    const g = git(repoPath);
+    await g.init();
+    await g.addConfig("user.email", "test@arij.local");
+    await g.addConfig("user.name", "Arij Tests");
+
+    const result = await runRegressionCheck({
+      repoPath,
+      commandTemplate: "node tools/probe.js {files}",
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("command_error");
+    expect(result.detail).toContain("no branch checked out");
+  }, 30_000);
+
+  it("warns in the report when the branch worktree has uncommitted tracked changes", async () => {
+    // The green run reads the working tree while the red run reads committed
+    // blobs. A half-staged fix would otherwise be certified silently.
+    const { repoPath } = await initRepo("redgreen");
+    await commitOnBranch(repoPath, {
+      "src/bug.test.js": "// reproduces the bug\n",
+      "src/fix.marker": "fixed\n",
+    });
+    writeFileSync(path.join(repoPath, "src/app.js"), "uncommitted edit\n");
+
+    const result = await runRegressionCheck({
+      repoPath,
+      commandTemplate: "node tools/probe.js {files}",
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.detail).toContain("uncommitted changes");
+    expect(result.detail).toContain("src/app.js");
   }, 30_000);
 
   it("links the epic worktree's node_modules into the red worktree", async () => {
@@ -468,11 +570,24 @@ describe("runRegressionCheck — real repositories", () => {
 
 describe("looksLikeStartupFailure", () => {
   it("matches module-resolution and runner-startup signatures", () => {
-    expect(looksLikeStartupFailure("Error: Cannot find module 'vitest'")).toBe(true);
-    expect(looksLikeStartupFailure("ERR_MODULE_NOT_FOUND")).toBe(true);
+    expect(looksLikeStartupFailure("Error: Cannot find package 'vitest'")).toBe(true);
     expect(looksLikeStartupFailure("No test files found, exiting with code 1")).toBe(true);
+    expect(looksLikeStartupFailure("sh: 1: vitest: not found")).toBe(true);
     expect(
       looksLikeStartupFailure("FAIL src/bug.test.js — expected 1 to be 2")
+    ).toBe(false);
+    // Project-source resolution is the EXPECTED red, never environmental.
+    expect(
+      looksLikeStartupFailure("Error: Cannot find module '../lib/normalize'")
+    ).toBe(false);
+    expect(looksLikeStartupFailure("ERR_MODULE_NOT_FOUND")).toBe(false);
+    expect(
+      looksLikeStartupFailure('Failed to resolve import "./normalize"')
+    ).toBe(false);
+    // An assertion message that merely contains "not found" is not a shell
+    // reporting a missing program.
+    expect(
+      looksLikeStartupFailure("AssertionError: expected 'not found' to be 'ok'")
     ).toBe(false);
     expect(looksLikeStartupFailure(undefined)).toBe(false);
     expect(looksLikeStartupFailure("   ")).toBe(false);

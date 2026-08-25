@@ -11,7 +11,10 @@
  * lib/verify/regression-constants.ts.
  */
 
-import type { RegressionFailureReason } from "./regression-constants";
+import {
+  DEFAULT_TEST_FILE_PATTERNS,
+  type RegressionFailureReason,
+} from "./regression-constants";
 
 /** Stable prefix identifying a ticket comment as a regression report. */
 export const REGRESSION_REPORT_MARKER = "<!-- arij:regression-report -->";
@@ -63,13 +66,58 @@ export function formatRegressionReportComment(
     }`,
     `- Checked at: ${regression.checkedAt}`,
   ];
-  if (regression.detail) {
-    lines.push("", "```", regression.detail.trim(), "```");
-  }
+  // `detail` is deliberately NOT repeated as its own fenced block: the
+  // payload below already carries it, the UI reads it from there, and these
+  // comments are injected verbatim into every later prompt of the run.
   lines.push("", "```json");
   lines.push(JSON.stringify(payload, null, 2));
   lines.push("```");
   return lines.join("\n");
+}
+
+/**
+ * A regression report located inside a ticket comment: the parsed payload
+ * plus whatever ordinary prose surrounds it.
+ *
+ * The surrounding text matters because report comments are ordinary ticket
+ * comments and are injected verbatim into later prompts — an agent that
+ * quotes one back inside its own result comment must not have its whole
+ * comment swallowed by the rendered block.
+ */
+export interface LocatedRegressionReport {
+  payload: RegressionReportPayload;
+  /** Markdown before the report region (may be empty). */
+  before: string;
+  /** Markdown after the report region (may be empty). */
+  after: string;
+}
+
+/**
+ * Locates and parses the report region of a ticket comment, or null when
+ * the comment carries no readable report. The region runs from the marker
+ * to the end of the JSON fence that follows it.
+ */
+export function locateRegressionReport(
+  content: string | null | undefined
+): LocatedRegressionReport | null {
+  if (!content) return null;
+  const markerIndex = content.indexOf(REGRESSION_REPORT_MARKER);
+  if (markerIndex === -1) return null;
+  const fenceIndex = content.indexOf("```json", markerIndex);
+  if (fenceIndex === -1) return null;
+  const closeIndex = content.indexOf("```", fenceIndex + "```json".length);
+  const regionEnd =
+    closeIndex === -1 ? content.length : closeIndex + "```".length;
+
+  const payload = parseRegressionReportComment(
+    content.slice(markerIndex, regionEnd)
+  );
+  if (!payload) return null;
+  return {
+    payload,
+    before: content.slice(0, markerIndex).trim(),
+    after: content.slice(regionEnd).trim(),
+  };
 }
 
 /**
@@ -131,8 +179,17 @@ export function parseRegressionReportComment(
  * gate — the exact failure reason, verbatim, so the agent repairs the real
  * problem instead of guessing.
  */
-export function buildRegressionFixSection(payload: RegressionReportPayload): string {
+export function buildRegressionFixSection(
+  payload: RegressionReportPayload,
+  patterns: readonly string[] = DEFAULT_TEST_FILE_PATTERNS
+): string {
   const { regression } = payload;
+  // The gate filters the diff with the PROJECT's configured patterns; a
+  // prompt quoting the built-in defaults would state the wrong rule for the
+  // check the agent has to satisfy.
+  const patternList = (patterns.length > 0 ? patterns : DEFAULT_TEST_FILE_PATTERNS)
+    .map((p) => `\`${p}\``)
+    .join(", ");
   const files =
     regression.testFiles.length > 0
       ? regression.testFiles.map((f) => `- \`${f}\``).join("\n")
@@ -147,7 +204,7 @@ Test files detected on the branch:
 ${files}
 ${regression.detail ? `\nCommand output:\n\n\`\`\`\n${regression.detail.trim().slice(0, 2000)}\n\`\`\`\n` : ""}
 Fix the branch so that:
-1. Its diff contains at least one test file matching the project's test patterns (\`**/*.test.*\`, \`**/*.spec.*\`, \`**/__tests__/**\` by default);
+1. Its diff contains at least one test file matching the project's test patterns (${patternList});
 2. That test PASSES on the branch (with your fix applied);
 3. That test FAILS when only the test file is applied without your fix — i.e. it genuinely reproduces the bug.
 

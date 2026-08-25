@@ -91,7 +91,7 @@ This ticket is a **bug fix**. The pipeline runs a mechanical regression check on
 
 1. **Write the failing test first.** Add (or modify) a test that reproduces the reported bug and run it — it MUST fail against the unfixed code.
 2. **Then apply the fix.** Make the minimal change that makes the same test pass.
-3. **Commit the test file(s) together with the fix.** The check inspects the files added/modified on the branch: a diff with no test file fails (\`no_test_in_diff\`), a test that already passes without the fix fails (\`test_passes_on_base\`), and a test still failing on the branch fails (\`test_fails_on_branch\`). Any of these sends the ticket back to a fix cycle.`;
+3. **Commit the test file(s) together with the fix.** The check inspects the files added/modified on the branch and selects them with the project's configured test-file patterns — follow this repository's existing test layout and naming. A diff with no test file fails (\`no_test_in_diff\`), a test that already passes without the fix fails (\`test_passes_on_base\`), and a test still failing on the branch fails (\`test_fails_on_branch\`). Any of these sends the ticket back to a fix cycle.`;
 
 // ---------------------------------------------------------------------------
 // Local helpers (not extracted to prompt-sections)

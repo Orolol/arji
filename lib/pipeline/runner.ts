@@ -203,7 +203,15 @@ export interface RunPipelineOptions {
    * session id for the transition's audit trail. Absent → the ticket keeps
    * whatever status the code stage left it in.
    */
-  parkRejectedTicket?: (lastCodeSessionId: string | null) => void;
+  /**
+   * Moves a ticket the code stage already promoted to review back to
+   * in_progress. `reason` is written verbatim to the activity log, so each
+   * call site passes what actually happened rather than one shared string.
+   */
+  parkRejectedTicket?: (
+    lastCodeSessionId: string | null,
+    reason: string
+  ) => void;
 }
 
 const RUNNING_STATE_BY_STAGE: Record<PipelineStageKind, PipelineState> = {
@@ -522,7 +530,10 @@ export async function runPipeline(
           handle.sessionId
         );
         try {
-          options.parkRejectedTicket?.(lastCodeSessionId);
+          options.parkRejectedTicket?.(
+            lastCodeSessionId,
+            "Regression gate crashed before it could verify the branch"
+          );
         } catch (parkError) {
           console.warn(
             "[pipeline] Failed to park regression-crashed ticket:",
@@ -552,7 +563,10 @@ export async function runPipeline(
             handle.sessionId
           );
           try {
-            options.parkRejectedTicket?.(lastCodeSessionId);
+            options.parkRejectedTicket?.(
+              lastCodeSessionId,
+              "Regression test command could not run — the branch was never verified"
+            );
           } catch (parkError) {
             console.warn(
               "[pipeline] Failed to park regression-rejected ticket:",
@@ -575,7 +589,10 @@ export async function runPipeline(
           // in_progress like the negative-review path does — best effort,
           // it must not change how the run terminates.
           try {
-            options.parkRejectedTicket?.(lastCodeSessionId);
+            options.parkRejectedTicket?.(
+              lastCodeSessionId,
+              "Mandatory regression test rejected the branch (red → green)"
+            );
           } catch (parkError) {
             console.warn(
               "[pipeline] Failed to park regression-rejected ticket:",

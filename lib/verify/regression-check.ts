@@ -129,6 +129,14 @@ export interface RunRegressionCheckInput {
    * tests see when handed a plain repository.
    */
   worktreeRoot?: string | null;
+  /**
+   * The project's main checkout (`projects.git_repo_path`) — the only place
+   * installed dependencies actually live. `createWorktree` does a bare
+   * `git worktree add` and never installs, so without borrowing this
+   * `node_modules` the green run has no runner to execute. Null (unit
+   * tests handed a plain repo) simply skips the link.
+   */
+  mainRepoPath?: string | null;
   /** Branch carrying the fix; defaults to the worktree's current branch. */
   headBranch?: string | null;
   /** Base to diff against; resolved through resolveBaseBranch when null. */
@@ -240,7 +248,7 @@ export async function runRegressionCheck(
   const branches = await git.branchLocal();
   const head = input.headBranch || branches.current;
   if (!head) {
-    return failed("no_test_in_diff", [], "no branch checked out");
+    return failed("command_error", [], "no branch checked out");
   }
   // Same resolution createWorktree/mergeWorktree use (projects.default_branch
   // preferred, git-asked fallback).
@@ -276,11 +284,31 @@ export async function runRegressionCheck(
     );
   }
 
-  // createWorktree never installs dependencies, so a fresh epic worktree
-  // cannot run the default command at all — surfaced in the report instead
-  const depsHint = fs.existsSync(path.join(input.repoPath, "node_modules"))
-    ? ""
-    : " — note: the worktree has no node_modules installed";
+  // Arij's own `createWorktree` never installs dependencies, so a fresh epic
+  // worktree has no runner to execute at all. Borrow the main checkout's
+  // node_modules — same link the red worktree gets below — so the green run
+  // measures the test rather than the absence of an environment.
+  linkNodeModules(input.mainRepoPath ?? null, input.repoPath);
+  // Deterministic environment evidence, scoped to where it actually means
+  // something: a repo with a package.json and no node_modules cannot run a
+  // JS runner at all, so a failure there measured nothing. A repo WITHOUT a
+  // package.json (Ruby, Go, a plain script) has no such requirement and its
+  // failures are real verdicts.
+  const dependenciesRequired = fs.existsSync(
+    path.join(input.repoPath, "package.json")
+  );
+  const dependenciesMissing =
+    dependenciesRequired &&
+    !fs.existsSync(path.join(input.repoPath, "node_modules"));
+  const depsHint = dependenciesMissing
+    ? " — the worktree has no node_modules and none could be linked from the main checkout"
+    : "";
+
+  // A green run against the working tree while the red run reads the
+  // COMMITTED blobs would compare two different states of the branch: a
+  // half-staged fix passes green and fails red, and the gate would certify
+  // a branch whose committed form is broken. Reported, never silent.
+  const dirtyWarning = await describeDirtyWorktree(git);
 
   // --- GREEN: same command must pass in the epic worktree ------------
   const greenCommand = buildRegressionCommand(template, testFiles);
@@ -289,27 +317,38 @@ export async function runRegressionCheck(
     return failed(
       "command_error",
       testFiles,
-      `the regression command could not run${depsHint}: ${
-        outputTail(green.output) ?? "no output"
-      }`
+      withWarning(
+        `the regression command could not run${depsHint}: ${
+          outputTail(green.output) ?? "no output"
+        }`,
+        dirtyWarning
+      )
     );
   }
   if (green.code !== 0) {
-    // The epic worktree can lack a working environment exactly like the
-    // red checkout does; blame that, not the agent's fix.
-    if (looksLikeStartupFailure(green.output)) {
+    // Deterministic first: with no dependencies present the command cannot
+    // have measured anything, whatever its output happens to say. The text
+    // signature is only a secondary net for a runner that is installed but
+    // still never started (missing config, no tests collected).
+    if (dependenciesMissing || looksLikeStartupFailure(green.output)) {
       return failed(
         "command_error",
         testFiles,
-        `the green run failed for environmental reasons rather than because of the test${depsHint}: ${
-          outputTail(green.output) ?? "no output"
-        }`
+        withWarning(
+          `the green run failed for environmental reasons rather than because of the test${depsHint}: ${
+            outputTail(green.output) ?? "no output"
+          }`,
+          dirtyWarning
+        )
       );
     }
     return failed(
       "test_fails_on_branch",
       testFiles,
-      outputTail(green.output) ?? `exit code ${green.code}`
+      withWarning(
+        outputTail(green.output) ?? `exit code ${green.code}`,
+        dirtyWarning
+      )
     );
   }
 
@@ -336,14 +375,7 @@ export async function runRegressionCheck(
     // The merge-base checkout has no installed dependencies (gitignored),
     // so without this link the command fails for environmental reasons and
     // a spurious red would masquerade as proof of reproduction.
-    const nodeModules = path.join(input.repoPath, "node_modules");
-    if (fs.existsSync(nodeModules)) {
-      try {
-        fs.symlinkSync(nodeModules, path.join(tempPath, "node_modules"), "dir");
-      } catch {
-        // A missing link degrades to the startup-failure check below.
-      }
-    }
+    linkNodeModules(input.repoPath, tempPath);
     for (const relPath of testFiles) {
       const destination = path.join(tempPath, relPath);
       fs.mkdirSync(path.dirname(destination), { recursive: true });
@@ -362,30 +394,36 @@ export async function runRegressionCheck(
       return failed(
         "command_error",
         testFiles,
-        `the regression command could not run${depsHint}: ${
-          outputTail(red.output) ?? "no output"
-        }`
+        withWarning(
+          `the regression command could not run${depsHint}: ${
+            outputTail(red.output) ?? "no output"
+          }`,
+          dirtyWarning
+        )
       );
     }
     if (red.code === 0) {
       return failed(
         "test_passes_on_base",
         testFiles,
-        "the test command already passes on the merge-base — the test does not reproduce the bug"
+        withWarning(
+          "the test command already passes on the merge-base — the test does not reproduce the bug",
+          dirtyWarning
+        )
       );
     }
-    // A non-zero exit that smells like the runner or an import never came
-    // up is not evidence of reproduction — do not count it as red.
-    if (looksLikeStartupFailure(red.output)) {
-      return failed(
-        "command_error",
-        testFiles,
-        `the red run failed for environmental reasons rather than because of the test${depsHint}: ${
-          outputTail(red.output) ?? "no output"
-        }`
-      );
-    }
-    return { status: "passed", reason: null, testFiles, detail: null };
+    // The green run just succeeded with the IDENTICAL command in a tree
+    // carrying the same linked dependencies, which is the only proof of a
+    // working environment worth having. After that, a non-zero exit on the
+    // merge-base is the required red — including the commonest shape of all,
+    // where the test imports a module the branch adds and the base cannot
+    // resolve it. Pattern-matching the output here rejected real fixes.
+    return {
+      status: "passed",
+      reason: null,
+      testFiles,
+      detail: withWarning(null, dirtyWarning),
+    };
   } finally {
     await removeRedWorktree(git, tempPath);
   }
@@ -397,6 +435,68 @@ function failed(
   detail: string | null
 ): RegressionCheckResult {
   return { status: "failed", reason, testFiles, detail };
+}
+
+/**
+ * Symlinks `<from>/node_modules` into `<to>` when the source exists and the
+ * destination does not. Best effort by design: a failure degrades to the
+ * `hasDeps` verdict rather than aborting the check.
+ *
+ * A link (not a copy) keeps this free, and neither `git worktree remove
+ * --force` nor `fs.rmSync` descends through it, so cleaning a worktree can
+ * never reach the real dependency tree behind it.
+ */
+function linkNodeModules(from: string | null, to: string): void {
+  if (!from) return;
+  const destination = path.join(to, "node_modules");
+  if (fs.existsSync(destination)) return;
+  const source = path.join(from, "node_modules");
+  if (!fs.existsSync(source)) return;
+  try {
+    fs.symlinkSync(source, destination, "dir");
+  } catch {
+    // Raced, unsupported, or read-only: the caller's hasDeps check decides.
+  }
+}
+
+/**
+ * Describes uncommitted changes to TRACKED files, or null for a clean tree.
+ * Untracked files are ignored: the red worktree only ever receives committed
+ * blobs, so an untracked scratch file cannot skew the comparison.
+ */
+async function describeDirtyWorktree(git: SimpleGit): Promise<string | null> {
+  let porcelain: string;
+  try {
+    porcelain = await git.raw([
+      "-c",
+      "core.quotePath=false",
+      "status",
+      "--porcelain",
+      "--untracked-files=no",
+    ]);
+  } catch {
+    return null; // status is not worth failing the check over
+  }
+  const paths = porcelain
+    .split("\n")
+    .map((line) => line.slice(3).trim())
+    .filter(Boolean);
+  if (paths.length === 0) return null;
+  const shown = paths.slice(0, 10).join(", ");
+  return `WARNING: the branch worktree has uncommitted changes to ${
+    paths.length
+  } tracked file(s) — the green run measured the working tree while the red run used the committed blobs, so this verdict may not describe the branch as committed: ${shown}${
+    paths.length > 10 ? ", …" : ""
+  }`;
+}
+
+/** Appends the dirty-tree warning, if any, to a detail string. */
+function withWarning(
+  detail: string | null,
+  warning: string | null
+): string | null {
+  if (!warning) return detail;
+  return detail ? `${detail}\n\n${warning}` : warning;
 }
 
 /**

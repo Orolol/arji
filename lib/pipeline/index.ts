@@ -233,12 +233,12 @@ export function startPipelineRun(input: StartPipelineRunInput): {
     assessReview: driver.assessReview,
     readSessionStatus: driver.readSessionStatus,
     checkGuards: driver.checkGuards,
-    parkRejectedTicket: (lastCodeSessionId) => {
+    parkRejectedTicket: (lastCodeSessionId, reason) => {
       // Mirror of the negative-review path: a gate-rejected bug must not
       // stay in the approval-ready column. Only a ticket actually sitting
-      // in review/done is moved; anything else is left untouched.
-      const reason =
-        "Mandatory regression test rejected the branch (red → green)";
+      // in review/done is moved; anything else is left untouched. The
+      // caller supplies `reason` because the three park paths — rejection,
+      // unrunnable command, crashed gate — are not the same event.
       if (input.scope === "story") {
         const story = input.userStoryId
           ? db

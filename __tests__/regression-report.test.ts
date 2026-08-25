@@ -6,6 +6,7 @@ import {
   buildRegressionFixSection,
   regressionReasonLabel,
 } from "@/lib/verify/regression-report";
+import { DEFAULT_TEST_FILE_PATTERNS } from "@/lib/verify/regression-constants";
 
 /**
  * Wire-format coverage for the verify report: the persisted ticket comment
@@ -85,3 +86,42 @@ describe("buildRegressionFixSection", () => {
     expect(section).toContain(FAILED.regression.detail);
   });
 });
+
+describe("buildRegressionFixSection", () => {
+  it("quotes the project's configured patterns, not the built-in defaults", () => {
+    // The gate filters the diff with the project's patterns; a prompt naming
+    // the defaults would state a rule the agent cannot satisfy.
+    const section = buildRegressionFixSection(
+      {
+        regression: {
+          status: "failed",
+          reason: "no_test_in_diff",
+          testFiles: [],
+          detail: null,
+          checkedAt: "2026-08-25T12:00:00.000Z",
+        },
+      },
+      ["spec/**/*.rb"]
+    );
+
+    expect(section).toContain("`spec/**/*.rb`");
+    expect(section).not.toContain("**/*.test.*");
+  });
+
+  it("falls back to the defaults when no patterns are supplied", () => {
+    const section = buildRegressionFixSection({
+      regression: {
+        status: "failed",
+        reason: "no_test_in_diff",
+        testFiles: [],
+        detail: null,
+        checkedAt: "2026-08-25T12:00:00.000Z",
+      },
+    });
+
+    for (const pattern of DEFAULT_TEST_FILE_PATTERNS) {
+      expect(section).toContain(pattern);
+    }
+  });
+});
+

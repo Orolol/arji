@@ -13,13 +13,15 @@ import {
 import {
   BUG_REGRESSION_CHECK_SETTING_KEY,
   BUG_REGRESSION_COMMAND_SETTING_KEY,
+  BUG_REGRESSION_TIMEOUT_SETTING_KEY,
   DEFAULT_BUG_REGRESSION_COMMAND,
+  DEFAULT_BUG_REGRESSION_TIMEOUT_MS,
   DEFAULT_TEST_FILE_PATTERNS,
   TEST_FILE_PATTERNS_SETTING_KEY,
   parseBugRegressionCommand,
   parseBugRegressionSetting,
+  parseBugRegressionTimeoutMs,
   parseTestFilePatterns,
-  resolveBugRegressionCheckEnabled,
 } from "@/lib/verify/regression-constants";
 import {
   createVerifyGate,
@@ -115,51 +117,6 @@ describe("regression settings parsers (regression-constants.ts)", () => {
     });
   });
 
-  describe("resolveBugRegressionCheckEnabled", () => {
-    it("follows per-project -> global -> default false precedence", () => {
-      expect(resolveBugRegressionCheckEnabled(null)).toBe(false);
-      expect(resolveBugRegressionCheckEnabled({})).toBe(false);
-
-      // Global setting
-      expect(
-        resolveBugRegressionCheckEnabled({
-          [BUG_REGRESSION_CHECK_SETTING_KEY]: true,
-        })
-      ).toBe(true);
-
-      // Per-project overrides global
-      expect(
-        resolveBugRegressionCheckEnabled(
-          {
-            [BUG_REGRESSION_CHECK_SETTING_KEY]: true,
-            [`${BUG_REGRESSION_CHECK_SETTING_KEY}:proj-1`]: false,
-          },
-          "proj-1"
-        )
-      ).toBe(false);
-
-      expect(
-        resolveBugRegressionCheckEnabled(
-          {
-            [BUG_REGRESSION_CHECK_SETTING_KEY]: false,
-            [`${BUG_REGRESSION_CHECK_SETTING_KEY}:proj-1`]: true,
-          },
-          "proj-1"
-        )
-      ).toBe(true);
-
-      // Other project falls back to global
-      expect(
-        resolveBugRegressionCheckEnabled(
-          {
-            [BUG_REGRESSION_CHECK_SETTING_KEY]: true,
-            [`${BUG_REGRESSION_CHECK_SETTING_KEY}:proj-1`]: false,
-          },
-          "proj-2"
-        )
-      ).toBe(true);
-    });
-  });
 });
 
 describe("readRegressionConfig (database settings round-trip)", () => {
@@ -172,6 +129,7 @@ describe("readRegressionConfig (database settings round-trip)", () => {
     expect(config.enabled).toBe(false);
     expect(config.patterns).toEqual(DEFAULT_TEST_FILE_PATTERNS);
     expect(config.commandTemplate).toBe(DEFAULT_BUG_REGRESSION_COMMAND);
+    expect(config.commandTimeoutMs).toBe(DEFAULT_BUG_REGRESSION_TIMEOUT_MS);
   });
 
   it("decodes JSON-encoded global settings written by PATCH /api/settings", () => {
@@ -387,6 +345,80 @@ describe("createVerifyGate", () => {
     expect(comments[0].content).toContain("PASSED");
   });
 
+  it("hands the check the project's configured patterns, command, timeout and main repo path", async () => {
+    // The gate reads these settings; a gate that read them and then let the
+    // check fall back to its own defaults would silently ignore the
+    // project's configuration.
+    db.insert(projects)
+      .values({
+        id: "proj-gate",
+        name: "Test Project",
+        gitRepoPath: "/tmp/repo",
+        defaultBranch: "develop",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .run();
+    db.insert(epics)
+      .values({
+        id: "epic-bug",
+        projectId: "proj-gate",
+        title: "Bug Epic",
+        type: "bug",
+        status: "in_progress",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .run();
+    db.insert(agentSessions)
+      .values({
+        id: "sess-code-1",
+        projectId: "proj-gate",
+        epicId: "epic-bug",
+        agentType: "claude-code",
+        status: "completed",
+        worktreePath: "/tmp/worktree",
+        branchName: "feature/epic-bug",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    putSetting(BUG_REGRESSION_CHECK_SETTING_KEY, true);
+    putSetting(TEST_FILE_PATTERNS_SETTING_KEY, ["spec/**/*.rb"]);
+    putSetting(BUG_REGRESSION_COMMAND_SETTING_KEY, "bundle exec rspec {files}");
+    putSetting(BUG_REGRESSION_TIMEOUT_SETTING_KEY, 90_000);
+
+    const spy = vi
+      .spyOn(regressionCheckModule, "runRegressionCheck")
+      .mockResolvedValueOnce({
+        status: "passed",
+        reason: null,
+        testFiles: ["spec/bug_spec.rb"],
+        detail: null,
+      });
+
+    const gate = createVerifyGate({
+      projectId: "proj-gate",
+      epicId: "epic-bug",
+      userStoryId: null,
+      scope: "epic",
+    });
+    await gate("sess-code-1");
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoPath: "/tmp/worktree",
+        headBranch: "feature/epic-bug",
+        baseBranch: "develop",
+        patterns: ["spec/**/*.rb"],
+        commandTemplate: "bundle exec rspec {files}",
+        commandTimeoutMs: 90_000,
+        // The only checkout with dependencies installed.
+        mainRepoPath: "/tmp/repo",
+      })
+    );
+  });
+
   it("persists story-scoped report comment to userStoryId only, not epicId", async () => {
     db.delete(userStories).run();
 
@@ -455,5 +487,20 @@ describe("createVerifyGate", () => {
     expect(comments[0].userStoryId).toBe("story-1");
     expect(comments[0].epicId).toBeNull();
     expect(comments[0].agentSessionId).toBe("sess-code-2");
+  });
+});
+
+describe("parseBugRegressionTimeoutMs", () => {
+  it("accepts positive numbers in any encoding and rejects the rest", () => {
+    expect(parseBugRegressionTimeoutMs(90_000)).toBe(90_000);
+    expect(parseBugRegressionTimeoutMs("90000")).toBe(90_000);
+    expect(parseBugRegressionTimeoutMs(JSON.stringify(90_000))).toBe(90_000);
+    expect(parseBugRegressionTimeoutMs(JSON.stringify("90000"))).toBe(90_000);
+    // A zero or negative timeout would kill every run instantly — treated as
+    // "not configured" so the default applies.
+    expect(parseBugRegressionTimeoutMs(0)).toBeNull();
+    expect(parseBugRegressionTimeoutMs(-1)).toBeNull();
+    expect(parseBugRegressionTimeoutMs("soon")).toBeNull();
+    expect(parseBugRegressionTimeoutMs(null)).toBeNull();
   });
 });

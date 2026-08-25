@@ -202,6 +202,7 @@ export const PIPELINE_REASONS = {
   failedRegressionCommandError: "Pipeline failed: regression command error",
 } as const;
 
+/** True when an activity-log reason belongs to the pipeline trace. */
 export function isPipelineActivityReason(
   reason: string | null | undefined
 ): boolean {

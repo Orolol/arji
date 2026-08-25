@@ -11,6 +11,10 @@ import {
   parsePipelineMaxFixCycles,
   resolvePipelineEnabledDefault,
 } from "@/lib/pipeline/constants";
+import {
+  DEFAULT_BUG_REGRESSION_COMMAND,
+  DEFAULT_TEST_FILE_PATTERNS,
+} from "@/lib/verify/regression-constants";
 
 let stored: Record<string, unknown> = {};
 let patchCalls: Array<Record<string, unknown>> = [];
@@ -141,6 +145,76 @@ describe("Settings page — Autonomous Pipeline card", () => {
 
     await new Promise((r) => setTimeout(r, 0));
     expect(patchCalls).toHaveLength(0);
+  });
+});
+
+describe("Settings page — bug regression command and patterns", () => {
+  it("hides the command and pattern fields until the gate is switched on", async () => {
+    render(<SettingsPage />);
+    await waitFor(() => screen.getByTestId("bug-regression-toggle"));
+
+    expect(screen.queryByTestId("bug-regression-command")).toBeNull();
+    expect(screen.queryByTestId("test-file-patterns")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("bug-regression-toggle"));
+    await waitFor(() => screen.getByTestId("bug-regression-command"));
+    expect(screen.getByTestId("test-file-patterns")).toBeInTheDocument();
+  });
+
+  it("shows the effective defaults and PATCHes an edited command", async () => {
+    stored = { bug_regression_check: true };
+    render(<SettingsPage />);
+
+    const command = (await waitFor(() =>
+      screen.getByTestId("bug-regression-command")
+    )) as HTMLInputElement;
+    // The built-in default, not an empty box that would read as unset.
+    expect(command.value).toBe(DEFAULT_BUG_REGRESSION_COMMAND);
+
+    fireEvent.change(command, { target: { value: "bundle exec rspec {files}" } });
+    fireEvent.blur(command);
+
+    await waitFor(() =>
+      expect(patchCalls).toContainEqual({
+        bug_regression_command: "bundle exec rspec {files}",
+      })
+    );
+  });
+
+  it("refuses a command without the {files} placeholder instead of storing it", async () => {
+    // Such a template would run the entire suite on every check.
+    stored = { bug_regression_check: true };
+    render(<SettingsPage />);
+
+    const command = (await waitFor(() =>
+      screen.getByTestId("bug-regression-command")
+    )) as HTMLInputElement;
+    fireEvent.change(command, { target: { value: "npm test" } });
+    fireEvent.blur(command);
+
+    await waitFor(() => screen.getByText(/must contain \{files\}/i));
+    expect(
+      patchCalls.some((c) => "bug_regression_command" in c)
+    ).toBe(false);
+  });
+
+  it("PATCHes comma-separated patterns as an array", async () => {
+    stored = { bug_regression_check: true };
+    render(<SettingsPage />);
+
+    const patterns = (await waitFor(() =>
+      screen.getByTestId("test-file-patterns")
+    )) as HTMLInputElement;
+    expect(patterns.value).toBe(DEFAULT_TEST_FILE_PATTERNS.join(", "));
+
+    fireEvent.change(patterns, { target: { value: "spec/**/*.rb, test/**/*.rb" } });
+    fireEvent.blur(patterns);
+
+    await waitFor(() =>
+      expect(patchCalls).toContainEqual({
+        test_file_patterns: ["spec/**/*.rb", "test/**/*.rb"],
+      })
+    );
   });
 });
 

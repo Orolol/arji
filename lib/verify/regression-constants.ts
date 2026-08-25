@@ -34,6 +34,13 @@ export const TEST_FILE_PATTERNS_SETTING_KEY = "test_file_patterns";
 export const BUG_REGRESSION_COMMAND_SETTING_KEY =
   "bug_regression_command";
 
+/**
+ * Kill threshold in milliseconds for each of the two command runs. Absent
+ * or unusable falls back to {@link DEFAULT_BUG_REGRESSION_TIMEOUT_MS}.
+ */
+export const BUG_REGRESSION_TIMEOUT_SETTING_KEY =
+  "bug_regression_timeout_ms";
+
 export const REGRESSION_COMMAND_FILE_PLACEHOLDER = "{files}";
 
 export const DEFAULT_TEST_FILE_PATTERNS: readonly string[] = [
@@ -51,21 +58,31 @@ export const REGRESSION_WORKTREE_PREFIX = "regression-check-";
 export const DEFAULT_BUG_REGRESSION_TIMEOUT_MS = 10 * 60_000;
 
 /**
- * Output signatures of a red-run failure that is ENVIRONMENTAL rather than
- * a genuine reproduction: the command could not start, resolve its runner
- * or its imports, or find the tests at all. A non-zero exit matching one of
- * these proves nothing about the test and is reported as `command_error`
- * instead of counting as the required red.
+ * Output signatures of a failure caused by the RUNNER never getting off the
+ * ground — the binary is missing, its config would not load, it found no
+ * tests, or a bare package specifier did not resolve. A non-zero exit
+ * matching one of these says nothing about the test and is reported as
+ * `command_error`.
+ *
+ * Deliberately excluded: relative module-resolution errors
+ * (`Cannot find module './x'`, `ERR_MODULE_NOT_FOUND` for a project path,
+ * vitest's `Failed to resolve import`). Those name a file the branch adds,
+ * which makes them the EXPECTED shape of the red run — the most ordinary
+ * bug fix there is adds a module and imports it from the new test, and the
+ * merge-base cannot resolve it. Treating them as environmental rejected
+ * genuine reproductions. On the green side the deterministic
+ * `node_modules`-present fact (lib/verify/regression-check.ts) settles the
+ * dependency question instead, and a relative import that fails on the
+ * branch is the fix's own defect, not the environment's.
  */
 export const REGRESSION_STARTUP_FAILURE_PATTERNS: readonly RegExp[] = [
-  /cannot find module/i,
   /cannot find package/i,
-  /err_module_not_found/i,
-  /module_not_found/i,
   /no test files found/i,
   /failed to load config/i,
   /command not found/i,
-  /:\s*not found/i,
+  // Anchored to a shell's own "<program>: not found" line so an assertion
+  // message merely containing "not found" is not mistaken for one.
+  /^\s*(?:sh|bash|zsh)(?:\[\d+\])?:\s*(?:\d+:\s*)?.*:\s*not found\s*$/im,
 ];
 
 /** Normalized failure reasons reported when the red → green cycle breaks. */
@@ -151,23 +168,24 @@ export function parseBugRegressionCommand(value: unknown): string | null {
 }
 
 /**
- * Effective answer for a project from a settings map (as returned by GET
- * /api/settings, already JSON-parsed). Default OFF — the epic's contract:
- * with the key absent, behaviour is unchanged for every existing ticket.
+ * Parses the per-run command timeout. Only a finite positive number of
+ * milliseconds is a timeout; anything else is null so callers fall back to
+ * {@link DEFAULT_BUG_REGRESSION_TIMEOUT_MS} (a zero or negative value would
+ * kill every run instantly).
  */
-export function resolveBugRegressionCheckEnabled(
-  settings: Record<string, unknown> | null | undefined,
-  projectId?: string | null
-): boolean {
-  if (!settings) return false;
-  if (projectId) {
-    const perProject = parseBugRegressionSetting(
-      settings[`${BUG_REGRESSION_CHECK_SETTING_KEY}:${projectId}`]
-    );
-    if (perProject !== null) return perProject;
+export function parseBugRegressionTimeoutMs(value: unknown): number | null {
+  let parsed: unknown = value;
+  if (typeof parsed === "string") {
+    const raw = parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // A bare "600000" written straight into the settings table.
+      parsed = raw;
+    }
   }
-  return (
-    parseBugRegressionSetting(settings[BUG_REGRESSION_CHECK_SETTING_KEY]) ??
-    false
-  );
+  // JSON.parse of a JSON-encoded string yields a string again.
+  if (typeof parsed === "string") parsed = Number(parsed.trim());
+  if (typeof parsed !== "number" || !Number.isFinite(parsed)) return null;
+  return parsed > 0 ? Math.round(parsed) : null;
 }

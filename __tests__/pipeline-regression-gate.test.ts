@@ -61,7 +61,7 @@ interface GateHarnessConfig {
   }>;
   assessments?: boolean[];
   maxFixCycles?: number;
-  onParkRejectedTicket?: (sessionId: string | null) => void;
+  onParkRejectedTicket?: (sessionId: string | null, reason: string) => void;
 }
 
 function runWithGate(config: GateHarnessConfig = {}) {
@@ -172,10 +172,14 @@ describe("runPipeline — regression verify gate", () => {
 
   it("fails the run without review when the gate is red and no fix cycles remain, parking the ticket", async () => {
     const parked: Array<string | null> = [];
+    const parkReasons: string[] = [];
     const h = runWithGate({
       maxFixCycles: 0,
       gateOutcomes: [{ ran: true, passed: false, result: failingCheck() }],
-      onParkRejectedTicket: (sessionId) => parked.push(sessionId),
+      onParkRejectedTicket: (sessionId, reason) => {
+        parked.push(sessionId);
+        parkReasons.push(reason);
+      },
     });
     const summary = await h.promise;
 
@@ -185,6 +189,10 @@ describe("runPipeline — regression verify gate", () => {
     expect(h.traces).toContain(PIPELINE_REASONS.failedRegression(0));
     // The board counterpart: the rejected bug leaves the approval column.
     expect(parked).toEqual(["s-build"]);
+    // Only THIS path may claim the test rejected the branch.
+    expect(parkReasons).toEqual([
+      "Mandatory regression test rejected the branch (red → green)",
+    ]);
   });
 
   it("does not invoke the park callback when the budget is not exhausted", async () => {
@@ -230,6 +238,7 @@ describe("runPipeline — regression verify gate", () => {
 
   it("fails immediately on command_error without wasting fix cycles, parking the ticket", async () => {
     const parked: Array<string | null> = [];
+    const parkReasons: string[] = [];
     const commandErrorResult: RegressionCheckResult = {
       status: "failed",
       reason: "command_error",
@@ -239,7 +248,10 @@ describe("runPipeline — regression verify gate", () => {
     const h = runWithGate({
       maxFixCycles: 3,
       gateOutcomes: [{ ran: true, passed: false, result: commandErrorResult }],
-      onParkRejectedTicket: (sessionId) => parked.push(sessionId),
+      onParkRejectedTicket: (sessionId, reason) => {
+        parked.push(sessionId);
+        parkReasons.push(reason);
+      },
     });
     const summary = await h.promise;
 
@@ -248,13 +260,22 @@ describe("runPipeline — regression verify gate", () => {
     expect(h.requests).toEqual([]); // Zero fix cycles dispatched
     expect(h.traces).toContain(PIPELINE_REASONS.failedRegressionCommandError);
     expect(parked).toEqual(["s-build"]);
+    // Nothing was rejected here — the command never ran. Saying otherwise
+    // writes a false statement into the ticket's activity log.
+    expect(parkReasons).toEqual([
+      "Regression test command could not run — the branch was never verified",
+    ]);
   });
 
   it("fails the run when the gate itself crashes, parking the ticket and tracing the crash", async () => {
     const parked: Array<string | null> = [];
+    const parkReasons: string[] = [];
     const h = runWithGate({
       gateOutcomes: [{ throwOnCall: true }],
-      onParkRejectedTicket: (sessionId) => parked.push(sessionId),
+      onParkRejectedTicket: (sessionId, reason) => {
+        parked.push(sessionId);
+        parkReasons.push(reason);
+      },
     });
     const summary = await h.promise;
 
@@ -263,5 +284,8 @@ describe("runPipeline — regression verify gate", () => {
     expect(h.requests).toEqual([]);
     expect(h.traces).toContain(PIPELINE_REASONS.failedRegressionGateCrashed);
     expect(parked).toEqual(["s-build"]);
+    expect(parkReasons).toEqual([
+      "Regression gate crashed before it could verify the branch",
+    ]);
   });
 });

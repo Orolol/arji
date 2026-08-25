@@ -12,11 +12,14 @@ import { createId } from "@/lib/utils/nanoid";
 import {
   BUG_REGRESSION_CHECK_SETTING_KEY,
   BUG_REGRESSION_COMMAND_SETTING_KEY,
+  BUG_REGRESSION_TIMEOUT_SETTING_KEY,
   TEST_FILE_PATTERNS_SETTING_KEY,
   DEFAULT_BUG_REGRESSION_COMMAND,
+  DEFAULT_BUG_REGRESSION_TIMEOUT_MS,
   DEFAULT_TEST_FILE_PATTERNS,
   parseBugRegressionCommand,
   parseBugRegressionSetting,
+  parseBugRegressionTimeoutMs,
   parseTestFilePatterns,
 } from "@/lib/verify/regression-constants";
 import {
@@ -82,6 +85,7 @@ export function readRegressionConfig(projectId: string): {
   enabled: boolean;
   patterns: readonly string[];
   commandTemplate: string;
+  commandTimeoutMs: number;
 } {
   const patternKeys = [
     `${TEST_FILE_PATTERNS_SETTING_KEY}:${projectId}`,
@@ -95,11 +99,22 @@ export function readRegressionConfig(projectId: string): {
     `${BUG_REGRESSION_CHECK_SETTING_KEY}:${projectId}`,
     BUG_REGRESSION_CHECK_SETTING_KEY,
   ];
+  const timeoutKeys = [
+    `${BUG_REGRESSION_TIMEOUT_SETTING_KEY}:${projectId}`,
+    BUG_REGRESSION_TIMEOUT_SETTING_KEY,
+  ];
 
   const rows = db
     .select({ key: settings.key, value: settings.value })
     .from(settings)
-    .where(inArray(settings.key, [...patternKeys, ...commandKeys, ...enabledKeys]))
+    .where(
+      inArray(settings.key, [
+        ...patternKeys,
+        ...commandKeys,
+        ...enabledKeys,
+        ...timeoutKeys,
+      ])
+    )
     .all();
   const map = new Map(rows.map((row) => [row.key, row.value]));
 
@@ -122,6 +137,9 @@ export function readRegressionConfig(projectId: string): {
     commandTemplate:
       firstParsed(commandKeys, parseBugRegressionCommand) ??
       DEFAULT_BUG_REGRESSION_COMMAND,
+    commandTimeoutMs:
+      firstParsed(timeoutKeys, parseBugRegressionTimeoutMs) ??
+      DEFAULT_BUG_REGRESSION_TIMEOUT_MS,
   };
 }
 
@@ -159,55 +177,82 @@ function persistReportComment(
  */
 export function createVerifyGate(identity: VerifyGateIdentity): VerifyGate {
   return async (lastCodeSessionId: string | null): Promise<VerifyGateOutcome> => {
-    // --- Ticket type: bugs only ----------------------------------------
-    const epic = db.select().from(epics).where(eq(epics.id, identity.epicId)).get();
-    if (!epic) return notRun();
-    if ((epic.type ?? "feature") !== "bug") return notRun();
+    // Applicability is decided by three plain DB reads. They are wrapped
+    // together so the gate is TOTAL: a transient database error must resolve
+    // to "did not apply", never to a thrown gate. The runner's crash path
+    // would otherwise fail the run and park a ticket — possibly a feature
+    // ticket this gate does not even govern — for a fault that says nothing
+    // about the branch.
+    let config: ReturnType<typeof readRegressionConfig>;
+    let session: { worktreePath: string; branchName: string | null };
+    let project: { defaultBranch: string | null; gitRepoPath: string | null };
+    try {
+      // --- Ticket type: bugs only --------------------------------------
+      const epic = db
+        .select()
+        .from(epics)
+        .where(eq(epics.id, identity.epicId))
+        .get();
+      if (!epic) return notRun();
+      if ((epic.type ?? "feature") !== "bug") return notRun();
 
-    // --- Settings ------------------------------------------------------
-    const config = readRegressionConfig(identity.projectId);
-    if (!config.enabled) return notRun();
+      // --- Settings ----------------------------------------------------
+      config = readRegressionConfig(identity.projectId);
+      if (!config.enabled) return notRun();
 
-    // --- Worktree of the code stage being verified ---------------------
-    if (!lastCodeSessionId) return notRun();
-    const session = db
-      .select({
-        worktreePath: agentSessions.worktreePath,
-        branchName: agentSessions.branchName,
-      })
-      .from(agentSessions)
-      .where(
-        and(
-          eq(agentSessions.id, lastCodeSessionId),
-          eq(agentSessions.projectId, identity.projectId)
+      // --- Worktree of the code stage being verified -------------------
+      if (!lastCodeSessionId) return notRun();
+      const row = db
+        .select({
+          worktreePath: agentSessions.worktreePath,
+          branchName: agentSessions.branchName,
+        })
+        .from(agentSessions)
+        .where(
+          and(
+            eq(agentSessions.id, lastCodeSessionId),
+            eq(agentSessions.projectId, identity.projectId)
+          )
         )
-      )
-      .get();
-    if (!session?.worktreePath) return notRun();
+        .get();
+      if (!row?.worktreePath) return notRun();
+      session = { worktreePath: row.worktreePath, branchName: row.branchName };
 
-    const project = db
-      .select({
-        defaultBranch: projects.defaultBranch,
-        gitRepoPath: projects.gitRepoPath,
-      })
-      .from(projects)
-      .where(eq(projects.id, identity.projectId))
-      .get();
+      project = db
+        .select({
+          defaultBranch: projects.defaultBranch,
+          gitRepoPath: projects.gitRepoPath,
+        })
+        .from(projects)
+        .where(eq(projects.id, identity.projectId))
+        .get() ?? { defaultBranch: null, gitRepoPath: null };
+    } catch (error) {
+      console.warn(
+        "[pipeline verify] Could not establish gate applicability:",
+        error instanceof Error ? error.message : error
+      );
+      return notRun();
+    }
 
     let result: RegressionCheckResult;
     try {
       result = await runRegressionCheck({
         repoPath: session.worktreePath,
         headBranch: session.branchName,
-        baseBranch: project?.defaultBranch ?? null,
+        baseBranch: project.defaultBranch ?? null,
         // Compute the red worktree's home from the MAIN repository: the
         // green cwd is itself `<root>/.arij-worktrees/<branch>`, and a
         // naive sibling computation would nest `.arij-worktrees` inside
         // `.arij-worktrees`.
-        worktreeRoot: project?.gitRepoPath
+        worktreeRoot: project.gitRepoPath
           ? worktreesRootFor(project.gitRepoPath)
           : null,
+        // The only checkout with dependencies installed; the check borrows
+        // its node_modules so the green run has a runner at all.
+        mainRepoPath: project.gitRepoPath ?? null,
+        patterns: config.patterns,
         commandTemplate: config.commandTemplate,
+        commandTimeoutMs: config.commandTimeoutMs,
       });
     } catch (error) {
       result = {
