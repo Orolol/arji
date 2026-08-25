@@ -342,20 +342,23 @@ export function buildProjectStateSection(
     const epicLines = displayedEpics.map((epic) => {
       const lines = [`- **${epic.title}** — ${epic.status || "backlog"}`];
       const stories = storiesByEpic.get(epic.id) ?? [];
-      const displayedStories = stories.slice(0, SPEC_UPDATE_MAX_STORIES_PER_EPIC);
+      const displayedStories = stories.slice(
+        0,
+        SPEC_UPDATE_MAX_STORIES_PER_EPIC,
+      );
       for (const story of displayedStories) {
         lines.push(`  - ${story.title} — ${story.status || "todo"}`);
       }
       if (stories.length > SPEC_UPDATE_MAX_STORIES_PER_EPIC) {
         lines.push(
-          `  - _... and ${stories.length - SPEC_UPDATE_MAX_STORIES_PER_EPIC} more stories (truncated)_`
+          `  - _... and ${stories.length - SPEC_UPDATE_MAX_STORIES_PER_EPIC} more stories (truncated)_`,
         );
       }
       return lines.join("\n");
     });
     if (epics.length > SPEC_UPDATE_MAX_EPICS) {
       epicLines.push(
-        `- _... and ${epics.length - SPEC_UPDATE_MAX_EPICS} more epics (truncated)_`
+        `- _... and ${epics.length - SPEC_UPDATE_MAX_EPICS} more epics (truncated)_`,
       );
     }
     parts.push(epicLines.join("\n") + "\n");
@@ -365,7 +368,9 @@ export function buildProjectStateSection(
     parts.push(`### Releases\n`);
     const displayedReleases = releases.slice(0, SPEC_UPDATE_MAX_RELEASES);
     const releaseLines = displayedReleases.map((release) => {
-      const lines = [`- **${release.version}**${release.title ? ` — ${release.title}` : ""}`];
+      const lines = [
+        `- **${release.version}**${release.title ? ` — ${release.title}` : ""}`,
+      ];
       if (release.changelog?.trim()) {
         let cl = release.changelog.trim();
         let wasTruncated = false;
@@ -373,9 +378,7 @@ export function buildProjectStateSection(
           cl = cl.slice(0, SPEC_UPDATE_MAX_CHANGELOG_CHARS).trimEnd();
           wasTruncated = true;
         }
-        const clLines = cl
-          .split("\n")
-          .map((line) => `  ${line}`);
+        const clLines = cl.split("\n").map((line) => `  ${line}`);
         if (wasTruncated) {
           clLines.push(`  _... [changelog truncated]_`);
         }
@@ -385,7 +388,7 @@ export function buildProjectStateSection(
     });
     if (releases.length > SPEC_UPDATE_MAX_RELEASES) {
       releaseLines.push(
-        `- _... and ${releases.length - SPEC_UPDATE_MAX_RELEASES} older releases (truncated)_`
+        `- _... and ${releases.length - SPEC_UPDATE_MAX_RELEASES} older releases (truncated)_`,
       );
     }
     parts.push(releaseLines.join("\n") + "\n");
@@ -710,9 +713,7 @@ code fence and do not add commentary before or after it.
  * Claude Code runs in analyze mode within the target project's directory
  * and writes the structured JSON assessment to `arji.json` at the project root.
  */
-export function buildImportPrompt(
-  systemPrompt?: string | null,
-): string {
+export function buildImportPrompt(systemPrompt?: string | null): string {
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
@@ -917,7 +918,10 @@ export function buildTitleGenerationPrompt(
  * `projectId`/`images` are picked from `PromptEpic` rather than redeclared so a
  * batch build cannot silently drop a bug's screenshots the way it once did.
  */
-export interface TeamEpic extends Pick<PromptEpic, "projectId" | "images" | "type"> {
+export interface TeamEpic extends Pick<
+  PromptEpic,
+  "projectId" | "images" | "type"
+> {
   title: string;
   description?: string | null;
   worktreePath: string;
@@ -1073,6 +1077,13 @@ Work through the user stories in order. If a story depends on another, implement
 }
 
 /**
+ * Spec budget for CI fix prompts, which also carry up to 60 KB of bounded
+ * log evidence. Codex passes the prompt as a single argv element against a
+ * 128 KB MAX_ARG_STRLEN kernel cap.
+ */
+export const CI_FIX_MAX_SPEC_CHARS = 16_000;
+
+/**
  * Build a narrowly-scoped code prompt from mechanical GitHub CI evidence.
  * Log tails are explicitly marked as untrusted diagnostics: a test command
  * can print arbitrary repository-controlled text and must not become a
@@ -1086,14 +1097,21 @@ export function buildCiFixPrompt(
     headSha: string;
     failures: PromptCiFailure[];
   },
-  systemPrompt?: string | null
+  systemPrompt?: string | null,
 ): string {
   project = withProjectMemory(project);
+  // The CI evidence below is already argv-budgeted; an uncapped spec could
+  // still push the prompt past MAX_ARG_STRLEN on argv-based providers.
+  // Memory is capped at write time, so only the spec needs a bound here.
+  const spec =
+    project.spec && project.spec.length > CI_FIX_MAX_SPEC_CHARS
+      ? `${project.spec.slice(0, CI_FIX_MAX_SPEC_CHARS)}\n\n[Specification truncated for this fix session]`
+      : project.spec;
   const parts: string[] = [];
 
   parts.push(systemSection(systemPrompt));
   parts.push(projectHeader(project.name));
-  parts.push(specSection(project.spec));
+  parts.push(specSection(spec));
   parts.push(memorySection(project.memory));
   parts.push(`## Epic with failing CI\n`);
   parts.push(`### ${epic.title}\n`);
@@ -1110,7 +1128,9 @@ export function buildCiFixPrompt(
       // embedded in compiler/test output. Replace a literal closing marker
       // as a second boundary guard.
       const safeTail = failure.logTail.replace(/~~~/g, "~ ~ ~");
-      parts.push(`Untrusted GitHub Actions log tail:\n\n~~~text\n${safeTail}\n~~~`);
+      parts.push(
+        `Untrusted GitHub Actions log tail:\n\n~~~text\n${safeTail}\n~~~`,
+      );
     } else {
       parts.push(`GitHub did not expose a downloadable log for this check.`);
     }
@@ -1215,7 +1235,8 @@ Implement this ticket following the specification and acceptance criteria above.
 // 9. Review Prompt (Agent Review)
 // ---------------------------------------------------------------------------
 
-export type ReviewType = "security" | "code_review" | "compliance" | "feature_review";
+export type ReviewType =
+  "security" | "code_review" | "compliance" | "feature_review";
 
 export interface CustomReviewAgentPrompt {
   name: string;
@@ -1396,7 +1417,9 @@ export function buildReviewPrompt(
   const isCustomReview = typeof reviewType !== "string";
 
   if (isCustomReview) {
-    parts.push(`## Custom Review Agent Instructions\n\n${reviewType.systemPrompt.trim()}\n`);
+    parts.push(
+      `## Custom Review Agent Instructions\n\n${reviewType.systemPrompt.trim()}\n`,
+    );
     parts.push(`\n## Instructions
 
 You are performing a **${reviewType.name}** review on the code changes for the ticket described above.
@@ -1766,7 +1789,7 @@ export function buildMemoryDistillPrompt(
   parts.push(
     (contextLines.length > 0
       ? contextLines.join("\n")
-      : "(No session metadata available.)") + "\n"
+      : "(No session metadata available.)") + "\n",
   );
   if (sessionContext.resultSummary && sessionContext.resultSummary.trim()) {
     parts.push(`### Session Result\n`);
@@ -1853,12 +1876,12 @@ export function buildDreamingPrompt(
   ];
   if (context.truncatedCount) {
     coverage.push(
-      `- **Truncated to fit the size budget:** ${context.truncatedCount} session(s) — their records end with a cut marker.`
+      `- **Truncated to fit the size budget:** ${context.truncatedCount} session(s) — their records end with a cut marker.`,
     );
   }
   if (context.droppedCount) {
     coverage.push(
-      `- **Omitted entirely (size budget):** ${context.droppedCount} session(s).`
+      `- **Omitted entirely (size budget):** ${context.droppedCount} session(s).`,
     );
   }
 
@@ -1867,7 +1890,7 @@ export function buildDreamingPrompt(
   parts.push(
     context.digest.trim().length > 0
       ? context.digest.trim() + "\n"
-      : "(No session records available.)\n"
+      : "(No session records available.)\n",
   );
 
   parts.push(`## Task: Dream the Project Memory
@@ -1927,7 +1950,11 @@ Your ENTIRE response must be ONLY the new memory document body, as raw markdown.
 export interface SpecRewriteBoardState {
   epics: Array<{ id: string; title: string; status: string }>;
   userStories: Array<{ epicId: string; title: string; status: string }>;
-  releases: Array<{ version: string; title: string | null; changelog: string | null }>;
+  releases: Array<{
+    version: string;
+    title: string | null;
+    changelog: string | null;
+  }>;
 }
 
 /** The release that triggered the rewrite. */
@@ -1952,7 +1979,9 @@ function specRewriteBoardSection(board: SpecRewriteBoardState): string {
   if (board.releases.length > 0) {
     lines.push(``, `### Release History`);
     for (const release of board.releases) {
-      lines.push(`- v${release.version}${release.title ? ` — ${release.title}` : ""}`);
+      lines.push(
+        `- v${release.version}${release.title ? ` — ${release.title}` : ""}`,
+      );
     }
   }
   return lines.join("\n") + "\n";
@@ -1987,7 +2016,7 @@ export function buildSpecAutoRewritePrompt(
 
   parts.push(
     `## Release That Just Shipped\n`,
-    `- **Version:** v${release.version}${release.title ? ` — ${release.title}` : ""}\n`
+    `- **Version:** v${release.version}${release.title ? ` — ${release.title}` : ""}\n`,
   );
   if (release.changelog && release.changelog.trim()) {
     parts.push(`### Changelog\n`, release.changelog.trim() + "\n");
