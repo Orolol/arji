@@ -62,6 +62,17 @@ function deps(row: Routine): CiWatchDeps {
       state: "failing" as const,
       failedChecks: ["lint", "unit"],
     })),
+    isAutofixEnabled: vi.fn(() => false),
+    fetchFailureEvidence: vi.fn(async (_owner, _repo, snapshot) =>
+      snapshot.failedChecks.map((name: string) => ({
+        name,
+        logTail: `${name} failed`,
+      }))
+    ),
+    launchAutofix: vi.fn(async () => ({
+      status: "launched" as const,
+      sessionId: "session-fix-1",
+    })),
     persistConfig: vi.fn((_id, config) => {
       row.config = config;
     }),
@@ -186,5 +197,76 @@ describe("CI watch", () => {
       { key: "ci_autofix_enabled", value: "true" },
     ];
     expect(isCiAutofixEnabled("project-1")).toBe(true);
+  });
+
+  it("keeps autofix OFF by default while still notifying the CI failure", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+
+    await runCiWatchRoutine(row, watchDeps);
+
+    expect(watchDeps.notifyFailure).toHaveBeenCalledTimes(1);
+    expect(watchDeps.fetchFailureEvidence).not.toHaveBeenCalled();
+    expect(watchDeps.launchAutofix).not.toHaveBeenCalled();
+  });
+
+  it("launches one autofix per PR head and rearms only after a new push", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.isAutofixEnabled).mockReturnValue(true);
+    vi.mocked(watchDeps.fetchPullRequestCi)
+      .mockResolvedValueOnce({
+        headSha: "sha-1",
+        state: "failing",
+        failedChecks: ["unit"],
+      })
+      .mockResolvedValueOnce({
+        headSha: "sha-1",
+        state: "failing",
+        failedChecks: ["unit"],
+      })
+      .mockResolvedValueOnce({
+        headSha: "sha-2",
+        state: "failing",
+        failedChecks: ["unit"],
+      });
+    vi.mocked(watchDeps.launchAutofix)
+      .mockResolvedValueOnce({ status: "launched", sessionId: "fix-sha-1" })
+      .mockResolvedValueOnce({ status: "launched", sessionId: "fix-sha-2" });
+
+    await runCiWatchRoutine(row, watchDeps);
+    await runCiWatchRoutine(row, watchDeps);
+    await runCiWatchRoutine(row, watchDeps);
+
+    expect(watchDeps.launchAutofix).toHaveBeenCalledTimes(2);
+    expect(watchDeps.launchAutofix).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ headSha: "sha-1", prNumber: 11 })
+    );
+    expect(watchDeps.launchAutofix).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ headSha: "sha-2", prNumber: 11 })
+    );
+  });
+
+  it("does not retry a busy target until GitHub reports a new head SHA", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.isAutofixEnabled).mockReturnValue(true);
+    vi.mocked(watchDeps.launchAutofix).mockResolvedValue({
+      status: "skipped",
+      reason: "target_busy",
+      sessionId: "busy-session",
+    });
+
+    await runCiWatchRoutine(row, watchDeps);
+    await runCiWatchRoutine(row, watchDeps);
+
+    expect(watchDeps.launchAutofix).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(row.config).ciWatchState["epic-open"]).toMatchObject({
+      headSha: "sha-1",
+      autofixAttempted: true,
+      autofixSessionId: "busy-session",
+    });
   });
 });

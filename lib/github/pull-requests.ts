@@ -62,10 +62,27 @@ interface PullRequestResult {
 
 export type PullRequestCiState = "passing" | "pending" | "failing";
 
+export interface PullRequestFailedCheckRun {
+  id: number;
+  name: string;
+}
+
 export interface PullRequestCiStatus {
   headSha: string;
   state: PullRequestCiState;
   failedChecks: string[];
+  /**
+   * GitHub check-run ids whose logs can be fetched through the Actions job
+   * endpoint. Legacy commit statuses have no job id and therefore appear in
+   * `failedChecks` only.
+   */
+  failedCheckRuns?: PullRequestFailedCheckRun[];
+}
+
+export interface PullRequestCiFailureEvidence {
+  name: string;
+  /** Best-effort tail of the job log; null for legacy/third-party checks. */
+  logTail: string | null;
 }
 
 interface CheckRunSignal {
@@ -87,6 +104,39 @@ const FAILING_CHECK_CONCLUSIONS = new Set([
   "startup_failure",
   "timed_out",
 ]);
+
+export const CI_JOB_LOG_TAIL_CHARS = 8_000;
+
+async function logPayloadToText(payload: unknown): Promise<string | null> {
+  if (typeof payload === "string") return payload;
+  if (payload instanceof ArrayBuffer) {
+    return new TextDecoder().decode(new Uint8Array(payload));
+  }
+  if (ArrayBuffer.isView(payload)) {
+    return new TextDecoder().decode(
+      new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength)
+    );
+  }
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "text" in payload &&
+    typeof (payload as { text?: unknown }).text === "function"
+  ) {
+    return await (payload as { text(): Promise<string> }).text();
+  }
+  return null;
+}
+
+export function tailCiJobLog(
+  log: string,
+  maxChars: number = CI_JOB_LOG_TAIL_CHARS
+): string {
+  const normalized = log.replace(/\0/g, "").trimEnd();
+  return normalized.length <= maxChars
+    ? normalized
+    : normalized.slice(normalized.length - maxChars);
+}
 
 /**
  * Collapse GitHub Checks and legacy commit statuses into one deterministic
@@ -239,18 +289,85 @@ export async function fetchPullRequestCiStatus(
     }),
   ]);
 
+  const checkRunSignals = checks.check_runs.map((check) => ({
+    id: check.id,
+    name: check.name,
+    status: check.status,
+    conclusion: check.conclusion,
+  }));
+  const classification = classifyPullRequestCi({
+    checkRuns: checkRunSignals.map((check) => ({
+      name: check.name,
+      status: check.status,
+      conclusion: check.conclusion,
+    })),
+    commitStatuses: combinedStatus.statuses.map((status) => ({
+      context: status.context,
+      state: status.state,
+    })),
+  });
+
+  const failedCheckRuns = new Map<string, PullRequestFailedCheckRun>();
+  for (const check of checkRunSignals) {
+    if (
+      check.conclusion &&
+      FAILING_CHECK_CONCLUSIONS.has(check.conclusion) &&
+      !failedCheckRuns.has(check.name)
+    ) {
+      failedCheckRuns.set(check.name, { id: check.id, name: check.name });
+    }
+  }
+
   return {
     headSha,
-    ...classifyPullRequestCi({
-      checkRuns: checks.check_runs.map((check) => ({
-        name: check.name,
-        status: check.status,
-        conclusion: check.conclusion,
-      })),
-      commitStatuses: combinedStatus.statuses.map((status) => ({
-        context: status.context,
-        state: status.state,
-      })),
-    }),
+    ...classification,
+    failedCheckRuns: [...failedCheckRuns.values()].sort((left, right) =>
+      left.name.localeCompare(right.name)
+    ),
   };
+}
+
+/**
+ * Fetch the log tail for every failed GitHub Actions check. GitHub exposes
+ * legacy commit statuses and third-party check runs without an Actions job
+ * log, so those checks remain present with `logTail: null`. One unavailable
+ * log never hides evidence from the other failed checks.
+ */
+export async function fetchPullRequestCiFailureEvidence(
+  owner: string,
+  repo: string,
+  snapshot: PullRequestCiStatus
+): Promise<PullRequestCiFailureEvidence[]> {
+  const token = getGitHubTokenFromSettings();
+  if (!token) {
+    throw new Error("GitHub PAT not configured. Set it in Settings.");
+  }
+  const octokit = createGitHubClient(token);
+  const runByName = new Map(
+    (snapshot.failedCheckRuns ?? []).map((check) => [check.name, check])
+  );
+
+  return Promise.all(
+    snapshot.failedChecks.map(async (name) => {
+      const checkRun = runByName.get(name);
+      if (!checkRun) return { name, logTail: null };
+
+      try {
+        const response =
+          await octokit.actions.downloadJobLogsForWorkflowRun({
+            owner,
+            repo,
+            job_id: checkRun.id,
+          });
+        const payload = (response as unknown as { data?: unknown }).data;
+        const text = await logPayloadToText(payload);
+        return { name, logTail: text === null ? null : tailCiJobLog(text) };
+      } catch {
+        // A non-Actions check run, expired redirect, or missing permission is
+        // expected to have no downloadable log. The check name is still
+        // useful evidence and the autofix must continue with the rest.
+        return { name, logTail: null };
+      }
+    })
+  );
 }

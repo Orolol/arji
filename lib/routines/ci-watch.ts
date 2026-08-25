@@ -8,13 +8,19 @@ import {
   type Routine,
 } from "@/lib/db/schema";
 import {
+  fetchPullRequestCiFailureEvidence,
   fetchPullRequestCiStatus,
+  type PullRequestCiFailureEvidence,
   type PullRequestCiState,
   type PullRequestCiStatus,
 } from "@/lib/github/pull-requests";
 import { parseOwnerRepo } from "@/lib/github/client";
 import { createCiWatchFailureNotification } from "@/lib/notifications/create";
 import type { RoutineActionResult } from "@/lib/routines/actions";
+import {
+  launchCiAutofixSession,
+  type CiAutofixLaunchResult,
+} from "@/lib/routines/ci-autofix";
 
 export const DEFAULT_CI_WATCH_INTERVAL_MINUTES = 15;
 export const CI_AUTOFIX_ENABLED_SETTING_KEY = "ci_autofix_enabled";
@@ -73,6 +79,9 @@ export interface StoredCiObservation {
   headSha: string;
   state: PullRequestCiState;
   failureNotified: boolean;
+  /** Claimed before dispatch so a crash cannot replay the same PR head. */
+  autofixAttempted: boolean;
+  autofixSessionId: string | null;
 }
 
 type StoredCiWatchState = Record<string, StoredCiObservation>;
@@ -85,6 +94,19 @@ export interface CiWatchDeps {
     repo: string,
     prNumber: number
   ): Promise<PullRequestCiStatus>;
+  isAutofixEnabled(projectId: string): boolean;
+  fetchFailureEvidence(
+    owner: string,
+    repo: string,
+    snapshot: PullRequestCiStatus
+  ): Promise<PullRequestCiFailureEvidence[]>;
+  launchAutofix(input: {
+    projectId: string;
+    epicId: string;
+    prNumber: number;
+    headSha: string;
+    failures: PullRequestCiFailureEvidence[];
+  }): Promise<CiAutofixLaunchResult>;
   persistConfig(routineId: string, config: string): void;
   notifyFailure(input: {
     projectId: string;
@@ -123,6 +145,9 @@ export const defaultCiWatchDeps: CiWatchDeps = {
       .where(eq(projects.id, projectId))
       .get()?.githubOwnerRepo ?? null,
   fetchPullRequestCi: fetchPullRequestCiStatus,
+  isAutofixEnabled: isCiAutofixEnabled,
+  fetchFailureEvidence: fetchPullRequestCiFailureEvidence,
+  launchAutofix: launchCiAutofixSession,
   persistConfig: (routineId, config) => {
     db.update(routines)
       .set({ config })
@@ -165,7 +190,20 @@ function parseStoredState(value: unknown): StoredCiWatchState {
     ) {
       continue;
     }
-    state[epicId] = row as StoredCiObservation;
+    state[epicId] = {
+      prNumber: row.prNumber,
+      headSha: row.headSha,
+      state: row.state,
+      failureNotified: row.failureNotified,
+      autofixAttempted:
+        typeof row.autofixAttempted === "boolean"
+          ? row.autofixAttempted
+          : false,
+      autofixSessionId:
+        typeof row.autofixSessionId === "string"
+          ? row.autofixSessionId
+          : null,
+    } as StoredCiObservation;
   }
   return state;
 }
@@ -192,6 +230,12 @@ export function nextCiObservation(
       headSha: snapshot.headSha,
       state: snapshot.state,
       failureNotified: alreadyNotified || shouldNotify,
+      autofixAttempted: sameHead
+        ? previous?.autofixAttempted ?? false
+        : false,
+      autofixSessionId: sameHead
+        ? previous?.autofixSessionId ?? null
+        : null,
     },
     shouldNotify,
   };
@@ -229,6 +273,9 @@ export async function runCiWatchRoutine(
   const eligibleEpicIds = new Set(openPullRequests.map((epic) => epic.id));
   let failingPullRequests = 0;
   let newFailures = 0;
+  let autofixesLaunched = 0;
+  let autofixesSkipped = 0;
+  const autofixEnabled = deps.isAutofixEnabled(routine.projectId);
 
   for (const epic of openPullRequests) {
     const snapshot = await deps.fetchPullRequestCi(
@@ -263,6 +310,56 @@ export async function runCiWatchRoutine(
       });
       newFailures += 1;
     }
+
+    if (
+      snapshot.state === "failing" &&
+      autofixEnabled &&
+      !decision.observation.autofixAttempted
+    ) {
+      // Claim before fetching logs or invoking the build route. A process
+      // crash anywhere below consumes this head, honoring the strict
+      // one-session-per-(PR, SHA) contract after restart.
+      nextState[epic.id] = {
+        ...decision.observation,
+        autofixAttempted: true,
+      };
+      deps.persistConfig(
+        routine.id,
+        JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState })
+      );
+
+      let failures: PullRequestCiFailureEvidence[];
+      try {
+        failures = await deps.fetchFailureEvidence(owner, repo, snapshot);
+      } catch (error) {
+        console.warn(
+          `[ci-watch] Could not fetch CI log tails for PR #${epic.prNumber}`,
+          error
+        );
+        failures = snapshot.failedChecks.map((name) => ({
+          name,
+          logTail: null,
+        }));
+      }
+
+      const launch = await deps.launchAutofix({
+        projectId: routine.projectId,
+        epicId: epic.id,
+        prNumber: epic.prNumber,
+        headSha: snapshot.headSha,
+        failures,
+      });
+      if (launch.status === "launched") autofixesLaunched += 1;
+      else autofixesSkipped += 1;
+      nextState[epic.id] = {
+        ...nextState[epic.id],
+        autofixSessionId: launch.sessionId,
+      };
+      deps.persistConfig(
+        routine.id,
+        JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState })
+      );
+    }
   }
 
   for (const epicId of Object.keys(nextState)) {
@@ -277,7 +374,11 @@ export async function runCiWatchRoutine(
     status: "completed",
     message: `Checked ${openPullRequests.length} open pull request${
       openPullRequests.length === 1 ? "" : "s"
-    }; ${failingPullRequests} failing, ${newFailures} newly reported.`,
+    }; ${failingPullRequests} failing, ${newFailures} newly reported${
+      autofixesLaunched + autofixesSkipped > 0
+        ? `; ${autofixesLaunched} autofix launched, ${autofixesSkipped} skipped`
+        : ""
+    }.`,
     targetUrl: `/projects/${routine.projectId}`,
   };
 }

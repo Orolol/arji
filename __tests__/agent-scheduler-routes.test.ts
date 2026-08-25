@@ -78,7 +78,7 @@ vi.mock("fs", () => ({
 }));
 
 const { db } = await import("@/lib/db");
-const { projects, epics, agentSessions, settings } = await import(
+const { projects, epics, agentSessions, settings, ticketActivityLog } = await import(
   "@/lib/db/schema"
 );
 const { POST: batchBuildPost } = await import(
@@ -139,6 +139,9 @@ function sessionsByStatus(projectId: string) {
       status: agentSessions.status,
       startedAt: agentSessions.startedAt,
       error: agentSessions.error,
+      prompt: agentSessions.prompt,
+      agentType: agentSessions.agentType,
+      batchRunId: agentSessions.batchRunId,
     })
     .from(agentSessions)
     .where(eq(agentSessions.projectId, projectId))
@@ -266,6 +269,76 @@ describe("scheduler-integrated batch build", () => {
     expect(conflictRes.status).toBe(409);
     expect(conflictJson.code).toBe("AGENT_ALREADY_RUNNING");
     expect(conflictJson.data.activeSessionId).toBe(state.queued[0].id);
+  });
+
+  it("queues CI autofix as a normal visible build and de-duplicates its PR head", async () => {
+    const { projectId, epicIds } = seedProject(2, 1);
+
+    const occupyingResponse = await epicBuildPost(
+      mockJsonRequest({}),
+      mockRouteContext({ projectId, epicId: epicIds[0] })
+    );
+    expect(occupyingResponse.status).toBe(200);
+
+    const ciAutofix = {
+      prNumber: 42,
+      headSha: "abc123",
+      failures: [{ name: "unit", logTail: "Expected 2, received 1" }],
+    };
+    const response = await epicBuildPost(
+      mockJsonRequest({ pipeline: false, ciAutofix }),
+      mockRouteContext({ projectId, epicId: epicIds[1] })
+    );
+    const json = await response.json();
+    expect(response.status).toBe(200);
+    expect(json.data.ciAutofix).toEqual({ launched: true });
+    expect(json.data.pipeline).toBeNull();
+
+    let state = sessionsByStatus(projectId);
+    const autofixRow = state.queued.find((row) => row.id === json.data.sessionId);
+    expect(autofixRow).toMatchObject({
+      epicId: epicIds[1],
+      status: "queued",
+      agentType: "build",
+      batchRunId: `ci-autofix:${epicIds[1]}:pr-42:abc123`,
+    });
+    expect(autofixRow?.prompt).toContain("### unit");
+    expect(autofixRow?.prompt).toContain("Expected 2, received 1");
+
+    const activeResponse = await activeGet(
+      mockNextRequest(),
+      mockRouteContext({ projectId })
+    );
+    const active = (await activeResponse.json()).data as Array<{ id: string }>;
+    expect(active.some((session) => session.id === json.data.sessionId)).toBe(true);
+
+    const duplicateResponse = await epicBuildPost(
+      mockJsonRequest({ pipeline: false, ciAutofix }),
+      mockRouteContext({ projectId, epicId: epicIds[1] })
+    );
+    expect(await duplicateResponse.json()).toMatchObject({
+      data: {
+        sessionId: json.data.sessionId,
+        ciAutofix: { launched: false, reason: "already_attempted" },
+      },
+    });
+
+    completeSession(state.running[0].id);
+    await vi.advanceTimersByTimeAsync(2500);
+    state = sessionsByStatus(projectId);
+    expect(state.running.map((row) => row.id)).toContain(json.data.sessionId);
+
+    completeSession(json.data.sessionId);
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(sessionsByStatus(projectId).completed.map((row) => row.id)).toContain(
+      json.data.sessionId
+    );
+    const activity = db
+      .select({ reason: ticketActivityLog.reason })
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, epicIds[1]))
+      .all();
+    expect(activity.some((row) => row.reason?.includes("CI autofix"))).toBe(true);
   });
 
   it("cancelling a queued session removes it from the queue and it never starts", async () => {
