@@ -71,7 +71,8 @@ describe("0031_notification_message — migration file", () => {
     // increasing so 0031 runs after 0030_chat_attachment_ownership.
     const whens = journal.entries.map((e) => e.when);
     expect([...whens].sort((a, b) => a - b)).toEqual(whens);
-    expect(journal.entries[journal.entries.length - 1]?.tag).toBe(MIGRATION_TAG);
+    // Position, not tail: later migrations append after it.
+    expect(journal.entries[30]?.tag).toBe(MIGRATION_TAG);
   });
 
   it("is listed in POST_BASELINE_COLUMN_MIGRATIONS for bookkeeping-less recovery", () => {
@@ -184,10 +185,13 @@ describe("0031_notification_message — applied schema", () => {
 
     // Build the full schema, then simulate a database that predates 0031 by
     // dropping the column and un-stamping 0031 — the migrator replays entries
-    // strictly newer than the last stamped one.
+    // strictly newer than the last stamped one, so the columns the later
+    // migrations add are dropped here too (an ADD COLUMN is not a no-op the
+    // second time).
     withDb(file, (conn) => {
       initDb(conn);
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')

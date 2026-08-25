@@ -252,6 +252,7 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
     });
 
     withDb(file, (conn) => {
@@ -269,6 +270,7 @@ describe("initDb", () => {
       expect(columnNames(conn, "chat_attachments")).toContain("project_id");
       expect(columnNames(conn, "chat_attachments")).toContain("epic_id");
       expect(columnNames(conn, "notifications")).toContain("message");
+      expect(columnNames(conn, "agent_sessions")).toContain("review_verdict");
       expect(appliedMigrationTimestamps(conn)).toHaveLength(TOTAL_MIGRATIONS);
       expectFullSchema(conn);
     });
@@ -314,8 +316,8 @@ describe("initDb", () => {
 
     // Simulate a bookkeeping-less database whose schema stops at 0023:
     // outcome exists; the 0024 usage columns, the 0025 table, the 0026
-    // batch_run_id column, the 0028 clone columns and the 0030 attachment
-    // ownership columns do not.
+    // batch_run_id column, the 0028 clone columns, the 0030 attachment
+    // ownership columns and the 0032 review verdict do not.
     withDb(file, (conn) => {
       initDb(conn);
       conn.exec('DROP TABLE "__drizzle_migrations"');
@@ -329,6 +331,7 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       conn.exec("DROP TABLE ticket_read_cursors");
     });
 
@@ -344,6 +347,7 @@ describe("initDb", () => {
       expect(columnNames(conn, "projects")).toContain("clone_source");
       expect(columnNames(conn, "projects")).toContain("git_remote_url");
       expect(columnNames(conn, "projects")).toContain("default_branch");
+      expect(columnNames(conn, "agent_sessions")).toContain("review_verdict");
       expect(tableNames(conn)).toContain("ticket_read_cursors");
       expect(appliedMigrationTimestamps(conn)).toHaveLength(TOTAL_MIGRATIONS);
       expectFullSchema(conn);
@@ -427,14 +431,16 @@ describe("migration journal", () => {
 
       // Drop this row and every later one so the migrator's high-water mark
       // falls back below it, exactly as it does when the entry moves up the
-      // journal. The tail re-runs with it, so the columns 0030 adds have to go
-      // back too — an ADD COLUMN is not a no-op the second time.
+      // journal. The tail re-runs with it, so every column the later
+      // migrations add has to go back too — an ADD COLUMN is not a no-op the
+      // second time.
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')
         .run(entry!.when);
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
 
       expect(() => initDb(conn)).not.toThrow();
 

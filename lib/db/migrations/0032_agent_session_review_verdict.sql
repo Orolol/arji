@@ -1,0 +1,25 @@
+-- The structured review verdict a review session submitted through the MCP
+-- `submit_findings` tool (approved | approved_with_minor_issues |
+-- changes_requested).
+--
+-- Until now the verdict travelled through the tool call and then evaporated:
+-- only the per-finding review_comments rows and a prose summary comment
+-- survived, so the transition drivers had to re-derive "did this review
+-- pass?" by substring-matching the reviewer's markdown
+-- (lib/pipeline/findings.ts). Persisting it makes the structured channel the
+-- authoritative signal and leaves the prose scan as the fallback for
+-- providers that cannot call MCP tools at all.
+--
+-- The verdict is an attribute of THE review session, not of a finding: a
+-- summary-only review files zero findings and still has a verdict. NULL for
+-- every non-review session, for reviews that never called submit_findings,
+-- and for every legacy row — which is exactly what selects the prose
+-- fallback.
+--
+-- SQLite has no ADD COLUMN IF NOT EXISTS, so like 0023/0024/0026/0028/0030/
+-- 0031 this is not an idempotent no-op, and re-running it on a database that
+-- already has the column throws. A database can reach that state by losing
+-- its drizzle bookkeeping, so the column is listed in
+-- POST_BASELINE_COLUMN_MIGRATIONS (lib/db/init.ts), which stamps this
+-- migration as applied when it exists.
+ALTER TABLE agent_sessions ADD COLUMN review_verdict text;

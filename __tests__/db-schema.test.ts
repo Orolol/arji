@@ -168,6 +168,7 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       lastNonEmptyText: "last_non_empty_text",
       error: "error",
       outcome: "outcome",
+      reviewVerdict: "review_verdict",
       inputTokens: "input_tokens",
       outputTokens: "output_tokens",
       totalCostUsd: "total_cost_usd",

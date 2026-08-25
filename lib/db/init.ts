@@ -69,6 +69,12 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
   { folderMillis: 1786712700000, table: "chat_attachments", column: "epic_id" },
   // 0031_notification_message (single column ALTER)
   { folderMillis: 1786712800000, table: "notifications", column: "message" },
+  // 0032_agent_session_review_verdict (single column ALTER)
+  {
+    folderMillis: 1786712900000,
+    table: "agent_sessions",
+    column: "review_verdict",
+  },
 ];
 
 /** Default on-disk location of the drizzle migration files. */
