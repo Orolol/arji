@@ -500,11 +500,19 @@ export function startNightRun(input: StartNightRunInput): StartNightRunHandle {
     // Fire-and-forget cross-session distillation of everything this run just
     // taught (OFF unless `dreaming_after_night_run` says otherwise). It runs
     // AFTER the summary on purpose: the run is already closed and counted, so
-    // a dream can neither delay the morning summary nor fail it. The run id
-    // rides along as batch_run_id so the dream's spend lands inside this run's
-    // cost cap and totals instead of escaping both — the same tag that wires
-    // up an auto-distill (lib/workflow/memory-distill.ts).
-    void maybeDreamAfterNightRun(projectId, runId);
+    // a dream can neither delay the morning summary nor fail it.
+    //
+    // Because it starts past the wave engine's last `shouldAbortRun` check,
+    // the cap can no longer stop it there — so the cap and the user's stop are
+    // handed over explicitly and re-applied by the trigger before it spends
+    // anything. The run id still rides along as batch_run_id, so every
+    // DB-derived total for the run (detail view, sumNightRunCost) includes the
+    // dream; only the summary notification above, already sent, does not.
+    void maybeDreamAfterNightRun(projectId, runId, {
+      abortReason: abortInfo.abortReason,
+      costCapUsd: costCap,
+      spentUsd: totalCostUsd,
+    });
   };
 
   const engineRun = runExecutionWaves({
