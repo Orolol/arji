@@ -29,6 +29,7 @@ function session(
     agentType: "build",
     status: "completed",
     outcome: "answered",
+    batchRunId: null,
     ...overrides,
   };
 }
@@ -37,11 +38,13 @@ function evaluate(input: {
   enabled?: boolean;
   session?: AutoDistillCandidateSession | null;
   hasPendingDistill?: boolean;
+  dreamWillFollow?: boolean;
 }) {
   return evaluateAutoDistillGuards({
     enabled: input.enabled ?? true,
     session: input.session === undefined ? session() : input.session,
     hasPendingDistill: input.hasPendingDistill ?? false,
+    dreamWillFollow: input.dreamWillFollow ?? false,
   });
 }
 
@@ -126,6 +129,41 @@ describe("evaluateAutoDistillGuards", () => {
     expect(evaluate({ session: session({ outcome: null }) }).allowed).toBe(
       true
     );
+  });
+});
+
+/**
+ * Both memory writers take the same exclusive lock, and the night-run dream is
+ * attempted EXACTLY ONCE at the run's terminal choke point. An auto-distill
+ * still holding the lock at that instant does not delay the dream — it cancels
+ * it, for good. So the distill stands down instead.
+ */
+describe("night-run dream vs auto-distill", () => {
+  it("denies the distill when a night-run dream will cover the run", () => {
+    const decision = evaluate({
+      session: session({ batchRunId: "night_abc" }),
+      dreamWillFollow: true,
+    });
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toContain("night-run dream");
+  });
+
+  it("allows the distill when no dream will follow", () => {
+    expect(
+      evaluate({
+        session: session({ batchRunId: "night_abc" }),
+        dreamWillFollow: false,
+      }).allowed
+    ).toBe(true);
+  });
+
+  it("stands down BEFORE the pending-writer check, so the reason is the real one", () => {
+    const decision = evaluate({
+      session: session({ batchRunId: "night_abc" }),
+      dreamWillFollow: true,
+      hasPendingDistill: true,
+    });
+    expect(decision.reason).toContain("night-run dream");
   });
 });
 

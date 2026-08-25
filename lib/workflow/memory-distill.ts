@@ -66,7 +66,9 @@ import {
   MEMORY_AUTO_DISTILL_SETTING_KEY,
   parseMemoryAutoDistillSetting,
 } from "@/lib/documents/memory-constants";
+import { isNightRunId } from "@/lib/night/constants";
 import { MEMORY_WRITER_AGENT_TYPES } from "./dreaming-constants";
+import { isDreamingAfterNightRunEnabled } from "./dreaming";
 import {
   MEMORY_WRITER_BUSY_MESSAGE,
   hasPendingMemoryWriter,
@@ -116,6 +118,8 @@ export interface AutoDistillCandidateSession {
   agentType: string | null;
   status: string | null;
   outcome: string | null;
+  /** Batch/night run that dispatched this session; null for standalone runs. */
+  batchRunId: string | null;
 }
 
 export interface AutoDistillDecision {
@@ -135,6 +139,10 @@ export interface AutoDistillDecision {
  *   - non-build agent types,
  *   - asked_question outcome (the build is still awaiting the user — its
  *     learnings are not settled yet),
+ *   - a night-run dream will cover this session anyway (see
+ *     nightRunDreamWillFollow): the two writers share one lock and the dream
+ *     gets exactly one attempt, so a distill running at that moment would
+ *     cancel it outright,
  *   - a memory writer (distill OR dream) already queued/running for the
  *     project — both rewrite the whole document, so they must not overlap.
  */
@@ -142,6 +150,8 @@ export function evaluateAutoDistillGuards(input: {
   enabled: boolean;
   session: AutoDistillCandidateSession | null;
   hasPendingDistill: boolean;
+  /** True when a night-run dream will cover this session — see below. */
+  dreamWillFollow?: boolean;
 }): AutoDistillDecision {
   if (!input.enabled) {
     return { allowed: false, reason: "auto-distill setting is off" };
@@ -176,6 +186,12 @@ export function evaluateAutoDistillGuards(input: {
   if (!input.session.projectId) {
     return { allowed: false, reason: "session has no project" };
   }
+  if (input.dreamWillFollow) {
+    return {
+      allowed: false,
+      reason: "a night-run dream will distill this session's run instead",
+    };
+  }
   if (input.hasPendingDistill) {
     return {
       allowed: false,
@@ -184,6 +200,25 @@ export function evaluateAutoDistillGuards(input: {
     };
   }
   return { allowed: true, reason: "eligible" };
+}
+
+/**
+ * True when this session's completion should stand down for the cross-session
+ * dream the night run will fire when it ends.
+ *
+ * Both writers take the same exclusive lock on the memory document, and the
+ * dream is attempted EXACTLY ONCE at the run's terminal choke point. So an
+ * auto-distill still holding the lock at that instant does not merely delay
+ * the dream — it cancels it, permanently, for that run. Standing the distill
+ * down is the right way round: the dream reads the whole run (this session
+ * included) rather than one session of it, the user asked for it explicitly by
+ * enabling the setting, and it costs one session instead of one per build.
+ */
+export function nightRunDreamWillFollow(
+  session: AutoDistillCandidateSession | null
+): boolean {
+  if (!session?.projectId || !isNightRunId(session.batchRunId)) return false;
+  return isDreamingAfterNightRunEnabled(session.projectId);
 }
 
 /**
@@ -223,6 +258,7 @@ export async function maybeAutoDistillAfterSessionTerminal(
           agentType: agentSessions.agentType,
           status: agentSessions.status,
           outcome: agentSessions.outcome,
+          batchRunId: agentSessions.batchRunId,
         })
         .from(agentSessions)
         .where(eq(agentSessions.id, sessionId))
@@ -234,6 +270,7 @@ export async function maybeAutoDistillAfterSessionTerminal(
       hasPendingDistill: session?.projectId
         ? hasPendingMemoryDistill(session.projectId)
         : false,
+      dreamWillFollow: nightRunDreamWillFollow(session),
     });
 
     if (!decision.allowed) {
