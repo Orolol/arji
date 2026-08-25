@@ -389,6 +389,7 @@ export function NightRunDialog({
                 value={namedAgentId}
                 onChange={setNamedAgentId}
                 className="h-[28px] w-[186px] text-[13px]"
+                dispatchRole="build"
               />
             </OptionRow>
 

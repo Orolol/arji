@@ -14,6 +14,7 @@ import type {
   AutoModeDispatchInput,
   AutoModeEngineDeps,
 } from "@/lib/auto-mode/engine";
+import type { SmartDispatchPick } from "@/lib/agent-config/smart-dispatch";
 
 vi.mock("@/lib/db", async () => {
   const { createTestDb } = await import("@/lib/db/test-utils");
@@ -149,6 +150,8 @@ interface Fakes {
     namedAgentId: string | null;
     dispatchConflictAgent: boolean;
   }>;
+  /** Stages the engine asked the smart selector about, in order. */
+  smartLookups: Array<"build" | "review">;
   /** Sessions the fake dispatcher created, keyed by id → status. */
   sessionStatus: Map<string, string>;
   /** Delivery verdicts, keyed by session id. */
@@ -158,12 +161,16 @@ interface Fakes {
   conflictNextDispatch(sessionId: string): void;
   mergeOutcome(outcome: unknown): void;
   mergeImplementation(fn: () => unknown): void;
+  /** What the (stubbed) reliability argmax returns for a stage. */
+  smartPick(stage: "build" | "review", pick: SmartDispatchPick | null): void;
 }
 
 function makeFakes(): Fakes {
   const dispatches: AutoModeDispatchInput[] = [];
   const merges: string[] = [];
   const mergeOptions: Fakes["mergeOptions"] = [];
+  const smartLookups: Array<"build" | "review"> = [];
+  const smartPicks = new Map<string, SmartDispatchPick | null>();
   const sessionStatus = new Map<string, string>();
   const sessionOutcome = new Map<string, string>();
   let dispatchFailures = 0;
@@ -178,10 +185,15 @@ function makeFakes(): Fakes {
     buildConcurrency: DEFAULT_AUTO_BUILD_CONCURRENCY,
     reviewAgent: "review-agent" as string | null,
     reviewConcurrency: DEFAULT_AUTO_REVIEW_CONCURRENCY,
+    smartDispatch: false,
   };
 
   const deps: AutoModeEngineDeps = {
     listEnabledProjectIds: () => (config.enabled ? [PROJECT_ID] : []),
+    selectSmartAgent: async ({ stage }) => {
+      smartLookups.push(stage);
+      return smartPicks.get(stage) ?? null;
+    },
     resolveConfig: () => ({ ...config }),
     loadBoard: (projectId) => loadAutoModeBoard(projectId),
     dispatch: async (input) => {
@@ -245,6 +257,7 @@ function makeFakes(): Fakes {
     dispatches,
     merges,
     mergeOptions,
+    smartLookups,
     sessionStatus,
     sessionOutcome,
     setConfig(patch) {
@@ -262,6 +275,9 @@ function makeFakes(): Fakes {
     },
     mergeImplementation(fn) {
       mergeImpl = fn;
+    },
+    smartPick(stage, pick) {
+      smartPicks.set(stage, pick);
     },
   };
 }
@@ -475,6 +491,149 @@ describe("dispatch shape", () => {
     expect(fakes.dispatches[1].ownSessionIds).toEqual([
       result.buildsDispatched[0],
     ]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Smart dispatch (auto_mode_smart_dispatch)                           */
+/* ------------------------------------------------------------------ */
+
+describe("smart dispatch", () => {
+  const BUILD_PICK = {
+    namedAgentId: "measured-builder",
+    agentName: "Measured Builder",
+    role: "build" as const,
+    successRate: 0.92,
+    sampleSize: 25,
+    medianDurationMs: 252_000,
+  };
+  const REVIEW_PICK = {
+    namedAgentId: "measured-reviewer",
+    agentName: "Measured Reviewer",
+    role: "review" as const,
+    successRate: 0.8,
+    sampleSize: 10,
+    medianDurationMs: 60_000,
+  };
+
+  it("changes nothing while the setting is off", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildAgent: null, reviewAgent: null, smartDispatch: false });
+    fakes.smartPick("build", BUILD_PICK);
+    addEpic({ id: "t1", status: "todo" });
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    // The selector is not even consulted, so a slow stats read cannot cost a
+    // sweep anything when the feature is off.
+    expect(fakes.smartLookups).toEqual([]);
+    expect(fakes.dispatches[0].buildNamedAgentId).toBeNull();
+    expect(autoReasons("t1")).toEqual([
+      "Auto mode dispatched a build (epic scope)",
+    ]);
+  });
+
+  it("never overrides an explicitly configured agent", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({
+      buildAgent: "chosen-by-hand",
+      reviewAgent: "chosen-by-hand-too",
+      smartDispatch: true,
+    });
+    fakes.smartPick("build", BUILD_PICK);
+    fakes.smartPick("review", REVIEW_PICK);
+    addEpic({ id: "t1", status: "todo" });
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.smartLookups).toEqual([]);
+    expect(fakes.dispatches[0].buildNamedAgentId).toBe("chosen-by-hand");
+    expect(autoReasons("t1").some((r) => r.includes("picked"))).toBe(false);
+  });
+
+  it("only overrides the role that has no agent of its own", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({
+      buildAgent: "chosen-by-hand",
+      reviewAgent: null,
+      smartDispatch: true,
+    });
+    fakes.smartPick("build", BUILD_PICK);
+    fakes.smartPick("review", REVIEW_PICK);
+    addEpic({ id: "r1", status: "review" });
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.smartLookups).toEqual(["review"]);
+    expect(fakes.dispatches[0]).toMatchObject({
+      stage: "review",
+      reviewNamedAgentId: "measured-reviewer",
+      // The build agent field still carries the configured value untouched.
+      buildNamedAgentId: "chosen-by-hand",
+    });
+  });
+
+  it("dispatches the measured agent and records WHY in the activity log", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildAgent: null, reviewAgent: null, smartDispatch: true });
+    fakes.smartPick("build", BUILD_PICK);
+    addEpic({ id: "t1", status: "todo" });
+
+    const result = await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.dispatches[0].buildNamedAgentId).toBe("measured-builder");
+    expect(autoReasons("t1")).toContain(
+      "Auto mode picked Measured Builder for the build: best 92% success over 25 runs in the last 30 days"
+    );
+
+    // The trace hangs off the session it explains, so the feed can link them.
+    const traced = db
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, "t1"))
+      .all()
+      .find((row) => (row.reason ?? "").includes("picked"))!;
+    expect(traced.sessionId).toBe(result.buildsDispatched[0]);
+    expect(traced.actor).toBe("system");
+  });
+
+  it("keeps the current default when nothing clears the sample threshold", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildAgent: null, reviewAgent: null, smartDispatch: true });
+    fakes.smartPick("build", null);
+    addEpic({ id: "t1", status: "todo" });
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.smartLookups).toEqual(["build"]);
+    // null = "resolve through the normal project -> global -> builtin chain".
+    expect(fakes.dispatches[0].buildNamedAgentId).toBeNull();
+    expect(autoReasons("t1")).toEqual([
+      "Auto mode dispatched a build (epic scope)",
+    ]);
+  });
+
+  it("asks once per sweep, not once per ticket", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({
+      buildAgent: null,
+      reviewAgent: null,
+      smartDispatch: true,
+      buildConcurrency: 3,
+      reviewConcurrency: 0,
+    });
+    fakes.smartPick("build", BUILD_PICK);
+    addEpic({ id: "t1", status: "todo", position: 0 });
+    addEpic({ id: "t2", status: "todo", position: 1 });
+    addEpic({ id: "t3", status: "todo", position: 2 });
+
+    const result = await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(result.buildsDispatched).toHaveLength(3);
+    expect(fakes.smartLookups).toEqual(["build"]);
+    for (const dispatch of fakes.dispatches) {
+      expect(dispatch.buildNamedAgentId).toBe("measured-builder");
+    }
   });
 });
 

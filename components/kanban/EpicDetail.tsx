@@ -640,6 +640,7 @@ export function EpicDetail({
           value: resolveMergeAgentId,
           onChange: setResolveMergeAgentId,
           className: "w-44 h-8 text-xs",
+          dispatchRole: "merge",
         }}
         sessionPicker={
           epicId

@@ -24,6 +24,10 @@ import {
 } from "./select";
 import { tryAutoMerge, type AutoMergeOutcome } from "./merge";
 import { SESSION_TRANSITION_REFUSED_OUTCOME } from "@/lib/agent-sessions/lifecycle";
+import {
+  selectSmartDispatchAgent,
+  type SmartDispatchPick,
+} from "@/lib/agent-config/smart-dispatch";
 
 /**
  * Full Auto Mode — the standing build / review / merge supervisor.
@@ -106,6 +110,15 @@ export interface AutoModeEngineDeps {
   resolveConfig(projectId: string): AutoModeConfig;
   loadBoard(projectId: string): AutoModeBoard;
   dispatch(input: AutoModeDispatchInput): Promise<AutoModeDispatchResult>;
+  /**
+   * Best-measured named agent for a stage, or null when nothing clears the
+   * sample threshold. Only consulted when `smartDispatch` is on AND the role
+   * has no explicitly configured agent.
+   */
+  selectSmartAgent(input: {
+    projectId: string;
+    stage: "build" | "review";
+  }): Promise<SmartDispatchPick | null>;
   merge(
     projectId: string,
     epicId: string,
@@ -239,6 +252,16 @@ export const defaultAutoModeDeps: AutoModeEngineDeps = {
   resolveConfig: resolveAutoModeConfigForProject,
   loadBoard: loadAutoModeBoard,
   dispatch: defaultDispatch,
+  selectSmartAgent: ({ stage }) =>
+    // A stats read must never take the sweep down with it: no pick simply
+    // means "keep the configured default".
+    selectSmartDispatchAgent({ role: stage }).catch((error) => {
+      console.warn(
+        "[auto-mode] Smart dispatch lookup failed:",
+        error instanceof Error ? error.message : error
+      );
+      return null;
+    }),
   merge: (projectId, epicId, options) =>
     tryAutoMerge(projectId, epicId, options),
   readSessionStatus: (sessionId) =>
@@ -605,7 +628,19 @@ interface DispatchKindInput {
  */
 async function dispatchKind(input: DispatchKindInput): Promise<void> {
   const { kind, projectId, deps, config, budget, candidates, result } = input;
-  if (budget <= 0) return;
+  if (budget <= 0 || candidates.length === 0) return;
+
+  // Resolved once per kind, not per candidate: every candidate of this sweep
+  // is the same question ("who is best at builds right now?"), and one answer
+  // per sweep keeps the trace readable and the stats read off the hot loop.
+  // Behind the empty-candidate guard above, so an idle sweep — the common
+  // case, every 15 seconds — costs no stats query at all.
+  const configuredAgent =
+    kind === "build" ? config.buildAgent : config.reviewAgent;
+  const smartPick =
+    !configuredAgent && config.smartDispatch
+      ? await deps.selectSmartAgent({ projectId, stage: kind })
+      : null;
 
   for (const candidate of candidates) {
     const inFlight = autoModeRegistry.countInFlight(projectId)[kind];
@@ -621,8 +656,16 @@ async function dispatchKind(input: DispatchKindInput): Promise<void> {
       scope: candidate.scope,
       epicId: candidate.epicId,
       userStoryId: candidate.userStoryId,
-      buildNamedAgentId: config.buildAgent,
-      reviewNamedAgentId: config.reviewAgent,
+      // Only the field matching this stage may carry the smart pick — the
+      // other one is not what is being dispatched.
+      buildNamedAgentId:
+        kind === "build"
+          ? config.buildAgent ?? smartPick?.namedAgentId ?? null
+          : config.buildAgent,
+      reviewNamedAgentId:
+        kind === "review"
+          ? config.reviewAgent ?? smartPick?.namedAgentId ?? null
+          : config.reviewAgent,
       ownSessionIds: autoModeRegistry.ownSessionIds(projectId),
     });
 
@@ -698,6 +741,23 @@ async function dispatchKind(input: DispatchKindInput): Promise<void> {
         : AUTO_MODE_REASONS.buildDispatched(candidate.scope),
       dispatched.sessionId
     );
+
+    // The session row already carries the chosen named_agent_id; this second
+    // entry carries the WHY, which the session row cannot express.
+    if (smartPick) {
+      trace(
+        deps,
+        projectId,
+        candidate.epicId,
+        AUTO_MODE_REASONS.smartDispatch(
+          kind,
+          smartPick.agentName ?? smartPick.namedAgentId,
+          smartPick.successRate,
+          smartPick.sampleSize
+        ),
+        dispatched.sessionId
+      );
+    }
 
     (kind === "review"
       ? result.reviewsDispatched

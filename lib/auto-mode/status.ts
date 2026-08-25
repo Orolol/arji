@@ -19,6 +19,11 @@ export interface AutoModeStatus {
   reviewAgent: string | null;
   reviewConcurrency: number;
   /**
+   * Pick the build/review agent from its measured 30-day success rate when
+   * the role has no explicit agent above. Off by default.
+   */
+  smartDispatch: boolean;
+  /**
    * The scheduler's per-project `agent_max_concurrent` budget. Build + review
    * concurrency live ABOVE it: when their sum exceeds this the dialog warns
    * that the excess will queue. The mode never raises it silently.

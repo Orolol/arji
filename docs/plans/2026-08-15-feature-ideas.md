@@ -74,10 +74,13 @@ Ne pas exposer de bouton Fetch (l'utilisateur d'Arij ne pense pas en plomberie g
 *Ancrage : Vérifié : lib/claude/prompt-sections.ts:73-95 (specSection + documentsSection assemblés par projectContextSections — la memorySection s'ajoute en une fonction) ; markSessionTerminal (lifecycle.ts:259) comme hook de fin de session ; table documents existante ; agentSessionChunks comme matière première.*
 
 
-> **Écarts assumés du tier M** (revue d'intégration finale) : le mini-badge de fiabilité
+> **Écarts assumés du tier M** (revue d'intégration finale) : ~~le mini-badge de fiabilité
 > dans les sélecteurs de dispatch n'a pas été construit (stats visibles dans l'onglet Stats
-> uniquement) ; les queued orphelines au boot sont annulées, pas ré-adoptées (les closures
-> meurent avec le process) ; voir les messages de commit pour le détail.
+> uniquement)~~ **livré (2026-08-25)** — badge taux de réussite + durée médiane sur 30 jours
+> par agent nommé et par type de tâche dans tous les sélecteurs de dispatch, plus la
+> sélection informée en Full Auto (`auto_mode_smart_dispatch`) ; les queued orphelines au
+> boot sont annulées, pas ré-adoptées (les closures meurent avec le process) ; voir les
+> messages de commit pour le détail.
 
 ## 🚀 Gros paris — MCP, pipeline autonome et mode nuit livrés (2026-08-17) ; timeline rejouable écartée par décision produit
 
