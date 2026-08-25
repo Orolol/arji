@@ -27,6 +27,7 @@ const EXPECTED_TOOL_NAMES = [
   "get_ticket",
   "update_ticket_status",
   "post_comment",
+  "create_bug",
   "ask_question",
   "submit_findings",
   "submit_grading",
@@ -528,7 +529,7 @@ describe("chat toolset (ARIJ_MCP_TOOLSET=chat)", () => {
   });
 
   it("rejects agent-only tools without calling the backend", async () => {
-    for (const name of ["ask_question", "submit_findings", "submit_grading"]) {
+    for (const name of ["create_bug", "ask_question", "submit_findings", "submit_grading"]) {
       const result = await chatClient.callTool(name, {});
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("UNKNOWN_TOOL");

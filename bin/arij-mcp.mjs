@@ -120,6 +120,43 @@ const AGENT_TOOLS = [
     },
   },
   {
+    name: "create_bug",
+    description:
+      "Create a standalone, non-blocking bug ticket in this session's current Arij project when you discover an adjacent problem. The bug is attributed to this session, duplicate open titles are refused, and each session may create at most 5 bugs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description: "Short, specific bug title.",
+        },
+        description: {
+          type: "string",
+          minLength: 1,
+          maxLength: 10000,
+          description:
+            "Markdown with context, observed reproduction steps, and the actual error or behavior.",
+        },
+        severity: {
+          type: "string",
+          enum: ["low", "medium", "high", "critical"],
+          description: "Optional suggested severity.",
+        },
+        source_ticket_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+          description:
+            "Optional id or readable id of a source ticket in this project. Defaults to the ticket this session was launched for.",
+        },
+      },
+      required: ["title", "description"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "ask_question",
     description:
       "Ask the user a blocking question and stop working on the blocked part. This reliably marks the session as awaiting a reply and holds the ticket from advancing. Include full context and concrete options in one call, then end your turn.",

@@ -137,6 +137,7 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "mcp__arij__get_ticket",
       "mcp__arij__update_ticket_status",
       "mcp__arij__post_comment",
+      "mcp__arij__create_bug",
       "mcp__arij__ask_question",
       "mcp__arij__submit_findings",
       "mcp__arij__submit_grading",
@@ -406,6 +407,7 @@ describe("arijToolsSection", () => {
     expect(text.startsWith("## Arij tools\n\n")).toBe(true);
     expect(text).toContain("mcp__arij__*");
     expect(text).toContain("ask_question");
+    expect(text).toContain("create_bug");
     expect(text).toContain("update_ticket_status");
     expect(text).not.toContain("submit_findings");
     expect(text).not.toContain("Overall Verdict");

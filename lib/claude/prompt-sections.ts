@@ -193,6 +193,8 @@ export function arijToolsSection(agentType: string | null): string {
     "through MCP tools named mcp__arij__*. Use them for structured signals " +
     "instead of prose conventions: get_ticket to re-read current ticket " +
     "state; post_comment for substantive progress/result notes; " +
+    "create_bug to preserve an adjacent bug as a standalone, non-blocking " +
+    "ticket in the current project; " +
     "update_ticket_status to move the ticket (transitions are validated — " +
     "review→done requires human approval); ask_question when you are blocked " +
     "on the user — it reliably holds the ticket and marks the session as " +
