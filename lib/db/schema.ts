@@ -8,6 +8,7 @@ import {
   AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import type { RoutineKind } from "@/lib/routines/constants";
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
@@ -28,11 +29,7 @@ export const projects = sqliteTable("projects", {
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
-export type RoutineKind =
-  | "night_run"
-  | "dreaming"
-  | "github_issue_sync"
-  | "ci_watch";
+export type { RoutineKind } from "@/lib/routines/constants";
 
 /**
  * Durable routine definitions. Daily scheduling is interpreted in the

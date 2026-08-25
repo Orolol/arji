@@ -1,10 +1,9 @@
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   epics,
   projects,
   routines,
-  settings,
   type Routine,
 } from "@/lib/db/schema";
 import {
@@ -21,50 +20,16 @@ import {
   launchCiAutofixSession,
   type CiAutofixLaunchResult,
 } from "@/lib/routines/ci-autofix";
+import { isCiAutofixEnabled } from "@/lib/routines/settings";
+
+export {
+  CI_AUTOFIX_ENABLED_SETTING_KEY,
+  ciAutofixEnabledSettingKey,
+  isCiAutofixEnabled,
+} from "@/lib/routines/settings";
 
 export const DEFAULT_CI_WATCH_INTERVAL_MINUTES = 15;
-export const CI_AUTOFIX_ENABLED_SETTING_KEY = "ci_autofix_enabled";
 const CI_WATCH_STATE_CONFIG_KEY = "ciWatchState";
-
-export function ciAutofixEnabledSettingKey(projectId: string): string {
-  return `${CI_AUTOFIX_ENABLED_SETTING_KEY}:${projectId}`;
-}
-
-function parseBooleanSetting(value: string | undefined): boolean | null {
-  if (value === undefined) return null;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return typeof parsed === "boolean" ? parsed : null;
-  } catch {
-    if (value === "true") return true;
-    if (value === "false") return false;
-    return null;
-  }
-}
-
-/** Project override -> global override -> built-in OFF. */
-export function isCiAutofixEnabled(projectId: string): boolean {
-  try {
-    const projectKey = ciAutofixEnabledSettingKey(projectId);
-    const rows = db
-      .select({ key: settings.key, value: settings.value })
-      .from(settings)
-      .where(
-        inArray(settings.key, [projectKey, CI_AUTOFIX_ENABLED_SETTING_KEY])
-      )
-      .all();
-    const byKey = new Map(rows.map((row) => [row.key, row.value]));
-
-    return (
-      parseBooleanSetting(byKey.get(projectKey)) ??
-      parseBooleanSetting(byKey.get(CI_AUTOFIX_ENABLED_SETTING_KEY)) ??
-      false
-    );
-  } catch {
-    // A settings read failure must never turn an opt-in code-writing action on.
-    return false;
-  }
-}
 
 export interface CiWatchEpic {
   id: string;

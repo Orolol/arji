@@ -120,6 +120,7 @@ export default function ProjectLayout({
     { href: `/projects/${projectId}/releases`, label: "Releases" },
     { href: `/projects/${projectId}/git-sync`, label: "Git Sync" },
     { href: `/projects/${projectId}/github-issues`, label: "GitHub Issues" },
+    { href: `/projects/${projectId}/settings`, label: "Settings" },
   ];
 
   const moreIsActive = moreItems.some((item) => pathname.startsWith(item.href));
