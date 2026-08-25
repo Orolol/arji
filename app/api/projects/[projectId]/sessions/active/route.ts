@@ -34,10 +34,9 @@ export interface UnifiedActivity {
   source: "db" | "registry";
   cancellable: boolean;
   /**
-   * Freshest output signal for running DB sessions: newest chunk createdAt,
-   * falling back to startedAt. Null for queued sessions (no output yet by
-   * definition) and registry activities (they stream outside the chunk
-   * store).
+   * Freshest lifecycle/output signal for DB sessions, using the same
+   * definition as the sessions list. Registry activities return null because
+   * they stream outside the durable session/chunk stores.
    */
   lastActivityAt: string | null;
   /**
@@ -181,7 +180,7 @@ export async function GET(
     // Staleness only means something for sessions that should be
     // producing output — queued sessions are silent by design.
     const isRunning = row.status === "running";
-    const lastActivityAt = isRunning ? getSessionLastActivityAt(row) : null;
+    const lastActivityAt = getSessionLastActivityAt(row);
 
     return {
       id: row.id,

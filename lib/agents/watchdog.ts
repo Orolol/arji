@@ -2,6 +2,10 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentSessions, epics, settings } from "@/lib/db/schema";
 import { lastSessionChunkAt } from "@/lib/agent-sessions/chunks";
+import {
+  latestActivityTimestamp,
+  parseStoredTimestamp,
+} from "@/lib/agent-sessions/last-activity";
 import { createStalledSessionNotification } from "@/lib/notifications/create";
 import { logTransition } from "@/lib/workflow/log";
 import {
@@ -80,23 +84,39 @@ export function resolveWatchdogThresholdMinutes(
 }
 
 /**
- * Last known activity for a session: newest chunk timestamp, falling back
- * to `startedAt` (spawn is activity) then `createdAt`. Best-effort on the
- * chunk read — a broken chunk store must not take the monitor down (same
- * stance as the session detail route's chunk listing).
+ * Last known activity for a session across output and lifecycle changes.
+ * Once a terminal timestamp exists, it bounds all legitimate output, so
+ * historical sessions avoid a chunk lookup entirely. Live/legacy sessions
+ * use the indexed per-session chunk lookup on a best-effort basis: a broken
+ * chunk store must not take the monitor or sessions list down.
  */
 export function getSessionLastActivityAt(session: {
   id: string;
+  status?: string | null;
   startedAt: string | null;
+  endedAt?: string | null;
+  completedAt?: string | null;
   createdAt: string | null;
 }): string | null {
+  const terminalActivityAt = latestActivityTimestamp(
+    session.endedAt,
+    session.completedAt
+  );
   let lastChunkAt: string | null = null;
-  try {
-    lastChunkAt = lastSessionChunkAt(session.id);
-  } catch {
-    // chunk store unavailable — fall back to lifecycle timestamps
+  if (!terminalActivityAt && session.status !== "queued") {
+    try {
+      lastChunkAt = lastSessionChunkAt(session.id);
+    } catch {
+      // chunk store unavailable — fall back to lifecycle timestamps
+    }
   }
-  return lastChunkAt ?? session.startedAt ?? session.createdAt ?? null;
+
+  return latestActivityTimestamp(
+    session.createdAt,
+    session.startedAt,
+    terminalActivityAt,
+    lastChunkAt
+  );
 }
 
 /**
@@ -112,8 +132,8 @@ export function isSessionStale(
   if (!lastActivityAt) return false;
   if (isWatchdogExemptAgentType(agentType)) return false;
 
-  const last = Date.parse(lastActivityAt);
-  if (Number.isNaN(last)) return false;
+  const last = parseStoredTimestamp(lastActivityAt);
+  if (last === null) return false;
 
   const thresholdMs = resolveWatchdogThresholdMinutes(agentType) * 60_000;
   return now.getTime() - last >= thresholdMs;
@@ -201,8 +221,10 @@ export class SessionWatchdog {
       const lastActivityAt = getSessionLastActivityAt(row);
       if (!isSessionStale(lastActivityAt, row.agentType, now)) continue;
 
+      const lastActivityMs = parseStoredTimestamp(lastActivityAt!);
+      if (lastActivityMs === null) continue;
       const staleMinutes = Math.floor(
-        (now.getTime() - Date.parse(lastActivityAt!)) / 60_000
+        (now.getTime() - lastActivityMs) / 60_000
       );
 
       this.notifiedSessionIds.add(row.id);

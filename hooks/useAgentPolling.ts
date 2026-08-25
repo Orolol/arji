@@ -27,7 +27,7 @@ export interface UnifiedActivity {
   startedAt: string;
   source: "db" | "registry";
   cancellable: boolean;
-  /** Newest output chunk timestamp for running DB sessions (null otherwise). */
+  /** Newest lifecycle/output timestamp for durable DB sessions. */
   lastActivityAt?: string | null;
   /** Watchdog verdict: no output past the staleness threshold. */
   stale?: boolean;
@@ -69,7 +69,9 @@ export function useAgentPolling(projectId: string, intervalMs = 3000, refreshTri
 
   // Immediate re-poll when SSE triggers a refresh
   useEffect(() => {
-    if (refreshTrigger) poll();
+    if (!refreshTrigger) return;
+    const timeout = window.setTimeout(() => void poll(), 0);
+    return () => window.clearTimeout(timeout);
   }, [refreshTrigger, poll]);
 
   return { activities, failedSessions, refresh: poll };
