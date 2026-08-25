@@ -405,7 +405,22 @@ export function transitionBuildCompleted(opts: {
   }
 }
 
-/** Move a negative review back to buildable work through guarded writes. */
+/**
+ * Move a negative review back to buildable work through guarded writes.
+ *
+ * `verdictSource` records WHICH channel produced the negative verdict — the
+ * reviewer's structured `submit_findings` verdict, or the prose scan of its
+ * final message (see lib/pipeline/findings.ts, which owns the priority
+ * between them). It is appended to the reason so `ticket_activity_log` says
+ * why the ticket came back, not just that it did: a revert driven by a
+ * substring match in markdown and one driven by a tool call the agent
+ * deliberately made are not the same evidence. Omitted — the pre-existing
+ * shape — leaves the reason untouched.
+ *
+ * Typed structurally rather than importing `ReviewVerdictSource` from
+ * lib/pipeline/findings.ts: the workflow layer sits below the pipeline and
+ * does not depend on it.
+ */
 export function transitionReviewRejected(opts: {
   projectId: string;
   epicId: string;
@@ -413,7 +428,11 @@ export function transitionReviewRejected(opts: {
   userStoryId?: string | null;
   sessionId: string;
   reason: string;
+  verdictSource?: "structured" | "prose";
 }): void {
+  const reason = opts.verdictSource
+    ? `${opts.reason} [verdict source: ${opts.verdictSource}]`
+    : opts.reason;
   const epicStatus = readEpicStatus(opts.epicId);
   const stories =
     opts.scope === "epic"
@@ -430,7 +449,7 @@ export function transitionReviewRejected(opts: {
       toStatus: "in_progress",
       actor: "agent",
       source: "review",
-      reason: opts.reason,
+      reason,
       sessionId: opts.sessionId,
       validateOnly: true,
     })
@@ -445,7 +464,7 @@ export function transitionReviewRejected(opts: {
         toStatus: "in_progress",
         actor: "agent",
         source: "review",
-        reason: opts.reason,
+        reason,
         sessionId: opts.sessionId,
         validateOnly: true,
       })
@@ -460,7 +479,7 @@ export function transitionReviewRejected(opts: {
       toStatus: "in_progress",
       actor: "agent",
       source: "review",
-      reason: opts.reason,
+      reason,
       sessionId: opts.sessionId,
     })
   );
@@ -474,7 +493,7 @@ export function transitionReviewRejected(opts: {
         toStatus: "in_progress",
         actor: "agent",
         source: "review",
-        reason: opts.reason,
+        reason,
         sessionId: opts.sessionId,
       })
     );

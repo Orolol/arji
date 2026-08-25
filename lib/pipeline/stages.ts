@@ -74,7 +74,7 @@ import {
   createUnresolvedMentionsNotification,
 } from "@/lib/notifications/create";
 import { PIPELINE_REVIEW_TYPE } from "./constants";
-import { assessReviewOutcome } from "./findings";
+import { assessReviewOutcome, resolveReviewVerdict } from "./findings";
 import type {
   PipelineGuardCheck,
   PipelineReviewAssessment,
@@ -198,12 +198,15 @@ export function createPipelineStageDriver(
         epicId: init.epicId,
         sinceIso: stageStartedAt,
         sessionOutput: output,
+        reviewSessionId: sessionId || null,
       });
       return {
         blocking: assessment.blocking,
         blockingCount: assessment.blockingFindings.length,
         agentCommentCount: assessment.agentCommentCount,
         usedProseFallback: assessment.usedProseFallback,
+        verdictSource: assessment.verdictSource,
+        structuredVerdict: assessment.structuredVerdict,
       };
     },
 
@@ -856,12 +859,18 @@ function finalizeReviewSession(input: {
     });
   }
 
-  const lowerOutput = output.toLowerCase();
-  const isNegativeVerdict =
-    !askedQuestion &&
-    (lowerOutput.includes("changes requested") ||
-      lowerOutput.includes("not complete") ||
-      lowerOutput.includes("partially complete"));
+  // Verdict channels, in priority order: the reviewer's persisted
+  // submit_findings verdict, else the prose scan of its final message (see
+  // lib/pipeline/findings.ts). A reviewer that asked a question delivered no
+  // verdict at all, so neither channel is consulted.
+  const decision = askedQuestion
+    ? null
+    : resolveReviewVerdict({
+        epicId,
+        reviewSessionId: sessionId,
+        sessionOutput: output,
+      });
+  const isNegativeVerdict = decision?.negative ?? false;
 
   if (scope === "epic") {
     if (result?.success) {
@@ -894,6 +903,7 @@ function finalizeReviewSession(input: {
         scope: "epic",
         reason: `Review verdict: changes requested (${PIPELINE_REVIEW_LABEL})`,
         sessionId,
+        verdictSource: decision?.source,
       });
     }
   } else if (userStoryId) {
@@ -913,6 +923,7 @@ function finalizeReviewSession(input: {
         userStoryId,
         reason: `Review verdict: changes requested (${PIPELINE_REVIEW_LABEL})`,
         sessionId,
+        verdictSource: decision?.source,
       });
     }
   }
