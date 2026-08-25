@@ -24,6 +24,7 @@ import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
 // The prompt asks for these headings and the workflow refuses to store a
 // document without them — one contract, one definition.
 import { DREAMING_MEMORY_SECTIONS } from "@/lib/workflow/dreaming-constants";
+import type { TelescopeCollectionResult } from "@/lib/telescope/collect";
 
 // ---------------------------------------------------------------------------
 // Types — lightweight projections of the Drizzle schema rows
@@ -613,6 +614,83 @@ Produce a detailed markdown report with:
 - A prioritized list of failures and recommended fixes
 
 Your response should be a well-formatted markdown report.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// 2d. Recurring Failure Digest Prompt
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the project-level, read-only Telescope-lite analysis prompt.
+ *
+ * The collector has already selected, normalized, grouped, and capped the
+ * evidence. Keeping that boundary explicit prevents the agent from receiving
+ * unbounded raw logs or quietly redefining which incidents belong together.
+ */
+export function buildFailureDigestPrompt(
+  project: PromptProject,
+  collection: TelescopeCollectionResult,
+  customPrompt?: string | null,
+  systemPrompt?: string | null,
+): string {
+  project = withProjectMemory(project);
+  const parts: string[] = [];
+
+  parts.push(systemSection(systemPrompt));
+  parts.push(projectHeader(project.name));
+  parts.push(specSection(project.spec));
+  parts.push(memorySection(project.memory));
+
+  if (customPrompt && customPrompt.trim()) {
+    parts.push(`## Additional Instructions\n\n${customPrompt.trim()}\n`);
+  }
+
+  parts.push(`## Task: Recurring Failure Digest
+
+You are running in plan mode. Analyze the mechanically pre-grouped failure
+evidence below and produce a concise markdown report. Do not modify the
+repository, run fixes, or create tickets. The mechanical signatures and their
+frequencies are evidence: do not merge unrelated signatures or invent events
+that are absent from the payload.
+
+### Collection Window
+
+- From: ${collection.sinceIso}
+- Through: ${collection.untilIso}
+- Window: ${collection.windowDays} days
+- Evidence rows: ${collection.evidenceCount}
+- Mechanical groups before payload limits: ${collection.groupCount}
+- Groups included: ${collection.groups.length}
+- Groups omitted by limits: ${collection.omittedGroupCount}
+- Payload truncated: ${collection.truncated ? "yes" : "no"}
+
+### Mechanically Grouped Evidence
+
+\`\`\`json
+${JSON.stringify(collection.groups, null, 2)}
+\`\`\`
+
+### Required Report Format
+
+Start with a short executive summary. Then write one section per meaningful
+cluster, ordered by urgency and frequency. Every cluster section must include:
+
+- a specific, human-readable cluster name;
+- the exact observed frequency and source breakdown;
+- the affected ticket IDs (or explicitly state that none were attached);
+- the provider and agent type dimensions;
+- an evidence-based root-cause hypothesis, clearly labelled as a hypothesis;
+- a concrete proposed remediation and a way to verify it.
+
+Close with a prioritized remediation list. Distinguish observed facts from
+inference, preserve uncertainty, and mention omitted/truncated evidence when it
+limits confidence.
+
+Your ENTIRE response must be only the markdown report. Do not wrap it in a
+code fence and do not add commentary before or after it.
 `);
 
   return parts.filter(Boolean).join("\n");

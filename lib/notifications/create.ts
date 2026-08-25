@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import {
   agentSessions,
@@ -52,14 +52,18 @@ export function buildTitle(
 /**
  * Build the target URL for a notification.
  *
- * tech_check and e2e_test navigate to the QA tab; everything else to the session detail.
+ * QA report sessions navigate to the QA tab; everything else to the session detail.
  */
 export function buildTargetUrl(
   projectId: string,
   sessionId: string,
   agentType: string | null
 ): string {
-  if (agentType === "tech_check" || agentType === "e2e_test") {
+  if (
+    agentType === "tech_check" ||
+    agentType === "e2e_test" ||
+    agentType === "failure_digest"
+  ) {
     return `/projects/${projectId}/qa`;
   }
   return `/projects/${projectId}/sessions/${sessionId}`;

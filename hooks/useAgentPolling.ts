@@ -19,6 +19,7 @@ export interface UnifiedActivity {
     | "spec_generation"
     | "release"
     | "memory"
+    | "qa"
     | "grading";
   label: string;
   status: string;
