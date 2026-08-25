@@ -42,6 +42,11 @@ export interface ManualEpicPayload {
   }>;
 }
 
+/** Extra context accepted only by specialised callers of the manual form. */
+export interface ManualEpicRequestContext {
+  frictionId?: string;
+}
+
 /**
  * Mirrors of the caps `createEpicSchema` enforces server-side, epic fields and
  * nested stories alike. They are copied rather than imported because
@@ -173,7 +178,10 @@ const trimmedOrNull = (value: string): string | null => {
  * creates the epic and its stories in one transaction — no orphan epic if a
  * story insert fails.
  */
-export function buildManualEpicPayload(draft: ManualEpicDraft): ManualEpicPayload {
+export function buildManualEpicPayload(
+  draft: ManualEpicDraft,
+  context: ManualEpicRequestContext = {},
+): ManualEpicPayload & ManualEpicRequestContext {
   return {
     title: draft.title.trim(),
     description: trimmedOrNull(draft.description),
@@ -184,5 +192,6 @@ export function buildManualEpicPayload(draft: ManualEpicDraft): ManualEpicPayloa
       description: trimmedOrNull(story.description),
       acceptanceCriteria: trimmedOrNull(story.acceptanceCriteria),
     })),
+    ...context,
   };
 }

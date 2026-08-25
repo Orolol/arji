@@ -3,12 +3,13 @@ import { db } from "@/lib/db";
 import {
   agentSessions,
   epics,
+  frictions,
   gradingReports,
   ticketComments,
   ticketReadCursors,
   userStories,
 } from "@/lib/db/schema";
-import { count, eq, sql, and } from "drizzle-orm";
+import { count, eq, sql, and, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { createDependencies } from "@/lib/dependencies/crud";
@@ -29,6 +30,9 @@ import {
   aggregateGradingStatus,
   parseGradingEntries,
 } from "@/lib/grading/report";
+import { OPEN_FRICTION_STATUSES } from "@/lib/frictions/constants";
+
+class FrictionConversionConflict extends Error {}
 
 /** Optional prose: blank is absence, so it is stored as NULL, not `""`. */
 function trimmedOrNull(value: string | null | undefined): string | null {
@@ -249,6 +253,34 @@ export async function POST(
   if (isErrorResponse(foundProject)) return foundProject;
   const { project } = foundProject;
 
+  const sourceFriction = body.frictionId
+    ? db
+        .select({ id: frictions.id, status: frictions.status })
+        .from(frictions)
+        .where(
+          and(
+            eq(frictions.id, body.frictionId),
+            eq(frictions.projectId, projectId),
+          ),
+        )
+        .get()
+    : null;
+
+  if (body.frictionId && !sourceFriction) {
+    return NextResponse.json({ error: "Friction not found" }, { status: 404 });
+  }
+  if (
+    sourceFriction &&
+    !OPEN_FRICTION_STATUSES.includes(
+      sourceFriction.status as (typeof OPEN_FRICTION_STATUSES)[number],
+    )
+  ) {
+    return NextResponse.json(
+      { error: "Only an open friction can be converted", code: "FRICTION_CLOSED" },
+      { status: 409 },
+    );
+  }
+
   const now = new Date().toISOString();
 
   // Every story the caller sent gets inserted. `userStoryInput` already
@@ -261,10 +293,15 @@ export async function POST(
     acceptanceCriteria: trimmedOrNull(story.acceptanceCriteria),
   }));
 
+  // Friction conversions always enter through the ordinary backlog feature
+  // path, even if a caller tries to smuggle another board status or type.
+  const targetStatus = body.frictionId ? "backlog" : body.status || "backlog";
+  const targetType = body.frictionId ? "feature" : body.type || "feature";
+
   const maxPos = db
     .select({ max: sql<number>`COALESCE(MAX(position), -1)` })
     .from(epics)
-    .where(and(eq(epics.projectId, projectId), eq(epics.status, body.status || "backlog")))
+    .where(and(eq(epics.projectId, projectId), eq(epics.status, targetStatus)))
     .get();
 
   const id = createId();
@@ -356,7 +393,7 @@ export async function POST(
       const readableId = generateReadableId(
         projectId,
         project.name,
-        (body.type as "feature" | "bug") || "feature"
+        targetType as "feature" | "bug"
       );
       tx.insert(epics)
         .values({
@@ -365,14 +402,14 @@ export async function POST(
           title: body.title,
           description: body.description || null,
           priority: body.priority ?? 0,
-          status: body.status || "backlog",
+          status: targetStatus,
           position: (maxPos?.max ?? -1) + 1,
           branchName: body.branchName || null,
           confidence: body.confidence ?? null,
           evidence: body.evidence || null,
           createdAt: now,
           updatedAt: now,
-          type: body.type || "feature",
+          type: targetType,
           linkedEpicId: body.linkedEpicId || null,
           images: body.images ? JSON.stringify(body.images) : null,
           readableId: readableId || null,
@@ -381,8 +418,30 @@ export async function POST(
       if (storiesToInsert.length > 0) {
         tx.insert(userStories).values(storiesToInsert).run();
       }
+      if (body.frictionId) {
+        const result = tx
+          .update(frictions)
+          .set({ status: "converted", epicId: id })
+          .where(
+            and(
+              eq(frictions.id, body.frictionId),
+              eq(frictions.projectId, projectId),
+              inArray(frictions.status, [...OPEN_FRICTION_STATUSES]),
+            ),
+          )
+          .run();
+        if (result.changes !== 1) {
+          throw new FrictionConversionConflict();
+        }
+      }
     });
   } catch (error) {
+    if (error instanceof FrictionConversionConflict) {
+      return NextResponse.json(
+        { error: "Friction is no longer open", code: "FRICTION_CLOSED" },
+        { status: 409 },
+      );
+    }
     console.error("[epics/POST] Failed to create epic transaction:", error);
     return NextResponse.json({ error: "Failed to create epic" }, { status: 500 });
   }

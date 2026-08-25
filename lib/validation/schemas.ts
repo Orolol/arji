@@ -112,6 +112,12 @@ export const createEpicSchema = z.object({
   evidence: z.string().max(10000).nullish(),
   linkedEpicId: z.string().nullish(),
   images: z.array(z.string()).nullish(),
+  /**
+   * Optional project-scoped friction converted by the ordinary epic creation
+   * transaction. The route, not the client, validates that it is still open
+   * and belongs to the project before linking it to the new ticket.
+   */
+  frictionId: z.string().min(1).max(64).optional(),
   userStories: z.array(userStoryInput).optional(),
   dependencies: z.array(dependencyInput).optional(),
 });

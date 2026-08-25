@@ -100,6 +100,42 @@ describe("EpicCreateDialog", () => {
     expect(onCreated).toHaveBeenCalledWith("epic-1");
   });
 
+  it("pre-fills and attributes a friction conversion through the same create route", async () => {
+    const fetchMock = mockFetchOk();
+    render(
+      <EpicCreateDialog
+        projectId="proj-1"
+        open
+        onOpenChange={vi.fn()}
+        frictionId="friction-7"
+        initialDraft={{
+          title: "Broken tooling: scripts/check.sh",
+          description: "The script exits without diagnostics.",
+          userStories: [],
+        }}
+        submitLabel="Create Ticket"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("epic-title-input")).toHaveValue(
+        "Broken tooling: scripts/check.sh",
+      ),
+    );
+    expect(screen.getByTestId("epic-description-input")).toHaveValue(
+      "The script exits without diagnostics.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Ticket" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(lastBody(fetchMock)).toMatchObject({
+      title: "Broken tooling: scripts/check.sh",
+      frictionId: "friction-7",
+      status: "backlog",
+      type: "feature",
+    });
+  });
+
   it("posts added user stories in one request", async () => {
     const fetchMock = mockFetchOk();
     const user = userEvent.setup();

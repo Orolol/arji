@@ -117,6 +117,7 @@ export default function ProjectLayout({
   const moreItems = [
     { href: `/projects/${projectId}/documents`, label: "Docs" },
     { href: `/projects/${projectId}/qa`, label: "QA" },
+    { href: `/projects/${projectId}/frictions`, label: "Frictions" },
     { href: `/projects/${projectId}/releases`, label: "Releases" },
     { href: `/projects/${projectId}/git-sync`, label: "Git Sync" },
     { href: `/projects/${projectId}/github-issues`, label: "GitHub Issues" },
