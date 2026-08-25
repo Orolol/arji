@@ -136,4 +136,32 @@ describe("ReportDetail", () => {
       ]);
     });
   });
+
+  it("labels and renders a failure digest through the existing report detail", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: {
+              id: "digest-1",
+              projectId: "proj-1",
+              status: "completed",
+              checkType: "failure_digest",
+              summary: "Two recurring clusters",
+              reportContent: "## Cluster: Worker exits\n\nFrequency: 4",
+              createdAt: "2026-08-25T10:00:00.000Z",
+              completedAt: "2026-08-25T10:01:00.000Z",
+            },
+          }),
+      }) as Promise<Response>,
+    ) as typeof fetch;
+
+    render(<ReportDetail projectId="proj-1" reportId="digest-1" />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Failure Digest #digest-1" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Cluster: Worker exits")).toBeInTheDocument();
+  });
 });

@@ -13,7 +13,11 @@ import {
   extractSessionUsage,
   resolveSessionOutput,
 } from "@/lib/claude/resolve-session-output";
-import { buildTechCheckPrompt, buildE2eTestPrompt } from "@/lib/claude/prompt-builder";
+import {
+  buildTechCheckPrompt,
+  buildE2eTestPrompt,
+  buildFailureDigestPrompt,
+} from "@/lib/claude/prompt-builder";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
@@ -25,19 +29,25 @@ import {
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
 import { agentScheduler } from "@/lib/agents/scheduler";
+import {
+  collectFailureDigestEvidence,
+  TELESCOPE_WINDOW_DAYS,
+} from "@/lib/telescope/collect";
 
 type Params = { params: Promise<{ projectId: string }> };
 
-type CheckType = "tech_check" | "e2e_test";
+type CheckType = "tech_check" | "e2e_test" | "failure_digest";
 
 const CHECK_TYPE_TO_AGENT_TYPE: Record<CheckType, AgentType> = {
   tech_check: "tech_check",
   e2e_test: "e2e_test",
+  failure_digest: "failure_digest",
 };
 
 const CHECK_TYPE_LABELS: Record<CheckType, string> = {
   tech_check: "Tech check",
   e2e_test: "E2E test",
+  failure_digest: "Failure digest",
 };
 
 const POLL_INTERVAL_MS = 2000;
@@ -50,7 +60,28 @@ function toNullableTrimmedString(value: unknown): string | null {
 
 function parseCheckType(value: unknown): CheckType {
   if (value === "e2e_test") return "e2e_test";
+  if (value === "failure_digest") return "failure_digest";
   return "tech_check";
+}
+
+function parseWindowDays(value: unknown): number | undefined {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value)
+        : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function emptyDigestReport(input: {
+  sinceIso: string;
+  untilIso: string;
+  windowDays: number;
+}): string {
+  return `# Recurring Failure Digest
+
+No eligible recurring failure evidence was found between ${input.sinceIso} and ${input.untilIso} (${input.windowDays}-day window). No analysis session was launched.`;
 }
 
 function extractSummary(content: string, checkType: CheckType): string {
@@ -84,13 +115,63 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (isErrorResponse(found)) return found;
   const { project } = found;
 
+  const collection =
+    checkType === "failure_digest"
+      ? collectFailureDigestEvidence(projectId, {
+          windowDays: parseWindowDays(body.windowDays),
+        })
+      : null;
+
+  // A report row is the durable journal for this successful no-op. It makes
+  // "nothing happened" visible in the same QA history as real digests while
+  // avoiding a provider call, an agent session row, and scheduler work.
+  if (collection && collection.evidenceCount === 0) {
+    const reportId = createId();
+    const now = new Date().toISOString();
+    const reportContent = emptyDigestReport(collection);
+    const summary = `No recurring failure evidence in the last ${collection.windowDays} days; no agent session launched.`;
+
+    db.insert(qaReports)
+      .values({
+        id: reportId,
+        projectId,
+        status: "completed",
+        agentSessionId: null,
+        namedAgentId: null,
+        promptUsed: null,
+        customPromptId: null,
+        reportContent,
+        summary,
+        checkType,
+        createdAt: now,
+        completedAt: now,
+      })
+      .run();
+
+    console.info(
+      `[failure-digest] skipped for project ${projectId}: empty ${collection.windowDays}-day window`,
+    );
+    return NextResponse.json({
+      data: {
+        reportId,
+        sessionId: null,
+        noOp: true,
+        evidenceCount: 0,
+        windowDays: collection.windowDays,
+      },
+    });
+  }
+
   const systemPrompt = await resolveAgentPrompt(agentType, projectId);
   const resolvedAgent = resolveAgentByNamedId(agentType, projectId, namedAgentId);
 
   const prompt =
-    checkType === "e2e_test"
+    checkType === "failure_digest"
+      ? buildFailureDigestPrompt(project, collection!, customPrompt, systemPrompt)
+      : checkType === "e2e_test"
       ? buildE2eTestPrompt(project, customPrompt, systemPrompt)
       : buildTechCheckPrompt(project, customPrompt, systemPrompt);
+  const mode = checkType === "failure_digest" ? "plan" : "code";
 
   const sessionId = createId();
   const reportId = createId();
@@ -105,12 +186,15 @@ export async function POST(request: NextRequest, { params }: Params) {
   createQueuedSession({
     id: sessionId,
     projectId,
-    mode: "code",
+    mode,
     provider: resolvedAgent.provider,
     prompt,
     logsPath,
     cliSessionId,
+    namedAgentId: resolvedAgent.namedAgentId ?? null,
     agentType,
+    namedAgentName: resolvedAgent.name || null,
+    model: resolvedAgent.model || null,
     createdAt: now,
   });
 
@@ -136,7 +220,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     processManager.start(
       sessionId,
       {
-        mode: "code",
+        mode,
         prompt,
         cwd: project.gitRepoPath,
         model: resolvedAgent.model,
@@ -195,6 +279,12 @@ export async function POST(request: NextRequest, { params }: Params) {
   });
 
   return NextResponse.json({
-    data: { reportId, sessionId },
+    data: {
+      reportId,
+      sessionId,
+      noOp: false,
+      evidenceCount: collection?.evidenceCount ?? null,
+      windowDays: collection?.windowDays ?? TELESCOPE_WINDOW_DAYS,
+    },
   });
 }

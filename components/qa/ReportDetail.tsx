@@ -259,7 +259,12 @@ export function ReportDetail({
 
   const heading = useMemo(() => {
     if (!report) return "Report";
-    const label = report.checkType === "e2e_test" ? "E2E Test" : "Tech Check";
+    const label =
+      report.checkType === "e2e_test"
+        ? "E2E Test"
+        : report.checkType === "failure_digest"
+          ? "Failure Digest"
+          : "Tech Check";
     return `${label} #${report.id.slice(0, 8)}`;
   }, [report]);
 
@@ -415,7 +420,9 @@ export function ReportDetail({
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             {report.checkType === "e2e_test"
               ? "E2E test is still running..."
-              : "Tech check is still running..."}
+              : report.checkType === "failure_digest"
+                ? "Failure digest is still running..."
+                : "Tech check is still running..."}
           </div>
         )}
 

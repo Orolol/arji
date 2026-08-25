@@ -498,6 +498,10 @@ describe("isMcpExemptAgentType", () => {
     expect(isMcpExemptAgentType("memory_distill")).toBe(true);
   });
 
+  it("exempts the ticket-less failure digest report writer", () => {
+    expect(isMcpExemptAgentType("failure_digest")).toBe(true);
+  });
+
   it("leaves every ticket-scoped agent on the channel", () => {
     for (const agentType of [
       "build",

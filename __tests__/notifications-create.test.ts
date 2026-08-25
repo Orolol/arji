@@ -83,6 +83,12 @@ describe("buildTargetUrl()", () => {
     expect(buildTargetUrl("p1", "s1", "e2e_test")).toBe("/projects/p1/qa");
   });
 
+  it("routes failure_digest to QA tab", () => {
+    expect(buildTargetUrl("p1", "s1", "failure_digest")).toBe(
+      "/projects/p1/qa",
+    );
+  });
+
   it("routes build to session detail", () => {
     expect(buildTargetUrl("p1", "s1", "build")).toBe("/projects/p1/sessions/s1");
   });

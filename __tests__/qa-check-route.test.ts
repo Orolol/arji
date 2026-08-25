@@ -25,6 +25,14 @@ const mockResolvers = vi.hoisted(() => ({
   resolveAgentByNamedId: vi.fn(),
 }));
 
+const mockPromptBuilders = vi.hoisted(() => ({
+  buildTechCheckPrompt: vi.fn(() => "TECH_CHECK_PROMPT"),
+  buildE2eTestPrompt: vi.fn(() => "E2E_TEST_PROMPT"),
+  buildFailureDigestPrompt: vi.fn(() => "FAILURE_DIGEST_PROMPT"),
+}));
+
+const mockCollectFailureDigestEvidence = vi.hoisted(() => vi.fn());
+
 // Real drizzle-orm + real @/lib/db/schema; the shared chain mock ignores
 // column identity, so no fake column maps.
 vi.mock("@/lib/db", async () => {
@@ -37,7 +45,14 @@ vi.mock("@/lib/utils/nanoid", () => ({
 }));
 
 vi.mock("@/lib/claude/prompt-builder", () => ({
-  buildTechCheckPrompt: vi.fn(() => "TECH_CHECK_PROMPT"),
+  buildTechCheckPrompt: mockPromptBuilders.buildTechCheckPrompt,
+  buildE2eTestPrompt: mockPromptBuilders.buildE2eTestPrompt,
+  buildFailureDigestPrompt: mockPromptBuilders.buildFailureDigestPrompt,
+}));
+
+vi.mock("@/lib/telescope/collect", () => ({
+  collectFailureDigestEvidence: mockCollectFailureDigestEvidence,
+  TELESCOPE_WINDOW_DAYS: 14,
 }));
 
 vi.mock("@/lib/agent-config/prompts", () => ({
@@ -91,6 +106,18 @@ describe("POST /api/projects/[projectId]/qa/check", () => {
     mockResolvers.resolveAgentByNamedId.mockReturnValue({
       provider: "claude-code",
       model: "claude-opus-4-1",
+    });
+    mockCollectFailureDigestEvidence.mockReset().mockReturnValue({
+      projectId: "proj-1",
+      windowDays: 14,
+      sinceIso: "2026-08-11T12:00:00.000Z",
+      untilIso: "2026-08-25T12:00:00.000Z",
+      evidenceCount: 2,
+      groupCount: 1,
+      groups: [{ signature: "claude-code::build::failure", count: 2 }],
+      omittedGroupCount: 0,
+      payloadChars: 100,
+      truncated: false,
     });
     mockProcessManager.start.mockReturnValue({
       sessionId: "session-1",
@@ -153,5 +180,115 @@ describe("POST /api/projects/[projectId]/qa/check", () => {
       }),
     );
     expect(mockProcessManager.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("launches a project-level failure_digest session in plan mode", async () => {
+    dbMockState.getQueue = [
+      { id: "proj-1", name: "Arij", gitRepoPath: "/tmp/repo", spec: "Spec" },
+    ];
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/qa/check/route"
+    );
+    const res = await POST(
+      mockJsonRequest({ checkType: "failure_digest", windowDays: 7 }),
+      mockRouteContext({ projectId: "proj-1" }),
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data).toMatchObject({
+      reportId: "report-1",
+      sessionId: "session-1",
+      noOp: false,
+      evidenceCount: 2,
+      windowDays: 14,
+    });
+    expect(mockCollectFailureDigestEvidence).toHaveBeenCalledWith("proj-1", {
+      windowDays: 7,
+    });
+    expect(mockPromptBuilders.buildFailureDigestPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "proj-1" }),
+      expect.objectContaining({ evidenceCount: 2 }),
+      null,
+      "System prompt",
+    );
+    expect(mockLifecycle.createQueuedSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "session-1",
+        projectId: "proj-1",
+        mode: "plan",
+        agentType: "failure_digest",
+      }),
+    );
+    expect(mockLifecycle.createQueuedSession.mock.calls[0][0]).not.toHaveProperty(
+      "epicId",
+    );
+    expect(mockProcessManager.start).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ mode: "plan", prompt: "FAILURE_DIGEST_PROMPT" }),
+      "claude-code",
+    );
+    expect(dbMockState.insertCalls).toContainEqual(
+      expect.objectContaining({
+        id: "report-1",
+        checkType: "failure_digest",
+        agentSessionId: "session-1",
+        status: "running",
+      }),
+    );
+  });
+
+  it("journals an empty failure window without launching a session", async () => {
+    mockCreateId.mockReset().mockReturnValueOnce("report-empty");
+    mockCollectFailureDigestEvidence.mockReturnValue({
+      projectId: "proj-1",
+      windowDays: 14,
+      sinceIso: "2026-08-11T12:00:00.000Z",
+      untilIso: "2026-08-25T12:00:00.000Z",
+      evidenceCount: 0,
+      groupCount: 0,
+      groups: [],
+      omittedGroupCount: 0,
+      payloadChars: 2,
+      truncated: false,
+    });
+    dbMockState.getQueue = [
+      { id: "proj-1", name: "Arij", gitRepoPath: "/tmp/repo", spec: "Spec" },
+    ];
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/qa/check/route"
+    );
+    const res = await POST(
+      mockJsonRequest({ checkType: "failure_digest" }),
+      mockRouteContext({ projectId: "proj-1" }),
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data).toEqual({
+      reportId: "report-empty",
+      sessionId: null,
+      noOp: true,
+      evidenceCount: 0,
+      windowDays: 14,
+    });
+    expect(mockLifecycle.createQueuedSession).not.toHaveBeenCalled();
+    expect(mockProcessManager.start).not.toHaveBeenCalled();
+    expect(dbMockState.insertCalls).toEqual([
+      expect.objectContaining({
+        id: "report-empty",
+        status: "completed",
+        agentSessionId: null,
+        checkType: "failure_digest",
+        summary: expect.stringContaining("no agent session launched"),
+        reportContent: expect.stringContaining("No eligible recurring failure evidence"),
+      }),
+    ]);
+    expect(consoleInfo).toHaveBeenCalledWith(
+      expect.stringContaining("[failure-digest] skipped for project proj-1"),
+    );
   });
 });

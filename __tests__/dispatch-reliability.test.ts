@@ -345,6 +345,7 @@ describe("dispatch role mapping", () => {
     expect(dispatchRoleForAgentType("ticket_build")).toBe("build");
     expect(dispatchRoleForAgentType("review_security")).toBe("review");
     expect(dispatchRoleForAgentType("e2e_test")).toBe("qa");
+    expect(dispatchRoleForAgentType("failure_digest")).toBe("qa");
     expect(dispatchRoleForAgentType("nonsense")).toBeNull();
     expect(dispatchRoleForAgentType(null)).toBeNull();
   });
