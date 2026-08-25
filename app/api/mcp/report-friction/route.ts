@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { frictions } from "@/lib/db/schema";
@@ -82,27 +82,27 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = db.transaction((tx) => {
-      const sameFile =
-        body.filePath === undefined
-          ? isNull(frictions.filePath)
-          : eq(frictions.filePath, body.filePath);
-
-      const existing = tx
-        .select({
-          id: frictions.id,
-          occurrences: frictions.occurrences,
-        })
-        .from(frictions)
-        .where(
-          and(
-            eq(frictions.projectId, auth.projectId),
-            eq(frictions.category, body.category),
-            sameFile,
-            inArray(frictions.status, [...OPEN_FRICTION_STATUSES])
-          )
-        )
-        .orderBy(asc(frictions.createdAt), asc(frictions.id))
-        .get();
+      // Without a path, category alone is too broad a key: unrelated reports
+      // would collapse onto the oldest row and the newer descriptions would
+      // be lost. Path-less reports therefore remain distinct.
+      const existing = body.filePath
+        ? tx
+            .select({
+              id: frictions.id,
+              occurrences: frictions.occurrences,
+            })
+            .from(frictions)
+            .where(
+              and(
+                eq(frictions.projectId, auth.projectId),
+                eq(frictions.category, body.category),
+                eq(frictions.filePath, body.filePath),
+                inArray(frictions.status, [...OPEN_FRICTION_STATUSES])
+              )
+            )
+            .orderBy(asc(frictions.createdAt), asc(frictions.id))
+            .get()
+        : undefined;
 
       if (existing) {
         const occurrences = existing.occurrences + 1;

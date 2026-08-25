@@ -364,21 +364,33 @@ describe("POST /api/mcp/report-friction — soft deduplication", () => {
     });
   });
 
-  it("treats two omitted file paths as the same dedupe key", async () => {
-    const payload = {
-      category: "unclear_convention" as const,
-      description: "The convention has no documented owner.",
-    };
-
-    await call(payload, token);
-    const res = await call(payload, siblingToken);
+  it("keeps path-less reports distinct so unrelated descriptions are preserved", async () => {
+    await call(
+      {
+        category: "unclear_convention",
+        description: "The convention has no documented owner.",
+      },
+      token
+    );
+    const res = await call(
+      {
+        category: "unclear_convention",
+        description: "The release checklist does not name the base branch.",
+      },
+      siblingToken
+    );
 
     expect((await res.json()).data).toMatchObject({
-      occurrences: 2,
-      deduplicated: true,
+      occurrences: 1,
+      deduplicated: false,
     });
-    expect(db().select().from(frictions).all()).toHaveLength(1);
-    expect(db().select().from(frictions).get()?.filePath).toBeNull();
+    const rows = db().select().from(frictions).all();
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.description)).toEqual([
+      "The convention has no documented owner.",
+      "The release checklist does not name the base branch.",
+    ]);
+    expect(rows.every((row) => row.filePath === null)).toBe(true);
   });
 
   it("does not dedupe different keys or closed rows", async () => {
