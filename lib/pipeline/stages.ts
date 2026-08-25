@@ -59,6 +59,7 @@ import { buildRegressionFixSection } from "@/lib/verify/regression-report";
 import { runVerification as executeVerification } from "@/lib/verify/runner";
 import { assertManagedEpicWorktreePath } from "@/lib/verify/worktree";
 import { readRegressionConfig } from "@/lib/pipeline/verify";
+import { emitTicketUpdated } from "@/lib/events/emit";
 import {
   enrichPromptWithDocumentMentions,
   userAuthoredTexts,
@@ -248,14 +249,23 @@ async function runPipelineVerification(
   // path would otherwise fail the run and park the ticket — possibly a
   // fully green branch — for a fault that says nothing about the branch.
   // This mirrors the regression gate's stance (lib/pipeline/verify.ts).
+  // Every non-disabled skip carries a reason: the runner traces it into
+  // ticket_activity_log, because a silent skip would be indistinguishable
+  // from "the configured checks passed".
+  const notRun = (): PipelineDeterministicVerificationOutcome => ({
+    ran: false,
+    result: null,
+  });
+  const skip = (reason: string): PipelineDeterministicVerificationOutcome => {
+    console.warn(`[pipeline verify] Skipping: ${reason}`);
+    return { ran: false, result: null, skipReason: reason };
+  };
+
   try {
     const config = resolveVerifyConfigForProject(init.projectId);
-    if (!config.enabled) return { ran: false, result: null };
+    if (!config.enabled) return notRun();
     if (!lastCodeSessionId) {
-      console.warn(
-        "[pipeline verify] Skipping: deterministic verification requires a code session"
-      );
-      return { ran: false, result: null };
+      return skip("deterministic verification requires a code session");
     }
 
     const codeSession = db
@@ -270,10 +280,7 @@ async function runPipelineVerification(
       )
       .get();
     if (!codeSession?.worktreePath) {
-      console.warn(
-        "[pipeline verify] Skipping: no epic worktree recorded by the last code session"
-      );
-      return { ran: false, result: null };
+      return skip("no epic worktree recorded by the last code session");
     }
     const worktreePath = codeSession.worktreePath;
 
@@ -283,10 +290,7 @@ async function runPipelineVerification(
       .where(eq(projects.id, init.projectId))
       .get();
     if (!project?.gitRepoPath) {
-      console.warn(
-        "[pipeline verify] Skipping: deterministic verification requires a Git repository"
-      );
-      return { ran: false, result: null };
+      return skip("deterministic verification requires a Git repository");
     }
     // Hard constraint: never execute in the repository checkout or any
     // unmanaged path, even when durable session state records one.
@@ -304,13 +308,18 @@ async function runPipelineVerification(
           timeoutMs: config.timeoutMs,
         })
     );
+
+    // The manual route emits this too. Without it the board and the open
+    // EpicDetail panel never learn that an autonomous run's checks have
+    // finished (or failed) until the panel is closed and reopened.
+    emitTicketUpdated(init.projectId, init.epicId, {
+      verifyReportId: result.id,
+      verifyStatus: result.status,
+    });
     return { ran: true, result };
   } catch (error) {
-    console.warn(
-      "[pipeline verify] Skipping: applicability check failed:",
-      error instanceof Error ? error.message : error
-    );
-    return { ran: false, result: null };
+    const message = error instanceof Error ? error.message : String(error);
+    return skip(`applicability check failed: ${message}`);
   }
 }
 

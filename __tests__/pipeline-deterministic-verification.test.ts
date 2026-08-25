@@ -55,6 +55,7 @@ interface HarnessOptions {
   verification?: Array<{
     ran: boolean;
     result: VerificationResult | null;
+    skipReason?: string;
   }>;
   maxSessions?: number;
   /** Simulate the driver crashing instead of returning an outcome. */
@@ -262,6 +263,25 @@ describe("runPipeline — deterministic verification stage", () => {
     expect(warn).toHaveBeenCalledWith(
       "[pipeline] Deterministic verification crashed:",
       "verify driver exploded"
+    );
+  });
+
+  it("traces a visible reason when configured checks are skipped", async () => {
+    const harness = runHarness({
+      verification: [
+        { ran: false, result: null, skipReason: "no epic worktree recorded" },
+      ],
+    });
+
+    const summary = await harness.promise;
+
+    // A skip must be observable in the activity feed — it must not read as
+    // "the configured checks passed".
+    expect(summary.state).toBe("succeeded");
+    expect(harness.traces).toContain(
+      PIPELINE_REASONS.deterministicVerificationSkipped(
+        "no epic worktree recorded"
+      )
     );
   });
 });

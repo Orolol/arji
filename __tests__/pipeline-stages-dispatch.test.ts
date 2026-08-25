@@ -87,8 +87,8 @@ vi.mock("@/lib/events/emit", () => ({
   emitSessionCompleted: vi.fn(),
   emitSessionFailed: vi.fn(),
   emitTicketMoved: vi.fn(),
+  emitTicketUpdated: vi.fn(),
 }));
-
 vi.mock("@/lib/verify/runner", () => ({
   runVerification: verificationMocks.runVerification,
 }));
@@ -127,6 +127,7 @@ const {
   settings,
 } = await import("@/lib/db/schema");
 const { processManager } = await import("@/lib/claude/process-manager");
+const { emitTicketUpdated } = await import("@/lib/events/emit");
 const { createPipelineStageDriver } = await import("@/lib/pipeline/stages");
 const { PIPELINE_FIX_INSTRUCTIONS_SECTION } = await import(
   "@/lib/pipeline/stages"
@@ -1057,6 +1058,13 @@ describe("deterministic verification driver", () => {
       driver.runDeterministicVerification(codeSessionId)
     ).resolves.toEqual({ ran: true, result: expected });
 
+    // The pipeline announces the finished report the same way the manual
+    // route does, so an open EpicDetail panel and the board stay current.
+    expect(emitTicketUpdated).toHaveBeenCalledWith(projectId, epicId, {
+      verifyReportId: "verify-report",
+      verifyStatus: "pass",
+    });
+
     expect(verificationMocks.runVerification).toHaveBeenCalledWith({
       projectId,
       epicId,
@@ -1068,6 +1076,22 @@ describe("deterministic verification driver", () => {
       ],
       timeoutMs: 45_000,
     });
+  });
+
+  it("does not emit a report event when verification is not configured", async () => {
+    const { projectId, epicId } = seed("review");
+
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+    await expect(
+      driver.runDeterministicVerification("unused-session")
+    ).resolves.toEqual({ ran: false, result: null });
+    expect(emitTicketUpdated).not.toHaveBeenCalled();
   });
 
   it("skips verification for a repository checkout recorded as a session worktree", async () => {
@@ -1096,11 +1120,13 @@ describe("deterministic verification driver", () => {
 
     // Hard constraint intact — nothing runs outside a managed epic
     // worktree — but the stage is TOTAL: an applicability fault resolves
-    // to "did not apply" instead of crashing into the runner's park path.
-    await expect(
-      driver.runDeterministicVerification(codeSessionId)
-    ).resolves.toEqual({ ran: false, result: null });
+    // to "did not apply" with a visible reason instead of crashing into
+    // the runner's park path.
+    const outcome = await driver.runDeterministicVerification(codeSessionId);
+    expect(outcome).toMatchObject({ ran: false, result: null });
+    expect(outcome.skipReason).toMatch(/managed epic worktree/i);
     expect(verificationMocks.runVerification).not.toHaveBeenCalled();
+    expect(emitTicketUpdated).not.toHaveBeenCalled();
   });
 });
 

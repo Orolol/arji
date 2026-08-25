@@ -169,6 +169,8 @@ describe("runPipeline — regression verify gate", () => {
     expect(h.traces).toContain(PIPELINE_REASONS.regressionFailed(1, 1));
     // The gate verified the code session's worktree.
     expect(h.seenSessionIds[0]).toBe("s-build");
+    // The post-fix code stage is verified again before review.
+    expect(h.seenSessionIds[1]).toBe("s-fix-1");
   });
 
   it("keeps the gate's failure payload on a retried fix attempt", async () => {

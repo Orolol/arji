@@ -94,9 +94,15 @@ export interface PipelineStageRequest {
 
 /** Result of resolving and, when configured, running deterministic checks. */
 export interface PipelineDeterministicVerificationOutcome {
-  /** False when verify_commands is absent/empty: the strict passthrough path. */
+  /**
+   * False when verify_commands is absent/empty (the strict passthrough path)
+   * or when the checks could not apply; `skipReason` distinguishes the two
+   * so the operator sees why nothing ran.
+   */
   ran: boolean;
   result: VerificationResult | null;
+  /** Present when configured checks were skipped for an applicability fault. */
+  skipReason?: string;
 }
 
 /** Verdict of the blocking-findings assessment after a successful review. */
@@ -613,8 +619,8 @@ export async function runPipeline(
               fixCycles += 1;
               const summary = await dispatch({
                 stage: "fix",
-                attempt: 1,
                 fixCycle: fixCycles,
+                attempt: 1,
                 previousAttemptSessionId: null,
                 lastCodeSessionId,
                 verificationFailure: failedCommand,
@@ -622,6 +628,13 @@ export async function runPipeline(
               if (summary) return summary;
               continue;
             }
+          } else if (verification.skipReason) {
+            callbacks.onTrace?.(
+              PIPELINE_REASONS.deterministicVerificationSkipped(
+                verification.skipReason
+              ),
+              handle.sessionId
+            );
           }
         }
       } catch (error) {

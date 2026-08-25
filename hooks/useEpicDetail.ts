@@ -130,6 +130,9 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
   const setVerificationReport = useCallback(
     (report: VerificationReport | null) => {
       if (!epicId) return;
+      // A manual run's result is newer than any fetchVerification still in
+      // flight — invalidate them so a late response cannot clobber it.
+      verifyRequestSeq.current += 1;
       setVerificationState({ epicId, report });
     },
     [epicId]
