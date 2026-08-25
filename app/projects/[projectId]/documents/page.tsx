@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { FileText, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/utils/format-date";
-import { MEMORY_DOC_KIND } from "@/lib/documents/memory-constants";
+import { isInternalMemoryDocKind } from "@/lib/documents/memory-constants";
 
 interface Doc {
   id: string;
@@ -39,12 +39,13 @@ export default function DocumentsPage() {
       setError(data.error || "Failed to load documents.");
       return;
     }
-    // The learned project memory lives in the same table (kind 'memory')
-    // but has its own dedicated editor card — keep it out of the uploads
-    // list so it cannot be casually deleted like a reference document.
+    // The learned project memory and its pre-dream snapshot live in the same
+    // table but have their own editor card — keep them out of the uploads list
+    // so they cannot be casually deleted like a reference document. The GET
+    // route filters them too; this is the same rule applied at both ends.
     const docs = (
       (data.data || []) as Array<Omit<Doc, "kind"> & { kind: string }>
-    ).filter((doc) => doc.kind !== MEMORY_DOC_KIND) as Doc[];
+    ).filter((doc) => !isInternalMemoryDocKind(doc.kind)) as Doc[];
     setDocuments(docs);
     if (selectedDoc && !docs.some((doc) => doc.id === selectedDoc.id)) {
       setSelectedDoc(null);

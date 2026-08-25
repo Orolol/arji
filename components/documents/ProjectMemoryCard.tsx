@@ -159,8 +159,12 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
                 size="sm"
                 className="h-[29px] rounded-[8px] text-[12.5px]"
                 onClick={handleDream}
-                disabled={dreaming}
-                title="Rewrite this memory from the recent sessions of every ticket"
+                disabled={dreaming || saving || dirty}
+                title={
+                  dirty
+                    ? "Save or discard your edits first — the agent rewrites the SAVED memory"
+                    : "Rewrite this memory from the recent sessions of every ticket"
+                }
               >
                 <Moon className="mr-1 h-3.5 w-3.5" />
                 {dreaming ? "Dreaming..." : "Dream"}
@@ -176,6 +180,12 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
             </div>
           </div>
         </>
+      )}
+      {dirty && !loading && (
+        <p className="text-[12px] text-muted-foreground">
+          Dreaming reads the saved memory and replaces it wholesale — save or
+          discard your edits first, or they will be lost.
+        </p>
       )}
       {overCap && (
         <p className="text-[12px] text-destructive">

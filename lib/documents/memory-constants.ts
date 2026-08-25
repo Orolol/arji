@@ -58,6 +58,24 @@ export const MEMORY_ARCHIVE_DOC_KIND = "memory_archive";
 export const MEMORY_ARCHIVE_DOC_FILENAME = "Project memory (pre-dream snapshot)";
 
 /**
+ * Document kinds the memory workflow owns.
+ *
+ * They live in the `documents` table but are NOT uploads: the live memory has
+ * its own editor card and the archive is a recovery copy. Neither may appear
+ * in the Docs upload list — where a stray click would delete them — so the
+ * list route filters on this set and the delete route refuses it. Kept here,
+ * client-safe, so the API boundary and the page agree on one definition.
+ */
+export const MEMORY_INTERNAL_DOC_KINDS: readonly string[] = [
+  MEMORY_DOC_KIND,
+  MEMORY_ARCHIVE_DOC_KIND,
+];
+
+export function isInternalMemoryDocKind(kind: string | null | undefined): boolean {
+  return kind != null && MEMORY_INTERNAL_DOC_KINDS.includes(kind);
+}
+
+/**
  * Settings key for the optional auto-distillation mode: when the stored
  * value parses to `true` (JSON boolean or the string "true"), a successful
  * build-type session enqueues a memory-distill session on completion.

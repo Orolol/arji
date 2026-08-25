@@ -4,6 +4,7 @@ import { documents } from "@/lib/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { convertToMarkdown } from "@/lib/converters";
+import { isInternalMemoryDocKind } from "@/lib/documents/memory-constants";
 import path from "path";
 import fs from "fs";
 
@@ -51,12 +52,16 @@ export async function GET(
 ) {
   const { projectId } = await params;
 
+  // The memory documents (live + pre-dream archive) share this table but are
+  // not uploads — they have their own editor card, and listing them here would
+  // put a delete button next to the project's learned conventions.
   const result = db
     .select()
     .from(documents)
     .where(eq(documents.projectId, projectId))
     .orderBy(documents.createdAt)
-    .all();
+    .all()
+    .filter((doc) => !isInternalMemoryDocKind(doc.kind));
 
   return NextResponse.json({ data: result });
 }
