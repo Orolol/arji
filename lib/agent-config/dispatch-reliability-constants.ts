@@ -58,7 +58,13 @@ export const DISPATCH_ROLE_AGENT_TYPES: Record<DispatchRole, AgentType[]> = {
   chat: ["chat"],
   spec: ["spec_generation"],
   release: ["release_notes"],
-  maintenance: ["memory_distill", "dreaming", "forensic"],
+  maintenance: [
+    "title_generation",
+    "import_analysis",
+    "memory_distill",
+    "dreaming",
+    "forensic",
+  ],
 };
 
 export const DISPATCH_ROLE_LABELS: Record<DispatchRole, string> = {

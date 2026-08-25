@@ -4,12 +4,14 @@ import { join } from "node:path";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { spawnClaude } from "@/lib/claude/spawn";
 import { buildImportPrompt } from "@/lib/claude/prompt-builder";
+import { resolveAgent } from "@/lib/agent-config/agent-resolution";
+import { getProvider } from "@/lib/providers";
 import { arjiJsonExists, readArjiJson } from "@/lib/sync/arji-json";
 import { importProjectSchema } from "@/lib/validation/schemas";
 import { validateBody, isValidationError } from "@/lib/validation/validate";
 import { validatePath } from "@/lib/validation/path";
+import { createId } from "@/lib/utils/nanoid";
 
 const ARJI_JSON = "arji.json";
 
@@ -29,7 +31,7 @@ export async function POST(request: NextRequest) {
   }
   const safePath = pathResult.normalizedPath;
 
-  // Check if arji.json already exists — skip Claude analysis if so
+  // Check if arji.json already exists — skip agent analysis if so
   try {
     if (await arjiJsonExists(safePath)) {
       const existing = await readArjiJson(safePath);
@@ -40,28 +42,37 @@ export async function POST(request: NextRequest) {
       }
     }
   } catch (e) {
-    // Invalid arji.json — fall through to Claude analysis
-    console.warn("[import] Existing arji.json is invalid, running Claude analysis:", e);
+    // Invalid arji.json — fall through to configured agent analysis
+    console.warn("[import] Existing arji.json is invalid, running agent analysis:", e);
   }
 
   const settingsRow = db.select().from(settings).where(eq(settings.key, "global_prompt")).get();
   const globalPrompt = settingsRow ? JSON.parse(settingsRow.value) : "";
 
   const prompt = buildImportPrompt(globalPrompt);
+  // Import happens before a project row exists, so only the global mapping
+  // can apply here. The resolver's builtin fallback preserves the historical
+  // Claude CLI/default-model behavior when no lightweight agent is assigned.
+  const resolvedAgent = resolveAgent("import_analysis");
 
   try {
-    console.log("[import] Spawning Claude CLI with cwd:", safePath);
+    console.log("[import] Spawning analysis agent with cwd:", safePath);
     console.log("[import] Prompt length:", prompt.length);
 
-    const { promise } = spawnClaude({
+    const sessionId = `import-${createId()}`;
+    const session = getProvider(resolvedAgent.provider).spawn({
+      sessionId,
       mode: "analyze",
       prompt,
       cwd: safePath,
+      model: resolvedAgent.model,
+      logIdentifier: sessionId,
     });
 
-    const result = await promise;
+    const result = await session.promise;
 
-    console.log("[import] Claude CLI result:", {
+    console.log("[import] Analysis agent result:", {
+      provider: resolvedAgent.provider,
       success: result.success,
       duration: result.duration,
       error: result.error,
@@ -70,7 +81,7 @@ export async function POST(request: NextRequest) {
 
     if (!result.success) {
       return NextResponse.json({
-        error: result.error || "Claude Code failed",
+        error: result.error || "Repository analysis failed",
         debug: {
           duration: result.duration,
           rawOutput: result.result?.slice(0, 2000),
@@ -78,7 +89,7 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    // Read the arji.json file that Claude Code wrote to disk
+    // Read the arji.json file that the analysis agent wrote to disk
     const arjiPath = join(safePath, ARJI_JSON);
     let rawJson: string;
 
@@ -87,7 +98,7 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json(
         {
-          error: `Claude Code finished but did not write ${ARJI_JSON}. The analysis file was not found at: ${arjiPath}`,
+          error: `The analysis agent finished but did not write ${ARJI_JSON}. The analysis file was not found at: ${arjiPath}`,
           debug: {
             duration: result.duration,
             rawOutput: result.result?.slice(0, 2000),

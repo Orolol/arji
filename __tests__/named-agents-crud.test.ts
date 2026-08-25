@@ -246,6 +246,20 @@ describe("deleteNamedAgent", () => {
 });
 
 describe("resolveAgent", () => {
+  it("preserves the historical lightweight defaults when no task mapping exists", async () => {
+    const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
+
+    expect(resolveAgent("title_generation", "project-123")).toEqual({
+      provider: "claude-code",
+      model: "haiku",
+      namedAgentId: null,
+    });
+    expect(resolveAgent("import_analysis", "project-123")).toEqual({
+      provider: "claude-code",
+      namedAgentId: null,
+    });
+  });
+
   it("returns fallback when no defaults configured", async () => {
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
     const result = await resolveAgent("build");
@@ -362,5 +376,94 @@ describe("resolveAgent", () => {
     expect(result.provider).toBe("codex");
     expect(result.model).toBe("gpt-5");
     expect(result.name).toBe("Global Agent");
+  });
+
+  it("resolves an agentType mapping through project, global, then builtin", async () => {
+    const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
+    const { createNamedAgent } = await import("@/lib/agent-config/named-agents");
+
+    const { data: globalAgent } = await createNamedAgent({
+      name: "Global Lightweight",
+      provider: "codex",
+      model: "gpt-5-mini",
+    });
+    const { data: projectAgent } = await createNamedAgent({
+      name: "Project Lightweight",
+      provider: "gemini-cli",
+      model: "gemini-flash",
+    });
+
+    testDb.insert(schema.agentProviderDefaults)
+      .values({
+        id: "title-global",
+        agentType: "title_generation",
+        provider: globalAgent!.provider,
+        namedAgentId: globalAgent!.id,
+        scope: "global",
+      })
+      .run();
+    testDb.insert(schema.agentProviderDefaults)
+      .values({
+        id: "title-project",
+        agentType: "title_generation",
+        provider: projectAgent!.provider,
+        namedAgentId: projectAgent!.id,
+        scope: "project-123",
+      })
+      .run();
+
+    expect(resolveAgent("title_generation", "project-123")).toMatchObject({
+      provider: "gemini-cli",
+      model: "gemini-flash",
+      namedAgentId: projectAgent!.id,
+    });
+    expect(resolveAgent("title_generation", "another-project")).toMatchObject({
+      provider: "codex",
+      model: "gpt-5-mini",
+      namedAgentId: globalAgent!.id,
+    });
+    expect(resolveAgent("import_analysis", "project-123")).toEqual({
+      provider: "claude-code",
+      namedAgentId: null,
+    });
+  });
+
+  it("keeps an explicit UI agent choice ahead of the agentType mapping", async () => {
+    const { resolveAgentByNamedId } = await import(
+      "@/lib/agent-config/agent-resolution"
+    );
+    const { createNamedAgent } = await import("@/lib/agent-config/named-agents");
+
+    const { data: mappedAgent } = await createNamedAgent({
+      name: "Mapped Lightweight",
+      provider: "gemini-cli",
+      model: "gemini-flash",
+    });
+    const { data: explicitAgent } = await createNamedAgent({
+      name: "Explicit Choice",
+      provider: "codex",
+      model: "gpt-5",
+    });
+    testDb.insert(schema.agentProviderDefaults)
+      .values({
+        id: "distill-project",
+        agentType: "memory_distill",
+        provider: mappedAgent!.provider,
+        namedAgentId: mappedAgent!.id,
+        scope: "project-123",
+      })
+      .run();
+
+    expect(
+      resolveAgentByNamedId(
+        "memory_distill",
+        "project-123",
+        explicitAgent!.id
+      )
+    ).toMatchObject({
+      provider: "codex",
+      model: "gpt-5",
+      namedAgentId: explicitAgent!.id,
+    });
   });
 });

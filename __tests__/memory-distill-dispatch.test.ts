@@ -26,6 +26,7 @@ import { eq } from "drizzle-orm";
 const processManagerState = vi.hoisted(() => ({
   result: undefined as Record<string, unknown> | undefined,
 }));
+const resolveAgentByNamedIdMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", async () => {
   const { createTestDb } = await import("@/lib/db/test-utils");
@@ -48,12 +49,7 @@ vi.mock("@/lib/agent-config/prompts", () => ({
 }));
 
 vi.mock("@/lib/agent-config/agent-resolution", () => ({
-  resolveAgentByNamedId: vi.fn(() => ({
-    provider: "claude-code",
-    namedAgentId: null,
-    name: null,
-    model: null,
-  })),
+  resolveAgentByNamedId: resolveAgentByNamedIdMock,
 }));
 
 vi.mock("fs", () => ({
@@ -68,8 +64,14 @@ vi.mock("fs", () => ({
 }));
 
 const { db } = await import("@/lib/db");
-const { projects, epics, agentSessions, settings, ticketActivityLog } =
-  await import("@/lib/db/schema");
+const {
+  projects,
+  epics,
+  agentSessions,
+  namedAgents,
+  settings,
+  ticketActivityLog,
+} = await import("@/lib/db/schema");
 const {
   dispatchMemoryDistillSession,
   maybeAutoDistillAfterSessionTerminal,
@@ -164,6 +166,12 @@ function enableAutoDistill() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resolveAgentByNamedIdMock.mockReturnValue({
+    provider: "claude-code",
+    namedAgentId: null,
+    name: null,
+    model: null,
+  });
   db.delete(settings).where(eq(settings.key, "memory_auto_distill")).run();
   processManagerState.result = {
     success: true,
@@ -173,6 +181,44 @@ beforeEach(() => {
 });
 
 describe("dispatchMemoryDistillSession", () => {
+  it("persists the named agent selected by the memory_distill mapping", async () => {
+    const { projectId } = seedProject();
+    db.insert(namedAgents)
+      .values({
+        id: "agent-light",
+        name: `Lightweight Distiller ${counter}`,
+        provider: "gemini-cli",
+        model: "gemini-flash",
+      })
+      .run();
+    resolveAgentByNamedIdMock.mockReturnValueOnce({
+      provider: "gemini-cli",
+      namedAgentId: "agent-light",
+      name: "Lightweight Distiller",
+      model: "gemini-flash",
+    });
+
+    const { sessionId } = await dispatchMemoryDistillSession({ projectId });
+    const row = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .get();
+
+    expect(resolveAgentByNamedIdMock).toHaveBeenCalledWith(
+      "memory_distill",
+      projectId,
+      null
+    );
+    expect(row).toMatchObject({
+      provider: "gemini-cli",
+      namedAgentId: "agent-light",
+      namedAgentName: "Lightweight Distiller",
+      model: "gemini-flash",
+    });
+    await flushBackground();
+  });
+
   it("runs a memory_distill session and replaces the memory doc on answered completion", async () => {
     const { projectId, epicId } = seedProject();
     saveProjectMemory(projectId, "- Old rule: keep tests green");
