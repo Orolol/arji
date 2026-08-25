@@ -21,6 +21,7 @@ import {
 } from "@/lib/db/schema";
 import { logTransition } from "@/lib/workflow/log";
 import { createId } from "@/lib/utils/nanoid";
+import { MCP_CREATE_BUG_ACTIVITY_PREFIX } from "@/lib/mcp/create-bug-contract";
 import {
   extractArijToolCalls,
   mergeArijActions,
@@ -487,6 +488,41 @@ describe("collectArijActions", () => {
         at: "2026-08-25T10:01:00.000Z",
       },
     ]);
+  });
+
+  it("surfaces create_bug's same-state audit row as a durable tool action", () => {
+    logTransition({
+      database: db,
+      projectId,
+      epicId,
+      fromStatus: "backlog",
+      toStatus: "backlog",
+      actor: "agent",
+      reason: `${MCP_CREATE_BUG_ACTIVITY_PREFIX} reported from E-p-001; source session ${sessionId}`,
+      sessionId,
+    });
+
+    const actions = collectArijActions({
+      sessionId,
+      database: db,
+      chunks: [
+        {
+          content: `${JSON.stringify({
+            type: "tool_use",
+            id: "create-bug-1",
+            name: "mcp__arij__create_bug",
+          })}\n`,
+          createdAt: "2026-08-17T10:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      kind: "tool_call",
+      summary: "Created a bug ticket (create_bug)",
+    });
+    expect(actions[0].detail).toContain("source session");
   });
 
   it("ignores artifacts from other sessions and user comments", () => {

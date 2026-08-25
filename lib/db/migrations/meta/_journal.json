@@ -237,7 +237,14 @@
       "idx": 33,
       "version": "6",
       "when": 1786713100000,
-      "tag": "0034_session_artifacts",
+      "tag": "0034_agent_session_review_verdict",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1786713200000,
+      "tag": "0035_session_artifacts",
       "breakpoints": true
     }
   ]

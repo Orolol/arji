@@ -54,6 +54,7 @@ export const ARIJ_MCP_ALLOWED_TOOL_NAMES = [
   "mcp__arij__update_ticket_status",
   "mcp__arij__post_comment",
   "mcp__arij__attach_artifact",
+  "mcp__arij__create_bug",
   "mcp__arij__ask_question",
   "mcp__arij__submit_findings",
   "mcp__arij__submit_grading",

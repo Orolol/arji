@@ -305,6 +305,14 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
   // and merges are epic-level by design, so a story review must never
   // satisfy the epic's merge gate. The code branch deliberately keeps story
   // sessions — they commit to the same branch.
+  //
+  // A review that answered through submit_findings with `changes_requested`
+  // is NOT clean, findings or no findings: the verdict is the authoritative
+  // channel (lib/pipeline/findings.ts), so an explicit NO must never satisfy
+  // the merge gate. NULL stays clean — that is every MCP-less provider,
+  // whose only verdict signal is the prose scan this gate never read. Any
+  // other stored value (e.g. 'approved') keeps today's behaviour; unknown
+  // values are treated as absent, matching readStructuredReviewVerdict.
   const factRows = db
     .select({
       epicId: agentSessions.epicId,
@@ -313,6 +321,8 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
          AND ${agentSessions.userStoryId} IS NULL
          AND ${agentSessions.agentType} IN (${sql.raw(REVIEW_AGENT_TYPES_SQL)})
          AND ${agentSessions.outcome} = 'answered'
+         AND (${agentSessions.reviewVerdict} IS NULL
+              OR ${agentSessions.reviewVerdict} <> 'changes_requested')
         THEN ${SESSION_AT_SQL} END)`,
       lastTerminalCodeAt: sql<string | null>`MAX(CASE
         WHEN ${agentSessions.status} IN (${sql.raw(TERMINAL_STATUSES_SQL)})
@@ -552,11 +562,12 @@ function compareEpics(a: EpicRow, b: EpicRow): number {
  *
  * A review that PASSES leaves the epic in `review` (the pipeline never
  * auto-approves), so a naive "everything in review" selector would review the
- * same epic forever. The guard is deliberately temporal rather than
- * verdict-based: the verdict is a substring heuristic over the reviewer's
- * markdown (epics/[epicId]/review/route.ts:337), with no structured field to
- * read. "Has a review been attempted since the last terminal code change?"
- * is a fact, not a guess.
+ * same epic forever. The gate is temporal at its core — "has a review been
+ * attempted since the last terminal code change?" is a fact, not a guess —
+ * plus one verdict rule: since agent_sessions.review_verdict exists, a review
+ * that answered `changes_requested` through submit_findings is not clean and
+ * earns a fresh one (see lastCleanReviewAt). The prose fallback for MCP-less
+ * providers is deliberately NOT parsed here; their rows stay NULL.
  *
  * "A review" means a completed, epic-scoped review that delivered a verdict —
  * see SessionFacts.lastCleanReviewAt for what is deliberately excluded and

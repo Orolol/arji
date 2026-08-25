@@ -28,6 +28,7 @@ const EXPECTED_TOOL_NAMES = [
   "update_ticket_status",
   "post_comment",
   "attach_artifact",
+  "create_bug",
   "ask_question",
   "submit_findings",
   "submit_grading",
@@ -554,6 +555,7 @@ describe("chat toolset (ARIJ_MCP_TOOLSET=chat)", () => {
 
   it("rejects agent-only tools without calling the backend", async () => {
     for (const name of [
+      "create_bug",
       "ask_question",
       "attach_artifact",
       "submit_findings",

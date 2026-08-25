@@ -144,6 +144,43 @@ const AGENT_TOOLS = [
     },
   },
   {
+    name: "create_bug",
+    description:
+      "Create a standalone, non-blocking bug ticket in this session's current Arij project when you discover an adjacent problem. The bug is attributed to this session, duplicate open titles are refused, and each session may create at most 5 bugs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description: "Short, specific bug title.",
+        },
+        description: {
+          type: "string",
+          minLength: 1,
+          maxLength: 10000,
+          description:
+            "Markdown with context, observed reproduction steps, and the actual error or behavior.",
+        },
+        severity: {
+          type: "string",
+          enum: ["low", "medium", "high", "critical"],
+          description: "Optional suggested severity.",
+        },
+        source_ticket_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+          description:
+            "Optional id or readable id of a source ticket in this project. Defaults to the ticket this session was launched for.",
+        },
+      },
+      required: ["title", "description"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "ask_question",
     description:
       "Ask the user a blocking question and stop working on the blocked part. This reliably marks the session as awaiting a reply and holds the ticket from advancing. Include full context and concrete options in one call, then end your turn.",
@@ -166,14 +203,15 @@ const AGENT_TOOLS = [
   {
     name: "submit_findings",
     description:
-      "(Review sessions) File structured review findings: each finding anchors to file_path+line and becomes an open review comment that blocks approval until resolved; include an overall verdict and summary. Still end your final message with the required '**Overall Verdict: …**' line.",
+      "(Review sessions) Submit your review: the verdict here is what Arij acts on — it decides whether the ticket goes back for changes. Each finding anchors to file_path+line and becomes an open review comment that blocks approval until resolved, so an 'approved' verdict alongside an open critical/major finding still blocks. Call this once, at the end, then still end your final message with the required '**Overall Verdict: …**' line (the fallback Arij reads only when no verdict was submitted).",
     inputSchema: {
       type: "object",
       properties: {
         verdict: {
           type: "string",
           enum: ["approved", "approved_with_minor_issues", "changes_requested"],
-          description: "Overall review verdict.",
+          description:
+            "Overall review verdict. Persisted on this session and read as the authoritative signal for the ticket's next transition.",
         },
         summary: {
           type: "string",

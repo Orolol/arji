@@ -32,6 +32,7 @@ import {
   ticketActivityLog,
   ticketComments,
 } from "@/lib/db/schema";
+import { MCP_CREATE_BUG_ACTIVITY_PREFIX } from "@/lib/mcp/create-bug-contract";
 import { listSessionChunks } from "./chunks";
 
 export const ARIJ_MCP_TOOL_PREFIX = "mcp__arij__";
@@ -75,6 +76,7 @@ const TOOL_ARTIFACT_KIND: Record<string, ArijActionKind> = {
   ask_question: "question",
   submit_findings: "findings",
   attach_artifact: "artifact",
+  create_bug: "tool_call",
 };
 
 const QUESTION_HEADER = "**Question**";
@@ -348,7 +350,17 @@ export function collectArijActions(
 
   for (const row of transitions) {
     // from == to rows are "held" log entries, not moves.
-    if (row.fromStatus === row.toStatus) continue;
+    if (row.fromStatus === row.toStatus) {
+      if (row.reason?.startsWith(MCP_CREATE_BUG_ACTIVITY_PREFIX)) {
+        dbActions.push({
+          kind: "tool_call",
+          summary: "Created a bug ticket (create_bug)",
+          detail: row.reason.slice(MCP_CREATE_BUG_ACTIVITY_PREFIX.length).trim(),
+          at: row.createdAt ?? null,
+        });
+      }
+      continue;
+    }
     dbActions.push({
       kind: "status_change",
       summary: `Ticket moved ${row.fromStatus} → ${row.toStatus}`,
