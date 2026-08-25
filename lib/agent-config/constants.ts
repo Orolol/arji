@@ -47,6 +47,20 @@ export function isCodeProducingAgentType(
   );
 }
 
+/**
+ * The code-producing types the prompt layer tells they may move their own
+ * ticket to review — `CODE_PRODUCING_AGENT_TYPES` minus `team_build`: a
+ * team session row carries no epicId, so its MCP token has no ticket and
+ * the move would 400 with MISSING_TICKET. Promising the capability the
+ * tool channel cannot deliver recreates the "board transition refused"
+ * bug for that type; if team builds ever get a ticketed session row, add
+ * them back here.
+ */
+export const TICKET_MOVING_AGENT_TYPES: Exclude<
+  (typeof CODE_PRODUCING_AGENT_TYPES)[number],
+  "team_build"
+>[] = CODE_PRODUCING_AGENT_TYPES.filter((type) => type !== "team_build");
+
 export const BUILTIN_REVIEW_TYPES = [
   "security",
   "code_review",

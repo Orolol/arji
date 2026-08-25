@@ -43,12 +43,25 @@ if (!baseUrl || !token) {
 
 const TOOLSET = process.env.ARIJ_MCP_TOOLSET === "chat" ? "chat" : "agent";
 
+// get_ticket always resolves the epic this session was launched for.
 const TICKET_ID_PROPERTY = {
   ticket_id: {
     type: "string",
     minLength: 1,
     description:
-      "Optional: id of another ticket in the same project. Defaults to the ticket this session was launched for.",
+      "Optional: id of another epic in the same project. Defaults to the epic this session was launched for.",
+  },
+};
+
+// update_ticket_status diverges for story builds: with no ticket_id it
+// moves the session's own story, while an explicit ticket_id targets
+// epics only (story ids are not accepted here yet).
+const UPDATE_TICKET_ID_PROPERTY = {
+  ticket_id: {
+    type: "string",
+    minLength: 1,
+    description:
+      "Optional: id of an epic in the same project — epics only; a story id is not accepted. Without it a story build moves its own story; otherwise it moves the epic this session was launched for.",
   },
 };
 
@@ -80,7 +93,7 @@ const AGENT_TOOLS = [
           maxLength: 500,
           description: "Short reason recorded in the ticket activity log.",
         },
-        ...TICKET_ID_PROPERTY,
+        ...UPDATE_TICKET_ID_PROPERTY,
       },
       required: ["status"],
       additionalProperties: false,
