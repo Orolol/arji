@@ -74,6 +74,12 @@ export const BUILTIN_AGENT_PROMPTS: Record<AgentType, string> = {
   forensic: "",
 };
 
+/**
+ * Ready-to-use instructions for a custom review agent. The creation form is
+ * intentionally useful after typing only a name.
+ */
+export const DEFAULT_REVIEW_AGENT_PROMPT = `You are a code reviewer. Review the changes on this ticket's branch and report concrete problems: bugs, security issues, missing edge cases, and unclear naming. Reference files and lines. Do not restyle working code.`;
+
 export type AgentProvider =
   | "claude-code"
   | "codex"

@@ -279,7 +279,7 @@ describe("resolveAgent", () => {
     expect(result.name).toBe("CC Opus");
   });
 
-  it("falls back to raw provider when namedAgentId is null", async () => {
+  it("ignores a legacy raw provider when namedAgentId is null", async () => {
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
 
     testDb.insert(schema.agentProviderDefaults)
@@ -292,7 +292,7 @@ describe("resolveAgent", () => {
       .run();
 
     const result = await resolveAgent("build");
-    expect(result.provider).toBe("codex");
+    expect(result.provider).toBe("claude-code");
     expect(result.model).toBeUndefined();
     expect(result.name).toBeUndefined();
   });

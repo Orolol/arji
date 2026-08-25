@@ -20,9 +20,9 @@ interface RuntimeSettingsTabProps {
 }
 
 /**
- * Non-provider runtime settings: the reviewer-segregation toggle and the
- * per-scope concurrency cap. Provider defaults used to live in this tab too;
- * they are gone — CLIs manage their own providers.
+ * Runtime-only settings: the reviewer-segregation toggle and the per-scope
+ * concurrency cap. Automatic task-to-agent choices live in Assignments;
+ * each selected CLI owns its own provider configuration.
  */
 export function RuntimeSettingsTab({
   scope,

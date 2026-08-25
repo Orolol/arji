@@ -4,12 +4,27 @@ import { useState, useEffect, useCallback } from "react";
 import type { AgentType, AgentProvider } from "@/lib/agent-config/constants";
 
 type PromptSource = "builtin" | "global" | "project";
+type AssignmentSource = "builtin" | "global" | "project";
 
 export interface ResolvedAgentPrompt {
   agentType: AgentType;
   systemPrompt: string;
   source: PromptSource;
   scope: string;
+}
+
+export interface ResolvedAgentAssignment {
+  agentType: AgentType;
+  provider: AgentProvider;
+  namedAgentId: string | null;
+  source: AssignmentSource;
+  scope: string;
+  namedAgent?: {
+    id: string;
+    name: string;
+    provider: AgentProvider;
+    model: string;
+  } | null;
 }
 
 
@@ -90,6 +105,62 @@ export function useAgentPrompts(
   );
 
   return { data, loading, refresh: load, updatePrompt, resetPrompt };
+}
+
+export function useAgentAssignments(
+  scope: "global" | "project",
+  projectId?: string
+) {
+  const [data, setData] = useState<ResolvedAgentAssignment[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const url = buildUrl("/agent-config/providers", scope, projectId);
+      const res = await fetch(url);
+      const json = await res.json();
+      setData(json.data || []);
+    } catch {
+      setData([]);
+    }
+    setLoading(false);
+  }, [scope, projectId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const assignAgent = useCallback(
+    async (agentType: AgentType, namedAgentId: string | null) => {
+      const url = buildUrl(
+        `/agent-config/providers/${agentType}`,
+        scope,
+        projectId
+      );
+      const res = await fetch(url, {
+        method: namedAgentId ? "PUT" : "DELETE",
+        headers: namedAgentId
+          ? { "Content-Type": "application/json" }
+          : undefined,
+        body: namedAgentId ? JSON.stringify({ namedAgentId }) : undefined,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) await load();
+      return {
+        ok: res.ok,
+        error:
+          typeof json.error === "string"
+            ? json.error
+            : res.ok
+              ? undefined
+              : "Could not update this assignment.",
+      };
+    },
+    [scope, projectId, load]
+  );
+
+  return { data, loading, refresh: load, assignAgent };
 }
 
 export function useReviewAgents(

@@ -118,9 +118,9 @@ export function StatsTab({ scope, projectId }: StatsTabProps) {
         <section>
           <h3 className="text-sm font-medium mb-1">Agent reliability</h3>
           <p className="text-xs text-muted-foreground mb-2">
-            Runs per named agent and provider
+            Runs per named agent and CLI
             {scopedProjectId ? " in this project" : " across all projects"}.
-            Cost and tokens are only counted when the provider reports them.
+            Cost and tokens are only counted when the CLI reports them.
           </p>
           {agents.length === 0 ? (
             <p className="text-xs text-muted-foreground py-2">
@@ -132,7 +132,7 @@ export function StatsTab({ scope, projectId }: StatsTabProps) {
                 <thead>
                   <tr className="border-b border-border text-muted-foreground">
                     <th className="text-left font-medium px-3 py-2">Agent</th>
-                    <th className="text-left font-medium px-3 py-2">Provider</th>
+                    <th className="text-left font-medium px-3 py-2">CLI</th>
                     <th className="text-right font-medium px-3 py-2">Runs</th>
                     <th className="text-right font-medium px-3 py-2" title="Completed / (completed + failed)">
                       Success

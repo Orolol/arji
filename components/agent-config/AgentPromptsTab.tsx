@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ChevronDown, ChevronRight, RotateCcw, Save, Loader2 } from "lucide-react";
+import { Field } from "@/components/agent-config/Field";
 
 interface AgentPromptsTabProps {
   scope: "global" | "project";
@@ -29,6 +30,12 @@ function sourceBadgeVariant(source: string) {
   }
 }
 
+function sourceLabel(source: ResolvedAgentPrompt["source"]): string {
+  if (source === "project") return "This project";
+  if (source === "global") return "All projects";
+  return "Arij default";
+}
+
 function PromptRow({
   prompt,
   scope,
@@ -44,6 +51,8 @@ function PromptRow({
   const [value, setValue] = useState(prompt.systemPrompt);
   const [saving, setSaving] = useState(false);
   const dirty = value !== prompt.systemPrompt;
+  const editorId = `agent-prompt-${prompt.agentType}`;
+  const panelId = `${editorId}-panel`;
 
   const handleSave = async () => {
     setSaving(true);
@@ -62,6 +71,8 @@ function PromptRow({
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-controls={panelId}
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
       >
         {expanded ? (
@@ -73,25 +84,28 @@ function PromptRow({
           {AGENT_TYPE_LABELS[prompt.agentType]}
         </span>
         <Badge variant={sourceBadgeVariant(prompt.source)} className="text-xs">
-          {prompt.source}
+          {sourceLabel(prompt.source)}
         </Badge>
       </button>
       {expanded && (
-        <div className="px-4 pb-4 space-y-3">
-          <Textarea
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="Enter system prompt..."
-            className="min-h-32 text-sm font-mono"
-          />
-          <p className="text-xs text-muted-foreground">
-            This is the prompt the agent receives when it runs this role. It
-            already works as-is — edit it only to change how the agent
-            behaves.
-            {scope === "project"
-              ? " Reset to global restores the shared version."
-              : ""}
-          </p>
+        <div id={panelId} className="px-4 pb-4 space-y-3">
+          <Field
+            id={editorId}
+            label="Instructions"
+            hint={`What the agent should do when it runs this role. The current instructions already work; edit them only to change its behaviour.${
+              scope === "project"
+                ? " Reset to all projects restores the shared version."
+                : ""
+            }`}
+          >
+            <Textarea
+              id={editorId}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder="Describe how this role should behave"
+              className="min-h-32 text-sm font-mono"
+            />
+          </Field>
           <div className="flex items-center gap-2 justify-end">
             {scope === "project" && prompt.source === "project" && (
               <Button
@@ -105,7 +119,7 @@ function PromptRow({
                 ) : (
                   <RotateCcw className="h-3 w-3 mr-1" />
                 )}
-                Reset to global
+                Reset to all projects
               </Button>
             )}
             <Button

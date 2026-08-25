@@ -19,28 +19,58 @@ import {
   type AgentProvider,
 } from "@/lib/agent-config/constants";
 import { Field } from "@/components/agent-config/Field";
-
+import {
+  useProvidersAvailable,
+  type ProvidersAvailability,
+} from "@/hooks/useProvidersAvailable";
 
 function CliSelect({
   id,
   value,
   onChange,
+  availability,
+  availabilityLoading,
   disabled,
 }: {
   id: string;
   value: AgentProvider;
   onChange: (value: AgentProvider) => void;
+  availability: ProvidersAvailability["providers"];
+  availabilityLoading: boolean;
   disabled?: boolean;
 }) {
   return (
-    <Select value={value} onValueChange={(v) => onChange(v as AgentProvider)} disabled={disabled}>
+    <Select
+      value={value}
+      onValueChange={(v) => onChange(v as AgentProvider)}
+      disabled={disabled}
+    >
       <SelectTrigger id={id} className="h-8 text-sm">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {PROVIDER_OPTIONS.map((p) => (
           <SelectItem key={p} value={p}>
-            {PROVIDER_LABELS[p]}
+            <span className="flex items-center gap-1.5">
+              <span
+                aria-hidden="true"
+                className={`inline-block size-1.5 shrink-0 rounded-full ${
+                  availabilityLoading
+                    ? "bg-muted-foreground/40"
+                    : availability[p]
+                      ? "bg-green-500"
+                      : "bg-red-500"
+                }`}
+              />
+              {PROVIDER_LABELS[p]}
+              <span className="sr-only">
+                {availabilityLoading
+                  ? " — checking availability"
+                  : availability[p]
+                    ? " — ready to use"
+                    : " — not detected"}
+              </span>
+            </span>
           </SelectItem>
         ))}
       </SelectContent>
@@ -50,10 +80,14 @@ function CliSelect({
 
 function NamedAgentRow({
   agent,
+  availability,
+  availabilityLoading,
   onUpdate,
   onDelete,
 }: {
   agent: NamedAgent;
+  availability: ProvidersAvailability["providers"];
+  availabilityLoading: boolean;
   onUpdate: (
     agentId: string,
     payload: { name?: string; provider?: AgentProvider; model?: string }
@@ -65,25 +99,60 @@ function NamedAgentRow({
   const [model, setModel] = useState(agent.model);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const dirty = name !== agent.name || provider !== agent.provider || model !== agent.model;
+  const dirty =
+    name !== agent.name ||
+    provider !== agent.provider ||
+    model !== agent.model;
 
   async function handleSave() {
     if (!dirty || !name.trim()) return;
+    const nextName = name.trim();
+    const nextModel = model.trim();
+    setError(null);
     setSaving(true);
-    await onUpdate(agent.id, {
-      name: name.trim(),
-      provider,
-      model: model.trim(),
-    });
-    setSaving(false);
+    try {
+      const result = await onUpdate(agent.id, {
+        name: nextName,
+        provider,
+        model: nextModel,
+      });
+      if (result.ok) {
+        setName(nextName);
+        setModel(nextModel);
+      } else {
+        setError(result.error || "Could not save this agent. Try again.");
+      }
+    } catch {
+      setError(
+        "Could not save this agent. Check the connection and try again."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleDelete() {
+    setError(null);
     setDeleting(true);
-    await onDelete(agent.id);
-    setDeleting(false);
+    try {
+      const deleted = await onDelete(agent.id);
+      if (!deleted) setError("Could not delete this agent. Try again.");
+    } catch {
+      setError(
+        "Could not delete this agent. Check the connection and try again."
+      );
+    } finally {
+      setDeleting(false);
+    }
   }
+
+  const availabilityHint = availabilityLoading
+    ? `Checking whether ${PROVIDER_LABELS[provider]} is ready on this machine.`
+    : availability[provider]
+      ? `${PROVIDER_LABELS[provider]} is ready to use on this machine.`
+      : `${PROVIDER_LABELS[provider]} was not detected. Install or sign in to the CLI before running this agent.`;
 
   return (
     <div className="rounded-lg border border-border p-3 space-y-3">
@@ -106,12 +175,14 @@ function NamedAgentRow({
         <Field
           id={`named-agent-cli-${agent.id}`}
           label="CLI"
-          hint="The coding tool this agent runs on."
+          hint={availabilityHint}
         >
           <CliSelect
             id={`named-agent-cli-${agent.id}`}
             value={provider}
             onChange={setProvider}
+            availability={availability}
+            availabilityLoading={availabilityLoading}
             disabled={saving || deleting}
           />
         </Field>
@@ -130,6 +201,12 @@ function NamedAgentRow({
         </Field>
       </div>
 
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+
       <div className="flex items-center justify-end gap-2">
         <Button
           variant="ghost"
@@ -137,6 +214,7 @@ function NamedAgentRow({
           className="h-8 text-destructive"
           onClick={handleDelete}
           disabled={deleting || saving}
+          aria-label={`Delete ${agent.name}`}
         >
           {deleting ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -158,24 +236,53 @@ function NamedAgentRow({
 }
 
 export function NamedAgentsTab() {
-  const { data, loading, createNamedAgent, updateNamedAgent, deleteNamedAgent } = useNamedAgents();
+  const {
+    data,
+    loading,
+    createNamedAgent,
+    updateNamedAgent,
+    deleteNamedAgent,
+  } = useNamedAgents();
+  const {
+    providers: availability,
+    loading: availabilityLoading,
+  } = useProvidersAvailable();
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<AgentProvider>("claude-code");
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   async function handleCreate() {
     if (!name.trim()) return;
+    setCreateError(null);
     setCreating(true);
-    const { ok } = await createNamedAgent({
-      name: name.trim(),
-      provider,
-    });
-    if (ok) {
-      setName("");
-      setProvider("claude-code");
+    try {
+      const result = await createNamedAgent({
+        name: name.trim(),
+        provider,
+      });
+      if (result.ok) {
+        setName("");
+        setProvider("claude-code");
+      } else {
+        setCreateError(
+          result.error || "Could not create this agent. Try again."
+        );
+      }
+    } catch {
+      setCreateError(
+        "Could not create this agent. Check the connection and try again."
+      );
+    } finally {
+      setCreating(false);
     }
-    setCreating(false);
   }
+
+  const availabilityHint = availabilityLoading
+    ? `Checking whether ${PROVIDER_LABELS[provider]} is ready on this machine.`
+    : availability[provider]
+      ? `${PROVIDER_LABELS[provider]} is ready to use on this machine.`
+      : `${PROVIDER_LABELS[provider]} was not detected. Install or sign in to the CLI before running this agent.`;
 
   if (loading) {
     return (
@@ -210,19 +317,22 @@ export function NamedAgentsTab() {
               className="h-8 text-sm"
             />
           </Field>
-          <Field
-            id="new-agent-cli"
-            label="CLI"
-            hint="The coding tool this agent runs on. You can change it later."
-          >
+          <Field id="new-agent-cli" label="CLI" hint={availabilityHint}>
             <CliSelect
               id="new-agent-cli"
               value={provider}
               onChange={setProvider}
+              availability={availability}
+              availabilityLoading={availabilityLoading}
               disabled={creating}
             />
           </Field>
         </div>
+        {createError && (
+          <p role="alert" className="text-xs text-destructive">
+            {createError}
+          </p>
+        )}
         <div className="flex justify-end">
           <Button
             size="sm"
@@ -253,6 +363,8 @@ export function NamedAgentsTab() {
             <NamedAgentRow
               key={agent.id}
               agent={agent}
+              availability={availability}
+              availabilityLoading={availabilityLoading}
               onUpdate={updateNamedAgent}
               onDelete={deleteNamedAgent}
             />

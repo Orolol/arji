@@ -20,29 +20,18 @@ vi.mock("@/hooks/useAgentConfig", () => ({
   }),
 }));
 
+vi.mock("@/hooks/useProvidersAvailable", () => ({
+  useProvidersAvailable: () => ({
+    providers: new Proxy({}, { get: () => true }),
+    loading: false,
+  }),
+}));
+
 // Radix popper is not drivable from jsdom — same stand-in as the
 // NamedAgentSelect test: trigger/value render nothing.
 vi.mock("@/components/ui/select", () => ({
-  Select: ({
-    value,
-    onValueChange,
-    children,
-    disabled,
-  }: {
-    value: string | undefined;
-    onValueChange: (v: string) => void;
-    children: ReactNode;
-    disabled?: boolean;
-  }) => (
-    <select
-      value={value ?? ""}
-      disabled={disabled}
-      onChange={(e) => onValueChange(e.target.value)}
-    >
-      {children}
-    </select>
-  ),
-  SelectTrigger: ({ id }: { id?: string }) => <select id={id} disabled />,
+  Select: ({ children }: { children: ReactNode }) => <>{children}</>,
+  SelectTrigger: ({ id }: { id?: string }) => <button id={id} type="button" />,
   SelectValue: () => null,
   SelectContent: ({ children }: { children: ReactNode }) => <>{children}</>,
   SelectItem: ({
@@ -51,7 +40,7 @@ vi.mock("@/components/ui/select", () => ({
   }: {
     value: string;
     children: ReactNode;
-  }) => <option value={value}>{children}</option>,
+  }) => <div data-value={value}>{children}</div>,
 }));
 
 // Markers for the advanced tabs, so expansion is observable without
@@ -61,6 +50,9 @@ vi.mock("@/components/agent-config/AgentPromptsTab", () => ({
 }));
 vi.mock("@/components/agent-config/ReviewAgentsTab", () => ({
   ReviewAgentsTab: () => <div>review-tab-marker</div>,
+}));
+vi.mock("@/components/agent-config/TaskAssignmentsTab", () => ({
+  TaskAssignmentsTab: () => <div>assignments-tab-marker</div>,
 }));
 vi.mock("@/components/agent-config/RuntimeSettingsTab", () => ({
   RuntimeSettingsTab: () => <div>runtime-tab-marker</div>,
@@ -80,7 +72,8 @@ describe("AgentConfigPanel progressive disclosure", () => {
 
     const toggle = screen.getByTestId("advanced-settings-toggle");
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("Prompts")).toBeNull();
+    expect(toggle.getAttribute("aria-controls")).toBe("advanced-agent-settings");
+    expect(screen.queryByText("Instructions")).toBeNull();
     expect(screen.queryByText("prompts-tab-marker")).toBeNull();
   });
 
@@ -94,8 +87,10 @@ describe("AgentConfigPanel progressive disclosure", () => {
     expect(
       screen.getByTestId("advanced-settings-toggle").getAttribute("aria-expanded")
     ).toBe("true");
-    expect(screen.getByText("Prompts")).toBeTruthy();
+    expect(screen.getByText("Instructions")).toBeTruthy();
     expect(screen.getByText("prompts-tab-marker")).toBeTruthy();
+    expect(document.getElementById("advanced-agent-settings")).toBeTruthy();
+    expect(screen.queryByDisplayValue("Fast builder")).toBeNull();
   });
 
   it("collapses the advanced section again on a second click", () => {

@@ -421,7 +421,7 @@ export function NightRunDialog({
             </OptionRow>
 
             {/* Read-only: the scheduler's budget, set in Agent
-                Configuration → Providers → Max concurrent agents. */}
+                Configuration → Advanced settings → Runtime → Max concurrent agents. */}
             <OptionRow label="Parallel agents">
               <span className="font-mono text-[13px]">
                 {formatMaxConcurrent(maxConcurrent)}
@@ -431,7 +431,7 @@ export function NightRunDialog({
             <OptionRow
               label="Cost cap (USD)"
               htmlFor="night-cost-cap"
-              hint="Claude-reported costs only — other providers are not counted, so the run may spend more than the cap."
+              hint="Claude-reported costs only — other CLIs are not counted, so the run may spend more than the cap."
             >
               <Input
                 id="night-cost-cap"

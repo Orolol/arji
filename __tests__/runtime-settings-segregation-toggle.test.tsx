@@ -6,10 +6,6 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { RuntimeSettingsTab } from "@/components/agent-config/RuntimeSettingsTab";
 
-vi.mock("@/hooks/useAgentConfig", () => ({
-  useNamedAgents: () => ({ data: [], loading: false }),
-}));
-
 describe("RuntimeSettingsTab — review provider segregation toggle", () => {
   let fetchMock: Mock;
 

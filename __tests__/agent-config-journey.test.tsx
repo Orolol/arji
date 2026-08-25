@@ -48,6 +48,15 @@ vi.stubGlobal(
     if (url === "/api/agent-config/named-agents" && method === "GET") {
       return jsonResponse({ data: [...namedAgents] });
     }
+    if (url === "/api/providers/available" && method === "GET") {
+      return jsonResponse({
+        data: {
+          "claude-code": true,
+          codex: false,
+          "gemini-cli": false,
+        },
+      });
+    }
     if (url === "/api/agent-config/named-agents" && method === "POST") {
       if (!body.name?.trim()) return jsonResponse({ error: "name required" }, false);
       const agent = {
@@ -97,7 +106,7 @@ vi.mock("@/components/ui/select", () => ({
   }: {
     value: string;
     children: ReactNode;
-  }) => <option value={value}>{children}</option>,
+  }) => <div data-value={value}>{children}</div>,
 }));
 
 import { NamedAgentsTab } from "@/components/agent-config/NamedAgentsTab";
@@ -115,7 +124,7 @@ describe("new-user journey: create agents without documentation", () => {
     // The form explains itself: labels + hints, no doc needed.
     expect(await screen.findByLabelText("Name")).toBeTruthy();
     expect(
-      screen.getByText(/The coding tool this agent runs on/)
+      screen.getByText(/Claude Code is ready to use on this machine/)
     ).toBeTruthy();
 
     // One typed field is the whole build-agent flow.

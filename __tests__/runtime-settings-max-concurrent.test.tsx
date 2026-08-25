@@ -8,10 +8,6 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { RuntimeSettingsTab } from "@/components/agent-config/RuntimeSettingsTab";
 
-vi.mock("@/hooks/useAgentConfig", () => ({
-  useNamedAgents: () => ({ data: [], loading: false }),
-}));
-
 type FetchArgs = [input: string | URL | Request, init?: RequestInit];
 
 describe("RuntimeSettingsTab — max concurrent agents input", () => {

@@ -88,3 +88,24 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   return NextResponse.json({ data: updated });
 }
+
+export async function DELETE(_request: NextRequest, { params }: Params) {
+  const { agentType } = await params;
+  if (!isAgentType(agentType)) {
+    return NextResponse.json(
+      { error: `Unknown agent type: ${agentType}` },
+      { status: 400 }
+    );
+  }
+
+  db.delete(agentProviderDefaults)
+    .where(
+      and(
+        eq(agentProviderDefaults.agentType, agentType),
+        eq(agentProviderDefaults.scope, "global")
+      )
+    )
+    .run();
+
+  return NextResponse.json({ data: { ok: true } });
+}

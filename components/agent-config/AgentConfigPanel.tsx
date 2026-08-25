@@ -13,6 +13,7 @@ import { ReviewAgentsTab } from "./ReviewAgentsTab";
 import { RuntimeSettingsTab } from "./RuntimeSettingsTab";
 import { NamedAgentsTab } from "./NamedAgentsTab";
 import { StatsTab } from "./StatsTab";
+import { TaskAssignmentsTab } from "./TaskAssignmentsTab";
 import { Globe, FolderOpen, ChevronDown, ChevronRight } from "lucide-react";
 
 interface AgentConfigPanelProps {
@@ -22,11 +23,12 @@ interface AgentConfigPanelProps {
 /**
  * Two clearly separated sections:
  *
- *  - Core (always visible): the named-agents list. This is the only part a
+ *  - Core (the default view): the named-agents list. This is the only part a
  *    new user needs — a name and a CLI make a working agent.
  *  - Advanced (collapsed by default): role prompts, review agents, per-role
- *    defaults and usage stats. The Global/Project scope switcher lives here
- *    because it only affects these scoped settings, not the agents list.
+ *    assignments, runtime settings and usage stats. The Global/Project scope
+ *    switcher lives here because it only affects these scoped settings, not
+ *    the agents list.
  */
 export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
   const [scope, setScope] = useState<"global" | "project">(
@@ -36,10 +38,12 @@ export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* Core — always visible, fits one screen. */}
-      <div className="flex-1 min-h-0 flex flex-col">
-        <NamedAgentsTab />
-      </div>
+      {/* Core — the default view, fits one screen. */}
+      {!advancedOpen && (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <NamedAgentsTab />
+        </div>
+      )}
 
       {/* Advanced — collapsed by default, expanded explicitly. */}
       <div className="shrink-0 border-t border-border">
@@ -47,6 +51,7 @@ export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
           type="button"
           onClick={() => setAdvancedOpen((open) => !open)}
           aria-expanded={advancedOpen}
+          aria-controls="advanced-agent-settings"
           data-testid="advanced-settings-toggle"
           className="flex w-full items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
@@ -58,14 +63,17 @@ export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
           Advanced settings
           {!advancedOpen && (
             <span className="text-xs font-normal text-muted-foreground/70">
-              prompts, review agents, runtime limits, usage
+              instructions, review agents, assignments, runtime limits, usage
             </span>
           )}
         </button>
       </div>
 
       {advancedOpen && (
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div
+          id="advanced-agent-settings"
+          className="flex-1 min-h-0 flex flex-col"
+        >
           {projectId && (
             <div className="flex items-center gap-1 px-4 pt-2 pb-1 shrink-0">
               <Button
@@ -94,8 +102,9 @@ export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
 
           <Tabs defaultValue="prompts" className="flex-1 flex flex-col min-h-0">
             <TabsList variant="line" className="px-4 shrink-0">
-              <TabsTrigger value="prompts">Prompts</TabsTrigger>
+              <TabsTrigger value="prompts">Instructions</TabsTrigger>
               <TabsTrigger value="review">Review Agents</TabsTrigger>
+              <TabsTrigger value="assignments">Assignments</TabsTrigger>
               <TabsTrigger value="runtime">Runtime</TabsTrigger>
               <TabsTrigger value="stats">Stats</TabsTrigger>
             </TabsList>
@@ -109,6 +118,16 @@ export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
 
             <TabsContent value="review" className="flex-1 min-h-0 px-3 pb-3">
               <ReviewAgentsTab
+                scope={scope}
+                projectId={scope === "project" ? projectId : undefined}
+              />
+            </TabsContent>
+
+            <TabsContent
+              value="assignments"
+              className="flex-1 min-h-0 px-3 pb-3"
+            >
+              <TaskAssignmentsTab
                 scope={scope}
                 projectId={scope === "project" ? projectId : undefined}
               />

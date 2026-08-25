@@ -101,3 +101,29 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   return NextResponse.json({ data: updated });
 }
+
+export async function DELETE(_request: NextRequest, { params }: Params) {
+  const { projectId, agentType } = await params;
+  if (!isAgentType(agentType)) {
+    return NextResponse.json(
+      { error: `Unknown agent type: ${agentType}` },
+      { status: 400 }
+    );
+  }
+
+  const project = await validateProject(projectId);
+  if (!project) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+
+  db.delete(agentProviderDefaults)
+    .where(
+      and(
+        eq(agentProviderDefaults.agentType, agentType),
+        eq(agentProviderDefaults.scope, projectId)
+      )
+    )
+    .run();
+
+  return NextResponse.json({ data: { ok: true } });
+}
