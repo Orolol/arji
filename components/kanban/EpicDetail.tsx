@@ -45,6 +45,7 @@ import { EpicGitSection } from "./epic-detail/EpicGitSection";
 import { EpicUserStoriesSection } from "./epic-detail/EpicUserStoriesSection";
 import { TicketImagesSection } from "./epic-detail/TicketImagesSection";
 import { WhatTheAgentDid } from "./epic-detail/WhatTheAgentDid";
+import { SessionArtifactGallery } from "./epic-detail/SessionArtifactGallery";
 import { formatCostUsd } from "@/lib/utils/format-usage";
 import { formatElapsed } from "@/lib/utils/format-elapsed";
 import { formatDateTime } from "@/lib/utils/format-date";
@@ -134,6 +135,7 @@ export function EpicDetail({
     epic,
     userStories,
     gradingReport,
+    artifacts,
     loading,
     updateEpic,
     addUserStory,
@@ -673,7 +675,7 @@ export function EpicDetail({
               <WhatTheAgentDid
                 projectId={projectId}
                 epicId={epicId}
-                refreshToken={activeSession?.id ?? null}
+                refreshToken={`${activeSession?.id ?? ""}:${refreshTrigger}`}
               />
 
               {/* Key / value rows (priority & status moved to the header) */}
@@ -786,6 +788,13 @@ export function EpicDetail({
                 value="review"
                 className="min-h-0 flex-1 overflow-y-auto px-[24px] py-[22px]"
               >
+                <SessionArtifactGallery
+                  projectId={projectId}
+                  artifacts={(artifacts ?? []).filter(
+                    (artifact) => artifact.epicId === epicId
+                  )}
+                  className="mb-[22px] border-b border-border-soft pb-[22px]"
+                />
                 <DiffViewer
                   projectId={projectId}
                   epicId={epicId}

@@ -13,6 +13,7 @@ import {
 } from "@/lib/agent-sessions/artifacts";
 import { requireMcpToken } from "@/lib/mcp/http-auth";
 import { validateBody } from "@/lib/validation/validate";
+import { emitSessionArtifactCreated } from "@/lib/events/emit";
 
 const bodySchema = z
   .object({
@@ -45,6 +46,12 @@ export async function POST(request: NextRequest) {
       sourcePath: validated.data.path,
       caption: validated.data.caption,
     });
+    emitSessionArtifactCreated(
+      auth.projectId,
+      artifact.epicId,
+      auth.sessionId,
+      artifact.id
+    );
     return NextResponse.json({ data: { artifact } });
   } catch (error) {
     if (error instanceof SessionArtifactError) {

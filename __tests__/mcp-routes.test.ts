@@ -34,6 +34,7 @@ import {
   wasQuestionAskedViaMcp,
 } from "@/lib/mcp/token-store";
 import { eq } from "drizzle-orm";
+import { eventBus, type TicketEvent } from "@/lib/events/bus";
 
 const testDb = vi.hoisted(() => ({
   instance: null as ReturnType<
@@ -326,6 +327,48 @@ describe("POST /api/mcp/attach-artifact", () => {
         Buffer.concat([pngHeader, Buffer.from("proof")])
       );
     } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(durableSessionDir, { recursive: true, force: true });
+    }
+  });
+
+  it("emits a project-scoped SSE event after the durable artifact is registered", async () => {
+    const { root, worktree } = createWorktreeFixture();
+    const source = path.join(worktree, "proof.png");
+    const durableSessionDir = path.join(
+      process.cwd(),
+      "data",
+      "sessions",
+      sessionId
+    );
+    const events: TicketEvent[] = [];
+    const unsubscribe = eventBus.subscribe(projectId, (event) =>
+      events.push(event)
+    );
+    fs.writeFileSync(source, pngHeader);
+
+    try {
+      const res = await call(
+        attachArtifactPost,
+        { path: "proof.png", caption: "Feature rendered successfully" },
+        token
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "artifact:created",
+          projectId,
+          epicId,
+          data: {
+            sessionId,
+            artifactId: json.data.artifact.id,
+          },
+        })
+      );
+    } finally {
+      unsubscribe();
       fs.rmSync(root, { recursive: true, force: true });
       fs.rmSync(durableSessionDir, { recursive: true, force: true });
     }

@@ -6,6 +6,8 @@ import { X } from "lucide-react";
 export interface LightboxImage {
   url: string;
   alt: string;
+  /** Optional prose shown below the enlarged image. */
+  caption?: string;
 }
 
 interface ImageLightboxProps {
@@ -46,12 +48,23 @@ export function ImageLightbox({ image, onClose }: ImageLightboxProps) {
       >
         <X className="h-6 w-6" />
       </button>
-      <img
-        src={image.url}
-        alt={image.alt}
-        className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+      <figure
+        className="flex max-h-[92vh] max-w-[92vw] flex-col items-center gap-2"
         onClick={(e) => e.stopPropagation()}
-      />
+      >
+        {/* Callers use local project-scoped/dynamic image routes. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={image.url}
+          alt={image.alt}
+          className="min-h-0 max-h-[86vh] max-w-[90vw] rounded-lg object-contain"
+        />
+        {image.caption && (
+          <figcaption className="max-w-[80vw] text-center text-[13px] text-white/85">
+            {image.caption}
+          </figcaption>
+        )}
+      </figure>
     </div>
   );
 }
