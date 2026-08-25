@@ -449,6 +449,42 @@ describe("sessions/active route activity typing", () => {
     });
   });
 
+  it("classifies plan-mode grading sessions explicitly", async () => {
+    dbMockState.allRows = [
+      {
+        id: "sess-grading",
+        epicId: "epic-grade",
+        userStoryId: null,
+        status: "running",
+        mode: "plan",
+        orchestrationMode: "solo",
+        provider: "codex",
+        agentType: "grading",
+        prompt: "Evaluate acceptance criteria",
+        startedAt: "2026-02-12T10:12:00.000Z",
+        epicTitle: "Structured outcomes",
+        storyTitle: null,
+      },
+    ];
+
+    const { GET } = await import(
+      "@/app/api/projects/[projectId]/sessions/active/route"
+    );
+    const response = await GET(
+      mockNextRequest(),
+      mockRouteContext({ projectId: "proj-1" })
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.data[0]).toMatchObject({
+      id: "sess-grading",
+      type: "grading",
+      label: "Grading: Structured outcomes",
+      mode: "plan",
+    });
+  });
+
   it("classifies release note sessions as release", async () => {
     dbMockState.allRows = [
       {

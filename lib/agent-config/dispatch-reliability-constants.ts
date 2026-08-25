@@ -52,6 +52,7 @@ export const DISPATCH_ROLE_AGENT_TYPES: Record<DispatchRole, AgentType[]> = {
     "review_code",
     "review_compliance",
     "review_feature",
+    "grading",
   ],
   merge: ["merge"],
   qa: ["tech_check", "e2e_test"],

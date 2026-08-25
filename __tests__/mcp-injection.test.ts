@@ -444,6 +444,14 @@ describe("arijToolsSection", () => {
     },
   );
 
+  it("tells grading sessions to submit the structured grading report", () => {
+    const text = arijToolsSection("grading");
+    expect(text).toContain("submit_grading");
+    expect(text).toContain("every acceptance criterion");
+    expect(text).not.toContain("submit_findings");
+    expect(text).not.toContain("You may move the ticket you are building");
+  });
+
   it.each([null, "chat", "merge", "memory_distill"])(
     "keeps the base section for non-review agent type %s",
     (agentType) => {
