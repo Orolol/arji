@@ -15,7 +15,12 @@ import {
 } from "@/lib/api/route-helpers";
 import { createId } from "@/lib/utils/nanoid";
 import { isBuildableStatus } from "@/lib/types/kanban";
-import { attachWorktree, createWorktree, isGitRepo } from "@/lib/git/manager";
+import {
+  attachWorktree,
+  createWorktree,
+  isGitRepo,
+  resolveWorktreeHead,
+} from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import {
   buildBuildPrompt,
@@ -84,13 +89,11 @@ export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, epicId } = await params;
   const body = await request.json().catch(() => ({}));
   const ciAutofix =
-    body.ciAutofix === undefined
-      ? null
-      : parseCiAutofixPayload(body.ciAutofix);
+    body.ciAutofix === undefined ? null : parseCiAutofixPayload(body.ciAutofix);
   if (body.ciAutofix !== undefined && !ciAutofix) {
     return NextResponse.json(
       { error: "Invalid ciAutofix payload" },
-      { status: 400 }
+      { status: 400 },
     );
   }
   const namedAgentId: string | null = body.namedAgentId || null;
@@ -120,8 +123,8 @@ export async function POST(request: NextRequest, { params }: Params) {
             and(
               eq(agentSessions.projectId, projectId),
               eq(agentSessions.epicId, epicId),
-              eq(agentSessions.batchRunId, ciAutofixRunId)
-            )
+              eq(agentSessions.batchRunId, ciAutofixRunId),
+            ),
           )
           .get()
       : null;
@@ -138,8 +141,11 @@ export async function POST(request: NextRequest, { params }: Params) {
   // Validate status — same source of truth as the batch build's guard.
   if (!isBuildableStatus(epic.status)) {
     return NextResponse.json(
-      { error: "Epic must be in backlog, todo, in_progress, or review status to build" },
-      { status: 400 }
+      {
+        error:
+          "Epic must be in backlog, todo, in_progress, or review status to build",
+      },
+      { status: 400 },
     );
   }
 
@@ -147,8 +153,10 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (ciAutofix) {
     if (!epic.branchName) {
       return NextResponse.json(
-        { error: "CI autofix requires the epic's persisted pull request branch" },
-        { status: 400 }
+        {
+          error: "CI autofix requires the epic's persisted pull request branch",
+        },
+        { status: 400 },
       );
     }
     ciAutofixBranchName = epic.branchName;
@@ -164,7 +172,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (!isRepo) {
     return NextResponse.json(
       { error: `Path is not a git repository: ${gitRepoPath}` },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -203,18 +211,24 @@ export async function POST(request: NextRequest, { params }: Params) {
     createdAt: c.createdAt ?? "",
   }));
 
-  // Load open review comments (code review feedback)
-  const openReviewComments = db
-    .select()
-    .from(reviewComments)
-    .where(
-      and(
-        eq(reviewComments.epicId, epicId),
-        eq(reviewComments.status, "open")
-      )
-    )
-    .orderBy(reviewComments.createdAt)
-    .all();
+  // Load open review comments (code review feedback). A CI autofix is a
+  // narrowly-scoped session — its prompt ends with "fix only the code or
+  // tests responsible for the CI failures" and "make the smallest correct
+  // change", so open findings must not override that as a trailing,
+  // highest-recency "address each one" block.
+  const openReviewComments = ciAutofix
+    ? []
+    : db
+        .select()
+        .from(reviewComments)
+        .where(
+          and(
+            eq(reviewComments.epicId, epicId),
+            eq(reviewComments.status, "open"),
+          ),
+        )
+        .orderBy(reviewComments.createdAt)
+        .all();
 
   // Format review comments as additional prompt context
   let reviewContext = "";
@@ -225,7 +239,9 @@ export async function POST(request: NextRequest, { params }: Params) {
       existing.push(rc);
       byFile.set(rc.filePath, existing);
     }
-    const parts = ["## Code Review Feedback\n\nThe following review comments were left on your previous changes. Address each one:\n"];
+    const parts = [
+      "## Code Review Feedback\n\nThe following review comments were left on your previous changes. Address each one:\n",
+    ];
     for (const [filePath, fileComments] of byFile) {
       parts.push(`### ${filePath}`);
       for (const rc of fileComments) {
@@ -257,8 +273,24 @@ export async function POST(request: NextRequest, { params }: Params) {
         us,
         buildSystemPrompt,
         promptComments,
-        { visualProofEnabled: isVisualProofEnabled() }
+        { visualProofEnabled: isVisualProofEnabled() },
       );
+
+  // Arij never auto-pushes, so the local branch is routinely ahead of the
+  // PR head whose CI logs the agent received. Say so explicitly instead of
+  // letting the agent discover — or revert — unseen commits mid-fix.
+  if (ciAutofix && ciAutofixBranchName) {
+    const worktreeHead = await resolveWorktreeHead(worktreePath);
+    if (worktreeHead && worktreeHead !== ciAutofix.headSha) {
+      prompt +=
+        "\n\n## Important: this branch is ahead of the PR head\n\n" +
+        `The worktree tip (${worktreeHead.slice(0, 12)}) differs from the ` +
+        `CI-failing PR head (${ciAutofix.headSha.slice(0, 12)}). The extra ` +
+        "local commits are intentional; fix the CI failure on top of them " +
+        "and do not revert or rewrite them.\n";
+    }
+  }
+
   if (reviewContext) {
     prompt = prompt + "\n\n" + reviewContext;
   }
@@ -298,7 +330,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       resumeSession = true;
     }
   }
-  if (!cliSessionId && providerAcceptsAssignedSessionId(resolvedAgent.provider)) {
+  if (
+    !cliSessionId &&
+    providerAcceptsAssignedSessionId(resolvedAgent.provider)
+  ) {
     cliSessionId = crypto.randomUUID();
   }
 
@@ -334,9 +369,9 @@ export async function POST(request: NextRequest, { params }: Params) {
       createAgentAlreadyRunningPayload(
         { scope: "epic", projectId, epicId },
         conflict,
-        "Another agent is already running for this epic."
+        "Another agent is already running for this epic.",
       ),
-      { status: 409 }
+      { status: 409 },
     );
   }
 
@@ -394,15 +429,19 @@ export async function POST(request: NextRequest, { params }: Params) {
   // observe the terminal result.
   const runBuildSession = async () => {
     markSessionRunning(sessionId);
-    processManager.start(sessionId, {
-      mode: "code",
-      prompt: enrichedPrompt,
-      cwd: worktreePath,
-      allowedTools: ["Edit", "Write", "Bash", "Read", "Glob", "Grep"],
-      model: resolvedAgent.model,
-      cliSessionId,
-      resumeSession,
-    }, resolvedAgent.provider);
+    processManager.start(
+      sessionId,
+      {
+        mode: "code",
+        prompt: enrichedPrompt,
+        cwd: worktreePath,
+        allowedTools: ["Edit", "Write", "Bash", "Read", "Glob", "Grep"],
+        model: resolvedAgent.model,
+        cliSessionId,
+        resumeSession,
+      },
+      resolvedAgent.provider,
+    );
 
     const info = await waitForProcessCompletion(sessionId);
 
@@ -426,7 +465,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           outcome,
           usage: extractSessionUsage(result),
         },
-        completedAt
+        completedAt,
       );
     } catch (error) {
       if (!isSessionLifecycleConflictError(error)) {
@@ -456,7 +495,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         sessionId,
         terminal.kind === "refused"
           ? terminal.error
-          : result?.error || "Build failed"
+          : result?.error || "Build failed",
       );
     }
     if (ciAutofix && terminal.kind === "promoted") {
@@ -472,7 +511,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       } catch (error) {
         console.warn(
           `[epic build] Failed to notify that CI autofix ${sessionId} is ready to push`,
-          error
+          error,
         );
       }
     }
@@ -503,7 +542,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   // engine can await this build's terminal state, then start the run.
   const pipelineActive = ciAutofix
     ? false
-    : pipelineParam ?? resolvePipelineEnabled(projectId);
+    : (pipelineParam ?? resolvePipelineEnabled(projectId));
 
   let pipeline: { runId: string } | null = null;
   if (pipelineActive) {
@@ -522,8 +561,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           sessionId,
           success: false,
           outcome: "error",
-          error:
-            error instanceof Error ? error.message : "Agent launch failed",
+          error: error instanceof Error ? error.message : "Agent launch failed",
         });
         throw error;
       }

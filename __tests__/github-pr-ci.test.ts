@@ -115,9 +115,26 @@ describe("classifyPullRequestCi", () => {
     }
   });
 
+  it("reports only actionable failures once one exists, not cancelled siblings", () => {
+    expect(
+      classifyPullRequestCi({
+        checkRuns: [
+          { name: "z-real", status: "completed", conclusion: "failure" },
+          { name: "a-sibling-0", status: "completed", conclusion: "cancelled" },
+          { name: "a-sibling-1", status: "completed", conclusion: "stale" },
+        ],
+        commitStatuses: [],
+      }),
+    ).toEqual({ state: "failing", failedChecks: ["z-real"] });
+  });
+
   it("reads checks and commit statuses for the exact PR head SHA", async () => {
     githubMocks.pullsGet.mockResolvedValue({
-      data: { head: { sha: "head-123" } },
+      data: {
+        head: { sha: "head-123" },
+        state: "open",
+        draft: false,
+      },
     });
     githubMocks.checksListForRef.mockResolvedValue({
       data: {
@@ -137,6 +154,7 @@ describe("classifyPullRequestCi", () => {
       fetchPullRequestCiStatus("acme", "widgets", 42),
     ).resolves.toEqual({
       headSha: "head-123",
+      prState: "open",
       state: "failing",
       failedChecks: ["unit"],
       failedCheckRuns: [{ id: 701, name: "unit", conclusion: "failure" }],
@@ -156,7 +174,11 @@ describe("classifyPullRequestCi", () => {
 
   it("uses the newest status per context and preserves third-party check names", async () => {
     githubMocks.pullsGet.mockResolvedValue({
-      data: { head: { sha: "head-statuses" } },
+      data: {
+        head: { sha: "head-statuses" },
+        state: "open",
+        draft: false,
+      },
     });
     githubMocks.checksListForRef.mockResolvedValue({
       data: { check_runs: [] },
@@ -173,6 +195,7 @@ describe("classifyPullRequestCi", () => {
       fetchPullRequestCiStatus("acme", "widgets", 42),
     ).resolves.toEqual({
       headSha: "head-statuses",
+      prState: "open",
       state: "failing",
       failedChecks: ["codecov/project"],
       failedCheckRuns: [],
@@ -181,7 +204,11 @@ describe("classifyPullRequestCi", () => {
 
   it("returns passing for realistic successful check and status responses", async () => {
     githubMocks.pullsGet.mockResolvedValue({
-      data: { head: { sha: "head-green" } },
+      data: {
+        head: { sha: "head-green" },
+        state: "open",
+        draft: false,
+      },
     });
     githubMocks.checksListForRef.mockResolvedValue({
       data: {
@@ -210,7 +237,11 @@ describe("classifyPullRequestCi", () => {
 
   it("paginates checks and statuses so a failure after page one is visible", async () => {
     githubMocks.pullsGet.mockResolvedValue({
-      data: { head: { sha: "head-many" } },
+      data: {
+        head: { sha: "head-many" },
+        state: "open",
+        draft: false,
+      },
     });
     githubMocks.paginate
       .mockResolvedValueOnce([
@@ -258,6 +289,7 @@ describe("classifyPullRequestCi", () => {
       "widgets",
       {
         headSha: "head-123",
+        prState: "open",
         state: "failing",
         failedChecks: ["legacy", "unit"],
         failedCheckRuns: [{ id: 701, name: "unit" }],
@@ -265,7 +297,7 @@ describe("classifyPullRequestCi", () => {
     );
 
     expect(evidence).toEqual([
-      { name: "legacy", logTail: null },
+      { name: "legacy", logTail: null, logTailReason: "unavailable" },
       {
         name: "unit",
         logTail: `prefix-${"x".repeat(40)}-failure-tail`,
@@ -287,11 +319,14 @@ describe("classifyPullRequestCi", () => {
     await expect(
       fetchPullRequestCiFailureEvidence("acme", "widgets", {
         headSha: "head-123",
+        prState: "open",
         state: "failing",
         failedChecks: ["third-party"],
         failedCheckRuns: [{ id: 999, name: "third-party" }],
       }),
-    ).resolves.toEqual([{ name: "third-party", logTail: null }]);
+    ).resolves.toEqual([
+      { name: "third-party", logTail: null, logTailReason: "unavailable" },
+    ]);
   });
 
   it("bounds combined evidence and downloads logs for only a limited check set", async () => {
@@ -308,6 +343,7 @@ describe("classifyPullRequestCi", () => {
       "widgets",
       {
         headSha: "head-123",
+        prState: "open",
         state: "failing",
         failedChecks,
         failedCheckRuns: failedChecks.map((name, index) => ({
@@ -342,6 +378,7 @@ describe("classifyPullRequestCi", () => {
 
     await fetchPullRequestCiFailureEvidence("acme", "widgets", {
       headSha: "head-123",
+      prState: "open",
       state: "failing",
       failedChecks: [
         ...cancelledChecks.map((check) => check.name),
@@ -361,5 +398,65 @@ describe("classifyPullRequestCi", () => {
       repo: "widgets",
       job_id: 999,
     });
+  });
+
+  it("spends the evidence byte budget on the actionable failure first", async () => {
+    const cancelledChecks = Array.from(
+      { length: CI_AUTOFIX_MAX_LOGGED_FAILURES },
+      (_, index) => ({
+        id: index + 1,
+        name: `a-cancelled-${index}`,
+        conclusion: "cancelled",
+      }),
+    );
+    githubMocks.downloadJobLogs.mockImplementation(async ({ job_id }) => ({
+      data:
+        job_id === 999
+          ? `${"x".repeat(8_000)} REAL-FAILURE-TAIL`
+          : `cancelled log ${job_id} ${"x".repeat(8_000)}`,
+    }));
+
+    const evidence = await fetchPullRequestCiFailureEvidence(
+      "acme",
+      "widgets",
+      {
+        headSha: "head-123",
+        prState: "open",
+        state: "failing",
+        failedChecks: [
+          ...cancelledChecks.map((check) => check.name),
+          "z-real-failure",
+        ],
+        failedCheckRuns: [
+          ...cancelledChecks,
+          { id: 999, name: "z-real-failure", conclusion: "failure" },
+        ],
+      },
+    );
+
+    const realFailure = evidence.find(
+      (failure) => failure.name === "z-real-failure",
+    );
+    expect(realFailure?.logTail).toContain("REAL-FAILURE-TAIL");
+    expect(ciAutofixEvidenceBytes(evidence)).toBeLessThanOrEqual(
+      CI_AUTOFIX_MAX_EVIDENCE_BYTES,
+    );
+    // Whatever budget the actionable failure left unspent goes to the
+    // cancelled siblings, in display order — never the other way around.
+    const cancelledWithLogs = evidence.filter(
+      (failure) =>
+        failure.name.startsWith("a-cancelled") && failure.logTail !== null,
+    );
+    // A tail dropped by the fair-share allocation is disclosed as such
+    // rather than reported as missing.
+    expect(realFailure?.logTailReason).toBeUndefined();
+    for (const failure of evidence) {
+      if (failure.name !== "z-real-failure" && failure.logTail === null) {
+        expect(failure.logTailReason).toBe("budget");
+      }
+    }
+    expect(cancelledWithLogs.length).toBeLessThan(
+      CI_AUTOFIX_MAX_LOGGED_FAILURES,
+    );
   });
 });

@@ -4,11 +4,12 @@ import { routines, type Routine } from "@/lib/db/schema";
 import {
   isDailyRoutineKind,
   isAvailableRoutineKind,
+  isSameLocalDay,
   type AvailableRoutineKind,
+  TIME_OF_DAY_PATTERN,
 } from "@/lib/routines/constants";
 import { createId } from "@/lib/utils/nanoid";
 
-const TIME_OF_DAY_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const INTERNAL_CONFIG_KEYS = new Set(["ciWatchState", "ciWatchErrorState"]);
 
 export interface RoutineDto {
@@ -66,7 +67,7 @@ function parseStoredConfig(config: string): Record<string, unknown> {
 function publicConfig(config: string): Record<string, unknown> {
   const parsed = parseStoredConfig(config);
   return Object.fromEntries(
-    Object.entries(parsed).filter(([key]) => !INTERNAL_CONFIG_KEYS.has(key))
+    Object.entries(parsed).filter(([key]) => !INTERNAL_CONFIG_KEYS.has(key)),
   );
 }
 
@@ -81,7 +82,9 @@ function toDto(row: Routine): RoutineDto | null {
   };
 }
 
-function assertConfigObject(value: unknown): asserts value is Record<string, unknown> {
+function assertConfigObject(
+  value: unknown,
+): asserts value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new RoutineInputError("`config` must be a JSON object.");
   }
@@ -100,7 +103,7 @@ function optionalBoolean(config: Record<string, unknown>, key: string): void {
 
 function optionalPositiveInteger(
   config: Record<string, unknown>,
-  key: string
+  key: string,
 ): void {
   const value = config[key];
   if (
@@ -108,14 +111,14 @@ function optionalPositiveInteger(
     (!Number.isInteger(value) || (value as number) < 1)
   ) {
     throw new RoutineInputError(
-      `\`config.${key}\` must be a positive integer.`
+      `\`config.${key}\` must be a positive integer.`,
     );
   }
 }
 
 function validateConfig(
   kind: AvailableRoutineKind,
-  config: Record<string, unknown>
+  config: Record<string, unknown>,
 ): void {
   assertConfigObject(config);
 
@@ -128,7 +131,7 @@ function validateConfig(
       failurePolicy !== "stop"
     ) {
       throw new RoutineInputError(
-        "`config.failurePolicy` must be `halt` or `stop`."
+        "`config.failurePolicy` must be `halt` or `stop`.",
       );
     }
     const circuitBreaker = config.circuitBreaker;
@@ -139,7 +142,7 @@ function validateConfig(
         (circuitBreaker as number) > 10)
     ) {
       throw new RoutineInputError(
-        "`config.circuitBreaker` must be an integer between 0 and 10."
+        "`config.circuitBreaker` must be an integer between 0 and 10.",
       );
     }
     const costCapUsd = config.costCapUsd;
@@ -150,7 +153,7 @@ function validateConfig(
         costCapUsd <= 0)
     ) {
       throw new RoutineInputError(
-        "`config.costCapUsd` must be a positive number."
+        "`config.costCapUsd` must be a positive number.",
       );
     }
     const namedAgentId = config.namedAgentId;
@@ -160,7 +163,7 @@ function validateConfig(
       typeof namedAgentId !== "string"
     ) {
       throw new RoutineInputError(
-        "`config.namedAgentId` must be a string or null."
+        "`config.namedAgentId` must be a string or null.",
       );
     }
     return;
@@ -185,12 +188,12 @@ function validateWrite(input: RoutineWriteInput): void {
 function persistedConfig(
   next: Record<string, unknown>,
   previous?: string,
-  preserveInternal = false
+  preserveInternal = false,
 ): string {
   const internal = Object.fromEntries(
     Object.entries(
-      preserveInternal && previous ? parseStoredConfig(previous) : {}
-    ).filter(([key]) => INTERNAL_CONFIG_KEYS.has(key))
+      preserveInternal && previous ? parseStoredConfig(previous) : {},
+    ).filter(([key]) => INTERNAL_CONFIG_KEYS.has(key)),
   );
   return JSON.stringify({ ...next, ...internal });
 }
@@ -208,7 +211,7 @@ function findRoutine(projectId: string, routineId: string): Routine {
 function assertUniqueProjectKind(
   projectId: string,
   kind: AvailableRoutineKind,
-  currentRoutineId?: string
+  currentRoutineId?: string,
 ): void {
   const existing = db
     .select({ id: routines.id })
@@ -220,48 +223,59 @@ function assertUniqueProjectKind(
   }
 }
 
-function isSameLocalDay(left: Date, right: Date): boolean {
-  return (
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate()
-  );
-}
-
 function missedDailySlot(input: RoutineWriteInput, now: Date): boolean {
   if (!input.enabled || !isDailyRoutineKind(input.kind)) return false;
   const [hours, minutes] = input.timeOfDay.split(":").map(Number);
   return now.getHours() * 60 + now.getMinutes() > hours * 60 + minutes;
 }
 
-function seededLastRunAt(
+/**
+ * Status recorded when a daily routine claims today's already-missed slot at
+ * creation/reconfiguration time. Nothing ran — the UI must present this as
+ * "first run scheduled for tomorrow", not as a completed run.
+ */
+const SEEDED_STATUS = "scheduled";
+
+function seedDailyClaim(
   input: RoutineWriteInput,
   now: Date,
-  previous?: Routine
-): string | null {
+  previous?: Routine,
+): { lastRunAt: string | null; lastStatus: string | null } {
+  const unchanged = {
+    lastRunAt: previous?.lastRunAt ?? null,
+    lastStatus: previous?.lastStatus ?? null,
+  };
   const scheduleChanged =
     !previous ||
     previous.kind !== input.kind ||
     previous.timeOfDay !== input.timeOfDay ||
     (!previous.enabled && input.enabled);
   if (!scheduleChanged || !missedDailySlot(input, now)) {
-    return previous?.lastRunAt ?? null;
+    return unchanged;
   }
 
-  const previousRun = previous?.lastRunAt
-    ? new Date(previous.lastRunAt)
-    : null;
+  const previousRun = previous?.lastRunAt ? new Date(previous.lastRunAt) : null;
   if (
     previousRun &&
     !Number.isNaN(previousRun.getTime()) &&
     isSameLocalDay(previousRun, now)
   ) {
-    return previous?.lastRunAt ?? null;
+    return unchanged;
   }
 
   // Claim today's already-missed slot so the minute sweep starts this daily
   // routine tomorrow instead of immediately after creation/reconfiguration.
-  return now.toISOString();
+  return { lastRunAt: now.toISOString(), lastStatus: SEEDED_STATUS };
+}
+
+/** A concurrent create/update lands on the raw UNIQUE index, not the guard. */
+function isRoutineUniqueViolation(error: unknown): error is { code: string } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "SQLITE_CONSTRAINT_UNIQUE"
+  );
 }
 
 export function listProjectRoutines(projectId: string): RoutineDto[] {
@@ -277,30 +291,38 @@ export function listProjectRoutines(projectId: string): RoutineDto[] {
 
 export function createProjectRoutine(
   projectId: string,
-  input: RoutineWriteInput
+  input: RoutineWriteInput,
 ): RoutineDto {
   validateWrite(input);
   assertUniqueProjectKind(projectId, input.kind);
   const id = createId();
-  const lastRunAt = seededLastRunAt(input, new Date());
-  db.insert(routines)
-    .values({
-      id,
-      projectId,
-      kind: input.kind,
-      enabled: input.enabled,
-      timeOfDay: input.timeOfDay,
-      config: persistedConfig(input.config),
-      lastRunAt,
-    })
-    .run();
+  const seeded = seedDailyClaim(input, new Date());
+  try {
+    db.insert(routines)
+      .values({
+        id,
+        projectId,
+        kind: input.kind,
+        enabled: input.enabled,
+        timeOfDay: input.timeOfDay,
+        config: persistedConfig(input.config),
+        lastRunAt: seeded.lastRunAt,
+        lastStatus: seeded.lastStatus,
+      })
+      .run();
+  } catch (error) {
+    if (isRoutineUniqueViolation(error)) {
+      throw new RoutineConflictError(input.kind);
+    }
+    throw error;
+  }
   return toDto(findRoutine(projectId, id)) as RoutineDto;
 }
 
 export function updateProjectRoutine(
   projectId: string,
   routineId: string,
-  patch: RoutinePatchInput
+  patch: RoutinePatchInput,
 ): RoutineDto {
   const current = findRoutine(projectId, routineId);
   if (!isAvailableRoutineKind(current.kind)) {
@@ -314,28 +336,36 @@ export function updateProjectRoutine(
   };
   validateWrite(next);
   assertUniqueProjectKind(projectId, next.kind, routineId);
-
-  db.update(routines)
-    .set({
-      kind: next.kind,
-      enabled: next.enabled,
-      timeOfDay: next.timeOfDay,
-      config: persistedConfig(
-        next.config,
-        current.config,
-        next.kind === "ci_watch"
-      ),
-      lastRunAt: seededLastRunAt(next, new Date(), current),
-    })
-    .where(and(eq(routines.id, routineId), eq(routines.projectId, projectId)))
-    .run();
+  const seeded = seedDailyClaim(next, new Date(), current);
+  try {
+    db.update(routines)
+      .set({
+        kind: next.kind,
+        enabled: next.enabled,
+        timeOfDay: next.timeOfDay,
+        config: persistedConfig(
+          next.config,
+          current.config,
+          next.kind === "ci_watch",
+        ),
+        lastRunAt: seeded.lastRunAt,
+        lastStatus: seeded.lastStatus,
+      })
+      .where(and(eq(routines.id, routineId), eq(routines.projectId, projectId)))
+      .run();
+  } catch (error) {
+    if (isRoutineUniqueViolation(error)) {
+      throw new RoutineConflictError(next.kind);
+    }
+    throw error;
+  }
 
   return toDto(findRoutine(projectId, routineId)) as RoutineDto;
 }
 
 export function deleteProjectRoutine(
   projectId: string,
-  routineId: string
+  routineId: string,
 ): void {
   findRoutine(projectId, routineId);
   db.delete(routines)

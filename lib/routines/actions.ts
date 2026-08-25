@@ -6,6 +6,7 @@ import {
   syncProjectGitHubIssues,
 } from "@/lib/github/issues";
 import { runCiWatchRoutine } from "@/lib/routines/ci-watch";
+import { parseRoutineConfig } from "@/lib/routines/constants";
 
 /** Result persisted and surfaced by the routine scheduler. */
 export interface RoutineActionResult {
@@ -110,24 +111,6 @@ export const defaultRoutineActionDeps: RoutineActionDeps = {
   runCiWatch: runCiWatchRoutine,
 };
 
-function parseConfig(
-  routine: Pick<Routine, "id" | "config">,
-): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(routine.config) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("config must be a JSON object");
-    }
-    return parsed as Record<string, unknown>;
-  } catch (error) {
-    throw new Error(
-      `Routine ${routine.id} has invalid config: ${
-        error instanceof Error ? error.message : "invalid JSON"
-      }`,
-    );
-  }
-}
-
 function optionalBoolean(
   config: Record<string, unknown>,
   key: string,
@@ -145,7 +128,7 @@ function parseNightRunRequest(
   routine: Routine,
   deps: RoutineActionDeps,
 ): NightRunRequest | null {
-  const config = parseConfig(routine);
+  const config = parseRoutineConfig(routine);
   const includeBacklog = optionalBoolean(config, "includeBacklog", false);
   const statuses: Array<"todo" | "backlog"> = includeBacklog
     ? ["todo", "backlog"]
@@ -227,7 +210,7 @@ async function runGitHubIssueSyncRoutine(
   routine: Routine,
   deps: RoutineActionDeps,
 ): Promise<RoutineActionResult> {
-  const config = parseConfig(routine);
+  const config = parseRoutineConfig(routine);
   const configuredInterval = config.intervalMinutes ?? 15;
   if (
     !Number.isInteger(configuredInterval) ||

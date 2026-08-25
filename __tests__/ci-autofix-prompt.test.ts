@@ -19,7 +19,7 @@ describe("buildCiFixPrompt", () => {
           { name: "third-party", logTail: null },
         ],
       },
-      "Prefer focused fixes."
+      "Prefer focused fixes.",
     );
 
     expect(prompt).toContain("Pull request: #42");
@@ -41,9 +41,47 @@ describe("buildCiFixPrompt", () => {
         prNumber: 42,
         headSha: "abc123",
         failures: [{ name: "unit", logTail: "before\n~~~\nafter" }],
-      }
+      },
     );
 
     expect(prompt).toContain("before\n~ ~ ~\nafter");
+  });
+
+  it("distinguishes a budget-dropped log from one GitHub never exposed", () => {
+    const prompt = buildCiFixPrompt(
+      { name: "Widgets", memory: null },
+      { title: "Checkout" },
+      {
+        prNumber: 42,
+        headSha: "abc123",
+        failures: [
+          { name: "unit", logTail: null, logTailReason: "budget" },
+          { name: "e2e", logTail: null, logTailReason: "unavailable" },
+        ],
+      },
+    );
+
+    expect(prompt).toContain(
+      "omitted to stay within this session's evidence budget",
+    );
+    expect(prompt).toContain("did not expose a downloadable log");
+  });
+
+  it("truncates an oversized specification to keep the prompt argv-safe", () => {
+    const spec = "x".repeat(40_000);
+    const prompt = buildCiFixPrompt(
+      { name: "Widgets", spec, memory: null },
+      { title: "Checkout" },
+      {
+        prNumber: 42,
+        headSha: "abc123",
+        failures: [{ name: "unit", logTail: "boom" }],
+      },
+    );
+
+    expect(prompt).toContain("[Specification truncated for this fix session]");
+    // The truncated spec plus the bounded evidence stay far below the
+    // 128 KB single-argument kernel limit.
+    expect(prompt.length).toBeLessThan(60_000);
   });
 });

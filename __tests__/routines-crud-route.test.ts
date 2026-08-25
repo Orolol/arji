@@ -13,18 +13,13 @@ vi.mock("@/lib/db", async () => {
 
 const { db } = await import("@/lib/db");
 const { projects, routines, settings } = await import("@/lib/db/schema");
-const { GET, POST } = await import(
-  "@/app/api/projects/[projectId]/routines/route"
-);
-const { PATCH, DELETE } = await import(
-  "@/app/api/projects/[projectId]/routines/[routineId]/route"
-);
-const { PUT: PUT_AUTOFIX } = await import(
-  "@/app/api/projects/[projectId]/routines/ci-autofix/route"
-);
-const { ciAutofixEnabledSettingKey } = await import(
-  "@/lib/routines/settings"
-);
+const { GET, POST } =
+  await import("@/app/api/projects/[projectId]/routines/route");
+const { PATCH, DELETE } =
+  await import("@/app/api/projects/[projectId]/routines/[routineId]/route");
+const { PUT: PUT_AUTOFIX } =
+  await import("@/app/api/projects/[projectId]/routines/ci-autofix/route");
+const { ciAutofixEnabledSettingKey } = await import("@/lib/routines/settings");
 
 const PROJECT_ID = "routine-project";
 
@@ -68,13 +63,11 @@ describe("project routines CRUD routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload.data).toEqual([]);
-    expect(payload.meta.availableKinds.map((entry: { kind: string }) => entry.kind)).toEqual([
-      "night_run",
-      "github_issue_sync",
-      "ci_watch",
-    ]);
+    expect(
+      payload.meta.availableKinds.map((entry: { kind: string }) => entry.kind),
+    ).toEqual(["night_run", "github_issue_sync", "ci_watch"]);
     expect(payload.meta.availableKinds).not.toContainEqual(
-      expect.objectContaining({ kind: "dreaming" })
+      expect.objectContaining({ kind: "dreaming" }),
     );
     expect(payload.meta.serverTimezone).toEqual(expect.any(String));
     expect(payload.meta.ciAutofixEnabled).toBe(false);
@@ -92,7 +85,7 @@ describe("project routines CRUD routes", () => {
           circuitBreaker: 4,
         },
       }),
-      projectParams()
+      projectParams(),
     );
     const created = (await createResponse.json()).data;
 
@@ -118,7 +111,7 @@ describe("project routines CRUD routes", () => {
         timeOfDay: "06:30",
         config: { intervalMinutes: 45 },
       }),
-      routineParams(created.id)
+      routineParams(created.id),
     );
     expect(patchResponse.status).toBe(200);
     expect((await patchResponse.json()).data).toMatchObject({
@@ -134,13 +127,13 @@ describe("project routines CRUD routes", () => {
 
     const deleteResponse = await DELETE(
       mockNextRequest({ method: "DELETE" }),
-      routineParams(created.id)
+      routineParams(created.id),
     );
     expect(deleteResponse.status).toBe(200);
     expect((await deleteResponse.json()).data.deleted).toBe(true);
-    expect((await (await GET(mockNextRequest(), projectParams())).json()).data).toEqual(
-      []
-    );
+    expect(
+      (await (await GET(mockNextRequest(), projectParams())).json()).data,
+    ).toEqual([]);
   });
 
   it("preserves CI-watch SHA state while replacing user-editable config", async () => {
@@ -174,12 +167,18 @@ describe("project routines CRUD routes", () => {
 
     const response = await PATCH(
       mockJsonRequest({ config: { intervalMinutes: 30 } }),
-      routineParams("ci-routine")
+      routineParams("ci-routine"),
     );
     expect(response.status).toBe(200);
-    expect((await response.json()).data.config).toEqual({ intervalMinutes: 30 });
+    expect((await response.json()).data.config).toEqual({
+      intervalMinutes: 30,
+    });
 
-    const stored = db.select().from(routines).all().find((row) => row.id === "ci-routine");
+    const stored = db
+      .select()
+      .from(routines)
+      .all()
+      .find((row) => row.id === "ci-routine");
     expect(JSON.parse(stored?.config ?? "{}")).toEqual({
       intervalMinutes: 30,
       ciWatchState: internalState,
@@ -199,9 +198,12 @@ describe("project routines CRUD routes", () => {
         timeOfDay: "22:00",
         config: {},
       }),
-      projectParams()
+      projectParams(),
     );
-    expect((await created.json()).data.lastRunAt).toBe(now.toISOString());
+    const createdPayload = (await created.json()).data;
+    expect(createdPayload.lastRunAt).toBe(now.toISOString());
+    // Nothing ran — the claim must read as scheduled, not as a completed run.
+    expect(createdPayload.lastStatus).toBe("scheduled");
 
     const disabled = await POST(
       mockJsonRequest({
@@ -210,16 +212,16 @@ describe("project routines CRUD routes", () => {
         timeOfDay: "23:30",
         config: {},
       }),
-      projectParams()
+      projectParams(),
     );
     const disabledRoutine = (await disabled.json()).data;
     expect(disabledRoutine.lastRunAt).toBeNull();
 
     const reenabled = await PATCH(
       mockJsonRequest({ enabled: true, timeOfDay: "22:30" }),
-      routineParams(disabledRoutine.id)
+      routineParams(disabledRoutine.id),
     );
-    expect((await reenabled.json()).data.lastRunAt).toBe(now.toISOString());
+    expect((await reenabled.json()).data.lastStatus).toBe("scheduled");
   });
 
   it("rejects duplicate routine kinds within one project", async () => {
@@ -229,7 +231,9 @@ describe("project routines CRUD routes", () => {
       timeOfDay: "00:00",
       config: { intervalMinutes: 15 },
     };
-    expect((await POST(mockJsonRequest(input), projectParams())).status).toBe(201);
+    expect((await POST(mockJsonRequest(input), projectParams())).status).toBe(
+      201,
+    );
 
     const duplicate = await POST(mockJsonRequest(input), projectParams());
     expect(duplicate.status).toBe(409);
@@ -242,12 +246,12 @@ describe("project routines CRUD routes", () => {
         timeOfDay: "22:00",
         config: {},
       }),
-      projectParams()
+      projectParams(),
     );
     const nightRunId = (await nightRun.json()).data.id;
     const conflictingUpdate = await PATCH(
       mockJsonRequest({ kind: "ci_watch", config: { intervalMinutes: 30 } }),
-      routineParams(nightRunId)
+      routineParams(nightRunId),
     );
     expect(conflictingUpdate.status).toBe(409);
   });
@@ -259,7 +263,7 @@ describe("project routines CRUD routes", () => {
         timeOfDay: "03:00",
         config: {},
       }),
-      projectParams()
+      projectParams(),
     );
     expect(unavailable.status).toBe(400);
 
@@ -269,7 +273,7 @@ describe("project routines CRUD routes", () => {
         timeOfDay: "25:00",
         config: {},
       }),
-      projectParams()
+      projectParams(),
     );
     expect(invalidTime.status).toBe(400);
     expect((await invalidTime.json()).error).toContain("HH:MM");
@@ -280,7 +284,7 @@ describe("project routines CRUD routes", () => {
         timeOfDay: "00:00",
         config: { intervalMinutes: 0 },
       }),
-      projectParams()
+      projectParams(),
     );
     expect(invalidConfig.status).toBe(400);
     expect((await invalidConfig.json()).error).toContain("positive integer");
@@ -298,11 +302,11 @@ describe("project routines CRUD routes", () => {
 
     const patch = await PATCH(
       mockJsonRequest({ enabled: false }),
-      routineParams("other-routine")
+      routineParams("other-routine"),
     );
     const remove = await DELETE(
       mockNextRequest({ method: "DELETE" }),
-      routineParams("other-routine")
+      routineParams("other-routine"),
     );
     expect(patch.status).toBe(404);
     expect(remove.status).toBe(404);
@@ -313,7 +317,7 @@ describe("project CI autofix setting", () => {
   it("is opt-in and round-trips an explicit project setting", async () => {
     const enabled = await PUT_AUTOFIX(
       mockJsonRequest({ enabled: true }),
-      projectParams()
+      projectParams(),
     );
     expect(enabled.status).toBe(200);
     expect((await enabled.json()).data.enabled).toBe(true);
@@ -327,7 +331,7 @@ describe("project CI autofix setting", () => {
 
     const disabled = await PUT_AUTOFIX(
       mockJsonRequest({ enabled: false }),
-      projectParams()
+      projectParams(),
     );
     expect((await disabled.json()).data.enabled).toBe(false);
   });
@@ -335,7 +339,7 @@ describe("project CI autofix setting", () => {
   it("rejects non-boolean values", async () => {
     const response = await PUT_AUTOFIX(
       mockJsonRequest({ enabled: "yes" }),
-      projectParams()
+      projectParams(),
     );
     expect(response.status).toBe(400);
   });

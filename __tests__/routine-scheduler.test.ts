@@ -220,6 +220,44 @@ describe("RoutineScheduler", () => {
     expect(result[0].status).toBe("failed");
     errorSpy.mockRestore();
   });
+
+  it("notifies a persistent thrown error once until its message changes", async () => {
+    const row = routine({ kind: "ci_watch", lastRunAt: null });
+    let attempts = 0;
+    const execute = vi.fn(async () => {
+      attempts += 1;
+      throw new Error("GitHub unavailable");
+    });
+    const deps = schedulerDeps(row, execute);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The signature guard lives on the scheduler instance (globalThis in
+    // production), so the same instance must run every sweep.
+    const scheduler = new RoutineScheduler(deps);
+
+    // Each sweep must see the routine as due again (the durable claim does
+    // not stop retries); the in-memory signature guard is what suppresses
+    // the repeat notifications. Sweeps are spaced one default CI-watch
+    // interval apart so dueness alone never blocks a retry.
+    await scheduler.sweep(localDate(25, 9, 30));
+    await scheduler.sweep(localDate(25, 9, 45));
+    await scheduler.sweep(localDate(25, 10, 0));
+    expect(attempts).toBe(3);
+    expect(deps.notify).toHaveBeenCalledTimes(1);
+
+    // A changed error signature re-notifies.
+    execute.mockImplementation(async () => {
+      throw new Error("Project is not connected to a GitHub repository");
+    });
+    await scheduler.sweep(localDate(25, 10, 15));
+    expect(deps.notify).toHaveBeenCalledTimes(2);
+    expect(deps.notify).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: "failed",
+        message: "Project is not connected to a GitHub repository",
+      }),
+    );
+    errorSpy.mockRestore();
+  });
 });
 
 describe("interrupted routine recovery", () => {

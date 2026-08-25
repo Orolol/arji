@@ -85,12 +85,16 @@ export interface PullRequestCiStatus {
    * `failedChecks` only.
    */
   failedCheckRuns?: PullRequestFailedCheckRun[];
+  /** Lifecycle of the PR itself, so CI watch can stop polling merged PRs. */
+  prState: "draft" | "open" | "closed" | "merged";
 }
 
 export interface PullRequestCiFailureEvidence {
   name: string;
-  /** Best-effort tail of the job log; null for legacy/third-party checks. */
+  /** Best-effort tail of the job log; null when GitHub exposes none or the
+   * bounded evidence budget dropped it (see `logTailReason`). */
   logTail: string | null;
+  logTailReason?: "unavailable" | "budget";
 }
 
 interface CheckRunSignal {
@@ -171,7 +175,7 @@ export function tailCiJobLog(
 export function classifyPullRequestCi(input: {
   checkRuns: CheckRunSignal[];
   commitStatuses: CommitStatusSignal[];
-}): Omit<PullRequestCiStatus, "headSha"> {
+}): PullRequestCiClassification {
   const failedChecks = new Set<string>();
   const hasActionableFailure =
     input.checkRuns.some(
@@ -184,11 +188,13 @@ export function classifyPullRequestCi(input: {
     );
 
   if (hasActionableFailure) {
+    // Only genuinely broken checks are reported: cancelled/stale matrix
+    // siblings stay pending signals and never join the alert or the fix
+    // prompt, where they would pad one real failure with empty work.
     for (const check of input.checkRuns) {
       if (
         check.conclusion &&
-        (ACTIONABLE_FAILURE_CONCLUSIONS.has(check.conclusion) ||
-          RELATED_FAILURE_CONCLUSIONS.has(check.conclusion))
+        ACTIONABLE_FAILURE_CONCLUSIONS.has(check.conclusion)
       ) {
         failedChecks.add(check.name);
       }
@@ -314,6 +320,13 @@ export async function fetchPullRequestCiStatus(
     pull_number: prNumber,
   });
   const headSha = pullRequest.head.sha;
+  const prState = pullRequest.merged
+    ? ("merged" as const)
+    : pullRequest.state === "closed"
+      ? ("closed" as const)
+      : pullRequest.draft
+        ? ("draft" as const)
+        : ("open" as const);
 
   const [checkRuns, rawCommitStatuses] = await Promise.all([
     octokit.paginate(octokit.checks.listForRef, {
@@ -380,10 +393,7 @@ export async function fetchPullRequestCiStatus(
   const failedCheckRuns = new Map<string, PullRequestFailedCheckRun>();
   for (const check of checkRunSignals) {
     if (
-      check.conclusion &&
       classification.failedChecks.includes(check.name) &&
-      (ACTIONABLE_FAILURE_CONCLUSIONS.has(check.conclusion) ||
-        RELATED_FAILURE_CONCLUSIONS.has(check.conclusion)) &&
       !failedCheckRuns.has(check.name)
     ) {
       failedCheckRuns.set(check.name, {
@@ -396,9 +406,18 @@ export async function fetchPullRequestCiStatus(
 
   return {
     headSha,
+    prState,
     ...classification,
     failedCheckRuns: [...failedCheckRuns.values()].sort(compareFailedCheckRuns),
   };
+}
+
+/**
+ * CI-only classification, independent of the PR's lifecycle state.
+ */
+export interface PullRequestCiClassification {
+  state: PullRequestCiState;
+  failedChecks: string[];
 }
 
 /**
@@ -423,6 +442,11 @@ export async function fetchPullRequestCiFailureEvidence(
   const runByName = new Map(
     failedCheckRuns.map((check) => [check.name, check]),
   );
+  // failedCheckRuns is priority-sorted (actionable conclusions first), so its
+  // index is the order in which the shared log-byte budget should be spent.
+  const logPriorityByName = new Map(
+    failedCheckRuns.map((check, index) => [check.name, index]),
+  );
 
   const loggedCheckNames = new Set(
     failedCheckRuns
@@ -434,8 +458,13 @@ export async function fetchPullRequestCiFailureEvidence(
       .slice(0, CI_AUTOFIX_MAX_FAILURES)
       .map(async (name) => {
         const checkRun = runByName.get(name);
-        if (!checkRun || !loggedCheckNames.has(name)) {
-          return { name, logTail: null };
+        if (!checkRun) {
+          // Legacy commit status: GitHub exposes no Actions job log at all.
+          return { name, logTail: null, logTailReason: "unavailable" as const };
+        }
+        if (!loggedCheckNames.has(name)) {
+          // A real log exists but falls outside the bounded download set.
+          return { name, logTail: null, logTailReason: "budget" as const };
         }
 
         try {
@@ -451,9 +480,16 @@ export async function fetchPullRequestCiFailureEvidence(
           // A non-Actions check run, expired redirect, or missing permission is
           // expected to have no downloadable log. The check name is still
           // useful evidence and the autofix must continue with the rest.
-          return { name, logTail: null };
+          return {
+            name,
+            logTail: null,
+            logTailReason: "unavailable" as const,
+          };
         }
       }),
   );
-  return boundCiAutofixEvidence(evidence);
+  return boundCiAutofixEvidence(
+    evidence,
+    (failure) => logPriorityByName.get(failure.name) ?? Number.MAX_SAFE_INTEGER,
+  );
 }

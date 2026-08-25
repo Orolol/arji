@@ -26,7 +26,11 @@ export function ciAutofixAttemptId(input: {
 
 function parseFailure(value: unknown): PullRequestCiFailureEvidence | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const candidate = value as { name?: unknown; logTail?: unknown };
+  const candidate = value as {
+    name?: unknown;
+    logTail?: unknown;
+    logTailReason?: unknown;
+  };
   if (
     typeof candidate.name !== "string" ||
     candidate.name.trim().length === 0 ||
@@ -38,9 +42,15 @@ function parseFailure(value: unknown): PullRequestCiFailureEvidence | null {
   ) {
     return null;
   }
+  const logTailReason =
+    candidate.logTailReason === "unavailable" ||
+    candidate.logTailReason === "budget"
+      ? candidate.logTailReason
+      : undefined;
   return {
     name: candidate.name.trim(),
     logTail: candidate.logTail,
+    ...(logTailReason ? { logTailReason } : {}),
   };
 }
 

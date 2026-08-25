@@ -1,6 +1,7 @@
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { epics, projects, routines, type Routine } from "@/lib/db/schema";
+import { getRunningSessionForTarget } from "@/lib/agents/concurrency";
 import {
   fetchPullRequestCiFailureEvidence,
   fetchPullRequestCiStatus,
@@ -11,6 +12,7 @@ import {
 import { parseOwnerRepo } from "@/lib/github/client";
 import { createCiWatchFailureNotification } from "@/lib/notifications/create";
 import type { RoutineActionResult } from "@/lib/routines/actions";
+import { parseRoutineConfig } from "@/lib/routines/constants";
 import {
   launchCiAutofixSession,
   type CiAutofixLaunchResult,
@@ -85,6 +87,17 @@ export interface CiWatchDeps {
     headSha: string;
     failedChecks: string[];
   }): void;
+  /**
+   * Writes back the lifecycle Arij just observed so a merged or closed PR
+   * stops being polled every interval. Internal state only; never surfaced
+   * through the routine CRUD API.
+   */
+  setEpicPullRequestState(epicId: string, prStatus: string): void;
+  /**
+   * Cheap pre-check mirroring the build route's one-agent-per-ticket guard:
+   * lets the sweep defer a busy epic before downloading log evidence.
+   */
+  hasActiveSessionForEpic(projectId: string, epicId: string): boolean;
 }
 
 export const defaultCiWatchDeps: CiWatchDeps = {
@@ -101,7 +114,9 @@ export const defaultCiWatchDeps: CiWatchDeps = {
       .where(
         and(
           eq(epics.projectId, projectId),
-          eq(epics.prStatus, "open"),
+          // Drafts run CI too; only closed/merged PRs are dropped, and the
+          // sweep writes that state back through setEpicPullRequestState.
+          inArray(epics.prStatus, ["open", "draft"]),
           isNotNull(epics.prNumber),
         ),
       )
@@ -124,7 +139,10 @@ export const defaultCiWatchDeps: CiWatchDeps = {
         .where(eq(routines.id, routineId))
         .get();
       if (!current) return;
-      const config = parseConfig({ id: routineId, config: current.config });
+      const config = parseRoutineConfig({
+        id: routineId,
+        config: current.config,
+      });
       tx.update(routines)
         .set({
           config: JSON.stringify({
@@ -138,25 +156,15 @@ export const defaultCiWatchDeps: CiWatchDeps = {
     });
   },
   notifyFailure: createCiWatchFailureNotification,
+  setEpicPullRequestState: (epicId, prStatus) => {
+    db.update(epics)
+      .set({ prStatus, updatedAt: new Date().toISOString() })
+      .where(eq(epics.id, epicId))
+      .run();
+  },
+  hasActiveSessionForEpic: (projectId, epicId) =>
+    getRunningSessionForTarget({ scope: "epic", projectId, epicId }) !== null,
 };
-
-function parseConfig(
-  routine: Pick<Routine, "id" | "config">,
-): Record<string, unknown> {
-  try {
-    const config = JSON.parse(routine.config) as unknown;
-    if (!config || typeof config !== "object" || Array.isArray(config)) {
-      throw new Error("config must be a JSON object");
-    }
-    return config as Record<string, unknown>;
-  } catch (error) {
-    throw new Error(
-      `Routine ${routine.id} has invalid config: ${
-        error instanceof Error ? error.message : "invalid JSON"
-      }`,
-    );
-  }
-}
 
 function parseStoredState(value: unknown): StoredCiWatchState {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -258,13 +266,28 @@ export async function runCiWatchRoutine(
   routine: Routine,
   deps: CiWatchDeps = defaultCiWatchDeps,
 ): Promise<RoutineActionResult> {
+  const config = parseRoutineConfig(routine);
+  const previousState = parseStoredState(config[CI_WATCH_STATE_CONFIG_KEY]);
+  const previousErrorState = parseStoredErrorState(
+    config[CI_WATCH_ERROR_STATE_CONFIG_KEY],
+  );
+
   const openPullRequests = deps
     .listOpenPullRequestEpics(routine.projectId)
     .filter(
       (epic): epic is CiWatchEpic & { prNumber: number } =>
-        epic.prStatus === "open" && epic.prNumber !== null,
+        (epic.prStatus === "open" || epic.prStatus === "draft") &&
+        epic.prNumber !== null,
     );
   if (openPullRequests.length === 0) {
+    // Nothing left to watch — prune the durable observations instead of
+    // letting the routine config accumulate stale per-PR entries forever.
+    if (
+      Object.keys(previousState).length > 0 ||
+      Object.keys(previousErrorState).length > 0
+    ) {
+      deps.persistState(routine.id, {}, {});
+    }
     return {
       status: "skipped",
       message: "No open pull requests are currently attached to epics.",
@@ -273,12 +296,8 @@ export async function runCiWatchRoutine(
     };
   }
 
-  const config = parseConfig(routine);
-  const previousState = parseStoredState(config[CI_WATCH_STATE_CONFIG_KEY]);
-  const previousErrorState = parseStoredErrorState(
-    config[CI_WATCH_ERROR_STATE_CONFIG_KEY],
-  );
   const nextErrorState: StoredCiWatchErrorState = { ...previousErrorState };
+
   let owner: string;
   let repo: string;
   try {
@@ -310,6 +329,7 @@ export async function runCiWatchRoutine(
   let autofixesLaunched = 0;
   let autofixesSkipped = 0;
   let processedPullRequests = 0;
+  let reconciledPullRequests = 0;
   let newProcessingErrors = 0;
   const failedPullRequestNumbers: number[] = [];
   const autofixEnabled = deps.isAutofixEnabled(routine.projectId);
@@ -321,6 +341,18 @@ export async function runCiWatchRoutine(
         repo,
         epic.prNumber,
       );
+
+      // A merged or closed PR has no living CI. Write the observed state
+      // back so it stops being polled, and drop its stale observation.
+      if (snapshot.prState === "closed" || snapshot.prState === "merged") {
+        deps.setEpicPullRequestState(epic.id, snapshot.prState);
+        delete nextState[epic.id];
+        delete nextErrorState[epic.id];
+        deps.persistState(routine.id, nextState, nextErrorState);
+        reconciledPullRequests += 1;
+        processedPullRequests += 1;
+        continue;
+      }
       const decision = nextCiObservation(
         previousState[epic.id],
         epic.prNumber,
@@ -347,11 +379,20 @@ export async function runCiWatchRoutine(
         newFailures += 1;
       }
 
-      if (
+      const autofixCandidate =
         snapshot.state === "failing" &&
         autofixEnabled &&
-        !decision.observation.autofixAttempted
+        !decision.observation.autofixAttempted;
+
+      if (
+        autofixCandidate &&
+        deps.hasActiveSessionForEpic(routine.projectId, epic.id)
       ) {
+        // A running agent owns this ticket. Defer without consuming the
+        // one-shot claim or downloading log evidence that would be thrown
+        // away on every poll until the ticket frees up.
+        autofixesSkipped += 1;
+      } else if (autofixCandidate) {
         // Claim before fetching logs or invoking the build route. A process
         // crash anywhere below consumes this head, honoring the strict
         // one-session-per-(PR, SHA) contract after restart.
@@ -431,6 +472,10 @@ export async function runCiWatchRoutine(
     }; ${failingPullRequests} failing, ${newFailures} newly reported${
       autofixesLaunched + autofixesSkipped > 0
         ? `; ${autofixesLaunched} autofix launched, ${autofixesSkipped} skipped`
+        : ""
+    }${
+      reconciledPullRequests > 0
+        ? `; ${reconciledPullRequests} closed or merged and no longer watched`
         : ""
     }${
       failedPullRequestNumbers.length > 0
