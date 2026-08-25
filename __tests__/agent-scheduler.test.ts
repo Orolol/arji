@@ -9,6 +9,7 @@ import {
   dbMockState,
   resetDbMockState,
 } from "@/__tests__/helpers/db-mock";
+import { SessionLifecycleConflictError } from "@/lib/agent-sessions/lifecycle";
 
 const lifecycleMocks = vi.hoisted(() => ({
   markSessionTerminal: vi.fn(),
@@ -246,6 +247,48 @@ describe("AgentScheduler dispatch", () => {
       success: false,
       error: "spawn exploded",
     });
+    expect(dbMockState.updateCalls).toHaveLength(0);
+  });
+
+  it("keeps a delivered build's review promotion when the closure settled the row before failing", async () => {
+    // A tail failure after finalizeBuildTerminalOutcome: the row is already
+    // terminal, so the net's own markSessionTerminal hits a lifecycle
+    // conflict — proof the closure owned every board effect, including the
+    // legitimate Review promotion. Reverting it would strand committed
+    // work in in_progress and hand it back to Full Auto's build selector.
+    const scheduler = new AgentScheduler({ getMaxConcurrent: () => 1 });
+    const started: string[] = [];
+
+    const a = controlledLaunch(started, "a");
+    scheduler.submit("proj-1", "a", a.launch);
+
+    dbMockState.getQueue = [
+      {
+        id: "a",
+        projectId: "proj-1",
+        epicId: "epic-a",
+        userStoryId: null,
+        agentType: "build",
+      },
+      { status: "review" },
+    ];
+
+    lifecycleMocks.markSessionTerminal.mockImplementation(() => {
+      throw new SessionLifecycleConflictError({
+        sessionId: "a",
+        fromStatus: "completed",
+        toStatus: "failed",
+      });
+    });
+
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    a.reject(new Error("comment insert failed"));
+    await settle();
+    consoleError.mockRestore();
+    lifecycleMocks.markSessionTerminal.mockReset();
+
     expect(dbMockState.updateCalls).toHaveLength(0);
   });
 

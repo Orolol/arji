@@ -119,6 +119,14 @@ export function cancelOrphanedQueuedSessions(): number {
  * in-process handler could not. Full Auto starts in the same boot and
  * would otherwise pick the orphaned review ticket up as a review candidate.
  *
+ * Known trade-off, deliberately accepted: `status = 'running'` cannot
+ * distinguish "the handler never ran" from "the handler promoted the
+ * ticket but its own lifecycle write failed" (the row then stays
+ * `running` while the board is already in Review). In the second case
+ * this sweep demotes delivered work; it errs toward `in_progress`
+ * because the alternative — trusting an unverifiable promotion — can
+ * feed unverified work into Full Auto's merge path.
+ *
  * Once per process, like `cancelOrphanedQueuedSessions`: a repeat call would
  * kill sessions started by live requests.
  */
@@ -155,11 +163,16 @@ export function failOrphanedRunningSessions(): number {
           error
         );
       }
+      // A row that could not be marked terminal here was not marked by
+      // anyone else either (nothing else runs at boot) — leave the board
+      // untouched and let the next boot retry the whole sweep.
+      continue;
     }
-    // Pull the zombie's mid-run review promotion back, if any. No-op
-    // unless the ticket is actually in Review; a code-producing zombie
-    // without an epicId (team builds) has nothing to address. One bad
-    // row must not abort the sweep, matching the loop's existing style.
+    // Pull the zombie's mid-run review promotion back, if any — only for
+    // rows this sweep actually finalized. No-op unless the ticket is
+    // actually in Review; a code-producing zombie without an epicId
+    // (team builds) has nothing to address. One bad row must not abort
+    // the sweep, matching the loop's existing style.
     if (zombie.epicId && isCodeProducingAgentType(zombie.agentType)) {
       try {
         pullTicketBackIfPromoted({
