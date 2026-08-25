@@ -9,13 +9,13 @@
  * (or in environments that skip instrumentation): lib/db initializes
  * lazily on first use. This hook just front-loads that work to startup.
  *
- * Also starts the two standing loops — the silent-session watchdog
- * (lib/agents/watchdog.ts) and Full Auto Mode (lib/auto-mode/engine.ts).
- * Both are globalThis-backed singletons with idempotent starts, so dev hot
- * reloads (which re-run instrumentation) cannot stack a second timer. Full
- * Auto Mode resumes purely from the `auto_mode_enabled:<projectId>` settings
- * keys: nothing about the mode is stored in memory across a restart, and the
- * sessions it was tracking were just cleaned up above.
+ * Also starts the three standing loops — the silent-session watchdog
+ * (lib/agents/watchdog.ts), Full Auto Mode (lib/auto-mode/engine.ts), and the
+ * daily routine scheduler (lib/routines/scheduler.ts). All are globalThis-
+ * backed singletons with idempotent starts, so dev hot reloads (which re-run
+ * instrumentation) cannot stack a second timer. Full Auto Mode resumes purely
+ * from the `auto_mode_enabled:<projectId>` settings keys; daily routines use
+ * their durable last_run_at claim to avoid a replay after restart.
  *
  * Finally registers the session terminal hook
  * (lib/agent-sessions/terminal-hooks.ts). That slot holds exactly ONE
@@ -50,6 +50,11 @@ export async function register(): Promise<void> {
       "@/lib/auto-mode/engine"
     );
     startAutoMode();
+
+    const { startRoutineScheduler } = await import(
+      "@/lib/routines/scheduler"
+    );
+    startRoutineScheduler();
 
     const { setSessionTerminalHook } = await import(
       "@/lib/agent-sessions/terminal-hooks"

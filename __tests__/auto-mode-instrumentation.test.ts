@@ -14,8 +14,10 @@ const bootMocks = vi.hoisted(() => ({
   failOrphanedRunningSessions: vi.fn(),
   startSessionWatchdog: vi.fn(),
   startAutoMode: vi.fn(),
+  startRoutineScheduler: vi.fn(),
   kickAutoModeForSession: vi.fn(),
   maybeAutoDistillAfterSessionTerminal: vi.fn(async () => {}),
+  createTerminalSessionNotification: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -38,9 +40,18 @@ vi.mock("@/lib/auto-mode/engine", () => ({
   kickAutoModeForSession: bootMocks.kickAutoModeForSession,
 }));
 
+vi.mock("@/lib/routines/scheduler", () => ({
+  startRoutineScheduler: bootMocks.startRoutineScheduler,
+}));
+
 vi.mock("@/lib/workflow/memory-distill", () => ({
   maybeAutoDistillAfterSessionTerminal:
     bootMocks.maybeAutoDistillAfterSessionTerminal,
+}));
+
+vi.mock("@/lib/agent-sessions/terminal-notification", () => ({
+  createTerminalSessionNotification:
+    bootMocks.createTerminalSessionNotification,
 }));
 
 const { register } = await import("@/instrumentation");
@@ -63,6 +74,7 @@ describe("register()", () => {
     expect(bootMocks.failOrphanedRunningSessions).toHaveBeenCalled();
     expect(bootMocks.startSessionWatchdog).toHaveBeenCalledTimes(1);
     expect(bootMocks.startAutoMode).toHaveBeenCalledTimes(1);
+    expect(bootMocks.startRoutineScheduler).toHaveBeenCalledTimes(1);
   });
 
   it("registers ONE hook that runs both the auto-mode kick and auto-distill", async () => {
@@ -93,6 +105,7 @@ describe("register()", () => {
     process.env.NEXT_RUNTIME = "edge";
     await register();
     expect(bootMocks.startAutoMode).not.toHaveBeenCalled();
+    expect(bootMocks.startRoutineScheduler).not.toHaveBeenCalled();
     process.env.NEXT_RUNTIME = "nodejs";
   });
 });

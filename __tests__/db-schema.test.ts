@@ -49,6 +49,19 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       updatedAt: "updated_at",
     },
   },
+  routines: {
+    sqlName: "routines",
+    columns: {
+      id: "id",
+      projectId: "project_id",
+      kind: "kind",
+      enabled: "enabled",
+      timeOfDay: "time_of_day",
+      config: "config",
+      lastRunAt: "last_run_at",
+      lastStatus: "last_status",
+    },
+  },
   documents: {
     sqlName: "documents",
     columns: {
@@ -541,6 +554,8 @@ const DEFAULTS: [string, string, unknown][] = [
   ["projects", "status", "ideation"],
   ["projects", "imported", 0],
   ["projects", "ticketCounter", 0],
+  ["routines", "enabled", true],
+  ["routines", "config", "{}"],
   ["documents", "kind", "text"],
   ["epics", "priority", 0],
   ["epics", "status", "backlog"],
@@ -578,6 +593,11 @@ describe("db schema: column defaults", () => {
 
 const NOT_NULL: [string, string][] = [
   ["projects", "name"],
+  ["routines", "projectId"],
+  ["routines", "kind"],
+  ["routines", "enabled"],
+  ["routines", "timeOfDay"],
+  ["routines", "config"],
   ["documents", "projectId"],
   ["documents", "originalFilename"],
   ["epics", "projectId"],
@@ -644,6 +664,8 @@ const NULLABLE: [string, string][] = [
   ["projects", "cloneSource"],
   ["projects", "gitRemoteUrl"],
   ["projects", "defaultBranch"],
+  ["routines", "lastRunAt"],
+  ["routines", "lastStatus"],
   ["epics", "prNumber"],
   ["epics", "prUrl"],
   ["epics", "prStatus"],
@@ -686,6 +708,23 @@ describe("db schema: nullable columns", () => {
 type IndexSpec = { name: string; unique: boolean; columns: string[] };
 
 const INDEXES: Record<string, IndexSpec[]> = {
+  routines: [
+    {
+      name: "routines_project_kind_unique",
+      unique: true,
+      columns: ["project_id", "kind"],
+    },
+    {
+      name: "routines_project_idx",
+      unique: false,
+      columns: ["project_id"],
+    },
+    {
+      name: "routines_enabled_idx",
+      unique: false,
+      columns: ["enabled"],
+    },
+  ],
   documents: [
     {
       name: "documents_project_filename_unique",
@@ -865,6 +904,9 @@ type ForeignKeySpec = {
 };
 
 const FOREIGN_KEYS: Record<string, ForeignKeySpec[]> = {
+  routines: [
+    { columns: ["project_id"], foreignTable: "projects", foreignColumns: ["id"], onDelete: "cascade" },
+  ],
   documents: [
     { columns: ["project_id"], foreignTable: "projects", foreignColumns: ["id"], onDelete: "cascade" },
   ],
@@ -932,6 +974,27 @@ describe("db schema: foreign keys", () => {
 // ---------------------------------------------------------------------------
 
 describe("db schema: exported types", () => {
+  it("Routine select and insert shapes", () => {
+    const selected: schema.Routine = {
+      id: "routine_1",
+      projectId: "proj_1",
+      kind: "night_run",
+      enabled: true,
+      timeOfDay: "02:30",
+      config: "{}",
+      lastRunAt: null,
+      lastStatus: null,
+    };
+    const inserted: schema.NewRoutine = {
+      id: "routine_2",
+      projectId: "proj_1",
+      kind: "github_issue_sync",
+      timeOfDay: "09:00",
+    };
+    expect(selected.kind).toBe("night_run");
+    expect(inserted.kind).toBe("github_issue_sync");
+  });
+
   it("GitSyncLog select shape", () => {
     const log: schema.GitSyncLog = {
       id: "sl_1",

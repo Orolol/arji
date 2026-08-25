@@ -14,6 +14,7 @@ import {
   dreamingLastCutoffSettingKey,
 } from "@/lib/workflow/dreaming-constants";
 import { webhookSettingKey } from "@/lib/webhooks/send";
+import { ciAutofixEnabledSettingKey } from "@/lib/routines/settings";
 
 /**
  * Every `<key>:<projectId>` settings row a project can own.
@@ -39,5 +40,6 @@ export function perProjectSettingKeys(projectId: string): string[] {
     nightCostCapSettingKey(projectId),
     dreamingAfterNightRunSettingKey(projectId),
     dreamingLastCutoffSettingKey(projectId),
+    ciAutofixEnabledSettingKey(projectId),
   ];
 }

@@ -5,6 +5,7 @@ import {
   userStories,
   ticketComments,
   reviewComments,
+  agentSessions,
 } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import {
@@ -14,9 +15,12 @@ import {
 } from "@/lib/api/route-helpers";
 import { createId } from "@/lib/utils/nanoid";
 import { isBuildableStatus } from "@/lib/types/kanban";
-import { createWorktree, isGitRepo } from "@/lib/git/manager";
+import { attachWorktree, createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
-import { buildBuildPrompt } from "@/lib/claude/prompt-builder";
+import {
+  buildBuildPrompt,
+  buildCiFixPrompt,
+} from "@/lib/claude/prompt-builder";
 import { isVisualProofEnabled } from "@/lib/claude/visual-proof";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import {
@@ -44,6 +48,7 @@ import {
 } from "@/lib/documents/mentions";
 import {
   buildEpicTargetUrl,
+  createCiAutofixReadyNotification,
   createUnresolvedMentionsNotification,
 } from "@/lib/notifications/create";
 import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
@@ -68,12 +73,26 @@ import {
   startPipelineRun,
   type PipelineStageResult,
 } from "@/lib/pipeline";
+import {
+  ciAutofixAttemptId,
+  parseCiAutofixPayload,
+} from "@/lib/routines/ci-autofix-shared";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
 
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId, epicId } = await params;
   const body = await request.json().catch(() => ({}));
+  const ciAutofix =
+    body.ciAutofix === undefined
+      ? null
+      : parseCiAutofixPayload(body.ciAutofix);
+  if (body.ciAutofix !== undefined && !ciAutofix) {
+    return NextResponse.json(
+      { error: "Invalid ciAutofix payload" },
+      { status: 400 }
+    );
+  }
   const namedAgentId: string | null = body.namedAgentId || null;
   // Autonomous pipeline flag: an explicit boolean forces on/off; absent, the
   // pipeline_enabled setting chain decides (default OFF).
@@ -85,12 +104,54 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (isErrorResponse(foundEpic)) return foundEpic;
   const { epic } = foundEpic;
 
+  const ciAutofixRunId = ciAutofix
+    ? ciAutofixAttemptId({
+        epicId,
+        prNumber: ciAutofix.prNumber,
+        headSha: ciAutofix.headSha,
+      })
+    : null;
+  const findExistingCiAutofixAttempt = () =>
+    ciAutofixRunId
+      ? db
+          .select({ id: agentSessions.id })
+          .from(agentSessions)
+          .where(
+            and(
+              eq(agentSessions.projectId, projectId),
+              eq(agentSessions.epicId, epicId),
+              eq(agentSessions.batchRunId, ciAutofixRunId)
+            )
+          )
+          .get()
+      : null;
+  const existingAttempt = findExistingCiAutofixAttempt();
+  if (existingAttempt) {
+    return NextResponse.json({
+      data: {
+        sessionId: existingAttempt.id,
+        ciAutofix: { launched: false, reason: "already_attempted" },
+      },
+    });
+  }
+
   // Validate status — same source of truth as the batch build's guard.
   if (!isBuildableStatus(epic.status)) {
     return NextResponse.json(
       { error: "Epic must be in backlog, todo, in_progress, or review status to build" },
       { status: 400 }
     );
+  }
+
+  let ciAutofixBranchName: string | null = null;
+  if (ciAutofix) {
+    if (!epic.branchName) {
+      return NextResponse.json(
+        { error: "CI autofix requires the epic's persisted pull request branch" },
+        { status: 400 }
+      );
+    }
+    ciAutofixBranchName = epic.branchName;
   }
 
   // Get project
@@ -177,24 +238,27 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const buildSystemPrompt = await resolveAgentPrompt("build", projectId);
 
-  // Create worktree
-  const { worktreePath, branchName } = await createWorktree(
-    gitRepoPath,
-    epic.id,
-    epic.title,
-    { defaultBranch: project.defaultBranch }
-  );
+  // A CI autofix must modify the exact branch behind the PR. Deriving a
+  // branch from the current epic title could silently cut a new branch from
+  // the base branch after the title has been edited.
+  const { worktreePath, branchName } = ciAutofixBranchName
+    ? await attachWorktree(gitRepoPath, ciAutofixBranchName)
+    : await createWorktree(gitRepoPath, epic.id, epic.title, {
+        defaultBranch: project.defaultBranch,
+      });
 
   // Build prompt — append review context if present
-  let prompt = buildBuildPrompt(
-    project,
-    [],
-    epic,
-    us,
-    buildSystemPrompt,
-    promptComments,
-    { visualProofEnabled: isVisualProofEnabled() }
-  );
+  let prompt = ciAutofix
+    ? buildCiFixPrompt(project, epic, ciAutofix, buildSystemPrompt)
+    : buildBuildPrompt(
+        project,
+        [],
+        epic,
+        us,
+        buildSystemPrompt,
+        promptComments,
+        { visualProofEnabled: isVisualProofEnabled() }
+      );
   if (reviewContext) {
     prompt = prompt + "\n\n" + reviewContext;
   }
@@ -219,7 +283,11 @@ export async function POST(request: NextRequest, { params }: Params) {
   // Resume support — scope-guarded
   let cliSessionId: string | undefined;
   let resumeSession = false;
-  if (isResumableProvider(resolvedAgent.provider) && body.resumeSessionId) {
+  if (
+    !ciAutofix &&
+    isResumableProvider(resolvedAgent.provider) &&
+    body.resumeSessionId
+  ) {
     const validated = validateResumeSession({
       resumeSessionId: body.resumeSessionId,
       epicId: epicId,
@@ -240,6 +308,20 @@ export async function POST(request: NextRequest, { params }: Params) {
   const logsDir = path.join(process.cwd(), "data", "sessions", sessionId);
   fs.mkdirSync(logsDir, { recursive: true });
   const logsPath = path.join(logsDir, "logs.json");
+
+  // The first lookup happened before repository/worktree preparation. Repeat
+  // it immediately before the no-await conflict/transition/insert section so
+  // two CI-watch routines that prepared concurrently cannot both persist a
+  // session for the same PR head.
+  const concurrentAttempt = findExistingCiAutofixAttempt();
+  if (concurrentAttempt) {
+    return NextResponse.json({
+      data: {
+        sessionId: concurrentAttempt.id,
+        ciAutofix: { launched: false, reason: "already_attempted" },
+      },
+    });
+  }
 
   // Check concurrency guard
   const conflict = getRunningSessionForTarget({
@@ -264,6 +346,9 @@ export async function POST(request: NextRequest, { params }: Params) {
       epicId,
       scope: "epic",
       sessionId,
+      reason: ciAutofix
+        ? `CI autofix started for PR #${ciAutofix.prNumber} at ${ciAutofix.headSha.slice(0, 12)}`
+        : undefined,
     });
   } catch (error) {
     if (error instanceof WorkflowTransitionError) {
@@ -273,10 +358,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // Branch metadata is not a status transition and stays a plain update.
-  db.update(epics)
-    .set({ branchName, updatedAt: now })
-    .where(eq(epics.id, epicId))
-    .run();
+  // Autofix deliberately preserves the PR branch recorded on the epic.
+  if (!ciAutofix) {
+    db.update(epics)
+      .set({ branchName, updatedAt: now })
+      .where(eq(epics.id, epicId))
+      .run();
+  }
 
   createQueuedSession({
     id: sessionId,
@@ -293,6 +381,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     agentType: "build",
     namedAgentName: resolvedAgent.name || null,
     model: resolvedAgent.model || null,
+    batchRunId: ciAutofixRunId,
     createdAt: now,
   });
 
@@ -353,6 +442,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       success: !!result?.success,
       outcome,
       error: result?.error,
+      reason: ciAutofix
+        ? `CI autofix completed locally for PR #${ciAutofix.prNumber}; ` +
+          `branch ${branchName} carries an unpushed fix for head ${ciAutofix.headSha.slice(0, 12)} and requires a manual push`
+        : undefined,
     });
     if (terminal.kind !== "failed" && terminal.kind !== "refused") {
       emitSessionCompleted(projectId, epicId, sessionId);
@@ -365,6 +458,23 @@ export async function POST(request: NextRequest, { params }: Params) {
           ? terminal.error
           : result?.error || "Build failed"
       );
+    }
+    if (ciAutofix && terminal.kind === "promoted") {
+      try {
+        createCiAutofixReadyNotification({
+          projectId,
+          epicId,
+          sessionId,
+          branchName,
+          prNumber: ciAutofix.prNumber,
+          headSha: ciAutofix.headSha,
+        });
+      } catch (error) {
+        console.warn(
+          `[epic build] Failed to notify that CI autofix ${sessionId} is ready to push`,
+          error
+        );
+      }
     }
 
     // Post output as epic comment
@@ -391,7 +501,9 @@ export async function POST(request: NextRequest, { params }: Params) {
   // Autonomous pipeline: when active, wrap the launch closure with the
   // settle pattern (copied from the batch route's launchEpic) so the run's
   // engine can await this build's terminal state, then start the run.
-  const pipelineActive = pipelineParam ?? resolvePipelineEnabled(projectId);
+  const pipelineActive = ciAutofix
+    ? false
+    : pipelineParam ?? resolvePipelineEnabled(projectId);
 
   let pipeline: { runId: string } | null = null;
   if (pipelineActive) {
@@ -434,6 +546,12 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   return NextResponse.json({
-    data: { sessionId, branchName, worktreePath, pipeline },
+    data: {
+      sessionId,
+      branchName,
+      worktreePath,
+      pipeline,
+      ...(ciAutofix ? { ciAutofix: { launched: true } } : {}),
+    },
   });
 }
