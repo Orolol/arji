@@ -5,9 +5,14 @@ import {
   real,
   index,
   uniqueIndex,
+  check,
   AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import type {
+  FrictionCategory,
+  FrictionStatus,
+} from "@/lib/frictions/constants";
 import type { RoutineKind } from "@/lib/routines/constants";
 
 export const projects = sqliteTable("projects", {
@@ -262,6 +267,60 @@ export const agentSessionChunks = sqliteTable(
     sessionStreamSequenceIdx: index(
       "agent_session_chunks_session_stream_sequence_idx"
     ).on(table.sessionId, table.streamType, table.sequence),
+  })
+);
+
+/**
+ * Structured DevX friction reported by an agent session.
+ *
+ * `agentSessionId` intentionally remains an attributed string rather than a
+ * foreign key: friction is durable project memory and must survive later
+ * session cleanup. The optional epic link is cleared if its ticket is
+ * deleted, while deleting the project removes the project-owned report.
+ */
+export const frictions = sqliteTable(
+  "frictions",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    epicId: text("epic_id").references(() => epics.id, {
+      onDelete: "set null",
+    }),
+    agentSessionId: text("agent_session_id").notNull(),
+    category: text("category").$type<FrictionCategory>().notNull(),
+    description: text("description").notNull(),
+    filePath: text("file_path"),
+    occurrences: integer("occurrences").notNull().default(1),
+    status: text("status").$type<FrictionStatus>().notNull().default("new"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectStatusOccurrencesIdx: index(
+      "frictions_project_status_occurrences_idx"
+    ).on(table.projectId, table.status, table.occurrences),
+    openDedupeIdx: index("frictions_open_dedupe_idx").on(
+      table.projectId,
+      table.category,
+      table.filePath,
+      table.status
+    ),
+    sessionIdx: index("frictions_session_idx").on(table.agentSessionId),
+    categoryCheck: check(
+      "frictions_category_check",
+      sql`${table.category} IN ('broken_tooling', 'misleading_docs', 'flaky_test', 'unclear_convention', 'other')`
+    ),
+    statusCheck: check(
+      "frictions_status_check",
+      sql`${table.status} IN ('new', 'triaged', 'converted', 'dismissed')`
+    ),
+    occurrencesCheck: check(
+      "frictions_occurrences_check",
+      sql`${table.occurrences} >= 1`
+    ),
   })
 );
 
@@ -625,6 +684,9 @@ export type NewReviewComment = typeof reviewComments.$inferInsert;
 
 export type GradingReport = typeof gradingReports.$inferSelect;
 export type NewGradingReport = typeof gradingReports.$inferInsert;
+
+export type Friction = typeof frictions.$inferSelect;
+export type NewFriction = typeof frictions.$inferInsert;
 
 export type SessionArtifact = typeof sessionArtifacts.$inferSelect;
 export type NewSessionArtifact = typeof sessionArtifacts.$inferInsert;

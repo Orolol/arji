@@ -137,6 +137,7 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "mcp__arij__get_ticket",
       "mcp__arij__update_ticket_status",
       "mcp__arij__post_comment",
+      "mcp__arij__report_friction",
       "mcp__arij__attach_artifact",
       "mcp__arij__create_bug",
       "mcp__arij__ask_question",
@@ -410,6 +411,9 @@ describe("arijToolsSection", () => {
     expect(text).toContain("ask_question");
     expect(text).toContain("create_bug");
     expect(text).toContain("update_ticket_status");
+    expect(text).toContain("report_friction and then continue working");
+    expect(text).toContain("fire-and-forget");
+    expect(text).toContain("never a reason to stop or leave the task unfinished");
     expect(text).not.toContain("submit_findings");
     expect(text).not.toContain("Overall Verdict");
   });
@@ -578,6 +582,7 @@ describe("buildMcpSpawnConfig", () => {
     expect(config.allowedToolNames).toEqual([...ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES]);
     // no agent-only tools leak into the chat allowlist
     expect(config.allowedToolNames).not.toContain("mcp__arij__ask_question");
+    expect(config.allowedToolNames).not.toContain("mcp__arij__report_friction");
     expect(config.allowedToolNames).not.toContain("mcp__arij__attach_artifact");
     expect(config.allowedToolNames).not.toContain("mcp__arij__submit_findings");
     expect(config.allowedToolNames).not.toContain("mcp__arij__submit_grading");

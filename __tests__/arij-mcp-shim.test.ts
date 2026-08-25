@@ -27,6 +27,7 @@ const EXPECTED_TOOL_NAMES = [
   "get_ticket",
   "update_ticket_status",
   "post_comment",
+  "report_friction",
   "attach_artifact",
   "create_bug",
   "ask_question",
@@ -291,6 +292,20 @@ describe("tools/list", () => {
       submitGrading.inputSchema.properties.gradings.items.properties.status.enum
     ).toEqual(["met", "partial", "missed"]);
 
+    const reportFriction: any = byName.get("report_friction");
+    expect(reportFriction.inputSchema.required).toEqual([
+      "category",
+      "description",
+    ]);
+    expect(reportFriction.inputSchema.properties.category.enum).toEqual([
+      "broken_tooling",
+      "misleading_docs",
+      "flaky_test",
+      "unclear_convention",
+      "other",
+    ]);
+    expect(reportFriction.inputSchema.properties.filePath.type).toBe("string");
+
     const attachArtifact: any = byName.get("attach_artifact");
     expect(attachArtifact.inputSchema.required).toEqual(["path", "caption"]);
     expect(attachArtifact.inputSchema.properties.caption.maxLength).toBe(2000);
@@ -365,6 +380,33 @@ describe("tools/call → HTTP bridge", () => {
     expect(result.isError).toBeFalsy();
     expect(capturedRequests[0]).toMatchObject({
       url: "/api/mcp/submit-grading",
+      authorization: "Bearer test-token",
+      body: payload,
+    });
+  });
+
+  it("bridges report_friction to the kebab-case endpoint without adding scope fields", async () => {
+    nextResponse = {
+      status: 200,
+      body: {
+        data: {
+          frictionId: "friction-1",
+          occurrences: 1,
+          deduplicated: false,
+        },
+      },
+    };
+    const payload = {
+      category: "broken_tooling",
+      description: "The local lint wrapper exits without diagnostics.",
+      filePath: "scripts/lint.sh",
+    };
+
+    const result = await client.callTool("report_friction", payload);
+
+    expect(result.isError).toBeFalsy();
+    expect(capturedRequests[0]).toMatchObject({
+      url: "/api/mcp/report-friction",
       authorization: "Bearer test-token",
       body: payload,
     });
@@ -558,6 +600,7 @@ describe("chat toolset (ARIJ_MCP_TOOLSET=chat)", () => {
       "create_bug",
       "ask_question",
       "attach_artifact",
+      "report_friction",
       "submit_findings",
       "submit_grading",
     ]) {

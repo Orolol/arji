@@ -11,9 +11,10 @@
  * Toolsets (ARIJ_MCP_TOOLSET): "agent" (default) is the ticket-scoped set for
  * build/review sessions launched on a ticket. "chat" is the board-scoped set
  * for CLI chat conversations — parity with the fast-mode board tools
- * (lib/chat/board-tools.ts): no ask_question/submit_findings/submit_grading
- * (nothing holds a chat turn), ticket_id always explicit (a chat token has no
- * launch ticket).
+ * (lib/chat/board-tools.ts): no ask_question/report_friction/submit_findings/
+ * submit_grading (nothing holds a chat turn and chat turns are not durable
+ * agent sessions), ticket_id always explicit (a chat token has no launch
+ * ticket).
  * Only the active toolset's tools are listed AND callable.
  *
  * Deliberate constraints:
@@ -116,6 +117,41 @@ const AGENT_TOOLS = [
         ...TICKET_ID_PROPERTY,
       },
       required: ["body"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "report_friction",
+    description:
+      "Record a tooling, documentation, test, or convention friction for this project. This writes only to Arij's friction register and never changes the board.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          enum: [
+            "broken_tooling",
+            "misleading_docs",
+            "flaky_test",
+            "unclear_convention",
+            "other",
+          ],
+          description: "Closed category describing the kind of friction.",
+        },
+        description: {
+          type: "string",
+          minLength: 1,
+          maxLength: 4000,
+          description: "Concise, actionable description of what was difficult.",
+        },
+        filePath: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2000,
+          description: "Optional repository-relative path related to the friction.",
+        },
+      },
+      required: ["category", "description"],
       additionalProperties: false,
     },
   },

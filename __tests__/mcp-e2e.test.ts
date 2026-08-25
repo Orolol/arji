@@ -261,6 +261,19 @@ const CALL_MATRIX: ReadonlyArray<{
     data: { commentId: "comment-1" },
   },
   {
+    tool: "report_friction",
+    args: {
+      category: "unclear_convention",
+      description: "The branch naming convention is ambiguous.",
+      filePath: "CONTRIBUTING.md",
+    },
+    data: {
+      frictionId: "friction-1",
+      occurrences: 1,
+      deduplicated: false,
+    },
+  },
+  {
     tool: "attach_artifact",
     args: {
       path: "screenshots/result.png",
