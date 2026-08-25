@@ -1480,7 +1480,8 @@ export function buildSecondOpinionPrompt(
   epic: PromptEpic,
   userStories: PromptUserStory[],
   branchName: string,
-  baseBranch: string
+  baseBranch: string,
+  finalDiff?: string
 ): string {
   project = withProjectMemory(project);
   const parts: string[] = [];
@@ -1501,7 +1502,14 @@ Base branch: \`${baseBranch}\`
 This epic already passed its normal review. Perform one short, independent,
 read-only pass over the **final branch diff** before Full Auto merges it.
 
-1. Inspect the exact final diff with \`git diff ${baseBranch}...HEAD\` and read only the surrounding code needed to validate it.
+The exact output of \`git diff ${baseBranch}...HEAD\` is embedded below. Read
+only the surrounding code needed to validate it; do not edit files.
+
+\`\`\`diff
+${finalDiff?.trim() || "(no committed diff)"}
+\`\`\`
+
+1. Inspect the embedded final diff and read only the surrounding code needed to validate it.
 2. Look only for merge-blocking defects: correctness regressions, security issues, destructive behaviour, or an acceptance criterion that the diff plainly does not implement. Do not restyle working code and do not edit files.
 3. Call \`mcp__arij__submit_findings\` exactly once. Use \`changes_requested\` and file/line-anchored \`critical\` or \`major\` findings for any blocker. Otherwise use \`approved\` (or \`approved_with_minor_issues\`) with an empty findings array; keep non-blocking suggestions in the summary so they do not become open merge blockers.
 4. End your response with exactly one of these lines:

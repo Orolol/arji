@@ -153,7 +153,7 @@ export const agentSessions = sqliteTable("agent_sessions", {
   epicId: text("epic_id").references(() => epics.id),
   userStoryId: text("user_story_id").references(() => userStories.id),
   status: text("status").default("queued"), // queued | running | completed | failed | cancelled
-  mode: text("mode").default("code"), // plan | code
+  mode: text("mode").default("code"), // plan | code | analyze | chat
   orchestrationMode: text("orchestration_mode").default("solo"), // solo | team
   provider: text("provider").default("claude-code"), // see PROVIDER_OPTIONS in lib/agent-config/constants.ts
   prompt: text("prompt"),

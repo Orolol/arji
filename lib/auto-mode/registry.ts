@@ -110,6 +110,13 @@ interface AutoModeProjectState {
    * so the sweep does not re-run a doomed `git merge` every 15 seconds.
    */
   mergeDeferredUntil: Map<string, string>;
+  /**
+   * Last stable reason why the pre-merge second-opinion gate could not be
+   * dispatched. The supervisor still probes on every sweep so installing a
+   * compatible provider takes effect immediately, but it writes the same
+   * activity trace only once instead of every 15 seconds.
+   */
+  secondOpinionSkipReasons: Map<string, string>;
 }
 
 function emptyState(): AutoModeProjectState {
@@ -122,6 +129,7 @@ function emptyState(): AutoModeProjectState {
     sweeping: false,
     merging: new Set(),
     mergeDeferredUntil: new Map(),
+    secondOpinionSkipReasons: new Map(),
   };
 }
 
@@ -249,6 +257,27 @@ export class AutoModeRegistry {
       (entry.kind === "build" ? build : review).push(sessionId);
     }
     return { build, review };
+  }
+
+  /** True only when this epic's second-opinion skip reason changed. */
+  shouldTraceSecondOpinionSkip(
+    projectId: string,
+    epicId: string,
+    reason: string
+  ): boolean {
+    const reasons = this.stateFor(projectId).secondOpinionSkipReasons;
+    if (reasons.get(epicId) === reason) return false;
+    reasons.set(epicId, reason);
+    return true;
+  }
+
+  /** A successful dispatch or usable verdict ends the stable skip. */
+  clearSecondOpinionSkip(projectId: string, epicId: string): void {
+    this.states.get(projectId)?.secondOpinionSkipReasons.delete(epicId);
+  }
+
+  clearSecondOpinionSkips(projectId: string): void {
+    this.states.get(projectId)?.secondOpinionSkipReasons.clear();
   }
 
   /** Every session id the mode is tracking — the driver's `ownSessionIds`. */

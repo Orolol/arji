@@ -418,6 +418,32 @@ function reconcileInFlight(
         );
         continue;
       }
+      if (gate.status === "retry") {
+        const failures = autoModeRegistry.recordFailure(
+          projectId,
+          entry.ticketId,
+          entry.epicId,
+          gate.reason
+        );
+        trace(
+          deps,
+          projectId,
+          entry.epicId,
+          AUTO_MODE_REASONS.dispatchFailed("second opinion", gate.reason),
+          sessionId
+        );
+        if (failures >= AUTO_MODE_MAX_CONSECUTIVE_FAILURES) {
+          result.parked.push(entry.ticketId);
+          trace(
+            deps,
+            projectId,
+            entry.epicId,
+            AUTO_MODE_REASONS.parked(failures),
+            sessionId
+          );
+        }
+        continue;
+      }
     }
 
     // A review that completed without producing a verdict delivered nothing.
@@ -544,6 +570,9 @@ export async function sweepProject(
     return emptyResult(projectId, "disabled");
   }
   autoModeRegistry.setEnabled(projectId, true);
+  if (!config.secondOpinion) {
+    autoModeRegistry.clearSecondOpinionSkips(projectId);
+  }
 
   if (!autoModeRegistry.tryLock(projectId)) {
     return emptyResult(projectId, "locked");
@@ -590,6 +619,10 @@ export async function sweepProject(
           candidate.epicId
         );
         if (gate.status === "rejected") {
+          autoModeRegistry.clearSecondOpinionSkip(
+            projectId,
+            candidate.epicId
+          );
           parkRejectedSecondOpinion(
             projectId,
             candidate.epicId,
@@ -598,6 +631,12 @@ export async function sweepProject(
             result
           );
           continue;
+        }
+        if (gate.status === "approved") {
+          autoModeRegistry.clearSecondOpinionSkip(
+            projectId,
+            candidate.epicId
+          );
         }
         if (gate.status !== "approved") {
           const reviewsInFlight =
@@ -651,19 +690,31 @@ export async function sweepProject(
                 );
               }
             } else if (dispatched.skipReason) {
-              trace(
-                deps,
-                projectId,
-                candidate.epicId,
-                AUTO_MODE_REASONS.skippedTargetMoved(
-                  "second opinion",
+              if (
+                autoModeRegistry.shouldTraceSecondOpinionSkip(
+                  projectId,
+                  candidate.epicId,
                   dispatched.skipReason
                 )
-              );
+              ) {
+                trace(
+                  deps,
+                  projectId,
+                  candidate.epicId,
+                  AUTO_MODE_REASONS.skippedTargetMoved(
+                    "second opinion",
+                    dispatched.skipReason
+                  )
+                );
+              }
             }
             continue;
           }
 
+          autoModeRegistry.clearSecondOpinionSkip(
+            projectId,
+            candidate.epicId
+          );
           autoModeRegistry.addInFlight(projectId, dispatched.sessionId, {
             kind: "review",
             purpose: "second-opinion",

@@ -920,7 +920,7 @@ describe("merge step", () => {
     expect(result.inFlight.review).toBe(1);
   });
 
-  it("holds the merge without parking when no structured-verdict provider is available", async () => {
+  it("holds the merge and traces an unavailable verdict provider only once", async () => {
     const fakes = makeFakes();
     fakes.setConfig({ secondOpinion: true, reviewConcurrency: 1 });
     seedMergeable();
@@ -934,13 +934,50 @@ describe("merge step", () => {
     fakes.mergeOutcome({ status: "merged", commitHash: "forbidden", sessionId: null });
 
     const result = await sweepProject(PROJECT_ID, fakes.deps);
+    const repeated = await sweepProject(PROJECT_ID, fakes.deps);
 
     expect(fakes.merges).toEqual([]);
     expect(result.secondOpinionsDispatched).toEqual([]);
+    expect(repeated.secondOpinionsDispatched).toEqual([]);
     expect(result.parked).toEqual([]);
-    expect(autoReasons("m1")).toContain(
-      "Auto mode skipped second opinion: no installed MCP-capable provider differs from both the builder and reviewer"
-    );
+    expect(
+      autoReasons("m1").filter(
+        (reason) =>
+          reason ===
+          "Auto mode skipped second opinion: no installed MCP-capable provider differs from both the builder and reviewer"
+      )
+    ).toHaveLength(1);
+  });
+
+  it("bounds missing structured verdicts with the review failure ladder", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true, reviewConcurrency: 0 });
+    seedMergeable();
+    autoModeRegistry.setEnabled(PROJECT_ID, true);
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const sessionId = `second-opinion-no-verdict-${attempt}`;
+      fakes.sessionStatus.set(sessionId, "completed");
+      fakes.sessionOutcome.set(sessionId, "answered");
+      fakes.setSecondOpinionState("m1", {
+        status: "retry",
+        sessionId,
+        reason: "no structured submit_findings verdict was recorded",
+      });
+      autoModeRegistry.addInFlight(PROJECT_ID, sessionId, {
+        kind: "review",
+        purpose: "second-opinion",
+        ticketId: "m1",
+        epicId: "m1",
+      });
+
+      const result = await sweepProject(PROJECT_ID, fakes.deps);
+      expect(result.parked).toEqual(attempt === 3 ? ["m1"] : []);
+    }
+
+    expect(fakes.merges).toEqual([]);
+    expect(fakes.secondOpinionNotifications).toEqual([]);
+    expect(autoModeRegistry.isParked(PROJECT_ID, "m1")).toBe(true);
   });
 
   it("merges only after a fresh structured second opinion approves", async () => {

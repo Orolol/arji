@@ -1,7 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 
 const availabilityState = vi.hoisted(() => ({
   available: new Set<string>(),
+}));
+
+const dispatchState = vi.hoisted(() => ({
+  launch: null as (() => Promise<void>) | null,
+  starts: [] as Array<{
+    sessionId: string;
+    options: { mode: string; prompt: string; cwd?: string };
+    provider: string;
+  }>,
+  diff: "diff --git a/lib/gate.ts b/lib/gate.ts\n+safe();",
+  diffArgs: [] as string[],
 }));
 
 vi.mock("@/lib/db", async () => {
@@ -16,6 +28,55 @@ vi.mock("@/lib/providers", () => ({
   }),
 }));
 
+vi.mock("@/lib/agents/scheduler", () => ({
+  agentScheduler: {
+    submit: vi.fn(
+      (
+        _projectId: string,
+        _sessionId: string,
+        launch: () => Promise<void>
+      ) => {
+        dispatchState.launch = launch;
+        return { started: false, queuedAhead: 0 };
+      }
+    ),
+  },
+}));
+
+vi.mock("@/lib/claude/process-manager", () => ({
+  processManager: {
+    start: vi.fn(
+      (sessionId: string, options: { mode: string; prompt: string }, provider: string) => {
+        dispatchState.starts.push({ sessionId, options, provider });
+        return { sessionId, status: "running" };
+      }
+    ),
+  },
+}));
+
+vi.mock("@/lib/agent-sessions/wait-for-completion", () => ({
+  waitForProcessCompletion: vi.fn(async () => ({
+    result: {
+      success: true,
+      result: "**Overall Verdict: Approved**",
+      duration: 1,
+    },
+  })),
+}));
+
+vi.mock("@/lib/git/manager", () => ({
+  attachWorktree: vi.fn(async () => ({ worktreePath: "/repo-worktree" })),
+}));
+
+vi.mock("simple-git", () => ({
+  default: vi.fn(() => ({
+    diff: vi.fn(async (args: string[]) => {
+      dispatchState.diffArgs = args;
+      return dispatchState.diff;
+    }),
+  })),
+}));
+
 const { db } = await import("@/lib/db");
 const {
   agentSessions,
@@ -24,10 +85,13 @@ const {
   projects,
   reviewComments,
   ticketComments,
+  userStories,
 } = await import("@/lib/db/schema");
-const { pickSecondOpinionProvider, readSecondOpinionState } = await import(
-  "@/lib/auto-mode/second-opinion"
-);
+const {
+  dispatchSecondOpinion,
+  pickSecondOpinionProvider,
+  readSecondOpinionState,
+} = await import("@/lib/auto-mode/second-opinion");
 const { buildSecondOpinionPrompt } = await import(
   "@/lib/claude/prompt-builder"
 );
@@ -47,7 +111,12 @@ function at(minute: number): string {
 
 function seedBase(): void {
   db.insert(projects)
-    .values({ id: PROJECT_ID, name: "Second", gitRepoPath: "/repo" })
+    .values({
+      id: PROJECT_ID,
+      name: "Second",
+      gitRepoPath: "/repo",
+      defaultBranch: "develop",
+    })
     .run();
   db.insert(epics)
     .values({
@@ -61,7 +130,34 @@ function seedBase(): void {
     .run();
 }
 
-function addOrdinaryReview(id: string, minute: number): void {
+function addOrdinaryReview(
+  id: string,
+  minute: number,
+  provider = "codex",
+  userStoryId: string | null = null
+): void {
+  db.insert(agentSessions)
+    .values({
+      id,
+      projectId: PROJECT_ID,
+      epicId: EPIC_ID,
+      userStoryId,
+      status: "completed",
+      outcome: "answered",
+      agentType: "review_code",
+      provider,
+      createdAt: at(minute),
+      endedAt: at(minute + 1),
+    })
+    .run();
+}
+
+function addBuilder(
+  id: string,
+  minute: number,
+  agentType = "build",
+  provider = "claude-code"
+): void {
   db.insert(agentSessions)
     .values({
       id,
@@ -69,8 +165,8 @@ function addOrdinaryReview(id: string, minute: number): void {
       epicId: EPIC_ID,
       status: "completed",
       outcome: "answered",
-      agentType: "review_code",
-      provider: "codex",
+      agentType,
+      provider,
       createdAt: at(minute),
       endedAt: at(minute + 1),
     })
@@ -113,10 +209,15 @@ function addSecondOpinion(input: {
 
 beforeEach(() => {
   availabilityState.available.clear();
+  dispatchState.launch = null;
+  dispatchState.starts.length = 0;
+  dispatchState.diffArgs.length = 0;
+  vi.clearAllMocks();
   db.delete(notifications).run();
   db.delete(reviewComments).run();
   db.delete(ticketComments).run();
   db.delete(agentSessions).run();
+  db.delete(userStories).run();
   db.delete(epics).run();
   db.delete(projects).run();
   seedBase();
@@ -227,15 +328,63 @@ describe("second-opinion structured gate", () => {
     });
   });
 
-  it("never treats prose without submit_findings as approval", () => {
+  it("retries prose-only output instead of treating missing evidence as a veto", () => {
     addOrdinaryReview("review-1", 1);
     addSecondOpinion({ id: "opinion-1", minute: 3 });
 
     expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
-      status: "rejected",
+      status: "retry",
       sessionId: "opinion-1",
       reason: "no structured submit_findings verdict was recorded",
     });
+  });
+
+  it("requires a fresh gate after the user responds to a rejection", () => {
+    addOrdinaryReview("review-1", 1);
+    addSecondOpinion({
+      id: "opinion-1",
+      minute: 3,
+      verdict: "changes requested",
+    });
+    db.insert(ticketComments)
+      .values({
+        id: "user-fix-note",
+        epicId: EPIC_ID,
+        author: "user",
+        content: "Fixed the reported issue; please check again.",
+        createdAt: at(5),
+      })
+      .run();
+
+    expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
+      status: "missing",
+      sessionId: null,
+    });
+  });
+
+  it("uses only epic-scoped ordinary reviews for second-opinion freshness", () => {
+    db.insert(userStories)
+      .values({
+        id: "story-1",
+        epicId: EPIC_ID,
+        title: "Story",
+        status: "review",
+      })
+      .run();
+    addOrdinaryReview("review-epic", 1);
+    addSecondOpinion({ id: "opinion-1", minute: 3, verdict: "approved" });
+    addOrdinaryReview("review-story", 5, "claude-code", "story-1");
+
+    expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
+      status: "approved",
+      sessionId: "opinion-1",
+    });
+    expect(
+      findLastSuccessfulReviewProvider({
+        projectId: PROJECT_ID,
+        epicId: EPIC_ID,
+      })
+    ).toBe("codex");
   });
 
   it("requires a new second opinion after a newer ordinary review", () => {
@@ -268,6 +417,50 @@ describe("second-opinion provider selection", () => {
   });
 });
 
+describe("second-opinion dispatch", () => {
+  it("runs a Team-build-aware, MCP-capable chat session with the final diff embedded", async () => {
+    addBuilder("team-build", 0, "team_build", "gemini-cli");
+    addOrdinaryReview("review-1", 2, "claude-code");
+    availabilityState.available.add("codex");
+
+    const result = await dispatchSecondOpinion({
+      projectId: PROJECT_ID,
+      epicId: EPIC_ID,
+    });
+
+    expect(result).toMatchObject({
+      error: null,
+      conflictSessionId: null,
+    });
+    expect(result.sessionId).toEqual(expect.any(String));
+    expect(dispatchState.diffArgs).toEqual(["develop...HEAD", "-U3"]);
+
+    const session = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, result.sessionId!))
+      .get();
+    expect(session).toMatchObject({
+      mode: "chat",
+      provider: "codex",
+      agentType: "review_second_opinion",
+    });
+    expect(session?.prompt).toContain(dispatchState.diff);
+
+    expect(dispatchState.launch).not.toBeNull();
+    await dispatchState.launch!();
+    expect(dispatchState.starts).toHaveLength(1);
+    expect(dispatchState.starts[0]).toMatchObject({
+      sessionId: result.sessionId,
+      provider: "codex",
+      options: {
+        mode: "chat",
+        cwd: "/repo-worktree",
+      },
+    });
+  });
+});
+
 describe("second-opinion prompt and notification", () => {
   it("orders a final-diff, read-only structured verdict", () => {
     const prompt = buildSecondOpinionPrompt(
@@ -275,10 +468,12 @@ describe("second-opinion prompt and notification", () => {
       { title: "Gate merge", description: "Independent check", type: "feature" },
       [{ title: "Safe merge", acceptanceCriteria: "- Never bypass a veto" }],
       "feature/gate",
-      "develop"
+      "develop",
+      "diff --git a/lib/gate.ts b/lib/gate.ts\n+safe();"
     );
 
     expect(prompt).toContain("git diff develop...HEAD");
+    expect(prompt).toContain("+safe();");
     expect(prompt).toContain("read-only");
     expect(prompt).toContain("mcp__arij__submit_findings");
     expect(prompt).toContain("exactly once");

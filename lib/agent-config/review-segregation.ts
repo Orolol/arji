@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agentSessions, settings } from "@/lib/db/schema";
 import {
@@ -42,7 +42,7 @@ export interface ReviewSegregationTarget {
 }
 
 /** agentType values written by the build dispatch routes. */
-const BUILD_AGENT_TYPES = ["build", "ticket_build"];
+const BUILD_AGENT_TYPES = ["build", "ticket_build", "team_build"];
 const REVIEW_AGENT_TYPES = [
   "review_security",
   "review_code",
@@ -102,6 +102,7 @@ export function findLastSuccessfulReviewProvider(
       and(
         eq(agentSessions.projectId, target.projectId),
         eq(agentSessions.epicId, target.epicId),
+        isNull(agentSessions.userStoryId),
         eq(agentSessions.status, "completed"),
         eq(agentSessions.outcome, "answered"),
         inArray(agentSessions.agentType, REVIEW_AGENT_TYPES)

@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import simpleGit from "simple-git";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   agentSessions,
@@ -75,7 +76,9 @@ export interface SecondOpinionDispatchResult {
 
 function timestamp(value: string | null | undefined): number | null {
   if (!value) return null;
-  const parsed = Date.parse(value);
+  const parsed = Date.parse(
+    value.includes("T") ? value : `${value.replace(" ", "T")}Z`
+  );
   return Number.isNaN(parsed) ? null : parsed;
 }
 
@@ -83,30 +86,47 @@ function latestOrdinaryReviewAt(
   projectId: string,
   epicId: string
 ): number | null {
+  const sessionAt = sql<string | null>`COALESCE(${agentSessions.endedAt}, ${agentSessions.completedAt}, ${agentSessions.createdAt})`;
   const row = db
     .select({
-      createdAt: agentSessions.createdAt,
-      endedAt: agentSessions.endedAt,
-      completedAt: agentSessions.completedAt,
+      sessionAt,
     })
     .from(agentSessions)
     .where(
       and(
         eq(agentSessions.projectId, projectId),
         eq(agentSessions.epicId, epicId),
+        isNull(agentSessions.userStoryId),
         eq(agentSessions.status, "completed"),
         eq(agentSessions.outcome, "answered"),
         inArray(agentSessions.agentType, ORDINARY_REVIEW_AGENT_TYPES)
       )
     )
-    .orderBy(desc(agentSessions.createdAt))
+    .orderBy(desc(sessionAt))
     .limit(1)
     .get();
-  return row
-    ? timestamp(row.endedAt) ??
-        timestamp(row.completedAt) ??
-        timestamp(row.createdAt)
-    : null;
+  return timestamp(row?.sessionAt);
+}
+
+/**
+ * A user response after a rejected gate is new evidence, not permission to
+ * reuse the old veto forever. It invalidates that session so Full Auto can
+ * ask for a fresh opinion after the ticket is unparked.
+ */
+function latestUserCommentAt(epicId: string): number | null {
+  const row = db
+    .select({ createdAt: ticketComments.createdAt })
+    .from(ticketComments)
+    .where(
+      and(
+        eq(ticketComments.epicId, epicId),
+        eq(ticketComments.author, "user")
+      )
+    )
+    .orderBy(desc(ticketComments.createdAt))
+    .limit(1)
+    .get();
+  return timestamp(row?.createdAt);
 }
 
 function structuredVerdictForSession(sessionId: string): string | null {
@@ -187,10 +207,23 @@ export function readSecondOpinionState(
     };
   }
 
+  const completedAt =
+    timestamp(session.endedAt) ??
+    timestamp(session.completedAt) ??
+    timestamp(session.createdAt);
+  const userCommentAt = latestUserCommentAt(epicId);
+  if (
+    completedAt !== null &&
+    userCommentAt !== null &&
+    userCommentAt > completedAt
+  ) {
+    return { status: "missing", sessionId: null };
+  }
+
   const verdict = structuredVerdictForSession(session.id);
   if (!verdict) {
     return {
-      status: "rejected",
+      status: "retry",
       sessionId: session.id,
       reason: "no structured submit_findings verdict was recorded",
     };
@@ -249,7 +282,7 @@ function existingWorktreePath(projectId: string, epicId: string): string | null 
   );
 }
 
-/** Dispatches the short plan-mode gate and returns as soon as it is queued. */
+/** Dispatches the short read-only gate and returns as soon as it is queued. */
 export async function dispatchSecondOpinion(input: {
   projectId: string;
   epicId: string;
@@ -325,12 +358,17 @@ export async function dispatchSecondOpinion(input: {
       .orderBy(userStories.position)
       .all();
     const baseBranch = project.defaultBranch || "main";
+    const finalDiff = await simpleGit(worktreePath).diff([
+      `${baseBranch}...HEAD`,
+      "-U3",
+    ]);
     const prompt = buildSecondOpinionPrompt(
       project,
       epic,
       stories,
       epic.branchName,
-      baseBranch
+      baseBranch,
+      finalDiff
     );
 
     const sessionId = createId();
@@ -378,7 +416,11 @@ export async function dispatchSecondOpinion(input: {
       id: sessionId,
       projectId: input.projectId,
       epicId: input.epicId,
-      mode: "plan",
+      // Claude's plan permission mode refuses mutating MCP tools even when
+      // allowlisted. `chat` is the read-only repository posture that can
+      // still submit the structured verdict; the final diff is embedded in
+      // the prompt so Claude needs no Bash access.
+      mode: "chat",
       orchestrationMode: "solo",
       provider,
       prompt,
@@ -405,7 +447,7 @@ export async function dispatchSecondOpinion(input: {
       processManager.start(
         sessionId,
         {
-          mode: "plan",
+          mode: "chat",
           prompt,
           cwd: worktreePath,
           cliSessionId,
