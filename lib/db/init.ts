@@ -77,6 +77,12 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
     table: "review_comments",
     column: "agent_session_id",
   },
+  // 0033_named_agent_escalation
+  {
+    folderMillis: 1786713000000,
+    table: "named_agents",
+    column: "escalates_to",
+  },
 ];
 
 /** Default on-disk location of the drizzle migration files. */

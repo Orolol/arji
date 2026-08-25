@@ -11,6 +11,7 @@ describe("Schema: namedAgents table and provider types", () => {
     expect(columnNames).toContain("name");
     expect(columnNames).toContain("provider");
     expect(columnNames).toContain("model");
+    expect(columnNames).toContain("escalatesTo");
     expect(columnNames).toContain("createdAt");
   });
 

@@ -225,6 +225,13 @@
       "when": 1786712900000,
       "tag": "0032_review_comment_session",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1786713000000,
+      "tag": "0033_named_agent_escalation",
+      "breakpoints": true
     }
   ]
 }

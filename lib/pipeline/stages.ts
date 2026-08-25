@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import {
   agentSessions,
   epics,
+  namedAgents,
   projects,
   reviewComments,
   ticketComments,
@@ -102,11 +103,15 @@ import type {
  *                allows (validateResumeSession — failed sessions keep their
  *                cliSessionId; status is not checked), same provider/agent;
  *                fresh otherwise.
- *   attempt 3+ — ESCALATE: fresh session on the first available alternative
- *                provider (pickAlternativeReviewProvider — despite its name
- *                it is the generic alternate picker); same provider when no
- *                alternative CLI is installed. namedAgentId null, model
- *                undefined (provider default).
+ *   attempt 3  — when the failed named agent has escalatesTo configured,
+ *                start fresh on that stronger named agent (same provider).
+ *                Without that opt-in edge, this is byte-for-byte the legacy
+ *                provider-escalation attempt below.
+ *   attempt 3+ — ESCALATE to the first available alternative provider when
+ *                no model escalation occupied attempt 3; with an escalatesTo
+ *                edge, provider escalation starts at attempt 4. The generic
+ *                picker is pickAlternativeReviewProvider despite its name.
+ *                namedAgentId null, model undefined (provider default).
  *
  * Fix stages additionally resume the run's previous code-writing session on
  * attempt 1 and append the open review feedback + pipeline fix instructions
@@ -275,16 +280,55 @@ function readLastNonEmptyText(sessionId: string): string | null {
 interface PreviousSessionRow {
   id: string;
   provider: string | null;
+  namedAgentId: string | null;
 }
 
-function readSessionProvider(sessionId: string): PreviousSessionRow | null {
+function readSessionAgent(sessionId: string): PreviousSessionRow | null {
   return (
     db
-      .select({ id: agentSessions.id, provider: agentSessions.provider })
+      .select({
+        id: agentSessions.id,
+        provider: agentSessions.provider,
+        namedAgentId: agentSessions.namedAgentId,
+      })
       .from(agentSessions)
       .where(eq(agentSessions.id, sessionId))
       .get() ?? null
   );
+}
+
+function readEffortEscalationTarget(
+  namedAgentId: string,
+  provider: AgentProvider
+): ResolvedAgent | null {
+  const source = db
+    .select({ escalatesTo: namedAgents.escalatesTo })
+    .from(namedAgents)
+    .where(eq(namedAgents.id, namedAgentId))
+    .get();
+  if (!source?.escalatesTo) return null;
+
+  const target = db
+    .select({
+      id: namedAgents.id,
+      name: namedAgents.name,
+      provider: namedAgents.provider,
+      model: namedAgents.model,
+    })
+    .from(namedAgents)
+    .where(eq(namedAgents.id, source.escalatesTo))
+    .get();
+
+  // The write service enforces this invariant. Keep the dispatch-side check
+  // so a database edited outside Arij can never turn effort escalation into
+  // an unannounced provider switch.
+  if (!target || target.provider !== provider) return null;
+  return {
+    provider,
+    namedAgentId: target.id,
+    name: target.name,
+    model: target.model,
+  };
 }
 
 /**
@@ -327,9 +371,11 @@ async function resolveStageAgent(
   codeAgentType: AgentType,
   reviewAgentType: AgentType
 ): Promise<ResolvedStageAgent> {
+  let configured: ResolvedAgent | null = null;
   const resolveConfigured = async (): Promise<ResolvedAgent> => {
+    if (configured) return configured;
     if (request.stage === "review") {
-      return resolveAgentForDispatch(
+      configured = await resolveAgentForDispatch(
         reviewAgentType,
         init.projectId,
         init.reviewNamedAgentId ?? null,
@@ -342,26 +388,47 @@ async function resolveStageAgent(
             : {}),
         }
       );
+      return configured;
     }
-    return resolveAgentByNamedId(
+    configured = resolveAgentByNamedId(
       codeAgentType,
       init.projectId,
       init.buildNamedAgentId
     );
+    return configured;
   };
 
   if (request.attempt < 3) {
     return { resolved: await resolveConfigured(), escalatedToProvider: null };
   }
 
-  // Escalation: fresh session on the first available alternative to the
-  // failed attempt's provider; same provider when none is installed. Named
-  // agent dropped, model left undefined (provider default).
+  // Escalation always starts fresh. If the failed named agent opted into a
+  // stronger same-provider model, that occupies attempt 3. Otherwise attempt
+  // 3 retains the exact historical alternative-provider path.
   const previous = request.previousAttemptSessionId
-    ? readSessionProvider(request.previousAttemptSessionId)
+    ? readSessionAgent(request.previousAttemptSessionId)
     : null;
   const baseProvider = (previous?.provider ??
     (await resolveConfigured()).provider) as AgentProvider;
+  if (request.attempt === 3) {
+    const sourceNamedAgentId =
+      previous !== null
+        ? previous.namedAgentId
+        : (await resolveConfigured()).namedAgentId ?? null;
+    if (sourceNamedAgentId) {
+      const effortTarget = readEffortEscalationTarget(
+        sourceNamedAgentId,
+        baseProvider
+      );
+      if (effortTarget) {
+        return { resolved: effortTarget, escalatedToProvider: null };
+      }
+    }
+  }
+
+  // Provider escalation: first available alternative to the failed attempt's
+  // provider; same provider when none is installed. The named agent is
+  // dropped and the provider's default model is used.
   const alternative = await pickAlternativeReviewProvider(baseProvider);
   if (alternative) {
     return {

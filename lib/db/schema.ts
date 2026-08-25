@@ -320,6 +320,10 @@ export const namedAgents = sqliteTable(
     provider: text("provider").notNull(), // see PROVIDER_OPTIONS in lib/agent-config/constants.ts
     model: text("model").notNull(),
     readableAgentName: text("readable_agent_name"), // Ancient Greek name
+    escalatesTo: text("escalates_to").references(
+      (): AnySQLiteColumn => namedAgents.id,
+      { onDelete: "set null" }
+    ),
     createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({

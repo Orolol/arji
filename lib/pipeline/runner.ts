@@ -52,8 +52,9 @@ export interface PipelineStageHandle {
   /** Resolves (never rejects) when the stage session reaches a terminal state. */
   settled: Promise<PipelineStageResult>;
   /**
-   * Provider the stage was escalated to (attempt >= 3 landed on an
-   * alternative provider), else null/undefined. Drives the escalation trace.
+   * Provider the stage was escalated to (attempt >= 3 without a configured
+   * same-provider model escalation, or attempt >= 4 with one), else
+   * null/undefined. Drives the escalation trace.
    */
   escalatedToProvider?: string | null;
 }
@@ -67,7 +68,8 @@ export interface PipelineStageRequest {
   fixCycle: number;
   /**
    * Failed previous attempt of THIS stage — attempt 2 resumes it when the
-   * machinery allows, attempt >= 3 escalates away from its provider. Null on
+   * machinery allows; attempt 3 uses its configured same-provider model
+   * escalation when present, then later attempts change provider. Null on
    * attempt 1.
    */
   previousAttemptSessionId: string | null;

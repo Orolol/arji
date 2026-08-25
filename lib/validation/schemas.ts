@@ -192,6 +192,7 @@ export const createNamedAgentSchema = z.object({
     .refine((v) => isAgentProvider(v), "invalid provider"),
   // Optional: an empty/absent model means "use the CLI's default model".
   model: z.string().optional(),
+  escalatesTo: z.string().nullable().optional(),
 });
 
 export const updateNamedAgentSchema = z.object({
@@ -204,6 +205,7 @@ export const updateNamedAgentSchema = z.object({
     .refine((v) => isAgentProvider(v), "invalid provider")
     .optional(),
   model: z.string().optional(),
+  escalatesTo: z.string().nullable().optional(),
 });
 
 export const createReviewAgentSchema = z.object({
