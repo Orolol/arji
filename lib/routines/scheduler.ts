@@ -181,6 +181,12 @@ function errorMessage(error: unknown): string {
  */
 export class RoutineScheduler {
   private readonly runningRoutineIds = new Set<string>();
+  /**
+   * Last thrown-error message per routine. A persistent failure (expired
+   * PAT, unreachable DB) would otherwise notify on every sweep and evict
+   * real alerts from the capped inbox; only a changed signature re-notifies.
+   */
+  private readonly lastThrownErrors = new Map<string, string>();
 
   constructor(
     private readonly deps: RoutineSchedulerDeps = defaultRoutineSchedulerDeps,
@@ -233,6 +239,7 @@ export class RoutineScheduler {
         lastRunAt: startedAt,
         lastStatus: "running",
       });
+      this.lastThrownErrors.delete(routine.id);
       this.deps.markFinished(routine.id, result.status);
       if (result.shouldNotify !== false) {
         this.notifySafely(routine, {
@@ -257,11 +264,15 @@ export class RoutineScheduler {
           );
         }
       }
-      this.notifySafely(routine, {
-        status: "failed",
-        message,
-        targetUrl: `/projects/${routine.projectId}`,
-      });
+      const isNewError = this.lastThrownErrors.get(routine.id) !== message;
+      this.lastThrownErrors.set(routine.id, message);
+      if (isNewError) {
+        this.notifySafely(routine, {
+          status: "failed",
+          message,
+          targetUrl: `/projects/${routine.projectId}`,
+        });
+      }
       console.error(`[routines] Routine ${routine.id} failed`, error);
       return { routineId: routine.id, status: "failed", message };
     } finally {

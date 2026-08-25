@@ -64,7 +64,9 @@ function fallbackKindOptions(): RoutineKindOption[] {
   }));
 }
 
-function parseKindOptions(value: RoutinesResponse["meta"]): RoutineKindOption[] {
+function parseKindOptions(
+  value: RoutinesResponse["meta"],
+): RoutineKindOption[] {
   const parsed = (value?.availableKinds ?? []).flatMap((option) => {
     if (!isAvailableRoutineKind(option.kind)) return [];
     return [
@@ -151,10 +153,10 @@ function RoutineEditor({
   const [kind, setKind] = useState<AvailableRoutineKind>(initialKind);
   const [enabled, setEnabled] = useState(routine?.enabled ?? true);
   const [timeOfDay, setTimeOfDay] = useState(
-    routine?.timeOfDay ?? DEFAULT_TIME_OF_DAY
+    routine?.timeOfDay ?? DEFAULT_TIME_OF_DAY,
   );
   const [configText, setConfigText] = useState(
-    formatConfig(routine?.config ?? defaultRoutineConfig(initialKind))
+    formatConfig(routine?.config ?? defaultRoutineConfig(initialKind)),
   );
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -187,7 +189,9 @@ function RoutineEditor({
       config = parseConfig(configText);
     } catch (parseError) {
       setError(
-        parseError instanceof Error ? parseError.message : "Invalid configuration."
+        parseError instanceof Error
+          ? parseError.message
+          : "Invalid configuration.",
       );
       return;
     }
@@ -213,7 +217,9 @@ function RoutineEditor({
       setMessage(isNew ? "Routine created." : "Routine saved.");
     } catch (saveError) {
       setError(
-        saveError instanceof Error ? saveError.message : "Failed to save routine."
+        saveError instanceof Error
+          ? saveError.message
+          : "Failed to save routine.",
       );
     } finally {
       setSaving(false);
@@ -237,7 +243,7 @@ function RoutineEditor({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ enabled: next }),
-        }
+        },
       );
       const payload = (await response.json().catch(() => ({}))) as {
         data?: RoutineRecord;
@@ -253,7 +259,7 @@ function RoutineEditor({
       setError(
         toggleError instanceof Error
           ? toggleError.message
-          : "Failed to update routine."
+          : "Failed to update routine.",
       );
     } finally {
       setSaving(false);
@@ -267,7 +273,7 @@ function RoutineEditor({
     try {
       const response = await fetch(
         `/api/projects/${projectId}/routines/${routine.id}`,
-        { method: "DELETE" }
+        { method: "DELETE" },
       );
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
@@ -280,7 +286,7 @@ function RoutineEditor({
       setError(
         deleteError instanceof Error
           ? deleteError.message
-          : "Failed to delete routine."
+          : "Failed to delete routine.",
       );
     } finally {
       setDeleting(false);
@@ -309,7 +315,7 @@ function RoutineEditor({
             {!isNew && (
               <span
                 className={`rounded-full border px-[8px] py-[2px] text-[11px] capitalize ${statusClass(
-                  routine.lastStatus
+                  routine.lastStatus,
                 )}`}
               >
                 {statusLabel(routine.lastStatus)}
@@ -340,7 +346,10 @@ function RoutineEditor({
 
       <div className="mt-[16px] grid gap-[14px] md:grid-cols-[minmax(180px,0.7fr)_160px_minmax(280px,1.3fr)]">
         <div className="space-y-[6px]">
-          <label className="text-[12px] font-medium" htmlFor={`kind-${routine?.id ?? "new"}`}>
+          <label
+            className="text-[12px] font-medium"
+            htmlFor={`kind-${routine?.id ?? "new"}`}
+          >
             Kind
           </label>
           <Select
@@ -367,7 +376,10 @@ function RoutineEditor({
         </div>
 
         <div className="space-y-[6px]">
-          <label className="text-[12px] font-medium" htmlFor={`time-${routine?.id ?? "new"}`}>
+          <label
+            className="text-[12px] font-medium"
+            htmlFor={`time-${routine?.id ?? "new"}`}
+          >
             Daily time
           </label>
           <Input
@@ -385,7 +397,10 @@ function RoutineEditor({
         </div>
 
         <div className="space-y-[6px]">
-          <label className="text-[12px] font-medium" htmlFor={`config-${routine?.id ?? "new"}`}>
+          <label
+            className="text-[12px] font-medium"
+            htmlFor={`config-${routine?.id ?? "new"}`}
+          >
             Configuration (JSON)
           </label>
           <Textarea
@@ -407,7 +422,15 @@ function RoutineEditor({
         </div>
       </div>
 
-      {!isNew && (
+      {!isNew && routine.lastStatus === "scheduled" && (
+        <div className="mt-[13px] flex items-center gap-[7px] text-[11.5px] text-muted-foreground">
+          <Clock3 className="h-[13px] w-[13px]" />
+          Saved after today&apos;s {routine.timeOfDay} slot — first run
+          scheduled for tomorrow ({serverTimezone}).
+        </div>
+      )}
+
+      {!isNew && routine.lastStatus !== "scheduled" && (
         <div className="mt-[13px] flex items-center gap-[7px] text-[11.5px] text-muted-foreground">
           <Clock3 className="h-[13px] w-[13px]" />
           Last run: {formatLastRun(routine.lastRunAt, serverTimezone)}
@@ -485,7 +508,7 @@ function RoutineEditor({
 export function RoutinesSettings({ projectId }: { projectId: string }) {
   const [routines, setRoutines] = useState<RoutineRecord[]>([]);
   const [kindOptions, setKindOptions] = useState<RoutineKindOption[]>(
-    fallbackKindOptions()
+    fallbackKindOptions(),
   );
   const [serverTimezone, setServerTimezone] = useState("local");
   const [ciAutofixEnabled, setCiAutofixEnabled] = useState(false);
@@ -503,7 +526,9 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
       setError(null);
       try {
         const response = await fetch(`/api/projects/${projectId}/routines`);
-        const payload = (await response.json().catch(() => ({}))) as RoutinesResponse;
+        const payload = (await response
+          .json()
+          .catch(() => ({}))) as RoutinesResponse;
         if (!response.ok) {
           throw new Error(payload.error || "Failed to load routines.");
         }
@@ -512,8 +537,8 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
         setKindOptions(options);
         setRoutines(
           (Array.isArray(payload.data) ? payload.data : []).filter((routine) =>
-            allowed.has(routine.kind)
-          )
+            allowed.has(routine.kind),
+          ),
         );
         if (typeof payload.meta?.serverTimezone === "string") {
           setServerTimezone(payload.meta.serverTimezone);
@@ -521,14 +546,16 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
         setCiAutofixEnabled(payload.meta?.ciAutofixEnabled === true);
       } catch (loadError) {
         setError(
-          loadError instanceof Error ? loadError.message : "Failed to load routines."
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load routines.",
         );
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [projectId]
+    [projectId],
   );
 
   useEffect(() => {
@@ -537,22 +564,24 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
 
   const availableKindsLabel = useMemo(
     () => kindOptions.map((option) => option.label).join(", "),
-    [kindOptions]
+    [kindOptions],
   );
   const configuredKinds = useMemo(
     () => new Set(routines.map((routine) => routine.kind)),
-    [routines]
+    [routines],
   );
   const newRoutineKindOptions = useMemo(
     () => kindOptions.filter((option) => !configuredKinds.has(option.kind)),
-    [configuredKinds, kindOptions]
+    [configuredKinds, kindOptions],
   );
 
   function upsertRoutine(next: RoutineRecord) {
     setRoutines((current) => {
       const index = current.findIndex((routine) => routine.id === next.id);
       if (index < 0) return [...current, next];
-      return current.map((routine) => (routine.id === next.id ? next : routine));
+      return current.map((routine) =>
+        routine.id === next.id ? next : routine,
+      );
     });
     setCreating(false);
   }
@@ -569,7 +598,7 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ enabled: next }),
-        }
+        },
       );
       const payload = (await response.json().catch(() => ({}))) as {
         data?: { enabled?: boolean };
@@ -584,7 +613,7 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
       setAutofixError(
         saveError instanceof Error
           ? saveError.message
-          : "Failed to update CI autofix."
+          : "Failed to update CI autofix.",
       );
     } finally {
       setSavingAutofix(false);
@@ -637,106 +666,115 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
         </TabsList>
         <TabsContent value="routines">
           <section className="mt-[20px]" aria-labelledby="routines-heading">
-        <div className="flex flex-wrap items-start gap-[16px]">
-          <div>
-            <h3 id="routines-heading" className="text-[16px] font-semibold">
-              Scheduled routines
-            </h3>
-            <p className="mt-[4px] max-w-3xl text-[12.5px] text-muted-foreground">
-              Daily times use the Arij server&apos;s local timezone
-              {serverTimezone !== "local" ? ` (${serverTimezone})` : ""}, not
-              the browser&apos;s timezone. The in-process scheduler must be
-              running for routines to trigger.
-            </p>
-            <p className="mt-[3px] text-[11.5px] text-muted-foreground">
-              Available kinds: {availableKindsLabel}. Unavailable kinds are
-              hidden until their scheduler integration ships.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-[16px] rounded-[12px] border border-border bg-band/40 px-[18px] py-[15px]">
-          <div className="flex items-start gap-[9px] text-[13px]">
-            <Checkbox
-              id="ci-autofix-enabled"
-              className="mt-[2px]"
-              checked={ciAutofixEnabled}
-              disabled={savingAutofix}
-              aria-label="Enable CI autofix"
-              onCheckedChange={(checked) =>
-                void toggleAutofix(checked === true)
-              }
-            />
-            <label className="cursor-pointer" htmlFor="ci-autofix-enabled">
-              <span className="font-medium">Enable CI autofix</span>
-              <span className="block text-[12px] text-muted-foreground">
-                Off by default. When enabled, a newly failing PR head may queue
-                one normal fix session after CI watch sends its notification.
-              </span>
-            </label>
-          </div>
-          {autofixError && (
-            <p className="mt-[8px] text-[12px] text-destructive" role="alert">
-              {autofixError}
-            </p>
-          )}
-        </div>
-
-        {loading ? (
-          <div className="mt-[22px] flex items-center gap-[8px] text-[13px] text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading routines…
-          </div>
-        ) : error ? (
-          <p className="mt-[22px] text-[13px] text-destructive" role="alert">
-            {error}
-          </p>
-        ) : (
-          <div className="mt-[16px] space-y-[12px]">
-            {creating && (
-              <RoutineEditor
-                projectId={projectId}
-                routine={null}
-                kindOptions={newRoutineKindOptions}
-                serverTimezone={serverTimezone}
-                onSaved={upsertRoutine}
-                onDeleted={() => {}}
-                onCancelNew={() => setCreating(false)}
-              />
-            )}
-
-            {routines.length === 0 && !creating && (
-              <div className="rounded-[12px] border border-dashed border-border px-[20px] py-[28px] text-center">
-                <p className="text-[13.5px] font-medium">No routines configured</p>
-                <p className="mt-[4px] text-[12.5px] text-muted-foreground">
-                  Existing manual and automated paths are unchanged until you
-                  add and enable a routine.
+            <div className="flex flex-wrap items-start gap-[16px]">
+              <div>
+                <h3 id="routines-heading" className="text-[16px] font-semibold">
+                  Scheduled routines
+                </h3>
+                <p className="mt-[4px] max-w-3xl text-[12.5px] text-muted-foreground">
+                  Daily times use the Arij server&apos;s local timezone
+                  {serverTimezone !== "local" ? ` (${serverTimezone})` : ""},
+                  not the browser&apos;s timezone. The in-process scheduler must
+                  be running for routines to trigger.
+                </p>
+                <p className="mt-[3px] text-[11.5px] text-muted-foreground">
+                  Available kinds: {availableKindsLabel}. Unavailable kinds are
+                  hidden until their scheduler integration ships.
                 </p>
               </div>
-            )}
+            </div>
 
-            {routines.map((routine) => (
-              <RoutineEditor
-                key={routine.id}
-                projectId={projectId}
-                routine={routine}
-                kindOptions={kindOptions.filter(
-                  (option) =>
-                    option.kind === routine.kind ||
-                    !configuredKinds.has(option.kind)
+            <div className="mt-[16px] rounded-[12px] border border-border bg-band/40 px-[18px] py-[15px]">
+              <div className="flex items-start gap-[9px] text-[13px]">
+                <Checkbox
+                  id="ci-autofix-enabled"
+                  className="mt-[2px]"
+                  checked={ciAutofixEnabled}
+                  disabled={savingAutofix}
+                  aria-label="Enable CI autofix"
+                  onCheckedChange={(checked) =>
+                    void toggleAutofix(checked === true)
+                  }
+                />
+                <label className="cursor-pointer" htmlFor="ci-autofix-enabled">
+                  <span className="font-medium">Enable CI autofix</span>
+                  <span className="block text-[12px] text-muted-foreground">
+                    Off by default. When enabled, a newly failing PR head may
+                    queue one normal fix session after CI watch sends its
+                    notification.
+                  </span>
+                </label>
+              </div>
+              {autofixError && (
+                <p
+                  className="mt-[8px] text-[12px] text-destructive"
+                  role="alert"
+                >
+                  {autofixError}
+                </p>
+              )}
+            </div>
+
+            {loading ? (
+              <div className="mt-[22px] flex items-center gap-[8px] text-[13px] text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading routines…
+              </div>
+            ) : error ? (
+              <p
+                className="mt-[22px] text-[13px] text-destructive"
+                role="alert"
+              >
+                {error}
+              </p>
+            ) : (
+              <div className="mt-[16px] space-y-[12px]">
+                {creating && (
+                  <RoutineEditor
+                    projectId={projectId}
+                    routine={null}
+                    kindOptions={newRoutineKindOptions}
+                    serverTimezone={serverTimezone}
+                    onSaved={upsertRoutine}
+                    onDeleted={() => {}}
+                    onCancelNew={() => setCreating(false)}
+                  />
                 )}
-                serverTimezone={serverTimezone}
-                onSaved={upsertRoutine}
-                onDeleted={(routineId) =>
-                  setRoutines((current) =>
-                    current.filter((item) => item.id !== routineId)
-                  )
-                }
-                onCancelNew={() => {}}
-              />
-            ))}
-          </div>
-        )}
+
+                {routines.length === 0 && !creating && (
+                  <div className="rounded-[12px] border border-dashed border-border px-[20px] py-[28px] text-center">
+                    <p className="text-[13.5px] font-medium">
+                      No routines configured
+                    </p>
+                    <p className="mt-[4px] text-[12.5px] text-muted-foreground">
+                      Existing manual and automated paths are unchanged until
+                      you add and enable a routine.
+                    </p>
+                  </div>
+                )}
+
+                {routines.map((routine) => (
+                  <RoutineEditor
+                    key={routine.id}
+                    projectId={projectId}
+                    routine={routine}
+                    kindOptions={kindOptions.filter(
+                      (option) =>
+                        option.kind === routine.kind ||
+                        !configuredKinds.has(option.kind),
+                    )}
+                    serverTimezone={serverTimezone}
+                    onSaved={upsertRoutine}
+                    onDeleted={(routineId) =>
+                      setRoutines((current) =>
+                        current.filter((item) => item.id !== routineId),
+                      )
+                    }
+                    onCancelNew={() => {}}
+                  />
+                ))}
+              </div>
+            )}
           </section>
         </TabsContent>
       </Tabs>

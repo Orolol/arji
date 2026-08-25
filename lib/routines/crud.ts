@@ -229,18 +229,29 @@ function missedDailySlot(input: RoutineWriteInput, now: Date): boolean {
   return now.getHours() * 60 + now.getMinutes() > hours * 60 + minutes;
 }
 
-function seededLastRunAt(
+/**
+ * Status recorded when a daily routine claims today's already-missed slot at
+ * creation/reconfiguration time. Nothing ran — the UI must present this as
+ * "first run scheduled for tomorrow", not as a completed run.
+ */
+const SEEDED_STATUS = "scheduled";
+
+function seedDailyClaim(
   input: RoutineWriteInput,
   now: Date,
   previous?: Routine,
-): string | null {
+): { lastRunAt: string | null; lastStatus: string | null } {
+  const unchanged = {
+    lastRunAt: previous?.lastRunAt ?? null,
+    lastStatus: previous?.lastStatus ?? null,
+  };
   const scheduleChanged =
     !previous ||
     previous.kind !== input.kind ||
     previous.timeOfDay !== input.timeOfDay ||
     (!previous.enabled && input.enabled);
   if (!scheduleChanged || !missedDailySlot(input, now)) {
-    return previous?.lastRunAt ?? null;
+    return unchanged;
   }
 
   const previousRun = previous?.lastRunAt ? new Date(previous.lastRunAt) : null;
@@ -249,12 +260,22 @@ function seededLastRunAt(
     !Number.isNaN(previousRun.getTime()) &&
     isSameLocalDay(previousRun, now)
   ) {
-    return previous?.lastRunAt ?? null;
+    return unchanged;
   }
 
   // Claim today's already-missed slot so the minute sweep starts this daily
   // routine tomorrow instead of immediately after creation/reconfiguration.
-  return now.toISOString();
+  return { lastRunAt: now.toISOString(), lastStatus: SEEDED_STATUS };
+}
+
+/** A concurrent create/update lands on the raw UNIQUE index, not the guard. */
+function isRoutineUniqueViolation(error: unknown): error is { code: string } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "SQLITE_CONSTRAINT_UNIQUE"
+  );
 }
 
 export function listProjectRoutines(projectId: string): RoutineDto[] {
@@ -275,18 +296,26 @@ export function createProjectRoutine(
   validateWrite(input);
   assertUniqueProjectKind(projectId, input.kind);
   const id = createId();
-  const lastRunAt = seededLastRunAt(input, new Date());
-  db.insert(routines)
-    .values({
-      id,
-      projectId,
-      kind: input.kind,
-      enabled: input.enabled,
-      timeOfDay: input.timeOfDay,
-      config: persistedConfig(input.config),
-      lastRunAt,
-    })
-    .run();
+  const seeded = seedDailyClaim(input, new Date());
+  try {
+    db.insert(routines)
+      .values({
+        id,
+        projectId,
+        kind: input.kind,
+        enabled: input.enabled,
+        timeOfDay: input.timeOfDay,
+        config: persistedConfig(input.config),
+        lastRunAt: seeded.lastRunAt,
+        lastStatus: seeded.lastStatus,
+      })
+      .run();
+  } catch (error) {
+    if (isRoutineUniqueViolation(error)) {
+      throw new RoutineConflictError(input.kind);
+    }
+    throw error;
+  }
   return toDto(findRoutine(projectId, id)) as RoutineDto;
 }
 
@@ -307,21 +336,29 @@ export function updateProjectRoutine(
   };
   validateWrite(next);
   assertUniqueProjectKind(projectId, next.kind, routineId);
-
-  db.update(routines)
-    .set({
-      kind: next.kind,
-      enabled: next.enabled,
-      timeOfDay: next.timeOfDay,
-      config: persistedConfig(
-        next.config,
-        current.config,
-        next.kind === "ci_watch",
-      ),
-      lastRunAt: seededLastRunAt(next, new Date(), current),
-    })
-    .where(and(eq(routines.id, routineId), eq(routines.projectId, projectId)))
-    .run();
+  const seeded = seedDailyClaim(next, new Date(), current);
+  try {
+    db.update(routines)
+      .set({
+        kind: next.kind,
+        enabled: next.enabled,
+        timeOfDay: next.timeOfDay,
+        config: persistedConfig(
+          next.config,
+          current.config,
+          next.kind === "ci_watch",
+        ),
+        lastRunAt: seeded.lastRunAt,
+        lastStatus: seeded.lastStatus,
+      })
+      .where(and(eq(routines.id, routineId), eq(routines.projectId, projectId)))
+      .run();
+  } catch (error) {
+    if (isRoutineUniqueViolation(error)) {
+      throw new RoutineConflictError(next.kind);
+    }
+    throw error;
+  }
 
   return toDto(findRoutine(projectId, routineId)) as RoutineDto;
 }

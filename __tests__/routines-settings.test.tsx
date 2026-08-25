@@ -29,13 +29,9 @@ vi.mock("@/components/ui/select", () => ({
   SelectTrigger: () => null,
   SelectValue: () => null,
   SelectContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-  SelectItem: ({
-    value,
-    children,
-  }: {
-    value: string;
-    children: ReactNode;
-  }) => <option value={value}>{children}</option>,
+  SelectItem: ({ value, children }: { value: string; children: ReactNode }) => (
+    <option value={value}>{children}</option>
+  ),
 }));
 
 const fetchMock = vi.fn();
@@ -87,7 +83,7 @@ describe("RoutinesSettings", () => {
           serverTimezone: "Europe/Paris",
           ciAutofixEnabled: false,
         },
-      })
+      }),
     );
 
     render(<RoutinesSettings projectId="p1" />);
@@ -95,40 +91,78 @@ describe("RoutinesSettings", () => {
     expect(await screen.findByText("Scheduled routines")).toBeInTheDocument();
     expect(await screen.findByTestId("routine-r1")).toBeInTheDocument();
     expect(screen.getByText(/server's local timezone/)).toHaveTextContent(
-      "Europe/Paris"
+      "Europe/Paris",
     );
     expect(screen.getByText(/Last run:/)).toBeInTheDocument();
     expect(screen.getAllByText("completed").length).toBeGreaterThan(0);
     expect(
-      screen.queryByRole("option", { name: "Dreaming" })
+      screen.queryByRole("option", { name: "Dreaming" }),
     ).not.toBeInTheDocument();
     expect(screen.getByLabelText("Enable CI autofix")).not.toBeChecked();
   });
 
-  it("creates a routine with kind, time, enabled state and parsed config", async () => {
-    fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith("/routines") && init?.method === "POST") {
-        const body = JSON.parse(String(init.body));
-        return jsonResponse({
-          data: {
-            id: "created",
+  it("presents a seeded missed slot as scheduled rather than a completed run", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        data: [
+          {
+            id: "r-seeded",
             projectId: "p1",
-            ...body,
-            lastRunAt: null,
-            lastStatus: null,
+            kind: "night_run",
+            enabled: true,
+            timeOfDay: "22:00",
+            config: {},
+            lastRunAt: "2026-08-25T21:15:00.000Z",
+            lastStatus: "scheduled",
           },
-        }, 201);
-      }
-      return jsonResponse({
-        data: [],
+        ],
         meta: {
           availableKinds: kinds,
           serverTimezone: "Europe/Paris",
           ciAutofixEnabled: false,
         },
-      });
-    });
+      }),
+    );
+
+    render(<RoutinesSettings projectId="p1" />);
+
+    expect(await screen.findByTestId("routine-r-seeded")).toBeInTheDocument();
+    expect(screen.getByText(/first run/i)).toHaveTextContent(
+      /scheduled for tomorrow/,
+    );
+    expect(screen.queryByText(/Last run:/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("scheduled").length).toBeGreaterThan(0);
+  });
+
+  it("creates a routine with kind, time, enabled state and parsed config", async () => {
+    fetchMock.mockImplementation(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/routines") && init?.method === "POST") {
+          const body = JSON.parse(String(init.body));
+          return jsonResponse(
+            {
+              data: {
+                id: "created",
+                projectId: "p1",
+                ...body,
+                lastRunAt: null,
+                lastStatus: null,
+              },
+            },
+            201,
+          );
+        }
+        return jsonResponse({
+          data: [],
+          meta: {
+            availableKinds: kinds,
+            serverTimezone: "Europe/Paris",
+            ciAutofixEnabled: false,
+          },
+        });
+      },
+    );
 
     render(<RoutinesSettings projectId="p1" />);
     await screen.findByText("No routines configured");
@@ -148,10 +182,12 @@ describe("RoutinesSettings", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/projects/p1/routines",
-        expect.objectContaining({ method: "POST" })
+        expect.objectContaining({ method: "POST" }),
       );
     });
-    const postCall = fetchMock.mock.calls.find((call) => call[1]?.method === "POST");
+    const postCall = fetchMock.mock.calls.find(
+      (call) => call[1]?.method === "POST",
+    );
     expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
       kind: "ci_watch",
       enabled: true,
@@ -172,24 +208,29 @@ describe("RoutinesSettings", () => {
       lastRunAt: null,
       lastStatus: null,
     };
-    fetchMock.mockImplementation(async (_input: string | URL | Request, init?: RequestInit) => {
-      if (init?.method === "PATCH") {
+    fetchMock.mockImplementation(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        if (init?.method === "PATCH") {
+          return jsonResponse({
+            data: {
+              ...routine,
+              enabled: JSON.parse(String(init.body)).enabled,
+            },
+          });
+        }
+        if (init?.method === "DELETE") {
+          return jsonResponse({ data: { deleted: true } });
+        }
         return jsonResponse({
-          data: { ...routine, enabled: JSON.parse(String(init.body)).enabled },
+          data: [routine],
+          meta: {
+            availableKinds: kinds,
+            serverTimezone: "Europe/Paris",
+            ciAutofixEnabled: false,
+          },
         });
-      }
-      if (init?.method === "DELETE") {
-        return jsonResponse({ data: { deleted: true } });
-      }
-      return jsonResponse({
-        data: [routine],
-        meta: {
-          availableKinds: kinds,
-          serverTimezone: "Europe/Paris",
-          ciAutofixEnabled: false,
-        },
-      });
-    });
+      },
+    );
 
     render(<RoutinesSettings projectId="p1" />);
     const enabled = await screen.findByLabelText("Enable Night run");
@@ -202,8 +243,8 @@ describe("RoutinesSettings", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/projects/p1/routines/r1",
-        expect.objectContaining({ method: "PATCH" })
-      )
+        expect.objectContaining({ method: "PATCH" }),
+      ),
     );
     expect(time).toHaveValue("21:30");
     expect(config).toHaveValue('{"includeBacklog":true}');
@@ -211,11 +252,12 @@ describe("RoutinesSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete Night run" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/projects/p1/routines/r1",
-        { method: "DELETE" }
-      )
+      expect(fetchMock).toHaveBeenCalledWith("/api/projects/p1/routines/r1", {
+        method: "DELETE",
+      }),
     );
-    expect(await screen.findByText("No routines configured")).toBeInTheDocument();
+    expect(
+      await screen.findByText("No routines configured"),
+    ).toBeInTheDocument();
   });
 });
