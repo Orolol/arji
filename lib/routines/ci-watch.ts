@@ -240,89 +240,101 @@ export async function runCiWatchRoutine(
   let newFailures = 0;
   let autofixesLaunched = 0;
   let autofixesSkipped = 0;
+  let processedPullRequests = 0;
+  const failedPullRequestNumbers: number[] = [];
   const autofixEnabled = deps.isAutofixEnabled(routine.projectId);
 
   for (const epic of openPullRequests) {
-    const snapshot = await deps.fetchPullRequestCi(
-      owner,
-      repo,
-      epic.prNumber
-    );
-    const decision = nextCiObservation(
-      previousState[epic.id],
-      epic.prNumber,
-      snapshot
-    );
-    nextState[epic.id] = decision.observation;
-    if (snapshot.state === "failing") failingPullRequests += 1;
+    try {
+      const snapshot = await deps.fetchPullRequestCi(
+        owner,
+        repo,
+        epic.prNumber
+      );
+      const decision = nextCiObservation(
+        previousState[epic.id],
+        epic.prNumber,
+        snapshot
+      );
+      nextState[epic.id] = decision.observation;
+      if (snapshot.state === "failing") failingPullRequests += 1;
 
-    // Persist the SHA guard before ringing the bell. This makes a process
-    // restart immediately after the notification unable to replay it.
-    deps.persistConfig(
-      routine.id,
-      JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState })
-    );
-
-    if (decision.shouldNotify) {
-      deps.notifyFailure({
-        projectId: routine.projectId,
-        epicId: epic.id,
-        epicTitle: epic.title,
-        epicReadableId: epic.readableId,
-        prNumber: epic.prNumber,
-        headSha: snapshot.headSha,
-        failedChecks: snapshot.failedChecks,
-      });
-      newFailures += 1;
-    }
-
-    if (
-      snapshot.state === "failing" &&
-      autofixEnabled &&
-      !decision.observation.autofixAttempted
-    ) {
-      // Claim before fetching logs or invoking the build route. A process
-      // crash anywhere below consumes this head, honoring the strict
-      // one-session-per-(PR, SHA) contract after restart.
-      nextState[epic.id] = {
-        ...decision.observation,
-        autofixAttempted: true,
-      };
+      // Persist the SHA guard before ringing the bell. This makes a process
+      // restart immediately after the notification unable to replay it.
       deps.persistConfig(
         routine.id,
         JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState })
       );
 
-      let failures: PullRequestCiFailureEvidence[];
-      try {
-        failures = await deps.fetchFailureEvidence(owner, repo, snapshot);
-      } catch (error) {
-        console.warn(
-          `[ci-watch] Could not fetch CI log tails for PR #${epic.prNumber}`,
-          error
-        );
-        failures = snapshot.failedChecks.map((name) => ({
-          name,
-          logTail: null,
-        }));
+      if (decision.shouldNotify) {
+        deps.notifyFailure({
+          projectId: routine.projectId,
+          epicId: epic.id,
+          epicTitle: epic.title,
+          epicReadableId: epic.readableId,
+          prNumber: epic.prNumber,
+          headSha: snapshot.headSha,
+          failedChecks: snapshot.failedChecks,
+        });
+        newFailures += 1;
       }
 
-      const launch = await deps.launchAutofix({
-        projectId: routine.projectId,
-        epicId: epic.id,
-        prNumber: epic.prNumber,
-        headSha: snapshot.headSha,
-        failures,
-      });
-      if (launch.status === "launched") autofixesLaunched += 1;
-      else autofixesSkipped += 1;
-      nextState[epic.id] = {
-        ...nextState[epic.id],
-        autofixSessionId: launch.sessionId,
-      };
-      deps.persistConfig(
-        routine.id,
-        JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState })
+      if (
+        snapshot.state === "failing" &&
+        autofixEnabled &&
+        !decision.observation.autofixAttempted
+      ) {
+        // Claim before fetching logs or invoking the build route. A process
+        // crash anywhere below consumes this head, honoring the strict
+        // one-session-per-(PR, SHA) contract after restart.
+        nextState[epic.id] = {
+          ...decision.observation,
+          autofixAttempted: true,
+        };
+        deps.persistConfig(
+          routine.id,
+          JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState })
+        );
+
+        let failures: PullRequestCiFailureEvidence[];
+        try {
+          failures = await deps.fetchFailureEvidence(owner, repo, snapshot);
+        } catch (error) {
+          console.warn(
+            `[ci-watch] Could not fetch CI log tails for PR #${epic.prNumber}`,
+            error
+          );
+          failures = snapshot.failedChecks.map((name) => ({
+            name,
+            logTail: null,
+          }));
+        }
+
+        const launch = await deps.launchAutofix({
+          projectId: routine.projectId,
+          epicId: epic.id,
+          prNumber: epic.prNumber,
+          headSha: snapshot.headSha,
+          failures,
+        });
+        if (launch.status === "launched") autofixesLaunched += 1;
+        else autofixesSkipped += 1;
+        nextState[epic.id] = {
+          ...nextState[epic.id],
+          autofixSessionId: launch.sessionId,
+        };
+        deps.persistConfig(
+          routine.id,
+          JSON.stringify({ ...config, [CI_WATCH_STATE_CONFIG_KEY]: nextState })
+        );
+      }
+
+      processedPullRequests += 1;
+    } catch (error) {
+      failedPullRequestNumbers.push(epic.prNumber);
+      console.error(
+        `[ci-watch] Failed to process PR #${epic.prNumber}; continuing the sweep`,
+        error
       );
     }
   }
@@ -337,11 +349,15 @@ export async function runCiWatchRoutine(
 
   return {
     status: "completed",
-    message: `Checked ${openPullRequests.length} open pull request${
+    message: `Checked ${processedPullRequests} of ${openPullRequests.length} open pull request${
       openPullRequests.length === 1 ? "" : "s"
     }; ${failingPullRequests} failing, ${newFailures} newly reported${
       autofixesLaunched + autofixesSkipped > 0
         ? `; ${autofixesLaunched} autofix launched, ${autofixesSkipped} skipped`
+        : ""
+    }${
+      failedPullRequestNumbers.length > 0
+        ? `; ${failedPullRequestNumbers.length} could not be processed (PR ${failedPullRequestNumbers.map((prNumber) => `#${prNumber}`).join(", ")})`
         : ""
     }.`,
     targetUrl: `/projects/${routine.projectId}`,

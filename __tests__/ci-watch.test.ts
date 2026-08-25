@@ -119,6 +119,41 @@ describe("CI watch", () => {
     });
   });
 
+  it("continues polling later PRs when one GitHub request fails", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.listOpenPullRequestEpics).mockReturnValue([
+      EPICS[0],
+      {
+        id: "epic-open-2",
+        title: "Second open PR",
+        readableId: "E-proj-004",
+        prNumber: 14,
+        prStatus: "open",
+      },
+    ]);
+    vi.mocked(watchDeps.fetchPullRequestCi)
+      .mockRejectedValueOnce(new Error("GitHub unavailable"))
+      .mockResolvedValueOnce({
+        headSha: "sha-2",
+        state: "failing",
+        failedChecks: ["e2e"],
+      });
+
+    const result = await runCiWatchRoutine(row, watchDeps);
+
+    expect(watchDeps.fetchPullRequestCi).toHaveBeenCalledTimes(2);
+    expect(watchDeps.notifyFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        epicId: "epic-open-2",
+        prNumber: 14,
+        failedChecks: ["e2e"],
+      })
+    );
+    expect(result.message).toContain("Checked 1 of 2 open pull requests");
+    expect(result.message).toContain("1 could not be processed (PR #11)");
+  });
+
   it("reports a red transition after an initial green observation", async () => {
     const row = routine();
     const watchDeps = deps(row);
