@@ -591,6 +591,100 @@ describe("collectDreamDigest — per-session record", () => {
     );
   });
 
+  /**
+   * A stage that failed, was retried, and failed again produces TWO sessions
+   * of the same scope with overlapping attach windows. Attributing by "first
+   * session in chronological order whose window covers the comment" would hand
+   * the retry's post-mortem to the attempt before it — so the dream would
+   * reason about a failure that belongs to a different revision of the code.
+   */
+  it("gives a rerun's post-mortem to the rerun, not to the attempt before it", () => {
+    const firstAttempt = seedSession({
+      status: "failed",
+      outcome: "error",
+      startedAt: minutesAgo(90),
+      createdAt: minutesAgo(90),
+      endedAt: minutesAgo(70),
+      completedAt: minutesAgo(70),
+      lastNonEmptyText: "attempt 1",
+    });
+    const retry = seedSession({
+      status: "failed",
+      outcome: "error",
+      startedAt: minutesAgo(65),
+      createdAt: minutesAgo(65),
+      endedAt: minutesAgo(50),
+      completedAt: minutesAgo(50),
+      lastNonEmptyText: "attempt 2",
+    });
+
+    // Both diagnostics land inside the FIRST attempt's window (its end + the
+    // 30-minute slack reaches minute 40), so only "closest terminal session"
+    // separates them.
+    db.insert(ticketComments)
+      .values({
+        id: `forensic-1st-${counter}`,
+        epicId,
+        userStoryId: null,
+        author: "agent",
+        content: `${FORENSIC_COMMENT_HEADING}\n\nATTEMPT ONE DIAGNOSIS`,
+        createdAt: minutesAgo(69),
+      })
+      .run();
+    db.insert(ticketComments)
+      .values({
+        id: `forensic-retry-${counter}`,
+        epicId,
+        userStoryId: null,
+        author: "agent",
+        content: `${FORENSIC_COMMENT_HEADING}\n\nRETRY DIAGNOSIS`,
+        createdAt: minutesAgo(49),
+      })
+      .run();
+
+    const { sessions } = collectDreamDigest(projectId, { now: NOW });
+    expect(sessions.find((s) => s.sessionId === firstAttempt)!.forensic).toContain(
+      "ATTEMPT ONE DIAGNOSIS"
+    );
+    expect(sessions.find((s) => s.sessionId === retry)!.forensic).toContain(
+      "RETRY DIAGNOSIS"
+    );
+  });
+
+  it("attributes a lone diagnostic to the run that had just ended", () => {
+    seedSession({
+      status: "failed",
+      outcome: "error",
+      startedAt: minutesAgo(90),
+      createdAt: minutesAgo(90),
+      endedAt: minutesAgo(70),
+      completedAt: minutesAgo(70),
+    });
+    const retry = seedSession({
+      status: "failed",
+      outcome: "error",
+      startedAt: minutesAgo(65),
+      createdAt: minutesAgo(65),
+      endedAt: minutesAgo(50),
+      completedAt: minutesAgo(50),
+    });
+    db.insert(ticketComments)
+      .values({
+        id: `forensic-only-${counter}`,
+        epicId,
+        userStoryId: null,
+        author: "agent",
+        content: `${FORENSIC_COMMENT_HEADING}\n\nONLY DIAGNOSIS`,
+        createdAt: minutesAgo(49),
+      })
+      .run();
+
+    const { sessions } = collectDreamDigest(projectId, { now: NOW });
+    const withForensic = sessions.filter((s) => s.forensic !== null);
+    expect(withForensic).toHaveLength(1);
+    expect(withForensic[0].sessionId).toBe(retry);
+  });
+
   it("never hands an epic-scoped forensic to a story-scoped session", () => {
     const storyId = `story-solo-${counter}`;
     db.insert(userStories)

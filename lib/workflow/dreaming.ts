@@ -28,7 +28,8 @@
  *   - the memory is replaced ONLY when the session actually delivers
  *     (`outcome === 'answered'` with non-empty output), the same guard
  *     spec-auto-rewrite.ts applies to the spec. The previous memory is
- *     snapshotted first (documents row, kind 'memory_archive').
+ *     snapshotted in the SAME transaction (documents row, kind
+ *     'memory_archive'), so a failed save can never burn the snapshot.
  */
 
 import fs from "fs";
@@ -68,9 +69,8 @@ import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-ca
 // the digest recognises forensic comments by exactly that string.
 import { FORENSIC_COMMENT_HEADING } from "@/lib/pipeline/forensic";
 import {
-  archiveProjectMemory,
   getProjectMemoryContent,
-  saveProjectMemory,
+  replaceProjectMemoryWithSnapshot,
 } from "@/lib/documents/memory";
 import { createMemoryDreamedNotification } from "@/lib/notifications/create";
 // Client-safe constants module (no db import) — no cycle back into the engine.
@@ -413,6 +413,77 @@ function loadForensicCommentsByEpic(epicIds: string[]): Map<string, DatedRow[]> 
   return byEpic;
 }
 
+/**
+ * Assigns each forensic diagnostic to the session it actually diagnoses.
+ *
+ * The pipeline files a post-mortem right after the doomed stage settles, but
+ * the comment row carries no link back to the dead session — only an epic, an
+ * optional story, and a timestamp. So the match is: same scope, comment inside
+ * the run's window (start → terminal + slack), and — the part that matters —
+ * the CLOSEST such session, preferring the one that had already ended.
+ *
+ * "Closest" is what makes reruns come out right. A first attempt ending at
+ * 10:00 and its retry ending at 10:20 both have windows covering a diagnostic
+ * filed at 10:21; taking the first session in chronological order would hand
+ * the retry's post-mortem to the attempt before it, and the dream would then
+ * reason about a failure that belongs to different code.
+ *
+ * Returns sessionId → diagnostic body, at most one each way: a session gets
+ * one post-mortem, and a post-mortem is never repeated across a ticket's runs
+ * (which would also burn the digest budget).
+ */
+function assignForensicComments(
+  rows: DreamCandidateRow[],
+  forensicByEpic: Map<string, DatedRow[]>
+): Map<string, string> {
+  const assigned = new Map<string, string>();
+  const takenSessions = new Set<string>();
+
+  const comments = [...forensicByEpic.values()]
+    .flat()
+    .filter((comment) => comment.createdMs !== null)
+    .sort((a, b) => (a.createdMs ?? 0) - (b.createdMs ?? 0));
+
+  for (const comment of comments) {
+    const at = comment.createdMs!;
+    const candidates = rows
+      .filter((row) => {
+        if (!row.epicId || takenSessions.has(row.id)) return false;
+        if ((comment.userStoryId ?? null) !== (row.userStoryId ?? null)) {
+          return false;
+        }
+        if (!(forensicByEpic.get(row.epicId) ?? []).includes(comment)) {
+          return false;
+        }
+        const startMs = parseTimestampMs(sessionAt(row));
+        const terminalMs = sessionTerminalMs(row);
+        if (startMs !== null && at < startMs) return false;
+        if (terminalMs !== null && at > terminalMs + DREAM_FORENSIC_ATTACH_SLACK_MS) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aEnd = sessionTerminalMs(a) ?? 0;
+        const bEnd = sessionTerminalMs(b) ?? 0;
+        // A session that had already ended when the diagnostic landed beats one
+        // that was still running: the pipeline files post-mortems for the dead.
+        const aBefore = aEnd <= at ? 0 : 1;
+        const bBefore = bEnd <= at ? 0 : 1;
+        if (aBefore !== bBefore) return aBefore - bBefore;
+        return Math.abs(at - aEnd) - Math.abs(at - bEnd);
+      });
+
+    const best = candidates[0];
+    if (best) {
+      takenSessions.add(best.id);
+      assigned.set(best.id, comment.body);
+    }
+  }
+
+  return assigned;
+}
+
 /** Final response of a session: streamed column first, then the logs file. */
 function resolveFinalText(row: DreamCandidateRow): string | null {
   if (row.lastNonEmptyText && row.lastNonEmptyText.trim()) {
@@ -466,10 +537,10 @@ export function collectDreamDigest(
   const findingsByEpic = loadBlockingFindingsByEpic(epicIds);
   const forensicByEpic = loadForensicCommentsByEpic(epicIds);
 
-  // A forensic comment belongs to exactly ONE session in the digest: the first
-  // (chronologically) whose run window covers it. Without this, every session
-  // on a ticket would repeat the same post-mortem and burn the budget.
-  const claimedForensic = new Set<string>();
+  // Resolved for the whole batch at once: attributing a post-mortem needs to
+  // compare candidate sessions against each other, which a per-session pass
+  // cannot do (see assignForensicComments).
+  const forensicBySession = assignForensicComments(ordered, forensicByEpic);
 
   const sessions: DreamSessionDigest[] = ordered.map((row) => {
     const startMs = parseTimestampMs(sessionAt(row));
@@ -487,26 +558,7 @@ export function collectDreamDigest(
           .map((finding) => finding.body)
       : [];
 
-    let forensic: string | null = null;
-    if (row.epicId) {
-      const candidate = (forensicByEpic.get(row.epicId) ?? []).find(
-        (comment) =>
-          !claimedForensic.has(comment.id) &&
-          // Same scope, exactly: a story-scoped session only claims its own
-          // story's post-mortem, an epic-scoped one only claims epic-scoped
-          // ones (both sides null). The pipeline files the comment with the
-          // dead session's own userStoryId, so equality is the honest test.
-          (comment.userStoryId ?? null) === (row.userStoryId ?? null) &&
-          comment.createdMs !== null &&
-          (startMs === null || comment.createdMs >= startMs) &&
-          (endMs === null ||
-            comment.createdMs <= endMs + DREAM_FORENSIC_ATTACH_SLACK_MS)
-      );
-      if (candidate) {
-        claimedForensic.add(candidate.id);
-        forensic = candidate.body;
-      }
-    }
+    const forensic = forensicBySession.get(row.id) ?? null;
 
     const ticketLabel = row.userStoryId
       ? [labels.epics.get(row.epicId ?? ""), labels.stories.get(row.userStoryId)]
@@ -938,10 +990,11 @@ export async function dispatchDreamingSession(
 
     const previous = getProjectMemoryContent(input.projectId);
     try {
-      // Snapshot BEFORE the replacement: a dream rewrites the whole document,
-      // so the pre-dream text is the only way back if it goes wrong.
-      archiveProjectMemory(input.projectId, previous);
-      saveProjectMemory(input.projectId, output);
+      // Snapshot and replacement commit together or not at all. A dream
+      // rewrites the whole document, so the pre-dream text is the only way
+      // back — and archiving it separately would let a failed save burn that
+      // snapshot while leaving the live memory untouched.
+      replaceProjectMemoryWithSnapshot(input.projectId, output);
     } catch (error) {
       // The window deliberately does NOT advance here. A dream that produced
       // text but failed to store it taught the project nothing, so the next
