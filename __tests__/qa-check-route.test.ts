@@ -52,7 +52,6 @@ vi.mock("@/lib/claude/prompt-builder", () => ({
 
 vi.mock("@/lib/telescope/collect", () => ({
   collectFailureDigestEvidence: mockCollectFailureDigestEvidence,
-  TELESCOPE_WINDOW_DAYS: 14,
 }));
 
 vi.mock("@/lib/agent-config/prompts", () => ({
@@ -237,6 +236,28 @@ describe("POST /api/projects/[projectId]/qa/check", () => {
         status: "running",
       }),
     );
+  });
+
+  it("bounds the failure digest window before collection", async () => {
+    dbMockState.getQueue = [
+      { id: "proj-1", name: "Arij", gitRepoPath: "/tmp/repo", spec: "Spec" },
+    ];
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/qa/check/route"
+    );
+    const res = await POST(
+      mockJsonRequest({
+        checkType: "failure_digest",
+        windowDays: 1_000_000_000,
+      }),
+      mockRouteContext({ projectId: "proj-1" }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockCollectFailureDigestEvidence).toHaveBeenCalledWith("proj-1", {
+      windowDays: 365,
+    });
   });
 
   it("journals an empty failure window without launching a session", async () => {

@@ -19,8 +19,15 @@ import {
   FORENSIC_COMMENT_HEADING,
   parseForensicDeadSessionId,
 } from "@/lib/pipeline/forensic";
+import {
+  TELESCOPE_MAX_WINDOW_DAYS,
+  TELESCOPE_WINDOW_DAYS,
+} from "@/lib/telescope/constants";
 
-export const TELESCOPE_WINDOW_DAYS = 14;
+export {
+  TELESCOPE_MAX_WINDOW_DAYS,
+  TELESCOPE_WINDOW_DAYS,
+} from "@/lib/telescope/constants";
 export const TELESCOPE_MAX_GROUPS = 50;
 export const TELESCOPE_MAX_EXAMPLES_PER_GROUP = 5;
 export const TELESCOPE_MAX_TICKET_IDS_PER_GROUP = 20;
@@ -172,10 +179,14 @@ function boundedNonNegativeInteger(
   return Math.min(maximum, Math.floor(value));
 }
 
-function positiveNumber(value: number | undefined, fallback: number) {
-  return value !== undefined && Number.isFinite(value) && value > 0
-    ? value
-    : fallback;
+function boundedWindowDays(value: number | undefined) {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return TELESCOPE_WINDOW_DAYS;
+  }
+  return Math.min(
+    TELESCOPE_MAX_WINDOW_DAYS,
+    Math.max(1, Math.floor(value))
+  );
 }
 
 function resolveOptions(
@@ -187,7 +198,7 @@ function resolveOptions(
   }
   return {
     now,
-    windowDays: positiveNumber(options.windowDays, TELESCOPE_WINDOW_DAYS),
+    windowDays: boundedWindowDays(options.windowDays),
     maxGroups: boundedNonNegativeInteger(
       options.maxGroups,
       TELESCOPE_MAX_GROUPS

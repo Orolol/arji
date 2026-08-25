@@ -13,6 +13,7 @@ import {
   buildFailureSignature,
   collectFailureDigestEvidence,
   normalizeFindingMessagePrefix,
+  TELESCOPE_MAX_WINDOW_DAYS,
   TELESCOPE_MAX_PAYLOAD_CHARS,
 } from "@/lib/telescope/collect";
 import {
@@ -188,6 +189,22 @@ describe("collectFailureDigestEvidence — window and session sources", () => {
     });
     expect(sevenDays.sinceIso).toBe(daysAgo(7));
     expect(sevenDays.evidenceCount).toBe(1);
+
+    const boundedWindow = collectFailureDigestEvidence("project-window", {
+      now: NOW,
+      windowDays: 1_000_000_000,
+      database: db,
+    });
+    expect(boundedWindow.windowDays).toBe(TELESCOPE_MAX_WINDOW_DAYS);
+    expect(boundedWindow.sinceIso).toBe(daysAgo(TELESCOPE_MAX_WINDOW_DAYS));
+
+    const integerWindow = collectFailureDigestEvidence("project-window", {
+      now: NOW,
+      windowDays: 7.9,
+      database: db,
+    });
+    expect(integerWindow.windowDays).toBe(7);
+    expect(integerWindow.sinceIso).toBe(daysAgo(7));
   });
 
   it("collects failed, silent, and transition-refused outcomes with their details", () => {

@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { TELESCOPE_MAX_WINDOW_DAYS } from "@/lib/telescope/constants";
 
 type CheckType = "tech_check" | "e2e_test" | "failure_digest";
 
@@ -254,6 +255,7 @@ export function StartQaCheckDialog({
                 id="failure-digest-window"
                 type="number"
                 min={1}
+                max={TELESCOPE_MAX_WINDOW_DAYS}
                 step={1}
                 value={failureDigestWindowDays}
                 onChange={(event) => setFailureDigestWindowDays(event.target.value)}

@@ -29,10 +29,11 @@ import {
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
 import { agentScheduler } from "@/lib/agents/scheduler";
+import { collectFailureDigestEvidence } from "@/lib/telescope/collect";
 import {
-  collectFailureDigestEvidence,
+  TELESCOPE_MAX_WINDOW_DAYS,
   TELESCOPE_WINDOW_DAYS,
-} from "@/lib/telescope/collect";
+} from "@/lib/telescope/constants";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -71,7 +72,11 @@ function parseWindowDays(value: unknown): number | undefined {
       : typeof value === "string" && value.trim()
         ? Number(value)
         : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.min(
+    TELESCOPE_MAX_WINDOW_DAYS,
+    Math.max(1, Math.floor(parsed))
+  );
 }
 
 function emptyDigestReport(input: {
