@@ -423,6 +423,11 @@ export async function fetchPullRequestCiFailureEvidence(
   const runByName = new Map(
     failedCheckRuns.map((check) => [check.name, check]),
   );
+  // failedCheckRuns is priority-sorted (actionable conclusions first), so its
+  // index is the order in which the shared log-byte budget should be spent.
+  const logPriorityByName = new Map(
+    failedCheckRuns.map((check, index) => [check.name, index]),
+  );
 
   const loggedCheckNames = new Set(
     failedCheckRuns
@@ -455,5 +460,8 @@ export async function fetchPullRequestCiFailureEvidence(
         }
       }),
   );
-  return boundCiAutofixEvidence(evidence);
+  return boundCiAutofixEvidence(
+    evidence,
+    (failure) => logPriorityByName.get(failure.name) ?? Number.MAX_SAFE_INTEGER,
+  );
 }

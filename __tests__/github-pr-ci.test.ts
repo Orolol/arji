@@ -362,4 +362,55 @@ describe("classifyPullRequestCi", () => {
       job_id: 999,
     });
   });
+
+  it("spends the evidence byte budget on the actionable failure first", async () => {
+    const cancelledChecks = Array.from(
+      { length: CI_AUTOFIX_MAX_LOGGED_FAILURES },
+      (_, index) => ({
+        id: index + 1,
+        name: `a-cancelled-${index}`,
+        conclusion: "cancelled",
+      }),
+    );
+    githubMocks.downloadJobLogs.mockImplementation(async ({ job_id }) => ({
+      data:
+        job_id === 999
+          ? `${"x".repeat(8_000)} REAL-FAILURE-TAIL`
+          : `cancelled log ${job_id} ${"x".repeat(8_000)}`,
+    }));
+
+    const evidence = await fetchPullRequestCiFailureEvidence(
+      "acme",
+      "widgets",
+      {
+        headSha: "head-123",
+        state: "failing",
+        failedChecks: [
+          ...cancelledChecks.map((check) => check.name),
+          "z-real-failure",
+        ],
+        failedCheckRuns: [
+          ...cancelledChecks,
+          { id: 999, name: "z-real-failure", conclusion: "failure" },
+        ],
+      },
+    );
+
+    const realFailure = evidence.find(
+      (failure) => failure.name === "z-real-failure",
+    );
+    expect(realFailure?.logTail).toContain("REAL-FAILURE-TAIL");
+    expect(ciAutofixEvidenceBytes(evidence)).toBeLessThanOrEqual(
+      CI_AUTOFIX_MAX_EVIDENCE_BYTES,
+    );
+    // Whatever budget the actionable failure left unspent goes to the
+    // cancelled siblings, in display order — never the other way around.
+    const cancelledWithLogs = evidence.filter(
+      (failure) =>
+        failure.name.startsWith("a-cancelled") && failure.logTail !== null,
+    );
+    expect(cancelledWithLogs.length).toBeLessThan(
+      CI_AUTOFIX_MAX_LOGGED_FAILURES,
+    );
+  });
 });
