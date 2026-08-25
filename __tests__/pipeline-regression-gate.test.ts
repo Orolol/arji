@@ -36,7 +36,9 @@ function failingCheck(): RegressionCheckResult {
 }
 
 /** What the runner should persist for that failing check (fresh timestamp). */
-function expectedPayloadFor(check: RegressionCheckResult): RegressionReportPayload {
+function expectedPayloadFor(
+  check: RegressionCheckResult
+): RegressionReportPayload {
   return {
     regression: {
       status: check.status,
@@ -48,6 +50,7 @@ function expectedPayloadFor(check: RegressionCheckResult): RegressionReportPaylo
   };
 }
 
+
 interface GateHarnessConfig {
   /** Gate outcomes per invocation; last one repeats. Default: not-ran. */
   gateOutcomes?: Array<{
@@ -58,6 +61,7 @@ interface GateHarnessConfig {
   }>;
   assessments?: boolean[];
   maxFixCycles?: number;
+  onParkRejectedTicket?: (sessionId: string | null) => void;
 }
 
 function runWithGate(config: GateHarnessConfig = {}) {
@@ -126,6 +130,7 @@ function runWithGate(config: GateHarnessConfig = {}) {
         result: script.result ?? null,
       };
     },
+    parkRejectedTicket: config.onParkRejectedTicket,
     cancelPollIntervalMs: 5,
     callbacks: { onTrace: (reason) => traces.push(reason) },
   });
@@ -165,10 +170,12 @@ describe("runPipeline — regression verify gate", () => {
     expect(h.seenSessionIds[1]).toBe("s-fix-1");
   });
 
-  it("fails the run without review when the gate is red and no fix cycles remain", async () => {
+  it("fails the run without review when the gate is red and no fix cycles remain, parking the ticket", async () => {
+    const parked: Array<string | null> = [];
     const h = runWithGate({
       maxFixCycles: 0,
       gateOutcomes: [{ ran: true, passed: false, result: failingCheck() }],
+      onParkRejectedTicket: (sessionId) => parked.push(sessionId),
     });
     const summary = await h.promise;
 
@@ -176,6 +183,27 @@ describe("runPipeline — regression verify gate", () => {
     expect(summary.reason).toContain("regression test still failing");
     expect(h.requests).toEqual([]);
     expect(h.traces).toContain(PIPELINE_REASONS.failedRegression(0));
+    // The board counterpart: the rejected bug leaves the approval column.
+    expect(parked).toEqual(["s-build"]);
+  });
+
+  it("does not invoke the park callback when the budget is not exhausted", async () => {
+    let parkCalls = 0;
+    const h = runWithGate({
+      maxFixCycles: 1,
+      gateOutcomes: [
+        { ran: true, passed: false, result: failingCheck() },
+        { ran: false },
+      ],
+      assessments: [false],
+      onParkRejectedTicket: () => {
+        parkCalls += 1;
+      },
+    });
+    const summary = await h.promise;
+
+    expect(summary.state).toBe("succeeded");
+    expect(parkCalls).toBe(0);
   });
 
   it("proceeds to review when the gate passes", async () => {

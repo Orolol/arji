@@ -196,7 +196,10 @@ export const PIPELINE_REASONS = {
   /** Regression gate still red after the fix-cycle budget ran out. */
   failedRegression: (cycles: number) =>
     `Pipeline failed: mandatory regression test still failing after ${cycles} fix cycles`,
+  /** The mechanical verify gate itself threw — an infrastructure failure. */
+  failedRegressionGateCrashed: "Pipeline failed: regression gate crashed",
 } as const;
+
 
 /** True when an activity-log reason belongs to the pipeline trace. */
 export function isPipelineActivityReason(

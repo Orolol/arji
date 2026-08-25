@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { epics, settings } from "@/lib/db/schema";
+import { epics, settings, userStories } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { logTransition } from "@/lib/workflow/log";
 import type { AgentProvider } from "@/lib/agent-config/constants";
+import { transitionReviewRejected } from "@/lib/workflow/automatic-transitions";
 import { runForensic } from "./forensic";
 import { createVerifyGate } from "./verify";
 import {
@@ -232,6 +233,47 @@ export function startPipelineRun(input: StartPipelineRunInput): {
     assessReview: driver.assessReview,
     readSessionStatus: driver.readSessionStatus,
     checkGuards: driver.checkGuards,
+    parkRejectedTicket: (lastCodeSessionId) => {
+      // Mirror of the negative-review path: a gate-rejected bug must not
+      // stay in the approval-ready column. Only a ticket actually sitting
+      // in review/done is moved; anything else is left untouched.
+      const reason =
+        "Mandatory regression test rejected the branch (red → green)";
+      if (input.scope === "story") {
+        const story = input.userStoryId
+          ? db
+              .select()
+              .from(userStories)
+              .where(eq(userStories.id, input.userStoryId))
+              .get()
+          : null;
+        if (!story) return;
+        if (story.status !== "review" && story.status !== "done") return;
+        transitionReviewRejected({
+          projectId: input.projectId,
+          epicId: input.epicId,
+          scope: "story",
+          userStoryId: input.userStoryId,
+          sessionId: lastCodeSessionId ?? "",
+          reason,
+        });
+        return;
+      }
+      const epic = db
+        .select()
+        .from(epics)
+        .where(eq(epics.id, input.epicId))
+        .get();
+      if (!epic) return;
+      if (epic.status !== "review" && epic.status !== "done") return;
+      transitionReviewRejected({
+        projectId: input.projectId,
+        epicId: input.epicId,
+        scope: "epic",
+        sessionId: lastCodeSessionId ?? "",
+        reason,
+      });
+    },
     runForensic: (forensicInput) =>
       runForensic({
         projectId: input.projectId,

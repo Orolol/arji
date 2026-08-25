@@ -30,7 +30,8 @@ import { DEFAULT_TEST_FILE_PATTERNS } from "@/lib/verify/regression-constants";
  */
 
 const PROBE_SCRIPTS: Record<
-  "redgreen" | "always-pass" | "always-fail" | "envfail",
+  "redgreen" | "always-pass" | "always-fail" | "envfail" | "envfail-always" |
+    "contentcheck",
   string
 > = {
   redgreen: [
@@ -49,6 +50,23 @@ const PROBE_SCRIPTS: Record<
     "  console.error(\"Error: Cannot find module 'left-pad'\");",
     "  process.exit(1);",
     "}",
+    "process.exit(0);",
+    "",
+  ].join("\n"),
+  // Fails ALWAYS with a module-resolution signature: the green run must
+  // blame the environment, not the agent's fix.
+  "envfail-always": [
+    "console.error(\"Error: Cannot find package 'vitest'\");",
+    "process.exit(1);",
+    "",
+  ].join("\n"),
+  // Red/green is driven by the CONTENT of the copied test file, proving
+  // which version of it the red worktree actually received.
+  contentcheck: [
+    "const fs = require('fs');",
+    "let c = '';",
+    "try { c = fs.readFileSync(process.argv[2].replaceAll(\"'\", ''), 'utf8'); } catch {}",
+    "if (!fs.existsSync('src/fix.marker') && !c.includes('WORKTREE')) process.exit(1);",
     "process.exit(0);",
     "",
   ].join("\n"),
@@ -390,6 +408,61 @@ describe("runRegressionCheck — real repositories", () => {
     expect(result.status).toBe("failed");
     expect(result.reason).toBe("command_error");
     expect(result.detail).toContain("timed out");
+  }, 30_000);
+
+  it("reports command_error — not test_fails_on_branch — when the GREEN run fails environmentally", async () => {
+    const { repoPath } = await initRepo("envfail-always");
+    await commitOnBranch(repoPath, {
+      "src/bug.test.js": "// fine, but the runner cannot start\n",
+    });
+
+    const result = await runRegressionCheck({
+      repoPath,
+      commandTemplate: "node tools/probe.js {files}",
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("command_error");
+    expect(result.detail).toContain(
+      "green run failed for environmental reasons"
+    );
+  }, 30_000);
+  it("copies the COMMITTED test blob into the red worktree, not the working tree", async () => {
+    const { repoPath } = await initRepo("contentcheck");
+    await commitOnBranch(repoPath, {
+      "src/bug.test.js": "// COMMITTED version\n",
+      "src/fix.marker": "fixed\n",
+    });
+    // Uncommitted agent edit: if the red run saw this, the probe would
+    // pass on the base and the gate would wrongly report
+    // test_passes_on_base instead of a genuine red.
+    writeFileSync(path.join(repoPath, "src/bug.test.js"), "// WORKTREE\n");
+
+    const result = await runRegressionCheck({
+      repoPath,
+      commandTemplate: "node tools/probe.js {files}",
+    });
+
+    expect(result.status).toBe("passed");
+    await assertNoRedWorktreeLeft(repoPath);
+  }, 30_000);
+
+  it("detects non-ASCII test paths despite core.quotePath", async () => {
+    const { repoPath, baseBranch } = await initRepo("redgreen");
+    await commitOnBranch(repoPath, {
+      "src/caf\u00e9.test.js": "// reproduces the bug\n",
+      "src/fix.marker": "fixed\n",
+    });
+    await commitOnBase(repoPath, baseBranch);
+
+    const result = await runRegressionCheck({
+      repoPath,
+      commandTemplate: "node tools/probe.js {files}",
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.testFiles).toEqual(["src/caf\u00e9.test.js"]);
+    await assertNoRedWorktreeLeft(repoPath);
   }, 30_000);
 });
 

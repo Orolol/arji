@@ -196,7 +196,16 @@ export interface RunPipelineOptions {
    * to pre-regression runs.
    */
   runVerifyGate?: VerifyGate;
+  /**
+   * Parks a gate-rejected bug back to in_progress (guarded review →
+   * in_progress) before the run terminates on regression exhaustion — the
+   * board counterpart of the terminal failure. Receives the last code
+   * session id for the transition's audit trail. Absent → the ticket keeps
+   * whatever status the code stage left it in.
+   */
+  parkRejectedTicket?: (lastCodeSessionId: string | null) => void;
 }
+
 
 const RUNNING_STATE_BY_STAGE: Record<PipelineStageKind, PipelineState> = {
   build: "running_build",
@@ -509,6 +518,10 @@ export async function runPipeline(
           "[pipeline] Regression gate crashed:",
           error instanceof Error ? error.message : error
         );
+        callbacks.onTrace?.(
+          PIPELINE_REASONS.failedRegressionGateCrashed,
+          handle.sessionId
+        );
         return finish("failed", "regression gate crashed");
       }
       if (gate.ran && !gate.passed && gate.result) {
@@ -526,6 +539,18 @@ export async function runPipeline(
             PIPELINE_REASONS.failedRegression(fixCycles),
             handle.sessionId
           );
+          // The code stage already moved the ticket to review; a gate
+          // rejection is the opposite of approval-ready. Park it back in
+          // in_progress like the negative-review path does — best effort,
+          // it must not change how the run terminates.
+          try {
+            options.parkRejectedTicket?.(lastCodeSessionId);
+          } catch (parkError) {
+            console.warn(
+              "[pipeline] Failed to park regression-rejected ticket:",
+              parkError instanceof Error ? parkError.message : parkError
+            );
+          }
           return finish(
             "failed",
             `mandatory regression test still failing after ${fixCycles} fix cycles`

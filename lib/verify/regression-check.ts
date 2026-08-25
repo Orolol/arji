@@ -250,8 +250,17 @@ export async function runRegressionCheck(
   const mergeBase = (await git.raw(["merge-base", base, head])).trim();
 
   // --- Test files added/modified on the branch ----------------------
+  // core.quotePath=false: the default true C-quotes non-ASCII paths, which
+  // then miss the pattern filter or break the later file read.
   const diffNames = (
-    await git.raw(["diff", "--name-only", "--diff-filter=ACMR", `${mergeBase}..${head}`])
+    await git.raw([
+      "-c",
+      "core.quotePath=false",
+      "diff",
+      "--name-only",
+      "--diff-filter=ACMR",
+      `${mergeBase}..${head}`,
+    ])
   )
     .split("\n")
     .map((line) => line.trim())
@@ -267,6 +276,12 @@ export async function runRegressionCheck(
     );
   }
 
+  // createWorktree never installs dependencies, so a fresh epic worktree
+  // cannot run the default command at all — surfaced in the report instead
+  const depsHint = fs.existsSync(path.join(input.repoPath, "node_modules"))
+    ? ""
+    : " — note: the worktree has no node_modules installed";
+
   // --- GREEN: same command must pass in the epic worktree ------------
   const greenCommand = buildRegressionCommand(template, testFiles);
   const green = await runCommand(input.repoPath, greenCommand);
@@ -274,10 +289,23 @@ export async function runRegressionCheck(
     return failed(
       "command_error",
       testFiles,
-      `the regression command could not run: ${outputTail(green.output) ?? "no output"}`
+      `the regression command could not run${depsHint}: ${
+        outputTail(green.output) ?? "no output"
+      }`
     );
   }
   if (green.code !== 0) {
+    // The epic worktree can lack a working environment exactly like the
+    // red checkout does; blame that, not the agent's fix.
+    if (looksLikeStartupFailure(green.output)) {
+      return failed(
+        "command_error",
+        testFiles,
+        `the green run failed for environmental reasons rather than because of the test${depsHint}: ${
+          outputTail(green.output) ?? "no output"
+        }`
+      );
+    }
     return failed(
       "test_fails_on_branch",
       testFiles,
@@ -316,11 +344,17 @@ export async function runRegressionCheck(
         // A missing link degrades to the startup-failure check below.
       }
     }
-
     for (const relPath of testFiles) {
       const destination = path.join(tempPath, relPath);
       fs.mkdirSync(path.dirname(destination), { recursive: true });
-      fs.copyFileSync(path.join(input.repoPath, relPath), destination);
+      // The COMMITTED blob, not the working tree: uncommitted agent edits
+      // would make the red proof describe a file that is not on the
+      // branch, and a committed-then-deleted file would throw ENOENT.
+      fs.writeFileSync(
+        destination,
+        await git.raw(["show", `${head}:${relPath}`]),
+        "utf8"
+      );
     }
 
     const red = await runCommand(tempPath, greenCommand);
@@ -328,7 +362,9 @@ export async function runRegressionCheck(
       return failed(
         "command_error",
         testFiles,
-        `the regression command could not run: ${outputTail(red.output) ?? "no output"}`
+        `the regression command could not run${depsHint}: ${
+          outputTail(red.output) ?? "no output"
+        }`
       );
     }
     if (red.code === 0) {
@@ -344,7 +380,7 @@ export async function runRegressionCheck(
       return failed(
         "command_error",
         testFiles,
-        `the red run failed for environmental reasons rather than because of the test: ${
+        `the red run failed for environmental reasons rather than because of the test${depsHint}: ${
           outputTail(red.output) ?? "no output"
         }`
       );
