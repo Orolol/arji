@@ -28,6 +28,40 @@ export const projects = sqliteTable("projects", {
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export type RoutineKind =
+  | "night_run"
+  | "dreaming"
+  | "github_issue_sync"
+  | "ci_watch";
+
+/**
+ * Durable routine definitions. Daily scheduling is interpreted in the
+ * server's local timezone; `lastRunAt` is written before dispatch so a
+ * process restart cannot replay a routine already claimed that day.
+ */
+export const routines = sqliteTable(
+  "routines",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<RoutineKind>().notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    timeOfDay: text("time_of_day").notNull(),
+    config: text("config").notNull().default("{}"),
+    lastRunAt: text("last_run_at"),
+    lastStatus: text("last_status"),
+  },
+  (table) => ({
+    projectIdx: index("routines_project_idx").on(table.projectId),
+    enabledIdx: index("routines_enabled_idx").on(table.enabled),
+  })
+);
+
+export type Routine = typeof routines.$inferSelect;
+export type NewRoutine = typeof routines.$inferInsert;
+
 export const documents = sqliteTable("documents", {
   id: text("id").primaryKey(),
   projectId: text("project_id")

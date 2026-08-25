@@ -38,6 +38,7 @@ import {
   createMergeRetryFailedNotification,
   buildUnresolvedMentionsTitle,
   createUnresolvedMentionsNotification,
+  createRoutineRunNotification,
 } from "@/lib/notifications/create";
 
 // ---- Tests ----
@@ -310,6 +311,37 @@ describe("buildStalledTitle()", () => {
     expect(buildStalledTitle(7, null, null)).toBe(
       "Agent seems stalled — no output for 7m"
     );
+  });
+});
+
+describe("createRoutineRunNotification()", () => {
+  beforeEach(() => {
+    resetDbMockState();
+    mockSqliteState.pruneCount = { cnt: 5 };
+  });
+
+  it("records a scheduled trigger with its outcome and deep link", () => {
+    dbMockState.getQueue.push({ name: "My Project" });
+
+    createRoutineRunNotification({
+      projectId: "p1",
+      kind: "night_run",
+      status: "completed",
+      message: "Night run night-1 started.",
+      targetUrl: "/projects/p1?nightRun=night-1",
+    });
+
+    expect(dbMockState.insertCalls).toContainEqual({
+      id: "notif-123",
+      projectId: "p1",
+      projectName: "My Project",
+      sessionId: null,
+      agentType: "routine",
+      status: "completed",
+      title: "Night run routine triggered",
+      message: "Night run night-1 started.",
+      targetUrl: "/projects/p1?nightRun=night-1",
+    });
   });
 });
 

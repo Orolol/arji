@@ -1,10 +1,11 @@
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import {
   agentSessions,
   projects,
   epics,
   notifications,
+  type RoutineKind,
 } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { AGENT_TYPE_LABELS } from "@/lib/agent-config/constants";
@@ -93,6 +94,57 @@ export function buildAskedQuestionTitle(
  */
 export function buildEpicTargetUrl(projectId: string, epicId: string): string {
   return `/projects/${projectId}?ticket=${epicId}`;
+}
+
+const ROUTINE_KIND_LABELS: Record<RoutineKind, string> = {
+  night_run: "Night run",
+  dreaming: "Dreaming",
+  github_issue_sync: "GitHub issue sync",
+  ci_watch: "CI watch",
+};
+
+/**
+ * Persist the visible audit signal for one scheduled trigger. The routine
+ * row keeps the durable last-run state; this notification explains the
+ * outcome and links to the surface affected by the canonical action.
+ */
+export function createRoutineRunNotification(input: {
+  projectId: string;
+  kind: RoutineKind;
+  status: "completed" | "skipped" | "failed";
+  message: string;
+  targetUrl: string;
+}): void {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  const label = ROUTINE_KIND_LABELS[input.kind];
+  const outcome =
+    input.status === "failed"
+      ? "failed"
+      : input.status === "skipped"
+        ? "skipped"
+        : "triggered";
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: null,
+      agentType: "routine",
+      status: input.status === "failed" ? "failed" : "completed",
+      title: `${label} routine ${outcome}`,
+      message: input.message,
+      targetUrl: input.targetUrl,
+    })
+    .run();
+
+  pruneNotifications();
 }
 
 /**
