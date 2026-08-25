@@ -82,6 +82,7 @@ function deps(row: Routine): CiWatchDeps {
     }),
     notifyFailure: vi.fn(),
     setEpicPullRequestState: vi.fn(),
+    hasActiveSessionForEpic: vi.fn(() => false),
   };
 }
 
@@ -353,6 +354,27 @@ describe("CI watch", () => {
       2,
       expect.objectContaining({ headSha: "sha-2", prNumber: 11 }),
     );
+  });
+
+  it("defers on a busy target without downloading log evidence", async () => {
+    const row = routine();
+    const watchDeps = deps(row);
+    vi.mocked(watchDeps.isAutofixEnabled).mockReturnValue(true);
+    vi.mocked(watchDeps.hasActiveSessionForEpic).mockReturnValue(true);
+
+    const result = await runCiWatchRoutine(row, watchDeps);
+
+    // The failure alert still fires, but the one-shot claim is not consumed
+    // and no log evidence is fetched for a dispatch that cannot happen.
+    expect(watchDeps.notifyFailure).toHaveBeenCalledTimes(1);
+    expect(watchDeps.fetchFailureEvidence).not.toHaveBeenCalled();
+    expect(watchDeps.launchAutofix).not.toHaveBeenCalled();
+    expect(result.message).toContain("0 autofix launched, 1 skipped");
+    expect(JSON.parse(row.config).ciWatchState["epic-open"]).toMatchObject({
+      headSha: "sha-1",
+      autofixAttempted: false,
+      autofixSessionId: null,
+    });
   });
 
   it("defers a busy target and retries the same SHA after its agent finishes", async () => {

@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { epics, projects, routines, type Routine } from "@/lib/db/schema";
+import { getRunningSessionForTarget } from "@/lib/agents/concurrency";
 import {
   fetchPullRequestCiFailureEvidence,
   fetchPullRequestCiStatus,
@@ -92,6 +93,11 @@ export interface CiWatchDeps {
    * through the routine CRUD API.
    */
   setEpicPullRequestState(epicId: string, prStatus: string): void;
+  /**
+   * Cheap pre-check mirroring the build route's one-agent-per-ticket guard:
+   * lets the sweep defer a busy epic before downloading log evidence.
+   */
+  hasActiveSessionForEpic(projectId: string, epicId: string): boolean;
 }
 
 export const defaultCiWatchDeps: CiWatchDeps = {
@@ -156,6 +162,8 @@ export const defaultCiWatchDeps: CiWatchDeps = {
       .where(eq(epics.id, epicId))
       .run();
   },
+  hasActiveSessionForEpic: (projectId, epicId) =>
+    getRunningSessionForTarget({ scope: "epic", projectId, epicId }) !== null,
 };
 
 function parseStoredState(value: unknown): StoredCiWatchState {
@@ -361,11 +369,20 @@ export async function runCiWatchRoutine(
         newFailures += 1;
       }
 
-      if (
+      const autofixCandidate =
         snapshot.state === "failing" &&
         autofixEnabled &&
-        !decision.observation.autofixAttempted
+        !decision.observation.autofixAttempted;
+
+      if (
+        autofixCandidate &&
+        deps.hasActiveSessionForEpic(routine.projectId, epic.id)
       ) {
+        // A running agent owns this ticket. Defer without consuming the
+        // one-shot claim or downloading log evidence that would be thrown
+        // away on every poll until the ticket frees up.
+        autofixesSkipped += 1;
+      } else if (autofixCandidate) {
         // Claim before fetching logs or invoking the build route. A process
         // crash anywhere below consumes this head, honoring the strict
         // one-session-per-(PR, SHA) contract after restart.

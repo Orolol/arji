@@ -38,6 +38,7 @@ vi.mock("@/lib/git/manager", () => ({
     branchName: `feature/${epicId}`,
   })),
   isGitRepo: vi.fn().mockResolvedValue(true),
+  resolveWorktreeHead: vi.fn(async () => null),
 }));
 
 vi.mock("@/lib/claude/process-manager", () => ({
@@ -82,7 +83,8 @@ vi.mock("fs", () => ({
 }));
 
 const { db } = await import("@/lib/db");
-const { attachWorktree, createWorktree } = await import("@/lib/git/manager");
+const { attachWorktree, createWorktree, resolveWorktreeHead } =
+  await import("@/lib/git/manager");
 const {
   projects,
   epics,
@@ -91,18 +93,14 @@ const {
   ticketActivityLog,
   notifications,
 } = await import("@/lib/db/schema");
-const { POST: batchBuildPost } = await import(
-  "@/app/api/projects/[projectId]/build/route"
-);
-const { POST: epicBuildPost } = await import(
-  "@/app/api/projects/[projectId]/epics/[epicId]/build/route"
-);
-const { GET: activeGet } = await import(
-  "@/app/api/projects/[projectId]/sessions/active/route"
-);
-const { DELETE: sessionDelete } = await import(
-  "@/app/api/projects/[projectId]/sessions/[sessionId]/route"
-);
+const { POST: batchBuildPost } =
+  await import("@/app/api/projects/[projectId]/build/route");
+const { POST: epicBuildPost } =
+  await import("@/app/api/projects/[projectId]/epics/[epicId]/build/route");
+const { GET: activeGet } =
+  await import("@/app/api/projects/[projectId]/sessions/active/route");
+const { DELETE: sessionDelete } =
+  await import("@/app/api/projects/[projectId]/sessions/[sessionId]/route");
 
 let counter = 0;
 
@@ -199,7 +197,7 @@ describe("scheduler-integrated batch build", () => {
 
     const res = await batchBuildPost(
       mockJsonRequest({ epicIds, mode: "parallel" }),
-      mockRouteContext({ projectId })
+      mockRouteContext({ projectId }),
     );
     const json = await res.json();
     expect(res.status).toBe(200);
@@ -219,15 +217,15 @@ describe("scheduler-integrated batch build", () => {
     // sessions/active shows all three, queued ones marked as such.
     const activeRes = await activeGet(
       mockNextRequest(),
-      mockRouteContext({ projectId })
+      mockRouteContext({ projectId }),
     );
     const activeJson = await activeRes.json();
     expect(activeJson.data).toHaveLength(3);
     expect(
-      activeJson.data.filter((a: { status: string }) => a.status === "queued")
+      activeJson.data.filter((a: { status: string }) => a.status === "queued"),
     ).toHaveLength(2);
     expect(
-      activeJson.data.every((a: { startedAt: string | null }) => !!a.startedAt)
+      activeJson.data.every((a: { startedAt: string | null }) => !!a.startedAt),
     ).toBe(true);
 
     // First CLI finishes -> second epic's session starts (FIFO).
@@ -256,7 +254,11 @@ describe("scheduler-integrated batch build", () => {
     expect(pmState.startOrder).toEqual(epicIds.map((id) => idByEpic.get(id)));
 
     // Epics advanced to review as usual once their build completed.
-    const epicRows = db.select().from(epics).where(eq(epics.projectId, projectId)).all();
+    const epicRows = db
+      .select()
+      .from(epics)
+      .where(eq(epics.projectId, projectId))
+      .all();
     expect(epicRows.every((e) => e.status === "review")).toBe(true);
   });
 
@@ -265,7 +267,7 @@ describe("scheduler-integrated batch build", () => {
 
     const res = await batchBuildPost(
       mockJsonRequest({ epicIds, mode: "parallel" }),
-      mockRouteContext({ projectId })
+      mockRouteContext({ projectId }),
     );
     expect(res.status).toBe(200);
 
@@ -275,7 +277,7 @@ describe("scheduler-integrated batch build", () => {
 
     const conflictRes = await epicBuildPost(
       mockJsonRequest({}),
-      mockRouteContext({ projectId, epicId: queuedEpicId })
+      mockRouteContext({ projectId, epicId: queuedEpicId }),
     );
     const conflictJson = await conflictRes.json();
     expect(conflictRes.status).toBe(409);
@@ -288,7 +290,7 @@ describe("scheduler-integrated batch build", () => {
 
     const occupyingResponse = await epicBuildPost(
       mockJsonRequest({}),
-      mockRouteContext({ projectId, epicId: epicIds[0] })
+      mockRouteContext({ projectId, epicId: epicIds[0] }),
     );
     expect(occupyingResponse.status).toBe(200);
 
@@ -302,7 +304,10 @@ describe("scheduler-integrated batch build", () => {
       .run();
     vi.mocked(attachWorktree).mockClear();
     vi.mocked(createWorktree).mockClear();
-
+    // The local branch already carries commits the PR head never ran.
+    vi.mocked(resolveWorktreeHead).mockResolvedValue(
+      "dddd000000000000000000000000000000000000",
+    );
     const ciAutofix = {
       prNumber: 42,
       headSha: "abc123",
@@ -310,7 +315,7 @@ describe("scheduler-integrated batch build", () => {
     };
     const response = await epicBuildPost(
       mockJsonRequest({ pipeline: false, ciAutofix }),
-      mockRouteContext({ projectId, epicId: epicIds[1] })
+      mockRouteContext({ projectId, epicId: epicIds[1] }),
     );
     const json = await response.json();
     expect(response.status).toBe(200);
@@ -318,12 +323,14 @@ describe("scheduler-integrated batch build", () => {
     expect(json.data.pipeline).toBeNull();
     expect(attachWorktree).toHaveBeenCalledWith(
       "/repos/sched",
-      persistedPrBranch
+      persistedPrBranch,
     );
     expect(createWorktree).not.toHaveBeenCalled();
 
     let state = sessionsByStatus(projectId);
-    const autofixRow = state.queued.find((row) => row.id === json.data.sessionId);
+    const autofixRow = state.queued.find(
+      (row) => row.id === json.data.sessionId,
+    );
     expect(autofixRow).toMatchObject({
       epicId: epicIds[1],
       status: "queued",
@@ -334,17 +341,21 @@ describe("scheduler-integrated batch build", () => {
     });
     expect(autofixRow?.prompt).toContain("### unit");
     expect(autofixRow?.prompt).toContain("Expected 2, received 1");
+    expect(autofixRow?.prompt).toContain("ahead of the PR head");
+    expect(autofixRow?.prompt).toContain("dddd000");
 
     const activeResponse = await activeGet(
       mockNextRequest(),
-      mockRouteContext({ projectId })
+      mockRouteContext({ projectId }),
     );
     const active = (await activeResponse.json()).data as Array<{ id: string }>;
-    expect(active.some((session) => session.id === json.data.sessionId)).toBe(true);
+    expect(active.some((session) => session.id === json.data.sessionId)).toBe(
+      true,
+    );
 
     const duplicateResponse = await epicBuildPost(
       mockJsonRequest({ pipeline: false, ciAutofix }),
-      mockRouteContext({ projectId, epicId: epicIds[1] })
+      mockRouteContext({ projectId, epicId: epicIds[1] }),
     );
     expect(await duplicateResponse.json()).toMatchObject({
       data: {
@@ -360,9 +371,9 @@ describe("scheduler-integrated batch build", () => {
 
     completeSession(json.data.sessionId);
     await vi.advanceTimersByTimeAsync(2500);
-    expect(sessionsByStatus(projectId).completed.map((row) => row.id)).toContain(
-      json.data.sessionId
-    );
+    expect(
+      sessionsByStatus(projectId).completed.map((row) => row.id),
+    ).toContain(json.data.sessionId);
     const activity = db
       .select({ reason: ticketActivityLog.reason })
       .from(ticketActivityLog)
@@ -373,8 +384,8 @@ describe("scheduler-integrated batch build", () => {
         (row) =>
           row.reason?.includes("CI autofix") &&
           row.reason.includes("unpushed fix") &&
-          row.reason.includes("manual push")
-      )
+          row.reason.includes("manual push"),
+      ),
     ).toBe(true);
     const autofixNotification = db
       .select()
@@ -387,7 +398,7 @@ describe("scheduler-integrated batch build", () => {
       targetUrl: `/projects/${projectId}/sessions/${json.data.sessionId}`,
     });
     expect(autofixNotification?.title).toContain(
-      `push ${persistedPrBranch} for PR #42`
+      `push ${persistedPrBranch} for PR #42`,
     );
   });
 
@@ -403,7 +414,7 @@ describe("scheduler-integrated batch build", () => {
           failures: [{ name: "unit", logTail: "failed" }],
         },
       }),
-      mockRouteContext({ projectId, epicId: epicIds[0] })
+      mockRouteContext({ projectId, epicId: epicIds[0] }),
     );
 
     expect(response.status).toBe(400);
@@ -419,7 +430,7 @@ describe("scheduler-integrated batch build", () => {
 
     await batchBuildPost(
       mockJsonRequest({ epicIds, mode: "parallel" }),
-      mockRouteContext({ projectId })
+      mockRouteContext({ projectId }),
     );
 
     let state = sessionsByStatus(projectId);
@@ -427,7 +438,7 @@ describe("scheduler-integrated batch build", () => {
 
     const cancelRes = await sessionDelete(
       mockNextRequest({ method: "DELETE" }),
-      mockRouteContext({ projectId, sessionId: firstQueued.id })
+      mockRouteContext({ projectId, sessionId: firstQueued.id }),
     );
     expect(cancelRes.status).toBe(200);
 
@@ -453,7 +464,7 @@ describe("scheduler-integrated batch build", () => {
 
     const res = await batchBuildPost(
       mockJsonRequest({ epicIds, mode: "parallel" }),
-      mockRouteContext({ projectId })
+      mockRouteContext({ projectId }),
     );
     expect(res.status).toBe(200);
 
