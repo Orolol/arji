@@ -74,6 +74,12 @@ export const BUILTIN_AGENT_PROMPTS: Record<AgentType, string> = {
   forensic: "",
 };
 
+/**
+ * Ready-to-use instructions for a custom review agent. The creation form is
+ * intentionally useful after typing only a name.
+ */
+export const DEFAULT_REVIEW_AGENT_PROMPT = `You are a code reviewer. Review the changes on this ticket's branch and report concrete problems: bugs, security issues, missing edge cases, and unclear naming. Reference files and lines. Do not restyle working code.`;
+
 export type AgentProvider =
   | "claude-code"
   | "codex"
@@ -136,16 +142,6 @@ export const PROVIDER_LABELS: Record<ChatModeProvider, string> = {
   "oh-my-pi": "Oh My Pi",
   "openai-compatible": "OpenAI-compatible",
 };
-
-/** Providers grouped by tier for UI display. */
-export const PROVIDER_TIERS: { label: string; providers: AgentProvider[] }[] = [
-  { label: "Tier 1", providers: ["claude-code", "gemini-cli", "codex"] },
-  {
-    label: "Tier 2",
-    providers: ["mistral-vibe", "qwen-code", "opencode", "pi", "oh-my-pi"],
-  },
-  { label: "Tier 3", providers: ["deepseek", "kimi", "zai"] },
-];
 
 export function isAgentProvider(value: string): value is AgentProvider {
   return (PROVIDER_OPTIONS as readonly string[]).includes(value);

@@ -190,9 +190,8 @@ export const createNamedAgentSchema = z.object({
   provider: z
     .string("invalid provider")
     .refine((v) => isAgentProvider(v), "invalid provider"),
-  model: z
-    .string("model is required")
-    .refine((v) => v.trim().length > 0, "model is required"),
+  // Optional: an empty/absent model means "use the CLI's default model".
+  model: z.string().optional(),
 });
 
 export const updateNamedAgentSchema = z.object({
@@ -204,10 +203,7 @@ export const updateNamedAgentSchema = z.object({
     .string()
     .refine((v) => isAgentProvider(v), "invalid provider")
     .optional(),
-  model: z
-    .string()
-    .refine((v) => v.trim().length > 0, "model must be a non-empty string")
-    .optional(),
+  model: z.string().optional(),
 });
 
 export const createReviewAgentSchema = z.object({

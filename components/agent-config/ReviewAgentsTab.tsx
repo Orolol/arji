@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { useReviewAgents, type CustomReviewAgent } from "@/hooks/useAgentConfig";
-import { AGENT_TYPE_LABELS } from "@/lib/agent-config/constants";
+import {
+  AGENT_TYPE_LABELS,
+  DEFAULT_REVIEW_AGENT_PROMPT,
+} from "@/lib/agent-config/constants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,6 +20,7 @@ import {
   Scale,
   ListChecks,
 } from "lucide-react";
+import { Field } from "@/components/agent-config/Field";
 
 interface ReviewAgentsTabProps {
   scope: "global" | "project";
@@ -48,10 +52,12 @@ const BUILTIN_REVIEWS = [
 
 function CustomAgentRow({
   agent,
+  inherited,
   onUpdate,
   onDelete,
 }: {
   agent: CustomReviewAgent;
+  inherited: boolean;
   onUpdate: (
     id: string,
     updates: { name?: string; systemPrompt?: string }
@@ -62,72 +68,119 @@ function CustomAgentRow({
   const [prompt, setPrompt] = useState(agent.systemPrompt);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const dirty = name !== agent.name || prompt !== agent.systemPrompt;
 
   const handleSave = async () => {
+    if (inherited) return;
+    setError(null);
     setSaving(true);
     const updates: { name?: string; systemPrompt?: string } = {};
     if (name !== agent.name) updates.name = name;
     if (prompt !== agent.systemPrompt) updates.systemPrompt = prompt;
-    await onUpdate(agent.id, updates);
-    setSaving(false);
+    try {
+      const saved = await onUpdate(agent.id, updates);
+      if (!saved) setError("Could not save this review agent. Try again.");
+    } catch {
+      setError(
+        "Could not save this review agent. Check the connection and try again."
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async () => {
+    if (inherited) return;
+    setError(null);
     setDeleting(true);
-    await onDelete(agent.id);
-    setDeleting(false);
+    try {
+      const deleted = await onDelete(agent.id);
+      if (!deleted) setError("Could not delete this review agent. Try again.");
+    } catch {
+      setError(
+        "Could not delete this review agent. Check the connection and try again."
+      );
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
     <div className="border border-border rounded-lg p-4 space-y-3">
-      <div className="flex items-center gap-2">
+      <div className="flex justify-end">
+        <Badge variant="outline" className="text-xs">
+          {inherited ? "Shared across projects" : "Editable here"}
+        </Badge>
+      </div>
+      <Field
+        id={`review-agent-name-${agent.id}`}
+        label="Name"
+        hint={
+          inherited
+            ? "This reviewer is shared. Switch to All projects to change it."
+            : "How you recognise this reviewer in lists and reports."
+        }
+      >
         <input
+          id={`review-agent-name-${agent.id}`}
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="flex-1 bg-transparent border-b border-border px-1 py-0.5 text-sm font-medium focus:outline-none focus:border-primary"
+          disabled={inherited}
+          className="w-full bg-transparent border-b border-border px-1 py-0.5 text-sm font-medium focus:outline-none focus:border-primary"
           placeholder="Agent name"
         />
-        {agent.source && (
-          <Badge
-            variant={agent.source === "project" ? "default" : "secondary"}
-            className="text-xs"
+      </Field>
+      <Field
+        id={`review-agent-prompt-${agent.id}`}
+        label="Instructions"
+        hint={
+          inherited
+            ? "These shared checks apply to every project and are read-only here."
+            : "What this reviewer should look for. Edit only if its current checks don't match your needs."
+        }
+      >
+        <Textarea
+          id={`review-agent-prompt-${agent.id}`}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          disabled={inherited}
+          placeholder="Describe what this reviewer should check"
+          className="min-h-24 text-sm font-mono"
+        />
+      </Field>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+      {!inherited && (
+        <div className="flex items-center gap-2 justify-end">
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleDelete}
+            disabled={deleting}
           >
-            {agent.source}
-          </Badge>
-        )}
-      </div>
-      <Textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder="System prompt for this review agent..."
-        className="min-h-24 text-sm font-mono"
-      />
-      <div className="flex items-center gap-2 justify-end">
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={handleDelete}
-          disabled={deleting}
-        >
-          {deleting ? (
-            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-          ) : (
-            <Trash2 className="h-3 w-3 mr-1" />
-          )}
-          Delete
-        </Button>
-        <Button size="sm" onClick={handleSave} disabled={saving || !dirty}>
-          {saving ? (
-            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-          ) : (
-            <Save className="h-3 w-3 mr-1" />
-          )}
-          Save
-        </Button>
-      </div>
+            {deleting ? (
+              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+            ) : (
+              <Trash2 className="h-3 w-3 mr-1" />
+            )}
+            Delete
+          </Button>
+          <Button size="sm" onClick={handleSave} disabled={saving || !dirty}>
+            {saving ? (
+              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+            ) : (
+              <Save className="h-3 w-3 mr-1" />
+            )}
+            Save
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -139,19 +192,32 @@ function NewAgentForm({
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(DEFAULT_REVIEW_AGENT_PROMPT);
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleCreate = async () => {
     if (!name.trim() || !prompt.trim()) return;
+    setError(null);
     setCreating(true);
-    const ok = await onCreate(name.trim(), prompt.trim());
-    if (ok) {
-      setName("");
-      setPrompt("");
-      setOpen(false);
+    try {
+      const ok = await onCreate(name.trim(), prompt.trim());
+      if (ok) {
+        setName("");
+        setPrompt(DEFAULT_REVIEW_AGENT_PROMPT);
+        setOpen(false);
+      } else {
+        setError(
+          "Could not create this review agent. Check its name and try again."
+        );
+      }
+    } catch {
+      setError(
+        "Could not create this review agent. Check the connection and try again."
+      );
+    } finally {
+      setCreating(false);
     }
-    setCreating(false);
   };
 
   if (!open) {
@@ -169,20 +235,34 @@ function NewAgentForm({
 
   return (
     <div className="border border-dashed border-border rounded-lg p-4 space-y-3">
-      <input
-        type="text"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        className="w-full bg-transparent border-b border-border px-1 py-0.5 text-sm font-medium focus:outline-none focus:border-primary"
-        placeholder="New agent name"
-        autoFocus
-      />
-      <Textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder="System prompt..."
-        className="min-h-24 text-sm font-mono"
-      />
+      <Field
+        id="new-review-agent-name"
+        label="Name"
+        hint="A short name you will recognise in review reports."
+      >
+        <input
+          id="new-review-agent-name"
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full bg-transparent border-b border-border px-1 py-0.5 text-sm font-medium focus:outline-none focus:border-primary"
+          placeholder="New agent name"
+          autoFocus
+        />
+      </Field>
+      <Field
+        id="new-review-agent-prompt"
+        label="Instructions"
+        hint="Pre-filled with sensible default checks — adjust it only if you want this reviewer to focus on something specific."
+      >
+        <Textarea
+          id="new-review-agent-prompt"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Describe what this reviewer should check"
+          className="min-h-24 text-sm font-mono"
+        />
+      </Field>
       <div className="flex items-center gap-2 justify-end">
         <Button
           variant="ghost"
@@ -190,7 +270,8 @@ function NewAgentForm({
           onClick={() => {
             setOpen(false);
             setName("");
-            setPrompt("");
+            setPrompt(DEFAULT_REVIEW_AGENT_PROMPT);
+            setError(null);
           }}
         >
           Cancel
@@ -208,6 +289,11 @@ function NewAgentForm({
           Create
         </Button>
       </div>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -240,13 +326,13 @@ export function ReviewAgentsTab({ scope, projectId }: ReviewAgentsTabProps) {
                 <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
                 <span className="text-sm">{label}</span>
                 <Badge variant="outline" className="ml-auto text-xs">
-                  builtin
+                  Included
                 </Badge>
               </div>
             ))}
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            Built-in review prompts are editable from the Prompts tab.
+            Built-in review instructions are editable from the Instructions tab.
           </p>
         </div>
 
@@ -259,6 +345,7 @@ export function ReviewAgentsTab({ scope, projectId }: ReviewAgentsTabProps) {
               <CustomAgentRow
                 key={agent.id}
                 agent={agent}
+                inherited={scope === "project" && agent.source === "global"}
                 onUpdate={updateAgent}
                 onDelete={deleteAgent}
               />

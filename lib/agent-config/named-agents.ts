@@ -55,10 +55,11 @@ export async function createNamedAgent(input: {
   id?: string;
   name: string;
   provider: string;
-  model: string;
+  // Optional: empty/absent means "use the CLI's default model".
+  model?: string;
 }): Promise<{ data: NamedAgentRecord | null; error?: string }> {
   const name = input.name.trim();
-  const model = input.model.trim();
+  const model = (input.model ?? "").trim();
   const provider = normalizeProvider(input.provider);
 
   if (!name) {
@@ -67,10 +68,6 @@ export async function createNamedAgent(input: {
 
   if (!provider) {
     return { data: null, error: "Invalid provider" };
-  }
-
-  if (!model) {
-    return { data: null, error: "Model must not be empty" };
   }
 
   const duplicate = db
@@ -144,11 +141,8 @@ export async function updateNamedAgent(
   }
 
   if (typeof updates.model === "string") {
-    const model = updates.model.trim();
-    if (!model) {
-      return { data: null, error: "model is required" };
-    }
-    patch.model = model;
+    // Empty string clears the override: the agent then uses the CLI's default.
+    patch.model = updates.model.trim();
   }
 
   if (Object.keys(patch).length === 0) {
