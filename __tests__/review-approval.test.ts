@@ -7,6 +7,12 @@
  * review — and surface a 409 plus a notification. Only a successful merge
  * (or having nothing to merge) lets the approval resolve comments and close
  * the ticket.
+ *
+ * Closing the ticket itself goes through the transition service: the epic
+ * → done write (and the child stories' → done writes) are the service's
+ * status writes, and every child transition is pre-flighted before the
+ * merge. Stories that never reached review are left unchanged and reported
+ * as `skippedStories` instead of invalidating the approval.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
@@ -19,6 +25,8 @@ import {
 const mocks = vi.hoisted(() => ({
   mergeWorktree: vi.fn(),
   applyTransition: vi.fn(),
+  applyStoryTransition: vi.fn(),
+  logWorkflowDecision: vi.fn(),
   logTransition: vi.fn(),
   createApproveMergeFailedNotification: vi.fn(),
   tryExportArjiJson: vi.fn(),
@@ -37,6 +45,8 @@ vi.mock("@/lib/git/manager", () => ({
 
 vi.mock("@/lib/workflow/transition-service", () => ({
   applyTransition: mocks.applyTransition,
+  applyStoryTransition: mocks.applyStoryTransition,
+  logWorkflowDecision: mocks.logWorkflowDecision,
 }));
 
 vi.mock("@/lib/workflow/log", () => ({
@@ -79,19 +89,22 @@ const mockProject = {
 /**
  * Seed the db-mock queues in the route's read order:
  *   get #1 → epic (getEpicOr404), get #2 → project,
- *   all #1 → agent sessions (worktree lookup, merge path only).
+ *   all #1 → the epic's stories (review/skip split),
+ *   all #2 → agent sessions (worktree lookup, merge path only).
  */
 function seed({
   epic = mockEpic,
   project = mockProject,
+  stories = [{ id: "story-1", epicId: "epic-1", status: "review", title: "One" }],
   sessions = [{ worktreePath: "/tmp/worktrees/epic-abc" }],
 }: {
   epic?: Record<string, unknown> | null;
   project?: Record<string, unknown> | null;
+  stories?: Record<string, unknown>[];
   sessions?: Record<string, unknown>[];
 } = {}) {
   dbMockState.getQueue.push(epic, project);
-  dbMockState.allQueue.push(sessions);
+  dbMockState.allQueue.push(stories, sessions);
 }
 
 async function callApprove(projectId = "p1", epicId = "epic-1") {
@@ -105,12 +118,19 @@ async function callApprove(projectId = "p1", epicId = "epic-1") {
   return POST(req, mockRouteContext({ projectId, epicId }));
 }
 
+/** Last transition-service epic call (the close, after the pre-flight). */
+function lastEpicCall() {
+  const calls = mocks.applyTransition.mock.calls;
+  return calls[calls.length - 1]?.[0] as Record<string, unknown> | undefined;
+}
+
 describe("Epic review approval", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
     mocks.mergeWorktree.mockResolvedValue({ merged: true, commitHash: "abc123" });
     mocks.applyTransition.mockReturnValue({ valid: true });
+    mocks.applyStoryTransition.mockReturnValue({ valid: true });
     mocks.beginMergeWork.mockReturnValue(true);
   });
 
@@ -161,31 +181,40 @@ describe("Epic review approval", () => {
       expect(approvalComment.author).toBe("user");
     });
 
-    it("sets epic status to done and clears the merged branch name", async () => {
+    it("closes the epic through the transition service and clears the merged branch name", async () => {
       seed();
       await callApprove();
 
-      const epicUpdate = dbMockState.updateCalls.find(
-        (c) =>
-          (c as Record<string, unknown>).status === "done" &&
-          "branchName" in (c as Record<string, unknown>)
+      // The status write is the service's (pre-flight excluded): review →
+      // done, not validate-only.
+      const close = lastEpicCall();
+      expect(close).toMatchObject({
+        fromStatus: "review",
+        toStatus: "done",
+        source: "approve",
+      });
+      expect("validateOnly" in (close ?? {})).toBe(false);
+
+      // Branch cleanup is metadata only, kept out of the service on purpose.
+      const branchClear = dbMockState.updateCalls.find(
+        (c) => "branchName" in (c as Record<string, unknown>)
       ) as Record<string, unknown>;
-      expect(epicUpdate).toBeDefined();
-      expect(epicUpdate.branchName).toBeNull();
+      expect(branchClear).toBeDefined();
+      expect(branchClear.branchName).toBeNull();
     });
 
-    it("sets all user stories to done", async () => {
+    it("moves the epic's review stories to done through the transition service", async () => {
       seed();
       await callApprove();
 
-      // The US bulk update is the only {status:"done"}-and-nothing-else payload
-      const usUpdate = dbMockState.updateCalls.find(
-        (c) =>
-          (c as Record<string, unknown>).status === "done" &&
-          !("branchName" in (c as Record<string, unknown>)) &&
-          !("updatedAt" in (c as Record<string, unknown>))
+      expect(mocks.applyStoryTransition).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userStoryId: "story-1",
+          fromStatus: "review",
+          toStatus: "done",
+          reviewScope: "epic",
+        })
       );
-      expect(usUpdate).toBeDefined();
     });
   });
 
@@ -213,8 +242,8 @@ describe("Epic review approval", () => {
       seed();
       await callApprove();
 
-      // No comment resolution, no epic/US status writes, no real transition —
-      // the whole point of merge-first approval. The only applyTransition
+      // No comment resolution, no epic/US status writes, no real transition
+      // — the whole point of merge-first approval. The only applyTransition
       // call is the side-effect-free pre-flight validation.
       expect(dbMockState.updateCalls).toEqual([]);
       expect(mocks.applyTransition).toHaveBeenCalledTimes(1);
@@ -317,6 +346,72 @@ describe("Epic review approval", () => {
     });
   });
 
+  describe("story synchronization (epic-scoped approval)", () => {
+    it("promotes every review story, leaves the rest untouched and reports them", async () => {
+      seed({
+        stories: [
+          { id: "story-1", epicId: "epic-1", status: "review", title: "One" },
+          { id: "story-2", epicId: "epic-1", status: "review", title: "Two" },
+          { id: "story-3", epicId: "epic-1", status: "todo", title: "Three" },
+        ],
+      });
+      const res = await callApprove();
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data.skippedStories).toEqual([
+        { id: "story-3", title: "Three", status: "todo" },
+      ]);
+
+      // Both review stories are promoted; the todo one is never touched.
+      expect(mocks.applyStoryTransition).toHaveBeenCalledWith(
+        expect.objectContaining({ userStoryId: "story-1", toStatus: "done" })
+      );
+      expect(mocks.applyStoryTransition).toHaveBeenCalledWith(
+        expect.objectContaining({ userStoryId: "story-2", toStatus: "done" })
+      );
+      const touchedIds = mocks.applyStoryTransition.mock.calls.map(
+        (c) => (c[0] as { userStoryId: string }).userStoryId
+      );
+      expect(touchedIds).not.toContain("story-3");
+
+      // The hold is named in the activity log, not left implicit.
+      expect(mocks.logWorkflowDecision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          epicId: "epic-1",
+          actor: "user",
+          reason: expect.stringContaining("story-3:todo"),
+        })
+      );
+    });
+
+    it("validates the child transitions BEFORE the merge and bounces 400 when one refuses", async () => {
+      seed({
+        stories: [
+          { id: "story-1", epicId: "epic-1", status: "review", title: "One" },
+          { id: "story-2", epicId: "epic-1", status: "review", title: "Two" },
+        ],
+      });
+      // The second child's guards refuse (e.g. a build session still running
+      // on it). The refusal must land before anything is merged or written.
+      mocks.applyStoryTransition
+        .mockReturnValueOnce({ valid: true })
+        .mockReturnValueOnce({
+          valid: false,
+          error: "Cannot move while a build session is running.",
+        });
+      const res = await callApprove();
+
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toContain("build session");
+      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+      expect(dbMockState.updateCalls).toEqual([]);
+      expect(dbMockState.insertCalls).toEqual([]);
+      expect(mocks.beginMergeWork).not.toHaveBeenCalled();
+    });
+  });
+
   describe("nothing to merge", () => {
     it("approves without a merge when the epic has no branch", async () => {
       seed({ epic: { ...mockEpic, branchName: null } });
@@ -331,10 +426,10 @@ describe("Epic review approval", () => {
       });
       expect(mocks.mergeWorktree).not.toHaveBeenCalled();
 
-      const epicUpdate = dbMockState.updateCalls.find(
-        (c) => (c as Record<string, unknown>).status === "done"
-      );
-      expect(epicUpdate).toBeDefined();
+      // The epic still closes through the service, it just has nothing to land.
+      const close = lastEpicCall();
+      expect(close).toMatchObject({ toStatus: "done" });
+      expect("validateOnly" in (close ?? {})).toBe(false);
     });
 
     it("approves without a merge when the project has no git repo", async () => {

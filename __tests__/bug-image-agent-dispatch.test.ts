@@ -54,6 +54,16 @@ vi.mock("@/lib/notifications/create", () => ({
 }));
 
 vi.mock("@/lib/workflow/log", () => ({ logTransition: vi.fn() }));
+// The build route's workflow bookkeeping is out of scope for a prompt-text
+// test: stub it out so the real transition engine (and its extra DB reads)
+// cannot interfere with the seeded row queue.
+vi.mock("@/lib/workflow/automatic-transitions", () => ({
+  transitionBuildStarted: vi.fn(),
+  finalizeBuildTerminalOutcome: vi.fn(() => ({ kind: "completed" })),
+  logBuildFailure: vi.fn(),
+  resolveBuildSessionResult: vi.fn(() => ({ success: true, error: null })),
+  WorkflowTransitionError: class WorkflowTransitionError extends Error {},
+}));
 vi.mock("@/lib/workflow/agent-question", () => ({
   handleAskedQuestionOutcome: vi.fn(() => false),
 }));

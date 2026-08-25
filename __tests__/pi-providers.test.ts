@@ -9,6 +9,7 @@
  * ended on a model error still exits 0 — so success has to be downgraded from
  * the stream, not the exit code.
  */
+import { readFileSync } from "fs";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const { mockSpawn } = vi.hoisted(() => ({
@@ -170,6 +171,11 @@ describe("PiProvider", () => {
     it("restricts tools to read-only ones in analyze mode", () => {
       const args = provider.buildArgs(baseOptions({ mode: "analyze" }));
       expect(args[args.indexOf("--tools") + 1]).toBe("read,grep,find,ls");
+    });
+
+    it("needs no config overlay — pi's allowlist genuinely strips write", () => {
+      const args = provider.buildArgs(baseOptions({ mode: "plan" }));
+      expect(args).not.toContain("--config");
     });
 
     it("includes --session when resuming", () => {
@@ -382,6 +388,21 @@ describe("OhMyPiProvider", () => {
   it("restricts to omp's read-only tools in plan mode (glob, not find/ls)", () => {
     const args = provider.buildArgs(baseOptions({ mode: "plan" }));
     expect(args[args.indexOf("--tools") + 1]).toBe("read,grep,glob");
+  });
+
+  it("adds the xdev-off overlay in read-only modes — omp's allowlist alone leaves write mounted", () => {
+    for (const mode of ["plan", "analyze"] as const) {
+      const args = provider.buildArgs(baseOptions({ mode }));
+      const overlayPath = args[args.indexOf("--config") + 1];
+      expect(overlayPath).toMatch(/arij-omp-readonly-\d+\.yml$/);
+      expect(readFileSync(overlayPath, "utf-8")).toBe("tools:\n  xdev: false\n");
+    }
+  });
+
+  it("keeps the full tool set in code mode: no --tools, no overlay", () => {
+    const args = provider.buildArgs(baseOptions({ mode: "code" }));
+    expect(args).not.toContain("--tools");
+    expect(args).not.toContain("--config");
   });
 
   it("resumes with --resume, not pi's --session", () => {

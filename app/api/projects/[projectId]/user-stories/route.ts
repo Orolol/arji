@@ -15,6 +15,10 @@ import {
   getStoryOr404,
   isErrorResponse,
 } from "@/lib/api/route-helpers";
+import {
+  applyStoryTransition,
+  type StoryStatus,
+} from "@/lib/workflow/transition-service";
 
 export async function GET(
   request: NextRequest,
@@ -95,11 +99,26 @@ export async function PATCH(
   const existing = getStoryOr404(projectId, body.id);
   if (isErrorResponse(existing)) return existing;
 
+  if (body.status !== undefined && body.status !== existing.story.status) {
+    const result = applyStoryTransition({
+      projectId,
+      epicId: existing.story.epicId,
+      userStoryId: body.id,
+      fromStatus: (existing.story.status ?? "todo") as StoryStatus,
+      toStatus: body.status as StoryStatus,
+      actor: "user",
+      source: "api",
+      reason: "Manual story status update",
+    });
+    if (!result.valid) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+  }
+
   const updates: Record<string, unknown> = {};
   if (body.title !== undefined) updates.title = body.title;
   if (body.description !== undefined) updates.description = body.description;
   if (body.acceptanceCriteria !== undefined) updates.acceptanceCriteria = body.acceptanceCriteria;
-  if (body.status !== undefined) updates.status = body.status;
   if (body.position !== undefined) updates.position = body.position;
 
   db.update(userStories).set(updates).where(eq(userStories.id, body.id)).run();

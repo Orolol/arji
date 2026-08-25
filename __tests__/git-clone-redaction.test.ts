@@ -57,6 +57,30 @@ describe("redactGitError", () => {
     );
   });
 
+  it("fully redacts a real clone failure carrying the token in every form", () => {
+    // One sample, every way git manages to echo a credential back: the header
+    // we injected, the base64 payload on its own, a URL with userinfo, and the
+    // raw PAT in a remote's message. A single leak here reaches the UI and
+    // git_sync_log at once.
+    const basic = Buffer.from(`x-access-token:${PAT}`).toString("base64");
+    const stderr = [
+      `Cloning into '/home/user/arij/projects/acme-private'...`,
+      `fatal: unable to access 'https://x-access-token:${PAT}@github.com/acme/private.git/': The requested URL returned error: 403`,
+      `remote: Invalid username or password for token ${PAT}`,
+      `error: RPC failed; HTTP 403 curl 22`,
+      `while running: git -c http.extraHeader=Authorization: Basic ${basic} clone -- https://github.com/acme/private.git /home/user/arij/projects/acme-private`,
+    ].join("\n");
+
+    const redacted = redactGitError(new Error(stderr), [PAT]);
+
+    expect(redacted).not.toContain(PAT);
+    expect(redacted).not.toContain(basic);
+    expect(redacted).not.toMatch(/x-access-token:/);
+    // Still diagnosable: the repository and the HTTP status survive.
+    expect(redacted).toContain("github.com/acme/private.git");
+    expect(redacted).toContain("403");
+  });
+
   it("handles non-string inputs without throwing", () => {
     expect(redactGitError(null)).toBe("");
     expect(redactGitError(undefined)).toBe("");

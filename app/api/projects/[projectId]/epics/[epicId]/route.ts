@@ -54,7 +54,6 @@ export async function PATCH(
         actor: "user",
         source: "api",
         reason: "Manual status update",
-        skipDbUpdate: true, // we update below with all fields
       });
       if (!result.valid) {
         return NextResponse.json({ error: result.error }, { status: 400 });
@@ -65,7 +64,6 @@ export async function PATCH(
     if (body.title !== undefined) updates.title = body.title;
     if (body.description !== undefined) updates.description = body.description;
     if (body.priority !== undefined) updates.priority = body.priority;
-    if (body.status !== undefined) updates.status = body.status;
     if (body.position !== undefined) updates.position = body.position;
     if (body.branchName !== undefined) updates.branchName = body.branchName;
 

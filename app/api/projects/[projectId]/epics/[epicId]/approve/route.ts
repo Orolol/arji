@@ -12,8 +12,13 @@ import { eq, and } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { mergeWorktree, type MergeWorktreeResult } from "@/lib/git/manager";
-import { applyTransition } from "@/lib/workflow/transition-service";
 import { logTransition } from "@/lib/workflow/log";
+import {
+  applyStoryTransition,
+  applyTransition,
+  logWorkflowDecision,
+  type StoryStatus,
+} from "@/lib/workflow/transition-service";
 import { createApproveMergeFailedNotification } from "@/lib/notifications/create";
 import { autoModeRegistry } from "@/lib/auto-mode/registry";
 import { getEpicOr404, isErrorResponse } from "@/lib/api/route-helpers";
@@ -33,6 +38,10 @@ type Params = { params: Promise<{ projectId: string; epicId: string }> };
  * branch) and a failed merge changes NOTHING: comments stay open, the epic
  * stays in review, and the caller gets a 409 telling the user to run
  * Resolve Merge and approve again.
+ *
+ * Every status write in this route (epic → done, child stories → done) goes
+ * through the transition service, so the workflow engine, the SSE event and
+ * the activity log see exactly what the user sees.
  */
 export async function POST(_request: NextRequest, { params }: Params) {
   const { projectId, epicId } = await params;
@@ -69,6 +78,39 @@ export async function POST(_request: NextRequest, { params }: Params) {
   });
   if (!preflight.valid) {
     return NextResponse.json({ error: preflight.error }, { status: 400 });
+  }
+
+  const stories = db
+    .select()
+    .from(userStories)
+    .where(eq(userStories.epicId, epicId))
+    .all();
+
+  // Only stories that reached review are part of this approval. Stories added
+  // later (or otherwise still todo/in_progress) retain their status and are
+  // named in the activity log instead of invalidating the parent approval.
+  const reviewedStories = stories.filter((story) => story.status === "review");
+  const skippedStories = stories.filter((story) => story.status !== "review");
+
+  // Validate every eligible child before applying any write; epic approval
+  // supplies the review context for its synchronized story transitions.
+  for (const story of reviewedStories) {
+    const validation = applyStoryTransition({
+      projectId,
+      epicId,
+      userStoryId: story.id,
+      fromStatus: (story.status ?? "review") as StoryStatus,
+      toStatus: "done",
+      actor: "user",
+      source: "approve",
+      reason: "Parent epic review approved",
+      reviewScope: "epic",
+      validateOnly: true,
+      assumeReviewCommentsResolved: true,
+    });
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
+    }
   }
 
   const project = db
@@ -212,7 +254,8 @@ export async function POST(_request: NextRequest, { params }: Params) {
       )
       .run();
 
-    // Validate + apply transition (updates epic status, emits event, logs)
+    // Validate + apply the epic transition (status write, event and log all
+    // come from the service — the pre-flight above already proved it valid).
     const validation = applyTransition({
       projectId,
       epicId,
@@ -221,7 +264,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
       actor: "user",
       source: "approve",
       reason: "Review approved",
-      skipDbUpdate: true, // we handle epic + US update below
+      assumeReviewCommentsResolved: true,
     });
     if (!validation.valid) {
       // Genuinely rare race now that the guards were pre-flighted above: the
@@ -242,30 +285,60 @@ export async function POST(_request: NextRequest, { params }: Params) {
       })
       .run();
 
-    // Epic -> done. The branch name is cleared only when a merge actually
-    // happened (mergeWorktree deleted the branch on success, so keeping the
-    // name would point at nothing and make later merge attempts fail).
-    db.update(epics)
-      .set(
-        merged
-          ? { status: "done", branchName: null, updatedAt: now }
-          : { status: "done", updatedAt: now }
-      )
-      .where(eq(epics.id, epicId))
-      .run();
+    // Child stories → done through the same service (per-story log entries).
+    for (const story of reviewedStories) {
+      applyStoryTransition({
+        projectId,
+        epicId,
+        userStoryId: story.id,
+        fromStatus: (story.status ?? "review") as StoryStatus,
+        toStatus: "done",
+        actor: "user",
+        source: "approve",
+        reason: "Parent epic review approved",
+        reviewScope: "epic",
+        assumeReviewCommentsResolved: true,
+      });
+    }
+    if (skippedStories.length > 0) {
+      logWorkflowDecision({
+        projectId,
+        epicId,
+        status: "done",
+        actor: "user",
+        reason: `Epic approved; ${skippedStories.length} non-review ${skippedStories.length === 1 ? "story was" : "stories were"} left unchanged (${skippedStories.map((story) => `${story.id}:${story.status ?? "todo"}`).join(", ")})`,
+      });
+    }
 
-    // All US -> done
-    db.update(userStories)
-      .set({ status: "done" })
-      .where(eq(userStories.epicId, epicId))
-      .run();
+    // The branch name is cleared only when a merge actually happened
+    // (mergeWorktree deleted the branch on success, so keeping the name
+    // would point at nothing and make later merge attempts fail). Metadata
+    // only — the status write itself went through the service above.
+    if (merged) {
+      db.update(epics)
+        .set({ branchName: null, updatedAt: now })
+        .where(eq(epics.id, epicId))
+        .run();
+    }
 
     tryExportArjiJson(projectId);
 
     return NextResponse.json({
-      data: merged
-        ? { approved: true, merged: true, commitHash }
-        : { approved: true, merged: false, mergeSkipped: "no-branch" },
+      data: {
+        approved: true,
+        merged,
+        ...(commitHash ? { commitHash } : {}),
+        ...(merged ? {} : { mergeSkipped: "no-branch" }),
+        ...(skippedStories.length > 0
+          ? {
+              skippedStories: skippedStories.map((story) => ({
+                id: story.id,
+                title: story.title,
+                status: story.status ?? "todo",
+              })),
+            }
+          : {}),
+      },
     });
   } finally {
     if (needsMerge) autoModeRegistry.endMergeWork(projectId, epicId);

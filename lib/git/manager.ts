@@ -33,6 +33,26 @@ export interface BaseBranchOptions {
 }
 
 /**
+ * Resolves the branch a project's work is based on, for callers that only
+ * have a repository path — the exact same resolution `createWorktree` and
+ * `mergeWorktree` run through {@link resolveBaseBranch}. The diff route uses
+ * it so the diff targets the branch the worktree was actually cut from:
+ * feeding `getWorktreeDiff` the stored default branch raw made a value that
+ * no longer exists locally (renamed after import, or the clone's local
+ * branch set diverging from the remote's) reach `merge-base` as a
+ * non-existent ref — a silent empty diff with 0 ahead/behind over an epic
+ * with real commits.
+ */
+export async function resolveDefaultBranch(
+  repoPath: string,
+  preferred?: string | null
+): Promise<string> {
+  const git = getGit(repoPath);
+  const branches = await git.branchLocal();
+  return resolveBaseBranch(git, branches.all, { preferred });
+}
+
+/**
  * Creates a worktree for an epic with a dedicated branch.
  * Returns the worktree path.
  */

@@ -84,6 +84,11 @@ export default function SettingsPage() {
   const [autoDistillMessage, setAutoDistillMessage] = useState<string | null>(
     null
   );
+  const [specAutoRewrite, setSpecAutoRewrite] = useState(false);
+  const [savingSpecRewrite, setSavingSpecRewrite] = useState(false);
+  const [specRewriteMessage, setSpecRewriteMessage] = useState<string | null>(
+    null
+  );
   const [mcpToolsEnabled, setMcpToolsEnabled] = useState(true);
   const [savingMcpTools, setSavingMcpTools] = useState(false);
   const [mcpToolsMessage, setMcpToolsMessage] = useState<string | null>(null);
@@ -152,6 +157,8 @@ export default function SettingsPage() {
         );
         const autoDistill = d.data?.memory_auto_distill;
         setMemoryAutoDistill(autoDistill === true || autoDistill === "true");
+        const specRewrite = d.data?.spec_auto_rewrite;
+        setSpecAutoRewrite(specRewrite === true || specRewrite === "true");
         // Default ON: only an explicitly-false value disables the MCP tools.
         const mcpTools = d.data?.mcp_tools_enabled;
         setMcpToolsEnabled(!(mcpTools === false || mcpTools === "false"));
@@ -442,6 +449,34 @@ export default function SettingsPage() {
       setAutoDistillMessage("Failed to save the auto-distill setting.");
     } finally {
       setSavingAutoDistill(false);
+    }
+  }
+
+  async function handleToggleSpecRewrite(next: boolean) {
+    setSpecAutoRewrite(next);
+    setSavingSpecRewrite(true);
+    setSpecRewriteMessage(null);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spec_auto_rewrite: next }),
+      });
+      if (!response.ok) {
+        setSpecAutoRewrite(!next);
+        setSpecRewriteMessage("Failed to save the spec auto-rewrite setting.");
+        return;
+      }
+      setSpecRewriteMessage(
+        next
+          ? "Spec auto-rewrite enabled: publishing a release will refresh each project's specification."
+          : "Spec auto-rewrite disabled."
+      );
+    } catch {
+      setSpecAutoRewrite(!next);
+      setSpecRewriteMessage("Failed to save the spec auto-rewrite setting.");
+    } finally {
+      setSavingSpecRewrite(false);
     }
   }
 
@@ -778,6 +813,37 @@ export default function SettingsPage() {
         </label>
         {autoDistillMessage && (
           <p className="text-xs text-muted-foreground">{autoDistillMessage}</p>
+        )}
+      </section>
+
+      <section className="space-y-3 rounded-md border border-border p-4">
+        <div>
+          <h2 className="text-lg font-semibold">Specification</h2>
+          <p className="text-sm text-muted-foreground">
+            Each project&apos;s specification is injected into every agent
+            prompt (editable in the project&apos;s Spec view).
+          </p>
+        </div>
+        <label className="flex items-start gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={specAutoRewrite}
+            disabled={savingSpecRewrite}
+            onChange={(e) => handleToggleSpecRewrite(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium">Auto-rewrite the spec after each release</span>
+            <span className="block text-muted-foreground">
+              When a release is published, automatically run a plan-mode agent
+              that rewrites the project specification to match what has
+              actually shipped. Skipped while a manual spec update is running.
+              Off by default.
+            </span>
+          </span>
+        </label>
+        {specRewriteMessage && (
+          <p className="text-xs text-muted-foreground">{specRewriteMessage}</p>
         )}
       </section>
 

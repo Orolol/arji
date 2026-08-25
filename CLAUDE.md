@@ -24,8 +24,21 @@ Arij is a local, AI-first project orchestrator. It provides a web interface for 
 - `lib/` — Server-side utilities (db, claude, converters)
 - `hooks/` — Client-side React hooks
 - `data/` — Local data (SQLite DB, session logs) — gitignored
+- `projects/` — App-managed clones of repositories imported from GitHub
+  (`<owner>-<repo>`), plus the `.arij-worktrees` their worktrees land in —
+  gitignored. Root resolved by `lib/projects/workspace.ts`; override with the
+  `projects_root` setting. Not to be confused with `app/projects/` or
+  `lib/projects/`, which are tracked source.
 
 ## Commands
 - `npm run dev` — Start dev server with Turbopack
-- `npx drizzle-kit generate` — Generate migrations
+- `npm test` — Vitest suite; `npm run test:e2e` — Playwright
 - `npx drizzle-kit push` — Push schema to DB
+
+## Migrations
+Migrations are **hand-written**. Do not run `npx drizzle-kit generate`: the
+`lib/db/migrations/meta/*_snapshot.json` files stop at 0013 while the journal
+is far ahead, so generate would diff against stale state and emit wrong DDL.
+Add a numbered `.sql` file and append an entry to `meta/_journal.json` by hand.
+Journal order and the `when` timestamps must both increase — drizzle only
+applies a migration whose `when` exceeds the last one recorded in the database.

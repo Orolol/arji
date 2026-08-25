@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWorktreeDiff } from "@/lib/git/diff";
-import { createWorktree, isGitRepo } from "@/lib/git/manager";
+import {
+  createWorktree,
+  isGitRepo,
+  resolveDefaultBranch,
+} from "@/lib/git/manager";
 import {
   errorResponse,
   getEpicOr404,
@@ -45,7 +49,19 @@ export async function GET(_request: NextRequest, { params }: Params) {
   );
 
   try {
-    const result = await getWorktreeDiff(worktreePath);
+    // Diff against the branch the worktree was actually cut from. createWorktree
+    // above resolved its base through resolveBaseBranch (stored default,
+    // existence-checked, then origin/HEAD → main → master → fallback); the
+    // diff must use the very same resolution. Feeding the stored value raw
+    // made a stored default branch that no longer exists locally (renamed
+    // after import, or the clone's local branch set diverging from the
+    // remote's) feed `merge-base` a non-existent ref — a silent empty diff
+    // with 0 ahead/behind over an epic with real commits.
+    const baseBranch = await resolveDefaultBranch(
+      project.gitRepoPath,
+      project.defaultBranch
+    );
+    const result = await getWorktreeDiff(worktreePath, baseBranch);
     return NextResponse.json({ data: result });
   } catch (error) {
     return errorResponse(error, "Failed to generate diff");

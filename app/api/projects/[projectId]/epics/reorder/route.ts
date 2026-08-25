@@ -102,7 +102,6 @@ export async function POST(
       for (const item of validItems) {
         db.update(epics)
           .set({
-            status: item.status,
             position: item.position,
             updatedAt: now,
           })
@@ -113,9 +112,10 @@ export async function POST(
 
     transaction();
 
-    // Emit events and log transitions for status changes (DB already updated in transaction)
+    // Apply status changes through the workflow service after the atomic
+    // position update; the full set was validated above.
     for (const change of statusChanges) {
-      applyTransition({
+      const result = applyTransition({
         projectId,
         epicId: change.epicId,
         fromStatus: change.from,
@@ -123,8 +123,10 @@ export async function POST(
         actor: "user",
         source: "drag",
         reason: "Kanban drag-and-drop",
-        skipDbUpdate: true,
       });
+      if (!result.valid) {
+        return NextResponse.json({ error: result.error }, { status: 409 });
+      }
     }
 
     tryExportArjiJson(projectId);

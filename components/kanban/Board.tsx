@@ -36,7 +36,7 @@ import { useKanban } from "@/hooks/useKanban";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
 import { hasUnreadAiComment, isAiCommentAuthor } from "@/lib/kanban/unread-ai";
 import { BoardSkeleton } from "./BoardSkeleton";
-import type { FailedSessionInfo } from "@/hooks/useAgentPolling";
+import type { FailedSessionInfo } from "@/lib/agent-sessions/latest-failure";
 
 interface BoardProps {
   projectId: string;

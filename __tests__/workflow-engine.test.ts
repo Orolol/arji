@@ -208,6 +208,24 @@ describe("validateTransition — same status reorder", () => {
   });
 });
 
+describe("validateTransition — active build ownership", () => {
+  it("refuses to move an in-progress ticket while a session is active", () => {
+    const result = validateTransition(
+      ctx("in_progress", "review", { hasRunningSession: true })
+    );
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("queued or running");
+  });
+
+  it("allows the terminal handler to promote after the session settles", () => {
+    expect(
+      validateTransition(
+        ctx("in_progress", "review", { hasRunningSession: false })
+      ).valid
+    ).toBe(true);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Invalid structural transitions produce clear error
 // ---------------------------------------------------------------------------

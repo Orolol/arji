@@ -123,6 +123,7 @@ vi.mock("@/lib/git/manager", () => ({
     branchName: "feature/test",
   }),
   isGitRepo: vi.fn().mockResolvedValue(true),
+  resolveDefaultBranch: vi.fn().mockResolvedValue("main"),
   startMergeInWorktree: vi.fn().mockResolvedValue({
     conflicted: true,
     output: "merge conflict",
@@ -191,6 +192,8 @@ vi.mock("@/lib/agent-sessions/lifecycle", () => ({
   markSessionRunning: vi.fn(),
   markSessionTerminal: vi.fn(),
   isSessionLifecycleConflictError: vi.fn(() => false),
+  isSessionNotFoundError: vi.fn(() => false),
+  recordSessionTransitionRefusal: vi.fn(),
 }));
 
 vi.mock("fs", () => ({

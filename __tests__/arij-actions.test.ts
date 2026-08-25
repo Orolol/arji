@@ -136,6 +136,123 @@ describe("extractArijToolCalls", () => {
     expect(extractArijToolCalls(chunks)).toEqual([]);
   });
 
+  it("extracts omp device-URI invocations and dedupes the id echoed across events", () => {
+    // Real omp NDJSON shapes (observed in raw session chunks): an MCP
+    // invocation is a built-in "write" toolCall whose arguments.path is the
+    // tool's device URI — single underscore after "arij" — and the same
+    // block id is echoed by message_start, toolcall_end, message_end,
+    // tool_execution_start and turn_end.
+    const block = {
+      type: "toolCall",
+      id: "a5995ec4-f013-43d9-ad20-1cdf5a804db0|fc_tmp_pr1eegb2do",
+      name: "write",
+      arguments: {
+        content: '{"action": "get_ticket"}',
+        i: "Reading Arij ticket",
+        path: "xd://mcp__arij_get_ticket",
+      },
+    };
+    const lines = [
+      JSON.stringify({
+        type: "message_start",
+        message: { role: "assistant", content: [block], api: "openrouter" },
+      }),
+      JSON.stringify({
+        type: "message_update",
+        assistantMessageEvent: {
+          type: "toolcall_end",
+          contentIndex: 1,
+          toolCall: block,
+        },
+      }),
+      JSON.stringify({
+        type: "message_end",
+        message: { role: "assistant", content: [block] },
+      }),
+      // tool_execution_start carries toolName/args (no toolCall block) and
+      // must not produce a second entry.
+      JSON.stringify({
+        type: "tool_execution_start",
+        toolCallId: block.id,
+        toolName: "write",
+        args: { content: block.arguments.content, path: block.arguments.path },
+        intent: "Reading Arij ticket",
+      }),
+      JSON.stringify({
+        type: "turn_end",
+        message: { role: "assistant", content: [block] },
+      }),
+    ];
+    const calls = extractArijToolCalls([
+      { content: lines.join("\n") + "\n", createdAt: "t-omp" },
+    ]);
+    expect(calls).toEqual([{ tool: "get_ticket", at: "t-omp" }]);
+  });
+
+  it("keeps distinct omp invocations, including effectful ones", () => {
+    const mk = (id: string, tool: string, content: string) =>
+      JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id,
+              name: "write",
+              arguments: { content, path: `xd://mcp__arij_${tool}` },
+            },
+          ],
+        },
+      });
+    const calls = extractArijToolCalls([
+      {
+        content:
+          [
+            mk("call_165475", "post_comment", '{"content": "Done."}'),
+            mk("call_165476", "update_ticket_status", '{"status": "review"}'),
+          ].join("\n") + "\n",
+        createdAt: "t-omp2",
+      },
+    ]);
+    expect(calls.map((c) => c.tool)).toEqual([
+      "post_comment",
+      "update_ticket_status",
+    ]);
+  });
+
+  it("skips omp schema reads and non-arij device writes", () => {
+    const chunks = [
+      {
+        // Schema read: "read" on the tool's device file is not an invocation.
+        content:
+          JSON.stringify({
+            type: "toolCall",
+            id: "call_read",
+            name: "read",
+            arguments: { path: "xd://mcp__arij_post_comment" },
+          }) + "\n",
+        createdAt: "t1",
+      },
+      {
+        // Non-MCP device write (real shape: omp browser device).
+        content:
+          JSON.stringify({
+            type: "toolCall",
+            id: "call_browser",
+            name: "write",
+            arguments: {
+              content: '{"action": "open", "url": "http://localhost:3457/"}',
+              i: "Opening app in browser",
+              path: "xd://browser",
+            },
+          }) + "\n",
+        createdAt: "t2",
+      },
+    ];
+    expect(extractArijToolCalls(chunks)).toEqual([]);
+  });
+
   it("parses a trailing line without a final newline", () => {
     const calls = extractArijToolCalls([
       {

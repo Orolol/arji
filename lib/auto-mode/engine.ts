@@ -23,6 +23,7 @@ import {
   type AutoModeBoard,
 } from "./select";
 import { tryAutoMerge, type AutoMergeOutcome } from "./merge";
+import { SESSION_TRANSITION_REFUSED_OUTCOME } from "@/lib/agent-sessions/lifecycle";
 
 /**
  * Full Auto Mode — the standing build / review / merge supervisor.
@@ -61,7 +62,7 @@ import { tryAutoMerge, type AutoMergeOutcome } from "./merge";
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 /** Statuses a build may still be dispatched onto, checked at the last moment. */
-const DISPATCHABLE_BUILD_STATUSES = new Set(["todo", "in_progress"]);
+const DISPATCHABLE_BUILD_STATUSES = new Set(["backlog", "todo", "in_progress"]);
 
 /** Epics past the finish line — never a valid dispatch target. */
 const DELIVERED_EPIC_STATUSES = new Set(["done", "released"]);
@@ -360,22 +361,28 @@ function reconcileInFlight(
     // The selectors treat it as "no review happened" so the epic stays
     // reviewable; charging it here is what bounds those retries — three
     // silent reviews park the epic instead of looping.
+    const sessionOutcome = deps.readSessionOutcome(sessionId);
     const silentReview =
       status === "completed" &&
       entry.kind === "review" &&
-      deps.readSessionOutcome(sessionId) === "silent";
+      sessionOutcome === "silent";
+    const transitionRefused =
+      status === "completed" &&
+      sessionOutcome === SESSION_TRANSITION_REFUSED_OUTCOME;
 
-    if (status === "completed" && !silentReview) {
+    if (status === "completed" && !silentReview && !transitionRefused) {
       autoModeRegistry.clearFailures(projectId, entry.ticketId);
       continue;
     }
-    if (status !== "failed" && !silentReview) continue;
+    if (status !== "failed" && !silentReview && !transitionRefused) continue;
 
     const failures = autoModeRegistry.recordFailure(
       projectId,
       entry.ticketId,
       entry.epicId,
-      silentReview
+      transitionRefused
+        ? "build completed but its workflow transition was refused"
+        : silentReview
         ? "review completed with no verdict"
         : `${entry.kind} session failed`
     );

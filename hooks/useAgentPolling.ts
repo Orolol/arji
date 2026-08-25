@@ -2,6 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { usePolling } from "@/hooks/usePolling";
+import {
+  selectLatestFailures,
+  type FailedSessionInfo,
+} from "@/lib/agent-sessions/latest-failure";
 
 export interface UnifiedActivity {
   id: string;
@@ -22,12 +26,6 @@ export interface UnifiedActivity {
   stale?: boolean;
 }
 
-export interface FailedSessionInfo {
-  sessionId: string;
-  error: string;
-  agentType: string;
-}
-
 export function useAgentPolling(projectId: string, intervalMs = 3000, refreshTrigger?: number) {
   const [activities, setActivities] = useState<UnifiedActivity[]>([]);
   const [failedSessions, setFailedSessions] = useState<Record<string, FailedSessionInfo>>({});
@@ -45,30 +43,15 @@ export function useAgentPolling(projectId: string, intervalMs = 3000, refreshTri
       const sessions = allData.data || [];
 
       // Build a set of epicIds that currently have a running agent
-      const runningEpicIds = new Set(
-        (activeData.data || [])
-          .filter((a: UnifiedActivity) => a.epicId)
-          .map((a: UnifiedActivity) => a.epicId)
+      const runningEpicIds = new Set<string>(
+        ((activeData.data || []) as UnifiedActivity[])
+          .filter((a) => a.epicId)
+          .map((a) => a.epicId as string)
       );
 
-      // Map by epicId, keeping only the most recent failure per epic
-      // (sessions come sorted by createdAt desc from the API)
-      const failed: Record<string, FailedSessionInfo> = {};
-      for (const session of sessions) {
-        if (session.kind !== "agent_session") continue;
-        if (session.status !== "failed") continue;
-        if (!session.epicId) continue;
-        // Skip epics that currently have an active agent
-        if (runningEpicIds.has(session.epicId)) continue;
-        // Keep only the most recent failure per epic (first seen wins since sorted desc)
-        if (!failed[session.epicId]) {
-          failed[session.epicId] = {
-            sessionId: session.id,
-            error: session.error || "Unknown error",
-            agentType: session.agentType || "build",
-          };
-        }
-      }
+      // "Latest session wins": the badge reflects only the most recent
+      // session per epic, so a retry clears the failure immediately.
+      const failed = selectLatestFailures(sessions, runningEpicIds);
       setFailedSessions(failed);
     } catch {
       // ignore

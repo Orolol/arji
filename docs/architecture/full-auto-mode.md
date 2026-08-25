@@ -10,11 +10,14 @@ Arij has three autonomous modes. Two are one-shot bursts:
 
 Full Auto Mode is the standing one. Once armed for a project it keeps:
 
-- **building** everything in `todo`, plus everything in `in_progress` with no agent on it (a ticket that came back from a negative review),
+- **building** everything in `backlog`/`todo`, plus everything in `in_progress` with no agent on it (a ticket that came back from a negative review),
 - **reviewing** everything in `review`,
 - **merging** a ticket as soon as its review is clean.
 
-It only ever *dispatches*. The state machine already loops on its own — a
+It only ever *dispatches*. Before a build session row is created, the shared
+driver moves the target (and a story's parent epic) to `in_progress`; this is
+what makes backlog dispatch safe without leaving an active-session/orphaned-
+column mismatch. The state machine then loops on its own — a
 successful build moves the epic to `review`, a negative review verdict moves it
 back to `in_progress` without an agent — and the supervisor picks that up on the
 next sweep. Every dispatch goes through

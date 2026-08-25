@@ -1362,3 +1362,105 @@ Your ENTIRE response must be ONLY the new memory document body, as raw markdown.
 
   return parts.filter(Boolean).join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// 13. Spec Auto-Rewrite Prompt
+// ---------------------------------------------------------------------------
+
+/**
+ * Board snapshot the auto rewrite grounds the spec in: every epic/story
+ * status plus the release history, so the agent can tell what actually
+ * shipped from what is still planned.
+ */
+export interface SpecRewriteBoardState {
+  epics: Array<{ id: string; title: string; status: string }>;
+  userStories: Array<{ epicId: string; title: string; status: string }>;
+  releases: Array<{ version: string; title: string | null; changelog: string | null }>;
+}
+
+/** The release that triggered the rewrite. */
+export interface SpecRewriteReleaseContext {
+  version: string;
+  title: string | null;
+  changelog: string | null;
+}
+
+function specRewriteBoardSection(board: SpecRewriteBoardState): string {
+  const lines: string[] = [`## Current Board State\n`];
+  if (board.epics.length === 0) {
+    lines.push(`(No tickets on the board.)\n`);
+  }
+  for (const epic of board.epics) {
+    lines.push(`- **${epic.title}** — ${epic.status}`);
+    const stories = board.userStories.filter((s) => s.epicId === epic.id);
+    for (const story of stories) {
+      lines.push(`  - ${story.title} (${story.status})`);
+    }
+  }
+  if (board.releases.length > 0) {
+    lines.push(``, `### Release History`);
+    for (const release of board.releases) {
+      lines.push(`- v${release.version}${release.title ? ` — ${release.title}` : ""}`);
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Builds the prompt for the automatic spec rewrite fired after a release.
+ * Like the memory distill, the current spec is the object being rewritten
+ * and gets its own framing instead of the standard injected section.
+ */
+export function buildSpecAutoRewritePrompt(
+  project: PromptProject,
+  currentSpec: string | null,
+  board: SpecRewriteBoardState,
+  release: SpecRewriteReleaseContext,
+  systemPrompt?: string | null,
+): string {
+  const parts: string[] = [];
+
+  parts.push(systemSection(systemPrompt));
+  parts.push(projectHeader(project.name));
+  parts.push(descriptionSection(project.description));
+
+  parts.push(`## Current Specification\n`);
+  if (currentSpec && currentSpec.trim().length > 0) {
+    parts.push(currentSpec.trim() + "\n");
+  } else {
+    parts.push(`(The project specification is currently empty.)\n`);
+  }
+
+  parts.push(specRewriteBoardSection(board));
+
+  parts.push(
+    `## Release That Just Shipped\n`,
+    `- **Version:** v${release.version}${release.title ? ` — ${release.title}` : ""}\n`
+  );
+  if (release.changelog && release.changelog.trim()) {
+    parts.push(`### Changelog\n`, release.changelog.trim() + "\n");
+  }
+
+  parts.push(`## Task: Rewrite the Specification to Match Reality
+
+This project's specification is a living document: it is injected into every agent prompt for this project, so it must describe the project as it IS today — not as it was when first written. A release was just published; update the specification accordingly.
+
+Rewrite the ENTIRE specification above so that:
+
+- Features delivered by shipped releases are presented as implemented reality (current behaviour), not as future plans.
+- Architecture and key-decisions sections reflect what was actually built, incorporating decisions taken during implementation.
+- Objectives and scope stay accurate: drop or rewrite goals the project has outgrown, keep genuine future direction clearly framed as plans (backlog / next steps).
+- The changelog of the release above is evidence of what changed — fold its facts in, but write prose, not a copy of the changelog.
+- Preserve the document's overall structure and voice where they are still accurate; this is a refresh, not a restart.
+
+### Output Format
+
+Your ENTIRE response must be ONLY the new specification, as raw markdown.
+
+- Do NOT wrap it in code fences.
+- Do NOT add any preamble, explanation, or summary before or after it.
+- Do NOT address the user — the response is written verbatim into the project specification.
+`);
+
+  return parts.filter(Boolean).join("\n");
+}

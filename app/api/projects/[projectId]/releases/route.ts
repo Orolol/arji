@@ -39,6 +39,7 @@ import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
 import { applyTransition } from "@/lib/workflow/transition-service";
 import { emitReleaseCreated } from "@/lib/events/emit";
 import { sendProjectWebhook } from "@/lib/webhooks/send";
+import { maybeAutoRewriteSpecAfterRelease } from "@/lib/workflow/spec-auto-rewrite";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import fs from "fs";
 import path from "path";
@@ -476,6 +477,11 @@ ${ticketContext}
     ticketTitle: title ? `v${version} — ${title}` : `v${version}`,
     path: `/projects/${projectId}/releases`,
   });
+
+  // Fire-and-forget spec auto-rewrite ("spec vivante"): a no-op unless the
+  // 'spec_auto_rewrite' setting is on. The trigger owns its guards (setting
+  // gate, pending spec_generation session) and never rejects.
+  void maybeAutoRewriteSpecAfterRelease(projectId, id);
 
   const release = db.select().from(releases).where(eq(releases.id, id)).get();
 

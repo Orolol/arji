@@ -7,36 +7,32 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Trash2 } from "lucide-react";
-
-interface ImportData {
-  project: {
-    name: string;
-    description: string;
-    stack?: string;
-    architecture?: string;
-  };
-  epics: Array<{
-    title: string;
-    description?: string;
-    status: string;
-    confidence?: number;
-    evidence?: string;
-    user_stories: Array<{
-      title: string;
-      description?: string;
-      acceptance_criteria?: string;
-      status: string;
-    }>;
-  }>;
-}
+import type { ImportData } from "@/components/import/types";
 
 interface ImportPreviewProps {
   data: ImportData;
+  /** True while the import chain is running. */
+  busy?: boolean;
+  /** A project row already exists from a (partial) import — re-submitting
+   *  would duplicate it. The button stays disabled but is labelled
+   *  "Already imported" so it does not read as a hung operation. */
+  locked?: boolean;
+  /** Disables Cancel while the import chain is in flight, so leaving the
+   *  preview cannot race the running chain (late redirects or state writes
+   *  landing on a second import). */
+  cancelDisabled?: boolean;
   onValidate: (data: ImportData) => void;
   onCancel: () => void;
 }
 
-export function ImportPreview({ data, onValidate, onCancel }: ImportPreviewProps) {
+export function ImportPreview({
+  data,
+  busy = false,
+  locked = false,
+  cancelDisabled = false,
+  onValidate,
+  onCancel,
+}: ImportPreviewProps) {
   const [editData, setEditData] = useState<ImportData>(structuredClone(data));
 
   function updateEpic(index: number, field: string, value: string) {
@@ -53,7 +49,9 @@ export function ImportPreview({ data, onValidate, onCancel }: ImportPreviewProps
 
   function removeUS(epicIndex: number, usIndex: number) {
     const updated = structuredClone(editData);
-    updated.epics[epicIndex].user_stories.splice(usIndex, 1);
+    // Defensive: an epic handed in without user_stories must not crash the
+    // remove handler either (the page validates the shape before rendering).
+    updated.epics[epicIndex].user_stories?.splice(usIndex, 1);
     setEditData(updated);
   }
 
@@ -95,7 +93,13 @@ export function ImportPreview({ data, onValidate, onCancel }: ImportPreviewProps
           Epics ({editData.epics.length})
         </h2>
         <div className="space-y-3">
-          {editData.epics.map((epic, ei) => (
+          {editData.epics.map((epic, ei) => {
+            // Defensive: the import page rejects a preview whose epics lack
+            // user_stories before rendering, but the component must not throw
+            // on a malformed entry either — `epic.user_stories.length` used to
+            // crash the whole app (no error boundary) on such a preview.
+            const stories = epic.user_stories ?? [];
+            return (
             <Card key={ei} className="p-4">
               <div className="flex items-start gap-2 mb-2">
                 <Input
@@ -120,9 +124,9 @@ export function ImportPreview({ data, onValidate, onCancel }: ImportPreviewProps
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
-              {epic.user_stories.length > 0 && (
+              {stories.length > 0 && (
                 <div className="ml-4 space-y-1">
-                  {epic.user_stories.map((us, usi) => (
+                  {stories.map((us, usi) => (
                     <div key={usi} className="flex items-center gap-2 text-sm">
                       <Badge
                         variant="outline"
@@ -144,15 +148,24 @@ export function ImportPreview({ data, onValidate, onCancel }: ImportPreviewProps
                 </div>
               )}
             </Card>
-          ))}
+            );
+          })}
         </div>
       </div>
 
       <div className="flex gap-2">
-        <Button onClick={() => onValidate(editData)}>
-          Validate & Import
+        <Button onClick={() => onValidate(editData)} disabled={busy || locked}>
+          {busy
+            ? "Importing..."
+            : locked
+              ? "Already imported"
+              : "Validate & Import"}
         </Button>
-        <Button variant="outline" onClick={onCancel}>
+        <Button
+          variant="outline"
+          onClick={onCancel}
+          disabled={cancelDisabled}
+        >
           Cancel
         </Button>
       </div>

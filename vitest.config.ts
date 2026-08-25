@@ -9,6 +9,17 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
     include: ["**/*.test.{ts,tsx,mjs}"],
+    // The checkout hosts foreign trees that carry their own test copies:
+    // .claude/worktrees (agent session snapshots), the projects/ clone
+    // workspace, and data/ (session logs, uploads). Running their stale
+    // suites against this repo's setup produces phantom failures.
+    exclude: [
+      "**/node_modules/**",
+      "**/.next/**",
+      ".claude/**",
+      "projects/**",
+      "data/**",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

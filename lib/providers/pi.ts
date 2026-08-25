@@ -172,6 +172,16 @@ export class PiProvider extends BaseCliProvider {
     return ["--session", cliSessionId];
   }
 
+  /**
+   * Extra argv appended alongside the read-only allowlist. On pi the
+   * allowlist genuinely strips the mutating built-ins (verified on 0.84.2:
+   * write is unavailable under `--tools read,grep,find,ls`), so there is
+   * nothing to add; omp needs an overlay on top — see OhMyPiProvider.
+   */
+  protected readonlyExtraArgs(): string[] {
+    return [];
+  }
+
   protected notAuthenticatedMessage(): string {
     return "Pi is not authenticated. Run `pi` and use /login, or set the provider API key.";
   }
@@ -184,6 +194,7 @@ export class PiProvider extends BaseCliProvider {
     // plan/analyze must not touch the working tree — drop write/edit/bash.
     if (mode !== "code") {
       args.push("--tools", this.readonlyTools().join(","));
+      args.push(...this.readonlyExtraArgs());
     }
 
     if (cliSessionId && resumeSession) {

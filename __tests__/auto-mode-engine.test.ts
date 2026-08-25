@@ -954,6 +954,30 @@ describe("silent reviews", () => {
   });
 });
 
+describe("refused terminal build transitions", () => {
+  it("charges the failure ladder and parks instead of crediting success", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
+    addEpic({ id: "held-build", status: "in_progress" });
+
+    for (let i = 0; i < 3; i += 1) {
+      const result = await sweepProject(PROJECT_ID, fakes.deps);
+      expect(result.buildsDispatched).toHaveLength(1);
+      settle(
+        fakes,
+        result.buildsDispatched[0],
+        "completed",
+        "transition_refused"
+      );
+    }
+
+    const final = await sweepProject(PROJECT_ID, fakes.deps);
+    expect(final.parked).toEqual(["held-build"]);
+    expect(autoModeRegistry.isParked(PROJECT_ID, "held-build")).toBe(true);
+    expect(fakes.dispatches.filter((d) => d.stage === "build")).toHaveLength(3);
+  });
+});
+
 describe("last-moment build guard", () => {
   it("does not dispatch onto a ticket a human just moved to done", async () => {
     const fakes = makeFakes();

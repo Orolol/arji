@@ -168,9 +168,6 @@ function finalizeMergedEpic(input: {
     source: "merge",
     reason: input.reason,
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-    // The branch clear below belongs to the same write, so the transition
-    // service validates/emits/logs but leaves the row to us.
-    skipDbUpdate: true,
   });
 
   if (!validation.valid) {
@@ -182,7 +179,6 @@ function finalizeMergedEpic(input: {
 
   db.update(epics)
     .set({
-      status: "done",
       branchName: null,
       updatedAt: new Date().toISOString(),
     })

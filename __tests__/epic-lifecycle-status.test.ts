@@ -217,6 +217,8 @@ vi.mock("@/lib/agent-sessions/lifecycle", () => ({
   markSessionRunning: vi.fn(),
   markSessionTerminal: vi.fn(),
   isSessionLifecycleConflictError: vi.fn(() => false),
+  isSessionNotFoundError: vi.fn(() => false),
+  recordSessionTransitionRefusal: vi.fn(),
 }));
 
 vi.mock("@/lib/events/emit", () => ({

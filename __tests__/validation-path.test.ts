@@ -35,6 +35,36 @@ describe("validatePath", () => {
     }
   });
 
+  it("rejects a trailing (..) segment", async () => {
+    const result = await validatePath("/home/user/project/..");
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain("traversal");
+    }
+  });
+
+  it("rejects (..) segments on Windows-style separators too", async () => {
+    const result = await validatePath("C:\\projects\\..\\etc");
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain("traversal");
+    }
+  });
+
+  it("accepts consecutive dots inside a file or directory name", async () => {
+    // A `..` *inside* a segment is not a traversal: the segments are already
+    // isolated by the separator and resolve() normalises afterwards. A
+    // user-supplied local directory with such a name imports instead of
+    // 400ing at the analysis step. (GitHub imports never produce one: the
+    // repo-reference parser rejects `..` in owner/repo segments outright.)
+    vi.mocked(fs.stat).mockResolvedValue({ isDirectory: () => true } as any);
+    const result = await validatePath("/home/user/projects/owner-repo..v2");
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.normalizedPath).toBe("/home/user/projects/owner-repo..v2");
+    }
+  });
+
   it("rejects empty string", async () => {
     const result = await validatePath("");
     expect(result.valid).toBe(false);

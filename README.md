@@ -84,6 +84,7 @@ Track every AI agent session with detailed status, duration, provider info, and 
 ### Git Automation
 
 Arij handles all the git plumbing:
+- **Clone** — import straight from a GitHub URL; Arij clones into its own workspace and sets the project up from there
 - **Worktrees** — each epic gets its own isolated working directory
 - **Branches** — automatic branch creation and naming
 - **Push & PR** — push to remote and create pull requests from the UI
@@ -158,14 +159,49 @@ Open **http://localhost:3000** in your browser. The database is created automati
 
 Or **Import** an existing codebase — Arij will analyze it and suggest epics automatically.
 
+#### Import from a GitHub URL
+
+**Import** accepts a repository URL as well as a local path. Pick **GitHub URL**, paste any of these, and hit **Import**:
+
+```
+https://github.com/owner/repo
+https://github.com/owner/repo/tree/main     # browser URLs work, the suffix is dropped
+git@github.com:owner/repo.git
+owner/repo                                   # shorthand
+```
+
+Arij then:
+
+1. **Clones** the repository into its own workspace — `<arij>/projects/<owner>-<repo>` by default
+2. **Analyzes** the clone with the same pipeline a local import uses (an existing `arij.json` short-circuits the AI analysis)
+3. Shows you the **preview** of epics and user stories to edit before creating the project
+
+The project is created already connected to GitHub: push, PR creation, releases and issue sync work immediately, with no separate "Connect GitHub" step.
+
+Notes:
+
+- **Private repositories** need a GitHub PAT — set it in **Settings → GitHub PAT**. The token is only sent when an anonymous attempt is refused, and it is never written to `.git/config`, so `origin` keeps a clean URL. Public repositories clone with no token at all.
+- **Clones are full clones** — no `--depth`, no `--single-branch`. Arij creates worktrees off the default branch, computes merge bases and tags releases, and all of that needs the complete history. Expect the clone of a large repository to take a while; the UI shows "Cloning repository..." as its own step.
+- **Re-importing the same repository is safe.** If the destination already holds that repository, Arij fetches it instead of re-cloning. If it holds something else, the import stops with a conflict and tells you what is in the way — nothing is ever overwritten.
+- Only directories Arij created itself are ever treated as Arij's to remove. A project you pointed at a local path is never touched.
+
 ### Configuration
+
+#### Where clones land
+
+Cloned repositories go to `<arij>/projects/` — the directory next to `data/`, gitignored, created on first use. Each clone is `<projects root>/<owner>-<repo>`, and their worktrees sit alongside in `<projects root>/.arij-worktrees`.
+
+To keep your code elsewhere, set **Settings → Projects Directory**, stored as the `projects_root` setting. Only an absolute path is accepted — a relative one would move with the directory Arij runs from, so it is refused and the default is used instead. Clearing the field restores the default.
+
+#### Credentials
+
+GitHub credentials live in **Settings**, not in the environment: the PAT is stored in the `settings` table of the local SQLite database, and read from there by every GitHub feature (clone, push, PR, releases, issue sync).
+
+> The `GITHUB_TOKEN` environment variable is **not** read by Arij. If you set it in an older `.env.local`, it has no effect — move the token to Settings → GitHub PAT.
 
 Create `.env.local` for optional settings:
 
 ```env
-# GitHub integration (for push, PR creation, releases)
-GITHUB_TOKEN=ghp_xxx
-
 # Custom Claude CLI path
 CLAUDE_PATH=/usr/local/bin/claude
 ```

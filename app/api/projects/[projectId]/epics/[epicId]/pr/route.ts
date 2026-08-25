@@ -11,6 +11,7 @@ import {
 } from "@/lib/api/route-helpers";
 import { getGitHubTokenFromSettings } from "@/lib/github/client";
 import { pushGitBranch } from "@/lib/git/remote";
+import { resolveDefaultBranch } from "@/lib/git/manager";
 import { generatePrBody, createPullRequest } from "@/lib/github/pull-requests";
 import { writeGitSyncLog } from "@/lib/github/sync-log";
 
@@ -44,11 +45,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   const { projectId, epicId } = await params;
 
   // Get optional body params (base branch, draft flag)
-  let baseBranch = "main";
+  let explicitBaseBranch: string | undefined;
   let draft = false;
   try {
     const body = await request.json();
-    if (body.baseBranch) baseBranch = body.baseBranch;
+    if (body.baseBranch) explicitBaseBranch = body.baseBranch;
     if (body.draft !== undefined) draft = body.draft;
   } catch {
     // Empty body is fine, use defaults
@@ -110,6 +111,26 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     .all();
 
   const [owner, repo] = project.githubOwnerRepo.split("/");
+
+  // The PR must target a branch that exists on the remote. The project's
+  // stored default_branch (set by a GitHub import) is authoritative for
+  // Arij-cloned projects — a hard-coded "main" makes GitHub answer 422
+  // "Base ref must be a branch" on a develop-default clone. Projects without
+  // a stored value fall back to asking the repository itself (main →
+  // master → origin/HEAD → current branch).
+  let baseBranch = explicitBaseBranch;
+  if (!baseBranch) {
+    try {
+      baseBranch = await resolveDefaultBranch(
+        project.gitRepoPath!,
+        project.defaultBranch || undefined
+      );
+    } catch {
+      // The repository cannot be resolved — keep the historical default so
+      // the GitHub-side error (if any) is what the user sees, not a crash.
+      baseBranch = "main";
+    }
+  }
 
   // Push the branch
   try {

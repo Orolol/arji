@@ -10,11 +10,22 @@ import type { TransitionContext } from "./engine";
 
 export function buildTransitionContext(opts: {
   epicId: string;
+  userStoryId?: string;
   fromStatus: KanbanStatus;
   toStatus: KanbanStatus;
   actor: "user" | "agent" | "system";
+  requireCompletedReview?: boolean;
+  requireResolvedComments?: boolean;
 }): TransitionContext {
-  const { epicId, fromStatus, toStatus, actor } = opts;
+  const {
+    epicId,
+    userStoryId,
+    fromStatus,
+    toStatus,
+    actor,
+    requireCompletedReview = true,
+    requireResolvedComments = true,
+  } = opts;
 
   // Check for open review comments
   const openComments = db
@@ -35,6 +46,7 @@ export function buildTransitionContext(opts: {
     .where(
       and(
         eq(agentSessions.epicId, epicId),
+        userStoryId ? eq(agentSessions.userStoryId, userStoryId) : undefined,
         eq(agentSessions.status, "completed")
       )
     )
@@ -50,17 +62,24 @@ export function buildTransitionContext(opts: {
       );
     });
 
-  // Check for running agent sessions
+  // Only code-producing sessions own the in_progress column. Review, chat,
+  // merge and other auxiliary sessions legitimately run in other columns.
+  const activeBuildTypes = new Set(["build", "ticket_build", "team_build"]);
   const runningSessions = db
     .select()
     .from(agentSessions)
     .where(
       and(
         eq(agentSessions.epicId, epicId),
-        eq(agentSessions.status, "running")
+        userStoryId ? eq(agentSessions.userStoryId, userStoryId) : undefined
       )
     )
-    .all();
+    .all()
+    .filter(
+      (session) =>
+        (session.status === "queued" || session.status === "running") &&
+        activeBuildTypes.has(session.agentType ?? "")
+    );
 
   return {
     epicId,
@@ -68,6 +87,8 @@ export function buildTransitionContext(opts: {
     toStatus,
     hasOpenReviewComments: openComments.length > 0,
     hasCompletedReview: completedReviewSessions.length > 0,
+    requireCompletedReview,
+    requireResolvedComments,
     hasRunningSession: runningSessions.length > 0,
     actor,
   };
