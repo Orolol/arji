@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
+  Brain,
   Hammer,
   Search,
   GitMerge,
@@ -71,6 +72,7 @@ const typeIcons: Record<UnifiedActivity["type"], typeof Hammer> = {
   chat: MessageSquare,
   spec_generation: Sparkles,
   release: FileText,
+  memory: Brain,
 };
 
 export function AgentMonitor({

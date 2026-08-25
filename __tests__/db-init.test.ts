@@ -27,14 +27,17 @@ import * as schema from "@/lib/db/schema";
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "lib", "db", "migrations");
 
 const journal = JSON.parse(
-  fs.readFileSync(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf-8")
+  fs.readFileSync(
+    path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"),
+    "utf-8",
+  ),
 ) as { entries: { when: number; tag: string }[] };
 
 const TOTAL_MIGRATIONS = journal.entries.length;
 
 /** SQL tables declared in schema.ts. */
 const schemaTables = (Object.values(schema) as unknown[]).filter(
-  (value): value is SQLiteTable => is(value, SQLiteTable)
+  (value): value is SQLiteTable => is(value, SQLiteTable),
 );
 
 // ---------------------------------------------------------------------------
@@ -67,7 +70,9 @@ function withDb<T>(file: string, fn: (conn: Database.Database) => T): T {
 function tableNames(conn: Database.Database): string[] {
   return (
     conn
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+      )
       .all() as { name: string }[]
   ).map((row) => row.name);
 }
@@ -83,7 +88,9 @@ function columnNames(conn: Database.Database, table: string): string[] {
 function appliedMigrationTimestamps(conn: Database.Database): number[] {
   return (
     conn
-      .prepare('SELECT created_at FROM "__drizzle_migrations" ORDER BY created_at')
+      .prepare(
+        'SELECT created_at FROM "__drizzle_migrations" ORDER BY created_at',
+      )
       .all() as { created_at: number }[]
   ).map((row) => Number(row.created_at));
 }
@@ -106,7 +113,7 @@ function expectFullSchema(conn: Database.Database): void {
     const dbColumns = columnNames(conn, sqlName);
     for (const column of Object.values(getTableColumns(table))) {
       expect(dbColumns, `missing column ${sqlName}.${column.name}`).toContain(
-        column.name
+        column.name,
       );
     }
   }
@@ -132,10 +139,10 @@ function applyLegacyAdHocDdl(conn: Database.Database): void {
     )
   `);
   conn.exec(
-    `CREATE INDEX IF NOT EXISTS ticket_activity_log_epic_idx ON ticket_activity_log(epic_id)`
+    `CREATE INDEX IF NOT EXISTS ticket_activity_log_epic_idx ON ticket_activity_log(epic_id)`,
   );
   conn.exec(
-    `CREATE INDEX IF NOT EXISTS ticket_activity_log_project_idx ON ticket_activity_log(project_id)`
+    `CREATE INDEX IF NOT EXISTS ticket_activity_log_project_idx ON ticket_activity_log(project_id)`,
   );
   conn.exec(`
     CREATE TABLE IF NOT EXISTS notifications (
@@ -151,7 +158,7 @@ function applyLegacyAdHocDdl(conn: Database.Database): void {
     )
   `);
   conn.exec(
-    `CREATE INDEX IF NOT EXISTS notifications_created_at_idx ON notifications(created_at)`
+    `CREATE INDEX IF NOT EXISTS notifications_created_at_idx ON notifications(created_at)`,
   );
   conn.exec(`
     CREATE TABLE IF NOT EXISTS notification_read_cursor (
@@ -223,7 +230,8 @@ describe("initDb", () => {
       expect(applied).toHaveLength(TOTAL_MIGRATIONS);
       // Baseline rows were stamped, post-baseline migrations actually ran.
       expect(applied.filter((ms) => ms <= LEGACY_BASELINE_MS)).toHaveLength(
-        journal.entries.filter((entry) => entry.when <= LEGACY_BASELINE_MS).length
+        journal.entries.filter((entry) => entry.when <= LEGACY_BASELINE_MS)
+          .length,
       );
 
       expectFullSchema(conn);
@@ -252,6 +260,7 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
     });
 
@@ -264,6 +273,9 @@ describe("initDb", () => {
       expect(columnNames(conn, "agent_sessions")).toContain("output_tokens");
       expect(columnNames(conn, "agent_sessions")).toContain("total_cost_usd");
       expect(columnNames(conn, "agent_sessions")).toContain("batch_run_id");
+      expect(columnNames(conn, "review_comments")).toContain(
+        "agent_session_id",
+      );
       expect(columnNames(conn, "projects")).toContain("clone_source");
       expect(columnNames(conn, "projects")).toContain("git_remote_url");
       expect(columnNames(conn, "projects")).toContain("default_branch");
@@ -289,9 +301,9 @@ describe("initDb", () => {
         conn
           .prepare(
             `INSERT INTO git_sync_log (id, project_id, operation, status, detail)
-             VALUES (?, NULL, 'clone', 'success', ?)`
+             VALUES (?, NULL, 'clone', 'success', ?)`,
           )
-          .run("log_1", JSON.stringify({ ownerRepo: "owner/repo" }))
+          .run("log_1", JSON.stringify({ ownerRepo: "owner/repo" })),
       ).not.toThrow();
 
       const row = conn
@@ -317,7 +329,8 @@ describe("initDb", () => {
     // Simulate a bookkeeping-less database whose schema stops at 0023:
     // outcome exists; the 0024 usage columns, the 0025 table, the 0026
     // batch_run_id column, the 0028 clone columns, the 0030 attachment
-    // ownership columns and the 0032 review verdict do not.
+    // ownership columns, 0032 finding attribution, and the 0033 review
+    // verdict do not.
     withDb(file, (conn) => {
       initDb(conn);
       conn.exec('DROP TABLE "__drizzle_migrations"');
@@ -331,6 +344,7 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       conn.exec("DROP TABLE ticket_read_cursors");
     });
@@ -344,6 +358,9 @@ describe("initDb", () => {
       expect(columnNames(conn, "agent_sessions")).toContain("output_tokens");
       expect(columnNames(conn, "agent_sessions")).toContain("total_cost_usd");
       expect(columnNames(conn, "agent_sessions")).toContain("batch_run_id");
+      expect(columnNames(conn, "review_comments")).toContain(
+        "agent_session_id",
+      );
       expect(columnNames(conn, "projects")).toContain("clone_source");
       expect(columnNames(conn, "projects")).toContain("git_remote_url");
       expect(columnNames(conn, "projects")).toContain("default_branch");
@@ -390,23 +407,27 @@ describe("migration journal", () => {
 
   it("orders migrations by a strictly increasing `when`", () => {
     const backdated = entries.filter(
-      (entry, index) => index > 0 && entry.when <= entries[index - 1].when
+      (entry, index) => index > 0 && entry.when <= entries[index - 1].when,
     );
 
     expect(
       backdated.map((entry) => entry.tag),
-      "a migration must be appended with a `when` above every earlier one, never backdated"
+      "a migration must be appended with a `when` above every earlier one, never backdated",
     ).toEqual([]);
   });
 
   it("gives every migration a unique tag, timestamp and file", () => {
-    expect(new Set(entries.map((entry) => entry.tag)).size).toBe(entries.length);
-    expect(new Set(entries.map((entry) => entry.when)).size).toBe(entries.length);
+    expect(new Set(entries.map((entry) => entry.tag)).size).toBe(
+      entries.length,
+    );
+    expect(new Set(entries.map((entry) => entry.when)).size).toBe(
+      entries.length,
+    );
 
     for (const entry of entries) {
       expect(
         fs.existsSync(path.join(MIGRATIONS_FOLDER, `${entry.tag}.sql`)),
-        `${entry.tag}.sql is referenced by the journal but missing on disk`
+        `${entry.tag}.sql is referenced by the journal but missing on disk`,
       ).toBe(true);
     }
   });
@@ -416,7 +437,7 @@ describe("migration journal", () => {
     // shipped on a branch, so an early database can legitimately run the
     // rebuild twice.
     const entry = entries.find(
-      (candidate) => candidate.tag === "0029_git_sync_log_nullable_project"
+      (candidate) => candidate.tag === "0029_git_sync_log_nullable_project",
     );
     expect(entry).toBeDefined();
 
@@ -425,7 +446,7 @@ describe("migration journal", () => {
       initDb(conn);
       conn
         .prepare(
-          "INSERT INTO git_sync_log (id, project_id, operation, status) VALUES ('g1', NULL, 'clone', 'success')"
+          "INSERT INTO git_sync_log (id, project_id, operation, status) VALUES ('g1', NULL, 'clone', 'success')",
         )
         .run();
 
@@ -440,21 +461,20 @@ describe("migration journal", () => {
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
 
       expect(() => initDb(conn)).not.toThrow();
 
       expect(appliedMigrationTimestamps(conn)).toContain(entry!.when);
-      expect(
-        conn.prepare("SELECT id FROM git_sync_log").all()
-      ).toHaveLength(1);
+      expect(conn.prepare("SELECT id FROM git_sync_log").all()).toHaveLength(1);
       // Still nullable afterwards.
       expect(() =>
         conn
           .prepare(
-            "INSERT INTO git_sync_log (id, project_id, operation, status) VALUES ('g2', NULL, 'clone', 'success')"
+            "INSERT INTO git_sync_log (id, project_id, operation, status) VALUES ('g2', NULL, 'clone', 'success')",
           )
-          .run()
+          .run(),
       ).not.toThrow();
     });
   });

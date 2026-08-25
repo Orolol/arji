@@ -13,10 +13,54 @@ export const AGENT_TYPES = [
   "e2e_test",
   "release_notes",
   "memory_distill",
+  "dreaming",
   "forensic",
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
+
+/**
+ * Agent types that produce code and own the in_progress column of the ticket
+ * they are building. Drives the workflow engine's in_progress lock and
+ * owning-session exemption (lib/workflow/context.ts) and the terminal
+ * rollback sweeps (lib/agent-sessions/boot-cleanup.ts, lib/agents/scheduler.ts).
+ * The "you may move your own ticket" prompt sentence
+ * (lib/claude/prompt-sections.ts) uses this list minus team_build: a team
+ * session row carries no epicId, so its MCP token has no ticket and the move
+ * would 400 — promising it recreates the "board transition refused" bug for
+ * that type. The similar lists in review-segregation, dispatch-reliability
+ * and auto-mode select for different purposes and must stay separate.
+ */
+export const CODE_PRODUCING_AGENT_TYPES = [
+  "build",
+  "ticket_build",
+  "team_build",
+] as const;
+
+/** True for the code-producing agent types; rows without a type are not. */
+export function isCodeProducingAgentType(
+  value: string | null | undefined
+): boolean {
+  return (
+    value !== null &&
+    value !== undefined &&
+    (CODE_PRODUCING_AGENT_TYPES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * The code-producing types the prompt layer tells they may move their own
+ * ticket to review — `CODE_PRODUCING_AGENT_TYPES` minus `team_build`: a
+ * team session row carries no epicId, so its MCP token has no ticket and
+ * the move would 400 with MISSING_TICKET. Promising the capability the
+ * tool channel cannot deliver recreates the "board transition refused"
+ * bug for that type; if team builds ever get a ticketed session row, add
+ * them back here.
+ */
+export const TICKET_MOVING_AGENT_TYPES: Exclude<
+  (typeof CODE_PRODUCING_AGENT_TYPES)[number],
+  "team_build"
+>[] = CODE_PRODUCING_AGENT_TYPES.filter((type) => type !== "team_build");
 
 export const BUILTIN_REVIEW_TYPES = [
   "security",
@@ -42,6 +86,7 @@ export const AGENT_TYPE_LABELS: Record<AgentType, string> = {
   e2e_test: "E2E Test",
   release_notes: "Release Notes",
   memory_distill: "Memory Distill",
+  dreaming: "Dreaming",
   forensic: "Forensic",
 };
 
@@ -71,6 +116,7 @@ export const BUILTIN_AGENT_PROMPTS: Record<AgentType, string> = {
   e2e_test: "",
   release_notes: "",
   memory_distill: "",
+  dreaming: "",
   forensic: "",
 };
 

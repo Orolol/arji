@@ -78,6 +78,8 @@ const {
   FORENSIC_COMMENT_HEADING,
   FORENSIC_POSTED_REASON,
   FORENSIC_RAW_TAIL_MAX_CHARS,
+  forensicDeadSessionMarker,
+  parseForensicDeadSessionId,
 } = await import("@/lib/pipeline/forensic");
 const { appendSessionChunk } = await import("@/lib/agent-sessions/chunks");
 const { evaluateAutoDistillGuards, AUTO_DISTILL_SOURCE_AGENT_TYPES } =
@@ -278,9 +280,12 @@ describe("runForensic — happy path", () => {
       agentSessionId: sessionId,
       userStoryId: null,
     });
+    // The heading, then the durable link back to the session being diagnosed
+    // (invisible in rendered markdown), then the diagnostic itself.
     expect(comments[0].content).toBe(
-      `${FORENSIC_COMMENT_HEADING}\n\n**Probable root cause**\n\nThe CLI died on a missing dependency.`
+      `${FORENSIC_COMMENT_HEADING}\n${forensicDeadSessionMarker(deadId)}\n\n**Probable root cause**\n\nThe CLI died on a missing dependency.`
     );
+    expect(parseForensicDeadSessionId(comments[0].content)).toBe(deadId);
 
     // Activity entry only — the ticket status is untouched.
     const activity = db
@@ -497,6 +502,7 @@ describe("runForensic — guards", () => {
         agentType: "forensic",
         status: "completed",
         outcome: "answered",
+        batchRunId: null,
       },
       hasPendingDistill: false,
     });

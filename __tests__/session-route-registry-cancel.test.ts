@@ -28,7 +28,9 @@ vi.mock("@/lib/claude/process-manager", () => ({
 
 vi.mock("@/lib/activity-registry", () => ({
   activityRegistry: {
-    cancel: cancelRegistryActivity,
+    // The route cancels through the project-scoped door: an id alone must not
+    // reach an activity registered under another project.
+    cancelInProject: cancelRegistryActivity,
   },
 }));
 
@@ -61,7 +63,10 @@ describe("sessions/[sessionId] delete registry fallback", () => {
 
     expect(response.status).toBe(200);
     expect(json.data.cancelled).toBe(true);
-    expect(cancelRegistryActivity).toHaveBeenCalledWith("chat-activity-1");
+    expect(cancelRegistryActivity).toHaveBeenCalledWith(
+      "chat-activity-1",
+      "proj-1"
+    );
     expect(cancelProcess).not.toHaveBeenCalled();
     expect(markSessionCancelled).not.toHaveBeenCalled();
   });

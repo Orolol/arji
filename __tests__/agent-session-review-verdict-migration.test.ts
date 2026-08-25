@@ -1,5 +1,5 @@
 /**
- * Migration 0032_agent_session_review_verdict: the `review_verdict` column on
+ * Migration 0033_agent_session_review_verdict: the `review_verdict` column on
  * `agent_sessions` (the structured verdict submit_findings persists), the
  * hand-written journal entry, its POST_BASELINE_COLUMN_MIGRATIONS
  * registration, and the guarantee that existing sessions keep a NULL verdict
@@ -16,11 +16,16 @@ import { initDb } from "@/lib/db/init";
 import { agentSessions } from "@/lib/db/schema";
 
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "lib", "db", "migrations");
-const MIGRATION_TAG = "0032_agent_session_review_verdict";
-const MIGRATION_WHEN = 1786712900000;
+const PREVIOUS_MIGRATION_TAG = "0032_review_comment_session";
+const PREVIOUS_MIGRATION_WHEN = 1786712900000;
+const MIGRATION_TAG = "0033_agent_session_review_verdict";
+const MIGRATION_WHEN = 1786713000000;
 
 const journal = JSON.parse(
-  fs.readFileSync(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf-8")
+  fs.readFileSync(
+    path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"),
+    "utf-8",
+  ),
 ) as { entries: { idx: number; when: number; tag: string }[] };
 
 const tempDirs: string[] = [];
@@ -33,7 +38,7 @@ afterEach(() => {
 
 function tempDbPath(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "arij-review-verdict-test-")
+    path.join(os.tmpdir(), "arij-review-verdict-test-"),
   );
   tempDirs.push(dir);
   return path.join(dir, "arij.db");
@@ -56,38 +61,44 @@ function columnNames(conn: Database.Database, table: string): string[] {
   ).map((row) => row.name);
 }
 
-describe("0032_agent_session_review_verdict — migration file", () => {
+describe("0033_agent_session_review_verdict — migration file", () => {
   it("adds the column with an ALTER TABLE statement", () => {
     const sql = fs.readFileSync(
       path.join(MIGRATIONS_FOLDER, `${MIGRATION_TAG}.sql`),
-      "utf-8"
+      "utf-8",
     );
 
     expect(sql).toMatch(
-      /ALTER TABLE agent_sessions ADD COLUMN review_verdict text/i
+      /ALTER TABLE agent_sessions ADD COLUMN review_verdict text/i,
     );
   });
 
-  it("is registered in the journal at idx 31, in apply order", () => {
+  it("owns a new journal slot after main's 0032 migration", () => {
     const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);
 
     expect(entry).toBeDefined();
-    expect(entry?.idx).toBe(31);
+    expect(entry?.idx).toBe(32);
     expect(entry?.when).toBe(MIGRATION_WHEN);
-    // Journal order drives apply order: drizzle only applies a migration whose
-    // `when` exceeds the last one recorded, so the timestamps must increase.
+    // Drizzle applies only migrations whose `when` strictly exceeds its one
+    // high-water mark. Equality is a collision, not valid ordering.
     const whens = journal.entries.map((e) => e.when);
-    expect([...whens].sort((a, b) => a - b)).toEqual(whens);
-    expect(journal.entries[31]?.tag).toBe(MIGRATION_TAG);
+    expect(
+      whens.every((when, index) => index === 0 || when > whens[index - 1]),
+    ).toBe(true);
+    expect(journal.entries[31]).toMatchObject({
+      tag: PREVIOUS_MIGRATION_TAG,
+      when: PREVIOUS_MIGRATION_WHEN,
+    });
+    expect(journal.entries[32]?.tag).toBe(MIGRATION_TAG);
   });
 
   it("is listed in POST_BASELINE_COLUMN_MIGRATIONS for bookkeeping-less recovery", () => {
     const initSource = fs.readFileSync(
       path.join(process.cwd(), "lib", "db", "init.ts"),
-      "utf-8"
+      "utf-8",
     );
     expect(initSource).toMatch(
-      /folderMillis:\s*1786712900000,\s*table:\s*"agent_sessions",\s*column:\s*"review_verdict"/
+      /folderMillis:\s*1786713000000,\s*table:\s*"agent_sessions",\s*column:\s*"review_verdict"/,
     );
   });
 
@@ -99,12 +110,12 @@ describe("0032_agent_session_review_verdict — migration file", () => {
 
     // The snapshots stop at 0013 while the journal runs far ahead;
     // regenerating them would diff against stale state and emit wrong DDL.
-    expect(snapshots).not.toContain("0032_snapshot.json");
+    expect(snapshots).not.toContain("0033_snapshot.json");
     expect(snapshots[snapshots.length - 1]).toBe("0013_snapshot.json");
   });
 });
 
-describe("0032_agent_session_review_verdict — applied schema", () => {
+describe("0033_agent_session_review_verdict — applied schema", () => {
   it("creates the column on a fresh database", () => {
     withDb(tempDbPath(), (conn) => {
       initDb(conn);
@@ -115,7 +126,7 @@ describe("0032_agent_session_review_verdict — applied schema", () => {
 
   it("mirrors the column in lib/db/schema.ts", () => {
     const declared = Object.values(getTableColumns(agentSessions)).map(
-      (c) => c.name
+      (c) => c.name,
     );
 
     expect(declared).toEqual(expect.arrayContaining(["review_verdict"]));
@@ -130,12 +141,14 @@ describe("0032_agent_session_review_verdict — applied schema", () => {
         .run("p1", "Project One");
       conn
         .prepare(
-          "INSERT INTO agent_sessions (id, project_id, status, agent_type) VALUES (?, ?, ?, ?)"
+          "INSERT INTO agent_sessions (id, project_id, status, agent_type) VALUES (?, ?, ?, ?)",
         )
         .run("s1", "p1", "completed", "review_code");
 
       const row = conn
-        .prepare("SELECT status, review_verdict FROM agent_sessions WHERE id = ?")
+        .prepare(
+          "SELECT status, review_verdict FROM agent_sessions WHERE id = ?",
+        )
         .get("s1") as Record<string, unknown>;
 
       expect(row).toEqual({ status: "completed", review_verdict: null });
@@ -157,16 +170,14 @@ describe("0032_agent_session_review_verdict — applied schema", () => {
       for (const [index, verdict] of verdicts.entries()) {
         conn
           .prepare(
-            "INSERT INTO agent_sessions (id, project_id, status, review_verdict) VALUES (?, ?, ?, ?)"
+            "INSERT INTO agent_sessions (id, project_id, status, review_verdict) VALUES (?, ?, ?, ?)",
           )
           .run(`s-${index}`, "p1", "completed", verdict);
       }
 
       const stored = (
         conn
-          .prepare(
-            "SELECT review_verdict FROM agent_sessions ORDER BY id"
-          )
+          .prepare("SELECT review_verdict FROM agent_sessions ORDER BY id")
           .all() as { review_verdict: string }[]
       ).map((row) => row.review_verdict);
 
@@ -174,12 +185,12 @@ describe("0032_agent_session_review_verdict — applied schema", () => {
     });
   });
 
-  it("applies cleanly on an existing database that predates it", () => {
+  it("applies after an existing database has already run main's 0032", () => {
     const file = tempDbPath();
 
-    // Build the full schema, then simulate a database that predates 0032 by
-    // dropping the column and un-stamping the migration — the migrator
-    // replays entries strictly newer than the last stamped one.
+    // Build the full schema, then leave the database precisely at main's 0032
+    // high-water mark. Reusing 0032's `when` would make Drizzle skip the new
+    // ALTER forever; 0033 must remain strictly newer.
     withDb(file, (conn) => {
       initDb(conn);
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
@@ -188,12 +199,22 @@ describe("0032_agent_session_review_verdict — applied schema", () => {
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')
         .run(entry?.when);
 
+      const applied = (
+        conn.prepare('SELECT created_at FROM "__drizzle_migrations"').all() as {
+          created_at: number;
+        }[]
+      ).map((row) => row.created_at);
+      expect(Math.max(...applied)).toBe(PREVIOUS_MIGRATION_WHEN);
+      expect(columnNames(conn, "review_comments")).toContain(
+        "agent_session_id",
+      );
+
       conn
         .prepare("INSERT INTO projects (id, name) VALUES (?, ?)")
         .run("p1", "Project One");
       conn
         .prepare(
-          "INSERT INTO agent_sessions (id, project_id, status) VALUES (?, ?, ?)"
+          "INSERT INTO agent_sessions (id, project_id, status) VALUES (?, ?, ?)",
         )
         .run("old-session", "p1", "completed");
     });
@@ -203,13 +224,15 @@ describe("0032_agent_session_review_verdict — applied schema", () => {
 
       expect(columnNames(conn, "agent_sessions")).toContain("review_verdict");
       const row = conn
-        .prepare("SELECT status, review_verdict FROM agent_sessions WHERE id = ?")
+        .prepare(
+          "SELECT status, review_verdict FROM agent_sessions WHERE id = ?",
+        )
         .get("old-session") as Record<string, unknown>;
       expect(row).toEqual({ status: "completed", review_verdict: null });
     });
   });
 
-  it("stamps 0032 on a bookkeeping-less database that already has the column", () => {
+  it("stamps 0033 on a bookkeeping-less database that already has the column", () => {
     const file = tempDbPath();
 
     withDb(file, (conn) => {
@@ -224,9 +247,9 @@ describe("0032_agent_session_review_verdict — applied schema", () => {
       expect(columnNames(conn, "agent_sessions")).toContain("review_verdict");
 
       const applied = (
-        conn
-          .prepare('SELECT created_at FROM "__drizzle_migrations"')
-          .all() as { created_at: number }[]
+        conn.prepare('SELECT created_at FROM "__drizzle_migrations"').all() as {
+          created_at: number;
+        }[]
       ).map((row) => row.created_at);
       expect(applied).toContain(MIGRATION_WHEN);
     });

@@ -1,11 +1,13 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { settings } from "@/lib/db/schema";
+import { agentSessions, settings } from "@/lib/db/schema";
+import { isCodeProducingAgentType } from "@/lib/agent-config/constants";
 import {
   isSessionLifecycleConflictError,
   isSessionNotFoundError,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
+import { pullTicketBackIfPromoted } from "@/lib/workflow/automatic-transitions";
 import {
   AGENT_MAX_CONCURRENT_GLOBAL_SETTING_KEY,
   DEFAULT_MAX_CONCURRENT_AGENTS,
@@ -248,11 +250,13 @@ export class AgentScheduler {
       error
     );
 
+    let markedTerminalHere = false;
     try {
       markSessionTerminal(sessionId, {
         success: false,
         error: error instanceof Error ? error.message : "Agent launch failed",
       });
+      markedTerminalHere = true;
     } catch (finalizeError) {
       if (
         !isSessionLifecycleConflictError(finalizeError) &&
@@ -263,6 +267,48 @@ export class AgentScheduler {
           finalizeError
         );
       }
+    }
+
+    // Board effect: the owning-session exemption can leave a code-producing
+    // session's ticket in Review while the session is live. A launch that
+    // never settles means no in-process terminal handler will undo that
+    // promotion, so the safety net does — the same pullback the boot sweep
+    // performs for restart orphans. No-op unless the ticket is actually in
+    // Review; a ticket-less row (team builds) has nothing to address.
+    //
+    // Only a session this net finalized itself can have an unsettled board.
+    // If the row was already terminal, the closure owned every board effect
+    // — including a legitimate Review promotion — before it threw on the
+    // way out; reverting then would strand delivered work in in_progress
+    // and hand it back to Full Auto's build selector. A lifecycle conflict
+    // from markSessionTerminal is exactly that signal, so no pullback.
+    if (!markedTerminalHere) return;
+    try {
+      const row = db
+        .select({
+          projectId: agentSessions.projectId,
+          epicId: agentSessions.epicId,
+          userStoryId: agentSessions.userStoryId,
+          agentType: agentSessions.agentType,
+        })
+        .from(agentSessions)
+        .where(eq(agentSessions.id, sessionId))
+        .get();
+      if (row?.epicId && isCodeProducingAgentType(row.agentType)) {
+        pullTicketBackIfPromoted({
+          projectId: row.projectId,
+          epicId: row.epicId,
+          scope: row.userStoryId ? "story" : "epic",
+          userStoryId: row.userStoryId,
+          sessionId,
+          reason: "Build session launch failed; returning ticket to in_progress",
+        });
+      }
+    } catch (pullbackError) {
+      console.error(
+        `[agent-scheduler] Failed to pull back ticket of crashed session ${sessionId}`,
+        pullbackError
+      );
     }
   }
 

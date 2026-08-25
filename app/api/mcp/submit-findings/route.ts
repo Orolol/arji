@@ -94,6 +94,10 @@ export async function POST(request: NextRequest) {
         body: `[${finding.severity}] ${finding.body}`,
         author: "agent",
         status: "open",
+        // The token is already scoped to the submitting session — recording it
+        // is what lets the Dreaming digest attribute a finding to the run that
+        // filed it instead of guessing from timestamps.
+        agentSessionId: auth.sessionId,
         createdAt: now,
         updatedAt: now,
       })

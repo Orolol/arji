@@ -403,6 +403,52 @@ describe("sessions/active route activity typing", () => {
     expect(registry).toMatchObject({ lastActivityAt: null, stale: false });
   });
 
+  /**
+   * Both memory writers run in PLAN mode with no epicId, so the route's mode
+   * heuristic would file them as reviews and the monitor would say "Reviewing"
+   * while an agent rewrites the project memory. These cases pin the type and
+   * the exact labels so a regression back to "Reviewing" cannot pass.
+   */
+  it.each([
+    ["dreaming", "Dreaming: rewriting project memory"],
+    ["memory_distill", "Distilling project memory"],
+  ])("classifies %s sessions as memory work", async (agentType, label) => {
+    dbMockState.allRows = [
+      {
+        id: `sess-${agentType}`,
+        epicId: null,
+        userStoryId: null,
+        status: "running",
+        mode: "plan",
+        orchestrationMode: "solo",
+        provider: "claude-code",
+        agentType,
+        prompt: "## Current Project Memory\n\n- a rule",
+        startedAt: "2026-02-12T10:12:00.000Z",
+        epicTitle: null,
+        storyTitle: null,
+      },
+    ];
+
+    const { GET } = await import(
+      "@/app/api/projects/[projectId]/sessions/active/route"
+    );
+
+    const response = await GET(
+      mockNextRequest(),
+      mockRouteContext({ projectId: "proj-1" })
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.data[0]).toMatchObject({
+      id: `sess-${agentType}`,
+      type: "memory",
+      label,
+      mode: "plan",
+    });
+  });
+
   it("classifies release note sessions as release", async () => {
     dbMockState.allRows = [
       {

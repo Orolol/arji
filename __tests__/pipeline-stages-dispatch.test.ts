@@ -342,7 +342,10 @@ describe("fix stage dispatch (epic scope)", () => {
     );
   });
 
-  it("settles a successful provider run as failed when review promotion is refused", async () => {
+  it("settles a successful provider run even if the terminal session write fails", async () => {
+    // The session row is left 'running' (forced write failure), but the
+    // terminal handler acts for that owning session — its in_progress →
+    // review promotion is now permitted, so the run settles as success.
     const { projectId, epicId } = seed("review");
     sqlite.exec(`
       CREATE TRIGGER refuse_pipeline_terminal_write
@@ -372,13 +375,12 @@ describe("fix stage dispatch (epic scope)", () => {
 
       await expect(handle.settled).resolves.toMatchObject({
         sessionId: handle.sessionId,
-        success: false,
-        outcome: "transition_refused",
-        error: expect.stringContaining("queued or running"),
+        success: true,
+        outcome: "answered",
       });
       expect(
         db.select().from(epics).where(eq(epics.id, epicId)).get()?.status
-      ).toBe("in_progress");
+      ).toBe("review");
       expect(
         db
           .select()

@@ -295,6 +295,8 @@ describe("perProjectSettingKeys", () => {
       "pipeline_max_fix_cycles:proj-1",
       "night_circuit_breaker:proj-1",
       "night_cost_cap_usd:proj-1",
+      "dreaming_after_night_run:proj-1",
+      "dreaming_last_cutoff:proj-1",
     ]);
   });
 });
