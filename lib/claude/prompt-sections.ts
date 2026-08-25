@@ -7,6 +7,7 @@
  */
 
 import { ticketImageAbsolutePaths } from "@/lib/uploads/ticket-image-paths";
+import { CODE_PRODUCING_AGENT_TYPES } from "@/lib/agent-config/constants";
 
 import type {
   PromptDocument,
@@ -202,7 +203,7 @@ export function arijToolsSection(agentType: string | null): string {
   // the ticket when the session ends, but moving it as soon as the work is
   // committed keeps the board honest while the session is still live.
   const buildExtra =
-    agentType && ["build", "ticket_build", "team_build"].includes(agentType)
+    agentType && (CODE_PRODUCING_AGENT_TYPES as readonly string[]).includes(agentType)
       ? " You may move the ticket you are building: once the work is " +
         "complete and committed, call update_ticket_status to move it to " +
         "Review. If the move is refused for any reason, post your result " +

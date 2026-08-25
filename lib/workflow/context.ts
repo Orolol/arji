@@ -5,6 +5,7 @@
 import { db } from "@/lib/db";
 import { agentSessions, reviewComments } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import { CODE_PRODUCING_AGENT_TYPES } from "@/lib/agent-config/constants";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import type { TransitionContext } from "./engine";
 
@@ -14,7 +15,12 @@ export function buildTransitionContext(opts: {
   fromStatus: KanbanStatus;
   toStatus: KanbanStatus;
   actor: "user" | "agent" | "system";
-  /** The session initiating the transition, when any (agent tool channel). */
+  /**
+   * The ACTING session — the one performing this transition. Besides
+   * activity-log provenance it is the engine's owning-session exemption
+   * input (lib/workflow/engine.ts): never pass a session id for
+   * traceability alone.
+   */
   sessionId?: string;
   requireCompletedReview?: boolean;
   requireResolvedComments?: boolean;
@@ -67,7 +73,7 @@ export function buildTransitionContext(opts: {
 
   // Only code-producing sessions own the in_progress column. Review, chat,
   // merge and other auxiliary sessions legitimately run in other columns.
-  const activeBuildTypes = new Set(["build", "ticket_build", "team_build"]);
+  const activeBuildTypes = new Set<string>(CODE_PRODUCING_AGENT_TYPES);
   const runningSessions = db
     .select()
     .from(agentSessions)

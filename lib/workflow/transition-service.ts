@@ -23,6 +23,12 @@ export interface ApplyTransitionOpts {
   actor: TransitionContext["actor"];
   source: NonNullable<TransitionContext["source"]>;
   reason?: string;
+  /**
+   * The ACTING session — the one performing this transition. Besides
+   * activity-log provenance it is the engine's owning-session exemption
+   * input (lib/workflow/engine.ts): never pass a session id for
+   * traceability alone.
+   */
   sessionId?: string;
   /** When true, only validate — skip DB update, emit, and log. */
   validateOnly?: boolean;
@@ -53,6 +59,10 @@ export interface ApplyStoryTransitionOpts {
   actor: TransitionContext["actor"];
   source: NonNullable<TransitionContext["source"]>;
   reason: string;
+  /**
+   * The ACTING session — see ApplyTransitionOpts.sessionId; the engine's
+   * owning-session exemption input as well as the activity-log provenance.
+   */
   sessionId?: string;
   validateOnly?: boolean;
   /** Epic approval may synchronize child stories using the epic review. */
