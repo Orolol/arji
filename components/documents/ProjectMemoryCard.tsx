@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Bot } from "lucide-react";
+import { Bot, Moon } from "lucide-react";
 import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
 
 interface ProjectMemoryCardProps {
@@ -17,10 +18,12 @@ interface ProjectMemoryCardProps {
  * hard character cap.
  */
 export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
+  const router = useRouter();
   const [content, setContent] = useState("");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [dreaming, setDreaming] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +77,43 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
     }
   }
 
+  /**
+   * Manual dream. A no-op answer (nothing new since the last dream) is a
+   * successful, informative outcome — reported inline, not as an error, and
+   * without navigating anywhere since no session was created.
+   */
+  async function handleDream() {
+    setDreaming(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/memory/dream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Failed to start the dreaming session.");
+        return;
+      }
+      const dreamSessionId = data.data?.sessionId;
+      if (!dreamSessionId) {
+        setMessage(
+          data.data?.reason
+            ? `Nothing to dream about: ${data.data.reason}.`
+            : "Nothing to dream about yet."
+        );
+        return;
+      }
+      router.push(`/projects/${projectId}/sessions/${dreamSessionId}`);
+    } catch {
+      setError("Failed to start the dreaming session.");
+    } finally {
+      setDreaming(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-[12px] rounded-[12px] border border-agent-border bg-agent-bg p-[18px]">
       <div className="flex items-center gap-[9px]">
@@ -90,7 +130,8 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
       <p className="text-[13.5px] leading-[1.6]">
         Conventions learned from previous sessions. Injected into every agent
         prompt for this project. Use the &quot;Distill learnings&quot; action on
-        a completed session to let an agent update it.
+        a completed session to fold in one run, or &quot;Dream&quot; below to
+        rewrite it from the recent sessions of every ticket at once.
       </p>
       {loading ? (
         <p className="text-[13px] text-muted-foreground">Loading...</p>
@@ -112,14 +153,27 @@ export function ProjectMemoryCard({ projectId }: ProjectMemoryCardProps) {
                 ? `last updated ${new Date(updatedAt).toLocaleString()}`
                 : "never updated"}
             </span>
-            <Button
-              size="sm"
-              className="h-[29px] rounded-[8px] text-[12.5px]"
-              onClick={handleSave}
-              disabled={saving || overCap || !dirty}
-            >
-              {saving ? "Saving..." : "Save memory"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-[29px] rounded-[8px] text-[12.5px]"
+                onClick={handleDream}
+                disabled={dreaming}
+                title="Rewrite this memory from the recent sessions of every ticket"
+              >
+                <Moon className="mr-1 h-3.5 w-3.5" />
+                {dreaming ? "Dreaming..." : "Dream"}
+              </Button>
+              <Button
+                size="sm"
+                className="h-[29px] rounded-[8px] text-[12.5px]"
+                onClick={handleSave}
+                disabled={saving || overCap || !dirty}
+              >
+                {saving ? "Saving..." : "Save memory"}
+              </Button>
+            </div>
           </div>
         </>
       )}

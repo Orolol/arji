@@ -19,6 +19,7 @@ import {
   createNightRunSummaryNotification,
 } from "@/lib/notifications/create";
 import { durationMsBetween, sendProjectWebhook } from "@/lib/webhooks/send";
+import { maybeDreamAfterNightRun } from "@/lib/workflow/dreaming";
 import {
   startPipelineRun,
   type PipelineStageResult,
@@ -429,8 +430,10 @@ export function startNightRun(input: StartNightRunInput): StartNightRunHandle {
   /**
    * Single terminal choke point (normal finish AND the crash safety net):
    * final counts to both registries, night ring snapshot, monitor cleanup,
-   * then EXACTLY ONE summary notification and ONE webhook. Never fires for
-   * restart-interrupted runs — the process (and this closure) died with them.
+   * then EXACTLY ONE summary notification, ONE webhook and — behind the
+   * `dreaming_after_night_run` setting — ONE cross-session dream. Never fires
+   * for restart-interrupted runs — the process (and this closure) died with
+   * them.
    */
   let finished = false;
   const finishRun = (abortInfo: {
@@ -493,6 +496,15 @@ export function startNightRun(input: StartNightRunInput): StartNightRunHandle {
       error: abortInfo.abortReason,
       path: `/projects/${projectId}?nightRun=${runId}`,
     });
+
+    // Fire-and-forget cross-session distillation of everything this run just
+    // taught (OFF unless `dreaming_after_night_run` says otherwise). It runs
+    // AFTER the summary on purpose: the run is already closed and counted, so
+    // a dream can neither delay the morning summary nor fail it. The run id
+    // rides along as batch_run_id so the dream's spend lands inside this run's
+    // cost cap and totals instead of escaping both — the same tag that wires
+    // up an auto-distill (lib/workflow/memory-distill.ts).
+    void maybeDreamAfterNightRun(projectId, runId);
   };
 
   const engineRun = runExecutionWaves({
