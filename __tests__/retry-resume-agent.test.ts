@@ -99,14 +99,55 @@ describe("retry dispatch — reuse the failed agent, in resume mode", () => {
     expect(body.resumeSessionId).toBeUndefined();
   });
 
-  it("does not graft the build retry onto a failed review thread", () => {
+  /**
+   * Parameterised over the toolbar because passing only `null` hides the
+   * defect: the resume gate used to infer "same agent" from id equality, and
+   * a toolbar selection that happens to equal the failed reviewer's agent
+   * satisfies that equality without the retry being a continuation at all.
+   */
+  it.each([
+    ["no toolbar selection", null],
+    ["a different toolbar selection", "agent-other"],
+    ["a toolbar selection equal to the reviewer's agent", "agent-omp"],
+  ])(
+    "does not graft the build retry onto a failed review thread — %s",
+    (_label, toolbar) => {
+      const { body } = buildRetryDispatch(
+        "proj-1",
+        "e1",
+        failure({ agentType: "review_code" }),
+        toolbar
+      );
+      expect(body.resumeSessionId).toBeUndefined();
+    }
+  );
+
+  it.each([
+    ["no toolbar selection", null],
+    ["a toolbar selection equal to the grader's agent", "agent-omp"],
+  ])(
+    "does not graft the build retry onto a failed grading thread — %s",
+    (_label, toolbar) => {
+      const { body } = buildRetryDispatch(
+        "proj-1",
+        "e1",
+        failure({ agentType: "grading" }),
+        toolbar
+      );
+      expect(body.resumeSessionId).toBeUndefined();
+    }
+  );
+
+  it("still honours an explicit toolbar pick that collides with the reviewer", () => {
     const { body } = buildRetryDispatch(
       "proj-1",
       "e1",
       failure({ agentType: "review_code" }),
-      null
+      "agent-omp"
     );
-    expect(body.resumeSessionId).toBeUndefined();
+    // The user asked for this agent, so it runs the build — it just does not
+    // inherit the review conversation.
+    expect(body.namedAgentId).toBe("agent-omp");
   });
 });
 
@@ -158,6 +199,16 @@ describe("retry dispatch — only an epic build informs an epic build", () => {
     expect(body.namedAgentId).toBe("agent-omp");
     // An epic-wide prompt must not be appended to a one-story conversation;
     // the epic route cannot pass userStoryId, so the server cannot catch it.
+    expect(body.resumeSessionId).toBeUndefined();
+  });
+
+  it("refuses a story thread even when the toolbar names the same agent", () => {
+    const { body } = buildRetryDispatch(
+      "proj-1",
+      "e1",
+      failure({ agentType: "ticket_build", userStoryId: "story-7" }),
+      "agent-omp"
+    );
     expect(body.resumeSessionId).toBeUndefined();
   });
 
