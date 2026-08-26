@@ -18,6 +18,14 @@ export interface FailedSessionInfo {
   sessionId: string;
   error: string;
   agentType: string;
+  /**
+   * Who ran the session that failed. The card's Retry button reuses this
+   * agent instead of falling through to the seeded default, and needs the
+   * provider to know whether that CLI can resume at all
+   * (lib/agent-sessions/retry-dispatch.ts). Null on legacy rows.
+   */
+  provider?: string | null;
+  namedAgentId?: string | null;
 }
 
 /** Minimal shape of a unified session row as returned by /api/projects/:id/sessions. */
@@ -28,6 +36,8 @@ export interface FailureCandidateSession {
   epicId?: string | null;
   error?: string | null;
   agentType?: string | null;
+  provider?: string | null;
+  namedAgentId?: string | null;
   createdAt?: string | null;
   endedAt?: string | null;
 }
@@ -68,6 +78,8 @@ export function selectLatestFailures(
       sessionId: latest.id,
       error: latest.error || "Unknown error",
       agentType: latest.agentType || "build",
+      provider: latest.provider ?? null,
+      namedAgentId: latest.namedAgentId ?? null,
     };
   }
   return failed;

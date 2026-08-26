@@ -25,7 +25,7 @@ describe("selectLatestFailures", () => {
       new Set()
     );
     expect(failed).toEqual({
-      e1: { sessionId: "f1", error: "boom", agentType: "build" },
+      e1: { sessionId: "f1", error: "boom", agentType: "build", provider: null, namedAgentId: null },
     });
   });
 
@@ -74,7 +74,7 @@ describe("selectLatestFailures", () => {
       new Set()
     );
     expect(failed).toEqual({
-      e1: { sessionId: "retry", error: "second failure", agentType: "review" },
+      e1: { sessionId: "retry", error: "second failure", agentType: "review", provider: null, namedAgentId: null },
     });
   });
 
@@ -102,7 +102,7 @@ describe("selectLatestFailures", () => {
       new Set()
     );
     expect(failed).toEqual({
-      e1: { sessionId: "f1", error: "epic 1 failed", agentType: "build" },
+      e1: { sessionId: "f1", error: "epic 1 failed", agentType: "build", provider: null, namedAgentId: null },
     });
   });
 
