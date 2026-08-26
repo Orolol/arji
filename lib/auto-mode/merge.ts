@@ -822,8 +822,9 @@ async function verifyResolvedConflict(input: {
 }): Promise<string | null> {
   if (!resolveVerifyConfigForProject(input.projectId).enabled) return null;
 
+  let skipReason: string | undefined;
   try {
-    await createPipelineStageDriver({
+    const outcome = await createPipelineStageDriver({
       projectId: input.projectId,
       scope: "epic",
       epicId: input.epicId,
@@ -831,17 +832,23 @@ async function verifyResolvedConflict(input: {
       buildNamedAgentId: null,
       batchRunId: autoRunId(input.projectId),
     }).runDeterministicVerification(input.sessionId);
+    skipReason = outcome.skipReason;
   } catch (error) {
-    // Swallowed on purpose: the gate below is what decides, and it reads
-    // persisted evidence rather than this call's return value. A crash simply
-    // leaves the newest report stale, which the gate reports as such.
+    // Not rethrown: the gate below is what decides, and it reads persisted
+    // evidence rather than this call's return value. A crash simply leaves
+    // the newest report stale, which the gate reports as such — but the
+    // message is kept, because "the report predates the merge session" is
+    // two steps removed from the cause the caller can act on.
+    skipReason = error instanceof Error ? error.message : String(error);
     console.warn(
       "[auto-mode/merge] Deterministic verification crashed after a conflict fix:",
-      error instanceof Error ? error.message : error
+      skipReason
     );
   }
 
-  return verificationGateReason(input.projectId, input.epicId);
+  const gateReason = verificationGateReason(input.projectId, input.epicId);
+  if (!gateReason) return null;
+  return skipReason ? `${gateReason} (${skipReason})` : gateReason;
 }
 
 /**

@@ -675,6 +675,7 @@ describe("review stage dispatch", () => {
         projectId,
         epicId,
         agentSessionId: "s-build",
+        persisted: true,
         status: "pass",
         startedAt: "2026-08-25T10:00:00.000Z",
         finishedAt: "2026-08-25T10:00:02.000Z",
@@ -1038,6 +1039,7 @@ describe("deterministic verification driver", () => {
       projectId,
       epicId,
       agentSessionId: codeSessionId,
+      persisted: true,
       status: "pass" as const,
       startedAt: "2026-08-25T10:00:00.000Z",
       finishedAt: "2026-08-25T10:00:02.000Z",
@@ -1082,6 +1084,58 @@ describe("deterministic verification driver", () => {
       ],
       timeoutMs: 45_000,
     });
+  });
+
+  it("treats a report that could not be persisted as a skip", async () => {
+    const { projectId, epicId } = seed("review");
+    const codeSessionId = `verify-lost-${counter}`;
+    insertSession({
+      id: codeSessionId,
+      projectId,
+      epicId,
+      worktreePath: "/repos/.arij-worktrees/exact-epic-worktree",
+    });
+    db.insert(settings)
+      .values([
+        {
+          key: verifyCommandsSettingKey(projectId),
+          value: JSON.stringify([{ name: "test", command: "npm test" }]),
+        },
+      ])
+      .run();
+    (fsMock.default.existsSync as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      (candidate: unknown) =>
+        candidate === "/repos/.arij-worktrees/exact-epic-worktree"
+    );
+    verificationMocks.runVerification.mockResolvedValueOnce({
+      id: "verify-lost",
+      projectId,
+      epicId,
+      agentSessionId: codeSessionId,
+      persisted: false,
+      status: "pass" as const,
+      startedAt: "2026-08-25T10:00:00.000Z",
+      finishedAt: "2026-08-25T10:00:02.000Z",
+      commands: [
+        { name: "test", command: "npm test", exitCode: 0, durationMs: 5, tail: "ok" },
+      ],
+    });
+
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+    const outcome = await driver.runDeterministicVerification(codeSessionId);
+
+    // Every durable reader — the merge gate, the panel, the next sweep —
+    // reads the table. Announcing "passed" from an in-memory report the
+    // table never received would have the two halves disagreeing forever.
+    expect(outcome.ran).toBe(false);
+    expect(outcome.skipReason).toMatch(/could not be persisted/i);
+    expect(emitTicketUpdated).not.toHaveBeenCalled();
   });
 
   it("does not emit a report event when verification is not configured", async () => {

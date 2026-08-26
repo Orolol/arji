@@ -32,7 +32,18 @@ const CHILD_ENV = (() => {
   return rest as NodeJS.ProcessEnv;
 })();
 
-export type VerificationResult = VerificationReport;
+export interface VerificationResult extends VerificationReport {
+  /**
+   * False when the commands ran but their report row could not be written.
+   *
+   * The run itself is still valid — the verdict is computed from the exit
+   * codes in hand — but every DURABLE consumer reads the table: the merge
+   * gate in lib/auto-mode/merge.ts, the EpicDetail panel, the next sweep. A
+   * caller that announced "checks passed" from this in-memory value while
+   * the table stayed empty would have the two halves disagreeing forever.
+   */
+  persisted: boolean;
+}
 export type { VerifyCommandResult } from "./verify-constants";
 
 export interface RunVerificationInput {
@@ -236,7 +247,7 @@ export async function runVerification(
   }
 
   const finishedAt = new Date().toISOString();
-  const report: VerificationResult = {
+  const report: VerificationReport = {
     id: createId(),
     projectId: input.projectId,
     epicId: input.epicId,
@@ -253,7 +264,10 @@ export async function runVerification(
 
   // A lost report row must never fail the run: the commands already
   // executed and their verdict is computed. This mirrors the regression
-  // gate's persistence stance (lib/pipeline/verify.ts).
+  // gate's persistence stance (lib/pipeline/verify.ts). The loss is
+  // REPORTED rather than swallowed, so a caller does not announce a verdict
+  // that no durable reader will ever see.
+  let persisted = true;
   try {
     const database = input.database ?? defaultDb;
     database
@@ -264,10 +278,11 @@ export async function runVerification(
       })
       .run();
   } catch (error) {
+    persisted = false;
     console.warn(
       "[verify] Failed to persist verification report:",
       error instanceof Error ? error.message : error
     );
   }
-  return report;
+  return { ...report, persisted };
 }

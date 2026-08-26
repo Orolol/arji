@@ -1060,13 +1060,20 @@ describe("deterministic verification", () => {
     // branch is to make the ticket buildable again.
     expect(db.select().from(epics).get()!.status).toBe("in_progress");
     expect(allAutoReasons("t1")).toContain(
-      'Auto mode: deterministic verification failed at "test" — returned to In Progress'
+      'Auto mode: deterministic verification failed at "test"'
     );
+    // The pullback landed, so no "ticket held" entry contradicts it.
+    expect(
+      allAutoReasons("t1").some((reason) => reason.includes("could not return"))
+    ).toBe(false);
     // The next build agent reads the comment history — without the evidence
     // it would have no idea why the ticket came back.
     const comment = db.select().from(ticketComments).all().at(-1);
     expect(comment?.content).toContain("FAIL __tests__/x.test.ts");
     expect(comment?.content).toContain("npm test");
+    // Epic scope files on the epic, which is where the epic rebuild reads.
+    expect(comment?.epicId).toBe("t1");
+    expect(comment?.userStoryId).toBeNull();
   });
 
   it("parks the ticket after three consecutive verification failures", async () => {
@@ -1159,7 +1166,7 @@ describe("deterministic verification", () => {
     expect(fakes.verifications).toEqual([]);
   });
 
-  it("returns a story — not its epic — to In Progress when its checks fail", async () => {
+  it("sends a story back and files its evidence on the story, not the epic", async () => {
     const fakes = makeFakes();
     fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
     addEpic({ id: "t1", status: "todo" });
@@ -1174,6 +1181,128 @@ describe("deterministic verification", () => {
     await sweepProject(PROJECT_ID, fakes.deps);
 
     expect(db.select().from(userStories).get()!.status).toBe("in_progress");
+    // transitionReviewRejected returns the whole scope for story work: the
+    // epic comes back too, because the branch is the integration unit.
+    expect(db.select().from(epics).get()!.status).toBe("in_progress");
+
+    // The consumers that matter both filter by story id — buildTicketPrompt's
+    // comment query and the story comment route. Filed on the epic, the
+    // evidence would be invisible to the very rebuild it exists to inform.
+    const comment = db.select().from(ticketComments).all().at(-1);
+    expect(comment?.userStoryId).toBe("s1");
+    expect(comment?.content).toContain("FAIL __tests__/x.test.ts");
+  });
+
+  it("never verifies a build that ended by asking the user a question", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "todo" });
+    fakes.verifyOutcome(failingReport());
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    // The agent stopped mid-edit: the ticket is HELD in in_progress awaiting
+    // a reply and the worktree is half-finished.
+    settle(fakes, first.buildsDispatched[0], "completed", "asked_question");
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    // Testing a half-finished tree would charge a phantom failure, write a
+    // false transition to the feed, and drop a failing-test comment into the
+    // thread where the user is being asked to answer.
+    expect(fakes.verifications).toEqual([]);
+    expect(db.select().from(ticketComments).all()).toEqual([]);
+    expect(autoModeRegistry.snapshot(PROJECT_ID).parked).toEqual([]);
+  });
+
+  it("still verifies a build that delivered without saying anything", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "todo" });
+    fakes.verifyOutcome(failingReport());
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    settle(fakes, first.buildsDispatched[0], "completed", "silent");
+    db.update(epics).set({ status: "review" }).where(eq(epics.id, "t1")).run();
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    // finalizeBuildTerminalOutcome promotes a silent build to Review, so it
+    // is a tree the merge gate will be asked about — an agent that delivered
+    // without saying anything is exactly where evidence matters most.
+    expect(fakes.verifications).toHaveLength(1);
+    expect(db.select().from(epics).get()!.status).toBe("in_progress");
+  });
+
+  it("says the ticket was held when the pullback is refused", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 0, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "review" });
+    // `released` is terminal, so transitionReviewRejected's pre-validation of
+    // every non-in_progress story refuses and NOTHING moves.
+    addStory({ id: "s1", epicId: "t1", status: "released" });
+    const sessionId = addSession({
+      epicId: "t1",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(1),
+      endedAt: at(2),
+    });
+    autoModeRegistry.addInFlight(PROJECT_ID, sessionId, {
+      kind: "build",
+      ticketId: "t1",
+      epicId: "t1",
+    });
+    fakes.verifyOutcome(failingReport());
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(db.select().from(epics).get()!.status).toBe("review");
+    // A feed that claimed the ticket went back would be lying about the board.
+    expect(allAutoReasons("t1")).toContain(
+      "Auto mode could not return the ticket to In Progress after failed verification: it is in review"
+    );
+  });
+
+  it("verifies one command list per sweep and defers the rest", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 2, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "todo", position: 0 });
+    addEpic({ id: "t2", status: "todo", position: 1 });
+    fakes.verifyOutcome({
+      ran: true,
+      result: {
+        id: "vr-pass",
+        projectId: PROJECT_ID,
+        epicId: "t1",
+        agentSessionId: null,
+        status: "pass",
+        startedAt: at(80),
+        finishedAt: at(81),
+        commands: [
+          { name: "test", command: "npm test", exitCode: 0, durationMs: 5, tail: "ok" },
+        ],
+      },
+    });
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    expect(first.buildsDispatched).toHaveLength(2);
+    for (const sessionId of first.buildsDispatched) {
+      settle(fakes, sessionId, "completed");
+    }
+    // What a delivered build's terminal handler does, for both epics.
+    db.update(epics).set({ status: "review" }).run();
+
+    // Verification spawns real child processes while the per-project sweep
+    // mutex is held; a second command list would extend that hold.
+    const second = await sweepProject(PROJECT_ID, fakes.deps);
+    expect(fakes.verifications).toHaveLength(1);
+    // The deferred entry is deliberately left in flight: the ticket stays
+    // busy and the next tick reconciles it.
+    expect(second.inFlight.build).toBe(1);
+    expect(
+      allAutoReasons("t1").concat(allAutoReasons("t2"))
+    ).toContain("Auto mode deferred deterministic verification to the next sweep");
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+    expect(fakes.verifications).toHaveLength(2);
   });
 });
 

@@ -363,7 +363,21 @@ export const AUTO_MODE_REASONS = {
       commandCount === 1 ? "" : "s"
     })`,
   verificationFailed: (commandName: string) =>
-    `Auto mode: deterministic verification failed at "${commandName}" — returned to In Progress`,
+    `Auto mode: deterministic verification failed at "${commandName}"`,
+  /**
+   * The checks failed but the ticket could not be sent back for a rebuild —
+   * it had already moved, or a guard refused. Written only when the pullback
+   * did NOT land, so the feed never claims a transition that did not happen.
+   */
+  verificationTicketHeld: (status: string) =>
+    `Auto mode could not return the ticket to In Progress after failed verification: it is in ${status}`,
+  /**
+   * One command list per sweep. Verification spawns real child processes
+   * while the per-project sweep mutex is held, so a second delivered build
+   * waits for the next tick rather than extending the hold.
+   */
+  verificationDeferred:
+    "Auto mode deferred deterministic verification to the next sweep",
   /** A skip is NOT a pass: without this trace the two look identical. */
   verificationSkipped: (reason: string) =>
     `Auto mode skipped deterministic verification: ${reason}`,

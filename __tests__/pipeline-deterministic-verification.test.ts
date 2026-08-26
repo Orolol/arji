@@ -33,6 +33,7 @@ function report(
     projectId: "project-1",
     epicId: "epic-1",
     agentSessionId: `code-${suffix}`,
+    persisted: true,
     status,
     startedAt: "2026-08-25T10:00:00.000Z",
     finishedAt: "2026-08-25T10:00:01.000Z",

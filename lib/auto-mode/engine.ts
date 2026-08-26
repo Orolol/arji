@@ -416,11 +416,18 @@ async function reconcileInFlight(
   deps: AutoModeEngineDeps,
   parked: string[]
 ): Promise<void> {
+  // One command list per tick. Verification spawns real child processes and
+  // this loop runs inside the per-project sweep mutex, so a three-command
+  // config at the default 10-minute timeout could otherwise hold the lock for
+  // half an hour PER epic that delivered in the same sweep — during which no
+  // review, merge or build for the project moves. A deferred entry stays in
+  // the in-flight map on purpose: the ticket remains busy (no second build
+  // lands on it) and the next tick, 15 seconds later, reconciles it.
+  let verificationRan = false;
+
   for (const { sessionId, entry } of autoModeRegistry.listInFlight(projectId)) {
     const status = deps.readSessionStatus(sessionId);
     if (status !== null && !TERMINAL_SESSION_STATUSES.has(status)) continue;
-
-    autoModeRegistry.removeInFlight(projectId, sessionId);
 
     // A review that completed without producing a verdict delivered nothing.
     // The selectors treat it as "no review happened" so the epic stays
@@ -435,16 +442,54 @@ async function reconcileInFlight(
       status === "completed" &&
       sessionOutcome === SESSION_TRANSITION_REFUSED_OUTCOME;
 
+    // What the checks are allowed to run against. A build that stopped to ask
+    // the user something DELIVERED NOTHING: the ticket is held in
+    // `in_progress` awaiting a reply and its worktree is half-finished, so
+    // testing it would charge a phantom failure to the parking ladder and
+    // drop a failing-test comment into the very thread the user is being
+    // asked to answer. The pipeline draws the same line one step earlier —
+    // lib/pipeline/runner.ts returns `paused_question` before its
+    // verification block, i.e. `success && outcome !== "asked_question"`.
+    //
+    // `silent` is deliberately NOT excluded, and that is not an oversight:
+    // finalizeBuildTerminalOutcome still promotes a silent build to Review,
+    // so it is a tree the merge gate will be asked about. An agent that
+    // delivered without saying anything is precisely the case where
+    // mechanical evidence matters most.
+    const deliveredCode =
+      status === "completed" &&
+      entry.kind === "build" &&
+      !transitionRefused &&
+      sessionOutcome !== "asked_question";
+
+    if (deliveredCode && verificationRan) {
+      trace(
+        deps,
+        projectId,
+        entry.epicId,
+        AUTO_MODE_REASONS.verificationDeferred,
+        sessionId
+      );
+      continue;
+    }
+
+    autoModeRegistry.removeInFlight(projectId, sessionId);
+
     if (status === "completed" && !silentReview && !transitionRefused) {
       // Delivered code: run Arij's own checks BEFORE crediting the session,
       // because a red branch is not a success. Clearing the streak first
       // would erase the very failure the check is about to record, and
       // build → red → build would loop forever instead of parking.
-      if (
-        entry.kind === "build" &&
-        (await verifyDeliveredCode(projectId, deps, entry, sessionId, parked))
-      ) {
-        continue;
+      if (deliveredCode) {
+        const verdict = await verifyDeliveredCode(
+          projectId,
+          deps,
+          entry,
+          sessionId,
+          parked
+        );
+        verificationRan = verdict.ran;
+        if (verdict.failed) continue;
       }
       autoModeRegistry.clearFailures(projectId, entry.ticketId);
       continue;
@@ -483,6 +528,20 @@ async function reconcileInFlight(
 const VERIFICATION_COMMENT_TAIL_LIMIT = 4_000;
 
 /**
+ * Outcome of one deterministic-verification pass over a delivered build.
+ *
+ * `ran` drives the caller's per-sweep cap (only an execution that actually
+ * spawned commands is worth rationing); `failed` tells it not to credit the
+ * session, or the streak recorded here would be cleared underneath it.
+ */
+interface DeliveredCodeVerdict {
+  ran: boolean;
+  failed: boolean;
+}
+
+const NOT_VERIFIED: DeliveredCodeVerdict = { ran: false, failed: false };
+
+/**
  * Runs Arij's deterministic checks for a delivered code session, then acts on
  * the verdict.
  *
@@ -501,9 +560,6 @@ const VERIFICATION_COMMENT_TAIL_LIMIT = 4_000;
  *
  * Verification is not an agent session: it takes no slot and is charged to
  * neither budget.
- *
- * Returns true when the checks FAILED — the caller must then not credit the
- * session, or the streak this just recorded would be cleared underneath it.
  */
 async function verifyDeliveredCode(
   projectId: string,
@@ -511,8 +567,8 @@ async function verifyDeliveredCode(
   entry: AutoModeInFlightEntry,
   sessionId: string,
   parked: string[]
-): Promise<boolean> {
-  if (!deps.runDeterministicVerification) return false;
+): Promise<DeliveredCodeVerdict> {
+  if (!deps.runDeterministicVerification) return NOT_VERIFIED;
 
   // A merge-fix session is charged to the build budget like any other code
   // work, but its checks belong to the merge retry that owns the worktree
@@ -520,7 +576,9 @@ async function verifyDeliveredCode(
   // starts AFTER the session row goes terminal — so without this guard the
   // sweep kicked by that very transition would start a second, redundant pass
   // against the tree the retry is about to merge.
-  if (autoModeRegistry.isMergeInFlight(projectId, entry.epicId)) return false;
+  if (autoModeRegistry.isMergeInFlight(projectId, entry.epicId)) {
+    return NOT_VERIFIED;
+  }
 
   let outcome: PipelineDeterministicVerificationOutcome;
   try {
@@ -542,7 +600,7 @@ async function verifyDeliveredCode(
       ),
       sessionId
     );
-    return false;
+    return NOT_VERIFIED;
   }
 
   if (!outcome.ran) {
@@ -558,11 +616,11 @@ async function verifyDeliveredCode(
         sessionId
       );
     }
-    return false;
+    return NOT_VERIFIED;
   }
 
   const report = outcome.result;
-  if (!report) return false;
+  if (!report) return NOT_VERIFIED;
 
   if (report.status === "pass") {
     trace(
@@ -572,7 +630,7 @@ async function verifyDeliveredCode(
       AUTO_MODE_REASONS.verificationPassed(report.commands.length),
       sessionId
     );
-    return false;
+    return { ran: true, failed: false };
   }
 
   const failedCommand =
@@ -581,8 +639,6 @@ async function verifyDeliveredCode(
     null;
   const label = failedCommand?.name ?? "the configured checks";
 
-  // Traced before the move, so the feed reads "checks failed" and then the
-  // transition service's own review → in_progress entry.
   trace(
     deps,
     projectId,
@@ -590,8 +646,21 @@ async function verifyDeliveredCode(
     AUTO_MODE_REASONS.verificationFailed(label),
     sessionId
   );
-  postVerificationFailureComment(entry.epicId, sessionId, failedCommand);
-  returnTicketToInProgress(projectId, entry, sessionId, label);
+  postVerificationFailureComment(entry, sessionId, failedCommand);
+
+  // The pullback has three no-op exits (ticket gone, already moved, guard
+  // refused), so its result is traced rather than asserted up front — a feed
+  // that claims a transition the board did not make is worse than no entry.
+  const returned = returnTicketToInProgress(projectId, entry, sessionId, label);
+  if (!returned.moved) {
+    trace(
+      deps,
+      projectId,
+      entry.epicId,
+      AUTO_MODE_REASONS.verificationTicketHeld(returned.status),
+      sessionId
+    );
+  }
 
   const failures = autoModeRegistry.recordFailure(
     projectId,
@@ -609,7 +678,7 @@ async function verifyDeliveredCode(
       sessionId
     );
   }
-  return true;
+  return { ran: true, failed: true };
 }
 
 /**
@@ -618,18 +687,24 @@ async function verifyDeliveredCode(
  * and without it the rebuilt ticket would carry no hint of why it came back.
  * Reuses the pipeline's fix section so the framing — untrusted output, fenced
  * longer than any backtick run in it — is identical on both paths.
+ *
+ * Scope matters. Both consumers filter by story id for story-scoped work —
+ * `buildTicketPrompt`'s comment query and the story comment route — so an
+ * epic-filed comment is invisible to the very rebuild it exists to inform.
+ * Same ternary as lib/pipeline/stages.ts uses for agent output.
  */
 function postVerificationFailureComment(
-  epicId: string,
+  entry: AutoModeInFlightEntry,
   sessionId: string,
   command: VerifyCommandResult | null
 ): void {
   if (!command) return;
+  const isStory = entry.ticketId !== entry.epicId;
   try {
     db.insert(ticketComments)
       .values({
         id: createId(),
-        epicId,
+        ...(isStory ? { userStoryId: entry.ticketId } : { epicId: entry.epicId }),
         author: "agent",
         content: buildDeterministicVerificationFixSection({
           name: command.name,
@@ -654,54 +729,58 @@ function postVerificationFailureComment(
  * Pulls a ticket whose checks failed back out of Review, through the same
  * transition the negative-review path uses. Only a ticket actually sitting in
  * review/done is moved — anything else is somebody else's business now.
+ *
+ * Returns whether the pullback landed and the status the ticket is actually
+ * held at afterwards, the same contract `pullTicketBackIfPromoted` uses, so
+ * the caller's activity entry stays truthful instead of hard-coding the move.
  */
 function returnTicketToInProgress(
   projectId: string,
   entry: AutoModeInFlightEntry,
   sessionId: string,
   commandLabel: string
-): void {
-  const reason = `Deterministic verification failed at "${commandLabel}"`;
-  try {
-    if (entry.ticketId !== entry.epicId) {
-      const story = db
-        .select({ status: userStories.status })
-        .from(userStories)
-        .where(eq(userStories.id, entry.ticketId))
-        .get();
-      if (!story) return;
-      if (story.status !== "review" && story.status !== "done") return;
-      transitionReviewRejected({
-        projectId,
-        epicId: entry.epicId,
-        scope: "story",
-        userStoryId: entry.ticketId,
-        sessionId,
-        reason,
-      });
-      return;
-    }
+): { moved: boolean; status: string } {
+  const isStory = entry.ticketId !== entry.epicId;
+  const readStatus = (): string =>
+    (isStory
+      ? db
+          .select({ status: userStories.status })
+          .from(userStories)
+          .where(eq(userStories.id, entry.ticketId))
+          .get()?.status
+      : db
+          .select({ status: epics.status })
+          .from(epics)
+          .where(eq(epics.id, entry.epicId))
+          .get()?.status) ?? "unknown";
 
-    const epic = db
-      .select({ status: epics.status })
-      .from(epics)
-      .where(eq(epics.id, entry.epicId))
-      .get();
-    if (!epic) return;
-    if (epic.status !== "review" && epic.status !== "done") return;
+  const before = readStatus();
+  if (before !== "review" && before !== "done") {
+    return { moved: false, status: before };
+  }
+
+  try {
     transitionReviewRejected({
       projectId,
       epicId: entry.epicId,
-      scope: "epic",
+      scope: isStory ? "story" : "epic",
+      userStoryId: isStory ? entry.ticketId : null,
       sessionId,
-      reason,
+      reason: `Deterministic verification failed at "${commandLabel}"`,
     });
   } catch (error) {
+    // A guard can refuse — a released sibling story makes the whole epic
+    // transition invalid, for instance. Best-effort, like every other
+    // terminal handler; the caller reports the column the board is in.
     console.warn(
       "[auto-mode] Could not return the ticket to In Progress after a failed verification:",
       error instanceof Error ? error.message : error
     );
+    return { moved: false, status: readStatus() };
   }
+
+  const after = readStatus();
+  return { moved: after === "in_progress", status: after };
 }
 
 /**

@@ -204,8 +204,11 @@ export async function POST(_request: NextRequest, { params }: Params) {
       fromStatus: epicStatus,
       toStatus: epicStatus,
       actor: "system",
-      reason:
-        report.status === "pass"
+      reason: !report.persisted
+        ? // The commands ran, but no durable reader will ever see the verdict
+          // — the panel refetches from the table and the merge gate reads it.
+          "Manual verification ran but its report could not be saved"
+        : report.status === "pass"
           ? `Manual verification passed (${report.commands.length} command${report.commands.length === 1 ? "" : "s"})`
           : `Manual verification failed${failedCommand ? ` at ${failedCommand.name}` : ""}`,
     });
