@@ -738,6 +738,35 @@ describe("tryAutoMerge — merge conflict", () => {
         .some((s) => s.agentType === "merge")
     ).toBe(false);
   });
+
+  it("enforces project exclusivity on tryLockProjectMerge and releases cleanly", () => {
+    expect(autoModeRegistry.tryLockProjectMerge(PROJECT_ID)).toBe(true);
+    // Project-level mutex: second claim on same project fails
+    expect(autoModeRegistry.tryLockProjectMerge(PROJECT_ID)).toBe(false);
+    expect(autoModeRegistry.isProjectMergeInFlight(PROJECT_ID)).toBe(true);
+
+    // Another project can still lock independently
+    expect(autoModeRegistry.tryLockProjectMerge("other-proj")).toBe(true);
+    autoModeRegistry.unlockProjectMerge("other-proj");
+
+    autoModeRegistry.unlockProjectMerge(PROJECT_ID);
+    expect(autoModeRegistry.isProjectMergeInFlight(PROJECT_ID)).toBe(false);
+    expect(autoModeRegistry.tryLockProjectMerge(PROJECT_ID)).toBe(true);
+    autoModeRegistry.unlockProjectMerge(PROJECT_ID);
+  });
+
+  it("permits merge on epic B while epic A is held in conflict repair", async () => {
+    // Epic A holds the long per-epic merge lock while its conflict-fix agent runs
+    autoModeRegistry.beginMergeWork(PROJECT_ID, "epic-A");
+    expect(autoModeRegistry.isMergeInFlight(PROJECT_ID, "epic-A")).toBe(true);
+
+    // Epic B's per-epic lock is independent and can be acquired
+    expect(autoModeRegistry.beginMergeWork(PROJECT_ID, "epic-B")).toBe(true);
+    expect(autoModeRegistry.isMergeInFlight(PROJECT_ID, "epic-B")).toBe(true);
+
+    autoModeRegistry.endMergeWork(PROJECT_ID, "epic-B");
+    autoModeRegistry.endMergeWork(PROJECT_ID, "epic-A");
+  });
 });
 
 

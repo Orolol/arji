@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   tryExportArjiJson: vi.fn(),
   beginMergeWork: vi.fn(),
   endMergeWork: vi.fn(),
+  tryLockProjectMerge: vi.fn(),
+  unlockProjectMerge: vi.fn(),
   getRunningSessionForTarget: vi.fn(),
 }));
 
@@ -67,6 +69,8 @@ vi.mock("@/lib/auto-mode/registry", () => ({
   autoModeRegistry: {
     beginMergeWork: mocks.beginMergeWork,
     endMergeWork: mocks.endMergeWork,
+    tryLockProjectMerge: mocks.tryLockProjectMerge,
+    unlockProjectMerge: mocks.unlockProjectMerge,
   },
 }));
 
@@ -150,6 +154,7 @@ describe("Epic review approval", () => {
     mocks.applyTransition.mockReturnValue({ valid: true });
     mocks.applyStoryTransition.mockReturnValue({ valid: true });
     mocks.beginMergeWork.mockReturnValue(true);
+    mocks.tryLockProjectMerge.mockReturnValue(true);
     // Default: nothing else is working on the epic.
     mocks.getRunningSessionForTarget.mockReturnValue(null);
   });
@@ -636,6 +641,18 @@ describe("Epic review approval", () => {
       expect(dbMockState.insertCalls).toEqual([]);
       // Never acquired, so never released.
       expect(mocks.endMergeWork).not.toHaveBeenCalled();
+    });
+
+    it("returns 409 when another merge is in progress in the project repository", async () => {
+      mocks.tryLockProjectMerge.mockReturnValue(false);
+      seed();
+      const res = await callApprove();
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.error).toContain("Another merge is in progress in this repository");
+      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+      expect(mocks.unlockProjectMerge).not.toHaveBeenCalled();
     });
 
     it("acquires and releases the lock around a successful merge", async () => {

@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   createMergeRetryFailedNotification: vi.fn(),
   tryExportArjiJson: vi.fn(),
   getRunningSessionForTarget: vi.fn(),
+  tryLockProjectMerge: vi.fn(),
+  unlockProjectMerge: vi.fn(),
 }));
 
 vi.mock("@/lib/db", async () => {
@@ -38,6 +40,13 @@ vi.mock("@/lib/workflow/transition-service", () => ({
   applyTransition: mocks.applyTransition,
   applyStoryTransition: vi.fn(),
   logWorkflowDecision: vi.fn(),
+}));
+
+vi.mock("@/lib/auto-mode/registry", () => ({
+  autoModeRegistry: {
+    tryLockProjectMerge: mocks.tryLockProjectMerge,
+    unlockProjectMerge: mocks.unlockProjectMerge,
+  },
 }));
 
 vi.mock("@/lib/git/manager", () => ({
@@ -158,6 +167,7 @@ describe("Resolve-merge: final merge fails after the agent", () => {
     resetDbMockState();
     mocks.applyTransition.mockReturnValue({ valid: true });
     mocks.getRunningSessionForTarget.mockReturnValue(null);
+    mocks.tryLockProjectMerge.mockReturnValue(true);
     mocks.isGitRepo.mockResolvedValue(true);
     mocks.attachWorktree.mockResolvedValue({
       worktreePath: "/tmp/worktrees/epic-abc",
@@ -385,6 +395,39 @@ describe("Resolve-merge: final merge fails after the agent", () => {
 
     expect(res.status).toBe(400);
     expect(json.error).toContain("Branch feature/epic-abc not found");
+  });
+
+  it("returns 409 when clean-path final merge cannot acquire project merge lock", async () => {
+    mocks.startMergeInWorktree.mockResolvedValue({
+      conflicted: false,
+      output: "Already up to date.",
+    });
+    mocks.tryLockProjectMerge.mockReturnValue(false);
+    seed();
+
+    const res = await callResolveMerge();
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.error).toContain("Another merge is in progress");
+    expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("notifies failure when agent completion final merge cannot acquire project merge lock", async () => {
+    mocks.tryLockProjectMerge.mockReturnValue(false);
+    seed();
+
+    await callResolveMerge();
+
+    await vi.waitFor(() => {
+      expect(mocks.createMergeRetryFailedNotification).toHaveBeenCalledWith({
+        projectId: "p1",
+        epicId: "epic-1",
+        sessionId: "session-1",
+        error: expect.stringContaining("another merge is in progress"),
+      });
+    });
+    expect(mocks.mergeWorktree).not.toHaveBeenCalled();
   });
 
   it("still closes the epic when the final merge lands (control)", async () => {

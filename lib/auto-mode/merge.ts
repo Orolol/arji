@@ -35,6 +35,7 @@ import {
   mergeWorktree,
   rollbackMerge,
   type MergeCheckpoint,
+  type MergeWorktreeResult,
 } from "@/lib/git/manager";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { applyTransition } from "@/lib/workflow/transition-service";
@@ -522,11 +523,23 @@ async function runAutoMerge(
     epic.branchName
   );
 
-  const result = await mergeWorktree(
-    project.gitRepoPath,
-    epic.branchName,
-    worktreePath
-  );
+  if (!autoModeRegistry.tryLockProjectMerge(projectId)) {
+    return {
+      status: "skipped",
+      reason: "Another merge is in progress in this repository",
+      sessionId: null,
+    };
+  }
+  let result: MergeWorktreeResult;
+  try {
+    result = await mergeWorktree(
+      project.gitRepoPath,
+      epic.branchName,
+      worktreePath
+    );
+  } finally {
+    autoModeRegistry.unlockProjectMerge(projectId);
+  }
 
   if (result.merged) {
     const finalized = finalizeMergedEpic({
@@ -936,6 +949,10 @@ async function retryMergeAfterFix(input: {
     return;
   }
 
+  if (!autoModeRegistry.tryLockProjectMerge(input.projectId)) {
+    park("Another merge is in progress in this repository");
+    return;
+  }
   let retry: Awaited<ReturnType<typeof mergeWorktree>>;
   try {
     retry = await mergeWorktree(
@@ -946,6 +963,8 @@ async function retryMergeAfterFix(input: {
   } catch (mergeError) {
     park(mergeError instanceof Error ? mergeError.message : "Merge failed");
     return;
+  } finally {
+    autoModeRegistry.unlockProjectMerge(input.projectId);
   }
 
   if (!retry.merged) {

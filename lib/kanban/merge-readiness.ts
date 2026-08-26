@@ -16,8 +16,8 @@
  * what a second implementation would introduce.
  *
  * The two callers are not identical sets, and both differences are
- * deliberate: the board also passes `lastMergeFailureAt` (auto-mode carries
- * that fact in its own registry backoff instead), and auto-mode additionally
+ * deliberate: the board also passes merge failure timestamps
+ * (`lastMergeConflictAt` / `lastConflictMarkersAt`; auto-mode carries
  * applies the runtime exclusions below. What they share is the definition of
  * ready.
  *
@@ -63,12 +63,6 @@ export interface MergeReadinessFacts {
    * predates it is stale.
    */
   lastTerminalCodeAt?: string | null;
-  /**
-   * Newest activity-log entry recording a merge that could not land
-   * (see lib/workflow/merge-failure.ts). Absent for callers that do not
-   * track it — auto-mode carries the same fact in its own registry backoff.
-   */
-  lastMergeFailureAt?: string | null;
   /** Newest activity entry recording a git merge conflict. */
   lastMergeConflictAt?: string | null;
   /** Newest activity entry recording committed conflict markers. */
@@ -124,22 +118,13 @@ export function hasFreshCleanReview(
  * conflict flag clears on its own — and the review it invalidated becomes
  * stale, which is the honest next blocker.
  */
-export function hasCurrentMergeFailure(
-  facts: Pick<
-    MergeReadinessFacts,
-    "lastMergeFailureAt" | "lastMergeConflictAt" | "lastConflictMarkersAt" | "lastTerminalCodeAt"
-  > | undefined
-): boolean {
-  return hasCurrentMergeConflict(facts) || hasCurrentConflictMarkers(facts);
-}
-
 export function hasCurrentMergeConflict(
   facts: Pick<
     MergeReadinessFacts,
-    "lastMergeFailureAt" | "lastMergeConflictAt" | "lastTerminalCodeAt"
+    "lastMergeConflictAt" | "lastTerminalCodeAt"
   > | undefined
 ): boolean {
-  const failed = normalizeAt(facts?.lastMergeConflictAt ?? facts?.lastMergeFailureAt);
+  const failed = normalizeAt(facts?.lastMergeConflictAt);
   if (!failed) return false;
   const coded = normalizeAt(facts?.lastTerminalCodeAt);
   if (!coded) return true;
@@ -180,7 +165,7 @@ export function evaluateMergeReadiness(
   const hasConflict = hasCurrentMergeConflict(facts);
   const hasMarkers = hasCurrentConflictMarkers(facts);
   if (hasConflict && hasMarkers) {
-    const conflictAt = normalizeAt(facts?.lastMergeConflictAt ?? facts?.lastMergeFailureAt);
+    const conflictAt = normalizeAt(facts?.lastMergeConflictAt);
     const markersAt = normalizeAt(facts?.lastConflictMarkersAt);
     return markersAt && conflictAt && markersAt > conflictAt
       ? blocked("conflict_markers")

@@ -69,14 +69,6 @@ export function buildApprovalConflictMarkersBlockedReason(input: {
   return `${APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX}${input.branchName} — ${input.error}`;
 }
 
-/**
- * Git verdicts that indicate the branch is blocked by git-level conflict
- * issues, used to build activity log prefix matchers for the blocker signal.
- */
-export const MERGE_FAILURE_GIT_VERDICTS = [
-  "conflict",
-  "conflict-markers",
-] as const;
 
 /**
  * `MergeWorktreeResult.reason` values that mean the branch has a conflict that

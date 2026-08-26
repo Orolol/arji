@@ -353,6 +353,11 @@ export function EpicCard({
             onMerge!();
           }}
           disabled={mergeDisabled}
+          title={
+            mergeLocked
+              ? "Another merge is in progress in this repository"
+              : undefined
+          }
           className="inline-flex h-[27px] shrink-0 items-center justify-center gap-[6px] rounded-[7px] bg-primary px-[11px] text-[12.5px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60 motion-reduce:transition-none"
           aria-label={`Merge ${epic.title}`}
           data-testid={`epic-merge-${epic.id}`}
@@ -424,6 +429,11 @@ export function EpicCard({
             onResolveMerge!();
           }}
           disabled={mergeDisabled}
+          title={
+            mergeLocked
+              ? "Another merge is in progress in this repository"
+              : undefined
+          }
           className="inline-flex h-[27px] shrink-0 items-center justify-center gap-[6px] rounded-[7px] border border-border px-[11px] text-[12.5px] transition-colors hover:bg-band disabled:opacity-60 motion-reduce:transition-none"
           aria-label={`Resolve the merge conflict on ${epic.title}`}
           data-testid={`epic-resolve-merge-${epic.id}`}

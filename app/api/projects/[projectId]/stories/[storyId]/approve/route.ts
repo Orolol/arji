@@ -231,6 +231,19 @@ export async function POST(_request: NextRequest, { params }: Params) {
         .pop();
       const worktreePath = session?.worktreePath || undefined;
 
+      if (!autoModeRegistry.tryLockProjectMerge(projectId)) {
+        autoModeRegistry.endMergeWork(projectId, epic.id);
+        tryExportArjiJson(projectId);
+        return NextResponse.json({
+          data: {
+            approved: true,
+            epicComplete: true,
+            merged: false,
+            mergeError:
+              "Another merge is in progress in this repository — retry in a moment.",
+          },
+        });
+      }
       let result: MergeWorktreeResult;
       try {
         result = await mergeWorktree(
@@ -240,14 +253,13 @@ export async function POST(_request: NextRequest, { params }: Params) {
           { defaultBranch: project.defaultBranch }
         );
       } catch (e) {
-        // Belt and braces: mergeWorktree reports failures as merged:false,
-        // but a throw (whatever its origin) must fund the same failure path,
-        // not escape as a raw 500 after the story already went done.
         result = {
           merged: false,
           error: e instanceof Error ? e.message : "Merge failed",
           reason: "error",
         };
+      } finally {
+        autoModeRegistry.unlockProjectMerge(projectId);
       }
 
       if (!result.merged) {

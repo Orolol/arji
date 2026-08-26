@@ -152,16 +152,14 @@ export async function POST(_request: NextRequest, { params }: Params) {
 
   const needsMerge = Boolean(project?.gitRepoPath && epic.branchName);
 
-  // Same per-epic merge lock as auto-mode (lib/auto-mode/merge.ts). Without
-  // it, a human approve racing auto-mode's merge can be silently un-merged
-  // by auto's rollback (its checkpoint predates our merge), and an
-  // epic-approve racing a last-story-approve has the loser hit
+  // Per-epic merge lock (lib/auto-mode/registry.ts). Without it, an
+  // epic-approve racing a last-story-approve on the SAME epic has the loser hit
   // 'branch-missing' and leave a spurious failure trail on a healthy epic.
   if (needsMerge && !autoModeRegistry.beginMergeWork(projectId, epicId)) {
     return NextResponse.json(
       {
         error:
-          "A merge is already in flight for this project — retry in a moment.",
+          "A merge is already in flight for this epic — retry in a moment.",
       },
       { status: 409 }
     );
@@ -190,6 +188,15 @@ export async function POST(_request: NextRequest, { params }: Params) {
         .pop();
       const worktreePath = session?.worktreePath || undefined;
 
+      if (!autoModeRegistry.tryLockProjectMerge(projectId)) {
+        return NextResponse.json(
+          {
+            error:
+              "Another merge is in progress in this repository — retry in a moment.",
+          },
+          { status: 409 }
+        );
+      }
       let result: MergeWorktreeResult;
       try {
         result = await mergeWorktree(
@@ -199,14 +206,13 @@ export async function POST(_request: NextRequest, { params }: Params) {
           { defaultBranch: project.defaultBranch }
         );
       } catch (e) {
-        // Belt and braces: mergeWorktree reports failures as merged:false,
-        // but a throw (whatever its origin) must fund the same failure path,
-        // not escape as a raw 500 with no trail.
         result = {
           merged: false,
           error: e instanceof Error ? e.message : "Merge failed",
           reason: "error",
         };
+      } finally {
+        autoModeRegistry.unlockProjectMerge(projectId);
       }
 
       if (!result.merged) {

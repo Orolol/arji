@@ -97,15 +97,15 @@ interface AutoModeProjectState {
   sweeping: boolean;
   /**
    * Epics with merge work outstanding — from the moment `tryAutoMerge` starts
-   * until its git merge (and any conflict-agent retry) has settled. Git is not
-   * transactional and a merge takes seconds, so a second sweep must not start
-   * another one on the same branch. This outlives the merge-fix SESSION: that
-   * session goes terminal before its retry runs, and the terminal hook kicks a
-   * sweep in exactly that window.
+   * until its git merge (and any conflict-agent retry) has settled. A second
+   * sweep must not start another build/review/merge on the same branch.
+   * This outlives the merge-fix SESSION: that session goes terminal before its
+   * retry runs, and the terminal hook kicks a sweep in exactly that window.
    */
   merging: Set<string>;
+  /** Short project-wide mutex: true while `mergeWorktree` runs in the base checkout. */
+  gitMerging: boolean;
   /**
-   * epicId → ISO instant before which no merge should be re-attempted. Used
    * when a conflict cannot be repaired right now (no build slot for an agent),
    * so the sweep does not re-run a doomed `git merge` every 15 seconds.
    */
@@ -136,6 +136,7 @@ function emptyState(): AutoModeProjectState {
     failures: new Map(),
     sweeping: false,
     merging: new Set(),
+    gitMerging: false,
     mergeDeferredUntil: new Map(),
     mergeGateRefusals: new Map(),
     secondOpinionSkipReasons: new Map(),
@@ -298,12 +299,14 @@ export class AutoModeRegistry {
   // Merge work in flight
   // ---------------------------------------------------------------------
 
-  /** Claims the merge lock for an epic. False when another merge is already held in the project. */
+  /**
+   * Claims the per-epic merge lock. False when one is already held on this epic.
+   * Held across the full conflict-repair window in auto-mode so the sweep does
+   * not double-dispatch on the same branch.
+   */
   beginMergeWork(projectId: string, epicId: string): boolean {
     const state = this.stateFor(projectId);
-    // Git merges operate on the shared base checkout for the project repo,
-    // so only one merge can run at a time per project.
-    if (state.merging.size > 0) return false;
+    if (state.merging.has(epicId)) return false;
     state.merging.add(epicId);
     return true;
   }
@@ -319,6 +322,30 @@ export class AutoModeRegistry {
   /** Epics with merge work outstanding — an exclusion set for the selectors. */
   mergingEpicIds(projectId: string): Set<string> {
     return new Set(this.states.get(projectId)?.merging ?? []);
+  }
+
+  // ---------------------------------------------------------------------
+  // Short project-wide base-checkout merge lock
+  // ---------------------------------------------------------------------
+
+  /**
+   * Claims the short project-wide checkout lock for `mergeWorktree`.
+   * False when another git merge is currently executing in the base checkout.
+   */
+  tryLockProjectMerge(projectId: string): boolean {
+    const state = this.stateFor(projectId);
+    if (state.gitMerging) return false;
+    state.gitMerging = true;
+    return true;
+  }
+
+  unlockProjectMerge(projectId: string): void {
+    const state = this.states.get(projectId);
+    if (state) state.gitMerging = false;
+  }
+
+  isProjectMergeInFlight(projectId: string): boolean {
+    return this.states.get(projectId)?.gitMerging === true;
   }
 
   /** Holds an epic's merge back until `until` (an unrepairable conflict). */

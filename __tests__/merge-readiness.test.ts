@@ -10,7 +10,8 @@ import { describe, it, expect } from "vitest";
 import {
   describeMergeBlocker,
   evaluateMergeReadiness,
-  hasCurrentMergeFailure,
+  hasCurrentConflictMarkers,
+  hasCurrentMergeConflict,
   hasFreshCleanReview,
   isMergeReady,
   isMergeReadyEpic,
@@ -75,12 +76,12 @@ describe("evaluateMergeReadiness", () => {
     ).toMatchObject({ ready: false, blocker: "no_branch" });
   });
 
-  it("ranks a merge failure above every other blocker — git is the wall", () => {
+  it("ranks a merge conflict above every other blocker — git is the wall", () => {
     expect(
       evaluateMergeReadiness({
         ...READY,
         openFindings: 3,
-        lastMergeFailureAt: "2026-08-20T13:00:00.000Z",
+        lastMergeConflictAt: "2026-08-20T13:00:00.000Z",
       })
     ).toMatchObject({ blocker: "merge_conflict", openFindings: 3 });
   });
@@ -129,11 +130,17 @@ describe("evaluateMergeReadiness", () => {
   });
 });
 
-describe("hasCurrentMergeFailure", () => {
-  it("holds while nothing has touched the branch since the failure", () => {
+describe("hasCurrentMergeConflict and hasCurrentConflictMarkers", () => {
+  it("holds while nothing has touched the branch since the conflict", () => {
     expect(
-      hasCurrentMergeFailure({
-        lastMergeFailureAt: "2026-08-20T13:00:00.000Z",
+      hasCurrentMergeConflict({
+        lastMergeConflictAt: "2026-08-20T13:00:00.000Z",
+        lastTerminalCodeAt: "2026-08-20T11:00:00.000Z",
+      })
+    ).toBe(true);
+    expect(
+      hasCurrentConflictMarkers({
+        lastConflictMarkersAt: "2026-08-20T13:00:00.000Z",
         lastTerminalCodeAt: "2026-08-20T11:00:00.000Z",
       })
     ).toBe(true);
@@ -141,22 +148,29 @@ describe("hasCurrentMergeFailure", () => {
 
   it("clears once a code session (e.g. the merge-fix agent) ran after it", () => {
     expect(
-      hasCurrentMergeFailure({
-        lastMergeFailureAt: "2026-08-20T11:00:00.000Z",
+      hasCurrentMergeConflict({
+        lastMergeConflictAt: "2026-08-20T11:00:00.000Z",
+        lastTerminalCodeAt: "2026-08-20T13:00:00.000Z",
+      })
+    ).toBe(false);
+    expect(
+      hasCurrentConflictMarkers({
+        lastConflictMarkersAt: "2026-08-20T11:00:00.000Z",
         lastTerminalCodeAt: "2026-08-20T13:00:00.000Z",
       })
     ).toBe(false);
   });
 
-  it("is false when no merge ever failed", () => {
-    expect(hasCurrentMergeFailure({ lastTerminalCodeAt: null })).toBe(false);
+  it("is false when no conflict or markers ever occurred", () => {
+    expect(hasCurrentMergeConflict({ lastTerminalCodeAt: null })).toBe(false);
+    expect(hasCurrentConflictMarkers({ lastTerminalCodeAt: null })).toBe(false);
   });
 
   it("a repaired conflict falls through to the stale review it invalidated", () => {
     expect(
       evaluateMergeReadiness({
         ...READY,
-        lastMergeFailureAt: "2026-08-20T11:30:00.000Z",
+        lastMergeConflictAt: "2026-08-20T11:30:00.000Z",
         // The merge-fix agent rewrote the branch after both the review and
         // the failed merge.
         lastTerminalCodeAt: "2026-08-20T13:00:00.000Z",

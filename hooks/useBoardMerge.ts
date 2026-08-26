@@ -12,10 +12,9 @@ import { useCallback, useRef, useState } from "react";
  * transition service. A merge that fails changes nothing and answers 409
  * with `mergeFailed`, which is exactly the state this hook parks on the card
  * so the user can reach for Resolve Merge instead of retrying blindly.
- *
- * State is per epic because the board can have several ready cards and each
- * one merges on its own; a single shared `merging` flag would grey out every
- * button on the column.
+ * Merges operate on the project repository's shared base checkout, so only one
+ * merge or resolve request can run at a time per project. Other cards on the
+ * board are locked while a merge is in flight to prevent index.lock collisions.
  */
 
 export interface BoardMergeState {

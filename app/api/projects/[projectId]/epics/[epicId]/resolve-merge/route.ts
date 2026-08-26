@@ -18,6 +18,7 @@ import {
   isGitRepo,
   startMergeInWorktree,
   mergeWorktree,
+  type MergeWorktreeResult,
 } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
@@ -33,6 +34,7 @@ import {
   createAgentAlreadyRunningPayload,
   getRunningSessionForTarget,
 } from "@/lib/agents/concurrency";
+import { autoModeRegistry } from "@/lib/auto-mode/registry";
 import { isGitRefusalMergeReason } from "@/lib/workflow/merge-failure";
 import fs from "fs";
 import path from "path";
@@ -152,9 +154,29 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (!preflight.valid) {
       return NextResponse.json({ error: preflight.error }, { status: 400 });
     }
-    const finalMerge = await mergeWorktree(gitRepoPath, branchName, worktreePath, {
-      defaultBranch: project.defaultBranch,
-    });
+    if (!autoModeRegistry.tryLockProjectMerge(projectId)) {
+      return NextResponse.json(
+        {
+          error:
+            "Another merge is in progress in this repository — retry in a moment.",
+        },
+        { status: 409 }
+      );
+    }
+    let finalMerge: MergeWorktreeResult;
+    try {
+      finalMerge = await mergeWorktree(gitRepoPath, branchName, worktreePath, {
+        defaultBranch: project.defaultBranch,
+      });
+    } catch (e) {
+      finalMerge = {
+        merged: false,
+        error: e instanceof Error ? e.message : "Final merge failed",
+        reason: "error",
+      };
+    } finally {
+      autoModeRegistry.unlockProjectMerge(projectId);
+    }
     if (!finalMerge.merged) {
       // `mergeFailed` marks the failures where GIT refused, the same flag the
       // approve route sets. Callers use it to decide whether offering another
@@ -317,13 +339,33 @@ export async function POST(request: NextRequest, { params }: Params) {
         validateOnly: true,
       });
       if (!preflight.valid) return;
-
-      const finalMerge = await mergeWorktree(
-        gitRepoPath,
-        branchName,
-        worktreePath,
-        { defaultBranch: project.defaultBranch }
-      );
+      if (!autoModeRegistry.tryLockProjectMerge(projectId)) {
+        createMergeRetryFailedNotification({
+          projectId,
+          epicId,
+          sessionId,
+          error:
+            "Final merge blocked: another merge is in progress in this repository.",
+        });
+        return;
+      }
+      let finalMerge: MergeWorktreeResult;
+      try {
+        finalMerge = await mergeWorktree(
+          gitRepoPath,
+          branchName,
+          worktreePath,
+          { defaultBranch: project.defaultBranch }
+        );
+      } catch (e) {
+        finalMerge = {
+          merged: false,
+          error: e instanceof Error ? e.message : "Final merge failed",
+          reason: "error",
+        };
+      } finally {
+        autoModeRegistry.unlockProjectMerge(projectId);
+      }
 
       if (finalMerge.merged) {
         const transition = applyTransition({
