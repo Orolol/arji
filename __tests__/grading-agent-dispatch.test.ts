@@ -247,7 +247,7 @@ describe("manual grading dispatch", () => {
       projectId,
       epicId,
       agentType: "grading",
-      mode: "plan",
+      mode: "code",
       provider: "codex",
       worktreePath: "/tmp/grading-worktree",
       branchName: "feature/grading-test",
@@ -266,7 +266,7 @@ describe("manual grading dispatch", () => {
     expect(processManager.start).toHaveBeenCalledWith(
       json.data.sessionId,
       expect.objectContaining({
-        mode: "plan",
+        mode: "code",
         cwd: "/tmp/grading-worktree",
       }),
       "codex"

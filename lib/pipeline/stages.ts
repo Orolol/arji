@@ -759,7 +759,12 @@ async function dispatchPipelineStage(
   const logsDir = path.join(process.cwd(), "data", "sessions", sessionId);
   fs.mkdirSync(logsDir, { recursive: true });
   const logsPath = path.join(logsDir, "logs.json");
-  const agentMode = isReview ? "plan" : "code";
+  // Reviews run in code mode like builds: plan mode refuses mutating MCP
+  // tools (submit_findings, create_bug) regardless of the allowlist, and
+  // provider read-only postures cut the tool channel entirely. The
+  // no-modification rule for reviewers is a prompt contract
+  // (REVIEW_BOUNDARY_SECTION in prompt-builder), not a harness restriction.
+  const agentMode = "code";
 
   if (!isReview) {
     transitionBuildStarted({

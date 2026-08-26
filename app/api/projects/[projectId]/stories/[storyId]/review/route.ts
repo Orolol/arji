@@ -219,7 +219,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     fs.mkdirSync(logsDir, { recursive: true });
     const logsPath = path.join(logsDir, "logs.json");
 
-    const agentMode = reviewType === "feature_review" ? "code" : "plan";
+    // All review types run in code mode: plan mode refuses mutating MCP
+    // tools (submit_findings, create_bug) and read-only provider postures
+    // cut the tool channel. The reviewer's no-modification rule is a prompt
+    // contract (REVIEW_BOUNDARY_SECTION), not a harness restriction.
+    const agentMode = "code";
 
     // First review session can resume; subsequent ones start fresh. Resolved
     // per review type because each one may land on a different provider, and

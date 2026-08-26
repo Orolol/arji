@@ -466,7 +466,8 @@ describe("pipeline e2e — clean pass", () => {
       db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
     ).toBe("review");
 
-    // Both sessions completed; review ran as review_code in plan mode.
+    // Both sessions completed; review ran as review_code in code mode
+    // (the no-edit rule is a prompt contract, not a harness mode).
     const reviewSessionId = run.sessionIds[1];
     expect(sessionRow(buildSessionId)).toMatchObject({
       status: "completed",
@@ -476,7 +477,7 @@ describe("pipeline e2e — clean pass", () => {
     expect(sessionRow(reviewSessionId)).toMatchObject({
       status: "completed",
       agentType: "review_code",
-      mode: "plan",
+      mode: "code",
     });
 
     // Labeled review comment on the ticket.

@@ -624,10 +624,10 @@ describe("review stage dispatch", () => {
       .from(agentSessions)
       .where(eq(agentSessions.id, handle.sessionId!))
       .get()!;
-    expect(row).toMatchObject({ agentType: "review_code", mode: "plan" });
+    expect(row).toMatchObject({ agentType: "review_code", mode: "code" });
 
     const spawn = startOpts();
-    expect(spawn.opts.mode).toBe("plan");
+    expect(spawn.opts.mode).toBe("code");
     expect(spawn.opts.allowedTools).toBeUndefined();
 
     await handle.settled;

@@ -10,7 +10,7 @@
  * exercises the actual composition (route launcher → night adapter → real
  * pipeline terminal → wave settlement → morning summary). Here the ONLY
  * fake is the CLI itself: the process manager serves scripted per-session
- * results matched by (mode, cwd, epic-title-in-prompt) — the pipeline-e2e
+ * results matched by (mode, cwd, prompt shape) — the pipeline-e2e
  * pattern, made order-independent because night waves run several epics
  * (and their stage sessions) concurrently.
  *
@@ -280,13 +280,22 @@ function cliFail(error: string): Record<string, unknown> {
 /** Matcher: a code-writing stage (initial build or fix) of the given epic. */
 function codeStage(title: string) {
   return (o: { mode?: string; prompt?: string }) =>
-    o.mode === "code" && !!o.prompt?.includes(title);
+    o.mode === "code" &&
+    !o.prompt?.includes("Under Review") &&
+    !!o.prompt?.includes(title);
 }
 
-/** Matcher: the review stage of the given epic (plan mode, worktree cwd). */
+/**
+ * Matcher: the review stage of the given epic. Reviews run in code mode like
+ * builds (the no-edit rule is a prompt contract), so the discriminator is the
+ * review prompt's "… Under Review" heading, not the mode.
+ */
 function reviewStage(title: string) {
   return (o: { mode?: string; prompt?: string; cwd?: string }) =>
-    o.mode === "plan" && o.cwd === WORKTREE_PATH && !!o.prompt?.includes(title);
+    o.mode === "code" &&
+    o.cwd === WORKTREE_PATH &&
+    !!o.prompt?.includes("Under Review") &&
+    !!o.prompt?.includes(title);
 }
 
 /** Matcher: the forensic post-mortem of the given epic (repo-root cwd). */

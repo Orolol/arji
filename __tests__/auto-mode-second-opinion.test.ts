@@ -581,7 +581,7 @@ describe("second-opinion dispatch", () => {
       .where(eq(agentSessions.id, result.sessionId!))
       .get();
     expect(session).toMatchObject({
-      mode: "plan",
+      mode: "code",
       provider: "codex",
       agentType: "review_second_opinion",
     });
@@ -594,7 +594,7 @@ describe("second-opinion dispatch", () => {
       sessionId: result.sessionId,
       provider: "codex",
       options: {
-        mode: "plan",
+        mode: "code",
         cwd: "/repo-worktree",
       },
     });

@@ -64,6 +64,14 @@ function inferDbActivityType(row: {
     return "grading";
   }
 
+  // Review agents run in code mode (the no-edit rule is a prompt contract),
+  // so the `mode === "plan"` fallback below no longer catches them —
+  // classify by agent type. Covers review_code, review_second_opinion, and
+  // every custom review_* type.
+  if (row.agentType?.startsWith("review_")) {
+    return "review";
+  }
+
   if (
     row.agentType === "tech_check" ||
     row.agentType === "e2e_test" ||

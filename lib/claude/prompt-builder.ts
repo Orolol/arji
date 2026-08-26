@@ -1431,9 +1431,29 @@ For each criterion, specify:
 - **Details**: Description of what works or what's missing`;
 
 /**
- * Builds the prompt for a review agent (plan mode). Each review type gets a
- * specialized checklist. The agent reads the code and posts findings as a
- * comment.
+ * Boundary contract appended to every review prompt. Review sessions spawn
+ * in code mode — plan mode refuses mutating MCP tools (submit_findings,
+ * create_bug) and read-only provider postures cut the tool channel — so the
+ * no-modification rule lives here, in the prompt, instead of in the harness.
+ */
+export const REVIEW_BOUNDARY_SECTION = `## Review Boundary — No Code Modifications
+
+This session deliberately runs with full tool access — shell, browser, test
+runners, and MCP tools — so nothing blocks your investigation. In exchange,
+the no-modification rule is yours to uphold, not the harness's:
+
+- Do not edit, create, or delete repository files. Do not stage, commit,
+  amend, revert, or push. Leave branches and the git state exactly as found.
+- Running the app, executing tests, and building are all allowed, including
+  when they write caches or generated artifacts; leave any such incidental
+  output uncommitted and set it aside in your report.
+- When you spot a concrete fix, describe it in a finding — never apply it
+  yourself.`;
+
+/**
+ * Builds the prompt for a review agent. Each review type gets a specialized
+ * checklist. The agent reads and exercises the code but must not modify it
+ * (REVIEW_BOUNDARY_SECTION), and posts findings as a comment.
  */
 export function buildReviewPrompt(
   project: PromptProject,
@@ -1531,6 +1551,8 @@ Your response should be a well-formatted markdown report.
 `);
   }
 
+  parts.push(REVIEW_BOUNDARY_SECTION);
+
   return parts.filter(Boolean).join("\n");
 }
 
@@ -1539,7 +1561,10 @@ Your response should be a well-formatted markdown report.
 // ---------------------------------------------------------------------------
 
 /**
- * Builds the plan-mode grader prompt for an epic.
+ * Builds the grader prompt for an epic. The session spawns in code mode so
+ * submit_grading — its sole deliverable, refused by plan mode as a mutating
+ * MCP tool — can be called; the Role Boundary below forbids modifying the
+ * repository.
  *
  * Unlike a feature/code review, grading has one narrow rubric: the user
  * stories' acceptance criteria. The durable deliverable is the
@@ -1584,7 +1609,9 @@ export function buildGradingPrompt(
 
 You are an acceptance-criteria grader, not a general code reviewer. Evaluate only whether the implementation satisfies each criterion above. Do not judge general code quality, style, architecture, or unrelated defects; those belong to review agents.
 
-Inspect the current worktree and its diff, read the relevant implementation and tests, and run focused read-only checks when they materially strengthen the evidence. Evidence must cite concrete files, tests, commands, or observed behavior. An implementation claim in an agent comment is not proof.
+Inspect the current worktree and its diff, read the relevant implementation and tests, and run focused checks (tests, commands, the app itself) when they materially strengthen the evidence. Evidence must cite concrete files, tests, commands, or observed behavior. An implementation claim in an agent comment is not proof.
+
+You must not modify the repository: no file edits, creates, or deletes, no commits, no branch or git-state changes. Grading only observes; if running something leaves incidental artifacts, leave them uncommitted.
 
 ## Mandatory Structured Submission
 
@@ -1775,6 +1802,8 @@ ${isBug ? "**IMPORTANT: This is a BUG FIX review.** Focus exclusively on the bug
 Your response should be a well-formatted markdown report.
 `);
   }
+
+  parts.push(REVIEW_BOUNDARY_SECTION);
 
   return parts.filter(Boolean).join("\n");
 }

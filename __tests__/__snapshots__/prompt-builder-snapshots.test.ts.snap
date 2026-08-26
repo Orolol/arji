@@ -403,7 +403,20 @@ You are performing a **code review (bug fix)** on the bug fix described above.
 - \`**Overall Verdict: Changes Requested**\` — blocking issues that must be fixed
 
 Your response should be a well-formatted markdown report.
-"
+
+## Review Boundary — No Code Modifications
+
+This session deliberately runs with full tool access — shell, browser, test
+runners, and MCP tools — so nothing blocks your investigation. In exchange,
+the no-modification rule is yours to uphold, not the harness's:
+
+- Do not edit, create, or delete repository files. Do not stage, commit,
+  amend, revert, or push. Leave branches and the git state exactly as found.
+- Running the app, executing tests, and building are all allowed, including
+  when they write caches or generated artifacts; leave any such incidental
+  output uncommitted and set it aside in your report.
+- When you spot a concrete fix, describe it in a finding — never apply it
+  yourself."
 `;
 
 exports[`Prompt builder snapshot regression > buildEpicReviewPrompt - bug ticket feature_review 1`] = `
@@ -496,7 +509,20 @@ You are performing a **bug fix verification** on the bug described above. You ha
 - \`**Overall Verdict: Not Complete**\` — if the bug is not resolved
 
 Your response should be a well-formatted markdown report. Do NOT just read the code — actually run and test the fix.
-"
+
+## Review Boundary — No Code Modifications
+
+This session deliberately runs with full tool access — shell, browser, test
+runners, and MCP tools — so nothing blocks your investigation. In exchange,
+the no-modification rule is yours to uphold, not the harness's:
+
+- Do not edit, create, or delete repository files. Do not stage, commit,
+  amend, revert, or push. Leave branches and the git state exactly as found.
+- Running the app, executing tests, and building are all allowed, including
+  when they write caches or generated artifacts; leave any such incidental
+  output uncommitted and set it aside in your report.
+- When you spot a concrete fix, describe it in a finding — never apply it
+  yourself."
 `;
 
 exports[`Prompt builder snapshot regression > buildEpicReviewPrompt - code_review 1`] = `
@@ -582,7 +608,20 @@ You are performing a **code review** on the entire epic described above, coverin
 - \`**Overall Verdict: Changes Requested**\` — blocking issues that must be fixed
 
 Your response should be a well-formatted markdown report.
-"
+
+## Review Boundary — No Code Modifications
+
+This session deliberately runs with full tool access — shell, browser, test
+runners, and MCP tools — so nothing blocks your investigation. In exchange,
+the no-modification rule is yours to uphold, not the harness's:
+
+- Do not edit, create, or delete repository files. Do not stage, commit,
+  amend, revert, or push. Leave branches and the git state exactly as found.
+- Running the app, executing tests, and building are all allowed, including
+  when they write caches or generated artifacts; leave any such incidental
+  output uncommitted and set it aside in your report.
+- When you spot a concrete fix, describe it in a finding — never apply it
+  yourself."
 `;
 
 exports[`Prompt builder snapshot regression > buildEpicReviewPrompt - feature_review 1`] = `
@@ -673,7 +712,20 @@ You are performing a **feature completeness review** on the entire epic describe
 - \`**Overall Verdict: Not Complete**\` — if major criteria fail
 
 Your response should be a well-formatted markdown report. Do NOT just read the code — actually run and test the features.
-"
+
+## Review Boundary — No Code Modifications
+
+This session deliberately runs with full tool access — shell, browser, test
+runners, and MCP tools — so nothing blocks your investigation. In exchange,
+the no-modification rule is yours to uphold, not the harness's:
+
+- Do not edit, create, or delete repository files. Do not stage, commit,
+  amend, revert, or push. Leave branches and the git state exactly as found.
+- Running the app, executing tests, and building are all allowed, including
+  when they write caches or generated artifacts; leave any such incidental
+  output uncommitted and set it aside in your report.
+- When you spot a concrete fix, describe it in a finding — never apply it
+  yourself."
 `;
 
 exports[`Prompt builder snapshot regression > buildImportPrompt 1`] = `
@@ -841,7 +893,20 @@ You are performing a **UI Review** review on the code changes for the ticket des
 2. Follow the custom review instructions above exactly.
 3. Produce a structured markdown report with findings and recommendations.
 4. If no issues are found, state "No issues found."
-"
+
+## Review Boundary — No Code Modifications
+
+This session deliberately runs with full tool access — shell, browser, test
+runners, and MCP tools — so nothing blocks your investigation. In exchange,
+the no-modification rule is yours to uphold, not the harness's:
+
+- Do not edit, create, or delete repository files. Do not stage, commit,
+  amend, revert, or push. Leave branches and the git state exactly as found.
+- Running the app, executing tests, and building are all allowed, including
+  when they write caches or generated artifacts; leave any such incidental
+  output uncommitted and set it aside in your report.
+- When you spot a concrete fix, describe it in a finding — never apply it
+  yourself."
 `;
 
 exports[`Prompt builder snapshot regression > buildReviewPrompt - feature_review 1`] = `
@@ -936,7 +1001,20 @@ You are performing a **feature completeness review** on the ticket described abo
 - \`**Overall Verdict: Not Complete**\` — if major criteria fail
 
 Your response should be a well-formatted markdown report. Do NOT just read the code — actually run and test the feature.
-"
+
+## Review Boundary — No Code Modifications
+
+This session deliberately runs with full tool access — shell, browser, test
+runners, and MCP tools — so nothing blocks your investigation. In exchange,
+the no-modification rule is yours to uphold, not the harness's:
+
+- Do not edit, create, or delete repository files. Do not stage, commit,
+  amend, revert, or push. Leave branches and the git state exactly as found.
+- Running the app, executing tests, and building are all allowed, including
+  when they write caches or generated artifacts; leave any such incidental
+  output uncommitted and set it aside in your report.
+- When you spot a concrete fix, describe it in a finding — never apply it
+  yourself."
 `;
 
 exports[`Prompt builder snapshot regression > buildReviewPrompt - security 1`] = `
@@ -1016,7 +1094,20 @@ You are performing a **security** on the code changes for the ticket described a
 - \`**Overall Verdict: Changes Requested**\` — blocking issues that must be fixed
 
 Your response should be a well-formatted markdown report.
-"
+
+## Review Boundary — No Code Modifications
+
+This session deliberately runs with full tool access — shell, browser, test
+runners, and MCP tools — so nothing blocks your investigation. In exchange,
+the no-modification rule is yours to uphold, not the harness's:
+
+- Do not edit, create, or delete repository files. Do not stage, commit,
+  amend, revert, or push. Leave branches and the git state exactly as found.
+- Running the app, executing tests, and building are all allowed, including
+  when they write caches or generated artifacts; leave any such incidental
+  output uncommitted and set it aside in your report.
+- When you spot a concrete fix, describe it in a finding — never apply it
+  yourself."
 `;
 
 exports[`Prompt builder snapshot regression > buildSpecGenerationPrompt 1`] = `

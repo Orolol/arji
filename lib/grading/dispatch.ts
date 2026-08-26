@@ -270,7 +270,10 @@ export async function dispatchGradingSession(
     projectId: input.projectId,
     epicId: input.epicId,
     userStoryId: input.userStoryId ?? null,
-    mode: "plan",
+    // Code mode so the grader can call submit_grading — its sole deliverable
+    // — which plan mode refuses as a mutating MCP tool. The prompt's Role
+    // Boundary forbids modifying the repository.
+    mode: "code",
     provider: resolvedAgent.provider,
     prompt,
     logsPath,
@@ -311,7 +314,7 @@ export async function dispatchGradingSession(
       processManager.start(
         sessionId,
         {
-          mode: "plan",
+          mode: "code",
           prompt,
           cwd: worktreePath,
           model: resolvedAgent.model,

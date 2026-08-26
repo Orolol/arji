@@ -166,8 +166,8 @@ function structuredVerdictForSession(sessionId: string): GateVerdict | null {
 }
 
 /**
- * Compatibility evidence for providers whose read-only posture cannot call
- * submit_findings. Structured submissions always win when present; this
+ * Compatibility evidence for providers without MCP injection, which cannot
+ * call submit_findings. Structured submissions always win when present; this
  * parser only consumes the exact final line the prompt mandates.
  */
 function proseVerdictForSession(sessionId: string): GateVerdict | null {
@@ -208,7 +208,7 @@ function openFindingCount(sessionId: string): number {
  * Reads the newest second opinion that is fresh relative to the ordinary
  * review. A structured submit_findings summary is authoritative when the
  * provider can produce one. The exact Overall Verdict line is the fail-safe
- * for read-only/non-MCP providers, so missing tool-channel capability cannot
+ * for non-MCP providers, so missing tool-channel capability cannot
  * turn an opted-in merge gate into a silent parking loop.
  */
 export function readSecondOpinionState(
@@ -297,7 +297,7 @@ export function readSecondOpinionState(
  * Keeps the general segregation picker and excludes both prior authors. MCP
  * capability is intentionally not a selection requirement: providers that
  * cannot call submit_findings can still produce the exact fallback verdict
- * from a read-only run.
+ * as prose in their final message.
  */
 export function pickSecondOpinionProvider(
   builderProvider: AgentProvider,
@@ -328,7 +328,7 @@ function existingWorktreePath(projectId: string, epicId: string): string | null 
   );
 }
 
-/** Dispatches the short read-only gate and returns as soon as it is queued. */
+/** Dispatches the short pre-merge gate and returns as soon as it is queued. */
 export async function dispatchSecondOpinion(input: {
   projectId: string;
   epicId: string;
@@ -454,7 +454,9 @@ export async function dispatchSecondOpinion(input: {
       id: sessionId,
       projectId: input.projectId,
       epicId: input.epicId,
-      mode: "plan",
+      // Code mode so the gate can call submit_findings (plan mode refuses
+      // mutating MCP tools); the prompt itself forbids editing files.
+      mode: "code",
       orchestrationMode: "solo",
       provider,
       prompt,
@@ -481,7 +483,7 @@ export async function dispatchSecondOpinion(input: {
       processManager.start(
         sessionId,
         {
-          mode: "plan",
+          mode: "code",
           prompt,
           cwd: worktreePath,
           cliSessionId,
