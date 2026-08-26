@@ -27,6 +27,7 @@ import { DREAMING_MEMORY_SECTIONS } from "@/lib/workflow/dreaming-constants";
 import type { TelescopeCollectionResult } from "@/lib/telescope/collect";
 import { utf8Head } from "@/lib/routines/ci-autofix-limits";
 import type { RefinementSnapshot } from "@/lib/refinement/snapshot";
+import { neutralizeControlMarkup } from "./untrusted";
 
 // ---------------------------------------------------------------------------
 // Types — lightweight projections of the Drizzle schema rows
@@ -1292,7 +1293,9 @@ export function commentHistorySection(comments?: PromptComment[]): string {
       return;
     }
     const prefix = comment.author === "user" ? "**User:**" : "**Agent:**";
-    rendered.push(`${prefix}\n${comment.content.trim()}`);
+    // Comments are written by users and by other agent sessions; a comment
+    // body must not be able to pose as a control turn (lib/claude/untrusted).
+    rendered.push(`${prefix}\n${neutralizeControlMarkup(comment.content.trim())}`);
   });
 
   return `## Comment History\n\n${rendered.join("\n\n")}\n`;
@@ -2418,9 +2421,12 @@ function renderRefinementColumn(
   return `${lines.join("\n")}\n`;
 }
 
-/** Flattens multi-line ticket text to one bounded prompt line. */
+/**
+ * Flattens multi-line ticket text to one bounded prompt line, with control
+ * markup neutralised: ticket bodies are stored content like any other.
+ */
 function oneLine(value: string, max = 600): string {
-  const flat = value.replace(/\s+/g, " ").trim();
+  const flat = neutralizeControlMarkup(value).replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 

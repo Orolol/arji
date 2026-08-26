@@ -7,6 +7,12 @@
  */
 
 import { ticketImageAbsolutePaths } from "@/lib/uploads/ticket-image-paths";
+import {
+  UNTRUSTED_CONTENT_NOTICE,
+  fenceOnly,
+  fenceUntrusted,
+  neutralizeControlMarkup,
+} from "./untrusted";
 import { TICKET_MOVING_AGENT_TYPES } from "@/lib/agent-config/constants";
 import { REFINEMENT_AGENT_TYPE } from "@/lib/refinement/constants";
 
@@ -33,13 +39,20 @@ export function systemSection(systemPrompt: string | null | undefined): string {
   return `# System Instructions\n\n${systemPrompt.trim()}\n\n`;
 }
 
-/** Formats reference documents separated by `---`. */
+/**
+ * Formats reference documents separated by `---`.
+ *
+ * Document bodies come from uploads and repository scans — content Arij did
+ * not write — so each one is fenced and labelled as data.
+ */
 export function documentsSection(documents: PromptDocument[]): string {
   if (documents.length === 0) return "";
   const parts = documents.map(
-    (doc) => `### ${doc.name}\n\n${doc.contentMd.trim()}`,
+    (doc) => `### ${doc.name}\n\n${fenceOnly(doc.contentMd)}`,
   );
-  return `## Reference Documents\n\n${parts.join("\n\n---\n\n")}\n`;
+  // The notice covers the whole section rather than every document: it is
+  // the same statement each time, and repeating it is pure token cost.
+  return `## Reference Documents\n\n${UNTRUSTED_CONTENT_NOTICE}\n\n${parts.join("\n\n---\n\n")}\n`;
 }
 
 /** Lists existing epic titles for deduplication context. */
@@ -68,14 +81,21 @@ export function projectHeader(name: string): string {
   return `# Project: ${name}\n`;
 }
 
-/** Alias for `section("Project Description", ...)`. */
+/**
+ * Project description. Not fenced — descriptions are short and read better
+ * inline — but control markup is still neutralised: a description is user-
+ * and agent-writable text like any other stored field.
+ */
 export function descriptionSection(description: string | null | undefined): string {
-  return section("Project Description", description);
+  if (!description || description.trim().length === 0) return "";
+  return section("Project Description", neutralizeControlMarkup(description));
 }
 
-/** Alias for `section("Project Specification", ...)`. */
 export function specSection(spec: string | null | undefined): string {
-  return section("Project Specification", spec);
+  if (!spec || spec.trim().length === 0) return "";
+  // Fenced: the specification is rewritten by an agent session, so it is
+  // stored content, not prompt the builder wrote. See lib/claude/untrusted.ts.
+  return section("Project Specification", fenceUntrusted(spec));
 }
 
 /** Heading used for the learned project memory block in every agent prompt. */
@@ -90,7 +110,10 @@ export const PROJECT_MEMORY_HEADING =
  * (PROJECT_MEMORY_MAX_CHARS in lib/documents/memory-constants.ts).
  */
 export function memorySection(memory: string | null | undefined): string {
-  return section(PROJECT_MEMORY_HEADING, memory);
+  if (!memory || memory.trim().length === 0) return "";
+  // Fenced for the same reason as the spec: distillation and Dreaming are
+  // agent sessions, so the memory document is agent-written content.
+  return section(PROJECT_MEMORY_HEADING, fenceUntrusted(memory));
 }
 
 /** Heading under which a ticket's attached screenshots are listed. */
