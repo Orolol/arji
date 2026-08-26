@@ -21,6 +21,7 @@ import {
 import { deleteDependencyEdge } from "@/lib/dependencies/crud";
 import { logWorkflowDecision } from "@/lib/workflow/transition-service";
 import { tryExportArjiJson } from "@/lib/sync/export";
+import { recordRefinementChange } from "@/lib/refinement/registry";
 
 const bodySchema = z
   .object({
@@ -63,6 +64,13 @@ export async function POST(request: NextRequest) {
       actor: "agent",
       reason: `No longer depends on ${ticketLabel(dependsOn)} — ${body.reason}`,
       sessionId: auth.sessionId,
+    });
+    recordRefinementChange(auth, {
+      kind: "dependency_removed",
+      ticketId: epic.id,
+      label: ticketLabel(epic),
+      detail: `no longer depends on ${ticketLabel(dependsOn)}`,
+      reason: body.reason,
     });
     tryExportArjiJson(auth.projectId);
   }

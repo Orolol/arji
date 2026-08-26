@@ -15,6 +15,7 @@ import {
   ChevronDown,
   Clock,
   Layers,
+  ListOrdered,
   Loader2,
   Moon,
   Square,
@@ -76,6 +77,7 @@ const typeIcons: Record<UnifiedActivity["type"], typeof Hammer> = {
   memory: Brain,
   qa: ClipboardCheck,
   grading: ClipboardCheck,
+  refinement: ListOrdered,
 };
 
 export function AgentMonitor({

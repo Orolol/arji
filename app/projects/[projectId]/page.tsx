@@ -31,6 +31,7 @@ import { NightRunDialog } from "@/components/night/NightRunDialog";
 import { NightRunSummaryDialog } from "@/components/night/NightRunSummaryDialog";
 import { AutoModeDialog } from "@/components/auto-mode/AutoModeDialog";
 import { AutoModeToggle } from "@/components/auto-mode/AutoModeToggle";
+import { RefinementButton } from "@/components/kanban/RefinementButton";
 import { QuickCapture } from "@/components/kanban/QuickCapture";
 import type { KanbanEpicAgentActivity } from "@/lib/types/kanban";
 import { getActiveDetailTicketId, selectOnlyTicket } from "@/lib/kanban/selection";
@@ -179,6 +180,16 @@ export default function KanbanPage() {
       setToasts((t) => t.filter((toast) => toast.id !== id));
     }, 5000);
   }, []);
+
+  /**
+   * A refinement pass reshapes columns, priorities and dependency edges
+   * without emitting one event per write, so the board is reloaded once when
+   * the pass ends rather than trusting the incremental SSE stream.
+   */
+  const handleRefinementFinished = useCallback(() => {
+    setRefreshTrigger((t) => t + 1);
+    addToast("success", "Board refinement finished — see the notification for the summary");
+  }, [addToast]);
 
   const handleRetryBuild = useCallback(async (epicId: string) => {
     try {
@@ -538,6 +549,18 @@ export default function KanbanPage() {
                 projectId={projectId}
                 onOpen={() => setAutoModeDialogOpen(true)}
                 refreshTrigger={refreshTrigger}
+              />
+              <RefinementButton
+                projectId={projectId}
+                refreshTrigger={refreshTrigger}
+                onError={(message) => addToast("error", message)}
+                onStarted={() =>
+                  addToast(
+                    "success",
+                    "Agent Refinement started — re-passing Backlog and To do"
+                  )
+                }
+                onFinished={handleRefinementFinished}
               />
               <span className="ml-auto truncate text-[12.5px] text-muted-foreground">
                 {visibleCount} ticket{visibleCount === 1 ? "" : "s"} visible

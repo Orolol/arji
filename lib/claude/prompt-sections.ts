@@ -8,6 +8,7 @@
 
 import { ticketImageAbsolutePaths } from "@/lib/uploads/ticket-image-paths";
 import { TICKET_MOVING_AGENT_TYPES } from "@/lib/agent-config/constants";
+import { REFINEMENT_AGENT_TYPE } from "@/lib/refinement/constants";
 
 import type {
   PromptDocument,
@@ -244,5 +245,26 @@ export function arijToolsSection(agentType: string | null): string {
         "a substitute for the tool call."
       : "";
 
-  return section("Arij tools", base + buildExtra + reviewExtra + gradingExtra);
+  // A refinement pass is attached to the board, not to a ticket: its session
+  // row carries no epicId, so the base sentence about "the ticket this
+  // session was launched for" would describe something it does not have.
+  // Naming the board tools and the ticket_id requirement here keeps the tool
+  // surface honest for the one agent type that is project-scoped and still
+  // writes to tickets.
+  const refinementExtra =
+    agentType === REFINEMENT_AGENT_TYPE
+      ? " This session is attached to the project board, not to a single " +
+        "ticket, so every call must name its target with ticket_id — there " +
+        "is no default ticket to fall back on. Your board tools are " +
+        "set_priority, reorder_tickets, add_dependency, remove_dependency " +
+        "and promote_ticket; each one requires a `reason` that is recorded " +
+        "in the ticket's activity log. They work on Backlog and To do only, " +
+        "and update_ticket_status is not your channel for moving work — " +
+        "promote_ticket is."
+      : "";
+
+  return section(
+    "Arij tools",
+    base + buildExtra + reviewExtra + gradingExtra + refinementExtra,
+  );
 }

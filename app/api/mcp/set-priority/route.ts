@@ -19,9 +19,11 @@ import {
   refinementReasonSchema,
   requireAgentSessionToken,
   resolveRefinementTicket,
+  ticketLabel,
 } from "@/lib/mcp/refinement";
 import { logWorkflowDecision } from "@/lib/workflow/transition-service";
 import { tryExportArjiJson } from "@/lib/sync/export";
+import { recordRefinementChange } from "@/lib/refinement/registry";
 
 const bodySchema = z
   .object({
@@ -66,6 +68,14 @@ export async function POST(request: NextRequest) {
     actor: "agent",
     reason: `Priority ${oldPriority} → ${body.priority} — ${body.reason}`,
     sessionId: auth.sessionId,
+  });
+
+  recordRefinementChange(auth, {
+    kind: "priority",
+    ticketId: epic.id,
+    label: ticketLabel(epic),
+    detail: `priority ${oldPriority} → ${body.priority}`,
+    reason: body.reason,
   });
 
   // Every other mutating route mirrors the board into arji.json; a priority

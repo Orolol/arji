@@ -23,6 +23,7 @@ import { createDependencies } from "@/lib/dependencies/crud";
 import { CycleError } from "@/lib/dependencies/validation";
 import { logWorkflowDecision } from "@/lib/workflow/transition-service";
 import { tryExportArjiJson } from "@/lib/sync/export";
+import { recordRefinementChange } from "@/lib/refinement/registry";
 
 const bodySchema = z
   .object({
@@ -103,6 +104,14 @@ export async function POST(request: NextRequest) {
     actor: "agent",
     reason: `Now depends on ${ticketLabel(dependsOn)} — ${body.reason}`,
     sessionId: auth.sessionId,
+  });
+
+  recordRefinementChange(auth, {
+    kind: "dependency_added",
+    ticketId: epic.id,
+    label: ticketLabel(epic),
+    detail: `now depends on ${ticketLabel(dependsOn)}`,
+    reason: body.reason,
   });
 
   tryExportArjiJson(auth.projectId);

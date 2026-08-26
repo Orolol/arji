@@ -32,6 +32,7 @@ import {
 import { applyTransition } from "@/lib/workflow/transition-service";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import { tryExportArjiJson } from "@/lib/sync/export";
+import { recordRefinementChange } from "@/lib/refinement/registry";
 
 const bodySchema = z
   .object({
@@ -115,6 +116,16 @@ export async function POST(request: NextRequest) {
       })
       .run();
   }
+
+  recordRefinementChange(auth, {
+    kind: demoting ? "demoted" : "promoted",
+    ticketId: epic.id,
+    label: ticketLabel(epic),
+    detail: demoting
+      ? `sent back to Backlog — ${body.question ?? ""}`.trim()
+      : "promoted to To do",
+    reason: body.reason,
+  });
 
   tryExportArjiJson(auth.projectId);
 

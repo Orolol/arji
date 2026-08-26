@@ -25,6 +25,7 @@ import {
 import { reorderTickets, type ReorderItemInput } from "@/lib/workflow/reorder";
 import { logWorkflowDecision } from "@/lib/workflow/transition-service";
 import { tryExportArjiJson } from "@/lib/sync/export";
+import { recordRefinementChange } from "@/lib/refinement/registry";
 
 const bodySchema = z
   .object({
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest) {
 
   // One same-state decision entry per touched ticket — where the agent
   // moved it and why.
-  for (const item of items) {
+  items.forEach((item, index) => {
     logWorkflowDecision({
       projectId: auth.projectId,
       epicId: item.id,
@@ -114,7 +115,14 @@ export async function POST(request: NextRequest) {
       reason: `Reordered to position ${item.position} in ${item.status} — ${body.reason}`,
       sessionId: auth.sessionId,
     });
-  }
+    recordRefinementChange(auth, {
+      kind: "reordered",
+      ticketId: item.id,
+      label: labels[index],
+      detail: `${item.status} position ${item.position}`,
+      reason: body.reason,
+    });
+  });
 
   tryExportArjiJson(auth.projectId);
 
