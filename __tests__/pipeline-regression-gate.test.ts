@@ -62,6 +62,8 @@ interface GateHarnessConfig {
   assessments?: boolean[];
   maxFixCycles?: number;
   onParkRejectedTicket?: (sessionId: string | null, reason: string) => void;
+  /** Request indexes whose settled result should report failure (retry ladder). */
+  failRequestIndexes?: number[];
 }
 
 function runWithGate(config: GateHarnessConfig = {}) {
@@ -85,13 +87,14 @@ function runWithGate(config: GateHarnessConfig = {}) {
     maxSessions: 12,
     initialBuild: { sessionId: "s-build", settled: buildSettled },
     launchStage: async (request) => {
+      const requestIndex = requests.length;
       requests.push(request);
       const sessionId = `s-${request.stage}-${++stageIndex}`;
       return {
         sessionId,
         settled: Promise.resolve<PipelineStageResult>({
           sessionId,
-          success: true,
+          success: !config.failRequestIndexes?.includes(requestIndex),
           outcome: "answered",
           error: null,
         }),
@@ -168,6 +171,33 @@ describe("runPipeline — regression verify gate", () => {
     expect(h.seenSessionIds[0]).toBe("s-build");
     // The post-fix code stage is verified again before review.
     expect(h.seenSessionIds[1]).toBe("s-fix-1");
+  });
+
+  it("keeps the gate's failure payload on a retried fix attempt", async () => {
+    const h = runWithGate({
+      gateOutcomes: [
+        { ran: true, passed: false, result: failingCheck() },
+        { ran: true, passed: true },
+      ],
+      // The first fix dispatch dies mid-run; the ladder retries it once.
+      failRequestIndexes: [0],
+    });
+
+    const summary = await h.promise;
+
+    expect(summary.state).toBe("succeeded");
+    expect(h.requests.map((r) => [r.stage, r.attempt])).toEqual([
+      ["fix", 1],
+      ["fix", 2],
+      ["review", 1],
+    ]);
+    // The retry keeps the gate's exact red→green context so the agent
+    // still knows precisely what to repair (deliberate behaviour since the
+    // deterministic-verification wiring; not a verify-only concern).
+    expect(h.requests[0].verifyFailure).toMatchObject({
+      regression: { reason: "test_passes_on_base" },
+    });
+    expect(h.requests[1].verifyFailure).toEqual(h.requests[0].verifyFailure);
   });
 
   it("fails the run without review when the gate is red and no fix cycles remain, parking the ticket", async () => {

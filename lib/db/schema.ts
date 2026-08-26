@@ -637,6 +637,34 @@ export const qaReports = sqliteTable("qa_reports", {
   completedAt: text("completed_at"),
 });
 
+/** Deterministic, non-agent test/lint/build results for an epic worktree. */
+export const verifyReports = sqliteTable(
+  "verify_reports",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    epicId: text("epic_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "cascade" }),
+    agentSessionId: text("agent_session_id").references(
+      () => agentSessions.id,
+      { onDelete: "set null" }
+    ),
+    status: text("status").notNull(), // pass | fail
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at").notNull(),
+    commands: text("commands").notNull(), // JSON VerifyCommandResult[]
+  },
+  (table) => ({
+    epicFinishedIdx: index("verify_reports_epic_finished_idx").on(
+      table.epicId,
+      table.finishedAt
+    ),
+  })
+);
+
 export const qaPrompts = sqliteTable(
   "qa_prompts",
   {
@@ -658,6 +686,9 @@ export type NewGitHubIssue = typeof githubIssues.$inferInsert;
 
 export type QaReport = typeof qaReports.$inferSelect;
 export type NewQaReport = typeof qaReports.$inferInsert;
+
+export type VerifyReport = typeof verifyReports.$inferSelect;
+export type NewVerifyReport = typeof verifyReports.$inferInsert;
 
 export type QaPrompt = typeof qaPrompts.$inferSelect;
 export type NewQaPrompt = typeof qaPrompts.$inferInsert;

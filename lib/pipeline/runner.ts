@@ -2,6 +2,11 @@ import type { PipelineStage, PipelineState } from "./constants";
 import { PIPELINE_REASONS } from "./constants";
 import type { VerifyGate, VerifyGateOutcome } from "./verify";
 import type { RegressionReportPayload } from "@/lib/verify/regression-report";
+import type { VerificationResult } from "@/lib/verify/runner";
+import type {
+  VerificationReport,
+  VerifyCommandResult,
+} from "@/lib/verify/verify-constants";
 import type {
   GradingEntry,
   GradingFailureContext,
@@ -94,8 +99,30 @@ export interface PipelineStageRequest {
    * the precise failure reason. Null/absent for every other dispatch.
    */
   verifyFailure?: RegressionReportPayload | null;
+  /** Failed human-configured command whose tail must guide this fix stage. */
+  verificationFailure?: VerifyCommandResult;
+  /**
+   * Passing mechanical evidence appended to this review stage's prompt.
+   * Deliberately the client-safe report shape, not the runner's result: the
+   * prompt only projects `commands`, and Full Auto forwards a row it read
+   * back from `verify_reports` rather than one it just executed.
+   */
+  verificationReport?: VerificationReport;
   /** Missed acceptance criteria that caused this fix dispatch. */
   gradingFailure?: GradingFailureContext | null;
+}
+
+/** Result of resolving and, when configured, running deterministic checks. */
+export interface PipelineDeterministicVerificationOutcome {
+  /**
+   * False when verify_commands is absent/empty (the strict passthrough path)
+   * or when the checks could not apply; `skipReason` distinguishes the two
+   * so the operator sees why nothing ran.
+   */
+  ran: boolean;
+  result: VerificationResult | null;
+  /** Present when configured checks were skipped for an applicability fault. */
+  skipReason?: string;
 }
 
 /** Verdict of the blocking-findings assessment after a successful review. */
@@ -232,6 +259,14 @@ export interface RunPipelineOptions {
   /** Opt-in only. False/absent preserves the pre-grader pipeline exactly. */
   gradingEnabled?: boolean;
   /**
+   * Arij-owned test/lint/build commands run after every successful code stage.
+   * Reports are plain persisted records, never agent sessions, so invoking
+   * this callback cannot consume the session ceiling.
+   */
+  runDeterministicVerification?: (
+    lastCodeSessionId: string | null
+  ) => Promise<PipelineDeterministicVerificationOutcome>;
+  /**
    * Parks a gate-rejected bug back to in_progress (guarded review →
    * in_progress) before the run terminates on regression exhaustion — the
    * board counterpart of the terminal failure. Receives the last code
@@ -273,13 +308,18 @@ export async function runPipeline(
   let fixCycles = 0;
   let lastCodeSessionId: string | null = null;
   let reviewStageStartedAt = "";
-  let activeVerifyFailure: RegressionReportPayload | null = null;
-  let activeGradingFailure: GradingFailureContext | null = null;
   let handle: PipelineStageHandle = {
     sessionId: options.initialBuild.sessionId,
     settled: options.initialBuild.settled,
     escalatedToProvider: null,
   };
+  let currentRequest: PipelineStageRequest | null = null;
+  /**
+   * Passing mechanical evidence from the latest code stage. Grading sits
+   * between that stage and review, so the report has to outlive the dispatch
+   * that carried it in order to still reach the reviewer's prompt.
+   */
+  let lastVerificationReport: VerificationReport | undefined;
 
   const readStatusSafe = (sessionId: string): string | null => {
     try {
@@ -396,13 +436,7 @@ export async function runPipeline(
 
     stage = request.stage;
     stageAttempt = request.attempt;
-    if (request.stage === "fix") {
-      activeVerifyFailure = request.verifyFailure ?? null;
-      activeGradingFailure = request.gradingFailure ?? null;
-    } else {
-      activeVerifyFailure = null;
-      activeGradingFailure = null;
-    }
+    currentRequest = request;
     callbacks.onStageChange?.(
       RUNNING_STATE_BY_STAGE[request.stage],
       request.stage,
@@ -495,8 +529,18 @@ export async function runPipeline(
         fixCycle: fixCycles,
         previousAttemptSessionId: handle.sessionId,
         lastCodeSessionId,
-        verifyFailure: stage === "fix" ? activeVerifyFailure : null,
-        gradingFailure: stage === "fix" ? activeGradingFailure : null,
+        ...(currentRequest?.verifyFailure
+          ? { verifyFailure: currentRequest.verifyFailure }
+          : {}),
+        ...(currentRequest?.gradingFailure
+          ? { gradingFailure: currentRequest.gradingFailure }
+          : {}),
+        ...(currentRequest?.verificationFailure
+          ? { verificationFailure: currentRequest.verificationFailure }
+          : {}),
+        ...(currentRequest?.verificationReport
+          ? { verificationReport: currentRequest.verificationReport }
+          : {}),
       });
     }
 
@@ -575,11 +619,116 @@ export async function runPipeline(
       continue;
     }
 
-    // Success: mechanical verify gate (bug tickets), then code stages flow
-    // into review. The gate never throws for check outcomes; an unhandled
-    // rejection is an infrastructure crash and fails the run.
+    // Success: Arij-owned deterministic commands, then the bug-specific
+    // regression gate, then review. Neither mechanical check creates an
+    // agent session or enters sessionIds, so the hard ceiling remains an
+    // agent-session ceiling.
     if (stage === "build" || stage === "fix") {
       lastCodeSessionId = handle.sessionId ?? lastCodeSessionId;
+      let verificationReport: VerificationResult | undefined;
+      try {
+        if (options.runDeterministicVerification) {
+          const verification =
+            await options.runDeterministicVerification(lastCodeSessionId);
+          if (verification.ran) {
+            if (!verification.result) {
+              throw new Error("Verification ran without producing a report");
+            }
+
+            if (verification.result.status === "pass") {
+              verificationReport = verification.result;
+              callbacks.onTrace?.(
+                PIPELINE_REASONS.deterministicVerificationPassed(
+                  verification.result.commands.length
+                ),
+                handle.sessionId
+              );
+            } else {
+              const failedCommand =
+                verification.result.commands.find(
+                  (command) => command.exitCode !== 0
+                ) ?? verification.result.commands.at(-1);
+              if (!failedCommand) {
+                throw new Error(
+                  "Failed verification report contains no command result"
+                );
+              }
+
+              callbacks.onTrace?.(
+                PIPELINE_REASONS.deterministicVerificationFailed(
+                  failedCommand.name
+                ),
+                handle.sessionId
+              );
+
+              if (fixCycles >= options.maxFixCycles) {
+                callbacks.onTrace?.(
+                  PIPELINE_REASONS.failedDeterministicVerification(fixCycles),
+                  handle.sessionId
+                );
+                try {
+                  options.parkRejectedTicket?.(
+                    lastCodeSessionId,
+                    "Deterministic verification rejected the branch"
+                  );
+                } catch (parkError) {
+                  console.warn(
+                    "[pipeline] Failed to park verification-rejected ticket:",
+                    parkError instanceof Error
+                      ? parkError.message
+                      : parkError
+                  );
+                }
+                return finish(
+                  "failed",
+                  `deterministic verification still failing after ${fixCycles} fix cycles`
+                );
+              }
+
+              fixCycles += 1;
+              const summary = await dispatch({
+                stage: "fix",
+                fixCycle: fixCycles,
+                attempt: 1,
+                previousAttemptSessionId: null,
+                lastCodeSessionId,
+                verificationFailure: failedCommand,
+              });
+              if (summary) return summary;
+              continue;
+            }
+          } else if (verification.skipReason) {
+            callbacks.onTrace?.(
+              PIPELINE_REASONS.deterministicVerificationSkipped(
+                verification.skipReason
+              ),
+              handle.sessionId
+            );
+          }
+        }
+      } catch (error) {
+        console.warn(
+          "[pipeline] Deterministic verification crashed:",
+          error instanceof Error ? error.message : error
+        );
+        callbacks.onTrace?.(
+          PIPELINE_REASONS.failedDeterministicVerificationCrashed,
+          handle.sessionId
+        );
+        try {
+          options.parkRejectedTicket?.(
+            lastCodeSessionId,
+            "Deterministic verification crashed before it could verify the branch"
+          );
+        } catch (parkError) {
+          console.warn(
+            "[pipeline] Failed to park verification-crashed ticket:",
+            parkError instanceof Error ? parkError.message : parkError
+          );
+        }
+        return finish("failed", "deterministic verification crashed");
+      }
+
       let gate: VerifyGateOutcome = { ran: false, passed: null, result: null };
       try {
         if (options.runVerifyGate) {
@@ -685,12 +834,14 @@ export async function runPipeline(
         if (summary) return summary;
         continue;
       }
+      lastVerificationReport = verificationReport;
       const summary = await dispatch({
         stage: options.gradingEnabled ? "grading" : "review",
         attempt: 1,
         fixCycle: fixCycles,
         previousAttemptSessionId: null,
         lastCodeSessionId,
+        ...(verificationReport ? { verificationReport } : {}),
       });
       if (summary) return summary;
       continue;
@@ -706,6 +857,11 @@ export async function runPipeline(
           fixCycle: fixCycles,
           previousAttemptSessionId: null,
           lastCodeSessionId,
+          // Grading sits between the code stage and review, so the passing
+          // mechanical evidence has to survive the hop to reach the reviewer.
+          ...(lastVerificationReport
+            ? { verificationReport: lastVerificationReport }
+            : {}),
         });
         if (summary) return summary;
         continue;
@@ -734,6 +890,11 @@ export async function runPipeline(
           fixCycle: fixCycles,
           previousAttemptSessionId: null,
           lastCodeSessionId,
+          // Grading sits between the code stage and review, so the passing
+          // mechanical evidence has to survive the hop to reach the reviewer.
+          ...(lastVerificationReport
+            ? { verificationReport: lastVerificationReport }
+            : {}),
         });
         if (summary) return summary;
         continue;

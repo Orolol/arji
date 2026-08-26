@@ -238,6 +238,7 @@ export function startPipelineRun(input: StartPipelineRunInput): {
       settled: input.buildSettled,
     },
     launchStage: driver.launchStage,
+    runDeterministicVerification: driver.runDeterministicVerification,
     gradingEnabled: resolvePipelineGraderEnabled(input.projectId),
     runVerifyGate: createVerifyGate({
       projectId: input.projectId,

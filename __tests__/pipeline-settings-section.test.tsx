@@ -16,6 +16,7 @@ import {
   DEFAULT_BUG_REGRESSION_COMMAND,
   DEFAULT_TEST_FILE_PATTERNS,
 } from "@/lib/verify/regression-constants";
+import { DEFAULT_VERIFY_TIMEOUT_MS } from "@/lib/verify/verify-constants";
 
 let stored: Record<string, unknown> = {};
 let patchCalls: Array<Record<string, unknown>> = [];
@@ -230,6 +231,103 @@ describe("Settings page — bug regression command and patterns", () => {
         test_file_patterns: ["spec/**/*.rb", "test/**/*.rb"],
       })
     );
+  });
+});
+
+describe("Settings page — deterministic verification", () => {
+  it("renders the disabled defaults when no verify setting is stored", async () => {
+    render(<SettingsPage />);
+
+    const commands = (await waitFor(() =>
+      screen.getByTestId("verify-commands")
+    )) as HTMLTextAreaElement;
+    expect(JSON.parse(commands.value)).toEqual([]);
+    expect(screen.getByTestId("verify-timeout-ms")).toHaveValue(
+      DEFAULT_VERIFY_TIMEOUT_MS
+    );
+  });
+
+  it("hydrates PATCH-encoded commands and saves normalized settings", async () => {
+    stored = {
+      verify_commands: JSON.stringify([
+        { name: "test", command: "npm test" },
+      ]),
+      verify_timeout_ms: "45000",
+    };
+    render(<SettingsPage />);
+
+    const commands = (await waitFor(() =>
+      screen.getByTestId("verify-commands")
+    )) as HTMLTextAreaElement;
+    expect(JSON.parse(commands.value)).toEqual([
+      { name: "test", command: "npm test" },
+    ]);
+    expect(screen.getByTestId("verify-timeout-ms")).toHaveValue(45_000);
+
+    fireEvent.change(commands, {
+      target: {
+        value: JSON.stringify([
+          { name: "lint", command: "npm run lint" },
+          { name: "build", command: "npm run build" },
+        ]),
+      },
+    });
+    fireEvent.change(screen.getByTestId("verify-timeout-ms"), {
+      target: { value: "90000" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save verification settings" })
+    );
+
+    await waitFor(() =>
+      expect(patchCalls).toContainEqual({
+        verify_commands: [
+          { name: "lint", command: "npm run lint" },
+          { name: "build", command: "npm run build" },
+        ],
+        verify_timeout_ms: 90_000,
+      })
+    );
+  });
+
+  it("rejects malformed commands without PATCHing settings", async () => {
+    render(<SettingsPage />);
+    const commands = await waitFor(() => screen.getByTestId("verify-commands"));
+
+    fireEvent.change(commands, { target: { value: '[{"name":"test"}]' } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save verification settings" })
+    );
+
+    expect(
+      await screen.findByText(/must be a JSON array of objects/i)
+    ).toBeInTheDocument();
+    expect(patchCalls).toHaveLength(0);
+  });
+
+  it("puts the typed value back when the PATCH fails", async () => {
+    patchShouldFail = true;
+    render(<SettingsPage />);
+    const commands = (await waitFor(() =>
+      screen.getByTestId("verify-commands")
+    )) as HTMLTextAreaElement;
+
+    const typed = '[{"name":"test","command":"npm test"}]';
+    fireEvent.change(commands, { target: { value: typed } });
+    fireEvent.change(screen.getByTestId("verify-timeout-ms"), {
+      target: { value: "45000" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save verification settings" })
+    );
+
+    expect(
+      await screen.findByText(/Failed to save the pipeline settings/i)
+    ).toBeInTheDocument();
+    // Leaving the pretty-printed value on screen next to the error would
+    // imply a value that was never persisted.
+    expect(commands.value).toBe(typed);
+    expect(screen.getByTestId("verify-timeout-ms")).toHaveValue(45_000);
   });
 });
 

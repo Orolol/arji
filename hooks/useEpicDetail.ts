@@ -1,7 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { usePolling } from "@/hooks/usePolling";
+import { useProjectEvents } from "@/hooks/useProjectEvents";
+import {
+  isVerificationReport,
+  type VerificationReport,
+} from "@/lib/verify/verify-constants";
 import type { GradingReportData } from "@/lib/grading/report";
 import type { SessionArtifactSummary } from "@/lib/agent-sessions/artifact-view";
 
@@ -39,12 +44,19 @@ interface EpicDetail {
 export function useEpicDetail(projectId: string, epicId: string | null) {
   const [epic, setEpic] = useState<EpicDetail | null>(null);
   const [userStories, setUserStories] = useState<UserStory[]>([]);
+  const [verificationState, setVerificationState] = useState<{
+    epicId: string;
+    report: VerificationReport | null;
+  } | null>(null);
   const [gradingReport, setGradingReport] =
     useState<GradingReportData | null>(null);
   const [artifacts, setArtifacts] = useState<SessionArtifactSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
 
+  // The verification report carries up to VERIFY_OUTPUT_LIMIT_BYTES of tail
+  // per command, so it is fetched on load, on ticket:updated and after a
+  // manual run — never on the 5-second epic poll.
   const fetchData = useCallback(async () => {
     if (!epicId) return;
     try {
@@ -76,6 +88,27 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
     }
   }, [projectId, epicId]);
 
+  const verifyRequestSeq = useRef(0);
+  const fetchVerification = useCallback(async () => {
+    if (!epicId) return;
+    const requestId = ++verifyRequestSeq.current;
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/epics/${epicId}/verify`
+      );
+      const data = await res.json().catch(() => ({}));
+      // A slow in-flight response must not clobber a newer report that a
+      // manual run or a later fetch already installed.
+      if (requestId !== verifyRequestSeq.current) return;
+      setVerificationState({
+        epicId,
+        report: isVerificationReport(data.data) ? data.data : null,
+      });
+    } catch {
+      // Keep the last known report on transient failures.
+    }
+  }, [projectId, epicId]);
+
   // Initial load — shows loading spinner
   const loadData = useCallback(async () => {
     if (!epicId) return;
@@ -85,17 +118,40 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
   }, [epicId, fetchData]);
 
   useEffect(() => {
+    // This effect synchronizes the selected epic with its HTTP resources;
+    // loadData owns the intentional loading-state transition around them.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
-  }, [loadData]);
+    void fetchVerification();
+  }, [loadData, fetchVerification]);
 
   // Silent background poll — only when polling is enabled. The initial load
   // above already fetched, so skip the immediate call.
   usePolling(fetchData, 5000, polling && !!epicId, { immediate: false });
 
+  // Pipeline and manual runs announce finished reports via ticket:updated;
+  // refetching here keeps the panel current without polling the payload.
+  useProjectEvents(projectId, epicId ? {
+    "ticket:updated": (event) => {
+      if (event.epicId === epicId) void fetchVerification();
+    },
+  } : undefined);
+
   // refresh: silent one-shot fetch (no loading state)
   const refresh = useCallback(async () => {
-    await fetchData();
-  }, [fetchData]);
+    await Promise.all([fetchData(), fetchVerification()]);
+  }, [fetchData, fetchVerification]);
+
+  const setVerificationReport = useCallback(
+    (report: VerificationReport | null) => {
+      if (!epicId) return;
+      // A manual run's result is newer than any fetchVerification still in
+      // flight — invalidate them so a late response cannot clobber it.
+      verifyRequestSeq.current += 1;
+      setVerificationState({ epicId, report });
+    },
+    [epicId]
+  );
 
   const updateEpic = useCallback(
     async (updates: Partial<EpicDetail>): Promise<{ ok: boolean; error?: string }> => {
@@ -168,6 +224,10 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
   return {
     epic,
     userStories,
+    verificationReport:
+      verificationState?.epicId === epicId
+        ? verificationState.report
+        : null,
     gradingReport,
     artifacts,
     loading,
@@ -176,6 +236,7 @@ export function useEpicDetail(projectId: string, epicId: string | null) {
     updateUserStory,
     deleteUserStory,
     refresh,
+    setVerificationReport,
     setPolling,
   };
 }

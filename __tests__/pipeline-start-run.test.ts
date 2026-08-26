@@ -8,6 +8,10 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
+import type {
+  PipelineDeterministicVerificationOutcome,
+  PipelineStageResult,
+} from "@/lib/pipeline/runner";
 
 const driverMocks = vi.hoisted(() => ({
   launchStage: vi.fn(),
@@ -18,6 +22,12 @@ const driverMocks = vi.hoisted(() => ({
     conflictSessionId: null as string | null,
     reviewTargetStatus: "review" as string | null,
   })),
+  runDeterministicVerification: vi.fn(
+    async (): Promise<PipelineDeterministicVerificationOutcome> => ({
+      ran: false,
+      result: null,
+    })
+  ),
   runForensic: vi.fn(),
 }));
 
@@ -34,6 +44,7 @@ vi.mock("@/lib/pipeline/stages", () => ({
     assessGrading: driverMocks.assessGrading,
     readSessionStatus: driverMocks.readSessionStatus,
     checkGuards: driverMocks.checkGuards,
+    runDeterministicVerification: driverMocks.runDeterministicVerification,
   })),
 }));
 
@@ -61,8 +72,6 @@ const {
 const { pipelineMaxAttemptsSettingKey } = await import(
   "@/lib/pipeline/constants"
 );
-import type { PipelineStageResult } from "@/lib/pipeline/runner";
-
 let counter = 0;
 
 async function flushBackground() {
@@ -113,6 +122,10 @@ beforeEach(() => {
   driverMocks.checkGuards.mockReturnValue({
     conflictSessionId: null,
     reviewTargetStatus: "review",
+  });
+  driverMocks.runDeterministicVerification.mockResolvedValue({
+    ran: false,
+    result: null,
   });
 });
 
@@ -185,6 +198,72 @@ describe("startPipelineRun", () => {
     // The stage session ids anchor the trace lines.
     expect(activity[0].sessionId).toBe("s-build");
     expect(activity[1].sessionId).toBe("s-review");
+  });
+
+  it("persists every deterministic verification trace as system activity", async () => {
+    const { projectId, epicId } = seed();
+    driverMocks.runDeterministicVerification.mockResolvedValueOnce({
+      ran: true,
+      result: {
+        id: "verify-system-activity",
+        projectId,
+        epicId,
+        agentSessionId: "s-build",
+        persisted: true,
+        status: "pass",
+        startedAt: "2026-08-25T10:00:00.000Z",
+        finishedAt: "2026-08-25T10:00:01.000Z",
+        commands: [
+          {
+            name: "test",
+            command: "npm test",
+            exitCode: 0,
+            durationMs: 1_000,
+            tail: "ok",
+          },
+        ],
+      },
+    });
+    driverMocks.launchStage.mockResolvedValueOnce(stageHandle("s-review"));
+    driverMocks.assessReview.mockResolvedValueOnce({
+      blocking: false,
+      blockingCount: 0,
+      agentCommentCount: 1,
+      usedProseFallback: false,
+    });
+
+    startPipelineRun({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildSessionId: "s-build",
+      buildProvider: "claude-code",
+      buildNamedAgentId: null,
+      buildSettled: Promise.resolve({
+        sessionId: "s-build",
+        success: true,
+        outcome: "answered",
+        error: null,
+      }),
+    });
+    await flushBackground();
+
+    const verifyActivity = db
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, epicId))
+      .all()
+      .find(
+        (entry) =>
+          entry.reason === PIPELINE_REASONS.deterministicVerificationPassed(1)
+      );
+    expect(verifyActivity).toMatchObject({
+      actor: "system",
+      fromStatus: "in_progress",
+      toStatus: "in_progress",
+      sessionId: "s-build",
+    });
   });
 
   it("honours the per-project attempts override and hands the dead session to forensic", async () => {

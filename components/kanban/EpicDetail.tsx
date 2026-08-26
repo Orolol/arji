@@ -45,6 +45,7 @@ import { EpicGitSection } from "./epic-detail/EpicGitSection";
 import { EpicUserStoriesSection } from "./epic-detail/EpicUserStoriesSection";
 import { TicketImagesSection } from "./epic-detail/TicketImagesSection";
 import { WhatTheAgentDid } from "./epic-detail/WhatTheAgentDid";
+import { VerificationReportSection } from "./epic-detail/VerificationReportSection";
 import { SessionArtifactGallery } from "./epic-detail/SessionArtifactGallery";
 import { formatCostUsd } from "@/lib/utils/format-usage";
 import { formatElapsed } from "@/lib/utils/format-elapsed";
@@ -134,6 +135,7 @@ export function EpicDetail({
   const {
     epic,
     userStories,
+    verificationReport,
     gradingReport,
     artifacts,
     loading,
@@ -142,6 +144,7 @@ export function EpicDetail({
     updateUserStory,
     deleteUserStory,
     refresh,
+    setVerificationReport,
     setPolling,
   } = useEpicDetail(projectId, epicId);
 
@@ -671,6 +674,15 @@ export function EpicDetail({
                 images={epic.images}
                 labelClassName={SECTION_LABEL_CLASS}
               />
+
+              {epicId && (
+                <VerificationReportSection
+                  projectId={projectId}
+                  epicId={epicId}
+                  report={verificationReport}
+                  onReportChange={setVerificationReport}
+                />
+              )}
 
               <WhatTheAgentDid
                 projectId={projectId}

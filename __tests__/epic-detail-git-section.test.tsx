@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { EpicDetail } from "@/components/kanban/EpicDetail";
 import { EpicGitSection } from "@/components/kanban/epic-detail/EpicGitSection";
+import type { VerificationReport } from "@/lib/verify/verify-constants";
 
 // Radix tooltips need a provider + hover to reveal their content; render the
 // content inline instead so the freshness tooltip copy is directly assertable.
@@ -89,7 +90,10 @@ const baseEpic = {
 
 const mockAddUserStory = vi.fn();
 
-function setupHooks(epicOverrides?: Partial<typeof baseEpic>) {
+function setupHooks(
+  epicOverrides?: Partial<typeof baseEpic>,
+  verificationReport: VerificationReport | null = null,
+) {
   mockUseEpicDetail.mockReturnValue({
     epic: { ...baseEpic, ...epicOverrides },
     userStories: [
@@ -104,12 +108,14 @@ function setupHooks(epicOverrides?: Partial<typeof baseEpic>) {
         createdAt: "2026-01-01",
       },
     ],
+    verificationReport,
     loading: false,
     updateEpic: vi.fn(),
     addUserStory: mockAddUserStory,
     updateUserStory: vi.fn(),
     deleteUserStory: vi.fn(),
     refresh: vi.fn(),
+    setVerificationReport: vi.fn(),
     setPolling: vi.fn(),
   });
   mockUseTicketComments.mockReturnValue({
@@ -201,6 +207,36 @@ describe("EpicDetail git section", () => {
     expect(
       screen.queryByRole("button", { name: "Merge into main" }),
     ).toBeNull();
+  });
+
+  it("renders the latest deterministic verification report in EpicDetail", () => {
+    setupHooks(undefined, {
+      id: "verify-1",
+      projectId: "proj-1",
+      epicId: "epic-1",
+      agentSessionId: null,
+      status: "fail",
+      startedAt: "2026-08-25T12:00:00.000Z",
+      finishedAt: "2026-08-25T12:00:01.000Z",
+      commands: [
+        {
+          name: "test",
+          command: "npm test",
+          exitCode: 1,
+          durationMs: 1_000,
+          tail: "one regression failed",
+        },
+      ],
+    });
+
+    renderSubject();
+
+    expect(screen.getByTestId("verification-report")).toHaveTextContent(
+      "Checks failed"
+    );
+    expect(screen.getByTestId("verification-command-test")).toHaveTextContent(
+      "FAIL"
+    );
   });
 
   it("posts to the merge endpoint and closes on success", async () => {

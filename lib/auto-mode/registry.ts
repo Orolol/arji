@@ -111,6 +111,14 @@ interface AutoModeProjectState {
    */
   mergeDeferredUntil: Map<string, string>;
   /**
+   * epicId → how many consecutive sweeps the deterministic-verification gate
+   * has refused this epic's merge. A refusal is not a failure (nothing ran,
+   * nothing broke), so it must not feed the parking ladder — but an epic that
+   * can never satisfy the gate is exactly the state a standing loop has to
+   * surface, so the count drives one notification instead of silence.
+   */
+  mergeGateRefusals: Map<string, number>;
+  /**
    * Last stable reason why the pre-merge second-opinion gate could not be
    * dispatched. The supervisor still probes on every sweep so installing a
    * compatible provider takes effect immediately, but it writes the same
@@ -129,6 +137,7 @@ function emptyState(): AutoModeProjectState {
     sweeping: false,
     merging: new Set(),
     mergeDeferredUntil: new Map(),
+    mergeGateRefusals: new Map(),
     secondOpinionSkipReasons: new Map(),
   };
 }
@@ -317,6 +326,22 @@ export class AutoModeRegistry {
 
   clearMergeDeferral(projectId: string, epicId: string): void {
     this.states.get(projectId)?.mergeDeferredUntil.delete(epicId);
+  }
+
+  /**
+   * Records one merge refused by the deterministic-verification gate and
+   * returns the new consecutive count.
+   */
+  recordMergeGateRefusal(projectId: string, epicId: string): number {
+    const state = this.stateFor(projectId);
+    const next = (state.mergeGateRefusals.get(epicId) ?? 0) + 1;
+    state.mergeGateRefusals.set(epicId, next);
+    return next;
+  }
+
+  /** Forgets an epic's refusal streak (it merged, or the gate is satisfied). */
+  clearMergeGateRefusals(projectId: string, epicId: string): void {
+    this.states.get(projectId)?.mergeGateRefusals.delete(epicId);
   }
 
   /** Epics whose merge deferral has not expired yet. */

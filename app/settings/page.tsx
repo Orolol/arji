@@ -37,6 +37,14 @@ import {
   parseBugRegressionSetting,
 } from "@/lib/verify/regression-constants";
 import {
+  DEFAULT_VERIFY_TIMEOUT_MS,
+  VERIFY_COMMANDS_SETTING_KEY,
+  VERIFY_TIMEOUT_MS_SETTING_KEY,
+  parseVerifyCommands,
+  parseVerifyTimeoutMs,
+  resolveVerifyConfig,
+} from "@/lib/verify/verify-constants";
+import {
   OPENAI_API_KEY_SETTING_KEY,
   OPENAI_BASE_URL_SETTING_KEY,
   OPENAI_MODEL_SETTING_KEY,
@@ -125,6 +133,10 @@ export default function SettingsPage() {
   );
   const [testFilePatterns, setTestFilePatterns] = useState(
     DEFAULT_TEST_FILE_PATTERNS.join(", ")
+  );
+  const [verifyCommandsJson, setVerifyCommandsJson] = useState("[]");
+  const [verifyTimeoutMs, setVerifyTimeoutMs] = useState(
+    String(DEFAULT_VERIFY_TIMEOUT_MS)
   );
   const [savingPipeline, setSavingPipeline] = useState(false);
   const [pipelineMessage, setPipelineMessage] = useState<string | null>(null);
@@ -217,6 +229,9 @@ export default function SettingsPage() {
             d.data?.[PIPELINE_MAX_FIX_CYCLES_SETTING_KEY]
           ) ?? DEFAULT_PIPELINE_MAX_FIX_CYCLES
         );
+        const verifyConfig = resolveVerifyConfig(d.data);
+        setVerifyCommandsJson(JSON.stringify(verifyConfig.commands, null, 2));
+        setVerifyTimeoutMs(String(verifyConfig.timeoutMs));
         // Bug regression gate: tri-state, default OFF — absent key means
         // every existing ticket behaves as before.
         setBugRegressionCheck(
@@ -340,6 +355,45 @@ export default function SettingsPage() {
       next === 0
         ? "Fix cycles disabled: blocking findings end the run immediately."
         : `Pipelines now run up to ${next} review → fix cycle${next === 1 ? "" : "s"}.`
+    );
+  }
+
+  async function handleSaveVerifySettings() {
+    const commands = parseVerifyCommands(verifyCommandsJson);
+    if (commands === null) {
+      setPipelineMessage(
+        "Verification commands must be a JSON array of objects with non-empty name and command fields."
+      );
+      return;
+    }
+
+    const timeoutMs = parseVerifyTimeoutMs(verifyTimeoutMs);
+    if (timeoutMs === null) {
+      setPipelineMessage(
+        "Verification timeout must be a positive number of milliseconds."
+      );
+      return;
+    }
+
+    // Show the normalised value immediately, but keep what the user typed so
+    // a failed PATCH can put it back: reformatted JSON left on screen next to
+    // "Failed to save" would imply a value that was never persisted.
+    const previousCommands = verifyCommandsJson;
+    const previousTimeout = verifyTimeoutMs;
+    setVerifyCommandsJson(JSON.stringify(commands, null, 2));
+    setVerifyTimeoutMs(String(timeoutMs));
+    await savePipelineSettings(
+      {
+        [VERIFY_COMMANDS_SETTING_KEY]: commands,
+        [VERIFY_TIMEOUT_MS_SETTING_KEY]: timeoutMs,
+      },
+      () => {
+        setVerifyCommandsJson(previousCommands);
+        setVerifyTimeoutMs(previousTimeout);
+      },
+      commands.length === 0
+        ? "Deterministic verification disabled."
+        : `${commands.length} verification command${commands.length === 1 ? "" : "s"} saved.`
     );
   }
 
@@ -1145,6 +1199,67 @@ export default function SettingsPage() {
               fixing them).
             </p>
           </div>
+        </div>
+
+        <div
+          className="space-y-3 border-t border-border pt-3"
+          data-testid="verify-settings"
+        >
+          <div>
+            <h3 className="text-sm font-medium">Deterministic verification</h3>
+            <p className="text-xs text-muted-foreground">
+              Arij runs these human-configured commands sequentially in the
+              epic worktree after a successful build. An empty array keeps the
+              stage disabled.
+            </p>
+          </div>
+          <div className="space-y-1">
+            <label
+              htmlFor="verify-commands"
+              className="block text-sm font-medium"
+            >
+              Verification commands (JSON)
+            </label>
+            <Textarea
+              id="verify-commands"
+              data-testid="verify-commands"
+              className="font-mono text-xs"
+              rows={6}
+              value={verifyCommandsJson}
+              disabled={savingPipeline}
+              onChange={(event) => setVerifyCommandsJson(event.target.value)}
+              spellCheck={false}
+            />
+            <p className="text-xs text-muted-foreground">
+              Example: [{`{"name":"test","command":"npm test"}`}]
+            </p>
+          </div>
+          <div className="space-y-1 sm:max-w-xs">
+            <label
+              htmlFor="verify-timeout-ms"
+              className="block text-sm font-medium"
+            >
+              Timeout per command (ms)
+            </label>
+            <Input
+              id="verify-timeout-ms"
+              data-testid="verify-timeout-ms"
+              type="number"
+              min={1}
+              value={verifyTimeoutMs}
+              disabled={savingPipeline}
+              onChange={(event) => setVerifyTimeoutMs(event.target.value)}
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={savingPipeline}
+            onClick={handleSaveVerifySettings}
+          >
+            Save verification settings
+          </Button>
         </div>
 
         <label className="flex items-start gap-2 text-sm cursor-pointer">

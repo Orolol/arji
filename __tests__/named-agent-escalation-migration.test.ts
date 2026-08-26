@@ -34,7 +34,7 @@ function withDb<T>(fn: (conn: Database.Database) => T): T {
 }
 
 describe("0039_named_agent_escalation", () => {
-  it("is a hand-written, last journal migration with a unique increasing timestamp", () => {
+  it("is a hand-written journal migration with a unique increasing timestamp", () => {
     const sql = fs.readFileSync(
       path.join(MIGRATIONS_FOLDER, `${MIGRATION_TAG}.sql`),
       "utf-8"
@@ -45,7 +45,14 @@ describe("0039_named_agent_escalation", () => {
 
     const entry = journal.entries.find((candidate) => candidate.tag === MIGRATION_TAG);
     expect(entry).toMatchObject({ idx: 38, when: 1786713600000 });
-    expect(journal.entries.at(-1)?.tag).toBe(MIGRATION_TAG);
+    // Appended, never spliced in: every entry recorded after it must carry a
+    // strictly later timestamp, or drizzle would skip one of them.
+    const position = journal.entries.findIndex(
+      (candidate) => candidate.tag === MIGRATION_TAG
+    );
+    for (const later of journal.entries.slice(position + 1)) {
+      expect(later.when).toBeGreaterThan(entry!.when);
+    }
     expect(new Set(journal.entries.map((candidate) => candidate.when)).size).toBe(
       journal.entries.length
     );

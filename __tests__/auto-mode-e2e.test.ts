@@ -96,6 +96,7 @@ const {
   reviewComments,
   notifications,
   settings,
+  verifyReports,
 } = await import("@/lib/db/schema");
 const {
   sweepProject,
@@ -391,6 +392,7 @@ beforeEach(() => {
   db.delete(epics).run();
   db.delete(projects).run();
   db.delete(settings).run();
+  db.delete(verifyReports).run();
   autoModeRegistry.resetAll();
   dispatched.length = 0;
   gitMocks.mergeWorktree.mockReset();
@@ -510,6 +512,151 @@ describe("re-review guard", () => {
     expect(s4.merged).toEqual([]);
     expect(s4.reviewsDispatched).toEqual([]);
     expect(reviewSessionsFor("e1")).toHaveLength(1);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 3b. Deterministic verification end to end                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Full Auto does not run lib/pipeline/runner.ts, so the pipeline's
+ * build → verify → review ordering is not inherited: the engine runs the
+ * checks itself in `reconcileInFlight`, and lib/auto-mode/merge.ts refuses to
+ * merge without a fresh PASSING report.
+ *
+ * Those two halves have to be tested TOGETHER. Tested apart, a gate nothing
+ * can satisfy still looks correct: it refuses, it logs, it does not park —
+ * and the epic never completes. These sweeps are the only place that shows
+ * the loop closing.
+ */
+describe("deterministic verification", () => {
+  function configureVerification(): void {
+    db.insert(settings)
+      .values({
+        key: "verify_commands",
+        value: JSON.stringify([{ name: "test", command: "npm test" }]),
+      })
+      .run();
+  }
+
+  /**
+   * Stands in for lib/verify/runner.ts (which would spawn `npm test`) while
+   * writing the same `verify_reports` row the real one persists — the row the
+   * merge gate reads.
+   */
+  function verifier(status: "pass" | "fail") {
+    return async (input: {
+      projectId: string;
+      epicId: string;
+      sessionId: string;
+    }) => {
+      const commands = [
+        {
+          name: "test",
+          command: "npm test",
+          exitCode: status === "pass" ? 0 : 1,
+          durationMs: 12,
+          tail: status === "pass" ? "ok" : "FAIL __tests__/x.test.ts",
+        },
+      ];
+      const report = {
+        id: `vr-${(seq += 1)}`,
+        projectId: input.projectId,
+        epicId: input.epicId,
+        agentSessionId: input.sessionId,
+        status,
+        startedAt: tick(),
+        finishedAt: tick(),
+        commands,
+      };
+      db.insert(verifyReports)
+        .values({ ...report, commands: JSON.stringify(commands) })
+        .run();
+      return { ran: true, result: report };
+    };
+  }
+
+  it("builds, verifies, reviews and merges an epic with verification configured", async () => {
+    arm(1, 1);
+    configureVerification();
+    addEpic("e1", "todo");
+    const withVerify = deps({ runDeterministicVerification: verifier("pass") });
+
+    const s1 = await sweepProject(PROJECT_ID, withVerify);
+    completeBuild(s1.buildsDispatched[0]);
+
+    // Reconciling the delivered build is what runs the checks.
+    const s2 = await sweepProject(PROJECT_ID, withVerify);
+    expect(db.select().from(verifyReports).all()).toHaveLength(1);
+    expect(s2.reviewsDispatched).toHaveLength(1);
+    completeReviewPass(s2.reviewsDispatched[0]);
+
+    const s3 = await sweepProject(PROJECT_ID, withVerify);
+    expect(s3.merged).toEqual(["e1"]);
+    expect(epicStatus("e1")).toBe("done");
+  });
+
+  it("never merges an epic whose checks fail, and rebuilds it instead", async () => {
+    arm(1, 1);
+    configureVerification();
+    addEpic("e1", "todo");
+    const withVerify = deps({ runDeterministicVerification: verifier("fail") });
+
+    const s1 = await sweepProject(PROJECT_ID, withVerify);
+    completeBuild(s1.buildsDispatched[0]);
+    expect(epicStatus("e1")).toBe("review");
+
+    // Red branch: back to In Progress, no review dispatched, nothing merged.
+    const s2 = await sweepProject(PROJECT_ID, withVerify);
+    expect(epicStatus("e1")).toBe("in_progress");
+    expect(s2.reviewsDispatched).toEqual([]);
+    expect(s2.merged).toEqual([]);
+    expect(gitMocks.mergeWorktree).not.toHaveBeenCalled();
+    // And the loop closes: the same sweep re-dispatches a build.
+    expect(s2.buildsDispatched).toHaveLength(1);
+  });
+
+  it("holds back an epic it cannot verify instead of logging a refusal every sweep", async () => {
+    arm(1, 1);
+    configureVerification();
+    addEpic("e1", "review", 0);
+    db.insert(agentSessions)
+      .values({
+        id: "prior-build",
+        projectId: PROJECT_ID,
+        epicId: "e1",
+        status: "completed",
+        agentType: "build",
+        outcome: "answered",
+        createdAt: tick(),
+        endedAt: tick(),
+      })
+      .run();
+    db.update(epics).set({ branchName: "feature/e1" }).run();
+
+    const s1 = await sweepProject(PROJECT_ID, deps());
+    completeReviewPass(s1.reviewsDispatched[0]);
+
+    // An epic built before verification existed has no report, and this mode
+    // never produced one for it. The merge is refused — once — and deferred.
+    const s2 = await sweepProject(PROJECT_ID, deps());
+    expect(s2.merged).toEqual([]);
+    expect(gitMocks.mergeWorktree).not.toHaveBeenCalled();
+    const refusals = () =>
+      db
+        .select()
+        .from(ticketActivityLog)
+        .all()
+        .filter((row) => (row.reason ?? "").includes("skipped merge")).length;
+    expect(refusals()).toBe(1);
+
+    // The next sweeps must not re-refuse: without the backoff this is one
+    // activity row every 15 seconds, forever.
+    await sweepProject(PROJECT_ID, deps());
+    await sweepProject(PROJECT_ID, deps());
+    expect(refusals()).toBe(1);
+    expect(autoModeRegistry.isParked(PROJECT_ID, "e1")).toBe(false);
   });
 });
 

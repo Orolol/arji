@@ -219,6 +219,18 @@ export const PIPELINE_REASONS = {
    */
   failedTicketNotInReview:
     "Pipeline failed: ticket left review before the review stage",
+  /** One trace entry for every configured deterministic verification run. */
+  deterministicVerificationPassed: (commandCount: number) =>
+    `Pipeline verify: deterministic checks passed (${commandCount} command${commandCount === 1 ? "" : "s"})`,
+  deterministicVerificationFailed: (commandName: string) =>
+    `Pipeline verify: deterministic check failed (${commandName})`,
+  /** Configured checks could not run (worktree pruned, no repo, …). */
+  deterministicVerificationSkipped: (reason: string) =>
+    `Pipeline verify: deterministic checks skipped — ${reason}`,
+  failedDeterministicVerification: (cycles: number) =>
+    `Pipeline failed: deterministic verification still failing after ${cycles} fix cycles`,
+  failedDeterministicVerificationCrashed:
+    "Pipeline failed: deterministic verification crashed",
   /**
    * Mechanical regression gate (bug tickets) rejected the branch; the run
    * enters a fix cycle with the exact reason injected into the prompt.

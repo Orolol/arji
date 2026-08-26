@@ -38,11 +38,20 @@ import {
 } from "@/lib/git/manager";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { applyTransition } from "@/lib/workflow/transition-service";
+import { resolveVerifyConfigForProject } from "@/lib/verify/config";
 import { logTransition } from "@/lib/workflow/log";
-import { createAutoModeMergeParkedNotification } from "@/lib/notifications/create";
+import {
+  createAutoModeMergeBlockedNotification,
+  createAutoModeMergeParkedNotification,
+} from "@/lib/notifications/create";
+import { createPipelineStageDriver } from "@/lib/pipeline/stages";
+import { getRunningSessionForTarget } from "@/lib/agents/concurrency";
+import { assessEpicVerification } from "@/lib/verify/freshness";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import {
   AUTO_MERGE_CONFLICT_BACKOFF_MS,
+  AUTO_MERGE_VERIFICATION_BACKOFF_MS,
+  AUTO_MERGE_VERIFICATION_NOTIFY_AFTER,
   AUTO_MODE_REASONS,
   autoRunId,
 } from "./constants";
@@ -105,6 +114,16 @@ export interface TryAutoMergeOptions {
    * true so a direct call still self-heals.
    */
   dispatchConflictAgent?: boolean;
+  /**
+   * Whether this call may RUN the deterministic checks when the epic has no
+   * usable report, rather than only asking for one.
+   *
+   * Off by default because the checks are real child processes and the caller
+   * owns the budget: the sweep allows one command list per tick across
+   * reconcile and merge combined, so a project with three merge candidates
+   * and no evidence does not hold the per-project mutex for an hour.
+   */
+  verifyIfMissing?: boolean;
 }
 
 const MERGE_ALLOWED_TOOLS = ["Edit", "Write", "Bash", "Read", "Glob", "Grep"];
@@ -281,6 +300,128 @@ export async function tryAutoMerge(
   }
 }
 
+/**
+ * Refusal reason when deterministic verification is configured but cannot
+ * vouch for this epic's branch, or null when the merge may proceed.
+ *
+ * The comparison itself lives in lib/verify/freshness.ts, shared with the
+ * review dispatch that forwards a passing report to the reviewer — the two
+ * must never disagree about what "fresh" means. Verification not configured
+ * is deliberately silent here: the feature is off, not unsatisfied.
+ */
+function verificationGateReason(
+  projectId: string,
+  epicId: string
+): string | null {
+  if (!resolveVerifyConfigForProject(projectId).enabled) return null;
+  return assessEpicVerification(projectId, epicId).problem?.reason ?? null;
+}
+
+/**
+ * Runs Arij's checks for an epic whose evidence is absent or stale, then
+ * re-asks the gate. Returns the surviving refusal, or null to proceed.
+ *
+ * `runDeterministicVerification` is wired into the pipeline and into Full
+ * Auto's reconcile, so an epic BUILT BY EITHER has a report. An epic that
+ * arrived in Review any other way — a manual build with the (default-off)
+ * pipeline disabled, or one already sitting there when `verify_commands` was
+ * first configured — has no producer at all, and an ask-only gate would
+ * refuse it forever. Running the checks here is what the conflict retry
+ * already does; this is the same three lines for the ordinary path.
+ */
+async function verifyThenReask(
+  projectId: string,
+  epicId: string,
+  sessionId: string
+): Promise<string | null> {
+  // Same rule as the engine's reconcile: never spawn commands into a
+  // worktree an agent is live in.
+  const active = getRunningSessionForTarget({ scope: "epic", projectId, epicId });
+  if (active) return "another agent is working in this epic's worktree";
+
+  let skipReason: string | undefined;
+  try {
+    const outcome = await createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+      batchRunId: autoRunId(projectId),
+    }).runDeterministicVerification(sessionId);
+    skipReason = outcome.skipReason;
+  } catch (error) {
+    // Not rethrown: the gate below is what decides, and it reads persisted
+    // evidence rather than this call's return value. A crash simply leaves
+    // the newest report stale, which the gate reports as such — but the
+    // message is kept, because "the report predates the merge session" is
+    // two steps removed from the cause the caller can act on.
+    skipReason = error instanceof Error ? error.message : String(error);
+    console.warn(
+      "[auto-mode/merge] Deterministic verification crashed:",
+      skipReason
+    );
+  }
+
+  const gateReason = verificationGateReason(projectId, epicId);
+  if (!gateReason) return null;
+  return skipReason ? `${gateReason} (${skipReason})` : gateReason;
+}
+
+/**
+ * Logs, defers and (eventually) surfaces a merge the verification gate
+ * refused.
+ *
+ * The deferral is the important part. `selectMergeCandidates` re-selects a
+ * refused epic on every sweep and `logTransition` inserts unconditionally, so
+ * without a backoff a single unverifiable epic writes an activity row every
+ * 15 seconds — thousands a day into the very feed the verification traces
+ * share — and never makes progress. Deferring holds the epic back until the
+ * window expires, which makes the refusal one row per window; a fresh passing
+ * report is picked up on the next attempt after it.
+ *
+ * The epic is NOT parked: parking is for failures, and a refusal means the
+ * evidence is missing, not that anything broke.
+ */
+function refuseUnverifiedMerge(input: {
+  projectId: string;
+  epicId: string;
+  fromStatus: KanbanStatus;
+  reason: string;
+}): AutoMergeOutcome {
+  const { projectId, epicId, fromStatus, reason } = input;
+  logTransition({
+    projectId,
+    epicId,
+    fromStatus,
+    toStatus: fromStatus,
+    actor: "system",
+    reason: AUTO_MODE_REASONS.mergeRefused(reason),
+  });
+  autoModeRegistry.deferMerge(
+    projectId,
+    epicId,
+    new Date(Date.now() + AUTO_MERGE_VERIFICATION_BACKOFF_MS).toISOString()
+  );
+
+  // Exactly once, on the Nth consecutive refusal: an epic that can never
+  // satisfy the gate is the state a standing loop must surface, and a skip
+  // raises nothing on its own.
+  const refusals = autoModeRegistry.recordMergeGateRefusal(projectId, epicId);
+  if (refusals === AUTO_MERGE_VERIFICATION_NOTIFY_AFTER) {
+    try {
+      createAutoModeMergeBlockedNotification({ projectId, epicId, error: reason });
+    } catch (notifyError) {
+      console.warn(
+        "[auto-mode/merge] Failed to create the blocked-merge notification:",
+        (notifyError as Error).message
+      );
+    }
+  }
+
+  return { status: "skipped", reason, sessionId: null };
+}
+
 async function runAutoMerge(
   projectId: string,
   epicId: string,
@@ -312,6 +453,38 @@ async function runAutoMerge(
   }
 
   const fromStatus = (epic.status ?? "review") as KanbanStatus;
+
+  // Mechanical-evidence gate. With verify_commands configured, the mode
+  // that merges to the default branch unattended must not do so on agent
+  // prose alone: require a PASSING deterministic verification produced no
+  // earlier than the last code-changing session ended. A block is logged
+  // and skipped (never parked) — the next passing report unlocks it.
+  let verificationBlock = verificationGateReason(projectId, epicId);
+  if (verificationBlock && options.verifyIfMissing) {
+    // "Did not pass" is an answer, not missing evidence — re-running it would
+    // just burn the same minutes to reach the same verdict. Only absent or
+    // superseded evidence is worth producing.
+    const assessment = assessEpicVerification(projectId, epicId);
+    if (
+      assessment.problem?.kind !== "failed" &&
+      assessment.lastCodeSessionId
+    ) {
+      verificationBlock = await verifyThenReask(
+        projectId,
+        epicId,
+        assessment.lastCodeSessionId
+      );
+    }
+  }
+  if (verificationBlock) {
+    return refuseUnverifiedMerge({
+      projectId,
+      epicId,
+      fromStatus,
+      reason: verificationBlock,
+    });
+  }
+  autoModeRegistry.clearMergeGateRefusals(projectId, epicId);
 
   // Pre-flight the workflow guards. A refusal here is the "review is not
   // actually OK" answer (no completed review, or an open review comment) —
@@ -364,6 +537,7 @@ async function runAutoMerge(
     if (finalized.ok) {
       autoModeRegistry.clearFailures(projectId, epicId);
       autoModeRegistry.clearMergeDeferral(projectId, epicId);
+      autoModeRegistry.clearMergeGateRefusals(projectId, epicId);
       autoModeRegistry.recordDispatch(projectId, {
         kind: "merge",
         epicId,
@@ -648,6 +822,24 @@ async function dispatchMergeFixAgent(input: {
 }
 
 /**
+ * Runs the deterministic checks against a conflict resolution and returns the
+ * gate's refusal reason, or null when the merge may proceed (including when
+ * verification is not configured — off is not "unsatisfied").
+ *
+ * The merge session is a code session for gate purposes, so its own fresh
+ * report is what unblocks the retry; anything older describes the tree from
+ * before the conflict was resolved.
+ */
+async function verifyResolvedConflict(input: {
+  projectId: string;
+  epicId: string;
+  sessionId: string;
+}): Promise<string | null> {
+  if (!resolveVerifyConfigForProject(input.projectId).enabled) return null;
+  return verifyThenReask(input.projectId, input.epicId, input.sessionId);
+}
+
+/**
  * The single retry. A second failure parks the epic and notifies — the
  * standing loop must never grind on a conflict no agent could resolve.
  */
@@ -709,6 +901,19 @@ async function retryMergeAfterFix(input: {
     return;
   }
 
+  // The merge-fix agent edited and committed into this worktree, and its
+  // resolution lands on the default branch without a second review — the one
+  // path in the mode where agent-written code merges unreviewed. Its prompt
+  // asks it to "verify the build still passes", but prose is not evidence:
+  // run Arij's own checks against the resolved tree and re-ask the gate.
+  // Fail-closed — a crashed or skipped run leaves the report stale, the gate
+  // refuses, and the epic is parked for a human rather than merged blind.
+  const verificationBlock = await verifyResolvedConflict(input);
+  if (verificationBlock) {
+    park(`deterministic verification blocked the merge: ${verificationBlock}`);
+    return;
+  }
+
   let retry: Awaited<ReturnType<typeof mergeWorktree>>;
   try {
     retry = await mergeWorktree(
@@ -740,6 +945,12 @@ async function retryMergeAfterFix(input: {
     return;
   }
 
+  // Drop the merge-fix session from the in-flight map, exactly as `park`
+  // does. It was charged to the build budget as a code session, so leaving it
+  // there hands the next sweep's reconcile a delivered build to verify — on
+  // an epic that is already `done` and whose worktree `mergeWorktree` removed.
+  // The result is a "we couldn't check this" skip traced onto a merged epic.
+  autoModeRegistry.removeInFlight(input.projectId, input.sessionId);
   autoModeRegistry.clearFailures(input.projectId, input.epicId);
   autoModeRegistry.recordDispatch(input.projectId, {
     kind: "merge",
