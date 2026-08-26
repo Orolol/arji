@@ -285,7 +285,9 @@ export async function POST(_request: NextRequest, { params }: Params) {
       })
       .run();
 
-    // Child stories → done through the same service (per-story log entries).
+    // Child stories → done through the same service. The approval logged its
+    // own review → done entry above; the children close as part of it, so
+    // they add no per-story line of their own (one movement, one line).
     for (const story of reviewedStories) {
       applyStoryTransition({
         projectId,
@@ -298,6 +300,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
         reason: "Parent epic review approved",
         reviewScope: "epic",
         assumeReviewCommentsResolved: true,
+        logActivity: false,
       });
     }
     if (skippedStories.length > 0) {
