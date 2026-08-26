@@ -237,6 +237,34 @@ describe("startup", () => {
     expect(stderr).toContain("ARIJ_MCP_TOKEN");
   }, 15000);
 
+  it("exits 1 when ARIJ_MCP_TOKEN is an unexpanded ${…} placeholder", async () => {
+    // Hosts that interpolate their MCP config leave an UNRESOLVED ${VAR} as a
+    // literal string rather than an empty one — measured on omp 18.0.5, whose
+    // ~/.omp/agent/mcp.json entry carries "ARIJ_MCP_TOKEN": "${ARIJ_MCP_TOKEN}".
+    // A literal placeholder is non-empty, so without this guard the shim starts,
+    // the CLI mounts the whole Arij toolset, and every call comes back
+    // "UNAUTHORIZED: Invalid or expired MCP token". Treat it as no token at all.
+    const env = {
+      ...process.env,
+      // what omp's `${ARIJ_BASE_URL:-http://localhost:3000}` expands to
+      ARIJ_BASE_URL: "http://localhost:3000",
+      ARIJ_MCP_TOKEN: "${ARIJ_MCP_TOKEN}",
+    };
+
+    const child = spawn(process.execPath, [SHIM_PATH], {
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr!.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    const [code] = (await once(child, "exit")) as [number | null];
+
+    expect(code).toBe(1);
+    expect(stderr).toContain("ARIJ_MCP_TOKEN");
+  }, 15000);
+
   it("identifies itself as the 'arij' server with tools capability", () => {
     expect(initResult.serverInfo.name).toBe("arij");
     expect(initResult.capabilities.tools).toBeDefined();

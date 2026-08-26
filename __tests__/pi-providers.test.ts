@@ -487,10 +487,22 @@ describe("OhMyPiProvider", () => {
       expect(env.PATH).toBe(process.env.PATH);
     });
 
-    it("keeps the child environment untouched without a channel", () => {
+    it("neutralises omp's global arij entry when the spawn has no channel", () => {
+      // omp's ~/.omp/agent/mcp.json entry interpolates ${ARIJ_MCP_TOKEN} at
+      // discovery time, and an UNSET variable leaves the placeholder as a
+      // literal string (measured on omp 18.0.5). That literal is non-empty, so
+      // the shim starts, the CLI mounts the whole Arij toolset, and every call
+      // comes back "UNAUTHORIZED: Invalid or expired MCP token" — phantom tools
+      // for exempt agent types, `mcp_tools_enabled: false`, and every spawn with
+      // no agent_sessions row. An explicitly EMPTY value expands to "" instead,
+      // the shim exits, and the tools never mount (also measured).
       const env = provider.buildEnv(baseOptions());
-      expect(env).toEqual({ ...process.env });
-      expect("ARIJ_MCP_TOKEN" in env).toBe(false);
+      expect(env.ARIJ_MCP_TOKEN).toBe("");
+    });
+
+    it("leaves the rest of the parent environment untouched without a channel", () => {
+      const env = provider.buildEnv(baseOptions());
+      expect(env).toEqual({ ...process.env, ARIJ_MCP_TOKEN: "" });
     });
 
     it("passes the chat toolset selector through when the channel sets it", () => {

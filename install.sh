@@ -223,6 +223,13 @@ NODE
 # without one gets a server that exits immediately with a clear message on
 # stderr, which every host isolates per-server.
 #
+# That last part needs the shim's placeholder guard to be true: hosts do NOT
+# agree on what an unresolved ${VAR} becomes. omp (measured on 18.0.5) hands
+# the literal string "${ARIJ_MCP_TOKEN}" straight through, which is non-empty,
+# so bin/arij-mcp.mjs treats any value still containing ${...} as no value at
+# all. Without that guard the server starts and 401s every call instead of
+# bowing out.
+#
 # ARIJ_MCP_TOOLSET rides the same seam: agent sessions leave it unset (the
 # default expands to "agent"), CLI chat turns set it to "chat" so the shim
 # serves the board toolset. Only omp actually needs the passthrough — claude
