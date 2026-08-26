@@ -45,6 +45,11 @@ function createFakeChild() {
     },
     kill: vi.fn(),
     killed: false,
+    // Real ChildProcess fields the kill path reads: a live child reports a
+    // pid and null exit fields, which is what routes the signal to the group.
+    pid: 4242,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
     emitStdout(text: string) {
       for (const fn of stdoutListeners) fn(Buffer.from(text));
     },
@@ -125,9 +130,14 @@ describe("GeminiCliProvider", () => {
         baseOptions({ sessionId: "test-789", prompt: "test", cwd: "/tmp", mode: "plan" })
       );
 
+      const killSpy = vi
+        .spyOn(process, "kill")
+        .mockImplementation(() => true);
       const result = provider.cancel(session);
       expect(result).toBe(true);
-      expect(fakeChild.kill).toHaveBeenCalledWith("SIGTERM");
+      // Negative pid = the whole process group, so the agent's own children
+      // (shells, test runners, dev servers) go down with it.
+      expect(killSpy).toHaveBeenCalledWith(-4242, "SIGTERM");
     } finally {
       vi.useRealTimers();
     }

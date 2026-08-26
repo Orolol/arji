@@ -708,8 +708,9 @@ export async function POST(
   const activityId = `chat-${createId()}`;
 
   // Per-turn Arij MCP tool channel for CLI chat providers (claude-code,
-  // codex): the spawned CLI gets the chat toolset of mcp__arij__* board
-  // tools — parity with the fast-mode board tools above. Null when the
+  // codex, oh-my-pi): the spawned CLI gets the chat toolset of arij board
+  // tools, spelled per provider (mcp__arij__* on claude/codex, mcp__arij_*
+  // on omp) — parity with the fast-mode board tools above. Null when the
   // provider has no MCP surface, the toggle is off, or the conversation is
   // an epic-creation/brainstorm prompt contract. The token must be revoked
   // on every completion path below (success, error, client cancel).

@@ -32,14 +32,20 @@ export interface ProviderChunk {
  * `lib/claude/mcp-injection.ts` at spawn time (processManager.start is the
  * single wiring point). Providers translate it into their CLI's MCP wiring:
  * Claude Code via `--mcp-config <0600 temp file>` + `--strict-mcp-config`,
- * Codex via `-c mcp_servers.<name>.*` TOML overrides. The bearer token rides
- * INSIDE this config (never in the child's process env), so agent Bash
- * subshells never see it. Claude's file form additionally keeps it out of
- * argv/`/proc/<pid>/cmdline`; codex has no file form — see the residual
- * exposure note in lib/providers/codex.ts.
+ * Codex via `-c mcp_servers.<name>.*` TOML overrides, Oh My Pi via the
+ * child's environment (its mcp.json entry expands ${ARIJ_MCP_TOKEN} at load
+ * time). For claude and codex the bearer token rides INSIDE the config
+ * (never in the child's process env), so agent Bash subshells never see it;
+ * claude's file form additionally keeps it out of argv/`/proc/<pid>/cmdline`.
+ * Codex has no file form and omp has no config form at all — see the
+ * residual exposure notes in lib/providers/codex.ts and
+ * lib/providers/oh-my-pi.ts.
  */
 export interface McpSpawnConfig {
-  /** MCP server name exposed to the agent — tool prefix `mcp__<name>__*`. */
+  /**
+   * MCP server name exposed to the agent. The tool prefix it produces is
+   * CLI-specific: `mcp__<name>__*` on claude/codex, `mcp__<name>_*` on omp.
+   */
   serverName: string;
   /** Executable that launches the stdio MCP shim (the running node binary). */
   command: string;
@@ -52,7 +58,11 @@ export interface McpSpawnConfig {
     /** Selects the shim's toolset; absent = the default agent toolset. */
     ARIJ_MCP_TOOLSET?: "chat";
   };
-  /** Exact tool names merged into the allowlist (no wildcards). */
+  /**
+   * Exact tool names merged into the allowlist (no wildcards), in the
+   * spawning provider's spelling — claude/codex say mcp__arij__get_ticket,
+   * omp says mcp__arij_get_ticket (see arijMcpToolName).
+   */
   allowedToolNames: string[];
 }
 
@@ -83,7 +93,7 @@ export interface ProviderSpawnOptions {
   cliSessionId?: string;
   /** When true, use --resume instead of --session-id. */
   resumeSession?: boolean;
-  /** Arij MCP tool-channel injection (claude-code and codex only). */
+  /** Arij MCP tool-channel injection (claude-code, codex, oh-my-pi). */
   mcp?: McpSpawnConfig;
 }
 

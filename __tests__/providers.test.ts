@@ -69,6 +69,11 @@ function createFakeChild() {
     },
     kill: vi.fn(),
     killed: false,
+    // Real ChildProcess fields the kill path reads: a live child reports a
+    // pid and null exit fields, which is what routes the signal to the group.
+    pid: 4242,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
     emitStdout(text: string) {
       for (const fn of stdoutListeners) fn(Buffer.from(text));
     },
@@ -231,8 +236,69 @@ describe("CodexProvider", () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
       const session = provider.spawn(baseOptions);
+      const killSpy = vi
+        .spyOn(process, "kill")
+        .mockImplementation(() => true);
       const result = provider.cancel(session);
       expect(result).toBe(true);
+      // Negative pid = the whole process group, so the agent's own children
+      // (shells, test runners, dev servers) go down with it.
+      expect(killSpy).toHaveBeenCalledWith(-4242, "SIGTERM");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("escalates to SIGKILL when SIGTERM leaves the agent standing", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    try {
+      const session = provider.spawn(baseOptions);
+      provider.cancel(session);
+      expect(killSpy).toHaveBeenCalledWith(-4242, "SIGTERM");
+
+      // The child ignored SIGTERM: still no exitCode, still no signalCode.
+      // `child.killed` is true by now, which is exactly why the escalation
+      // must not be guarded on it — an agent that outran SIGTERM used to
+      // survive its own cancellation and keep writing to the worktree.
+      fakeChild.killed = true;
+      vi.advanceTimersByTime(5000);
+
+      expect(killSpy).toHaveBeenCalledWith(-4242, "SIGKILL");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not escalate once the agent has actually exited", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    try {
+      const session = provider.spawn(baseOptions);
+      provider.cancel(session);
+      killSpy.mockClear();
+
+      fakeChild.exitCode = 143;
+      vi.advanceTimersByTime(5000);
+
+      expect(killSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to the child alone when the group is already gone", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
+      const error = new Error("ESRCH") as NodeJS.ErrnoException;
+      error.code = "ESRCH";
+      throw error;
+    });
+    try {
+      const session = provider.spawn(baseOptions);
+      // A throwing group signal must not take the cancel path down with it.
+      expect(() => provider.cancel(session)).not.toThrow();
+      expect(killSpy).toHaveBeenCalledWith(-4242, "SIGTERM");
       expect(fakeChild.kill).toHaveBeenCalledWith("SIGTERM");
     } finally {
       vi.useRealTimers();

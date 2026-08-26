@@ -238,6 +238,10 @@ export class PiProvider extends BaseCliProvider {
 
     // Plan/chat runs must not touch the working tree. Analyze adds only the
     // write primitive required to create arji.json; edit and bash stay absent.
+    // MCP tool names must NEVER be added here: omp validates --tools against
+    // built-in names only, and an unknown name is a fatal argv error that
+    // kills the spawn. Its MCP tools are orthogonal to this allowlist and
+    // stay mounted regardless — see lib/providers/oh-my-pi.ts.
     if (mode === "plan" || mode === "chat") {
       args.push("--tools", this.readonlyTools().join(","));
       args.push(...this.restrictedToolsExtraArgs());

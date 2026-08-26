@@ -131,23 +131,42 @@ It refuses to touch a ticket another agent already has, and it never overrides a
 - At least one AI coding CLI:
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `npm install -g @anthropic-ai/claude-code`, then `claude auth`
   - [OpenAI Codex](https://github.com/openai/codex) — optional
+  - [omp](https://omp.sh) (Oh My Pi) — optional
   - [Gemini CLI](https://github.com/google-gemini/gemini-cli) — optional
+
+`./install.sh` offers to install the first three for you.
 
 ### Install & Run
 
 ```bash
-# Clone the repository
 git clone https://github.com/yourorg/arij.git
 cd arij
-
-# Install dependencies
-npm install
-
-# Start the app
+./install.sh
 npm run dev
 ```
 
 Open **http://localhost:3000** in your browser. The database is created automatically on first run.
+
+`install.sh` runs three phases, each skippable with `--skip-app`, `--skip-cli`
+or `--skip-mcp`, and `--yes` takes the defaults for an unattended run:
+
+1. **the app** — checks Node and git, `npm install`, creates `data/`
+2. **the CLIs** — offers Claude Code, Codex and omp one at a time, skipping any already on your PATH
+3. **the channel** — registers Arij's MCP server in each CLI's own config
+
+It is re-runnable: every config write merges into what is already there and
+backs the file up first. A config it cannot parse is reported and left alone.
+
+Those MCP entries reference `${ARIJ_MCP_TOKEN}` rather than a literal token —
+Arij mints one per session and revokes it when the agent exits, so there is no
+long-lived value to write down. The channel comes alive when Arij spawns the
+CLI. A CLI you launch by hand has no token, so the Arij server exits
+immediately and the CLI carries on without it.
+
+Which providers actually reach the channel, and what was measured to establish
+that, is in [docs/architecture/mcp-provider-matrix.md](docs/architecture/mcp-provider-matrix.md).
+
+Prefer to do it by hand? `npm install && npm run dev` is still the whole app.
 
 ### Your First Project
 
