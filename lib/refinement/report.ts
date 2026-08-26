@@ -120,11 +120,19 @@ function changeList(
  * `focusTicketId` is the ticket the comment is posted on: its own change is
  * called out first so the feed entry reads as being about this ticket, not
  * as a board-wide broadcast that happens to be filed here.
+ *
+ * `includeFullList` controls whether the itemised, ticket-linked breakdown is
+ * appended. Exactly ONE comment per pass carries it — repeating every change
+ * on every moved ticket makes comment volume quadratic in the size of the
+ * pass (10 promotions x 40 changes), and bloats the very table the board's
+ * status poll reads. The rest get the focus block, the aggregate line and a
+ * pointer to where the full breakdown lives.
  */
 export function formatRefinementComment(
   projectId: string,
   report: RefinementReport,
-  focusTicketId?: string
+  focusTicketId?: string,
+  options: { includeFullList?: boolean; fullListTicketId?: string } = {}
 ): string {
   const lines: string[] = [];
   const focus = focusTicketId
@@ -150,18 +158,29 @@ export function formatRefinementComment(
     ""
   );
 
-  lines.push(
-    ...changeList(projectId, "Promoted to To do", report.promoted),
-    ...changeList(projectId, "Sent back to Backlog", report.demoted),
-    ...changeList(projectId, "Priority changes", report.priority),
-    ...changeList(projectId, "Dependency edges added", report.dependenciesAdded),
-    ...changeList(
-      projectId,
-      "Dependency edges removed",
-      report.dependenciesRemoved
-    ),
-    ...changeList(projectId, "Re-ranked", report.reordered)
-  );
+  if (options.includeFullList) {
+    lines.push(
+      ...changeList(projectId, "Promoted to To do", report.promoted),
+      ...changeList(projectId, "Sent back to Backlog", report.demoted),
+      ...changeList(projectId, "Priority changes", report.priority),
+      ...changeList(
+        projectId,
+        "Dependency edges added",
+        report.dependenciesAdded
+      ),
+      ...changeList(
+        projectId,
+        "Dependency edges removed",
+        report.dependenciesRemoved
+      ),
+      ...changeList(projectId, "Re-ranked", report.reordered)
+    );
+  } else if (options.fullListTicketId) {
+    lines.push(
+      `Full breakdown of this pass: ${buildEpicTargetUrl(projectId, options.fullListTicketId)}`,
+      ""
+    );
+  }
 
   return lines.join("\n").trim();
 }
@@ -206,15 +225,23 @@ export function publishRefinementReport(
     new Set([...report.promoted, ...report.demoted].map((c) => c.ticketId))
   );
 
+  // The itemised breakdown goes on the first moved ticket only; the others
+  // point at it. See formatRefinementComment for why.
+  const fullListTicketId = movedTicketIds[0];
+
   const commentedTicketIds: string[] = [];
   for (const ticketId of movedTicketIds) {
+    const isFullList = ticketId === fullListTicketId;
     try {
       db.insert(ticketComments)
         .values({
           id: createId(),
           epicId: ticketId,
           author: "agent",
-          content: formatRefinementComment(input.projectId, report, ticketId),
+          content: formatRefinementComment(input.projectId, report, ticketId, {
+            includeFullList: isFullList,
+            fullListTicketId: isFullList ? undefined : fullListTicketId,
+          }),
           agentSessionId: input.sessionId,
           createdAt: now,
         })

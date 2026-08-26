@@ -175,7 +175,7 @@ describe("RefinementButton", () => {
     );
   });
 
-  it("reports an empty board as a message, not a silent no-op", async () => {
+  it("reports an empty board as a notice, not a failure", async () => {
     mockFetchSequence([
       idle(0),
       {
@@ -189,6 +189,37 @@ describe("RefinementButton", () => {
       },
     ]);
     const onError = vi.fn();
+    const onNotice = vi.fn();
+
+    render(
+      <RefinementButton
+        projectId="proj-1"
+        onError={onError}
+        onNotice={onNotice}
+        pollIntervalMs={0}
+      />
+    );
+
+    fireEvent.click(await screen.findByTestId("refinement-button"));
+
+    // A 200 saying "nothing to do" is an answer, not a red toast.
+    await waitFor(() =>
+      expect(onNotice).toHaveBeenCalledWith(
+        "Refinement skipped — Backlog and To do are both empty."
+      )
+    );
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("falls back to onError when no notice handler is wired", async () => {
+    mockFetchSequence([
+      idle(0),
+      {
+        ok: true,
+        body: { data: { started: false, reason: "Nothing to refine" } },
+      },
+    ]);
+    const onError = vi.fn();
 
     render(
       <RefinementButton
@@ -199,12 +230,38 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
-
     await waitFor(() =>
-      expect(onError).toHaveBeenCalledWith(
-        "Refinement skipped — Backlog and To do are both empty."
-      )
+      expect(onError).toHaveBeenCalledWith("Nothing to refine")
     );
+  });
+
+  it("polls slowly while idle and fast while a pass runs", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = mockFetchSequence([idle()]);
+      render(
+        <RefinementButton
+          projectId="proj-1"
+          onError={vi.fn()}
+          pollIntervalMs={5000}
+          idlePollIntervalMs={30000}
+        />
+      );
+
+      // Initial read.
+      await vi.advanceTimersByTimeAsync(0);
+      const afterMount = fetchMock.mock.calls.length;
+
+      // Idle: nothing at the running cadence.
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(fetchMock.mock.calls.length).toBe(afterMount);
+
+      // Only at the idle cadence.
+      await vi.advanceTimersByTimeAsync(25000);
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(afterMount);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("notifies the page once a running pass finishes", async () => {

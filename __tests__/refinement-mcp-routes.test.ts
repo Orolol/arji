@@ -67,6 +67,7 @@ let backlogA: string;
 let backlogB: string;
 let todoA: string;
 let inProgressId: string;
+let doneId: string;
 let foreignId: string;
 let sessionId: string;
 let token: string;
@@ -108,6 +109,7 @@ beforeEach(() => {
   backlogB = createId();
   todoA = createId();
   inProgressId = createId();
+  doneId = createId();
   foreignId = createId();
   sessionId = createId();
 
@@ -163,6 +165,16 @@ beforeEach(() => {
         title: "In progress",
         readableId: "E-main-004",
         status: "in_progress",
+        position: 0,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: doneId,
+        projectId,
+        title: "Shipped",
+        readableId: "E-main-005",
+        status: "done",
         position: 0,
         createdAt: now,
         updatedAt: now,
@@ -425,17 +437,88 @@ describe("add_dependency / remove_dependency", () => {
     expect((await res.json()).code).toBe("SELF_DEPENDENCY");
   });
 
-  it("refuses an edge whose other end is out of scope", async () => {
+  /**
+   * The guardrail is about what gets WRITTEN, and only the dependent ticket
+   * is written to. "This Backlog ticket builds on the epic already in
+   * Review" is the most ordinary dependency there is; refusing it also made
+   * an edge to shipped work permanently unprunable.
+   */
+  it("accepts a prerequisite outside the planning columns", async () => {
     const res = await call(
       addDependency,
       {
         ticket_id: backlogA,
         depends_on_ticket_id: inProgressId,
-        reason: "out of scope",
+        reason: "Waits on the in-flight refactor",
+      },
+      token
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.created).toBe(true);
+
+    const edges = db().select().from(ticketDependencies).all();
+    expect(edges).toHaveLength(1);
+    expect(edges[0]).toMatchObject({
+      ticketId: backlogA,
+      dependsOnTicketId: inProgressId,
+    });
+    // The activity entry lands on the dependent ticket only.
+    expect(activityFor(backlogA)).toHaveLength(1);
+    expect(activityFor(inProgressId)).toHaveLength(0);
+  });
+
+  it("prunes an edge whose prerequisite has since shipped", async () => {
+    await call(
+      addDependency,
+      {
+        ticket_id: backlogA,
+        depends_on_ticket_id: doneId,
+        reason: "was blocked by it",
+      },
+      token
+    );
+    expect(db().select().from(ticketDependencies).all()).toHaveLength(1);
+
+    const res = await call(
+      removeDependency,
+      {
+        ticket_id: backlogA,
+        depends_on_ticket_id: doneId,
+        reason: "shipped, no longer holds",
+      },
+      token
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.removed).toBe(true);
+    expect(db().select().from(ticketDependencies).all()).toHaveLength(0);
+  });
+
+  it("still refuses when the DEPENDENT ticket is out of scope", async () => {
+    const res = await call(
+      addDependency,
+      {
+        ticket_id: inProgressId,
+        depends_on_ticket_id: backlogA,
+        reason: "writing to in-flight work",
       },
       token
     );
     expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("REFINEMENT_STATUS_LOCKED");
+    expect(db().select().from(ticketDependencies).all()).toHaveLength(0);
+  });
+
+  it("still 404s a prerequisite from another project", async () => {
+    const res = await call(
+      addDependency,
+      {
+        ticket_id: backlogA,
+        depends_on_ticket_id: foreignId,
+        reason: "cross-project",
+      },
+      token
+    );
+    expect(res.status).toBe(404);
     expect(db().select().from(ticketDependencies).all()).toHaveLength(0);
   });
 
@@ -502,6 +585,79 @@ describe("promote_ticket", () => {
     expect(entry.fromStatus).toBe("backlog");
     expect(entry.toStatus).toBe("todo");
     expect(entry.reason).toContain("Spec is settled");
+  });
+
+  /**
+   * Regression: `position` is a per-column 0-based index and the transition
+   * service never touches it, so a ticket promoted from Backlog index 0
+   * used to land in To do still holding 0 — tying with whatever sat there.
+   * The board breaks that tie by fetch order and the execution queue is
+   * derived from it, so a promoted ticket could silently take rank #1.
+   */
+  it("appends the promoted ticket to the bottom of To do", async () => {
+    // todoA already occupies To do position 0; backlogA holds Backlog 0.
+    const res = await call(
+      promoteTicket,
+      { ticket_id: backlogA, status: "todo", reason: "Ready now" },
+      token
+    );
+    expect(res.status).toBe(200);
+
+    const promoted = db()
+      .select()
+      .from(epics)
+      .where(eq(epics.id, backlogA))
+      .get();
+    const incumbent = db().select().from(epics).where(eq(epics.id, todoA)).get();
+
+    expect(incumbent!.position).toBe(0);
+    expect(promoted!.position).toBe(1);
+    // No collision: the promoted ticket cannot take the incumbent's rank.
+    expect(promoted!.position!).toBeGreaterThan(incumbent!.position!);
+  });
+
+  it("appends a demoted ticket to the bottom of Backlog", async () => {
+    // Backlog already holds positions 0 and 1.
+    await call(
+      promoteTicket,
+      {
+        ticket_id: todoA,
+        status: "backlog",
+        reason: "Not ready",
+        question: "Which provider?",
+      },
+      token
+    );
+
+    const demoted = db().select().from(epics).where(eq(epics.id, todoA)).get();
+    expect(demoted!.status).toBe("backlog");
+    expect(demoted!.position).toBe(2);
+  });
+
+  it("gives position 0 when the destination column is empty", async () => {
+    // Empty To do first.
+    await call(
+      promoteTicket,
+      {
+        ticket_id: todoA,
+        status: "backlog",
+        reason: "clear the column",
+        question: "Which provider?",
+      },
+      token
+    );
+
+    await call(
+      promoteTicket,
+      { ticket_id: backlogA, status: "todo", reason: "first in" },
+      token
+    );
+    const promoted = db()
+      .select()
+      .from(epics)
+      .where(eq(epics.id, backlogA))
+      .get();
+    expect(promoted!.position).toBe(0);
   });
 
   it("requires the missing question when demoting", async () => {

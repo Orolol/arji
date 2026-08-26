@@ -37,6 +37,7 @@ import { agentScheduler } from "@/lib/agents/scheduler";
 import { REFINEMENT_AGENT_TYPE } from "./constants";
 import { loadRefinementSnapshot, snapshotSize } from "./snapshot";
 import { publishRefinementReport, type RefinementReport } from "./report";
+import { takeRefinementChanges } from "./registry";
 
 export const REFINEMENT_EMPTY_BOARD_REASON =
   "Refinement skipped — Backlog and To do are both empty.";
@@ -259,14 +260,36 @@ export async function dispatchRefinementSession(
         summary: published.summary,
       };
     } catch (error) {
+      // A throw here (launch failure, or waitForProcessCompletion rejecting
+      // mid-run) can still leave board writes behind, and the same argument
+      // as the success path applies: unexplained movement is worse than a
+      // partial report. Publishing here also drains the change registry,
+      // which is what bounds it — a session whose entries are never taken
+      // stays resident for the life of the process.
+      let published: ReturnType<typeof publishRefinementReport> | null = null;
+      try {
+        published = publishRefinementReport({
+          projectId: input.projectId,
+          sessionId,
+          succeeded: false,
+        });
+      } catch (reportError) {
+        console.error(
+          "[refinement] Failed to publish report after launch failure",
+          reportError,
+        );
+        // Drain regardless, so the registry cannot leak this session's key.
+        takeRefinementChanges(sessionId);
+      }
+
       terminal = {
         sessionId,
         success: false,
         outcome: "error",
         error:
           error instanceof Error ? error.message : "Refinement launch failed",
-        report: null,
-        summary: null,
+        report: published?.report ?? null,
+        summary: published?.summary ?? null,
       };
       throw error;
     } finally {

@@ -19,8 +19,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isErrorResponse } from "@/lib/api/route-helpers";
 import { validateBody } from "@/lib/validation/validate";
+import { and, eq, max, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { ticketComments } from "@/lib/db/schema";
+import { epics, ticketComments } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { requireMcpToken } from "@/lib/mcp/http-auth";
 import {
@@ -103,6 +104,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // `position` is a per-column 0-based index, and the transition service does
+  // not touch it — so without this the ticket arrives in its new column still
+  // carrying the index it held in the old one, colliding with whatever sits
+  // there. The board breaks that tie by fetch order and the execution queue
+  // is derived from it, so a promoted ticket could silently take rank #1.
+  //
+  // Appending is the honest default: newly ready work queues behind what is
+  // already ranked until the agent (or the user) ranks it deliberately.
+  const position = appendPosition(auth.projectId, toStatus, epic.id);
+  db.update(epics)
+    .set({ position, updatedAt: new Date().toISOString() })
+    .where(eq(epics.id, epic.id))
+    .run();
+
   // The demotion's missing question, on the ticket, attributed to the run.
   if (demoting && body.question) {
     db.insert(ticketComments)
@@ -138,4 +153,31 @@ export async function POST(request: NextRequest) {
       changed: true,
     },
   });
+}
+
+/**
+ * The next free position at the bottom of a column.
+ *
+ * The moving ticket is excluded: this runs after the transition committed, so
+ * it already sits in the destination column carrying its stale index, and
+ * counting it would push the result past the real tail for no reason. An
+ * empty destination yields 0.
+ */
+function appendPosition(
+  projectId: string,
+  status: KanbanStatus,
+  excludeEpicId: string,
+): number {
+  const row = db
+    .select({ highest: max(epics.position) })
+    .from(epics)
+    .where(
+      and(
+        eq(epics.projectId, projectId),
+        eq(epics.status, status),
+        ne(epics.id, excludeEpicId),
+      ),
+    )
+    .get();
+  return (row?.highest ?? -1) + 1;
 }

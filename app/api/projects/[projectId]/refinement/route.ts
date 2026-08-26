@@ -15,7 +15,7 @@ import {
   dispatchRefinementSession,
   getActiveRefinementSession,
 } from "@/lib/refinement/dispatch";
-import { loadRefinementSnapshot, snapshotSize } from "@/lib/refinement/snapshot";
+import { countRefinableTickets } from "@/lib/refinement/snapshot";
 
 export interface RefinementStatus {
   running: boolean;
@@ -35,7 +35,7 @@ export async function GET(
     const data: RefinementStatus = {
       running: Boolean(active),
       sessionId: active?.id ?? null,
-      ticketCount: snapshotSize(loadRefinementSnapshot(projectId)),
+      ticketCount: countRefinableTickets(projectId),
     };
     return NextResponse.json({ data });
   } catch (error) {

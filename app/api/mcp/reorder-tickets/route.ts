@@ -87,6 +87,7 @@ export async function POST(request: NextRequest) {
 
   let updated = 0;
   let skipped = 0;
+  let updatedIds: string[] = [];
   try {
     const result = reorderTickets(auth.projectId, items, {
       actor: "agent",
@@ -107,13 +108,18 @@ export async function POST(request: NextRequest) {
     }
     updated = result.updated;
     skipped = result.skipped;
+    updatedIds = result.updatedIds;
   } catch (error) {
     return errorResponse(error, "Failed to reorder tickets");
   }
 
-  // One same-state decision entry per touched ticket — where the agent
-  // moved it and why.
+  // One same-state decision entry per ticket that was ACTUALLY written.
+  // Journalling the skipped ones too would put "Reordered to position N" in
+  // the activity log of a ticket that never moved, and would over-count the
+  // end-of-run report.
+  const written = new Set(updatedIds);
   items.forEach((item, index) => {
+    if (!written.has(item.id)) return;
     logWorkflowDecision({
       projectId: auth.projectId,
       epicId: item.id,

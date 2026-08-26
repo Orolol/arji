@@ -9,13 +9,28 @@ interface RefinementButtonProps {
   projectId: string;
   /** Bumped by the page whenever the board changes, to re-read the status. */
   refreshTrigger?: number;
-  /** Surfaced through the page's toast rail. */
+  /** Surfaced through the page's toast rail as a failure. */
   onError: (message: string) => void;
+  /**
+   * Surfaced as an informational message. "Nothing to refine" arrives on a
+   * 200 and is a real answer, not a failure — routing it to onError would
+   * show a red toast for a successful request.
+   */
+  onNotice?: (message: string) => void;
   onStarted?: (sessionId: string) => void;
   /** Called when the pass finishes, so the board can reload. */
   onFinished?: () => void;
-  /** Poll cadence; 0 disables polling (tests drive refreshTrigger instead). */
+  /**
+   * Poll cadence while a pass is in flight; 0 disables polling entirely
+   * (tests drive refreshTrigger instead).
+   */
   pollIntervalMs?: number;
+  /**
+   * Poll cadence while idle. Much slower on purpose: an idle board only needs
+   * to notice a pass someone else started, and this endpoint is hit once per
+   * open tab for as long as the board is open.
+   */
+  idlePollIntervalMs?: number;
 }
 
 /**
@@ -31,12 +46,15 @@ export function RefinementButton({
   projectId,
   refreshTrigger = 0,
   onError,
+  onNotice,
   onStarted,
   onFinished,
   pollIntervalMs = 5000,
+  idlePollIntervalMs = 30000,
 }: RefinementButtonProps) {
   const [status, setStatus] = useState<RefinementStatus | null>(null);
   const [starting, setStarting] = useState(false);
+  const isRunning = status?.running === true;
 
   // One effect owns both the initial read and the poll. `onFinished` fires on
   // the running → idle edge so the board reloads once the pass has actually
@@ -67,12 +85,24 @@ export function RefinementButton({
       };
     }
 
-    const timer = setInterval(load, pollIntervalMs);
+    // Fast only while something is actually happening; an idle board falls
+    // back to the slow cadence.
+    const timer = setInterval(
+      load,
+      isRunning ? pollIntervalMs : idlePollIntervalMs
+    );
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [projectId, refreshTrigger, pollIntervalMs, onFinished]);
+  }, [
+    projectId,
+    refreshTrigger,
+    pollIntervalMs,
+    idlePollIntervalMs,
+    isRunning,
+    onFinished,
+  ]);
 
   const start = useCallback(async () => {
     setStarting(true);
@@ -89,8 +119,9 @@ export function RefinementButton({
         return;
       }
       if (payload?.data?.started === false) {
-        // Nothing to refine — a real answer, not an error.
-        onError(payload.data.reason ?? "Nothing to refine right now");
+        // Nothing to refine — a real answer on a 200, not a failure.
+        const reason = payload.data.reason ?? "Nothing to refine right now";
+        (onNotice ?? onError)(reason);
         return;
       }
 
@@ -105,7 +136,7 @@ export function RefinementButton({
     } finally {
       setStarting(false);
     }
-  }, [projectId, onError, onStarted]);
+  }, [projectId, onError, onNotice, onStarted]);
 
   const running = status?.running === true;
   const busy = running || starting;

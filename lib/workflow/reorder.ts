@@ -58,7 +58,15 @@ export interface ReorderContext {
 }
 
 export type ReorderTicketsResult =
-  | { ok: true; updated: number; skipped: number }
+  | {
+      ok: true;
+      updated: number;
+      skipped: number;
+      /** Ids whose position was actually written — what callers may journal. */
+      updatedIds: string[];
+      /** Ids left alone because their stored column had moved on. */
+      skippedIds: string[];
+    }
   | { ok: false; error: string; statusCode: number };
 
 export function reorderTickets(
@@ -84,7 +92,7 @@ export function reorderTickets(
   // Lookups are project-scoped: epic ids from other projects are skipped.
   const statusChanges: { epicId: string; from: KanbanStatus; to: KanbanStatus }[] = [];
   const validItems: ReorderItemInput[] = [];
-  let skipped = 0;
+  const skippedIds: string[] = [];
   for (const item of items) {
     const epic = db
       .select()
@@ -99,7 +107,7 @@ export function reorderTickets(
     // `reorderOnly`). This covers a card the caller believes is elsewhere,
     // including one that has since been released.
     if (ctx.reorderOnly && fromStatus !== (item.status as KanbanStatus)) {
-      skipped += 1;
+      skippedIds.push(item.id);
       continue;
     }
 
@@ -193,5 +201,11 @@ export function reorderTickets(
     }
   }
 
-  return { ok: true, updated: validItems.length, skipped };
+  return {
+    ok: true,
+    updated: validItems.length,
+    skipped: skippedIds.length,
+    updatedIds: validItems.map((item) => item.id),
+    skippedIds,
+  };
 }

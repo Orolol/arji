@@ -13,7 +13,7 @@
  * a second ranking that drifts silently against the board the user sees.
  */
 
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, count, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   agentSessions,
@@ -206,6 +206,29 @@ export function assembleRefinementSnapshot(
 /** Total tickets a snapshot covers — the re-pass's workload. */
 export function snapshotSize(snapshot: RefinementSnapshot): number {
   return snapshot.backlog.length + snapshot.todo.length;
+}
+
+/**
+ * How many tickets a re-pass would cover, without building the snapshot.
+ *
+ * The status endpoint is polled every few seconds per open board tab and only
+ * needs the number. Going through `loadRefinementSnapshot` for that would run
+ * five queries — including full reads of `ticket_comments` and
+ * `agent_sessions`, neither of which is indexed by `epic_id` — and assemble
+ * the whole object graph, to read `.length` off two arrays.
+ */
+export function countRefinableTickets(projectId: string): number {
+  const row = db
+    .select({ total: count() })
+    .from(epics)
+    .where(
+      and(
+        eq(epics.projectId, projectId),
+        inArray(epics.status, [...REFINEMENT_STATUSES])
+      )
+    )
+    .get();
+  return row?.total ?? 0;
 }
 
 /**

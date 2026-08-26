@@ -14,6 +14,7 @@ import { isErrorResponse } from "@/lib/api/route-helpers";
 import { validateBody } from "@/lib/validation/validate";
 import { requireMcpToken } from "@/lib/mcp/http-auth";
 import {
+  getProjectTicket,
   refinementReasonSchema,
   requireAgentSessionToken,
   resolveRefinementTicket,
@@ -58,12 +59,24 @@ export async function POST(request: NextRequest) {
   if (isErrorResponse(found)) return found;
   const { epic } = found;
 
-  const foundDependency = resolveRefinementTicket(
-    auth.projectId,
-    body.depends_on_ticket_id
-  );
-  if (isErrorResponse(foundDependency)) return foundDependency;
-  const dependsOn = foundDependency.epic;
+  // Only the DEPENDENT ticket is held to the Backlog/To do guardrail: it is
+  // the row being written to and the one that gets the activity-log entry.
+  // The prerequisite is merely referenced — neither creating nor deleting an
+  // edge touches it — so requiring it to be in the planning columns would
+  // block the most ordinary dependency there is ("this Backlog ticket builds
+  // on the epic already in Review") and would make an edge pointing at
+  // shipped work permanently unprunable. The snapshot deliberately shows
+  // those endpoints to the agent, so the tools must accept them.
+  const dependsOn = getProjectTicket(auth.projectId, body.depends_on_ticket_id);
+  if (!dependsOn) {
+    return NextResponse.json(
+      {
+        error: "Ticket not found in this session's project",
+        code: "TICKET_NOT_FOUND",
+      },
+      { status: 404 }
+    );
+  }
 
   let created: ReturnType<typeof createDependencies>;
   try {

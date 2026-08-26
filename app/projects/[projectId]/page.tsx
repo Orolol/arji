@@ -554,6 +554,7 @@ export default function KanbanPage() {
                 projectId={projectId}
                 refreshTrigger={refreshTrigger}
                 onError={(message) => addToast("error", message)}
+                onNotice={(message) => addToast("success", message)}
                 onStarted={() =>
                   addToast(
                     "success",

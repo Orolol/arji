@@ -135,14 +135,18 @@ describe("formatRefinementComment", () => {
   ]);
 
   it("links every listed ticket to its board deep link", () => {
-    const body = formatRefinementComment("proj-1", report);
+    const body = formatRefinementComment("proj-1", report, undefined, {
+      includeFullList: true,
+    });
     expect(body).toContain("[E-arij-001](/projects/proj-1?ticket=epic-1)");
     expect(body).toContain("[E-arij-002](/projects/proj-1?ticket=epic-2)");
     expect(body).toContain("[E-arij-003](/projects/proj-1?ticket=epic-3)");
   });
 
   it("lists each category of change with its justification", () => {
-    const body = formatRefinementComment("proj-1", report);
+    const body = formatRefinementComment("proj-1", report, undefined, {
+      includeFullList: true,
+    });
     expect(body).toContain("Promoted to To do");
     expect(body).toContain("Sent back to Backlog");
     expect(body).toContain("Dependency edges added");
@@ -153,6 +157,22 @@ describe("formatRefinementComment", () => {
   it("leads with the focused ticket's own move", () => {
     const body = formatRefinementComment("proj-1", report, "epic-1");
     expect(body.startsWith("Promoted **Backlog → To do**")).toBe(true);
+  });
+
+  it("omits the itemised breakdown unless asked for it", () => {
+    const body = formatRefinementComment("proj-1", report, "epic-1");
+    // The aggregate is always there; the per-change lists are not.
+    expect(body).toContain("1 ticket promoted to To do");
+    expect(body).not.toContain("Dependency edges added");
+    expect(body).not.toContain("Needs the schema first.");
+  });
+
+  it("points at the ticket carrying the full breakdown", () => {
+    const body = formatRefinementComment("proj-1", report, "epic-2", {
+      fullListTicketId: "epic-1",
+    });
+    expect(body).toContain("Full breakdown of this pass:");
+    expect(body).toContain("/projects/proj-1?ticket=epic-1");
   });
 
   it("leads a demotion with its open question", () => {
@@ -274,8 +294,37 @@ describe("publishRefinementReport", () => {
     const comment = comments(promotedId)[0];
     expect(comment.author).toBe("agent");
     expect(comment.agentSessionId).toBe(sessionId);
+    // Its own move and reason are always present, whether or not this is the
+    // ticket carrying the itemised breakdown.
     expect(comment.content).toContain("Ready.");
-    expect(comment.content).toContain("Unblocked first.");
+    expect(comment.content).toContain("Promoted **Backlog → To do**");
+  });
+
+  /**
+   * Regression: the recap repeated the whole board report on every moved
+   * ticket, so comment volume was quadratic in the size of the pass (10
+   * promotions x 40 changes each) — and it bloated the very table the
+   * board's status poll used to scan.
+   */
+  it("posts the itemised breakdown exactly once per pass", () => {
+    seedChanges();
+    publishRefinementReport({ projectId, sessionId, succeeded: true });
+
+    const bodies = [promotedId, demotedId].map(
+      (id) => comments(id)[0].content
+    );
+    const withFullList = bodies.filter((body) =>
+      body.includes("Re-ranked")
+    );
+    expect(withFullList).toHaveLength(1);
+
+    // The other one still explains itself and points at the breakdown.
+    const withoutFullList = bodies.filter(
+      (body) => !body.includes("Re-ranked")
+    );
+    expect(withoutFullList).toHaveLength(1);
+    expect(withoutFullList[0]).toContain("Full breakdown of this pass:");
+    expect(withoutFullList[0]).toContain("1 ticket promoted to To do");
   });
 
   it("raises one notification carrying the aggregate", () => {

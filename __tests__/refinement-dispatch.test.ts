@@ -70,6 +70,11 @@ const {
   getActiveRefinementSession,
 } = await import("@/lib/refinement/dispatch");
 const { REFINEMENT_AGENT_TYPE } = await import("@/lib/refinement/constants");
+const {
+  recordRefinementChange,
+  peekRefinementChanges,
+  _resetRefinementRegistryForTests,
+} = await import("@/lib/refinement/registry");
 const { GET, POST } = await import(
   "@/app/api/projects/[projectId]/refinement/route"
 );
@@ -282,6 +287,52 @@ describe("dispatchRefinementSession", () => {
     expect(notification.title).toContain("ended early");
   });
 
+  /**
+   * Regression: the launch-failure path returned without publishing, so any
+   * board writes the session had already made went unexplained — and
+   * `takeRefinementChanges` never ran, stranding that session's key in the
+   * registry for the life of the process.
+   */
+  it("publishes and drains when the run throws", async () => {
+    const projectId = seedProject(["backlog", "todo"]);
+    const result = await dispatchRefinementSession({ projectId });
+    if (result.skipped) throw new Error("expected a dispatch");
+    await result.settled;
+
+    // A second session that makes a board write and then dies — the exact
+    // sequence that used to leave the write unexplained.
+    _resetRefinementRegistryForTests();
+    const { processManager } = await import("@/lib/claude/process-manager");
+    (
+      processManager.start as unknown as {
+        mockImplementationOnce: (fn: (sessionId: string) => void) => void;
+      }
+    ).mockImplementationOnce((sessionId: string) => {
+      recordRefinementChange(
+        { sessionId, agentType: REFINEMENT_AGENT_TYPE },
+        {
+          kind: "promoted",
+          ticketId: `epic-refine-${counter}-0`,
+          label: "E-1",
+          detail: "promoted to To do",
+          reason: "was ready",
+        }
+      );
+      throw new Error("provider is not authenticated");
+    });
+
+    const second = await dispatchRefinementSession({ projectId });
+    if (second.skipped) throw new Error("expected a dispatch");
+
+    const settled = await second.settled;
+    expect(settled.success).toBe(false);
+    // The partial work is reported rather than silently dropped.
+    expect(settled.report?.promoted).toHaveLength(1);
+    expect(settled.summary).toContain("promoted to To do");
+    // And the registry is drained, so the session key cannot leak.
+    expect(peekRefinementChanges(second.sessionId)).toEqual([]);
+  });
+
   it("rejects an unknown project", async () => {
     await expect(
       dispatchRefinementSession({ projectId: "nope" })
@@ -304,6 +355,38 @@ describe("refinement route", () => {
       sessionId: null,
       ticketCount: 2,
     });
+  });
+
+  /**
+   * The status endpoint is polled per open board tab. It must answer from a
+   * COUNT rather than assembling the whole snapshot (5 queries including
+   * unindexed reads of ticket_comments and agent_sessions) to return an int.
+   */
+  it("counts the planning columns without loading the snapshot", async () => {
+    const projectId = seedProject([
+      "backlog",
+      "backlog",
+      "todo",
+      "in_progress",
+      "review",
+      "done",
+      "released",
+    ]);
+
+    const response = await GET(
+      mockJsonRequest({}),
+      mockRouteContext({ projectId })
+    );
+    expect((await response.json()).data.ticketCount).toBe(3);
+  });
+
+  it("reports zero for a board with nothing to refine", async () => {
+    const projectId = seedProject(["in_progress", "done"]);
+    const response = await GET(
+      mockJsonRequest({}),
+      mockRouteContext({ projectId })
+    );
+    expect((await response.json()).data.ticketCount).toBe(0);
   });
 
   it("starts a pass", async () => {
