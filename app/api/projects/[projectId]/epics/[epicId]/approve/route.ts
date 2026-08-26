@@ -21,6 +21,7 @@ import {
 } from "@/lib/workflow/transition-service";
 import { createApproveMergeFailedNotification } from "@/lib/notifications/create";
 import { autoModeRegistry } from "@/lib/auto-mode/registry";
+import { buildApprovalMergeBlockedReason } from "@/lib/workflow/merge-failure";
 import { getEpicOr404, isErrorResponse } from "@/lib/api/route-helpers";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
@@ -207,14 +208,19 @@ export async function POST(_request: NextRequest, { params }: Params) {
 
           // review → review: not a status change, just the activity log
           // recording WHY the approval bounced (same pattern as auto-mode's
-          // held-in-place merge failures).
+          // held-in-place merge failures). The reason is built by the shared
+          // contract so the board can recognise it and show the card a
+          // "merge conflict" blocker instead of a doomed Merge button.
           logTransition({
             projectId,
             epicId,
             fromStatus: "review",
             toStatus: "review",
             actor: "system",
-            reason: `Approval blocked: merge of ${epic.branchName} failed — ${mergeError}`,
+            reason: buildApprovalMergeBlockedReason({
+              branchName: epic.branchName,
+              error: mergeError,
+            }),
           });
         } catch (trailError) {
           console.error(

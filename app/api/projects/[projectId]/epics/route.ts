@@ -5,12 +5,13 @@ import {
   epics,
   frictions,
   gradingReports,
+  reviewComments,
   ticketComments,
   ticketActivityLog,
   ticketReadCursors,
   userStories,
 } from "@/lib/db/schema";
-import { count, eq, sql, and, inArray } from "drizzle-orm";
+import { count, eq, or, sql, and, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { createDependencies } from "@/lib/dependencies/crud";
@@ -42,6 +43,12 @@ import {
   parseGradingEntries,
 } from "@/lib/grading/report";
 import { OPEN_FRICTION_STATUSES } from "@/lib/frictions/constants";
+import { evaluateMergeReadiness } from "@/lib/kanban/merge-readiness";
+import { MERGE_FAILURE_REASON_LIKE_PATTERNS } from "@/lib/workflow/merge-failure";
+import {
+  lastCleanReviewAtSql,
+  lastTerminalCodeAtSql,
+} from "@/lib/workflow/review-freshness";
 
 class FrictionConversionConflict extends Error {}
 
@@ -173,6 +180,61 @@ export async function GET(
     .where(eq(rankedGradingReports.rowNum, 1))
     .as("latest_grading_reports");
 
+  // ---- Merge readiness ------------------------------------------------
+  // The three facts lib/kanban/merge-readiness.ts turns into the board's
+  // "Ready to merge" signal. They ride along in THIS query rather than a
+  // follow-up call: the board polls, and one extra round trip per poll for a
+  // per-card badge is the kind of cost that only shows up on a big board.
+
+  // Open review findings per epic — the merge gate's blocking half.
+  const openFindingCounts = db
+    .select({
+      epicId: reviewComments.epicId,
+      openFindings: sql<number>`COUNT(*)`.as("open_findings"),
+    })
+    .from(reviewComments)
+    .where(eq(reviewComments.status, "open"))
+    .groupBy(reviewComments.epicId)
+    .as("open_finding_counts");
+
+  // Review/code freshness — the same aggregates Full Auto's sweep reads.
+  const reviewFreshness = db
+    .select({
+      epicId: agentSessions.epicId,
+      lastCleanReviewAt: lastCleanReviewAtSql().as("last_clean_review_at"),
+      lastTerminalCodeAt: lastTerminalCodeAtSql().as("last_terminal_code_at"),
+    })
+    .from(agentSessions)
+    .where(sql`${agentSessions.epicId} IS NOT NULL`)
+    .groupBy(agentSessions.epicId)
+    .as("review_freshness");
+
+  // Newest "the branch could not land" activity entry. A failed merge writes
+  // no column anywhere, so this same-state log row is the only durable trace
+  // (see lib/workflow/merge-failure.ts for why the patterns are derived).
+  const latestMergeFailures = db
+    .select({
+      epicId: ticketActivityLog.epicId,
+      lastMergeFailureAt:
+        sql<string | null>`MAX(REPLACE(${ticketActivityLog.createdAt}, ' ', 'T'))`.as(
+          "last_merge_failure_at"
+        ),
+    })
+    .from(ticketActivityLog)
+    .where(
+      or(
+        // Spelled out rather than composed from drizzle's `like()` so the
+        // ESCAPE clause lands on the LIKE itself, whatever grouping the
+        // helper decides to emit around its operands.
+        ...MERGE_FAILURE_REASON_LIKE_PATTERNS.map(
+          (pattern) =>
+            sql`${ticketActivityLog.reason} LIKE ${pattern} ESCAPE '\\'`
+        )
+      )
+    )
+    .groupBy(ticketActivityLog.epicId)
+    .as("latest_merge_failures");
+
   // Latest user-authored comment per epic — a user comment newer than the
   // asked_question session counts as the reply.
   const latestUserComments = db
@@ -229,6 +291,10 @@ export async function GET(
       // Per-epic read cursor (ticket_read_cursors) — the client derives the
       // "unread AI comment" dot from latestComment* vs this timestamp.
       lastReadAt: ticketReadCursors.lastReadAt,
+      openFindings: openFindingCounts.openFindings,
+      lastCleanReviewAt: reviewFreshness.lastCleanReviewAt,
+      lastTerminalCodeAt: reviewFreshness.lastTerminalCodeAt,
+      lastMergeFailureAt: latestMergeFailures.lastMergeFailureAt,
     })
     .from(epics)
     .leftJoin(storyCounts, eq(epics.id, storyCounts.epicId))
@@ -238,6 +304,9 @@ export async function GET(
     .leftJoin(epicSessionCosts, eq(epics.id, epicSessionCosts.epicId))
     .leftJoin(latestGradingReports, eq(epics.id, latestGradingReports.epicId))
     .leftJoin(ticketReadCursors, eq(epics.id, ticketReadCursors.epicId))
+    .leftJoin(openFindingCounts, eq(epics.id, openFindingCounts.epicId))
+    .leftJoin(reviewFreshness, eq(epics.id, reviewFreshness.epicId))
+    .leftJoin(latestMergeFailures, eq(epics.id, latestMergeFailures.epicId))
     .where(eq(epics.projectId, projectId))
     .orderBy(epics.position)
     .all();
@@ -248,12 +317,32 @@ export async function GET(
     queryMs: Date.now() - queryStartedAt,
   });
 
-  const data = result.map(({ latestGradingEntries, ...epic }) => ({
-    ...epic,
-    gradingStatus: aggregateGradingStatus(
-      parseGradingEntries(latestGradingEntries),
-    ),
-  }));
+  // The readiness facts are inputs, not board data: they are folded into the
+  // one derived signal the client consumes and dropped from the payload, so
+  // no component can start re-deriving "ready" from a subset of them.
+  const data = result.map(
+    ({
+      latestGradingEntries,
+      openFindings,
+      lastCleanReviewAt,
+      lastTerminalCodeAt,
+      lastMergeFailureAt,
+      ...epic
+    }) => ({
+      ...epic,
+      gradingStatus: aggregateGradingStatus(
+        parseGradingEntries(latestGradingEntries),
+      ),
+      mergeReadiness: evaluateMergeReadiness({
+        status: epic.status,
+        branchName: epic.branchName,
+        openFindings,
+        lastCleanReviewAt,
+        lastTerminalCodeAt,
+        lastMergeFailureAt,
+      }),
+    }),
+  );
 
   return NextResponse.json({ data });
 }

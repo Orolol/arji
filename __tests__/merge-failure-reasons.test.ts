@@ -1,0 +1,92 @@
+/**
+ * The activity-log contract for a merge that could not land
+ * (lib/workflow/merge-failure.ts).
+ *
+ * These assertions are the coupling: the board recognises a failed merge by
+ * matching reason prefixes, so if a writer rewords its reason without the
+ * matcher following, THIS is what fails — not a card that quietly stops
+ * warning about a conflict.
+ */
+import { describe, it, expect } from "vitest";
+import { AUTO_MODE_REASONS } from "@/lib/auto-mode/constants";
+import {
+  buildApprovalMergeBlockedReason,
+  isMergeFailureReason,
+  MERGE_FAILURE_REASON_LIKE_PATTERNS,
+  MERGE_FAILURE_REASON_PREFIXES,
+} from "@/lib/workflow/merge-failure";
+
+describe("isMergeFailureReason", () => {
+  it("recognises every reason auto-mode logs when git refuses the branch", () => {
+    expect(isMergeFailureReason(AUTO_MODE_REASONS.mergeConflict)).toBe(true);
+    expect(isMergeFailureReason(AUTO_MODE_REASONS.mergeConflictDeferred)).toBe(
+      true
+    );
+    expect(
+      isMergeFailureReason(AUTO_MODE_REASONS.dispatchFailed("merge", "boom"))
+    ).toBe(true);
+    expect(isMergeFailureReason(AUTO_MODE_REASONS.mergeRolledBack("boom"))).toBe(
+      true
+    );
+  });
+
+  it("recognises the approve route's blocked-merge reason", () => {
+    const reason = buildApprovalMergeBlockedReason({
+      branchName: "feature/epic-1",
+      error: "CONFLICT (content): Merge conflict in lib/db/schema.ts",
+    });
+    expect(isMergeFailureReason(reason)).toBe(true);
+    expect(reason).toContain("feature/epic-1");
+    expect(reason).toContain("Merge conflict in lib/db/schema.ts");
+  });
+
+  it("ignores a WORKFLOW refusal — the readiness predicate explains those better", () => {
+    expect(
+      isMergeFailureReason(
+        AUTO_MODE_REASONS.mergeRefused("Review comments are still open")
+      )
+    ).toBe(false);
+  });
+
+  it("ignores dispatch failures from the other stages", () => {
+    expect(
+      isMergeFailureReason(AUTO_MODE_REASONS.dispatchFailed("build", "boom"))
+    ).toBe(false);
+    expect(
+      isMergeFailureReason(AUTO_MODE_REASONS.dispatchFailed("review", "boom"))
+    ).toBe(false);
+  });
+
+  it("ignores the success and non-merge traces", () => {
+    expect(isMergeFailureReason(AUTO_MODE_REASONS.merged)).toBe(false);
+    expect(isMergeFailureReason(AUTO_MODE_REASONS.mergeAttempted)).toBe(false);
+    expect(isMergeFailureReason(AUTO_MODE_REASONS.reviewDispatched)).toBe(false);
+    expect(isMergeFailureReason(null)).toBe(false);
+    expect(isMergeFailureReason(undefined)).toBe(false);
+    expect(isMergeFailureReason("")).toBe(false);
+  });
+});
+
+describe("MERGE_FAILURE_REASON_PREFIXES", () => {
+  it("carries no leftover sentinel from probing the reason builders", () => {
+    for (const prefix of MERGE_FAILURE_REASON_PREFIXES) {
+      expect(prefix).not.toContain("\u0000");
+      expect(prefix.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("exposes LIKE patterns that are the prefixes plus a wildcard", () => {
+    expect(MERGE_FAILURE_REASON_LIKE_PATTERNS).toHaveLength(
+      MERGE_FAILURE_REASON_PREFIXES.length
+    );
+    for (const [index, pattern] of MERGE_FAILURE_REASON_LIKE_PATTERNS.entries()) {
+      expect(pattern.endsWith("%")).toBe(true);
+      // Only the trailing wildcard is a wildcard: any % or _ inside a prefix
+      // is escaped, so a reworded reason can never widen the match.
+      expect(pattern.slice(0, -1).replace(/\\[\\%_]/g, "")).not.toMatch(/[%_]/);
+      expect(pattern.slice(0, -1).replace(/\\([\\%_])/g, "$1")).toBe(
+        MERGE_FAILURE_REASON_PREFIXES[index]
+      );
+    }
+  });
+});

@@ -7,11 +7,14 @@ import {
 
 // Takes the tagged-template args so `mockSql.mock.calls` stays inspectable —
 // the query-shape assertions below read the raw template strings.
-const mockSql = vi.hoisted(() =>
-  vi.fn((..._args: unknown[]) => ({
+const mockSql = vi.hoisted(() => {
+  const fn = vi.fn((..._args: unknown[]) => ({
     as: vi.fn(() => ({})),
-  }))
-);
+  })) as ReturnType<typeof vi.fn> & { raw: ReturnType<typeof vi.fn> };
+  // lib/workflow/review-freshness.ts splices its agent-type IN lists in raw.
+  fn.raw = vi.fn((value: unknown) => value);
+  return fn;
+});
 const mockCount = vi.hoisted(() =>
   vi.fn(() => ({
     as: vi.fn(() => ({})),
@@ -62,9 +65,27 @@ const mockSchema = vi.hoisted(() => ({
     __name: "agentSessions",
     id: "id",
     epicId: "epicId",
+    userStoryId: "userStoryId",
+    status: "status",
+    agentType: "agentType",
+    reviewVerdict: "reviewVerdict",
+    totalCostUsd: "totalCostUsd",
     outcome: "outcome",
     endedAt: "endedAt",
     completedAt: "completedAt",
+    createdAt: "createdAt",
+  },
+  reviewComments: {
+    __name: "reviewComments",
+    id: "id",
+    epicId: "epicId",
+    status: "status",
+  },
+  ticketActivityLog: {
+    __name: "ticketActivityLog",
+    id: "id",
+    epicId: "epicId",
+    reason: "reason",
     createdAt: "createdAt",
   },
   gradingReports: {
@@ -96,6 +117,7 @@ const mockTryExportArjiJson = vi.hoisted(() => vi.fn());
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn(() => ({})),
   and: vi.fn(() => ({})),
+  or: vi.fn(() => ({})),
   sql: mockSql,
   count: mockCount,
 }));
@@ -170,8 +192,10 @@ vi.mock("@/lib/db/schema", () => ({
   projects: mockSchema.projects,
   userStories: mockSchema.userStories,
   ticketComments: mockSchema.ticketComments,
+  ticketActivityLog: mockSchema.ticketActivityLog,
   agentSessions: mockSchema.agentSessions,
   gradingReports: mockSchema.gradingReports,
+  reviewComments: mockSchema.reviewComments,
   ticketReadCursors: mockSchema.ticketReadCursors,
 }));
 
@@ -312,10 +336,12 @@ describe("POST /api/projects/[projectId]/epics", () => {
       gradingSummary: "One gap remains.",
     });
     // story counts + latest comments + latest sessions + latest user comments
-    // + session costs + latest grading + ticket read cursors
-    expect((db as unknown as { leftJoin: ReturnType<typeof vi.fn> }).leftJoin).toHaveBeenCalledTimes(7);
-    // story counts + session costs + latest user comments
-    expect((db as unknown as { groupBy: ReturnType<typeof vi.fn> }).groupBy).toHaveBeenCalledTimes(3);
+    // + session costs + latest grading + ticket read cursors + the three
+    // merge-readiness facts (open findings, review freshness, merge failures)
+    expect((db as unknown as { leftJoin: ReturnType<typeof vi.fn> }).leftJoin).toHaveBeenCalledTimes(10);
+    // story counts + session costs + latest user comments + open findings
+    // + review freshness + merge failures
+    expect((db as unknown as { groupBy: ReturnType<typeof vi.fn> }).groupBy).toHaveBeenCalledTimes(6);
 
     const sqlFragments = mockSql.mock.calls.map(([template]) =>
       Array.isArray(template) ? template.join(" ") : String(template),
