@@ -125,6 +125,72 @@ describe("useKanban moveEpic", () => {
     expect(onMoveError).toHaveBeenCalledWith("Refused");
   });
 
+  it("keeps the last known edges when the dependency request fails", async () => {
+    // Replacing a good edge list with [] does not degrade the board, it makes
+    // it confidently wrong: every "Waiting on:" row vanishes and a blocked
+    // ticket can acquire the "next" badge, with nothing on screen saying the
+    // data is missing.
+    let depsOk = true;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/epics/reorder")) return jsonResponse({});
+      if (url.endsWith("/epics")) return jsonResponse({ data: epics });
+      if (url.endsWith("/releases")) return jsonResponse({ data: [] });
+      if (url.endsWith("/dependencies")) {
+        return depsOk
+          ? jsonResponse({ data: [{ ticketId: "b", dependsOnTicketId: "a" }] })
+          : jsonResponse({ error: "boom" }, false);
+      }
+      return jsonResponse({ data: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useKanban("proj-1"), {
+      wrapper: StrictMode,
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() =>
+      expect(result.current.dependencies).toHaveLength(1)
+    );
+
+    depsOk = false;
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.dependencies).toEqual([
+      { ticketId: "b", dependsOnTicketId: "a" },
+    ]);
+  });
+
+  it("keeps the previous board when the epics request errors", async () => {
+    let epicsOk = true;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/epics")) {
+        return epicsOk
+          ? jsonResponse({ data: epics })
+          : jsonResponse({ error: "boom" }, false);
+      }
+      return jsonResponse({ data: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useKanban("proj-1"), {
+      wrapper: StrictMode,
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.board.columns.todo).toHaveLength(2);
+
+    epicsOk = false;
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    // A 500 must not read as "the board is empty"...
+    expect(result.current.board.columns.todo).toHaveLength(2);
+    // ...and must not strand the skeleton either.
+    expect(result.current.loading).toBe(false);
+  });
+
   it("keeps the board rendered when the dependency request rejects", async () => {
     // A rejected fetch inside the Promise.all used to skip setBoard entirely.
     const fetchMock = vi.fn(async (url: string) => {

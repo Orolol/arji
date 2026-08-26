@@ -28,6 +28,8 @@ const dndHandlers = vi.hoisted(() => ({
   onDragEnd: null as
     | ((event: { active: { id: string }; over: { id: string } | null }) => void)
     | null,
+  /** dnd-kit fires this INSTEAD of onDragEnd when a drag is aborted. */
+  onDragCancel: null as (() => void) | null,
   /** Column the pointer is currently over, mirroring dnd-kit's `isOver`. */
   overColumnId: null as string | null,
 }));
@@ -47,13 +49,16 @@ vi.mock("@dnd-kit/core", () => ({
     children,
     onDragStart,
     onDragEnd,
+    onDragCancel,
   }: {
     children: ReactNode;
     onDragStart: (event: { active: { id: string } }) => void;
     onDragEnd: (event: { active: { id: string }; over: { id: string } | null }) => void;
+    onDragCancel?: () => void;
   }) => {
     dndHandlers.onDragStart = onDragStart;
     dndHandlers.onDragEnd = onDragEnd;
+    dndHandlers.onDragCancel = onDragCancel ?? null;
     return <div>{children}</div>;
   },
   DragOverlay: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -160,6 +165,7 @@ describe("Kanban board dependency visibility", () => {
     mockKanbanState.moveEpic.mockClear();
     dndHandlers.onDragStart = null;
     dndHandlers.onDragEnd = null;
+    dndHandlers.onDragCancel = null;
     dndHandlers.overColumnId = null;
   });
 
@@ -241,10 +247,13 @@ describe("Kanban board dependency visibility", () => {
 
   it("hovering a card highlights its dependency neighbours and dims the rest", () => {
     vi.useFakeTimers();
-    const a = makeEpic({ id: "a", title: "Epic A" });
+    // A is delivered: the edge stays in the adjacency so the focus still has
+    // neighbours, but B is not blocked — this test is about the hover focus,
+    // and a blocked B would carry its own muted opacity.
+    const a = makeEpic({ id: "a", title: "Epic A", status: "done" });
     const b = makeEpic({ id: "b", title: "Epic B" });
     const z = makeEpic({ id: "z", title: "Unrelated" });
-    setBoard({ todo: [a, b, z] });
+    setBoard({ todo: [b, z], done: [a] });
     setDependencies([{ ticketId: "b", dependsOnTicketId: "a" }]);
 
     render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
@@ -290,11 +299,12 @@ describe("Kanban board dependency visibility", () => {
 
   it("hovering a card with no dependencies dims nothing", () => {
     vi.useFakeTimers();
-    const a = makeEpic({ id: "a", title: "Epic A" });
+    const a = makeEpic({ id: "a", title: "Epic A", status: "done" });
     const b = makeEpic({ id: "b", title: "Epic B" });
     const z = makeEpic({ id: "z", title: "Unrelated" });
-    setBoard({ todo: [a, b, z] });
+    setBoard({ todo: [b, z], done: [a] });
     // z has no edge in either direction; a and b are linked to each other.
+    // A is delivered so B carries no blocked styling of its own here.
     setDependencies([{ ticketId: "b", dependsOnTicketId: "a" }]);
 
     render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
@@ -315,6 +325,112 @@ describe("Kanban board dependency visibility", () => {
       expect(card.className).not.toContain("ring-primary/50");
       expect(card.className).not.toContain("ring-agent/50");
     }
+  });
+
+  it("still highlights dependencies after a cancelled drag", () => {
+    vi.useFakeTimers();
+    // dnd-kit dispatches cancel INSTEAD of end — Escape, a window resize and a
+    // tab switch all reach it. Without a reset there, the drag state stays
+    // latched and every later hover bails out, killing story 3 for the rest of
+    // the page session.
+    const a = makeEpic({ id: "a", title: "Epic A", status: "done" });
+    const b = makeEpic({ id: "b", title: "Epic B" });
+    const z = makeEpic({ id: "z", title: "Unrelated" });
+    setBoard({ todo: [b, z], done: [a] });
+    setDependencies([{ ticketId: "b", dependsOnTicketId: "a" }]);
+
+    render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+    expect(dndHandlers.onDragCancel).toBeTypeOf("function");
+
+    act(() => {
+      dndHandlers.onDragStart?.({ active: { id: "b" } });
+    });
+    act(() => {
+      dndHandlers.onDragCancel?.();
+    });
+
+    act(() => {
+      fireEvent.mouseEnter(cardOf("Epic A"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+
+    expect(cardOf("Epic B").className).toContain("ring-agent/50");
+    expect(cardOf("Unrelated").style.opacity).toBe("0.4");
+  });
+
+  it("clears the focus when the hovered card is moved to another column", () => {
+    vi.useFakeTimers();
+    // An SSE update moving the hovered ticket re-mounts its card under a
+    // different Column. React fires no mouseleave for that, so without the
+    // card reporting its own departure the board would stay dimmed with the
+    // pointer nowhere near a card.
+    const a = makeEpic({ id: "a", title: "Epic A", status: "done" });
+    const b = makeEpic({ id: "b", title: "Epic B" });
+    const z = makeEpic({ id: "z", title: "Unrelated" });
+    setBoard({ todo: [b, z], done: [a] });
+    setDependencies([{ ticketId: "b", dependsOnTicketId: "a" }]);
+
+    const { rerender } = render(
+      <Board projectId="proj-1" onEpicClick={vi.fn()} />
+    );
+
+    act(() => {
+      fireEvent.mouseEnter(cardOf("Epic B"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(cardOf("Unrelated").style.opacity).toBe("0.4");
+
+    // An agent picks B up — exactly what the user was hovering it to decide.
+    setBoard({
+      todo: [z],
+      in_progress: [{ ...b, status: "in_progress" }],
+      done: [a],
+    });
+    act(() => {
+      rerender(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+    });
+
+    expect(cardOf("Unrelated").style.opacity).toBe("1");
+  });
+
+  it("greys a blocked card, not just labels it", () => {
+    // Story 2 is "carte grisée + libellé": the label alone leaves a blocked
+    // card pixel-identical to a ready one apart from one 11px row.
+    const blocked = makeEpic({ id: "blocked", title: "Blocked" });
+    const ready = makeEpic({ id: "ready", title: "Ready" });
+    const prereq = makeEpic({ id: "prereq", title: "Prereq", status: "backlog" });
+    setBoard({ todo: [blocked, ready], backlog: [prereq] });
+    setDependencies([{ ticketId: "blocked", dependsOnTicketId: "prereq" }]);
+
+    render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+
+    // Asserted on the computed style: opacity is inline precisely because an
+    // inline declaration beats Tailwind's non-`!important` classes, so a class
+    // assertion could pass while nothing reaches the screen.
+    const blockedCard = cardOf("Blocked");
+    expect(blockedCard.style.opacity).toBe("0.62");
+    expect(blockedCard.className).toContain("saturate-[.55]");
+    expect(blockedCard).toHaveTextContent("Waiting on: Prereq");
+
+    // An unblocked sibling is untouched.
+    expect(cardOf("Ready").style.opacity).toBe("1");
+    expect(cardOf("Ready").className).not.toContain("saturate-[.55]");
+  });
+
+  it("clears the blocked styling once the prerequisite is delivered", () => {
+    const dependent = makeEpic({ id: "dependent", title: "Dependent" });
+    const prereq = makeEpic({ id: "prereq", title: "Prereq", status: "done" });
+    setBoard({ todo: [dependent], done: [prereq] });
+    setDependencies([{ ticketId: "dependent", dependsOnTicketId: "prereq" }]);
+
+    render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+
+    expect(cardOf("Dependent").style.opacity).toBe("1");
+    expect(screen.queryByTestId("epic-blocked-dependent")).toBeNull();
   });
 
   it("keeps the focus while focus moves within the same card", () => {

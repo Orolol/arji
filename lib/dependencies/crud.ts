@@ -133,16 +133,23 @@ export function setTicketDependencies(
     .where(eq(ticketDependencies.ticketId, ticketId))
     .all();
 
-  // Remove all existing dependencies for this ticket
-  db.delete(ticketDependencies)
-    .where(eq(ticketDependencies.ticketId, ticketId))
-    .run();
-
   const edges: DependencyEdge[] = dependsOnIds.map((depId) => ({
     ticketId,
     dependsOnTicketId: depId,
   }));
-  const created = edges.length > 0 ? insertDependencies(projectId, edges) : [];
+
+  // Delete and re-insert as one unit. Validation lives inside
+  // `insertDependencies` and runs AFTER the delete, so without a transaction a
+  // rejected edit (a cycle, a cross-project target) leaves the ticket with no
+  // dependencies at all while the caller reports 422 and the board — which
+  // gets no event on the throw path — keeps showing the old edges. Rolling the
+  // delete back keeps the pre-edit state the board is already displaying true.
+  const created = db.transaction(() => {
+    db.delete(ticketDependencies)
+      .where(eq(ticketDependencies.ticketId, ticketId))
+      .run();
+    return edges.length > 0 ? insertDependencies(projectId, edges) : [];
+  });
 
   const affected = [
     ticketId,

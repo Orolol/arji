@@ -139,6 +139,32 @@ describe("dependency change events", () => {
     expect(announcedTicketIds()).toEqual(["epic-1", "epic-2"]);
   });
 
+  it("rolls the delete back when the replacement is rejected", async () => {
+    // Validation runs inside the insert, after the delete. Un-transacted, a
+    // rejected edit returns 422 while silently destroying the ticket's
+    // existing edges — and no event fires on the throw path, so the board goes
+    // on showing dependencies that no longer exist.
+    dbMockState.allQueue = [
+      [{ ticketId: "epic-1", dependsOnTicketId: "epic-2" }],
+      [],
+    ];
+    mockValidateDagIntegrity.mockImplementationOnce(() => {
+      throw new Error("Dependency cycle detected");
+    });
+
+    const { setTicketDependencies } = await import("@/lib/dependencies/crud");
+    expect(() =>
+      setTicketDependencies("proj-1", "epic-1", ["epic-3"])
+    ).toThrow(/cycle/i);
+
+    // The delete and the insert went through one transaction call, so the
+    // throw unwinds both rather than leaving the ticket edge-less.
+    const { db } = await import("@/lib/db");
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    // Nothing durable changed, so nothing was announced.
+    expect(mockEmitDependenciesChanged).not.toHaveBeenCalled();
+  });
+
   it("announces the ex-prerequisite when a dependency is removed", async () => {
     // setTicketDependencies replaces the whole set, so clearing it is how the
     // UI deletes an edge. epic-2 loses a dependent and must be told.

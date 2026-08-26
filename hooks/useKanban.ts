@@ -63,9 +63,22 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
         // and leave the board unrendered.
         fetch(`/api/projects/${projectId}/dependencies`).catch(() => null),
       ]);
+      // A failed board request must not be read as "the board is empty": an
+      // errored /epics would blank every column, and an errored /dependencies
+      // would report every blocked ticket as unblocked and hand one of them the
+      // "next" badge. Keeping the last known state is the safer failure — it
+      // self-corrects on the next successful reload and never invents
+      // readiness.
+      // Thrown, not returned: the catch below still lets `setLoading(false)`
+      // run, so a first-load failure shows an empty board rather than an
+      // eternal skeleton.
+      if (!epicsRes.ok) throw new Error("epics request failed");
       const epicsData = await epicsRes.json();
-      const releasesData = await releasesRes.json();
-      let depEdges: TicketDependencyEdge[] = [];
+      const releasesData = releasesRes.ok
+        ? await releasesRes.json()
+        : { data: [] };
+
+      let depEdges: TicketDependencyEdge[] | null = null;
       try {
         if (depsRes?.ok) {
           const depsData = await depsRes.json();
@@ -77,9 +90,10 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
           );
         }
       } catch {
-        // keep [] — the board renders, just without dependency visibility
+        // leave null — the previous edges stand
       }
-      setDependencies(depEdges);
+      if (depEdges !== null) setDependencies(depEdges);
+
       const epics: KanbanEpic[] = epicsData.data || [];
       const releaseRows: ReleaseRow[] = releasesData.data || [];
 

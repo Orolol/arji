@@ -187,7 +187,13 @@ export function Column({
                 aria-hidden="true"
               />
             )}
-            {epics.length === 0 && !isOver ? (
+            {/* `showDropSlot`, not raw `isOver`: an empty, hovered,
+                drop-refusing column would otherwise render neither the
+                placeholder nor a slot. Unreachable while `dropDisabled` only
+                means "the dragged card's own column", but keeping the
+                invariant local stops that from depending on the caller's
+                current formula. */}
+            {epics.length === 0 && !showDropSlot ? (
               <div
                 className="rounded-[10px] border border-dashed border-border p-[15px] text-[13px] text-muted-foreground"
                 data-testid={`column-empty-${status}`}

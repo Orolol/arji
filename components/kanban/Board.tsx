@@ -171,6 +171,12 @@ export function Board({
     if (refreshTrigger) refresh();
   }, [refreshTrigger, refresh]);
   const [activeEpic, setActiveEpic] = useState<KanbanEpic | null>(null);
+  /**
+   * The column the dragged card was picked up from. Not `activeEpic.status`:
+   * `useKanban` buckets an unrecognised status into Backlog without rewriting
+   * the field, so the status and the column it renders in can disagree.
+   */
+  const [activeColumn, setActiveColumn] = useState<KanbanStatus | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -240,7 +246,10 @@ export function Board({
   // keeps a card fly-by from flickering the board, and the focus is cleared
   // on leave or the moment a drag starts, so it never competes with a drag.
   const [hoverFocusEpicId, setHoverFocusEpicId] = useState<string | null>(null);
-  const hoverFocusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverFocusTimer = useRef<{
+    epicId: string;
+    handle: ReturnType<typeof setTimeout>;
+  } | null>(null);
   // Read by handleDependencyHoverChange so it can bail during a drag without
   // taking `activeEpic` as a dependency — that would change the callback's
   // identity on every drag boundary and invalidate the whole epicViews map.
@@ -248,35 +257,55 @@ export function Board({
 
   const clearHoverFocus = useCallback(() => {
     if (hoverFocusTimer.current !== null) {
-      clearTimeout(hoverFocusTimer.current);
+      clearTimeout(hoverFocusTimer.current.handle);
       hoverFocusTimer.current = null;
     }
     setHoverFocusEpicId(null);
   }, []);
 
-  const handleDependencyHoverChange = useCallback((epicId: string | null) => {
-    if (hoverFocusTimer.current !== null) {
-      clearTimeout(hoverFocusTimer.current);
-      hoverFocusTimer.current = null;
-    }
-    if (epicId === null) {
-      setHoverFocusEpicId(null);
-      return;
-    }
-    // A drag owns the board's visuals. mouseenter still fires on every card the
-    // pointer crosses (the DragOverlay is pointer-events:none), so without this
-    // each one would arm a timer that re-renders the Board to draw nothing.
-    if (activeEpicRef.current !== null) return;
-    hoverFocusTimer.current = setTimeout(() => {
-      hoverFocusTimer.current = null;
-      setHoverFocusEpicId(epicId);
-    }, 150);
-  }, []);
+  /**
+   * A card reports that it gained (`active`) or lost the pointer/focus. Cards
+   * pass their OWN id in both directions, so a leave — including the synthetic
+   * one a card fires as it unmounts — can only retract the focus it armed
+   * itself. That is what handles a hovered ticket being re-parented by an SSE
+   * move (an agent picking it up is exactly what the user was hovering to
+   * decide): React fires no mouseleave on unmount, and without the id check an
+   * unrelated card leaving would drop somebody else's focus.
+   */
+  const handleDependencyHoverChange = useCallback(
+    (epicId: string, active: boolean) => {
+      if (!active) {
+        if (hoverFocusTimer.current?.epicId === epicId) {
+          clearTimeout(hoverFocusTimer.current.handle);
+          hoverFocusTimer.current = null;
+        }
+        setHoverFocusEpicId((prev) => (prev === epicId ? null : prev));
+        return;
+      }
+      if (hoverFocusTimer.current !== null) {
+        clearTimeout(hoverFocusTimer.current.handle);
+        hoverFocusTimer.current = null;
+      }
+      // A drag owns the board's visuals. mouseenter still fires on every card
+      // the pointer crosses (the DragOverlay is pointer-events:none), so
+      // without this each one would arm a timer that re-renders the Board to
+      // draw nothing.
+      if (activeEpicRef.current !== null) return;
+      hoverFocusTimer.current = {
+        epicId,
+        handle: setTimeout(() => {
+          hoverFocusTimer.current = null;
+          setHoverFocusEpicId(epicId);
+        }, 150),
+      };
+    },
+    []
+  );
 
   useEffect(
     () => () => {
       if (hoverFocusTimer.current !== null) {
-        clearTimeout(hoverFocusTimer.current);
+        clearTimeout(hoverFocusTimer.current.handle);
       }
     },
     []
@@ -496,12 +525,26 @@ export function Board({
     clearHoverFocus();
     activeEpicRef.current = found.epic;
     setActiveEpic(found.epic);
+    setActiveColumn(found.column);
+  }
+
+  /**
+   * Release the drag state. dnd-kit dispatches onDragCancel INSTEAD of
+   * onDragEnd, so this has to be reachable from both: Escape, a window resize
+   * and a tab switch all cancel a drag, and leaving `activeEpicRef` set would
+   * make every later hover bail out at the top of
+   * `handleDependencyHoverChange` — killing the dependency focus for the rest
+   * of the page session with no signal to the user.
+   */
+  function endDrag() {
+    activeEpicRef.current = null;
+    setActiveEpic(null);
+    setActiveColumn(null);
+    clearHoverFocus();
   }
 
   function handleDragEnd(event: DragEndEvent) {
-    activeEpicRef.current = null;
-    setActiveEpic(null);
-    clearHoverFocus();
+    endDrag();
 
     const { active, over } = event;
     if (!over) return;
@@ -578,6 +621,7 @@ export function Board({
       collisionDetection={closestCorners}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
+      onDragCancel={endDrag}
     >
       <div className="flex flex-col h-full">
         <FilterBar
@@ -603,7 +647,7 @@ export function Board({
                 onEpicClick={handleEpicClick}
                 epicViews={epicViews}
                 dropAtEnd={filtersActive}
-                dropDisabled={filtersActive && activeEpic?.status === status}
+                dropDisabled={filtersActive && activeColumn === status}
                 filtersActive={filtersActive}
                 focusRoles={focusRoles}
               />

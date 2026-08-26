@@ -77,8 +77,12 @@ export interface EpicCardView {
   blockedOn?: string[];
   /** Backlog readiness: criteria met out of the ones that apply to this card. */
   readiness?: ReadinessScore;
-  /** Report dependency hover focus enter/leave (Board owns the 150 ms timer). */
-  onDependencyHoverChange?: (epicId: string | null) => void;
+  /**
+   * Report this card gaining (`true`) or losing (`false`) the pointer/keyboard
+   * focus. The Board owns the 150 ms intent timer and only retracts a focus the
+   * same card armed, so the id travels in both directions.
+   */
+  onDependencyHoverChange?: (epicId: string, active: boolean) => void;
 }
 
 interface EpicCardProps {
@@ -153,6 +157,25 @@ export function EpicCard({
 
   const dimmed = focus === "dimmed";
 
+  // React fires no mouseleave when a card unmounts, and a card that changes
+  // column re-mounts under a different Column — so a hovered ticket moved by an
+  // SSE update would otherwise leave the board dimmed with the pointer nowhere
+  // near a card. The card reports its own departure on the way out.
+  const hoverChangeRef = useRef(onDependencyHoverChange);
+  useEffect(() => {
+    hoverChangeRef.current = onDependencyHoverChange;
+  });
+  useEffect(
+    () => () => {
+      hoverChangeRef.current?.(epic.id, false);
+    },
+    [epic.id]
+  );
+  // Story 2 asks for a greyed card, not just a label: a blocked ticket has to
+  // be legible at a glance in a dense column, where the 11px "Waiting on:" row
+  // is the first thing to scroll out of view.
+  const blocked = !!blockedOn?.length;
+
   const {
     attributes,
     listeners,
@@ -176,14 +199,17 @@ export function EpicCard({
     prevHighlight.current = highlight;
   }, [highlight]);
 
-  // Opacity lives in the inline style because the drag opacity already does:
-  // an inline declaration beats any non-`!important` class rule, and Tailwind
-  // emits `.opacity-40` without `!important`, so a class-based dim would never
-  // reach the screen while this object is applied to the same element.
+  // Every opacity state lives in this inline object because the drag opacity
+  // does: an inline declaration beats any non-`!important` class rule, and
+  // Tailwind emits `.opacity-*` without `!important`, so a class-based variant
+  // would never reach the screen while this object is applied to the same
+  // element. Ordered by precedence — a card being dragged reads as dragged
+  // first, an unrelated card under a hover focus recedes furthest, and blocked
+  // is the resting state that has to stay readable.
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : dimmed ? 0.4 : 1,
+    opacity: isDragging ? 0.5 : dimmed ? 0.4 : blocked ? 0.62 : 1,
   };
 
   const activityLabel = activeAgentActivity
@@ -229,16 +255,16 @@ export function EpicCard({
       {...listeners}
       onClick={handleCardClick}
       onMouseEnter={() => {
-        onDependencyHoverChange?.(epic.id);
+        onDependencyHoverChange?.(epic.id, true);
         if (!linkedActivityId) return;
         onLinkedAgentHoverChange?.(linkedActivityId);
       }}
       onMouseLeave={() => {
-        onDependencyHoverChange?.(null);
+        onDependencyHoverChange?.(epic.id, false);
         onLinkedAgentHoverChange?.(null);
       }}
       onFocusCapture={() => {
-        onDependencyHoverChange?.(epic.id);
+        onDependencyHoverChange?.(epic.id, true);
         if (!linkedActivityId) return;
         onLinkedAgentHoverChange?.(linkedActivityId);
       }}
@@ -250,7 +276,7 @@ export function EpicCard({
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
           return;
         }
-        onDependencyHoverChange?.(null);
+        onDependencyHoverChange?.(epic.id, false);
         onLinkedAgentHoverChange?.(null);
       }}
       data-selected={selected ? "true" : undefined}
@@ -276,6 +302,10 @@ export function EpicCard({
         isHighlighted &&
           "ring-2 ring-primary/70 bg-primary/5 motion-reduce:ring-0 motion-reduce:bg-transparent",
         dimmed && "saturate-50",
+        // Desaturation carries the "greyed" reading that opacity alone does
+        // not; the destructive-tinted border keeps the state findable once the
+        // card is muted. Both yield to an active hover focus.
+        blocked && !dimmed && "saturate-[.55] border-destructive/40",
         focus === "predecessor" && "ring-2 ring-primary/50",
         focus === "successor" && "ring-2 ring-agent/50",
       )}
@@ -413,8 +443,8 @@ export function EpicCard({
             )}
             title={
               isNextEpic
-                ? "Next up in the execution queue"
-                : `Position ${queueRank} in the To Do execution queue`
+                ? "Next in board order. Full Auto sorts by priority first, so its dispatch order can differ."
+                : `Position ${queueRank} in board order`
             }
             data-testid={`epic-queue-rank-${epic.id}`}
           >
