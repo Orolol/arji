@@ -141,19 +141,33 @@ export async function GET(
     .where(eq(rankedEpicSessions.rowNum, 1))
     .as("latest_epic_sessions");
 
-  // Cumulative agent cost per epic — the sum of its sessions' reported
-  // total_cost_usd. NULL (not 0) when no session ever reported a cost.
-  const epicSessionCosts = db
+  // One pass over `agent_sessions` for everything the board reads from it:
+  // the cumulative reported cost (NULL, not 0, when nothing ever reported one)
+  // and the two review/code freshness aggregates behind merge readiness.
+  //
+  // Deliberately one subquery rather than two identical scans grouped on the
+  // same key — `agent_sessions` carries no index, and this endpoint is
+  // refetched on every `session:*` SSE event. Scoped by project for the same
+  // reason `latestMergeFailures` is; the outer join to `epics` already made
+  // the result project-local, so this only narrows what SQLite has to read.
+  const epicSessionFacts = db
     .select({
       epicId: agentSessions.epicId,
       sessionsCostUsd: sql<number | null>`SUM(${agentSessions.totalCostUsd})`.as(
         "sessions_cost_usd"
       ),
+      lastCleanReviewAt: lastCleanReviewAtSql().as("last_clean_review_at"),
+      lastTerminalCodeAt: lastTerminalCodeAtSql().as("last_terminal_code_at"),
     })
     .from(agentSessions)
-    .where(sql`${agentSessions.epicId} IS NOT NULL`)
+    .where(
+      and(
+        eq(agentSessions.projectId, projectId),
+        sql`${agentSessions.epicId} IS NOT NULL`
+      )
+    )
     .groupBy(agentSessions.epicId)
-    .as("epic_session_costs");
+    .as("epic_session_facts");
 
   const rankedGradingReports = db
     .select({
@@ -196,18 +210,6 @@ export async function GET(
     .where(eq(reviewComments.status, "open"))
     .groupBy(reviewComments.epicId)
     .as("open_finding_counts");
-
-  // Review/code freshness — the same aggregates Full Auto's sweep reads.
-  const reviewFreshness = db
-    .select({
-      epicId: agentSessions.epicId,
-      lastCleanReviewAt: lastCleanReviewAtSql().as("last_clean_review_at"),
-      lastTerminalCodeAt: lastTerminalCodeAtSql().as("last_terminal_code_at"),
-    })
-    .from(agentSessions)
-    .where(sql`${agentSessions.epicId} IS NOT NULL`)
-    .groupBy(agentSessions.epicId)
-    .as("review_freshness");
 
   // Newest "the branch could not land" activity entry. A failed merge writes
   // no column anywhere, so this same-state log row is the only durable trace
@@ -293,7 +295,7 @@ export async function GET(
       latestSessionOutcome: latestEpicSessions.latestSessionOutcome,
       latestSessionEndedAt: latestEpicSessions.latestSessionEndedAt,
       latestUserCommentCreatedAt: latestUserComments.latestUserCommentCreatedAt,
-      sessionsCostUsd: epicSessionCosts.sessionsCostUsd,
+      sessionsCostUsd: epicSessionFacts.sessionsCostUsd,
       latestGradingEntries: latestGradingReports.latestGradingEntries,
       gradingSummary: latestGradingReports.latestGradingSummary,
       gradingCreatedAt: latestGradingReports.latestGradingCreatedAt,
@@ -301,8 +303,8 @@ export async function GET(
       // "unread AI comment" dot from latestComment* vs this timestamp.
       lastReadAt: ticketReadCursors.lastReadAt,
       openFindings: openFindingCounts.openFindings,
-      lastCleanReviewAt: reviewFreshness.lastCleanReviewAt,
-      lastTerminalCodeAt: reviewFreshness.lastTerminalCodeAt,
+      lastCleanReviewAt: epicSessionFacts.lastCleanReviewAt,
+      lastTerminalCodeAt: epicSessionFacts.lastTerminalCodeAt,
       lastMergeFailureAt: latestMergeFailures.lastMergeFailureAt,
     })
     .from(epics)
@@ -310,11 +312,10 @@ export async function GET(
     .leftJoin(latestEpicComments, eq(epics.id, latestEpicComments.epicId))
     .leftJoin(latestEpicSessions, eq(epics.id, latestEpicSessions.epicId))
     .leftJoin(latestUserComments, eq(epics.id, latestUserComments.epicId))
-    .leftJoin(epicSessionCosts, eq(epics.id, epicSessionCosts.epicId))
+    .leftJoin(epicSessionFacts, eq(epics.id, epicSessionFacts.epicId))
     .leftJoin(latestGradingReports, eq(epics.id, latestGradingReports.epicId))
     .leftJoin(ticketReadCursors, eq(epics.id, ticketReadCursors.epicId))
     .leftJoin(openFindingCounts, eq(epics.id, openFindingCounts.epicId))
-    .leftJoin(reviewFreshness, eq(epics.id, reviewFreshness.epicId))
     .leftJoin(latestMergeFailures, eq(epics.id, latestMergeFailures.epicId))
     .where(eq(epics.projectId, projectId))
     .orderBy(epics.position)

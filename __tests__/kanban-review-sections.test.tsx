@@ -12,7 +12,10 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { Board } from "@/components/kanban/Board";
 import type { KanbanEpic } from "@/lib/types/kanban";
-import type { MergeReadiness } from "@/lib/kanban/merge-readiness";
+import {
+  sortReviewColumn,
+  type MergeReadiness,
+} from "@/lib/kanban/merge-readiness";
 
 const mockKanbanState = vi.hoisted(() => ({
   board: {
@@ -122,7 +125,21 @@ function makeEpic(overrides?: Partial<KanbanEpic>): KanbanEpic {
   };
 }
 
+/**
+ * Seed the Review column the way `useKanban` always hands it over: sorted
+ * merge-ready-first. The Board slices its sections out of that array rather
+ * than re-permuting it, so feeding it an unsorted column here would test a
+ * state the hook cannot produce. `setRawReviewColumn` exists for the one case
+ * that deliberately does.
+ */
 function setReviewColumn(review: KanbanEpic[], rest?: Partial<Record<string, KanbanEpic[]>>) {
+  setRawReviewColumn(sortReviewColumn(review), rest);
+}
+
+function setRawReviewColumn(
+  review: KanbanEpic[],
+  rest?: Partial<Record<string, KanbanEpic[]>>
+) {
   mockKanbanState.board = {
     columns: {
       backlog: [],
@@ -208,6 +225,27 @@ describe("Review column sections", () => {
 
     expect(within(readySection()).getByText("Shifting")).toBeInTheDocument();
     expect(within(inReviewSection()).queryByText("Shifting")).toBeNull();
+  });
+
+  it("renders the array it was given, even if a card is out of order", () => {
+    // The invariant `useKanban` maintains can lapse for one refresh — an
+    // optimistic drop whose readiness has not been recomputed. When it does,
+    // the render order must still equal the array order, because that array
+    // is what drag indices are computed against. Mis-grouping for a beat is
+    // the acceptable cost; a drag persisted to the wrong rank is not.
+    const blocked = makeEpic({ title: "Out of order", mergeReadiness: FINDINGS });
+    const ready = makeEpic({ title: "Cleared", mergeReadiness: READY });
+    setRawReviewColumn([blocked, ready]);
+
+    renderBoard();
+
+    const cards = screen
+      .getAllByRole("heading", { level: 4 })
+      .map((h) => h.textContent);
+    expect(cards).toEqual(["Out of order", "Cleared"]);
+    // Grouping degrades gracefully: the ready card is filed below until the
+    // next refresh re-sorts the column.
+    expect(within(inReviewSection()).getByText("Cleared")).toBeInTheDocument();
   });
 
   it("leaves the other columns undivided", () => {
@@ -387,6 +425,53 @@ describe("Merge affordances on Review cards", () => {
     expect(screen.queryByTestId(`epic-merge-${ready.id}`)).toBeNull();
   });
 
+  it("explains the missing button when a queued session raises no agent chip", () => {
+    // `busyEpicIds` is queued-or-running across every session type;
+    // `activeAgentActivity` is running build/review/merge only. In the gap —
+    // a queued build, a running grading or QA session — the card would sit in
+    // the accented "Ready to merge" section with no button, no chip and no
+    // blocker line, and the user would have nothing to read.
+    const ready = makeEpic({ mergeReadiness: READY });
+    setReviewColumn([ready]);
+    renderBoard({ busyEpicIds: new Set([ready.id]) });
+
+    expect(screen.queryByTestId(`epic-merge-${ready.id}`)).toBeNull();
+    expect(
+      screen.getByTestId(`epic-merge-blocked-${ready.id}`)
+    ).toHaveTextContent("An agent is working on this epic");
+  });
+
+  it("keeps the real blocker when a busy ticket also has one", () => {
+    const findings = makeEpic({ mergeReadiness: FINDINGS });
+    setReviewColumn([findings]);
+    renderBoard({ busyEpicIds: new Set([findings.id]) });
+
+    expect(
+      screen.getByTestId(`epic-merge-blocked-${findings.id}`)
+    ).toHaveTextContent("2 open findings");
+  });
+
+  it("defers to the agent line when one is actually running", () => {
+    const ready = makeEpic({ mergeReadiness: READY });
+    setReviewColumn([ready]);
+    renderBoard({
+      busyEpicIds: new Set([ready.id]),
+      activeAgentActivities: {
+        [ready.id]: {
+          sessionId: "sess-1",
+          actionType: "review",
+          agentName: "Reviewer",
+          provider: "claude-code",
+        },
+      },
+    });
+
+    // The activity chip already says what is happening; a second line would
+    // just be noise.
+    expect(screen.queryByTestId(`epic-merge-blocked-${ready.id}`)).toBeNull();
+    expect(screen.getByTestId(`epic-activity-${ready.id}`)).toBeInTheDocument();
+  });
+
   it("withholds Resolve merge from a busy ticket too", () => {
     const conflict = makeEpic({ mergeReadiness: CONFLICT });
     setReviewColumn([conflict]);
@@ -396,7 +481,7 @@ describe("Merge affordances on Review cards", () => {
     // The reason still shows — it is true, and it is not a click.
     expect(
       screen.getByTestId(`epic-merge-blocked-${conflict.id}`)
-    ).toBeInTheDocument();
+    ).toHaveTextContent("Merge conflict");
   });
 
   it("lets the user dismiss a merge error", async () => {

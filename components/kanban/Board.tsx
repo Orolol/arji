@@ -359,30 +359,40 @@ export function Board({
   ]);
 
   /**
-   * The Review column, split into its two derived sections.
+   * The Review column's two derived sections, SLICED out of the rendered
+   * array rather than rebuilt from it.
    *
-   * The array handed to the Column is rebuilt as `[...ready, ...inReview]`
-   * rather than reusing the filtered list, so the SortableContext's item
-   * order can never drift from what is drawn — including in the moment after
-   * an optimistic drop, before the refresh recomputes the signal.
+   * This is load-bearing. `handleDragEnd` derives the drop index from
+   * `board.columns.review`, and `moveEpic` splices into (and
+   * `persistedColumnOrder` anchors against) that same array — so the order
+   * drawn on screen has to BE that array, not a re-derived permutation of it.
+   * `useKanban` keeps the column merge-ready-first on load and after every
+   * drag, which makes the two sections a prefix and a suffix.
+   *
+   * Slicing at the first non-ready card, rather than partitioning, is what
+   * enforces the invariant instead of papering over it: if a card ever sits
+   * out of order (an optimistic drop whose readiness has not been recomputed
+   * yet), it is grouped under "In review" for one refresh — the render order
+   * still matches the array exactly, so no drag can be persisted to the wrong
+   * rank.
    */
-  const reviewColumn = useMemo(() => {
+  const reviewSections = useMemo<ColumnSection[]>(() => {
     const visible = visibleColumns.review;
-    const ready = visible.filter(isMergeReadyEpic);
-    const inReview = visible.filter((epic) => !isMergeReadyEpic(epic));
+    let boundary = 0;
+    while (boundary < visible.length && isMergeReadyEpic(visible[boundary])) {
+      boundary += 1;
+    }
 
-    const sections: ColumnSection[] = [
+    return [
       {
         key: "ready",
         label: "Ready to merge",
-        epics: ready,
+        epics: visible.slice(0, boundary),
         accent: true,
         emptyHint: "Nothing cleared review yet.",
       },
-      { key: "in-review", label: "In review", epics: inReview },
+      { key: "in-review", label: "In review", epics: visible.slice(boundary) },
     ];
-
-    return { epics: [...ready, ...inReview], sections };
   }, [visibleColumns]);
 
   // How many cards the board is actually showing right now — the capture bar
@@ -505,14 +515,8 @@ export function Board({
               <Column
                 key={status}
                 status={status}
-                epics={
-                  status === "review"
-                    ? reviewColumn.epics
-                    : visibleColumns[status]
-                }
-                sections={
-                  status === "review" ? reviewColumn.sections : undefined
-                }
+                epics={visibleColumns[status]}
+                sections={status === "review" ? reviewSections : undefined}
                 onEpicClick={handleEpicClick}
                 epicViews={epicViews}
                 dragDisabled={filtersActive}

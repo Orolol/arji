@@ -336,12 +336,12 @@ describe("POST /api/projects/[projectId]/epics", () => {
       gradingSummary: "One gap remains.",
     });
     // story counts + latest comments + latest sessions + latest user comments
-    // + session costs + latest grading + ticket read cursors + the three
-    // merge-readiness facts (open findings, review freshness, merge failures)
-    expect((db as unknown as { leftJoin: ReturnType<typeof vi.fn> }).leftJoin).toHaveBeenCalledTimes(10);
-    // story counts + session costs + latest user comments + open findings
-    // + review freshness + merge failures
-    expect((db as unknown as { groupBy: ReturnType<typeof vi.fn> }).groupBy).toHaveBeenCalledTimes(6);
+    // + session facts (cost AND review freshness, one scan) + latest grading
+    // + ticket read cursors + open findings + merge failures
+    expect((db as unknown as { leftJoin: ReturnType<typeof vi.fn> }).leftJoin).toHaveBeenCalledTimes(9);
+    // story counts + session facts + latest user comments + open findings
+    // + merge failures
+    expect((db as unknown as { groupBy: ReturnType<typeof vi.fn> }).groupBy).toHaveBeenCalledTimes(5);
 
     const sqlFragments = mockSql.mock.calls.map(([template]) =>
       Array.isArray(template) ? template.join(" ") : String(template),

@@ -577,7 +577,9 @@ async function runAutoMerge(
       fromStatus,
       toStatus: fromStatus,
       actor: "system",
-      reason: AUTO_MODE_REASONS.dispatchFailed("merge", error),
+      // Tagged with the actual git verdict: the board reads this trace and
+      // must not call a missing branch a conflict.
+      reason: AUTO_MODE_REASONS.mergeFailed(result.reason ?? "error", error),
     });
     return { status: "failed", error, sessionId: null };
   }
@@ -628,6 +630,17 @@ async function runAutoMerge(
 
   const conflictWorktreePath = await restoreWorktree();
   if (!conflictWorktreePath) {
+    // A real conflict that no agent will repair. Without a trace of its own
+    // the only record is the engine's generic dispatch-failure line, and the
+    // board would show the epic as merely un-mergeable rather than conflicted.
+    logTransition({
+      projectId,
+      epicId,
+      fromStatus,
+      toStatus: fromStatus,
+      actor: "system",
+      reason: AUTO_MODE_REASONS.mergeFailed("conflict", error),
+    });
     return { status: "failed", error, sessionId: null };
   }
 
@@ -641,7 +654,16 @@ async function runAutoMerge(
 
   if (!sessionId) {
     // Nothing is going to repair this now; the caller releases the merge lock
-    // because the outcome is not "conflict".
+    // because the outcome is not "conflict". Still a conflict as far as the
+    // board is concerned — a human can resolve it.
+    logTransition({
+      projectId,
+      epicId,
+      fromStatus,
+      toStatus: fromStatus,
+      actor: "system",
+      reason: AUTO_MODE_REASONS.mergeFailed("conflict", error),
+    });
     return { status: "failed", error, sessionId: null };
   }
 

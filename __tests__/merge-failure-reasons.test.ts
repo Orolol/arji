@@ -23,8 +23,34 @@ describe("isMergeFailureReason", () => {
       true
     );
     expect(
-      isMergeFailureReason(AUTO_MODE_REASONS.dispatchFailed("merge", "boom"))
+      isMergeFailureReason(AUTO_MODE_REASONS.mergeFailed("conflict", "boom"))
     ).toBe(true);
+    expect(
+      isMergeFailureReason(
+        AUTO_MODE_REASONS.mergeFailed("conflict-markers", "boom")
+      )
+    ).toBe(true);
+  });
+
+  it("ignores git verdicts that are NOT conflicts", () => {
+    // A deleted branch or a broken repo is not something Resolve merge can
+    // repair — that button would cut a fresh branch and merge an empty diff.
+    expect(
+      isMergeFailureReason(
+        AUTO_MODE_REASONS.mergeFailed("branch-missing", "no such branch")
+      )
+    ).toBe(false);
+    expect(
+      isMergeFailureReason(AUTO_MODE_REASONS.mergeFailed("error", "boom"))
+    ).toBe(false);
+  });
+
+  it("ignores the supervisor's generic merge dispatch-failure trace", () => {
+    // It covers every non-conflict verdict at once, so it cannot tell a
+    // conflict from a missing branch. `mergeFailed` carries the verdict.
+    expect(
+      isMergeFailureReason(AUTO_MODE_REASONS.dispatchFailed("merge", "boom"))
+    ).toBe(false);
   });
 
   it("recognises the approve route's blocked-merge reason", () => {
@@ -63,6 +89,17 @@ describe("isMergeFailureReason", () => {
     expect(
       isMergeFailureReason(AUTO_MODE_REASONS.dispatchFailed("review", "boom"))
     ).toBe(false);
+  });
+
+  it("refuses a reason builder whose prefix would match everything", async () => {
+    // An empty prefix turns startsWith into a tautology and the LIKE pattern
+    // into `%`, so every Review card would report a merge conflict. The module
+    // must fail loudly rather than silently become a wildcard.
+    const { __testables } = await import("@/lib/workflow/merge-failure");
+    expect(() => __testables.reasonPrefix((arg) => `${arg} trailing`)).toThrow(
+      /empty prefix/i
+    );
+    expect(__testables.reasonPrefix((arg) => `head ${arg}`)).toBe("head ");
   });
 
   it("ignores the success and non-merge traces", () => {

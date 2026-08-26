@@ -200,9 +200,16 @@ export function EpicCard({
   const mergeBlocked = agentBusy || !!activeAgentActivity;
   const showMergeAction =
     !!onMerge && mergeReadiness?.ready === true && !mergeBlocked;
+  // A running build/review/merge already explains itself through the activity
+  // line above. `agentBusy` is wider — a QUEUED session, or a running grading
+  // or QA one — and none of those raise a chip, so without this a ready card
+  // would lose its Merge button with nothing at all in its place.
   const mergeBlockerLabel = activeAgentActivity
     ? null
-    : describeMergeBlocker(mergeReadiness);
+    : (describeMergeBlocker(mergeReadiness) ??
+      (agentBusy && mergeReadiness
+        ? "An agent is working on this epic"
+        : null));
   // Both the live 409 and the persisted activity-log trace mean the same
   // thing to the user, and both offer the same way out.
   const showResolveMerge =

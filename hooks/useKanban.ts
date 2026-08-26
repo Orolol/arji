@@ -187,10 +187,9 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
             loadEpics();
           });
 
-          // Mirror what was just persisted onto the local rows, keeping each
-          // column in its DISPLAY order. Without this a second drag before
-          // the next refresh would re-sort Review by stale positions and undo
-          // the first one.
+          // Mirror what was just persisted onto the local rows. Without this a
+          // second drag before the next refresh would re-sort Review by stale
+          // positions and undo the first one.
           const columns = { ...current.columns };
           for (const col of touched) {
             if (col === "released") continue;
@@ -200,6 +199,15 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
                 ? epic
                 : { ...epic, position };
             });
+          }
+
+          // Re-establish Review's ready-first order NOW, with the fresh
+          // positions. The board renders this exact array and derives drop
+          // indices from it, so leaving it in drop order while the Board
+          // re-split the sections for display would make the next drag anchor
+          // against a different sequence than the user is looking at.
+          if (touched.has("review")) {
+            columns.review = sortReviewColumn(columns.review);
           }
 
           return { columns, releaseGroups: current.releaseGroups };

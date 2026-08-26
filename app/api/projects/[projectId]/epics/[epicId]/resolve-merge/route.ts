@@ -85,6 +85,27 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  // Concurrency guard — BEFORE any git work, not just before dispatching the
+  // resolution agent. The clean-merge branch below calls `mergeWorktree`,
+  // which runs `git worktree remove --force`; landing that on top of a queued
+  // build drops it into a directory that no longer exists the moment it
+  // starts. Same check, same placement, as the approve route.
+  const activeSession = getRunningSessionForTarget({
+    scope: "epic",
+    projectId,
+    epicId,
+  });
+  if (activeSession) {
+    return NextResponse.json(
+      createAgentAlreadyRunningPayload(
+        { scope: "epic", projectId, epicId },
+        activeSession,
+        "Another agent is already running for this epic."
+      ),
+      { status: 409 }
+    );
+  }
+
   // Ensure worktree exists
   const { worktreePath, branchName } = await createWorktree(
     gitRepoPath,
@@ -93,10 +114,16 @@ export async function POST(request: NextRequest, { params }: Params) {
     { defaultBranch: project.defaultBranch }
   );
 
-  // Start merge in worktree to surface conflicts
+  // Start merge in worktree to surface conflicts. The base is the project's
+  // resolved default branch — the same one `mergeWorktree` is handed below;
+  // hardcoding "main" surfaced conflicts against a branch the merge would
+  // never touch on a repo whose default is anything else.
   let mergeResult: { conflicted: boolean; output: string };
   try {
-    mergeResult = await startMergeInWorktree(worktreePath, "main");
+    mergeResult = await startMergeInWorktree(
+      worktreePath,
+      project.defaultBranch || "main"
+    );
   } catch (error) {
     return errorResponse(error, "Failed to start merge");
   }
@@ -180,23 +207,6 @@ export async function POST(request: NextRequest, { params }: Params) {
   const logsDir = path.join(process.cwd(), "data", "sessions", sessionId);
   fs.mkdirSync(logsDir, { recursive: true });
   const logsPath = path.join(logsDir, "logs.json");
-
-  // Check concurrency guard
-  const conflict = getRunningSessionForTarget({
-    scope: "epic",
-    projectId,
-    epicId,
-  });
-  if (conflict) {
-    return NextResponse.json(
-      createAgentAlreadyRunningPayload(
-        { scope: "epic", projectId, epicId },
-        conflict,
-        "Another agent is already running for this epic."
-      ),
-      { status: 409 }
-    );
-  }
 
   // Resume support — scope-guarded
   let cliSessionId: string | undefined;

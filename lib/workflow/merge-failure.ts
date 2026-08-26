@@ -23,11 +23,27 @@ import { AUTO_MODE_REASONS } from "@/lib/auto-mode/constants";
  */
 const REASON_ARGUMENT_SENTINEL = "\u0000";
 
-/** The fixed head of a reason built by `build`, up to its first argument. */
+/**
+ * The fixed head of a reason built by `build`, up to its first argument.
+ *
+ * Throws on an empty head rather than returning `""`. A builder that
+ * interpolates its argument first would otherwise yield a prefix that
+ * `startsWith` matches on every string and a LIKE pattern of `%` — turning
+ * the safety net this module exists to be into a wildcard that reports a
+ * merge conflict on every card. Failing at import is the intended outcome.
+ */
 function reasonPrefix(build: (argument: string) => string): string {
   const built = build(REASON_ARGUMENT_SENTINEL);
   const index = built.indexOf(REASON_ARGUMENT_SENTINEL);
-  return index === -1 ? built : built.slice(0, index);
+  const prefix = index === -1 ? built : built.slice(0, index);
+  if (prefix.length === 0) {
+    throw new Error(
+      "merge-failure: a reason builder produced an empty prefix, which would " +
+        "match every activity row. Give the reason a fixed head before its " +
+        "first interpolated argument."
+    );
+  }
+  return prefix;
 }
 
 /** Head of the reason `POST .../approve` logs when its merge failed. */
@@ -42,10 +58,24 @@ export function buildApprovalMergeBlockedReason(input: {
 }
 
 /**
+ * `MergeWorktreeResult.reason` values that mean the branch genuinely has a
+ * conflict standing between it and `main`.
+ *
+ * `branch-missing` (already merged, or deleted by hand) and `error` (a broken
+ * repo, a failed worktree removal) are NOT here. Labelling them a conflict
+ * would put a Resolve merge button on the card, and that button re-enters
+ * resolve-merge, cuts a fresh branch off the default and merges an empty
+ * diff — a repair that repairs nothing, under a label that promised one.
+ */
+const GIT_REFUSAL_MERGE_REASONS = ["conflict", "conflict-markers"] as const;
+
+/**
  * Every reason head that means "the branch is still on the wrong side of
  * `main`, and GIT is the reason".
  *
- * Two auto-mode reasons are deliberately absent, both for the same rule:
+ * Three auto-mode reasons are deliberately absent, all for the same rule —
+ * the blocker must name what is actually in the way, and since
+ * `merge_conflict` is evaluated first it outranks whatever it displaces:
  *
  *   - `mergeRefused` records a WORKFLOW guard refusing (no completed review,
  *     an open finding), which the readiness predicate already reports
@@ -53,19 +83,23 @@ export function buildApprovalMergeBlockedReason(input: {
  *     vague "merge conflict" on every card the supervisor skipped.
  *   - `mergeRolledBack` is the same category one step later: the merge
  *     LANDED and the post-merge `→ done` guard refused, so main was put back
- *     (lib/auto-mode/merge.ts). Nothing conflicted. Because `merge_conflict`
- *     is evaluated first, admitting it here would let it outrank the accurate
- *     blocker and offer Resolve merge for a workflow problem.
+ *     (lib/auto-mode/merge.ts). Nothing conflicted.
+ *   - `dispatchFailed("merge", …)` is the supervisor's GENERIC failure trace.
+ *     It covers every non-conflict git verdict at once, so it cannot tell a
+ *     conflict from a deleted branch. `mergeFailed(reason, …)` carries the
+ *     verdict instead, and only the conflict-shaped ones are matched below.
  *
- * The bar is git refusing, not the merge failing to stick.
+ * The bar is git refusing over a conflict, not the merge failing to stick.
  */
 export const MERGE_FAILURE_REASON_PREFIXES: readonly string[] = [
   APPROVAL_MERGE_BLOCKED_PREFIX,
   // Constants: the whole string is its own prefix.
   AUTO_MODE_REASONS.mergeConflict,
   AUTO_MODE_REASONS.mergeConflictDeferred,
-  // Builders: probe for the fixed head.
-  reasonPrefix((error) => AUTO_MODE_REASONS.dispatchFailed("merge", error)),
+  // Builders: probe for the fixed head, one prefix per conflict-shaped verdict.
+  ...GIT_REFUSAL_MERGE_REASONS.map((reason) =>
+    reasonPrefix((error) => AUTO_MODE_REASONS.mergeFailed(reason, error))
+  ),
 ];
 
 /** True when an activity-log reason records a merge that could not land. */
@@ -91,3 +125,6 @@ export const MERGE_FAILURE_REASON_LIKE_PATTERNS: readonly string[] =
   MERGE_FAILURE_REASON_PREFIXES.map(
     (prefix) => `${prefix.replace(/[\\%_]/g, "\\$&")}%`
   );
+
+/** Internals exposed for the contract tests; not part of the module's API. */
+export const __testables = { reasonPrefix };
