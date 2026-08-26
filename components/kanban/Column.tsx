@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -8,6 +8,7 @@ import {
 } from "@dnd-kit/sortable";
 import { EpicCard, type EpicCardView } from "./EpicCard";
 import { cn } from "@/lib/utils";
+import { ArrowDownWideNarrow } from "lucide-react";
 import {
   COLUMN_LABELS,
   type KanbanStatus,
@@ -27,6 +28,15 @@ interface ColumnProps {
    * matches", not "nothing here" — inviting a capture would be a lie.
    */
   filtersActive?: boolean;
+  /**
+   * "Sort by priority" action in the column header. Shown only on the two
+   * columns a human curates before work starts (Backlog, To Do — see
+   * Board.tsx): the click rewrites the column's positions so priority order
+   * becomes the display order, which is then the execution order. Disabled
+   * while `filtersActive`, because it rewrites positions for the whole
+   * column and the user is looking at a subset.
+   */
+  onSortByPriority?: () => void;
 }
 
 /**
@@ -62,11 +72,14 @@ function ColumnHeader({
   count,
   accent = false,
   highlight = false,
+  action,
 }: {
   label: string;
   count: number;
   accent?: boolean;
   highlight?: boolean;
+  /** Small action on the header's right edge, left of the count. */
+  action?: ReactNode;
 }) {
   return (
     <div
@@ -85,7 +98,10 @@ function ColumnHeader({
       >
         {label}
       </span>
-      <span className="font-mono text-[11.5px] text-meta">{count}</span>
+      <span className="flex items-center gap-[8px]">
+        {action}
+        <span className="font-mono text-[11.5px] text-meta">{count}</span>
+      </span>
     </div>
   );
 }
@@ -97,6 +113,7 @@ export function Column({
   epicViews,
   dragDisabled = false,
   filtersActive = false,
+  onSortByPriority,
 }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: status,
@@ -151,6 +168,25 @@ export function Column({
         count={epics.length}
         accent={status === "in_progress"}
         highlight={headerHighlight}
+        action={
+          onSortByPriority ? (
+            <button
+              type="button"
+              onClick={onSortByPriority}
+              disabled={filtersActive}
+              title={
+                filtersActive
+                  ? "Clear the filters to sort — sorting rewrites the whole column"
+                  : "Sort by priority"
+              }
+              aria-label={`Sort ${COLUMN_LABELS[status]} by priority`}
+              data-testid={`column-sort-priority-${status}`}
+              className="rounded-[5px] p-[3px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground motion-reduce:transition-none"
+            >
+              <ArrowDownWideNarrow className="h-[13px] w-[13px]" />
+            </button>
+          ) : undefined
+        }
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <SortableContext

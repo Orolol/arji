@@ -3,6 +3,7 @@ import {
   detectCycle,
   topologicalSort,
   getTransitiveDependencies,
+  findTicketsBlockedByDependencies,
 } from "@/lib/dependencies/validation";
 
 describe("detectCycle", () => {
@@ -84,5 +85,107 @@ describe("getTransitiveDependencies (algorithm test via detectCycle)", () => {
   it("handles graph with no edges gracefully", () => {
     const graph = new Map<string, Set<string>>();
     expect(detectCycle(graph)).toBeNull();
+  });
+});
+
+/**
+ * The pure gate Full Auto's selector uses: does a ticket have a direct or
+ * transitive prerequisite that has not shipped?
+ */
+describe("findTicketsBlockedByDependencies", () => {
+  function graphOf(
+    edges: Record<string, string[]>
+  ): Map<string, Set<string>> {
+    return new Map(
+      Object.entries(edges).map(([id, deps]) => [id, new Set(deps)])
+    );
+  }
+
+  it("does not block a ticket with no prerequisites", () => {
+    const blocked = findTicketsBlockedByDependencies(
+      graphOf({}),
+      new Map([["A", "todo"]]),
+      ["A"]
+    );
+    expect(blocked.size).toBe(0);
+  });
+
+  it("blocks on an undelivered direct prerequisite", () => {
+    const blocked = findTicketsBlockedByDependencies(
+      graphOf({ A: ["B"] }),
+      new Map([
+        ["A", "todo"],
+        ["B", "in_progress"],
+      ]),
+      ["A"]
+    );
+    expect([...blocked]).toEqual(["A"]);
+  });
+
+  it("treats done and released prerequisites as satisfied", () => {
+    const blocked = findTicketsBlockedByDependencies(
+      graphOf({ A: ["B", "C"] }),
+      new Map([
+        ["A", "todo"],
+        ["B", "done"],
+        ["C", "released"],
+      ]),
+      ["A"]
+    );
+    expect(blocked.size).toBe(0);
+  });
+
+  it("blocks on a transitive prerequisite two hops away", () => {
+    const blocked = findTicketsBlockedByDependencies(
+      graphOf({ A: ["B"], B: ["C"] }),
+      new Map([
+        ["A", "todo"],
+        ["B", "todo"],
+        ["C", "review"],
+      ]),
+      ["A", "B"]
+    );
+    expect([...blocked].sort()).toEqual(["A", "B"]);
+  });
+
+  /**
+   * The documented divergence from `getTransitiveDependencies`, which stops at
+   * a delivered prerequisite. This gate keeps walking, because a prerequisite
+   * can be reopened after its dependent shipped (or an edge added between two
+   * existing tickets), and nothing in the schema forbids that shape.
+   */
+  it("keeps walking behind a delivered prerequisite", () => {
+    const blocked = findTicketsBlockedByDependencies(
+      graphOf({ A: ["B"], B: ["C"] }),
+      new Map([
+        ["A", "todo"],
+        ["B", "done"],
+        ["C", "in_progress"],
+      ]),
+      ["A"]
+    );
+    expect([...blocked]).toEqual(["A"]);
+  });
+
+  it("blocks on a prerequisite missing from the status map", () => {
+    const blocked = findTicketsBlockedByDependencies(
+      graphOf({ A: ["ghost"] }),
+      new Map([["A", "todo"]]),
+      ["A"]
+    );
+    expect([...blocked]).toEqual(["A"]);
+  });
+
+  it("terminates on a cyclic graph", () => {
+    const blocked = findTicketsBlockedByDependencies(
+      graphOf({ A: ["B"], B: ["A"] }),
+      new Map([
+        ["A", "todo"],
+        ["B", "done"],
+      ]),
+      ["A"]
+    );
+    // B is delivered, the walk expands through it back to A, which is not.
+    expect([...blocked]).toEqual(["A"]);
   });
 });
