@@ -232,7 +232,6 @@ export async function POST(_request: NextRequest, { params }: Params) {
       const worktreePath = session?.worktreePath || undefined;
 
       if (!autoModeRegistry.tryLockProjectMerge(projectId)) {
-        autoModeRegistry.endMergeWork(projectId, epic.id);
         tryExportArjiJson(projectId);
         return NextResponse.json({
           data: {

@@ -948,9 +948,11 @@ async function retryMergeAfterFix(input: {
     park(`deterministic verification blocked the merge: ${verificationBlock}`);
     return;
   }
-
   if (!autoModeRegistry.tryLockProjectMerge(input.projectId)) {
-    park("Another merge is in progress in this repository");
+    // Project-wide checkout lock is held by another merge right now.
+    // Return without parking: the per-epic hold is released unconditionally
+    // by the caller's finally block, so the next sweep will re-enter
+    // tryAutoMerge, find the branch already resolved, and merge cleanly.
     return;
   }
   let retry: Awaited<ReturnType<typeof mergeWorktree>>;

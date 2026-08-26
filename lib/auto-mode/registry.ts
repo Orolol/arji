@@ -103,8 +103,6 @@ interface AutoModeProjectState {
    * retry runs, and the terminal hook kicks a sweep in exactly that window.
    */
   merging: Set<string>;
-  /** Short project-wide mutex: true while `mergeWorktree` runs in the base checkout. */
-  gitMerging: boolean;
   /**
    * when a conflict cannot be repaired right now (no build slot for an agent),
    * so the sweep does not re-run a doomed `git merge` every 15 seconds.
@@ -136,16 +134,28 @@ function emptyState(): AutoModeProjectState {
     failures: new Map(),
     sweeping: false,
     merging: new Set(),
-    gitMerging: false,
     mergeDeferredUntil: new Map(),
     mergeGateRefusals: new Map(),
     secondOpinionSkipReasons: new Map(),
   };
 }
-
 export class AutoModeRegistry {
   private readonly states = new Map<string, AutoModeProjectState>();
-
+  /**
+   * Project IDs currently executing `mergeWorktree` in the shared repository
+   * checkout.
+   *
+   * Deliberately NOT a field on `AutoModeProjectState`. This lock guards a
+   * physical `git merge` in the base checkout, and the board's approve route
+   * takes it too — so it outlives Full Auto's runtime state. `setEnabled(id,
+   * false)` drops that state wholesale to un-park tickets; if the lock lived
+   * there, toggling Full Auto off mid-merge would hand a second merge the
+   * same checkout.
+   *
+   * `reset`/`resetAll` DO clear it: they are teardown, and a leaked lock
+   * would leak across tests.
+   */
+  private readonly gitMergingProjects = new Set<string>();
   private stateFor(projectId: string): AutoModeProjectState {
     let state = this.states.get(projectId);
     if (!state) {
@@ -333,19 +343,17 @@ export class AutoModeRegistry {
    * False when another git merge is currently executing in the base checkout.
    */
   tryLockProjectMerge(projectId: string): boolean {
-    const state = this.stateFor(projectId);
-    if (state.gitMerging) return false;
-    state.gitMerging = true;
+    if (this.gitMergingProjects.has(projectId)) return false;
+    this.gitMergingProjects.add(projectId);
     return true;
   }
 
   unlockProjectMerge(projectId: string): void {
-    const state = this.states.get(projectId);
-    if (state) state.gitMerging = false;
+    this.gitMergingProjects.delete(projectId);
   }
 
   isProjectMergeInFlight(projectId: string): boolean {
-    return this.states.get(projectId)?.gitMerging === true;
+    return this.gitMergingProjects.has(projectId);
   }
 
   /** Holds an epic's merge back until `until` (an unrepairable conflict). */
@@ -532,11 +540,13 @@ export class AutoModeRegistry {
   /** Drops all state for one project (used by disable and by tests). */
   reset(projectId: string): void {
     this.states.delete(projectId);
+    this.gitMergingProjects.delete(projectId);
   }
 
   /** Drops all state for every project (tests only). */
   resetAll(): void {
     this.states.clear();
+    this.gitMergingProjects.clear();
   }
 }
 
