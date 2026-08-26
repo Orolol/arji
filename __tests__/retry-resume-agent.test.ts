@@ -24,6 +24,8 @@ function failure(overrides: Partial<FailedSessionInfo> = {}): FailedSessionInfo 
     agentType: "build",
     provider: "oh-my-pi",
     namedAgentId: "agent-omp",
+    userStoryId: null,
+    producedOutput: true,
     ...overrides,
   };
 }
@@ -40,6 +42,8 @@ function session(
     agentType: "build",
     provider: "oh-my-pi",
     namedAgentId: "agent-omp",
+    userStoryId: null,
+    lastNonEmptyText: "done",
     createdAt: "2026-08-21 10:00:00",
     endedAt: "2026-08-21 10:00:30",
     ...overrides,
@@ -102,6 +106,81 @@ describe("retry dispatch — reuse the failed agent, in resume mode", () => {
       failure({ agentType: "review_code" }),
       null
     );
+    expect(body.resumeSessionId).toBeUndefined();
+  });
+});
+
+/**
+ * selectLatestFailures badges an epic from ANY session carrying its epicId —
+ * reviews and story builds included. The retry only ever dispatches an
+ * epic-wide build, so most of what can land on the badge says nothing about
+ * how to run that build.
+ */
+describe("retry dispatch — only an epic build informs an epic build", () => {
+  it("does not run the build on the reviewer's agent after a failed review", () => {
+    const { body } = buildRetryDispatch(
+      "proj-1",
+      "e1",
+      failure({ agentType: "review_code", namedAgentId: "agent-reviewer" }),
+      null
+    );
+    // No build agent is known, so the server's build-role chain decides.
+    expect(body.namedAgentId).toBeUndefined();
+  });
+
+  it("lets the toolbar choice win over a failed reviewer's agent", () => {
+    const { body } = buildRetryDispatch(
+      "proj-1",
+      "e1",
+      failure({ agentType: "review_code", namedAgentId: "agent-reviewer" }),
+      "agent-picked"
+    );
+    expect(body.namedAgentId).toBe("agent-picked");
+  });
+
+  it("does not run the build on a failed grading pass's agent", () => {
+    const { body } = buildRetryDispatch(
+      "proj-1",
+      "e1",
+      failure({ agentType: "grading", namedAgentId: "agent-grader" }),
+      null
+    );
+    expect(body.namedAgentId).toBeUndefined();
+  });
+
+  it("keeps a story build's agent — same role, same epic — but not its thread", () => {
+    const { body } = buildRetryDispatch(
+      "proj-1",
+      "e1",
+      failure({ agentType: "ticket_build", userStoryId: "story-7" }),
+      null
+    );
+    expect(body.namedAgentId).toBe("agent-omp");
+    // An epic-wide prompt must not be appended to a one-story conversation;
+    // the epic route cannot pass userStoryId, so the server cannot catch it.
+    expect(body.resumeSessionId).toBeUndefined();
+  });
+
+  it("still resumes an epic-scoped build", () => {
+    const { body } = buildRetryDispatch(
+      "proj-1",
+      "e1",
+      failure({ agentType: "build", userStoryId: null }),
+      null
+    );
+    expect(body.resumeSessionId).toBe("sess-failed");
+  });
+
+  it("does not resume a run that never produced any output", () => {
+    const { body } = buildRetryDispatch(
+      "proj-1",
+      "e1",
+      failure({ producedOutput: false }),
+      null
+    );
+    // claude-code's session id is minted before the process starts, so a
+    // launch-time death still stores one for a conversation that never
+    // existed. Retrying cold works; --resume on that id does not.
     expect(body.namedAgentId).toBe("agent-omp");
     expect(body.resumeSessionId).toBeUndefined();
   });
@@ -120,6 +199,33 @@ describe("selectLatestFailures — carries what the retry needs", () => {
       provider: "oh-my-pi",
       namedAgentId: "agent-omp",
     });
+  });
+
+  it("carries the story scope, so an epic retry can refuse to resume it", () => {
+    const failed = selectLatestFailures(
+      [session({ id: "f1", agentType: "ticket_build", userStoryId: "story-7" })],
+      new Set()
+    );
+    expect(failed.e1).toMatchObject({ userStoryId: "story-7" });
+  });
+
+  it("reports whether the run ever produced output", () => {
+    const spoke = selectLatestFailures([session({ id: "f1" })], new Set());
+    expect(spoke.e1.producedOutput).toBe(true);
+
+    const mute = selectLatestFailures(
+      [session({ id: "f1", lastNonEmptyText: null })],
+      new Set()
+    );
+    expect(mute.e1.producedOutput).toBe(false);
+  });
+
+  it("treats whitespace-only output as no output", () => {
+    const failed = selectLatestFailures(
+      [session({ id: "f1", lastNonEmptyText: "   \n  " })],
+      new Set()
+    );
+    expect(failed.e1.producedOutput).toBe(false);
   });
 
   it("reports the newest failure's agent, not an older one's", () => {

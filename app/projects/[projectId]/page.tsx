@@ -193,10 +193,12 @@ export default function KanbanPage() {
   }, [addToast]);
 
   /**
-   * A retry is a second attempt at the same work by the same agent: it
-   * reuses the failed session's named agent and resumes that session rather
-   * than restarting cold on whatever the default chain resolves to. See
-   * lib/agent-sessions/retry-dispatch.ts for the decision itself.
+   * A retry is a second attempt at the same work by the same agent: it reuses
+   * the failed session's named agent and resumes that session rather than
+   * restarting cold on whatever the default chain resolves to. The card can
+   * be badged by a review or a story build as well as by an epic build, so
+   * which of those two things it is safe to carry over is decided in
+   * lib/agent-sessions/retry-dispatch.ts.
    */
   const handleRetryBuild = useCallback(async (epicId: string) => {
     try {

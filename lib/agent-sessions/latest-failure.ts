@@ -20,12 +20,26 @@ export interface FailedSessionInfo {
   agentType: string;
   /**
    * Who ran the session that failed. The card's Retry button reuses this
-   * agent instead of falling through to the seeded default, and needs the
-   * provider to know whether that CLI can resume at all
-   * (lib/agent-sessions/retry-dispatch.ts). Null on legacy rows.
+   * agent — when the session was code-producing — instead of falling through
+   * to the seeded default, and needs the provider to know whether that CLI
+   * can resume at all (lib/agent-sessions/retry-dispatch.ts). Null on legacy
+   * rows.
    */
   provider?: string | null;
   namedAgentId?: string | null;
+  /**
+   * Story the failed session was scoped to. Story builds carry their parent
+   * epic's id too, so they land on the EPIC's card — an epic-wide retry must
+   * be able to tell them apart. Null for epic-scoped sessions.
+   */
+  userStoryId?: string | null;
+  /**
+   * Whether the run ever streamed a non-empty output line. claude-code's CLI
+   * session id is minted before the process starts, so a run that died at
+   * launch still stores an id for a conversation that was never written;
+   * resuming it fails where a cold start would have worked.
+   */
+  producedOutput?: boolean;
 }
 
 /** Minimal shape of a unified session row as returned by /api/projects/:id/sessions. */
@@ -38,6 +52,8 @@ export interface FailureCandidateSession {
   agentType?: string | null;
   provider?: string | null;
   namedAgentId?: string | null;
+  userStoryId?: string | null;
+  lastNonEmptyText?: string | null;
   createdAt?: string | null;
   endedAt?: string | null;
 }
@@ -80,6 +96,8 @@ export function selectLatestFailures(
       agentType: latest.agentType || "build",
       provider: latest.provider ?? null,
       namedAgentId: latest.namedAgentId ?? null,
+      userStoryId: latest.userStoryId ?? null,
+      producedOutput: !!latest.lastNonEmptyText?.trim(),
     };
   }
   return failed;
