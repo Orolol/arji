@@ -15,6 +15,22 @@ deepseek, kimi, zai, pi). Antigravity (`agy`) was added after live probing
 showed a working per-spawn seam. The sections about removed providers are kept
 below as the record of why they went.
 
+**2026-08-26 — silence on the channel is now a refusal.** Because every
+registered provider has the channel, a review session that files neither a
+`submit_findings` verdict nor a finding row is not "a review that found
+nothing" — it is a review whose channel did not work. Such a review is
+*unverifiable*: it does not satisfy `review → done`, does not satisfy the Full
+Auto merge gate, and shows as a blocking reason on the board
+(`lib/pipeline/findings.ts`). A 401 on `submit_findings` is also traced onto
+the ticket (`lib/mcp/review-channel-failure.ts`), because that rejection is
+otherwise invisible — the session still ends `answered`.
+
+The prose fallback in `lib/pipeline/findings.ts` survives for exactly one
+population: **legacy rows naming a removed provider** (gemini-cli and the rest
+of the list above). Those sessions could never call the tool, so `NULL` there
+means "no channel", not "nothing got through". No new session can produce that
+shape.
+
 ## The gate
 
 `providerSupportsMcp()` in `lib/claude/mcp-injection.ts` decides who gets a

@@ -16,6 +16,12 @@
  * channel, silence on that channel is missing evidence, not approval. A
  * provider without the channel keeps the prose fallback verbatim — that is
  * the non-regression half, and it is why the fallback exists at all.
+ *
+ * The MCP-less fixtures below name `gemini-cli` deliberately. Since the
+ * 2026-08 cleanup every REGISTERED provider has the channel
+ * (docs/architecture/mcp-provider-matrix.md), so the population the fallback
+ * still serves is legacy session rows naming a removed provider — which is
+ * exactly the shape these cases stand in for.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";

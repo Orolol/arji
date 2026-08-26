@@ -209,22 +209,37 @@ Four hazards were identified during design; each has a guard and a test.
 A review that **passes** leaves the epic in `review` — the pipeline never
 auto-approves. A naive "everything in Review" selector would review it forever.
 
-The guard is **temporal, not verdict-based**: an epic in `review` is a review
-candidate only if no review has been *attempted* since its newest terminal code
-session. (The verdict itself is a substring heuristic over the reviewer's
-markdown, with no structured field to read — so freshness is the fact, and the
-verdict is not.)
+The guard is **temporal first**: an epic in `review` is a review candidate only
+if no review has been *attempted* since its newest terminal code session.
+Freshness is a fact about sessions, so it is the base of the gate.
+
+On top of that sits one **verdict rule**, asked per session row, because
+whether a missing verdict means anything depends on who was reviewing:
+
+- The reviewer **had** the `submit_findings` channel (an MCP-capable provider
+  and `mcp_tools_enabled` on): only `approved` / `approved_with_minor_issues`
+  is clean. `changes_requested` is an explicit no, and **silence is missing
+  evidence, not approval** — that is how a reviewer whose findings were
+  rejected 401 once produced a "reviewed, nothing found" epic and unlocked its
+  own merge.
+- The reviewer **did not** (an MCP-less provider, or the channel switched off
+  globally): `NULL` stays clean. Its markdown is its only verdict signal, and
+  this gate has never read markdown. That, and nothing else, is what the prose
+  fallback in `lib/pipeline/findings.ts` exists for.
 
 A "review" is one completed, epic-scoped review session that delivered a
-verdict (`outcome = 'answered'`). That single signal drives both directions —
-reviewable when there is none newer than the last code change, mergeable when
-there is — which is what makes "reviewed exactly once, then merged" true by
-construction. Everything else is not a review, and every one of those cases is
-bounded by the **parking ladder** rather than by this guard:
+verdict (`outcome = 'answered'`) and passed the rule above. That single signal
+drives both directions — reviewable when there is none newer than the last code
+change, mergeable when there is — which is what makes "reviewed exactly once,
+then merged" true by construction. Everything else is not a review, and every
+one of those cases is bounded by the **parking ladder** or the
+**review-rejection budget** rather than by this guard:
 
 | Review session ended | Re-reviewed? | Satisfies the merge gate? |
 |---|---|---|
-| completed, `answered` | no | **yes** |
+| completed, `answered`, positive structured verdict (or an MCP-less reviewer) | no | **yes** |
+| completed, `answered`, `changes_requested` | yes — the ticket also bounces to `in_progress`, and the review-rejection budget parks it after three | no |
+| completed, `answered`, MCP-capable reviewer with no verdict and no findings rows | yes — the review is *unverifiable*, and the bounce it triggers is counted by the same rejection budget | no (nothing it found was recorded) |
 | completed, `silent` | yes — but each one is charged as a failure, so three park the epic | no (it produced no verdict to approve with) |
 | completed, `asked_question` | yes, but only once the user replies (`isAwaitingReply` holds it until then, so a human is in the loop by construction) | no |
 | completed, no recorded outcome (legacy row) | yes, once — it earns a fresh, classified review | no |
@@ -252,11 +267,15 @@ either thread counts as the answer to a story question.
 
 "Review is OK" exists nowhere as a boolean, and Full Auto Mode does **not**
 invent one. The workflow engine's `review → done` guards *are* the gate:
-`applyTransition` refuses unless a review session completed and no review
-comment is still open (`lib/workflow/engine.ts`). The mode attempts the
-transition and treats a refusal as "not ready — skip". Its own selector is
-*stricter* than the engine's (the engine accepts any completed review ever; the
-mode wants one newer than the last code change).
+`applyTransition` refuses unless a review session completed *with evidence* and
+no review comment is still open (`lib/workflow/engine.ts`). "With evidence"
+excludes an unverifiable review — an MCP-capable reviewer that filed neither a
+verdict nor a finding — which the engine reports through its own refusal
+message so the operator is told the channel is broken rather than that no
+review ever ran. The mode attempts the transition and treats a refusal as "not
+ready — skip". Its own selector is still *stricter* than the engine's (the
+engine accepts any completed, verifiable review ever; the mode wants one newer
+than the last code change).
 
 `POST .../approve` is deliberately **not** reused anywhere in this code path: it
 bulk-resolves every open review comment before transitioning, which would
