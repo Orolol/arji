@@ -53,54 +53,6 @@ export type FeedItem =
   | { kind: "bug-created"; ts: string; entry: EpicActivityEntry }
   | { kind: "transition-group"; ts: string; entries: EpicActivityEntry[] };
 
-/** The `Story <id> — ` prefix a cascaded child write used to carry. */
-const STORY_ECHO_PREFIX = /^Story \S+ — /;
-
-/** Everything but the story identity: what a parent and its echo share. */
-function movementKey(entry: EpicActivityEntry, reason: string): string {
-  return JSON.stringify([
-    entry.actor,
-    entry.fromStatus,
-    entry.toStatus,
-    entry.sessionId,
-    reason,
-  ]);
-}
-
-/**
- * Drop the per-story echoes of an epic movement recorded before the cascade
- * fix (lib/workflow/transition-service.ts).
- *
- * Moving an epic used to append one `Story <id> — <reason>` row per story
- * beside the epic's own, so a five-story epic showed six identical
- * "Agent moved In Progress → Review" lines. New movements record a single
- * entry; histories written earlier are folded here instead.
- *
- * A story row is dropped only when another entry has the same actor, status
- * pair, session AND the exact same reason minus the prefix — i.e. it is
- * provably the parent's own line repeated. A genuinely story-scoped move
- * keeps its row: its parent entry reads differently ("All stories are in
- * review or done"), so nothing matches it. Unprefixed entries are never
- * dropped.
- */
-export function dropCascadeEchoes(
-  entries: EpicActivityEntry[]
-): EpicActivityEntry[] {
-  const parents = new Set(
-    entries
-      .filter((entry) => !STORY_ECHO_PREFIX.test(entry.reason ?? ""))
-      .map((entry) => movementKey(entry, entry.reason ?? ""))
-  );
-  if (parents.size === 0) return entries;
-  return entries.filter((entry) => {
-    const reason = entry.reason ?? "";
-    if (!STORY_ECHO_PREFIX.test(reason)) return true;
-    return !parents.has(
-      movementKey(entry, reason.replace(STORY_ECHO_PREFIX, ""))
-    );
-  });
-}
-
 /**
  * Merge comments and transition entries into one chronological (oldest-first)
  * feed. Runs of 2+ consecutive `system` transitions whose successive
@@ -123,7 +75,7 @@ export function buildActivityFeed(
       ts: comment.createdAt ?? "",
       comment,
     })),
-    ...dropCascadeEchoes(entries).map((entry) => ({
+    ...entries.map((entry) => ({
       kind: isPipelineActivityReason(entry.reason)
         ? ("pipeline" as const)
         : isMcpCreateBugActivityReason(entry.reason)
@@ -518,9 +470,6 @@ export function EpicActivityFeed({
     () => buildActivityFeed(comments, entries),
     [comments, entries]
   );
-  // Legacy per-story echoes are folded out of the feed, so they must not
-  // inflate the header count either.
-  const entryCount = useMemo(() => dropCascadeEchoes(entries).length, [entries]);
 
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const visibleFeed = useMemo(
@@ -561,7 +510,7 @@ export function EpicActivityFeed({
       <div className="shrink-0 border-b border-border-soft px-[24px] py-[12px]">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-[12px] uppercase tracking-[.08em] text-meta">
-            Activity ({comments.length + entryCount})
+            Activity ({comments.length + entries.length})
           </h3>
           <div
             className="flex items-center gap-[4px]"

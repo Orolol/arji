@@ -237,6 +237,65 @@ describe("an epic movement writes one activity line, not one per story", () => {
 });
 
 describe("story-scoped movements keep their own line", () => {
+  // These three flows are the anti-over-fold guard: a story-scoped move names
+  // the story that actually moved, next to its parent epic's own entry. In
+  // build-start and review-rejection the two entries differ ONLY by the
+  // `Story <id> — ` prefix, which is why nothing may fold them together on
+  // content alone — the write side is the one that knows which is which.
+  it("records the story that was dispatched when a story build starts", () => {
+    const { projectId, epicId, storyIds } = seedEpic("todo", ["todo", "todo"]);
+
+    transitionBuildStarted({
+      projectId,
+      epicId,
+      scope: "story",
+      userStoryId: storyIds[0],
+      sessionId: "story-build-session",
+    });
+
+    expect(activity(epicId)).toEqual([
+      expect.objectContaining({
+        fromStatus: "todo",
+        toStatus: "in_progress",
+        reason: "Build agent started",
+      }),
+      expect.objectContaining({
+        fromStatus: "todo",
+        toStatus: "in_progress",
+        reason: `Story ${storyIds[0]} — Build agent started`,
+      }),
+    ]);
+  });
+
+  it("records the story that was sent back when a story review is rejected", () => {
+    const { projectId, epicId, storyIds } = seedEpic("review", [
+      "review",
+      "review",
+    ]);
+
+    transitionReviewRejected({
+      projectId,
+      epicId,
+      scope: "story",
+      userStoryId: storyIds[0],
+      sessionId: "story-review-session",
+      reason: "Review requested changes",
+    });
+
+    expect(activity(epicId)).toEqual([
+      expect.objectContaining({
+        fromStatus: "review",
+        toStatus: "in_progress",
+        reason: "Review requested changes",
+      }),
+      expect.objectContaining({
+        fromStatus: "review",
+        toStatus: "in_progress",
+        reason: `Story ${storyIds[0]} — Review requested changes`,
+      }),
+    ]);
+  });
+
   it("records the story that moved when a story build completes", () => {
     const { projectId, epicId, storyIds } = seedEpic("in_progress", [
       "in_progress",

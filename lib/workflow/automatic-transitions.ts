@@ -79,6 +79,20 @@ function readStories(epicId: string) {
     }));
 }
 
+/**
+ * Names the stories a half-applied epic cascade already moved.
+ *
+ * Their own rows are silenced (one activity line per ticket movement), so
+ * when the cascade is refused part-way the summary entry is the only place
+ * left that can say the children are ahead of their parent. Empty when
+ * nothing moved, so the ordinary refusal reason is unchanged.
+ */
+function partialCascadeSuffix(movedStories: string[], toStatus: string): string {
+  if (movedStories.length === 0) return "";
+  const count = `${movedStories.length} ${movedStories.length === 1 ? "story" : "stories"}`;
+  return ` (${count} already moved to ${toStatus}: ${movedStories.join(", ")})`;
+}
+
 function transitionStory(opts: {
   projectId: string;
   epicId: string;
@@ -207,14 +221,19 @@ export function transitionBuildCompleted(opts: {
 
   const refused = (
     error: string,
-    remainingStories = 0
+    remainingStories = 0,
+    movedStories: string[] = []
   ): BuildCompletionResult => {
     logWorkflowDecision({
       projectId: opts.projectId,
       epicId: opts.epicId,
       status: epicStatus,
       actor: "agent",
-      reason: `Build completed but review promotion was refused; ticket held in ${epicStatus}: ${error}`,
+      // An epic cascade silences its child rows, so a refusal AFTER some
+      // stories were written would otherwise leave those moves invisible —
+      // and this entry is what a human reads to explain a ticket held in
+      // in_progress while its stories sit in review. Name them.
+      reason: `Build completed but review promotion was refused; ticket held in ${epicStatus}: ${error}${partialCascadeSuffix(movedStories, "review")}`,
       sessionId: opts.sessionId,
     });
     return {
@@ -272,6 +291,8 @@ export function transitionBuildCompleted(opts: {
         }
       }
 
+      // Tracked for the refusal trail: these moves have no row of their own.
+      const movedStories: string[] = [];
       for (const story of stories) {
         const storyTransition = transitionStory({
           projectId: opts.projectId,
@@ -288,9 +309,12 @@ export function transitionBuildCompleted(opts: {
         if (!storyTransition.valid) {
           return refused(
             storyTransition.error ??
-              `The workflow engine refused review for story ${story.id}`
+              `The workflow engine refused review for story ${story.id}`,
+            0,
+            movedStories
           );
         }
+        movedStories.push(story.id);
       }
       const epicTransition = applyEpicCascadeTransition({
         projectId: opts.projectId,
@@ -304,7 +328,9 @@ export function transitionBuildCompleted(opts: {
       });
       if (!epicTransition.valid) {
         return refused(
-          epicTransition.error ?? "The workflow engine refused epic review"
+          epicTransition.error ?? "The workflow engine refused epic review",
+          0,
+          movedStories
         );
       }
       return { valid: true, epicPromoted: true, remainingStories: 0 };
@@ -493,21 +519,37 @@ export function transitionReviewRejected(opts: {
       sessionId: opts.sessionId,
     })
   );
+  // Tracked for the same reason as transitionBuildCompleted's refusal trail:
+  // in a cascade these moves have no row of their own, so a throw part-way
+  // through would leave the stories that did move untraceable.
+  const movedStories: string[] = [];
   for (const story of stories) {
-    requireValid(
-      applyStoryTransition({
-        projectId: opts.projectId,
-        epicId: opts.epicId,
-        userStoryId: story.id,
-        fromStatus: story.status,
-        toStatus: "in_progress",
-        actor: "agent",
-        source: "review",
-        reason,
-        sessionId: opts.sessionId,
-        logActivity: !cascading,
-      })
-    );
+    const result = applyStoryTransition({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      userStoryId: story.id,
+      fromStatus: story.status,
+      toStatus: "in_progress",
+      actor: "agent",
+      source: "review",
+      reason,
+      sessionId: opts.sessionId,
+      logActivity: !cascading,
+    });
+    if (!result.valid) {
+      if (cascading && movedStories.length > 0) {
+        logWorkflowDecision({
+          projectId: opts.projectId,
+          epicId: opts.epicId,
+          status: "in_progress",
+          actor: "agent",
+          reason: `Review rejection stopped at story ${story.id}: ${result.error ?? "unknown workflow guard failure"}${partialCascadeSuffix(movedStories, "in_progress")}`,
+          sessionId: opts.sessionId,
+        });
+      }
+      requireValid(result);
+    }
+    movedStories.push(story.id);
   }
 }
 
