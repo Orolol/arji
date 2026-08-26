@@ -114,10 +114,14 @@ export function Board({
   onVisibleCountChange,
   onMoveWarning,
 }: BoardProps) {
-  const { board, loading, moveEpic, refresh, dependencies } = useKanban(
-    projectId,
-    { onMoveError }
-  );
+  const {
+    board,
+    loading,
+    moveEpic,
+    sortColumnByPriority,
+    refresh,
+    dependencies,
+  } = useKanban(projectId, { onMoveError });
   // Optimistic overlay on the server-side read cursors: opening a ticket
   // clears its unread dot immediately, before the /api/inbox/read POST from
   // EpicDetail lands and the next board refresh returns the moved cursor.
@@ -650,6 +654,23 @@ export function Board({
                 dropDisabled={filtersActive && activeColumn === status}
                 filtersActive={filtersActive}
                 focusRoles={focusRoles}
+                onSortByPriority={
+                  // The two columns a human still curates by hand: Backlog
+                  // stages what is not queued yet (Full Auto does not build
+                  // it), To Do is the queue Full Auto drains in position
+                  // order. Sorting rewrites positions, so priority order
+                  // becomes execution order — "what you see is what runs".
+                  status === "backlog" || status === "todo"
+                    ? () => {
+                        // Same rule the drag handlers apply: under a filter
+                        // the user sees a subset, and this writes positions
+                        // for the whole column. The button already renders
+                        // disabled; this is the second lock on the same door.
+                        if (filtersActive) return;
+                        sortColumnByPriority(status);
+                      }
+                    : undefined
+                }
               />
             )
           )}

@@ -19,6 +19,21 @@ const reorderSchema = z.object({
       position: z.number(),
     })
   ),
+  /**
+   * "I am only reordering; never move anything."
+   *
+   * Each item carries the status the CLIENT believes the ticket has, and a
+   * mismatch with the stored one is otherwise read as a requested move. That
+   * is right for drag-and-drop, which really does move a card, but wrong for
+   * a whole-column action like "Sort by priority": on a board the server has
+   * moved on from, it would either fail the entire sort on a refused
+   * transition or silently demote a ticket the user never dragged.
+   *
+   * With this flag an item whose stored status differs is skipped instead —
+   * its index means nothing in a column it is not in — and the response says
+   * how many, so the client can re-sync.
+   */
+  reorderOnly: z.boolean().optional(),
 });
 
 export async function POST(
@@ -47,6 +62,7 @@ export async function POST(
   // Lookups are project-scoped: epic ids from other projects are skipped.
   const statusChanges: { epicId: string; from: KanbanStatus; to: KanbanStatus }[] = [];
   const validItems: typeof body.items = [];
+  let skipped = 0;
   for (const item of body.items) {
     const epic = db
       .select()
@@ -54,10 +70,19 @@ export async function POST(
       .where(and(eq(epics.id, item.id), eq(epics.projectId, projectId)))
       .get();
     if (!epic) continue;
-    validItems.push(item);
 
     const fromStatus = (epic.status ?? "backlog") as KanbanStatus;
     const toStatus = item.status as KanbanStatus;
+
+    // A pure reorder leaves stale rows alone rather than moving them (see
+    // `reorderOnly`). This covers a card the caller believes is elsewhere,
+    // including one that has since been released.
+    if (body.reorderOnly && fromStatus !== toStatus) {
+      skipped += 1;
+      continue;
+    }
+
+    validItems.push(item);
 
     // Reject moves from the released column
     if (fromStatus === "released") {
@@ -130,7 +155,9 @@ export async function POST(
     }
 
     tryExportArjiJson(projectId);
-    return NextResponse.json({ data: { updated: validItems.length } });
+    return NextResponse.json({
+      data: { updated: validItems.length, skipped },
+    });
   } catch (error) {
     return errorResponse(error, "Failed to reorder epics");
   }
