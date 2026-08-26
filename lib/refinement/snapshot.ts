@@ -23,6 +23,7 @@ import {
   userStories,
 } from "@/lib/db/schema";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
+import { isDeliveredStatus } from "@/lib/types/kanban";
 import { REFINEMENT_STATUSES, type RefinementStatus } from "@/lib/mcp/refinement";
 
 /** A dependency edge as the re-pass sees it: the target and its column. */
@@ -101,9 +102,6 @@ export interface RefinementSnapshotInput {
   latestAgentComment: Map<string, string>;
 }
 
-/** Statuses at which a dependency stops blocking its dependents. */
-const SATISFIED_STATUSES = new Set(["done", "released"]);
-
 function isPlanningStatus(status: string | null): status is RefinementStatus {
   return (REFINEMENT_STATUSES as readonly string[]).includes(status ?? "");
 }
@@ -132,7 +130,11 @@ export function assembleRefinementSnapshot(
       ticketId,
       label: epic?.readableId ?? ticketId,
       status,
-      satisfied: SATISFIED_STATUSES.has(status),
+      // Shared with the board's blocked-state computation
+      // (lib/kanban/queue.ts): "did this prerequisite ship?" must mean the
+      // same thing in the snapshot the agent reads and on the card the user
+      // sees, or the two quietly disagree about what is blocked.
+      satisfied: isDeliveredStatus(status),
     };
   };
 

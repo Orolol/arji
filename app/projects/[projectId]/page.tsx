@@ -23,7 +23,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Hammer, Layers, Loader2, X, CheckCircle2, XCircle, Plus, Users, Search, GitMerge, Bot } from "lucide-react";
+import { Hammer, Layers, Loader2, X, CheckCircle2, XCircle, Plus, Users, Search, GitMerge, Bot, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BugCreateDialog } from "@/components/kanban/BugCreateDialog";
 import { EpicCreateDialog } from "@/components/kanban/EpicCreateDialog";
@@ -39,7 +39,7 @@ import { useProjectEvents } from "@/hooks/useProjectEvents";
 
 interface Toast {
   id: string;
-  type: "success" | "error";
+  type: "success" | "error" | "warning";
   message: string;
   href?: string;
   actionLabel?: string;
@@ -161,7 +161,7 @@ export default function KanbanPage() {
   }, []);
 
   const addToast = useCallback((
-    type: "success" | "error",
+    type: "success" | "error" | "warning",
     message: string,
     action?: { href: string; label?: string }
   ) => {
@@ -771,6 +771,7 @@ export default function KanbanPage() {
                 activeAgentActivities={activeAgentActivities}
                 onLinkedAgentHoverChange={setHighlightedActivityId}
                 onMoveError={(error) => addToast("error", error)}
+                onMoveWarning={(message) => addToast("warning", message)}
                 failedSessions={failedSessions}
                 onRetryBuild={handleRetryBuild}
                 hideReleased={panelOpen}
@@ -797,11 +798,15 @@ export default function KanbanPage() {
               "flex items-center gap-2 rounded-[11px] border px-[14px] py-[10px] text-[13px] shadow-[0_18px_40px_rgba(58,48,44,.14)]",
               toast.type === "success"
                 ? "border-agent-border bg-agent-bg text-agent"
-                : "border-destructive/40 bg-card text-destructive"
+                : toast.type === "warning"
+                  ? "border-amber-500/40 bg-card text-amber-600 dark:text-amber-400"
+                  : "border-destructive/40 bg-card text-destructive"
             )}
           >
             {toast.type === "success" ? (
               <CheckCircle2 className="h-4 w-4" />
+            ) : toast.type === "warning" ? (
+              <TriangleAlert className="h-4 w-4" />
             ) : (
               <XCircle className="h-4 w-4" />
             )}

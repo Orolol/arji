@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -8,6 +8,8 @@ import {
 } from "@dnd-kit/sortable";
 import { EpicCard, type EpicCardView } from "./EpicCard";
 import { cn } from "@/lib/utils";
+import type { DependencyFocusRole } from "@/lib/kanban/queue";
+import { ArrowDownWideNarrow } from "lucide-react";
 import {
   COLUMN_LABELS,
   type KanbanStatus,
@@ -20,13 +22,39 @@ interface ColumnProps {
   onEpicClick: (epicId: string) => void;
   /** Per-epic state and callbacks, keyed by epic id and built by the Board */
   epicViews?: Record<string, EpicCardView>;
-  /** Disable drag-and-drop (set by the Board while filters are active) */
-  dragDisabled?: boolean;
   /**
    * Filters are hiding cards right now. An empty column then means "nothing
    * matches", not "nothing here" — inviting a capture would be a lie.
    */
   filtersActive?: boolean;
+  /**
+   * A filter is active, so any drop lands at the END of the target column —
+   * the drop indicator moves to the bottom of the column while a card is
+   * dragged over it.
+   */
+  dropAtEnd?: boolean;
+  /**
+   * This column would refuse the drop currently in flight, so it must not
+   * advertise a slot. Today that is the dragged card's own column under an
+   * active filter: `handleDragEnd` returns early there because a visible index
+   * does not match board order. Promising a slot and then doing nothing reads
+   * as a broken drag.
+   */
+  dropDisabled?: boolean;
+  /**
+   * Each card's role in the board's active dependency hover focus, keyed by
+   * epic id. Separate from `epicViews` on purpose — see EpicCardProps.focus.
+   */
+  focusRoles?: Record<string, DependencyFocusRole>;
+  /**
+   * "Sort by priority" action in the column header. Shown only on the two
+   * columns a human curates before work starts (Backlog, To Do — see
+   * Board.tsx): the click rewrites the column's positions so priority order
+   * becomes the display order, which is then the execution order. Disabled
+   * while `filtersActive`, because it rewrites positions for the whole
+   * column and the user is looking at a subset.
+   */
+  onSortByPriority?: () => void;
 }
 
 /**
@@ -62,11 +90,14 @@ function ColumnHeader({
   count,
   accent = false,
   highlight = false,
+  action,
 }: {
   label: string;
   count: number;
   accent?: boolean;
   highlight?: boolean;
+  /** Small action on the header's right edge, left of the count. */
+  action?: ReactNode;
 }) {
   return (
     <div
@@ -85,7 +116,10 @@ function ColumnHeader({
       >
         {label}
       </span>
-      <span className="font-mono text-[11.5px] text-meta">{count}</span>
+      <span className="flex items-center gap-[8px]">
+        {action}
+        <span className="font-mono text-[11.5px] text-meta">{count}</span>
+      </span>
     </div>
   );
 }
@@ -95,13 +129,16 @@ export function Column({
   epics,
   onEpicClick,
   epicViews,
-  dragDisabled = false,
+  dropAtEnd = false,
+  dropDisabled = false,
   filtersActive = false,
+  focusRoles,
+  onSortByPriority,
 }: ColumnProps) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: status,
-    disabled: dragDisabled,
-  });
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+
+  // `isOver` says the pointer is here; it does not say the drop is allowed.
+  const showDropSlot = isOver && !dropDisabled;
 
   // Track newly arrived epics for highlight animation
   const prevEpicIdsRef = useRef<Set<string>>(new Set());
@@ -151,6 +188,25 @@ export function Column({
         count={epics.length}
         accent={status === "in_progress"}
         highlight={headerHighlight}
+        action={
+          onSortByPriority ? (
+            <button
+              type="button"
+              onClick={onSortByPriority}
+              disabled={filtersActive}
+              title={
+                filtersActive
+                  ? "Clear the filters to sort — sorting rewrites the whole column"
+                  : "Sort by priority"
+              }
+              aria-label={`Sort ${COLUMN_LABELS[status]} by priority`}
+              data-testid={`column-sort-priority-${status}`}
+              className="rounded-[5px] p-[3px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground motion-reduce:transition-none"
+            >
+              <ArrowDownWideNarrow className="h-[13px] w-[13px]" />
+            </button>
+          ) : undefined
+        }
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <SortableContext
@@ -159,14 +215,21 @@ export function Column({
         >
           <div className="flex min-h-[50px] flex-col gap-[12px]">
             {/* Drop target: the slot the card would land in, not a ring
-                around the whole column. */}
-            {isOver && (
+                around the whole column. Under an active filter the drop
+                always lands at the end, so the slot moves to the bottom. */}
+            {!dropAtEnd && showDropSlot && (
               <div
                 className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
                 aria-hidden="true"
               />
             )}
-            {epics.length === 0 && !isOver ? (
+            {/* `showDropSlot`, not raw `isOver`: an empty, hovered,
+                drop-refusing column would otherwise render neither the
+                placeholder nor a slot. Unreachable while `dropDisabled` only
+                means "the dragged card's own column", but keeping the
+                invariant local stops that from depending on the caller's
+                current formula. */}
+            {epics.length === 0 && !showDropSlot ? (
               <div
                 className="rounded-[10px] border border-dashed border-border p-[15px] text-[13px] text-muted-foreground"
                 data-testid={`column-empty-${status}`}
@@ -201,10 +264,20 @@ export function Column({
                     onClick={() => onEpicClick(epic.id)}
                     highlight={highlightedEpicIds.has(epic.id)}
                     view={epicViews?.[epic.id]}
-                    dragDisabled={dragDisabled}
+                    focus={focusRoles?.[epic.id]}
                   />
                 </div>
               ))
+            )}
+            {/* `isOver`, not a board-scoped "a drag is happening" flag: the
+                indicator marks the column the pointer is actually over, the
+                same as the in-list slot above. */}
+            {dropAtEnd && showDropSlot && (
+              <div
+                className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
+                aria-hidden="true"
+                data-testid={`column-drop-end-${status}`}
+              />
             )}
           </div>
         </SortableContext>

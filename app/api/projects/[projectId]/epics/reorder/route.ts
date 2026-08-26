@@ -1,10 +1,12 @@
 /**
- * POST /api/projects/:projectId/epics/reorder — the board drag-and-drop
- * reorder endpoint.
+ * POST /api/projects/:projectId/epics/reorder — the board's ordering
+ * endpoint, used by drag-and-drop and by whole-column actions such as
+ * "Sort by priority".
  *
- * The position update and the status transitions run through the shared
+ * The position write and the status transitions run through the shared
  * transactional core in lib/workflow/reorder.ts, which the agent-facing
- * reorder MCP tools use as well — the same logic, the same guarantees.
+ * reorder MCP tool uses as well — one implementation, so board `position`
+ * stays the single ordering source no matter who writes it.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -22,6 +24,12 @@ const reorderSchema = z.object({
       position: z.number(),
     })
   ),
+  /**
+   * "I am only reordering; never move anything." See `reorderOnly` in
+   * lib/workflow/reorder.ts for why a whole-column sort needs it and
+   * drag-and-drop does not.
+   */
+  reorderOnly: z.boolean().optional(),
 });
 
 export async function POST(
@@ -40,6 +48,7 @@ export async function POST(
       actor: "user",
       source: "drag",
       reason: "Kanban drag-and-drop",
+      reorderOnly: body.reorderOnly,
     });
   } catch (error) {
     return errorResponse(error, "Failed to reorder epics");
@@ -50,5 +59,7 @@ export async function POST(
   }
 
   tryExportArjiJson(projectId);
-  return NextResponse.json({ data: { updated: result.updated } });
+  return NextResponse.json({
+    data: { updated: result.updated, skipped: result.skipped },
+  });
 }

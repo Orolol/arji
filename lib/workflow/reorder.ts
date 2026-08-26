@@ -34,6 +34,22 @@ export interface ReorderContext {
   /** Activity-log reason recorded for any status change. */
   reason?: string;
   /**
+   * "I am only reordering; never move anything."
+   *
+   * Each item carries the status the CALLER believes the ticket has, and a
+   * mismatch with the stored one is otherwise read as a requested move. That
+   * is right for drag-and-drop, which really does move a card, but wrong for
+   * a whole-column action like "Sort by priority" or an agent re-ranking a
+   * snapshot it read moments ago: on a board that has moved on, it would
+   * either fail the whole operation on a refused transition or silently
+   * demote a ticket nobody moved.
+   *
+   * With this set, an item whose stored status differs is skipped instead —
+   * its index means nothing in a column it is not in — and the count comes
+   * back so the caller can re-sync.
+   */
+  reorderOnly?: boolean;
+  /**
    * Restrict which columns the items may currently sit in. The refinement
    * tools pass ["backlog", "todo"] — their guardrail is that they never
    * touch in progress / review / done.
@@ -42,7 +58,7 @@ export interface ReorderContext {
 }
 
 export type ReorderTicketsResult =
-  | { ok: true; updated: number }
+  | { ok: true; updated: number; skipped: number }
   | { ok: false; error: string; statusCode: number };
 
 export function reorderTickets(
@@ -68,6 +84,7 @@ export function reorderTickets(
   // Lookups are project-scoped: epic ids from other projects are skipped.
   const statusChanges: { epicId: string; from: KanbanStatus; to: KanbanStatus }[] = [];
   const validItems: ReorderItemInput[] = [];
+  let skipped = 0;
   for (const item of items) {
     const epic = db
       .select()
@@ -75,9 +92,18 @@ export function reorderTickets(
       .where(and(eq(epics.id, item.id), eq(epics.projectId, projectId)))
       .get();
     if (!epic) continue;
-    validItems.push(item);
 
     const fromStatus = (epic.status ?? "backlog") as KanbanStatus;
+
+    // A pure reorder leaves stale rows alone rather than moving them (see
+    // `reorderOnly`). This covers a card the caller believes is elsewhere,
+    // including one that has since been released.
+    if (ctx.reorderOnly && fromStatus !== (item.status as KanbanStatus)) {
+      skipped += 1;
+      continue;
+    }
+
+    validItems.push(item);
 
     // Reject moves from the released column
     if (fromStatus === "released") {
@@ -167,5 +193,5 @@ export function reorderTickets(
     }
   }
 
-  return { ok: true, updated: validItems.length };
+  return { ok: true, updated: validItems.length, skipped };
 }

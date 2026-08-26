@@ -86,11 +86,17 @@ export async function POST(request: NextRequest) {
   }
 
   let updated = 0;
+  let skipped = 0;
   try {
     const result = reorderTickets(auth.projectId, items, {
       actor: "agent",
       source: "refinement",
       reason: body.reason,
+      // Positions only. The status passed for each item is the one just
+      // read above, so this is the guard for the window between that read
+      // and this write: a ticket that moved column in between is skipped
+      // rather than dragged back into the column the agent saw it in.
+      reorderOnly: true,
       onlyFromStatuses: REFINEMENT_STATUSES,
     });
     if (!result.ok) {
@@ -100,6 +106,7 @@ export async function POST(request: NextRequest) {
       );
     }
     updated = result.updated;
+    skipped = result.skipped;
   } catch (error) {
     return errorResponse(error, "Failed to reorder tickets");
   }
@@ -126,5 +133,5 @@ export async function POST(request: NextRequest) {
 
   tryExportArjiJson(auth.projectId);
 
-  return NextResponse.json({ data: { updated, tickets: labels } });
+  return NextResponse.json({ data: { updated, skipped, tickets: labels } });
 }

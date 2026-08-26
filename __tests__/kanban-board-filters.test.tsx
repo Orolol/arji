@@ -33,6 +33,7 @@ vi.mock("@/hooks/useKanban", () => ({
     loading: false,
     refresh: mockKanbanState.refresh,
     moveEpic: mockKanbanState.moveEpic,
+    dependencies: [],
   }),
 }));
 
@@ -258,27 +259,47 @@ describe("Kanban board filters and focus mode", () => {
     expect(screen.getByText("Bug Card")).toBeInTheDocument();
   });
 
-  it("disables drops while a filter is active, and re-enables after clearing", () => {
+  it("moves the epic to the end of the target column while a filter is active", () => {
     const epic = makeEpic({ title: "Draggable Epic", status: "todo" });
-    setBoard({ todo: [epic] });
+    const doneA = makeEpic({ title: "Done A", status: "done", type: "bug" });
+    const doneB = makeEpic({ title: "Done B", status: "done", type: "bug" });
+    setBoard({ todo: [epic], done: [doneA, doneB] });
 
     render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
 
-    fireEvent.click(screen.getByTestId("filter-type-feature"));
+    // Under a bug-only filter the feature epic is hidden from the todo
+    // view, but dragging stays live and lands at the end of the target
+    // column instead of the filtered-visible index.
+    fireEvent.click(screen.getByTestId("filter-type-bug"));
     act(() => {
-      dndHandlers.onDragEnd?.({ active: { id: epic.id }, over: { id: "done" } });
-    });
-    expect(mockKanbanState.moveEpic).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByTestId("filter-clear-all"));
-    act(() => {
-      dndHandlers.onDragEnd?.({ active: { id: epic.id }, over: { id: "done" } });
+      dndHandlers.onDragEnd?.({ active: { id: epic.id }, over: { id: doneB.id } });
     });
     expect(mockKanbanState.moveEpic).toHaveBeenCalledWith(
       epic.id,
       "todo",
       "done",
-      0
+      2,
+      undefined
+    );
+
+    // A same-column reorder under a filter stays a no-op: the visible
+    // index would not match the board order.
+    act(() => {
+      dndHandlers.onDragEnd?.({ active: { id: doneA.id }, over: { id: doneB.id } });
+    });
+    expect(mockKanbanState.moveEpic).toHaveBeenCalledTimes(1);
+
+    // With the filter cleared, the drop lands at the hovered card's slot.
+    fireEvent.click(screen.getByTestId("filter-clear-all"));
+    act(() => {
+      dndHandlers.onDragEnd?.({ active: { id: epic.id }, over: { id: doneB.id } });
+    });
+    expect(mockKanbanState.moveEpic).toHaveBeenLastCalledWith(
+      epic.id,
+      "todo",
+      "done",
+      1,
+      undefined
     );
   });
 
