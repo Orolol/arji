@@ -86,3 +86,40 @@ describe("EventBus", () => {
     expect(eventBus.listenerCount("proj-test-6")).toBe(0);
   });
 });
+
+describe("emitTicketDependenciesChanged", () => {
+  it("coalesces every affected ticket into one event", async () => {
+    // The board page maps each ticket:updated to a whole-board reload, and SSE
+    // messages arrive in separate ticks so React cannot batch them. One event
+    // per ticket turned a single edit into N reloads.
+    const { emitTicketDependenciesChanged } = await import("@/lib/events/emit");
+    const events: TicketEvent[] = [];
+    const unsub = eventBus.subscribe("proj-deps", (e) => events.push(e));
+
+    emitTicketDependenciesChanged("proj-deps", [
+      "b",
+      "p1",
+      "p2",
+      "p3",
+      "q1",
+      "b",
+    ]);
+
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("ticket:updated");
+    // The ids ride in the payload for any consumer that wants them, deduped.
+    expect(events[0].data.ticketIds).toEqual(["b", "p1", "p2", "p3", "q1"]);
+    unsub();
+  });
+
+  it("emits nothing when no ticket was affected", async () => {
+    const { emitTicketDependenciesChanged } = await import("@/lib/events/emit");
+    const events: TicketEvent[] = [];
+    const unsub = eventBus.subscribe("proj-deps-empty", (e) => events.push(e));
+
+    emitTicketDependenciesChanged("proj-deps-empty", []);
+
+    expect(events).toEqual([]);
+    unsub();
+  });
+});

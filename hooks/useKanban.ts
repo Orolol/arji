@@ -7,8 +7,9 @@ import {
   type KanbanStatus,
   type KanbanEpic,
   type BoardState,
-  type ReorderItem,
   type ReleaseGroup,
+  type TicketDependencyEdge,
+  type ReorderItem,
 } from "@/lib/types/kanban";
 
 interface ReleaseRow {
@@ -36,16 +37,63 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
   });
   const [loading, setLoading] = useState(true);
   const onMoveErrorRef = useRef(options?.onMoveError);
-  onMoveErrorRef.current = options?.onMoveError;
+  /** Epic-level dependency edges for the project (ticket_dependencies rows). */
+  const [dependencies, setDependencies] = useState<TicketDependencyEdge[]>([]);
+  /**
+   * Latest committed board, readable outside a state updater. `moveEpic` needs
+   * the current columns to build its reorder payload; reading them from a
+   * `setBoard` updater instead would run that work — and the request it issues
+   * — twice under Strict Mode.
+   */
+  const boardRef = useRef(board);
+
+  useEffect(() => {
+    onMoveErrorRef.current = options?.onMoveError;
+    boardRef.current = board;
+  });
 
   const loadEpics = useCallback(async () => {
     try {
-      const [epicsRes, releasesRes] = await Promise.all([
+      const [epicsRes, releasesRes, depsRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/epics`),
         fetch(`/api/projects/${projectId}/releases`),
+        // Dependency visibility is an enrichment, not the board itself: this
+        // request is made individually fallible so a network failure, an
+        // abort or a dev-server restart mid-poll cannot reject the Promise.all
+        // and leave the board unrendered.
+        fetch(`/api/projects/${projectId}/dependencies`).catch(() => null),
       ]);
+      // A failed board request must not be read as "the board is empty": an
+      // errored /epics would blank every column, and an errored /dependencies
+      // would report every blocked ticket as unblocked and hand one of them the
+      // "next" badge. Keeping the last known state is the safer failure — it
+      // self-corrects on the next successful reload and never invents
+      // readiness.
+      // Thrown, not returned: the catch below still lets `setLoading(false)`
+      // run, so a first-load failure shows an empty board rather than an
+      // eternal skeleton.
+      if (!epicsRes.ok) throw new Error("epics request failed");
       const epicsData = await epicsRes.json();
-      const releasesData = await releasesRes.json();
+      const releasesData = releasesRes.ok
+        ? await releasesRes.json()
+        : { data: [] };
+
+      let depEdges: TicketDependencyEdge[] | null = null;
+      try {
+        if (depsRes?.ok) {
+          const depsData = await depsRes.json();
+          depEdges = (depsData.data ?? []).map(
+            (d: { ticketId: string; dependsOnTicketId: string }) => ({
+              ticketId: d.ticketId,
+              dependsOnTicketId: d.dependsOnTicketId,
+            })
+          );
+        }
+      } catch {
+        // leave null — the previous edges stand
+      }
+      if (depEdges !== null) setDependencies(depEdges);
+
       const epics: KanbanEpic[] = epicsData.data || [];
       const releaseRows: ReleaseRow[] = releasesData.data || [];
 
@@ -95,6 +143,7 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
         };
       });
 
+      boardRef.current = { columns, releaseGroups };
       setBoard({ columns, releaseGroups });
     } catch {
       // ignore
@@ -122,7 +171,7 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
     (
       items: ReorderItem[],
       failureMessage: string,
-      options?: { reorderOnly?: boolean }
+      options?: { reorderOnly?: boolean; onAccepted?: () => void }
     ) => {
       fetch(`/api/projects/${projectId}/epics/reorder`, {
         method: "POST",
@@ -138,6 +187,10 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
             loadEpics();
             return;
           }
+          // The server committed the write: the optimistic update is
+          // confirmed, so post-move side effects may run. A refused
+          // transition took the error path above and reloaded instead.
+          options?.onAccepted?.();
           if ((data?.data?.skipped ?? 0) > 0) loadEpics();
         })
         .catch(() => {
@@ -152,52 +205,55 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       epicId: string,
       fromColumn: KanbanStatus,
       toColumn: KanbanStatus,
-      newIndex: number
+      newIndex: number,
+      /**
+       * Runs only once the server has accepted the move. The optimistic update
+       * below is not confirmation — a refused transition calls onMoveError and
+       * reloads instead, so anything the user should read as a consequence of
+       * the move (e.g. the board's awaiting-reply warning) belongs here rather
+       * than at the call site.
+       */
+      onMoveAccepted?: () => void
     ) => {
       if (fromColumn === "released" || toColumn === "released") return;
 
-      setBoard((prev) => {
-        const next = { columns: { ...prev.columns }, releaseGroups: prev.releaseGroups };
-        for (const col of KANBAN_COLUMNS) {
-          next.columns[col] = [...prev.columns[col]];
+      // Built here rather than inside a setBoard updater: React double-invokes
+      // updaters under Strict Mode, which would fire the request and the
+      // accepted-callback twice in development.
+      const prev = boardRef.current;
+      const next: BoardState = {
+        columns: { ...prev.columns },
+        releaseGroups: prev.releaseGroups,
+      };
+      for (const col of KANBAN_COLUMNS) {
+        next.columns[col] = [...prev.columns[col]];
+      }
+
+      const epicIndex = next.columns[fromColumn].findIndex(
+        (e) => e.id === epicId
+      );
+      if (epicIndex === -1) return;
+      const [epic] = next.columns[fromColumn].splice(epicIndex, 1);
+      next.columns[toColumn].splice(newIndex, 0, { ...epic, status: toColumn });
+
+      boardRef.current = next;
+      setBoard(next);
+
+      const reorderItems: ReorderItem[] = [];
+      for (const col of DRAGGABLE_COLUMNS) {
+        if (col === fromColumn || col === toColumn) {
+          next.columns[col].forEach((item, idx) => {
+            reorderItems.push({ id: item.id, status: col, position: idx });
+          });
         }
+      }
 
-        const epicIndex = next.columns[fromColumn].findIndex(
-          (e) => e.id === epicId
-        );
-        if (epicIndex === -1) return prev;
-        const [epic] = next.columns[fromColumn].splice(epicIndex, 1);
-
-        epic.status = toColumn;
-        next.columns[toColumn].splice(newIndex, 0, epic);
-
-        return next;
+      postReorder(reorderItems, "Failed to move epic", {
+        onAccepted: onMoveAccepted,
       });
-
-      setTimeout(async () => {
-        setBoard((current) => {
-          const reorderItems: ReorderItem[] = [];
-          for (const col of DRAGGABLE_COLUMNS) {
-            if (col === fromColumn || col === toColumn) {
-              current.columns[col].forEach((epic, idx) => {
-                reorderItems.push({
-                  id: epic.id,
-                  status: col,
-                  position: idx,
-                });
-              });
-            }
-          }
-
-          postReorder(reorderItems, "Failed to move epic");
-
-          return current;
-        });
-      }, 0);
     },
     [postReorder]
   );
-
   /**
    * "Sort by priority": rewrite the column's positions so the board's
    * display order (position ASC) becomes priority DESC. Ties keep their
@@ -206,11 +262,11 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
    * transitions — and Full Auto then executes the column in exactly the order
    * the board shows, which is the point of position being the source of truth.
    *
-   * Unlike `moveEpic` this needs no deferral: the target order is fully
-   * determined here, from the rendered board. Reading it back inside a
-   * `setTimeout` would let an in-flight `loadEpics()` land in between and
-   * make the request body describe the *pre-sort* order — a click that
-   * appears to sort and then silently persists the old positions.
+   * No deferral is needed: the target order is fully determined here, from
+   * the rendered board. Reading it back inside a `setTimeout` would let an
+   * in-flight `loadEpics()` land in between and make the request body
+   * describe the *pre-sort* order — a click that appears to sort and then
+   * silently persists the old positions.
    */
   const sortColumnByPriority = useCallback(
     (column: KanbanStatus) => {
@@ -248,5 +304,12 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
     [board, postReorder]
   );
 
-  return { board, loading, moveEpic, sortColumnByPriority, refresh: loadEpics };
+  return {
+    board,
+    loading,
+    moveEpic,
+    sortColumnByPriority,
+    refresh: loadEpics,
+    dependencies,
+  };
 }

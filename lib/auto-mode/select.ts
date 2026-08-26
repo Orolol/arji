@@ -104,7 +104,6 @@ export const STORY_PARENT_BUILDABLE_STATUSES: ReadonlySet<string> = new Set([
   "in_progress",
   "review",
 ]);
-
 /**
  * Agent types that constitute "a review happened". Same family the workflow
  * engine's `hasCompletedReview` recognises (lib/workflow/context.ts:42-51).

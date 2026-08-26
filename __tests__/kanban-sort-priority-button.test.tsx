@@ -29,6 +29,7 @@ const mockKanbanState = vi.hoisted(() => ({
   refresh: vi.fn(),
   moveEpic: vi.fn(),
   sortColumnByPriority: vi.fn(),
+  dependencies: [] as { ticketId: string; dependsOnTicketId: string }[],
 }));
 
 vi.mock("@/hooks/useKanban", () => ({
@@ -38,6 +39,7 @@ vi.mock("@/hooks/useKanban", () => ({
     refresh: mockKanbanState.refresh,
     moveEpic: mockKanbanState.moveEpic,
     sortColumnByPriority: mockKanbanState.sortColumnByPriority,
+    dependencies: mockKanbanState.dependencies,
   }),
 }));
 

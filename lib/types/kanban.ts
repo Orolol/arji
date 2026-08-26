@@ -68,8 +68,9 @@ const DELIVERED_STATUS_SET: ReadonlySet<string> = new Set(DELIVERED_STATUSES);
 /**
  * Whether a ticket has shipped, i.e. whether it satisfies a dependency edge
  * pointing at it. The single definition of "delivered": dependency gates
- * (lib/dependencies/validation.ts) and the Full Auto selector both read it,
- * so adding a terminal status updates every consumer at once.
+ * (lib/dependencies/validation.ts), the board's execution queue
+ * (lib/kanban/queue.ts) and the Full Auto selector all read it, so adding a
+ * terminal status updates every consumer at once.
  */
 export function isDeliveredStatus(status: string | null | undefined): boolean {
   return status != null && DELIVERED_STATUS_SET.has(status);
@@ -112,6 +113,13 @@ export interface KanbanEpic {
   releaseId: string | null;
   usCount: number;
   usDone: number;
+  /**
+   * How many of the epic's user stories carry a non-empty acceptance-criteria
+   * rubric. Drives the Backlog readiness indicator: `usCount` alone is
+   * satisfied by a story with an empty rubric, which is exactly the state that
+   * makes the grading stage a no-op.
+   */
+  usWithCriteriaCount?: number;
   latestCommentId?: string | null;
   latestCommentAuthor?: string | null;
   latestCommentCreatedAt?: string | null;
@@ -150,6 +158,15 @@ export interface ReleaseGroup {
 export interface BoardState {
   columns: Record<KanbanStatus, KanbanEpic[]>;
   releaseGroups?: ReleaseGroup[];
+}
+
+/**
+ * A project ticket-dependency edge (`ticket_dependencies` row, epic-level):
+ * `ticketId` depends on `dependsOnTicketId`.
+ */
+export interface TicketDependencyEdge {
+  ticketId: string;
+  dependsOnTicketId: string;
 }
 
 export interface ReorderItem {
