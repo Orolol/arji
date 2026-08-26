@@ -220,6 +220,7 @@ describe("0031_notification_message — applied schema", () => {
       conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
       const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')

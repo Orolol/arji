@@ -43,6 +43,9 @@ const {
   kickAutoMode,
   cancelPendingKicks,
 } = await import("@/lib/auto-mode/engine");
+const { isReviewSessionUnverifiable } = await import(
+  "@/lib/pipeline/findings"
+);
 const { autoModeRegistry } = await import("@/lib/auto-mode/registry");
 const { loadAutoModeBoard } = await import("@/lib/auto-mode/select");
 const {
@@ -307,6 +310,10 @@ function makeFakes(): Fakes {
         .where(eq(agentSessions.id, sessionId))
         .get()?.outcome ??
       null,
+    // The real rule against the real (test) database — `settle` writes the
+    // row, so a scripted review is judged exactly as production judges it.
+    readReviewUnverifiable: (sessionId) =>
+      isReviewSessionUnverifiable(sessionId),
     readEpicStatus: (epicId) =>
       db.select({ status: epics.status }).from(epics).where(eq(epics.id, epicId)).get()
         ?.status ?? null,
@@ -1839,6 +1846,64 @@ describe("silent reviews", () => {
     expect(autoReasons("r1")).toContain(
       "Auto mode parked this ticket after 3 consecutive failures"
     );
+  });
+
+  /**
+   * The unverifiable review is the `silent` review's twin: it completed and
+   * `answered`, so nothing in the outcome marks it as useless, but its
+   * structured channel produced nothing and the selectors treat it as "no
+   * review happened". Without charging it, needsReview would re-dispatch a
+   * reviewer every sweep forever.
+   */
+  it("retries an unverifiable review and parks the epic after three of them", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 0, reviewConcurrency: 1 });
+    addEpic({ id: "r1", status: "review" });
+    addSession({
+      epicId: "r1",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(1),
+      endedAt: at(2),
+    });
+
+    for (let i = 0; i < 3; i += 1) {
+      const result = await sweepProject(PROJECT_ID, fakes.deps);
+      expect(result.reviewsDispatched).toHaveLength(1);
+      // Answered, on an MCP-capable provider, with no verdict and no rows.
+      settle(fakes, result.reviewsDispatched[0], "completed", "answered");
+    }
+
+    const final = await sweepProject(PROJECT_ID, fakes.deps);
+    expect(final.parked).toEqual(["r1"]);
+    expect(final.reviewsDispatched).toEqual([]);
+    expect(autoReasons("r1")).toContain(
+      "Auto mode parked this ticket after 3 consecutive failures"
+    );
+  });
+
+  it("does not charge a review that delivered its verdict", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 0, reviewConcurrency: 1 });
+    addEpic({ id: "r1", status: "review" });
+    addSession({
+      epicId: "r1",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(1),
+      endedAt: at(2),
+    });
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    const reviewSessionId = first.reviewsDispatched[0];
+    db.update(agentSessions)
+      .set({ reviewVerdict: "approved" })
+      .where(eq(agentSessions.id, reviewSessionId))
+      .run();
+    settle(fakes, reviewSessionId, "completed", "answered");
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(autoModeRegistry.listParked(PROJECT_ID)).toEqual([]);
   });
 
   it("does not charge an asked_question review as a failure", async () => {

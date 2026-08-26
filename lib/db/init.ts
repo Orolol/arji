@@ -126,6 +126,12 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
     table: "named_agents",
     column: "escalates_to",
   },
+  // 0041_agent_session_mcp_channel (single column ALTER)
+  {
+    folderMillis: 1786713800000,
+    table: "agent_sessions",
+    column: "mcp_channel",
+  },
 ];
 
 /** Default on-disk location of the drizzle migration files. */

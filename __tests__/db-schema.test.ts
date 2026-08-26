@@ -182,6 +182,7 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       error: "error",
       outcome: "outcome",
       reviewVerdict: "review_verdict",
+      mcpChannel: "mcp_channel",
       inputTokens: "input_tokens",
       outputTokens: "output_tokens",
       totalCostUsd: "total_cost_usd",

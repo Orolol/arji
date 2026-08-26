@@ -110,6 +110,9 @@ const mockTryExportArjiJson = vi.hoisted(() => vi.fn());
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn(() => ({})),
   and: vi.fn(() => ({})),
+  // The route's unverifiable-review pass narrows to the four ordinary review
+  // agent types, and probes review_comments by session id.
+  inArray: vi.fn(() => ({})),
   sql: mockSql,
   count: mockCount,
 }));

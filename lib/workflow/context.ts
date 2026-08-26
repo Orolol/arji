@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { agentSessions, reviewComments } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { CODE_PRODUCING_AGENT_TYPES } from "@/lib/agent-config/constants";
-import { isReviewSessionUnverifiable } from "@/lib/pipeline/findings";
+import { selectUnverifiableReviewSessionIds } from "@/lib/pipeline/findings";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import type { TransitionContext } from "./engine";
 
@@ -81,8 +81,14 @@ export function buildTransitionContext(opts: {
       );
     });
 
+  // Batched on purpose: the per-session helper costs three queries each, and
+  // four review types over a few rounds turns one guarded transition into
+  // dozens of unindexed reads. The rows are already in hand above.
+  const unverifiableReviewIds = selectUnverifiableReviewSessionIds(
+    completedReviewSessions
+  );
   const verifiableReviewSessions = completedReviewSessions.filter(
-    (session) => !isReviewSessionUnverifiable(session.id)
+    (session) => !unverifiableReviewIds.has(session.id)
   );
 
   // Only code-producing sessions own the in_progress column. Review, chat,

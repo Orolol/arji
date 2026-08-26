@@ -2,8 +2,11 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db as defaultDb, type ArijDatabase } from "@/lib/db";
 import { agentSessions, reviewComments } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
+import { sessionAtSql } from "@/lib/agent-sessions/session-time";
 import {
   isMcpToolsEnabled,
+  MCP_CHANNEL_INJECTED,
+  parseMcpChannelRecord,
   providerSupportsMcp,
 } from "@/lib/claude/mcp-injection";
 import { parseReviewReport } from "./parse-review-report";
@@ -244,6 +247,20 @@ export function readStructuredReviewVerdict(
 /* The silence rule — unverifiable reviews                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The agent types that ARE a review for gate purposes — the same four the
+ * Full Auto merge gate counts (lib/auto-mode/select.ts). Deliberately not the
+ * looser `includes("review")` the workflow context uses for its floor guard,
+ * and deliberately without `review_second_opinion`, which is a merge gate
+ * with its own prose fail-safe.
+ */
+export const ORDINARY_REVIEW_AGENT_TYPES = [
+  "review_security",
+  "review_code",
+  "review_compliance",
+  "review_feature",
+] as const;
+
 /** Structured verdicts that let a review pass on its own. */
 export const POSITIVE_STRUCTURED_VERDICTS: ReadonlyArray<StructuredReviewVerdict> =
   ["approved", "approved_with_minor_issues"];
@@ -252,7 +269,19 @@ export const POSITIVE_STRUCTURED_VERDICTS: ReadonlyArray<StructuredReviewVerdict
  * What the structured channel was worth for one review session.
  *
  * `mcpCapable` is the question the whole rule turns on: could this session
- * have called `submit_findings` at all? It is the spawn-time gate, re-read —
+ * have called `submit_findings` at all?
+ *
+ * The answer comes from `agent_sessions.mcp_channel` — what Arij RECORDED at
+ * spawn time (migration 0041) — and only falls back to re-deriving it from
+ * the provider list when the row has no record. That order matters: injection
+ * degrades silently in two places (processManager.start catches every
+ * injection error, prepareClaudeSpawn drops --mcp-config on a temp-file
+ * failure), and in both the child never reaches the HTTP route, so no 401
+ * fires either. Reconstructing from the provider would judge such a review
+ * unverifiable and tell the operator its reviewer "filed no verdict" — for a
+ * tool that session was never handed.
+ *
+ * The fallback for rows with no record (every session from before 0041) is
  * the provider's injection surface AND the global `mcp_tools_enabled`
  * toggle, exactly the two conditions lib/claude/mcp-injection.ts applies
  * when it decides whether to wire the channel up. Reading the toggle at
@@ -260,12 +289,18 @@ export const POSITIVE_STRUCTURED_VERDICTS: ReadonlyArray<StructuredReviewVerdict
  * operator who turns the channel off must not find every epic in the board
  * suddenly unmergeable for want of a verdict nobody can produce any more.
  *
- * `filedFindings` is the escape hatch that keeps the rule about the CHANNEL
- * rather than about the reviewer's manners. A session with review_comments
- * rows of its own has proved the channel worked for it; a missing verdict is
- * then the reviewer's own omission, and the pre-existing findings veto and
- * prose fallback are exactly the right tools for it. Only total silence —
- * no verdict AND no rows — is evidence that nothing got through.
+ * `provedChannelWithRows` is the escape hatch that keeps the rule about the
+ * CHANNEL rather than about the reviewer's manners. A session with
+ * review_comments rows of its own has proved the channel worked for it; a
+ * missing verdict is then the reviewer's own omission, and the pre-existing
+ * findings veto and prose fallback are exactly the right tools for it. Only
+ * total silence — no verdict AND no rows — is evidence that nothing got
+ * through.
+ *
+ * It is only ever computed on the no-verdict path, and says so in its name:
+ * a review that filed a verdict is not asked the question, because nothing
+ * downstream needs the answer. Reading it as "this session filed rows" would
+ * be wrong for every healthy review.
  *
  * `delivered` bounds the rule to reviews that actually RAN to a verdict:
  * `status = completed` and `outcome = answered`. A failed, cancelled, silent
@@ -281,8 +316,18 @@ export interface ReviewChannelState {
   structuredVerdict: StructuredReviewVerdict | null;
   /** The session had a structured channel to file its verdict on. */
   mcpCapable: boolean;
-  /** The session filed review_comments rows of its own through the tool. */
-  filedFindings: boolean;
+  /**
+   * What Arij recorded at spawn time, or null for a row that predates the
+   * column. `unavailable` is the case the rule must NOT punish.
+   */
+  channelRecord: "injected" | "unavailable" | null;
+  /**
+   * Only meaningful on the no-verdict path: true when the session filed
+   * review_comments rows of its own, which proves its channel worked. False
+   * everywhere else INCLUDING for reviews that filed a verdict — the query
+   * is skipped there because no caller needs it.
+   */
+  provedChannelWithRows: boolean;
   /** The session ran to a verdict: completed AND outcome `answered`. */
   delivered: boolean;
   /**
@@ -312,6 +357,7 @@ export function readReviewChannelState(
       reviewVerdict: agentSessions.reviewVerdict,
       status: agentSessions.status,
       outcome: agentSessions.outcome,
+      mcpChannel: agentSessions.mcpChannel,
     })
     .from(agentSessions)
     .where(eq(agentSessions.id, sessionId))
@@ -323,9 +369,12 @@ export function readReviewChannelState(
   const structuredVerdict = isStructuredReviewVerdict(row.reviewVerdict)
     ? row.reviewVerdict
     : null;
+  const channelRecord = parseMcpChannelRecord(row.mcpChannel);
   const mcpCapable =
-    providerSupportsMcp(provider) && isMcpToolsEnabled(database);
-  const filedFindings =
+    channelRecord === null
+      ? providerSupportsMcp(provider) && isMcpToolsEnabled(database)
+      : channelRecord === MCP_CHANNEL_INJECTED;
+  const provedChannelWithRows =
     mcpCapable && delivered && structuredVerdict === null
       ? database
           .select({ id: reviewComments.id })
@@ -339,11 +388,80 @@ export function readReviewChannelState(
     provider,
     structuredVerdict,
     mcpCapable,
-    filedFindings,
+    channelRecord,
+    provedChannelWithRows,
     delivered,
     unverifiable:
-      mcpCapable && delivered && structuredVerdict === null && !filedFindings,
+      mcpCapable &&
+      delivered &&
+      structuredVerdict === null &&
+      !provedChannelWithRows,
   };
+}
+
+/** The session columns the rule needs — what a caller usually already holds. */
+export interface ReviewChannelRow {
+  id: string;
+  provider: string | null;
+  reviewVerdict: string | null;
+  status: string | null;
+  outcome: string | null;
+  mcpChannel: string | null;
+}
+
+/**
+ * Batch form of the rule, for callers that already hold the session rows.
+ *
+ * The per-session helper costs three queries each (the row, the settings
+ * toggle, and sometimes the review_comments probe), which a caller looping
+ * over an epic's reviews pays over and over against tables with no useful
+ * index — agent_sessions has none, and review_comments is indexed on
+ * (epic_id, file_path), not agent_session_id. This reads the toggle once and
+ * probes review_comments once for the whole set.
+ *
+ * Returns the ids of the rows that are unverifiable; everything else is
+ * verifiable by elimination.
+ */
+export function selectUnverifiableReviewSessionIds(
+  rows: ReviewChannelRow[],
+  database: ArijDatabase = defaultDb
+): Set<string> {
+  if (rows.length === 0) return new Set();
+
+  // Read once, and only if a row actually needs the fallback — a board whose
+  // sessions all carry a channel record never touches the settings table.
+  let toggle: boolean | null = null;
+  const mcpToolsEnabled = () => (toggle ??= isMcpToolsEnabled(database));
+
+  const candidates = rows.filter((row) => {
+    if (row.status !== "completed" || row.outcome !== "answered") return false;
+    if (isStructuredReviewVerdict(row.reviewVerdict)) return false;
+    const record = parseMcpChannelRecord(row.mcpChannel);
+    if (record !== null) return record === MCP_CHANNEL_INJECTED;
+    return (
+      providerSupportsMcp(row.provider ?? "claude-code") && mcpToolsEnabled()
+    );
+  });
+  if (candidates.length === 0) return new Set();
+
+  const provedChannel = new Set(
+    database
+      .select({ agentSessionId: reviewComments.agentSessionId })
+      .from(reviewComments)
+      .where(
+        inArray(
+          reviewComments.agentSessionId,
+          candidates.map((row) => row.id)
+        )
+      )
+      .all()
+      .map((row) => row.agentSessionId)
+      .filter((id): id is string => id !== null)
+  );
+
+  return new Set(
+    candidates.filter((row) => !provedChannel.has(row.id)).map((row) => row.id)
+  );
 }
 
 /**
@@ -363,7 +481,18 @@ export function isReviewSessionUnverifiable(
  *
  * Latest, not any: an epic re-reviewed after a broken round is no longer
  * blocked by the broken one, and the column should say so the moment the
- * channel comes back.
+ * channel comes back. Note the deliberate asymmetry with the workflow
+ * engine's guard, which accepts ANY verifiable completed review ever: an epic
+ * reviewed cleanly and then re-reviewed on a broken channel shows the badge
+ * while `review → done` still passes. The badge speaks for the merge gate and
+ * for what Full Auto will do next, which is what the Review column is about;
+ * it is not a restatement of the approval guard.
+ *
+ * Scoped to the four ORDINARY review types. `review_second_opinion` is a
+ * Full Auto merge gate, not a review: the merge gate does not count it
+ * (lib/auto-mode/select.ts), and it is allowed to answer through a prose
+ * fail-safe, so judging it by the structured channel would badge
+ * "unverifiable" on an epic the merge gate is perfectly happy to land.
  *
  * Two queries regardless of board size, which is why this exists instead of
  * calling {@link readReviewChannelState} per epic: one window-function scan
@@ -375,7 +504,7 @@ export function listUnverifiableReviewEpicIds(
   projectId: string,
   database: ArijDatabase = defaultDb
 ): Set<string> {
-  if (!isMcpToolsEnabled(database)) return new Set();
+  const mcpToolsEnabled = isMcpToolsEnabled(database);
 
   const ranked = database
     .select({
@@ -383,13 +512,10 @@ export function listUnverifiableReviewEpicIds(
       sessionId: agentSessions.id,
       provider: agentSessions.provider,
       reviewVerdict: agentSessions.reviewVerdict,
+      mcpChannel: agentSessions.mcpChannel,
       rowNum: sql<number>`ROW_NUMBER() OVER (
         PARTITION BY ${agentSessions.epicId}
-        ORDER BY COALESCE(
-          ${agentSessions.endedAt},
-          ${agentSessions.completedAt},
-          ${agentSessions.createdAt}
-        ) DESC, ${agentSessions.id} DESC
+        ORDER BY ${sessionAtSql()} DESC, ${agentSessions.id} DESC
       )`.as("review_row_num"),
     })
     .from(agentSessions)
@@ -400,7 +526,7 @@ export function listUnverifiableReviewEpicIds(
         sql`${agentSessions.userStoryId} IS NULL`,
         eq(agentSessions.status, "completed"),
         eq(agentSessions.outcome, "answered"),
-        sql`${agentSessions.agentType} LIKE 'review%'`
+        inArray(agentSessions.agentType, [...ORDINARY_REVIEW_AGENT_TYPES])
       )
     )
     .as("ranked_reviews");
@@ -411,17 +537,22 @@ export function listUnverifiableReviewEpicIds(
       sessionId: ranked.sessionId,
       provider: ranked.provider,
       reviewVerdict: ranked.reviewVerdict,
+      mcpChannel: ranked.mcpChannel,
     })
     .from(ranked)
     .where(eq(ranked.rowNum, 1))
     .all();
 
-  const candidates = latest.filter(
-    (row) =>
-      row.epicId !== null &&
-      providerSupportsMcp(row.provider ?? "claude-code") &&
-      !isStructuredReviewVerdict(row.reviewVerdict)
-  );
+  // Same capability rule readReviewChannelState applies, row by row: the
+  // recorded wiring first, the provider reconstruction only where there is
+  // no record.
+  const candidates = latest.filter((row) => {
+    if (row.epicId === null) return false;
+    if (isStructuredReviewVerdict(row.reviewVerdict)) return false;
+    const record = parseMcpChannelRecord(row.mcpChannel);
+    if (record !== null) return record === MCP_CHANNEL_INJECTED;
+    return mcpToolsEnabled && providerSupportsMcp(row.provider ?? "claude-code");
+  });
   if (candidates.length === 0) return new Set();
 
   // A session with rows of its own proved the channel worked — same escape
@@ -707,9 +838,18 @@ export interface ReviewVerdictDecision {
  * because these call sites never consulted findings rows and
  * retro-compatibility is bit-for-bit. With a structured verdict, the
  * findings veto applies over the session's own window (`sinceIso`,
- * defaulted from the session row). A reviewer that HAD the channel and
- * stayed silent is negative — the ticket goes back to `in_progress` rather
- * than resting in Review on a verdict nobody can read.
+ * defaulted from the session row).
+ *
+ * An UNVERIFIABLE review is reported (`unverifiable: true`) but is NOT
+ * negative. These call sites are the revert drivers: negative means "send the
+ * ticket back to in_progress", i.e. dispatch a code agent. An unverifiable
+ * review says nothing about the code — no finding was filed — so bouncing it
+ * would put a builder on a branch nothing faulted, and the completed session
+ * would clear the failure streak on the way past. The ticket stays in Review,
+ * un-mergeable (the merge gate and `review → done` both refuse it), and earns
+ * another REVIEW: the pipeline's stage ladder re-runs it, Full Auto's
+ * needsReview re-dispatches it, and Full Auto's reconciler charges it so
+ * three of them park the epic instead of looping.
  */
 export function resolveReviewVerdict(input: {
   epicId: string;
@@ -727,7 +867,7 @@ export function resolveReviewVerdict(input: {
   if (!structuredVerdict) {
     if (channel?.unverifiable) {
       return {
-        negative: true,
+        negative: false,
         source: "unverifiable",
         structuredVerdict: null,
         blockingFindings: [],

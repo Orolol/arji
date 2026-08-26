@@ -30,6 +30,12 @@
  *      and the trace is worth more than the residual doubt. Zero or several,
  *      and this module stays silent rather than blaming the wrong ticket.
  *
+ * Route 2 runs ONLY when route 1 found no record. A known token settles the
+ * caller's identity whether or not that caller turns out to be a review —
+ * guessing past it would let a build session's revoked token pin a
+ * "review does not count" trace onto whichever review happens to be running,
+ * and the dedupe would key that false trace to the innocent review's id.
+ *
  * Everything here is best-effort and never throws: the route's job is to
  * return its 401, and a failed trace must not turn an auth rejection into a
  * 500.
@@ -92,21 +98,37 @@ function readSession(sessionId: string) {
     .get();
 }
 
-/** Route 1 — the (possibly revoked) token record names its session. */
-function attributeByToken(token: string): AttributedReviewSession | null {
+/**
+ * Route 1 — the (possibly revoked) token record names its session.
+ *
+ * Returns the attribution when that session is a review worth tracing, and
+ * `null` when it is not — but the CALLER must still treat a resolvable record
+ * as final. `attributeByTokenRecord` reports both facts so the two cannot be
+ * confused: `known` says the token was ours, `attributed` says it is a review
+ * with a ticket to trace against.
+ */
+function attributeByTokenRecord(token: string): {
+  known: boolean;
+  attributed: AttributedReviewSession | null;
+} {
   const record = findMcpTokenRecord(token);
-  if (!record) return null;
+  if (!record) return { known: false, attributed: null };
+
   const session = readSession(record.sessionId);
   const agentType = session?.agentType ?? record.agentType;
-  if (!isReviewAgentType(agentType)) return null;
   const epicId = session?.epicId ?? record.epicId;
-  if (!epicId) return null;
+  if (!isReviewAgentType(agentType) || !epicId) {
+    return { known: true, attributed: null };
+  }
   return {
-    sessionId: record.sessionId,
-    projectId: session?.projectId ?? record.projectId,
-    epicId,
-    agentType: agentType ?? null,
-    attribution: "token",
+    known: true,
+    attributed: {
+      sessionId: record.sessionId,
+      projectId: session?.projectId ?? record.projectId,
+      epicId,
+      agentType: agentType ?? null,
+      attribution: "token",
+    },
   };
 }
 
@@ -171,9 +193,15 @@ export function recordSubmitFindingsAuthFailure(request: Request): void {
     const header = request.headers.get("authorization") ?? "";
     const token = BEARER_PATTERN.exec(header)?.[1]?.trim() ?? "";
 
-    const attributed =
-      (token ? attributeByToken(token) : null) ??
-      attributeBySoleRunningReview();
+    // A token we minted answers the question outright — including when the
+    // answer is "not a review". Only an unknown or absent token may fall
+    // through to the by-elimination inference.
+    const byToken = token
+      ? attributeByTokenRecord(token)
+      : { known: false, attributed: null };
+    const attributed = byToken.known
+      ? byToken.attributed
+      : attributeBySoleRunningReview();
     if (!attributed) return;
     if (alreadyTraced(attributed.sessionId)) return;
 

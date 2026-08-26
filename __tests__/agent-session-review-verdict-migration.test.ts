@@ -197,6 +197,7 @@ describe("0034_agent_session_review_verdict — applied schema", () => {
       // Rewinding the ledger re-runs the whole tail, and an ADD COLUMN is not
       // a no-op the second time — 0039's column has to go back as well.
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
       const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')
@@ -264,6 +265,7 @@ describe("0034_agent_session_review_verdict — applied schema", () => {
       // The repair stamps 0034 and hands the tail back to drizzle, so every
       // later ADD COLUMN runs again: 0039's column has to go back too.
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')
         .run(PREVIOUS_MIGRATION_WHEN);

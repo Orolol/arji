@@ -281,7 +281,14 @@ describe("assessReviewOutcome — the vacuous clean review", () => {
 });
 
 describe("resolveReviewVerdict — the revert drivers", () => {
-  it("returns a negative verdict for a verdict-less claude-code review", () => {
+  /**
+   * These drivers send the ticket back to `in_progress`, i.e. they dispatch a
+   * BUILD. An unverifiable review says nothing about the code — no finding
+   * was filed — so bouncing it would put a code agent on a branch nothing
+   * faulted. The ticket stays in Review, un-mergeable, and earns another
+   * REVIEW instead; `unverifiable` is what tells the caller which it is.
+   */
+  it("does not bounce the ticket for a verdict-less claude-code review", () => {
     const sessionId = insertReviewSession({ provider: "claude-code" });
     const decision = resolveReviewVerdict({
       epicId: EPIC_ID,
@@ -289,8 +296,24 @@ describe("resolveReviewVerdict — the revert drivers", () => {
       sessionOutput: NEUTRAL_REVIEW_OUTPUT,
       database: db(),
     });
-    expect(decision.negative).toBe(true);
+    expect(decision.negative).toBe(false);
+    expect(decision.unverifiable).toBe(true);
     expect(decision.source).toBe("unverifiable");
+  });
+
+  it("still bounces on an explicit changes_requested verdict", () => {
+    const sessionId = insertReviewSession({
+      provider: "claude-code",
+      reviewVerdict: "changes_requested",
+    });
+    expect(
+      resolveReviewVerdict({
+        epicId: EPIC_ID,
+        reviewSessionId: sessionId,
+        sessionOutput: NEUTRAL_REVIEW_OUTPUT,
+        database: db(),
+      })
+    ).toMatchObject({ negative: true, source: "structured" });
   });
 
   it("leaves an MCP-less reviewer's prose verdict untouched", () => {
@@ -590,6 +613,42 @@ describe("submit_findings 401 tracing", () => {
 
     expect(activityRows()).toHaveLength(1);
     expect(db().select().from(notifications).all()).toHaveLength(1);
+  });
+
+  it("does not blame a live review for a known non-review caller", async () => {
+    // A build session whose token was revoked mid-call. Its identity is
+    // KNOWN — and it is not a review — so the sole-running-review inference
+    // must not run: the trace would land on a healthy epic whose channel is
+    // fine, and the dedupe would key it to that innocent review's session.
+    const reviewSessionId = insertReviewSession({
+      provider: "claude-code",
+      status: "running",
+    });
+    db()
+      .insert(agentSessions)
+      .values({
+        id: "session-build-revoked",
+        projectId: PROJECT_ID,
+        epicId: EPIC_ID,
+        status: "running",
+        agentType: "build",
+        provider: "claude-code",
+        createdAt: CODE_AT,
+      })
+      .run();
+    const buildToken = mintMcpToken({
+      sessionId: "session-build-revoked",
+      projectId: PROJECT_ID,
+      epicId: EPIC_ID,
+      agentType: "build",
+    });
+    revokeMcpTokensForSession("session-build-revoked");
+
+    const response = await call(buildToken);
+    expect(response.status).toBe(401);
+    expect(activityRows()).toHaveLength(0);
+    expect(db().select().from(notifications).all()).toHaveLength(0);
+    expect(reviewSessionId).toBeTruthy();
   });
 
   it("stays silent when no review session can be identified", async () => {

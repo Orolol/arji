@@ -209,6 +209,51 @@ export function isMcpToolsEnabled(database: ArijDatabase = db): boolean {
   return parseMcpToolsEnabledSetting(row.value);
 }
 
+/* ------------------------------------------------------------------ */
+/* What actually got wired, per session                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `agent_sessions.mcp_channel` (migration 0041) — the RECORDED outcome of
+ * injection for one session, as opposed to the provider's static capability.
+ *
+ * The two are not the same question, and the gap is not theoretical:
+ * `processManager.start()` wraps the whole injection block in a try/catch and
+ * spawns without tools on any error, and `prepareClaudeSpawn` drops
+ * `--mcp-config` when the temp file cannot be written. In both the child
+ * never reaches the HTTP route, so the 401 trace never fires either — the
+ * session simply has no tools and nothing says so.
+ *
+ * Recording it makes the unverifiable-review rule read history instead of
+ * re-deriving it: a review Arij KNOWS it could not equip is judged by prose,
+ * not blamed for a tool call it was never able to make.
+ *
+ * Known gap: for oh-my-pi and agy the server entry lives in a user-global
+ * config file that Arij does not own, so `injected` means "Arij handed over
+ * the environment", not "the CLI loaded it". A CLI that quietly reports the
+ * server as failed still looks injected. That case is what the 401 trace and
+ * the operator-facing badge exist for.
+ */
+export const MCP_CHANNEL_INJECTED = "injected";
+export const MCP_CHANNEL_UNAVAILABLE = "unavailable";
+
+export type McpChannelRecord =
+  | typeof MCP_CHANNEL_INJECTED
+  | typeof MCP_CHANNEL_UNAVAILABLE;
+
+/**
+ * Reads the recorded value, or null when the row predates the column or
+ * belongs to a spawn injection never applied to. Null means "no record —
+ * fall back to the provider reconstruction", never "no channel".
+ */
+export function parseMcpChannelRecord(
+  value: string | null | undefined
+): McpChannelRecord | null {
+  return value === MCP_CHANNEL_INJECTED || value === MCP_CHANNEL_UNAVAILABLE
+    ? value
+    : null;
+}
+
 /**
  * Whether a provider has a per-spawn MCP injection surface. Verdicts from
  * the architecture contract (docs/architecture/mcp-provider-matrix.md):

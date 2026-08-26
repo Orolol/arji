@@ -245,6 +245,7 @@ export function createPipelineStageDriver(
         usedProseFallback: assessment.usedProseFallback,
         verdictSource: assessment.verdictSource,
         structuredVerdict: assessment.structuredVerdict,
+        unverifiable: assessment.unverifiable,
       };
     },
 

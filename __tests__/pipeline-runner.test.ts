@@ -32,7 +32,13 @@ interface ScriptedStage {
   throwOnLaunch?: boolean;
 }
 
-type ScriptedAssessment = boolean | "throw";
+/**
+ * `true`/`false` = blocking findings or a clean review. `"throw"` = the
+ * assessment itself crashed. `"unverifiable"` = the review delivered but its
+ * structured channel produced nothing — blocking, but with no finding to fix,
+ * so the ladder must re-REVIEW rather than dispatch a fix.
+ */
+type ScriptedAssessment = boolean | "throw" | "unverifiable";
 
 interface HarnessConfig {
   build?: ScriptedStage;
@@ -150,6 +156,16 @@ function runScripted(config: HarnessConfig = {}) {
       assessIndex += 1;
       const scripted = config.assessments?.[index] ?? false;
       if (scripted === "throw") throw new Error("assessment exploded");
+      if (scripted === "unverifiable") {
+        return {
+          blocking: true,
+          blockingCount: 0,
+          agentCommentCount: 0,
+          usedProseFallback: false,
+          unverifiable: true,
+          verdictSource: "unverifiable" as const,
+        };
+      }
       return {
         blocking: scripted,
         blockingCount: scripted ? 1 : 0,
@@ -538,6 +554,44 @@ describe("runPipeline — fix cycle caps", () => {
       reason: "blocking findings remain after 0 fix cycles",
     });
     expect(h.requests.map((r) => r.stage)).toEqual(["review"]);
+  });
+
+  /**
+   * A review whose structured channel produced nothing is blocking, but
+   * there is nothing to FIX: no finding was filed, so a fix agent would be
+   * dispatched with an empty findings list and instructions to "fix every
+   * [critical] and [major] item". The remedy for a broken review channel is
+   * another review, so it goes through the stage ladder instead.
+   */
+  it("re-reviews an unverifiable review instead of dispatching a fix", async () => {
+    const h = runScripted({
+      stages: [
+        { sessionId: "s-review-1" },
+        { sessionId: "s-review-2" },
+      ],
+      assessments: ["unverifiable", false],
+    });
+    const summary = await h.promise;
+
+    expect(summary).toMatchObject({ state: "succeeded", fixCycles: 0 });
+    expect(h.requests.map((r) => r.stage)).toEqual(["review", "review"]);
+    expect(h.requests.filter((r) => r.stage === "review").map((r) => r.attempt))
+      .toEqual([1, 2]);
+  });
+
+  it("fails an unverifiable review that never delivers, without a fix cycle", async () => {
+    const h = runScripted({
+      maxAttempts: 2,
+      stages: [{ sessionId: "s-review-1" }, { sessionId: "s-review-2" }],
+      assessments: ["unverifiable", "unverifiable"],
+    });
+    const summary = await h.promise;
+
+    expect(summary.state).toBe("failed");
+    // The reason must not blame findings that were never filed.
+    expect(summary.reason).not.toMatch(/blocking findings remain/);
+    expect(summary.fixCycles).toBe(0);
+    expect(h.requests.some((r) => r.stage === "fix")).toBe(false);
   });
 });
 

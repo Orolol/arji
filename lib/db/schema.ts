@@ -216,6 +216,12 @@ export const agentSessions = sqliteTable("agent_sessions", {
   // that never called the tool (providers without MCP), and for legacy rows;
   // NULL is what selects the prose-verdict fallback.
   reviewVerdict: text("review_verdict"),
+  // What Arij actually wired for this session's MCP tool channel (0041):
+  // 'injected' | 'unavailable'. NULL for legacy rows and for spawns injection
+  // never applies to. The unverifiable-review rule reads this BEFORE the
+  // provider list, because injection can degrade silently — see
+  // MCP_CHANNEL_INJECTED in lib/claude/mcp-injection.ts.
+  mcpChannel: text("mcp_channel"),
   // Usage reported by the CLI at session end. NULL for legacy rows,
   // non-terminal sessions, and providers that do not report usage.
   inputTokens: integer("input_tokens"),

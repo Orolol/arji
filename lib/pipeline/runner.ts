@@ -144,6 +144,12 @@ export interface PipelineReviewAssessment {
   verdictSource?: ReviewVerdictSource;
   /** The persisted submit_findings verdict, when the reviewer filed one. */
   structuredVerdict?: string | null;
+  /**
+   * The reviewer had the structured channel and nothing came through it.
+   * Blocking, but with no finding to fix — so the runner re-REVIEWS through
+   * the stage ladder instead of dispatching a fix agent.
+   */
+  unverifiable?: boolean;
 }
 
 export interface PipelineGradingAssessment {
@@ -971,6 +977,19 @@ export async function runPipeline(
       // the workflow engine.
       callbacks.onTrace?.(PIPELINE_REASONS.finished, handle.sessionId);
       return finish("succeeded", null);
+    }
+
+    if (assessment.unverifiable) {
+      // The review delivered nothing Arij can read, and filed no finding — so
+      // there is nothing for a fix agent to do. Dispatching one anyway hands
+      // it "fix every [critical] and [major] item" with an empty list, and it
+      // no-ops or invents changes to a branch nothing faulted. This is a
+      // FAILED REVIEW ATTEMPT: the ladder re-runs the review (a fresh session
+      // usually gets a working channel), and exhausting it fails the run with
+      // a forensic, exactly like a reviewer that crashed.
+      const summary = await handleStageFailure();
+      if (summary) return summary;
+      continue;
     }
 
     if (fixCycles >= options.maxFixCycles) {

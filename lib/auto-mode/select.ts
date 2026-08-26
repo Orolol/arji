@@ -18,7 +18,14 @@ import {
   isMcpToolsEnabled,
   MCP_CAPABLE_PROVIDERS,
 } from "@/lib/claude/mcp-injection";
-import { POSITIVE_STRUCTURED_VERDICTS } from "@/lib/pipeline/findings";
+import {
+  ORDINARY_REVIEW_AGENT_TYPES,
+  POSITIVE_STRUCTURED_VERDICTS,
+} from "@/lib/pipeline/findings";
+import {
+  normalizeAt,
+  sessionAtSql,
+} from "@/lib/agent-sessions/session-time";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
 import { listPipelineRunsByProject } from "@/lib/pipeline/registry";
 import { dagBatchRegistry } from "@/lib/agents/dag-batch-registry";
@@ -117,11 +124,17 @@ export const STORY_PARENT_BUILDABLE_STATUSES: ReadonlySet<string> = new Set([
   "review",
 ]);
 /**
- * Agent types that constitute "a review happened". Same family the workflow
- * engine's `hasCompletedReview` recognises (lib/workflow/context.ts:42-51).
+ * Agent types that constitute "a review happened", as a SQL literal list.
+ * Derived from the single definition in lib/pipeline/findings.ts so the merge
+ * gate, the board badge and the reviewer dispatcher cannot drift apart.
+ *
+ * Narrower than the workflow engine's `hasCompletedReview`, which matches any
+ * type containing "review" (lib/workflow/context.ts): that is the lax floor,
+ * this is the gate.
  */
-const REVIEW_AGENT_TYPES_SQL =
-  "'review_security','review_code','review_compliance','review_feature'";
+const REVIEW_AGENT_TYPES_SQL = ORDINARY_REVIEW_AGENT_TYPES.map(
+  (type) => `'${type}'`
+).join(",");
 
 /**
  * Agent types that constitute "the code changed". `merge` counts: a
@@ -145,18 +158,10 @@ const POSITIVE_REVIEW_VERDICTS_SQL = POSITIVE_STRUCTURED_VERDICTS.map(
 
 const TERMINAL_STATUSES_SQL = "'completed','failed','cancelled'";
 
-/**
- * Session timestamps mix ISO-8601 (`2026-08-16T09:00:00.000Z`, written by
- * routes) and SQLite CURRENT_TIMESTAMP (`2026-08-16 09:00:00`). Normalising
- * the separator makes lexicographic MAX/compare chronologically correct —
- * the same normalisation lib/kanban/awaiting-reply.ts does in JS.
- */
-const SESSION_AT_SQL = sql`REPLACE(COALESCE(${agentSessions.endedAt}, ${agentSessions.completedAt}, ${agentSessions.createdAt}), ' ', 'T')`;
-
-/** JS-side twin of the SQL normalisation above, for comparing timestamps. */
-export function normalizeAt(value: string): string {
-  return value.includes("T") ? value : value.replace(" ", "T");
-}
+// Both live in lib/agent-sessions/session-time.ts — see that module for why
+// the REPLACE is not optional. Re-exported because this file's callers have
+// always imported normalizeAt from here.
+export { normalizeAt };
 
 /* ------------------------------------------------------------------ */
 /* Public shapes                                                       */
@@ -228,11 +233,15 @@ interface SessionFacts {
    *   - NULL — a legacy row from before outcomes were classified. Treating it
    *     as clean would auto-merge on a verdict nobody ever recorded, so it
    *     earns exactly one fresh, properly classified review.
-   *   - answered by an MCP-capable reviewer that filed NO structured verdict
-   *     — the review ran and delivered nothing Arij can read. Excluding it
-   *     makes the epic reviewable again rather than mergeable, which is the
-   *     self-healing half: a broken findings channel now buys a re-review
-   *     (bounded by the same parking ladder), not a merge.
+   *   - answered by a reviewer that HAD the submit_findings channel and filed
+   *     no structured verdict — the review ran and delivered nothing Arij can
+   *     read. Excluding it makes the epic reviewable again rather than
+   *     mergeable, which is the self-healing half: a broken findings channel
+   *     buys a re-REVIEW, not a merge and not a rebuild. The ticket is
+   *     deliberately NOT bounced to in_progress (see resolveReviewVerdict —
+   *     nothing faulted the code), so the bound is the parking ladder:
+   *     reconcileInFlight charges each unusable review, and three park the
+   *     epic.
    */
   lastCleanReviewAt: string | null;
   /**
@@ -437,11 +446,11 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
          AND ${agentSessions.agentType} IN (${sql.raw(REVIEW_AGENT_TYPES_SQL)})
          AND ${agentSessions.outcome} = 'answered'
          AND ${cleanVerdictSql}
-        THEN ${SESSION_AT_SQL} END)`,
+        THEN ${sessionAtSql()} END)`,
       lastTerminalCodeAt: sql<string | null>`MAX(CASE
         WHEN ${agentSessions.status} IN (${sql.raw(TERMINAL_STATUSES_SQL)})
          AND ${agentSessions.agentType} IN (${sql.raw(CODE_AGENT_TYPES_SQL)})
-        THEN ${SESSION_AT_SQL} END)`,
+        THEN ${sessionAtSql()} END)`,
     })
     .from(agentSessions)
     .where(

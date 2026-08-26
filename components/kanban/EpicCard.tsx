@@ -498,7 +498,7 @@ export function EpicCard({
         {showUnverifiableReview && (
           <span
             className="inline-flex items-center gap-1 rounded-[4px] border border-destructive/40 px-[5px] text-[10px] text-destructive"
-            title="The last review filed no verdict through submit_findings — nothing it found was recorded, so this epic cannot be merged or approved. Run another review."
+            title="The last review filed no verdict through submit_findings, so nothing it found was recorded. It does not count as a clean review: Full Auto will not merge this epic, and it will be reviewed again rather than rebuilt."
             data-testid={`epic-review-unverifiable-${epic.id}`}
           >
             <ShieldAlert className="h-3 w-3" aria-hidden="true" />
