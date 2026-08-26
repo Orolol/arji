@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { ticketDependencies, epics } from "@/lib/db/schema";
 import { eq, and, or } from "drizzle-orm";
-import { isBuildableStatus } from "@/lib/types/kanban";
+import { isBuildableStatus, isDeliveredStatus } from "@/lib/types/kanban";
 
 export class CycleError extends Error {
   public readonly cycle: string[];
@@ -294,10 +294,17 @@ export function getTransitiveDependencies(
  *
  * Pure, pre-loaded twin of the batch route's guard: the graph and the status
  * map are passed in once, so a whole sweep is classified without N+1
- * round-trips. The walk shares `getTransitiveDependencies`' stop rule — a
- * delivered prerequisite ends the branch, because everything behind it was
- * delivered before it. A prerequisite missing from `statusOf` is treated as
- * undelivered (conservative block, like the DB twin's `?? null`).
+ * round-trips.
+ *
+ * Unlike `getTransitiveDependencies`, the walk deliberately expands *through*
+ * a delivered prerequisite instead of stopping at it. That function is
+ * assembling a work set, so pruning behind a delivered ticket costs nothing.
+ * This one is a gate, and A → B(`done`) → C(`in_progress`) is a reachable
+ * shape: a prerequisite reopened after B shipped, or an edge added between
+ * two tickets that already existed. Nothing in the schema forbids it, so the
+ * gate does not assume it away — A stays blocked. A prerequisite missing from
+ * `statusOf` is likewise treated as undelivered (conservative block, like the
+ * DB twin's `?? null`).
  */
 export function findTicketsBlockedByDependencies(
   graph: Map<string, Set<string>>,
@@ -316,8 +323,7 @@ export function findTicketsBlockedByDependencies(
       if (visited.has(dep)) continue;
       visited.add(dep);
 
-      const status = statusOf.get(dep) ?? null;
-      if (status !== "done" && status !== "released") {
+      if (!isDeliveredStatus(statusOf.get(dep))) {
         isBlocked = true;
         break;
       }
@@ -331,7 +337,6 @@ export function findTicketsBlockedByDependencies(
 
   return blocked;
 }
-
 
 /**
  * Compute a topological ordering for the given tickets based on their

@@ -10,14 +10,14 @@ Arij has three autonomous modes. Two are one-shot bursts:
 
 Full Auto Mode is the standing one. Once armed for a project it keeps:
 
-- **building** everything in `backlog`/`todo`, plus everything in `in_progress` with no agent on it (a ticket that came back from a negative review),
+- **building** everything in `todo`, plus everything in `in_progress` with no agent on it (a ticket that came back from a negative review) — **never** `backlog`,
 - **reviewing** everything in `review`,
 - **merging** a ticket as soon as its review is clean.
 
 It only ever *dispatches*. Before a build session row is created, the shared
-driver moves the target (and a story's parent epic) to `in_progress`; this is
-what makes backlog dispatch safe without leaving an active-session/orphaned-
-column mismatch. The state machine then loops on its own — a
+driver moves the target (and a story's parent epic) to `in_progress`, so a
+dispatched ticket is never left as an active session in a non-`in_progress`
+column. The state machine then loops on its own — a
 successful build moves the epic to `review`, a negative review verdict moves it
 back to `in_progress` without an agent — and the supervisor picks that up on the
 next sweep. Every dispatch goes through
@@ -123,10 +123,12 @@ Two things are re-checked continuously rather than once per sweep:
   mean off *now*, not "after the work already selected finishes".
 - **The dispatch target's status**, immediately before `launchStage`, through
   the driver's own `checkGuards`. The board snapshot is milliseconds old, but a
-  human approving or releasing a ticket in that window must win — otherwise the
-  build closure would drag it straight back to `in_progress`. Story-scoped
-  builds additionally check the parent epic, because `checkGuards` reports the
-  story's status for those.
+  human approving, releasing, or dragging a ticket back to Backlog in that
+  window must win — otherwise the build closure would drag it straight back to
+  `in_progress`. The check reads the selector's own `BUILDABLE_*_STATUSES`
+  sets, so it can never be laxer than selection. Story-scoped builds
+  additionally check the parent epic against `BUILDABLE_EPIC_STATUSES`,
+  because `checkGuards` reports the story's status for those.
 
 ### Granularity
 
@@ -140,6 +142,35 @@ Git is the constraint: there is one worktree and one branch **per epic**.
 - **Review** and **merge** → always *epic* scope. The branch is the integration
   unit and `epic.branchName` is what merges; reviewing each story *and* the epic
   would pay twice for the same diff.
+
+### Which tickets, in which order
+
+Two rules decide what a sweep may pick up, and both are deliberately the
+board's own rules rather than a scheduler-private heuristic.
+
+**Position is the only order.** `compareEpics` (`lib/auto-mode/select.ts`)
+sorts by `position ASC` and nothing else. Priority 0–3 is a badge and a filter,
+not a scheduling key: the card at the top of the column is the next one built,
+which is exactly what the board shows. **Sort by priority** in the Backlog and
+To Do headers is how priority reaches the scheduler — it rewrites the column's
+positions in bulk through the existing reorder route (priority DESC, ties
+keeping their current order), so the new display order *is* the new execution
+order. The button is disabled while a filter is active, because it writes
+positions for the whole column and a filtered view is a subset.
+
+**Only To Do and In Progress are buildable.** `BUILDABLE_EPIC_STATUSES` is
+`{todo, in_progress}` — Backlog is the staging area, not the queue, and
+dragging a ticket back to it is the "not yet" gesture that takes it out of
+Full Auto's reach. The same exported set is what `defaultDispatch` re-checks
+at launch time (and, for story scope, what the parent epic is checked
+against), so the selector and the last-moment guard cannot disagree.
+
+**Dependencies are respected.** `selectBuildCandidates` skips a ticket with a
+direct or transitive prerequisite that is not `done`/`released`, using
+`findTicketsBlockedByDependencies` from `lib/dependencies/validation.ts` — the
+same module the batch route and the DAG wave runner use. The graph is loaded
+once per sweep and walked in memory. The skip is currently silent on the
+board; surfacing blocked/ready state on the card is a separate backlog item.
 
 ---
 

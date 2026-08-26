@@ -14,7 +14,7 @@ not state transitions.
 | From | To | Trigger/reason | Production source |
 |---|---|---|---|
 | `backlog` | `todo` | planning / drag | epic PATCH, reorder, MCP |
-| `backlog` or `todo` | `in_progress` | build accepted; transition completes **before** `queued` session insert | `automatic-transitions.ts` via manual build, batch/night, pipeline and Full Auto |
+| `backlog` or `todo` | `in_progress` | build accepted; transition completes **before** `queued` session insert. Full Auto is the exception on the source side: it only ever selects and dispatches from `todo`/`in_progress` (`BUILDABLE_EPIC_STATUSES`), so a `backlog` build comes from a manual dispatch, a batch/night run or a pipeline | `automatic-transitions.ts` via manual build, batch/night, pipeline and Full Auto |
 | `in_progress` | `review` | successful build (`answered` and legacy successful outcomes); epic scope advances only stories already `in_progress` (a story added mid-build stays `todo`), story scope only promotes the parent after every story is `review`/`done` | `automatic-transitions.ts` |
 | current | current | failed build, unanswered question, successful story with siblings remaining, or refused terminal promotion; no status write, explicit activity reason, terminal handlers continue posting agent output. A refusal persists `transition_refused`, settles pipeline/wave work as failed, emits failure feedback, and counts toward Full Auto parking | terminal outcome helper / question handler |
 | `review` or `done` | `in_progress` | negative review / requested changes; the review session is already terminal | `automatic-transitions.ts` via review routes and pipeline |
@@ -28,9 +28,9 @@ terminal. `review → done` cannot be achieved by drag/API; its source must be
 `approve` or `merge`. An `in_progress` ticket cannot leave the column while a
 `build`, `ticket_build`, or `team_build` session is queued/running; review,
 chat, merge and auxiliary sessions do not own that column. Full Auto
-deliberately includes backlog: backlog/todo/in-progress are candidates, and
-the driver owns the move to `in_progress`. A rejected review returning to
-`in_progress` remains automatically buildable. Epic approval advances only
+deliberately excludes backlog: only todo/in-progress are candidates, ordered
+by board `position` alone, and the driver owns the move to `in_progress`. A
+rejected review returning to `in_progress` remains automatically buildable. Epic approval advances only
 children already in `review`; todo/in-progress children are retained and named
 in the activity log, returned as `skippedStories`, and shown persistently on a
 delivered epic card as an unfinished-stories warning.
@@ -107,11 +107,21 @@ closures, direct SQL in approval/merge routes, direct status fields in
 epic/story PATCH/reorder, and status overwrite during `arji.json`
 reconciliation. They now converge on the workflow service.
 
-The orphan symptom had two causes: Full Auto did not select backlog even
-though other build entry points did, and dispatchers inserted a `queued`
-session before changing status. Story-scoped builds also left their parent in
-backlog/todo. Backlog is now intentionally eligible, and the guarded parent +
-target transition precedes session creation.
+The orphan symptom had two causes: Full Auto selected tickets other build
+entry points did not, and dispatchers inserted a `queued` session before
+changing status. Story-scoped builds also left their parent in backlog/todo.
+The guarded parent + target transition now precedes session creation, which is
+what removes the orphan regardless of the source column.
+
+The eligibility half of that fix was later reversed on purpose: Backlog is a
+staging area, not an execution queue, so Full Auto builds only `todo` and
+`in_progress` (`BUILDABLE_EPIC_STATUSES` in `lib/auto-mode/select.ts`, re-read
+by the last-moment dispatch guard in `lib/auto-mode/engine.ts`). Dragging a
+ticket to Backlog is the supported way to take it out of the supervisor's
+reach. Manual builds, batch/night runs and pipelines still accept `backlog`.
+Note the consequence: tickets created directly in Backlog — agent-filed bugs
+via `create_bug`, imported GitHub issues, QA-generated epics — wait for a human
+to promote them to To Do before Full Auto will touch them.
 
 B-arij-104 was reproducible as the story-scope all-siblings gate: a completed
 story moved itself to review, but an epic with other todo/in-progress stories

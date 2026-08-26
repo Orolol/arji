@@ -12,6 +12,7 @@ import {
   loadProjectGraph,
 } from "@/lib/dependencies/validation";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
+import { isDeliveredStatus } from "@/lib/types/kanban";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
 import { listPipelineRunsByProject } from "@/lib/pipeline/registry";
 import { dagBatchRegistry } from "@/lib/agents/dag-batch-registry";
@@ -63,13 +64,22 @@ const ACTIVE_SESSION_STATUSES = ["queued", "running"];
  * is the queue's order (see compareEpics); "Sort by priority" makes
  * priority visible in the order by rewriting positions in bulk.
  */
-const BUILDABLE_EPIC_STATUSES = new Set(["todo", "in_progress"]);
+export const BUILDABLE_EPIC_STATUSES: ReadonlySet<string> = new Set([
+  "todo",
+  "in_progress",
+]);
 
-/** Story statuses the supervisor may dispatch a build for. */
-const BUILDABLE_STORY_STATUSES = new Set(["todo", "in_progress"]);
-
-/** Epics past the finish line — never candidates for anything. */
-const DELIVERED_EPIC_STATUSES = new Set(["done", "released"]);
+/**
+ * Story statuses the supervisor may dispatch a build for.
+ *
+ * Exported for the same reason as the epic set: `defaultDispatch`'s
+ * last-moment guard (lib/auto-mode/engine.ts) re-checks the very statuses the
+ * selector matched on, and a second copy of that vocabulary would drift.
+ */
+export const BUILDABLE_STORY_STATUSES: ReadonlySet<string> = new Set([
+  "todo",
+  "in_progress",
+]);
 
 /**
  * Agent types that constitute "a review happened". Same family the workflow
@@ -563,7 +573,7 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
 /** Epic-level exclusions every selector applies before looking at status. */
 function isEpicSelectable(board: AutoModeBoard, epic: EpicRow): boolean {
   if (board.projectBlocked) return false;
-  if (DELIVERED_EPIC_STATUSES.has(epic.status ?? "")) return false;
+  if (isDeliveredStatus(epic.status)) return false;
   if (board.blockedEpicIds.has(epic.id)) return false;
   if (board.busyEpicIds.has(epic.id)) return false;
   if (board.parkedTicketIds.has(epic.id)) return false;

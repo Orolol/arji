@@ -29,10 +29,12 @@ interface ColumnProps {
    */
   filtersActive?: boolean;
   /**
-   * "Sort by priority" action in the column header. Shown only on the
-   * columns Full Auto executes (Backlog, To Do — see Board.tsx): the click
-   * rewrites the column's positions so priority order becomes the display
-   * order, which is then the execution order.
+   * "Sort by priority" action in the column header. Shown only on the two
+   * columns a human curates before work starts (Backlog, To Do — see
+   * Board.tsx): the click rewrites the column's positions so priority order
+   * becomes the display order, which is then the execution order. Disabled
+   * while `filtersActive`, because it rewrites positions for the whole
+   * column and the user is looking at a subset.
    */
   onSortByPriority?: () => void;
 }
@@ -171,10 +173,15 @@ export function Column({
             <button
               type="button"
               onClick={onSortByPriority}
-              title="Sort by priority"
+              disabled={filtersActive}
+              title={
+                filtersActive
+                  ? "Clear the filters to sort — sorting rewrites the whole column"
+                  : "Sort by priority"
+              }
               aria-label={`Sort ${COLUMN_LABELS[status]} by priority`}
               data-testid={`column-sort-priority-${status}`}
-              className="rounded-[5px] p-[3px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground motion-reduce:transition-none"
+              className="rounded-[5px] p-[3px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground motion-reduce:transition-none"
             >
               <ArrowDownWideNarrow className="h-[13px] w-[13px]" />
             </button>

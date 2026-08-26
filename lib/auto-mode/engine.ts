@@ -29,6 +29,8 @@ import {
 } from "./config";
 import { autoModeRegistry } from "./registry";
 import {
+  BUILDABLE_EPIC_STATUSES,
+  BUILDABLE_STORY_STATUSES,
   loadAutoModeBoard,
   selectBuildCandidates,
   selectMergeCandidates,
@@ -85,11 +87,14 @@ import {
 
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
-/** Statuses a build may still be dispatched onto, checked at the last moment. */
-const DISPATCHABLE_BUILD_STATUSES = new Set(["backlog", "todo", "in_progress"]);
-
-/** Epics past the finish line — never a valid dispatch target. */
-const DELIVERED_EPIC_STATUSES = new Set(["done", "released"]);
+/*
+ * The statuses a build may still be dispatched onto are imported from the
+ * selector (`BUILDABLE_EPIC_STATUSES` / `BUILDABLE_STORY_STATUSES`) rather
+ * than restated here. A local copy is exactly the drift this guard exists to
+ * catch: it re-checks the ticket the selector saw, and `dispatchKind` awaits
+ * each dispatch in turn, so the window between snapshot and launch is seconds
+ * wide — long enough for a human to drag a ticket back to Backlog.
+ */
 
 /* ------------------------------------------------------------------ */
 /* Injection surface                                                   */
@@ -256,7 +261,11 @@ async function defaultDispatch(
   // dispatch would get a build agent on it anyway — and the build closure
   // would drag the epic straight back to `in_progress`.
   if (input.stage === "build") {
-    if (!DISPATCHABLE_BUILD_STATUSES.has(targetStatus ?? "")) {
+    const buildable =
+      input.scope === "story"
+        ? BUILDABLE_STORY_STATUSES
+        : BUILDABLE_EPIC_STATUSES;
+    if (!buildable.has(targetStatus ?? "")) {
       return {
         sessionId: null,
         error: null,
@@ -264,8 +273,10 @@ async function defaultDispatch(
         skipReason: `target is no longer buildable (now ${targetStatus ?? "unknown"})`,
       };
     }
-    // Story scope reports the story's status, so the parent epic is checked
-    // separately: a released epic must not gain a new story build.
+    // Story scope reports the STORY's status, so the parent epic is checked
+    // separately — against the same set the selector uses, not merely against
+    // done/released. A `todo` story must not drag its Backlog epic into the
+    // execution queue here any more than it can in `selectBuildCandidates`.
     if (input.scope === "story") {
       const epicStatus =
         db
@@ -273,12 +284,12 @@ async function defaultDispatch(
           .from(epics)
           .where(eq(epics.id, input.epicId))
           .get()?.status ?? null;
-      if (DELIVERED_EPIC_STATUSES.has(epicStatus ?? "")) {
+      if (!BUILDABLE_EPIC_STATUSES.has(epicStatus ?? "")) {
         return {
           sessionId: null,
           error: null,
           conflictSessionId: null,
-          skipReason: `parent epic is ${epicStatus}`,
+          skipReason: `parent epic is ${epicStatus ?? "unknown"}`,
         };
       }
     }

@@ -106,6 +106,33 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
     loadEpics();
   }, [loadEpics]);
 
+  /**
+   * The board's single bulk position write, shared by drag-and-drop and
+   * "Sort by priority". Both send the same `{ items }` shape to the reorder
+   * route; on failure the optimistic board is rolled back by re-reading the
+   * server's order.
+   */
+  const postReorder = useCallback(
+    (items: ReorderItem[], failureMessage: string) => {
+      fetch(`/api/projects/${projectId}/epics/reorder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            onMoveErrorRef.current?.(data.error || failureMessage);
+            loadEpics();
+          }
+        })
+        .catch(() => {
+          loadEpics();
+        });
+    },
+    [projectId, loadEpics]
+  );
+
   const moveEpic = useCallback(
     async (
       epicId: string,
@@ -148,39 +175,36 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
             }
           }
 
-          fetch(`/api/projects/${projectId}/epics/reorder`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ items: reorderItems }),
-          }).then(async (res) => {
-            if (!res.ok) {
-              const data = await res.json().catch(() => ({}));
-              const errorMsg = data.error || "Failed to move epic";
-              onMoveErrorRef.current?.(errorMsg);
-              loadEpics();
-            }
-          }).catch(() => {
-            loadEpics();
-          });
+          postReorder(reorderItems, "Failed to move epic");
 
           return current;
         });
       }, 0);
     },
-    [projectId, loadEpics]
+    [postReorder]
   );
 
   /**
    * "Sort by priority": rewrite the column's positions so the board's
    * display order (position ASC) becomes priority DESC. Ties keep their
-   * current display order (stable sort), so the button is deterministic.
-   * Same bulk write as drag-and-drop — no status change, no transitions —
-   * and Full Auto then executes the column in exactly the order the board
-   * shows, which is the point of position being the source of truth.
+   * current display order (`Array.prototype.sort` is stable), so the button
+   * is deterministic. Same bulk write as drag-and-drop — no status change, no
+   * transitions — and Full Auto then executes the column in exactly the order
+   * the board shows, which is the point of position being the source of truth.
+   *
+   * Unlike `moveEpic` this needs no deferral: the target order is fully
+   * determined here, from the rendered board. Reading it back inside a
+   * `setTimeout` would let an in-flight `loadEpics()` land in between and
+   * make the request body describe the *pre-sort* order — a click that
+   * appears to sort and then silently persists the old positions.
    */
   const sortColumnByPriority = useCallback(
     (column: KanbanStatus) => {
       if (column === "released") return;
+
+      const sorted = [...board.columns[column]].sort(
+        (a, b) => b.priority - a.priority
+      );
 
       // Optimistic half: the reorder route rewrites the same positions.
       setBoard((prev) => {
@@ -188,43 +212,20 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
           columns: { ...prev.columns },
           releaseGroups: prev.releaseGroups,
         };
-        next.columns[column] = [...prev.columns[column]].sort(
-          (a, b) => b.priority - a.priority
-        );
+        next.columns[column] = sorted;
         return next;
       });
 
-      setTimeout(() => {
-        setBoard((current) => {
-          const reorderItems: ReorderItem[] = current.columns[column].map(
-            (epic, idx) => ({
-              id: epic.id,
-              status: column,
-              position: idx,
-            })
-          );
-
-          fetch(`/api/projects/${projectId}/epics/reorder`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ items: reorderItems }),
-          })
-            .then(async (res) => {
-              if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                onMoveErrorRef.current?.(data.error || "Failed to sort column");
-                loadEpics();
-              }
-            })
-            .catch(() => {
-              loadEpics();
-            });
-
-          return current;
-        });
-      }, 0);
+      postReorder(
+        sorted.map((epic, idx) => ({
+          id: epic.id,
+          status: column,
+          position: idx,
+        })),
+        "Failed to sort column"
+      );
     },
-    [projectId, loadEpics]
+    [board, postReorder]
   );
 
   return { board, loading, moveEpic, sortColumnByPriority, refresh: loadEpics };
