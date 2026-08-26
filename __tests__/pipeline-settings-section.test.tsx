@@ -289,6 +289,31 @@ describe("Settings page — deterministic verification", () => {
     ).toBeInTheDocument();
     expect(patchCalls).toHaveLength(0);
   });
+
+  it("puts the typed value back when the PATCH fails", async () => {
+    patchShouldFail = true;
+    render(<SettingsPage />);
+    const commands = (await waitFor(() =>
+      screen.getByTestId("verify-commands")
+    )) as HTMLTextAreaElement;
+
+    const typed = '[{"name":"test","command":"npm test"}]';
+    fireEvent.change(commands, { target: { value: typed } });
+    fireEvent.change(screen.getByTestId("verify-timeout-ms"), {
+      target: { value: "45000" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save verification settings" })
+    );
+
+    expect(
+      await screen.findByText(/Failed to save the pipeline settings/i)
+    ).toBeInTheDocument();
+    // Leaving the pretty-printed value on screen next to the error would
+    // imply a value that was never persisted.
+    expect(commands.value).toBe(typed);
+    expect(screen.getByTestId("verify-timeout-ms")).toHaveValue(45_000);
+  });
 });
 
 describe("pipeline setting parsers", () => {

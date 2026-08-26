@@ -391,6 +391,40 @@ export function createAutoModeMergeParkedNotification(input: {
   sessionId: string | null;
   error: string;
 }): void {
+  createAutoModeMergeNotification(input, (label, error) =>
+    `Auto mode could not merge ${label} — ${error}`
+  );
+}
+
+/**
+ * Create the "Full Auto Mode will not merge <ticket>" notification.
+ *
+ * Raised when the deterministic-verification gate has refused the same epic
+ * repeatedly: nothing failed and nothing is parked, so the mode would
+ * otherwise stay silent forever while the epic sits in Review unmergeable.
+ * Deep-links to the epic, where the verification panel shows the evidence.
+ */
+export function createAutoModeMergeBlockedNotification(input: {
+  projectId: string;
+  epicId: string;
+  error: string;
+}): void {
+  createAutoModeMergeNotification(
+    { ...input, sessionId: null },
+    (label, error) =>
+      `Auto mode will not merge ${label} without verification — ${error}`
+  );
+}
+
+function createAutoModeMergeNotification(
+  input: {
+    projectId: string;
+    epicId: string;
+    sessionId: string | null;
+    error: string;
+  },
+  buildTitle: (label: string, error: string) => string
+): void {
   const project = db
     .select({ name: projects.name })
     .from(projects)
@@ -418,7 +452,7 @@ export function createAutoModeMergeParkedNotification(input: {
       sessionId: input.sessionId,
       agentType: "merge",
       status: "failed",
-      title: `Auto mode could not merge ${label} — ${input.error}`,
+      title: buildTitle(label, input.error),
       targetUrl: buildEpicTargetUrl(input.projectId, input.epicId),
     })
     .run();

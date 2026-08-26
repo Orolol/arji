@@ -1,8 +1,19 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { agentSessions, epics } from "@/lib/db/schema";
+import {
+  agentSessions,
+  epics,
+  ticketComments,
+  userStories,
+} from "@/lib/db/schema";
+import { createId } from "@/lib/utils/nanoid";
 import { logTransition } from "@/lib/workflow/log";
+import { transitionReviewRejected } from "@/lib/workflow/automatic-transitions";
+import { buildDeterministicVerificationFixSection } from "@/lib/claude/prompt-builder";
 import { createPipelineStageDriver } from "@/lib/pipeline/stages";
+import type { PipelineDeterministicVerificationOutcome } from "@/lib/pipeline/runner";
+import type { VerifyCommandResult } from "@/lib/verify/verify-constants";
+import type { AutoModeInFlightEntry } from "./registry";
 import {
   AUTO_MODE_MAX_CONSECUTIVE_FAILURES,
   AUTO_MODE_REASONS,
@@ -132,6 +143,25 @@ export interface AutoModeEngineDeps {
   /** Delivery verdict of a terminal session ("answered" | "silent" | …). */
   readSessionOutcome(sessionId: string): string | null;
   readEpicStatus(epicId: string): string | null;
+  /**
+   * Runs Arij's own `verify_commands` in the epic worktree the given code
+   * session recorded, and persists a `verify_reports` row.
+   *
+   * Full Auto does NOT go through lib/pipeline/runner.ts — it dispatches
+   * stages directly and lets the board state machine loop — so the pipeline's
+   * build → verify → review ordering is not inherited. This dep is how the
+   * mode runs the same checks at the same point in the lifecycle: right after
+   * a delivered code session, before the review it will dispatch next.
+   *
+   * Optional so a fully-faked deps object opts in explicitly;
+   * `defaultAutoModeDeps` always provides it, and a project without
+   * `verify_commands` resolves to `{ ran: false }` with no side effects.
+   */
+  runDeterministicVerification?(input: {
+    projectId: string;
+    epicId: string;
+    sessionId: string;
+  }): Promise<PipelineDeterministicVerificationOutcome>;
 }
 
 /**
@@ -282,6 +312,18 @@ export const defaultAutoModeDeps: AutoModeEngineDeps = {
       .from(epics)
       .where(eq(epics.id, epicId))
       .get()?.status ?? null,
+  runDeterministicVerification: ({ projectId, epicId, sessionId }) =>
+    // Epic scope on purpose: the worktree and the branch are epic-owned, so
+    // a story build's checks still cover the whole integration unit — the
+    // same unit the merge will land.
+    createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+      batchRunId: autoRunId(projectId),
+    }).runDeterministicVerification(sessionId),
 };
 
 /* ------------------------------------------------------------------ */
@@ -369,11 +411,11 @@ function trace(
  * a failed one extends it. A cancelled session is the user's decision, so it
  * counts neither way.
  */
-function reconcileInFlight(
+async function reconcileInFlight(
   projectId: string,
   deps: AutoModeEngineDeps,
   parked: string[]
-): void {
+): Promise<void> {
   for (const { sessionId, entry } of autoModeRegistry.listInFlight(projectId)) {
     const status = deps.readSessionStatus(sessionId);
     if (status !== null && !TERMINAL_SESSION_STATUSES.has(status)) continue;
@@ -394,6 +436,16 @@ function reconcileInFlight(
       sessionOutcome === SESSION_TRANSITION_REFUSED_OUTCOME;
 
     if (status === "completed" && !silentReview && !transitionRefused) {
+      // Delivered code: run Arij's own checks BEFORE crediting the session,
+      // because a red branch is not a success. Clearing the streak first
+      // would erase the very failure the check is about to record, and
+      // build → red → build would loop forever instead of parking.
+      if (
+        entry.kind === "build" &&
+        (await verifyDeliveredCode(projectId, deps, entry, sessionId, parked))
+      ) {
+        continue;
+      }
       autoModeRegistry.clearFailures(projectId, entry.ticketId);
       continue;
     }
@@ -419,6 +471,236 @@ function reconcileInFlight(
         sessionId
       );
     }
+  }
+}
+
+/**
+ * Bound on the failing command output copied into the ticket feed. The full
+ * tail can be 64 KiB per command, and the ticket-code prompt embeds the whole
+ * comment history verbatim — an unbounded copy here would grow every prompt
+ * for the rest of the epic's life.
+ */
+const VERIFICATION_COMMENT_TAIL_LIMIT = 4_000;
+
+/**
+ * Runs Arij's deterministic checks for a delivered code session, then acts on
+ * the verdict.
+ *
+ * This is the mode's substitute for the pipeline's build → verify → review
+ * ordering. Full Auto never enters `runPipeline`, so without this the
+ * `verify_commands` a user configured would simply never execute here — and
+ * the merge gate in lib/auto-mode/merge.ts, which demands a fresh passing
+ * report, could never be satisfied.
+ *
+ * A failure returns the ticket to In Progress rather than blocking at the
+ * merge: the mode has no fix-cycle ladder, so the only way it can repair a
+ * red branch is to make the ticket buildable again and let the next sweep
+ * dispatch a build — with the failing output posted to the ticket so that
+ * build knows what to fix. The streak feeds the normal parking ladder, which
+ * is what stops build → red → build from looping forever.
+ *
+ * Verification is not an agent session: it takes no slot and is charged to
+ * neither budget.
+ *
+ * Returns true when the checks FAILED — the caller must then not credit the
+ * session, or the streak this just recorded would be cleared underneath it.
+ */
+async function verifyDeliveredCode(
+  projectId: string,
+  deps: AutoModeEngineDeps,
+  entry: AutoModeInFlightEntry,
+  sessionId: string,
+  parked: string[]
+): Promise<boolean> {
+  if (!deps.runDeterministicVerification) return false;
+
+  // A merge-fix session is charged to the build budget like any other code
+  // work, but its checks belong to the merge retry that owns the worktree
+  // (lib/auto-mode/merge.ts). The retry runs inside the launch closure, which
+  // starts AFTER the session row goes terminal — so without this guard the
+  // sweep kicked by that very transition would start a second, redundant pass
+  // against the tree the retry is about to merge.
+  if (autoModeRegistry.isMergeInFlight(projectId, entry.epicId)) return false;
+
+  let outcome: PipelineDeterministicVerificationOutcome;
+  try {
+    outcome = await deps.runDeterministicVerification({
+      projectId,
+      epicId: entry.epicId,
+      sessionId,
+    });
+  } catch (error) {
+    // A fault in the checks themselves says nothing about the branch, so the
+    // ticket stays where the build put it. Nothing lands unverified either:
+    // the merge gate still refuses without a fresh passing report.
+    trace(
+      deps,
+      projectId,
+      entry.epicId,
+      AUTO_MODE_REASONS.verificationCrashed(
+        error instanceof Error ? error.message : String(error)
+      ),
+      sessionId
+    );
+    return false;
+  }
+
+  if (!outcome.ran) {
+    // No reason means "not configured" — the feature is off, and off must
+    // stay silent. Every other skip is traced, because a silent skip reads
+    // exactly like "the configured checks passed".
+    if (outcome.skipReason) {
+      trace(
+        deps,
+        projectId,
+        entry.epicId,
+        AUTO_MODE_REASONS.verificationSkipped(outcome.skipReason),
+        sessionId
+      );
+    }
+    return false;
+  }
+
+  const report = outcome.result;
+  if (!report) return false;
+
+  if (report.status === "pass") {
+    trace(
+      deps,
+      projectId,
+      entry.epicId,
+      AUTO_MODE_REASONS.verificationPassed(report.commands.length),
+      sessionId
+    );
+    return false;
+  }
+
+  const failedCommand =
+    report.commands.find((command) => command.exitCode !== 0) ??
+    report.commands.at(-1) ??
+    null;
+  const label = failedCommand?.name ?? "the configured checks";
+
+  // Traced before the move, so the feed reads "checks failed" and then the
+  // transition service's own review → in_progress entry.
+  trace(
+    deps,
+    projectId,
+    entry.epicId,
+    AUTO_MODE_REASONS.verificationFailed(label),
+    sessionId
+  );
+  postVerificationFailureComment(entry.epicId, sessionId, failedCommand);
+  returnTicketToInProgress(projectId, entry, sessionId, label);
+
+  const failures = autoModeRegistry.recordFailure(
+    projectId,
+    entry.ticketId,
+    entry.epicId,
+    `deterministic verification failed at "${label}"`
+  );
+  if (failures >= AUTO_MODE_MAX_CONSECUTIVE_FAILURES) {
+    parked.push(entry.ticketId);
+    trace(
+      deps,
+      projectId,
+      entry.epicId,
+      AUTO_MODE_REASONS.parked(failures),
+      sessionId
+    );
+  }
+  return true;
+}
+
+/**
+ * Posts the failing command's evidence to the ticket. This is the channel the
+ * next build agent reads: the ticket-code prompt embeds the comment history,
+ * and without it the rebuilt ticket would carry no hint of why it came back.
+ * Reuses the pipeline's fix section so the framing — untrusted output, fenced
+ * longer than any backtick run in it — is identical on both paths.
+ */
+function postVerificationFailureComment(
+  epicId: string,
+  sessionId: string,
+  command: VerifyCommandResult | null
+): void {
+  if (!command) return;
+  try {
+    db.insert(ticketComments)
+      .values({
+        id: createId(),
+        epicId,
+        author: "agent",
+        content: buildDeterministicVerificationFixSection({
+          name: command.name,
+          command: command.command,
+          exitCode: command.exitCode,
+          durationMs: command.durationMs,
+          tail: command.tail.slice(-VERIFICATION_COMMENT_TAIL_LIMIT),
+        }),
+        agentSessionId: sessionId,
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+  } catch (error) {
+    console.warn(
+      "[auto-mode] Could not post the verification failure comment:",
+      error instanceof Error ? error.message : error
+    );
+  }
+}
+
+/**
+ * Pulls a ticket whose checks failed back out of Review, through the same
+ * transition the negative-review path uses. Only a ticket actually sitting in
+ * review/done is moved — anything else is somebody else's business now.
+ */
+function returnTicketToInProgress(
+  projectId: string,
+  entry: AutoModeInFlightEntry,
+  sessionId: string,
+  commandLabel: string
+): void {
+  const reason = `Deterministic verification failed at "${commandLabel}"`;
+  try {
+    if (entry.ticketId !== entry.epicId) {
+      const story = db
+        .select({ status: userStories.status })
+        .from(userStories)
+        .where(eq(userStories.id, entry.ticketId))
+        .get();
+      if (!story) return;
+      if (story.status !== "review" && story.status !== "done") return;
+      transitionReviewRejected({
+        projectId,
+        epicId: entry.epicId,
+        scope: "story",
+        userStoryId: entry.ticketId,
+        sessionId,
+        reason,
+      });
+      return;
+    }
+
+    const epic = db
+      .select({ status: epics.status })
+      .from(epics)
+      .where(eq(epics.id, entry.epicId))
+      .get();
+    if (!epic) return;
+    if (epic.status !== "review" && epic.status !== "done") return;
+    transitionReviewRejected({
+      projectId,
+      epicId: entry.epicId,
+      scope: "epic",
+      sessionId,
+      reason,
+    });
+  } catch (error) {
+    console.warn(
+      "[auto-mode] Could not return the ticket to In Progress after a failed verification:",
+      error instanceof Error ? error.message : error
+    );
   }
 }
 
@@ -482,7 +764,12 @@ export async function sweepProject(
   };
 
   try {
-    reconcileInFlight(projectId, deps, result.parked);
+    // Awaited, and deliberately so: reconcile is where the mode runs Arij's
+    // own verification for a delivered build, and the checks must finish
+    // before the same sweep decides whether to review or merge that epic.
+    // The hold is bounded by verify_timeout_ms per command, and a tick that
+    // arrives meanwhile simply reports "locked" rather than piling up.
+    await reconcileInFlight(projectId, deps, result.parked);
 
     // The snapshot already reflects the parks reconcile just recorded (it is
     // built after them); only an un-park invalidates its exclusion set.

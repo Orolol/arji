@@ -355,6 +355,11 @@ export default function SettingsPage() {
       return;
     }
 
+    // Show the normalised value immediately, but keep what the user typed so
+    // a failed PATCH can put it back: reformatted JSON left on screen next to
+    // "Failed to save" would imply a value that was never persisted.
+    const previousCommands = verifyCommandsJson;
+    const previousTimeout = verifyTimeoutMs;
     setVerifyCommandsJson(JSON.stringify(commands, null, 2));
     setVerifyTimeoutMs(String(timeoutMs));
     await savePipelineSettings(
@@ -362,7 +367,10 @@ export default function SettingsPage() {
         [VERIFY_COMMANDS_SETTING_KEY]: commands,
         [VERIFY_TIMEOUT_MS_SETTING_KEY]: timeoutMs,
       },
-      () => {},
+      () => {
+        setVerifyCommandsJson(previousCommands);
+        setVerifyTimeoutMs(previousTimeout);
+      },
       commands.length === 0
         ? "Deterministic verification disabled."
         : `${commands.length} verification command${commands.length === 1 ? "" : "s"} saved.`

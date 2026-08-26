@@ -212,6 +212,40 @@ describe("GET /api/projects/[projectId]/epics/[epicId]/verify", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ data: null });
   });
+
+  it("returns null rather than a shorter report when a command row is corrupt", async () => {
+    testDb.instance!.db
+      .insert(verifyReports)
+      .values({
+        id: "corrupt-report",
+        projectId,
+        epicId,
+        status: "fail",
+        startedAt: "2026-08-25T10:00:00.000Z",
+        finishedAt: "2026-08-25T10:00:02.000Z",
+        commands: JSON.stringify([
+          {
+            name: "lint",
+            command: "npm run lint",
+            exitCode: 0,
+            durationMs: 1_000,
+            tail: "clean",
+          },
+          // The failing entry — the one that matters — lost its shape.
+          { name: "test", command: "npm test" },
+        ]),
+      })
+      .run();
+
+    const response = await callGet();
+
+    // Dropping the malformed entry would render this failing run as a
+    // *shorter* report listing only the command that passed. This payload is
+    // evidence: "unreadable" has to look like "never verified", not like a
+    // clean bill of health.
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: null });
+  });
 });
 
 describe("POST /api/projects/[projectId]/epics/[epicId]/verify", () => {

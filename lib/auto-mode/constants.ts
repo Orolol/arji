@@ -353,6 +353,22 @@ export const AUTO_MODE_REASONS = {
   skippedBusy: "Auto mode skipped: another agent is already on this ticket",
   skippedTargetMoved: (stage: string, detail: string) =>
     `Auto mode skipped ${stage}: ${detail}`,
+  /**
+   * Deterministic verification traces. Full Auto does not run the pipeline,
+   * so it runs Arij's own checks itself after a delivered code session —
+   * these are the only record that they ran, were skipped, or failed.
+   */
+  verificationPassed: (commandCount: number) =>
+    `Auto mode: deterministic verification passed (${commandCount} command${
+      commandCount === 1 ? "" : "s"
+    })`,
+  verificationFailed: (commandName: string) =>
+    `Auto mode: deterministic verification failed at "${commandName}" — returned to In Progress`,
+  /** A skip is NOT a pass: without this trace the two look identical. */
+  verificationSkipped: (reason: string) =>
+    `Auto mode skipped deterministic verification: ${reason}`,
+  verificationCrashed: (error: string) =>
+    `Auto mode could not run deterministic verification: ${error}`,
 } as const;
 
 /** True when an activity-log reason belongs to the Full Auto Mode trace. */
@@ -381,3 +397,22 @@ export const AUTO_MODE_MAX_CONSECUTIVE_FAILURES = 3;
  * seconds until capacity happened to free up.
  */
 export const AUTO_MERGE_CONFLICT_BACKOFF_MS = 5 * 60_000;
+
+/**
+ * How long an epic's merge is held back after the deterministic-verification
+ * gate refused it. Without a backoff the sweep would re-select the same epic
+ * every 15 seconds and write one activity row per tick — ~5,700 a day for a
+ * single epic whose checks never pass — while never making progress. The
+ * refusal is not sticky: a fresh passing report clears the deferral through
+ * the normal `clearMergeDeferral` on a successful merge, and the deferral
+ * expires on its own.
+ */
+export const AUTO_MERGE_VERIFICATION_BACKOFF_MS = 10 * 60_000;
+
+/**
+ * Consecutive verification-gate refusals before the user is notified. A
+ * refusal is silent by design (nothing failed, the evidence is simply not
+ * there yet), but an epic that can never satisfy the gate would otherwise
+ * sit in Review forever with only activity rows to show for it.
+ */
+export const AUTO_MERGE_VERIFICATION_NOTIFY_AFTER = 3;

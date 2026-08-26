@@ -33,20 +33,32 @@ type Params = { params: Promise<{ projectId: string; epicId: string }> };
 const NO_WORKTREE_ERROR =
   "Verification requires an existing epic worktree. Build or review this ticket first.";
 
-function parseCommandResults(value: string): VerifyCommandResult[] {
+/**
+ * All-or-nothing on purpose: this payload is mechanical EVIDENCE, and
+ * dropping the malformed entries would render a half-corrupt row as a
+ * *shorter* report listing only the commands that happened to parse — a
+ * failing run could show up as "all checks passed". Null (the same shape as
+ * "never verified") is the honest answer, and it is what the client-side
+ * `isVerificationReport` guard already does with the same value.
+ */
+function parseCommandResults(value: string): VerifyCommandResult[] | null {
   try {
     const parsed: unknown = JSON.parse(value);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) return null;
+    if (!parsed.every(isVerifyCommandResult)) return null;
 
-    return parsed.filter(isVerifyCommandResult);
+    return parsed;
   } catch {
-    return [];
+    return null;
   }
 }
 
 function toResponseReport(
   row: typeof verifyReports.$inferSelect
-): VerificationReport {
+): VerificationReport | null {
+  const commands = parseCommandResults(row.commands);
+  if (!commands) return null;
+
   return {
     id: row.id,
     projectId: row.projectId,
@@ -55,7 +67,7 @@ function toResponseReport(
     status: row.status === "pass" ? "pass" : "fail",
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
-    commands: parseCommandResults(row.commands),
+    commands,
   };
 }
 

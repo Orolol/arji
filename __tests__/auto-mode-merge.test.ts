@@ -30,6 +30,14 @@ const processManagerState = vi.hoisted(() => ({
 
 const exportMock = vi.hoisted(() => ({ tryExportArjiJson: vi.fn() }));
 
+/**
+ * The pipeline stage driver is the merge path's handle on Arij's own checks.
+ * Faked here for the same reason git is: the real one spawns child processes.
+ */
+const verifyMocks = vi.hoisted(() => ({
+  runDeterministicVerification: vi.fn(),
+}));
+
 vi.mock("@/lib/db", async () => {
   const { createTestDb } = await import("@/lib/db/test-utils");
   const created = createTestDb();
@@ -45,6 +53,12 @@ vi.mock("@/lib/git/manager", () => ({
 
 vi.mock("@/lib/sync/export", () => ({
   tryExportArjiJson: exportMock.tryExportArjiJson,
+}));
+
+vi.mock("@/lib/pipeline/stages", () => ({
+  createPipelineStageDriver: vi.fn(() => ({
+    runDeterministicVerification: verifyMocks.runDeterministicVerification,
+  })),
 }));
 
 vi.mock("@/lib/claude/process-manager", () => ({
@@ -190,6 +204,13 @@ beforeEach(() => {
   db.delete(epics).run();
   db.delete(projects).run();
   autoModeRegistry.resetAll();
+  verifyMocks.runDeterministicVerification.mockReset();
+  // Default: the checks run and change nothing. Every test that cares about
+  // the gate sets its own report explicitly.
+  verifyMocks.runDeterministicVerification.mockResolvedValue({
+    ran: false,
+    result: null,
+  });
   gitMocks.mergeWorktree.mockReset();
   gitMocks.attachWorktree.mockReset();
   gitMocks.captureMergeCheckpoint.mockReset();
@@ -723,6 +744,7 @@ describe("tryAutoMerge — merge conflict", () => {
 /* ------------------------------------------------------------------ */
 /* The deterministic-verification gate                                 */
 /* ------------------------------------------------------------------ */
+describe("tryAutoMerge — the deterministic-verification gate", () => {
   // The file-level beforeEach does not reset these two tables.
   afterEach(() => {
     db.delete(verifyReports).run();
@@ -737,7 +759,11 @@ describe("tryAutoMerge — merge conflict", () => {
       })
       .run();
   }
-  function insertReport(status: "pass" | "fail", finishedMinute: number): void {
+  function insertReport(
+    status: "pass" | "fail",
+    finishedMinute: number,
+    finishedAt = isoAt(finishedMinute)
+  ): void {
     db.insert(verifyReports)
       .values({
         id: `report-${status}-${finishedMinute}`,
@@ -745,7 +771,7 @@ describe("tryAutoMerge — merge conflict", () => {
         epicId: EPIC_ID,
         status,
         startedAt: isoAt(finishedMinute - 1),
-        finishedAt: isoAt(finishedMinute),
+        finishedAt,
         commands: JSON.stringify([
           {
             name: "test",
@@ -843,3 +869,133 @@ describe("tryAutoMerge — merge conflict", () => {
     });
     expect(gitMocks.mergeWorktree).not.toHaveBeenCalled();
   });
+  it("defers the merge and notifies instead of refusing on every sweep", async () => {
+    seed();
+    configureVerification();
+    gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      // selectMergeCandidates excludes a deferred epic, so in the real sweep
+      // this wait is the 10-minute backoff window elapsing.
+      autoModeRegistry.clearMergeDeferral(PROJECT_ID, EPIC_ID);
+      await tryAutoMerge(PROJECT_ID, EPIC_ID);
+    }
+
+    // Without the deferral the sweep re-selects this epic every 15 seconds
+    // and logTransition inserts unconditionally — thousands of rows a day
+    // into the ticket feed, and never any progress.
+    expect(
+      autoModeRegistry.mergeDeferredEpicIds(PROJECT_ID).has(EPIC_ID)
+    ).toBe(true);
+    // Exactly one notification: a refusal is silent by design, but an epic
+    // that can never satisfy the gate has to reach the user somehow.
+    const raised = db.select().from(notifications).all();
+    expect(raised).toHaveLength(1);
+    expect(raised[0].title).toMatch(/will not merge .* without verification/i);
+    expect(autoModeRegistry.isParked(PROJECT_ID, EPIC_ID)).toBe(false);
+  });
+
+  it("stops deferring once a fresh passing report arrives", async () => {
+    seed();
+    configureVerification();
+    gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
+
+    await tryAutoMerge(PROJECT_ID, EPIC_ID);
+    expect(
+      autoModeRegistry.mergeDeferredEpicIds(PROJECT_ID).has(EPIC_ID)
+    ).toBe(true);
+
+    insertReport("pass", 5);
+    autoModeRegistry.clearMergeDeferral(PROJECT_ID, EPIC_ID);
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    expect(outcome.status).toBe("merged");
+    expect(
+      autoModeRegistry.mergeDeferredEpicIds(PROJECT_ID).has(EPIC_ID)
+    ).toBe(false);
+  });
+
+  it("verifies the conflict resolution before the retry merges", async () => {
+    seed();
+    configureVerification();
+    // Verified before the conflict: describes the pre-resolution tree.
+    insertReport("pass", 5);
+    let merges = 0;
+    gitMocks.mergeWorktree.mockImplementation(async () => {
+      merges += 1;
+      return merges === 1
+        ? { merged: false, error: "CONFLICT in lib/x.ts", reason: "conflict" }
+        : { merged: true, commitHash: "resolved" };
+    });
+    // The merge-fix agent's own checks, run against the resolved tree.
+    verifyMocks.runDeterministicVerification.mockImplementation(
+      async (sessionId: string) => {
+        insertReport(
+          "pass",
+          9,
+          new Date(Date.now() + 60_000).toISOString()
+        );
+        db.update(verifyReports)
+          .set({ agentSessionId: sessionId })
+          .where(eq(verifyReports.id, "report-pass-9"))
+          .run();
+        return { ran: true, result: null };
+      }
+    );
+
+    await tryAutoMerge(PROJECT_ID, EPIC_ID);
+    await drainScheduler();
+
+    expect(verifyMocks.runDeterministicVerification).toHaveBeenCalledTimes(1);
+    expect(merges).toBe(2);
+    expect(db.select().from(epics).get()!.status).toBe("done");
+  });
+
+  it("parks instead of merging when the conflict resolution cannot be verified", async () => {
+    seed();
+    configureVerification();
+    // A passing report from before the conflict — the merge-fix agent has
+    // since rewritten the conflicted files, so it proves nothing.
+    insertReport("pass", 5);
+    verifyMocks.runDeterministicVerification.mockResolvedValue({
+      ran: false,
+      result: null,
+      skipReason: "the recorded epic worktree no longer exists on disk (pruned?)",
+    });
+    let merges = 0;
+    gitMocks.mergeWorktree.mockImplementation(async () => {
+      merges += 1;
+      return merges === 1
+        ? { merged: false, error: "CONFLICT in lib/x.ts", reason: "conflict" }
+        : { merged: true, commitHash: "should-not-happen" };
+    });
+
+    await tryAutoMerge(PROJECT_ID, EPIC_ID);
+    await drainScheduler();
+
+    // This is the one path where agent-written code reaches the default
+    // branch with no second review. It must fail closed.
+    expect(merges).toBe(1);
+    expect(db.select().from(epics).get()!.status).toBe("review");
+    expect(autoModeRegistry.isParked(PROJECT_ID, EPIC_ID)).toBe(true);
+    expect(db.select().from(notifications).all()).toHaveLength(1);
+  });
+
+  it("leaves the conflict retry alone when verification is not configured", async () => {
+    seed();
+    let merges = 0;
+    gitMocks.mergeWorktree.mockImplementation(async () => {
+      merges += 1;
+      return merges === 1
+        ? { merged: false, error: "CONFLICT in lib/x.ts", reason: "conflict" }
+        : { merged: true, commitHash: "resolved" };
+    });
+
+    await tryAutoMerge(PROJECT_ID, EPIC_ID);
+    await drainScheduler();
+
+    expect(verifyMocks.runDeterministicVerification).not.toHaveBeenCalled();
+    expect(merges).toBe(2);
+    expect(db.select().from(epics).get()!.status).toBe("done");
+  });
+});

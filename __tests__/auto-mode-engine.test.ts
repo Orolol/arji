@@ -47,6 +47,7 @@ const {
   AUTO_MODE_REASON_PREFIX,
   DEFAULT_AUTO_BUILD_CONCURRENCY,
   DEFAULT_AUTO_REVIEW_CONCURRENCY,
+  isAutoModeActivityReason,
 } = await import("@/lib/auto-mode/constants");
 
 const PROJECT_ID = "proj-engine";
@@ -163,6 +164,12 @@ interface Fakes {
   mergeImplementation(fn: () => unknown): void;
   /** What the (stubbed) reliability argmax returns for a stage. */
   smartPick(stage: "build" | "review", pick: SmartDispatchPick | null): void;
+  /** Every deterministic-verification request the engine made, in order. */
+  verifications: Array<{ projectId: string; epicId: string; sessionId: string }>;
+  /** What the (stubbed) verification runner answers. */
+  verifyOutcome(outcome: unknown): void;
+  /** Makes the verification runner throw, as a broken command list would. */
+  verifyThrows(message: string): void;
 }
 
 function makeFakes(): Fakes {
@@ -178,6 +185,11 @@ function makeFakes(): Fakes {
   let conflictSessionId: string | null = null;
   let mergeResult: unknown = { status: "skipped", reason: "n/a", sessionId: null };
   let mergeImpl: (() => unknown) | null = null;
+  const verifications: Fakes["verifications"] = [];
+  // The default is "verify_commands is not configured" — every pre-existing
+  // test therefore keeps the exact behaviour it had before the hook existed.
+  let verifyResult: unknown = { ran: false, result: null };
+  let verifyError: string | null = null;
 
   let config = {
     enabled: true,
@@ -250,6 +262,11 @@ function makeFakes(): Fakes {
     readEpicStatus: (epicId) =>
       db.select({ status: epics.status }).from(epics).where(eq(epics.id, epicId)).get()
         ?.status ?? null,
+    runDeterministicVerification: async (input) => {
+      verifications.push(input);
+      if (verifyError) throw new Error(verifyError);
+      return verifyResult as never;
+    },
   };
 
   return {
@@ -279,6 +296,13 @@ function makeFakes(): Fakes {
     smartPick(stage, pick) {
       smartPicks.set(stage, pick);
     },
+    verifications,
+    verifyOutcome(outcome) {
+      verifyResult = outcome;
+    },
+    verifyThrows(message) {
+      verifyError = message;
+    },
   };
 }
 
@@ -306,6 +330,22 @@ function autoReasons(epicId: string): string[] {
     .all()
     .map((row) => row.reason ?? "")
     .filter((reason) => reason.startsWith(AUTO_MODE_REASON_PREFIX));
+}
+
+/**
+ * Every "Auto mode …" reason, including the colon form ("Auto mode: …") that
+ * `AUTO_MODE_REASON_PREFIX` deliberately does not match. This is the
+ * production predicate (`isAutoModeActivityReason`), so it is what the UI
+ * badges — `autoReasons` above is the narrower, sentence-form view.
+ */
+function allAutoReasons(epicId: string): string[] {
+  return db
+    .select()
+    .from(ticketActivityLog)
+    .where(eq(ticketActivityLog.epicId, epicId))
+    .all()
+    .map((row) => row.reason ?? "")
+    .filter(isAutoModeActivityReason);
 }
 
 beforeEach(() => {
@@ -927,6 +967,215 @@ describe("merge step", () => {
 /* ------------------------------------------------------------------ */
 /* Mutex + lifecycle                                                   */
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* Deterministic verification                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Full Auto never enters lib/pipeline/runner.ts, so it does not inherit the
+ * pipeline's build → verify → review ordering: the engine has to run Arij's
+ * own checks itself, right after a delivered code session. Without this the
+ * merge gate in lib/auto-mode/merge.ts — which demands a fresh PASSING report
+ * — could never be satisfied by an epic this mode built.
+ */
+describe("deterministic verification", () => {
+  /** Drives one epic through dispatch → delivered build, then reconciles. */
+  async function buildAndSettle(fakes: Fakes): Promise<string> {
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    const sessionId = first.buildsDispatched[0];
+    settle(fakes, sessionId, "completed");
+    // What a real build's terminal handler does on delivery.
+    db.update(epics).set({ status: "review" }).where(eq(epics.id, "t1")).run();
+    return sessionId;
+  }
+
+  function failingReport() {
+    return {
+      ran: true,
+      result: {
+        id: "vr-1",
+        projectId: PROJECT_ID,
+        epicId: "t1",
+        agentSessionId: null,
+        status: "fail" as const,
+        startedAt: at(80),
+        finishedAt: at(81),
+        commands: [
+          {
+            name: "test",
+            command: "npm test",
+            exitCode: 1,
+            durationMs: 1_200,
+            tail: "FAIL __tests__/x.test.ts",
+          },
+        ],
+      },
+    };
+  }
+
+  it("runs the checks for a delivered build and traces the pass", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "todo" });
+    fakes.verifyOutcome({
+      ran: true,
+      result: {
+        id: "vr-1",
+        projectId: PROJECT_ID,
+        epicId: "t1",
+        agentSessionId: null,
+        status: "pass",
+        startedAt: at(80),
+        finishedAt: at(81),
+        commands: [
+          { name: "test", command: "npm test", exitCode: 0, durationMs: 5, tail: "ok" },
+        ],
+      },
+    });
+
+    const sessionId = await buildAndSettle(fakes);
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.verifications).toEqual([
+      { projectId: PROJECT_ID, epicId: "t1", sessionId },
+    ]);
+    expect(allAutoReasons("t1")).toContain(
+      "Auto mode: deterministic verification passed (1 command)"
+    );
+    // A pass leaves the ticket exactly where the build put it.
+    expect(db.select().from(epics).get()!.status).toBe("review");
+  });
+
+  it("returns the ticket to In Progress and posts the failing output", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "todo" });
+    fakes.verifyOutcome(failingReport());
+
+    await buildAndSettle(fakes);
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    // The mode has no fix-cycle ladder: the only way it can repair a red
+    // branch is to make the ticket buildable again.
+    expect(db.select().from(epics).get()!.status).toBe("in_progress");
+    expect(allAutoReasons("t1")).toContain(
+      'Auto mode: deterministic verification failed at "test" — returned to In Progress'
+    );
+    // The next build agent reads the comment history — without the evidence
+    // it would have no idea why the ticket came back.
+    const comment = db.select().from(ticketComments).all().at(-1);
+    expect(comment?.content).toContain("FAIL __tests__/x.test.ts");
+    expect(comment?.content).toContain("npm test");
+  });
+
+  it("parks the ticket after three consecutive verification failures", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "todo" });
+    fakes.verifyOutcome(failingReport());
+
+    for (let i = 0; i < 3; i += 1) {
+      const result = await sweepProject(PROJECT_ID, fakes.deps);
+      settle(fakes, result.buildsDispatched[0], "completed");
+      db.update(epics).set({ status: "review" }).where(eq(epics.id, "t1")).run();
+    }
+    const final = await sweepProject(PROJECT_ID, fakes.deps);
+
+    // build → red → build is a loop, and the parking ladder is what bounds it.
+    expect(final.parked).toContain("t1");
+    expect(autoModeRegistry.isParked(PROJECT_ID, "t1")).toBe(true);
+  });
+
+  it("traces a skip so it cannot be mistaken for a pass", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "todo" });
+    fakes.verifyOutcome({
+      ran: false,
+      result: null,
+      skipReason: "the recorded epic worktree no longer exists on disk (pruned?)",
+    });
+
+    await buildAndSettle(fakes);
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(allAutoReasons("t1")).toContain(
+      "Auto mode skipped deterministic verification: the recorded epic worktree no longer exists on disk (pruned?)"
+    );
+    expect(db.select().from(epics).get()!.status).toBe("review");
+  });
+
+  it("stays silent and changes nothing when verification is not configured", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "todo" });
+
+    await buildAndSettle(fakes);
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(
+      allAutoReasons("t1").some((reason) => reason.includes("verification"))
+    ).toBe(false);
+    expect(db.select().from(epics).get()!.status).toBe("review");
+  });
+
+  it("leaves the ticket alone when the checks themselves crash", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "todo" });
+    fakes.verifyThrows("EACCES: cannot spawn");
+
+    await buildAndSettle(fakes);
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    // A fault in the checks says nothing about the branch. Nothing lands
+    // unverified either: the merge gate still refuses without a report.
+    expect(allAutoReasons("t1")).toContain(
+      "Auto mode could not run deterministic verification: EACCES: cannot spawn"
+    );
+    expect(db.select().from(epics).get()!.status).toBe("review");
+    expect(autoModeRegistry.isParked(PROJECT_ID, "t1")).toBe(false);
+  });
+
+  it("never verifies after a review session", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 0, reviewConcurrency: 1 });
+    addEpic({ id: "t1", status: "review", branchName: "feature/t1" });
+    addSession({
+      epicId: "t1",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(1),
+      endedAt: at(2),
+    });
+    fakes.verifyOutcome(failingReport());
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    settle(fakes, first.reviewsDispatched[0], "completed");
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    // Reviews change no code, so there is nothing new to verify.
+    expect(fakes.verifications).toEqual([]);
+  });
+
+  it("returns a story — not its epic — to In Progress when its checks fail", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 1, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "todo" });
+    addStory({ id: "s1", epicId: "t1", status: "todo" });
+    fakes.verifyOutcome(failingReport());
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    settle(fakes, first.buildsDispatched[0], "completed");
+    db.update(userStories).set({ status: "review" }).where(eq(userStories.id, "s1")).run();
+    db.update(epics).set({ status: "review" }).where(eq(epics.id, "t1")).run();
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(db.select().from(userStories).get()!.status).toBe("in_progress");
+  });
+});
 
 describe("per-project mutex", () => {
   it("never lets two sweeps of the same project overlap", async () => {

@@ -41,10 +41,16 @@ import { tryExportArjiJson } from "@/lib/sync/export";
 import { applyTransition } from "@/lib/workflow/transition-service";
 import { resolveVerifyConfigForProject } from "@/lib/verify/config";
 import { logTransition } from "@/lib/workflow/log";
-import { createAutoModeMergeParkedNotification } from "@/lib/notifications/create";
+import {
+  createAutoModeMergeBlockedNotification,
+  createAutoModeMergeParkedNotification,
+} from "@/lib/notifications/create";
+import { createPipelineStageDriver } from "@/lib/pipeline/stages";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import {
   AUTO_MERGE_CONFLICT_BACKOFF_MS,
+  AUTO_MERGE_VERIFICATION_BACKOFF_MS,
+  AUTO_MERGE_VERIFICATION_NOTIFY_AFTER,
   AUTO_MODE_REASONS,
   autoRunId,
 } from "./constants";
@@ -331,7 +337,10 @@ function verificationGateReason(
       and(
         eq(agentSessions.projectId, projectId),
         eq(agentSessions.epicId, epicId),
-        inArray(agentSessions.agentType, ["build", "fix"])
+        // "merge" belongs here: the conflict-resolution agent edits and
+        // commits into the very worktree about to be merged, so a report
+        // older than it describes a tree that no longer exists.
+        inArray(agentSessions.agentType, ["build", "fix", "merge"])
       )
     )
     .orderBy(desc(agentSessions.createdAt))
@@ -339,10 +348,79 @@ function verificationGateReason(
   if (!lastCodeSession) return null;
 
   const codeEndedAt = lastCodeSession.endedAt ?? lastCodeSession.createdAt;
-  if (codeEndedAt && latestReport.finishedAt < codeEndedAt) {
+  if (
+    codeEndedAt &&
+    normalizeInstant(latestReport.finishedAt) < normalizeInstant(codeEndedAt)
+  ) {
     return "the passing verification predates the most recent code session";
   }
   return null;
+}
+
+/**
+ * Makes two stored timestamps lexically comparable. Reports always store ISO
+ * ("2026-08-19T09:05:00.000Z") while a session row that fell back to the
+ * schema default carries SQLite's "2026-08-19 09:05:00" — and 'T' (0x54)
+ * sorts after ' ' (0x20), so an unnormalised comparison would call every ISO
+ * report newer than any same-day default-format session and fail the
+ * staleness check open.
+ */
+function normalizeInstant(value: string): string {
+  return value.includes("T") ? value : value.replace(" ", "T");
+}
+
+/**
+ * Logs, defers and (eventually) surfaces a merge the verification gate
+ * refused.
+ *
+ * The deferral is the important part. `selectMergeCandidates` re-selects a
+ * refused epic on every sweep and `logTransition` inserts unconditionally, so
+ * without a backoff a single unverifiable epic writes an activity row every
+ * 15 seconds — thousands a day into the very feed the verification traces
+ * share — and never makes progress. Deferring holds the epic back until the
+ * window expires, which makes the refusal one row per window; a fresh passing
+ * report is picked up on the next attempt after it.
+ *
+ * The epic is NOT parked: parking is for failures, and a refusal means the
+ * evidence is missing, not that anything broke.
+ */
+function refuseUnverifiedMerge(input: {
+  projectId: string;
+  epicId: string;
+  fromStatus: KanbanStatus;
+  reason: string;
+}): AutoMergeOutcome {
+  const { projectId, epicId, fromStatus, reason } = input;
+  logTransition({
+    projectId,
+    epicId,
+    fromStatus,
+    toStatus: fromStatus,
+    actor: "system",
+    reason: AUTO_MODE_REASONS.mergeRefused(reason),
+  });
+  autoModeRegistry.deferMerge(
+    projectId,
+    epicId,
+    new Date(Date.now() + AUTO_MERGE_VERIFICATION_BACKOFF_MS).toISOString()
+  );
+
+  // Exactly once, on the Nth consecutive refusal: an epic that can never
+  // satisfy the gate is the state a standing loop must surface, and a skip
+  // raises nothing on its own.
+  const refusals = autoModeRegistry.recordMergeGateRefusal(projectId, epicId);
+  if (refusals === AUTO_MERGE_VERIFICATION_NOTIFY_AFTER) {
+    try {
+      createAutoModeMergeBlockedNotification({ projectId, epicId, error: reason });
+    } catch (notifyError) {
+      console.warn(
+        "[auto-mode/merge] Failed to create the blocked-merge notification:",
+        (notifyError as Error).message
+      );
+    }
+  }
+
+  return { status: "skipped", reason, sessionId: null };
 }
 
 async function runAutoMerge(
@@ -384,16 +462,14 @@ async function runAutoMerge(
   // and skipped (never parked) — the next passing report unlocks it.
   const verificationBlock = verificationGateReason(projectId, epicId);
   if (verificationBlock) {
-    logTransition({
+    return refuseUnverifiedMerge({
       projectId,
       epicId,
       fromStatus,
-      toStatus: fromStatus,
-      actor: "system",
-      reason: AUTO_MODE_REASONS.mergeRefused(verificationBlock),
+      reason: verificationBlock,
     });
-    return { status: "skipped", reason: verificationBlock, sessionId: null };
   }
+  autoModeRegistry.clearMergeGateRefusals(projectId, epicId);
 
   // Pre-flight the workflow guards. A refusal here is the "review is not
   // actually OK" answer (no completed review, or an open review comment) —
@@ -446,6 +522,7 @@ async function runAutoMerge(
     if (finalized.ok) {
       autoModeRegistry.clearFailures(projectId, epicId);
       autoModeRegistry.clearMergeDeferral(projectId, epicId);
+      autoModeRegistry.clearMergeGateRefusals(projectId, epicId);
       autoModeRegistry.recordDispatch(projectId, {
         kind: "merge",
         epicId,
@@ -730,6 +807,44 @@ async function dispatchMergeFixAgent(input: {
 }
 
 /**
+ * Runs the deterministic checks against a conflict resolution and returns the
+ * gate's refusal reason, or null when the merge may proceed (including when
+ * verification is not configured — off is not "unsatisfied").
+ *
+ * The merge session is a code session for gate purposes, so its own fresh
+ * report is what unblocks the retry; anything older describes the tree from
+ * before the conflict was resolved.
+ */
+async function verifyResolvedConflict(input: {
+  projectId: string;
+  epicId: string;
+  sessionId: string;
+}): Promise<string | null> {
+  if (!resolveVerifyConfigForProject(input.projectId).enabled) return null;
+
+  try {
+    await createPipelineStageDriver({
+      projectId: input.projectId,
+      scope: "epic",
+      epicId: input.epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+      batchRunId: autoRunId(input.projectId),
+    }).runDeterministicVerification(input.sessionId);
+  } catch (error) {
+    // Swallowed on purpose: the gate below is what decides, and it reads
+    // persisted evidence rather than this call's return value. A crash simply
+    // leaves the newest report stale, which the gate reports as such.
+    console.warn(
+      "[auto-mode/merge] Deterministic verification crashed after a conflict fix:",
+      error instanceof Error ? error.message : error
+    );
+  }
+
+  return verificationGateReason(input.projectId, input.epicId);
+}
+
+/**
  * The single retry. A second failure parks the epic and notifies — the
  * standing loop must never grind on a conflict no agent could resolve.
  */
@@ -788,6 +903,19 @@ async function retryMergeAfterFix(input: {
 
   if (!input.agentSucceeded) {
     park(input.originalError);
+    return;
+  }
+
+  // The merge-fix agent edited and committed into this worktree, and its
+  // resolution lands on the default branch without a second review — the one
+  // path in the mode where agent-written code merges unreviewed. Its prompt
+  // asks it to "verify the build still passes", but prose is not evidence:
+  // run Arij's own checks against the resolved tree and re-ask the gate.
+  // Fail-closed — a crashed or skipped run leaves the report stale, the gate
+  // refuses, and the epic is parked for a human rather than merged blind.
+  const verificationBlock = await verifyResolvedConflict(input);
+  if (verificationBlock) {
+    park(`deterministic verification blocked the merge: ${verificationBlock}`);
     return;
   }
 
