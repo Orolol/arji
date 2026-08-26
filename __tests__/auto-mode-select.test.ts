@@ -22,6 +22,7 @@ const {
   agentSessions,
   ticketComments,
   reviewComments,
+  ticketActivityLog,
   ticketDependencies,
 } = await import("@/lib/db/schema");
 const {
@@ -1218,10 +1219,11 @@ describe("query budget", () => {
     try {
       const board = loadAutoModeBoard(PROJECT_ID);
       const queriesForBoard = selectSpy.mock.calls.length;
-      // Ten board queries (nine + the dependency graph); the sub-selects of
-      // the two window-function CTEs are built through the same `select`
-      // entry point, hence the ceiling.
-      expect(queriesForBoard).toBeLessThanOrEqual(12);
+      // Eleven board queries (nine + the dependency graph + the
+      // review-rejection scan); the sub-selects of the two window-function
+      // CTEs are built through the same `select` entry point, hence the
+      // ceiling.
+      expect(queriesForBoard).toBeLessThanOrEqual(13);
 
       selectSpy.mockClear();
       selectBuildCandidates(PROJECT_ID, board);
@@ -1234,5 +1236,128 @@ describe("query budget", () => {
     } finally {
       selectSpy.mockRestore();
     }
+  });
+});
+
+describe("review-rejection budget", () => {
+  /** One review → in_progress bounce, as the review stage logs it. */
+  function addReviewRejection(epicId: string, createdAt: string): void {
+    db.insert(ticketActivityLog)
+      .values({
+        id: nextId("act"),
+        projectId: PROJECT_ID,
+        epicId,
+        fromStatus: "review",
+        toStatus: "in_progress",
+        actor: "agent",
+        reason: "Review verdict: changes requested (Code Review)",
+        createdAt,
+      })
+      .run();
+  }
+
+  it("keeps dispatching below the cap", () => {
+    addEpic({ id: "e1", status: "in_progress" });
+    addReviewRejection("e1", at(1));
+    addReviewRejection("e1", at(2));
+
+    const board = loadAutoModeBoard(PROJECT_ID);
+    expect(board.reviewRejectionsByEpic.get("e1")).toBe(2);
+    expect(selectBuildCandidates(PROJECT_ID, board)).toHaveLength(1);
+  });
+
+  it("stops every kind of dispatch at the cap", () => {
+    addEpic({ id: "e1", status: "in_progress" });
+    for (let i = 1; i <= 3; i += 1) addReviewRejection("e1", at(i));
+
+    const board = loadAutoModeBoard(PROJECT_ID);
+    expect(board.reviewRejectionsByEpic.get("e1")).toBe(3);
+    // The loop that ran E-arij-096 was builds; reviews and merges must stop
+    // together, or the epic just bounces between the other two selectors.
+    expect(selectBuildCandidates(PROJECT_ID, board)).toHaveLength(0);
+    expect(selectReviewCandidates(PROJECT_ID, board)).toHaveLength(0);
+    expect(selectMergeCandidates(PROJECT_ID, board)).toHaveLength(0);
+  });
+
+  it("stops story builds too, not just epic-scoped ones", () => {
+    addEpic({ id: "e1", status: "in_progress" });
+    addStory({ id: "s1", epicId: "e1", status: "in_progress" });
+    for (let i = 1; i <= 3; i += 1) addReviewRejection("e1", at(i));
+
+    const board = loadAutoModeBoard(PROJECT_ID);
+    expect(selectBuildCandidates(PROJECT_ID, board)).toHaveLength(0);
+  });
+
+  it("a user comment hands the ticket back with a fresh budget", () => {
+    addEpic({ id: "e1", status: "in_progress" });
+    for (let i = 1; i <= 3; i += 1) addReviewRejection("e1", at(i));
+
+    db.insert(ticketComments)
+      .values({
+        id: nextId("c"),
+        epicId: "e1",
+        author: "user",
+        content: "Ignore the E2E finding, ship it.",
+        createdAt: at(10),
+      })
+      .run();
+
+    const board = loadAutoModeBoard(PROJECT_ID);
+    // Only bounces NEWER than the comment count.
+    expect(board.reviewRejectionsByEpic.get("e1") ?? 0).toBe(0);
+    expect(selectBuildCandidates(PROJECT_ID, board)).toHaveLength(1);
+  });
+
+  it("re-parks after three more rejections following the comment", () => {
+    addEpic({ id: "e1", status: "in_progress" });
+    for (let i = 1; i <= 3; i += 1) addReviewRejection("e1", at(i));
+    db.insert(ticketComments)
+      .values({
+        id: nextId("c"),
+        epicId: "e1",
+        author: "user",
+        content: "Try again.",
+        createdAt: at(10),
+      })
+      .run();
+    for (let i = 11; i <= 13; i += 1) addReviewRejection("e1", at(i));
+
+    const board = loadAutoModeBoard(PROJECT_ID);
+    expect(board.reviewRejectionsByEpic.get("e1")).toBe(3);
+    expect(selectBuildCandidates(PROJECT_ID, board)).toHaveLength(0);
+  });
+
+  it("counts per epic, never across the board", () => {
+    addEpic({ id: "e1", status: "in_progress", position: 0 });
+    addEpic({ id: "e2", status: "in_progress", position: 1 });
+    for (let i = 1; i <= 3; i += 1) addReviewRejection("e1", at(i));
+    addReviewRejection("e2", at(4));
+
+    const board = loadAutoModeBoard(PROJECT_ID);
+    const built = selectBuildCandidates(PROJECT_ID, board);
+    expect(built.map((c) => c.epicId)).toEqual(["e2"]);
+  });
+
+  it("ignores transitions that are not a review bounce", () => {
+    addEpic({ id: "e1", status: "in_progress" });
+    // todo → in_progress is an ordinary start, not a rejected review.
+    for (let i = 1; i <= 5; i += 1) {
+      db.insert(ticketActivityLog)
+        .values({
+          id: nextId("act"),
+          projectId: PROJECT_ID,
+          epicId: "e1",
+          fromStatus: "todo",
+          toStatus: "in_progress",
+          actor: "agent",
+          reason: "Starting from backlog",
+          createdAt: at(i),
+        })
+        .run();
+    }
+
+    const board = loadAutoModeBoard(PROJECT_ID);
+    expect(board.reviewRejectionsByEpic.get("e1") ?? 0).toBe(0);
+    expect(selectBuildCandidates(PROJECT_ID, board)).toHaveLength(1);
   });
 });

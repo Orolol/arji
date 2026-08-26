@@ -47,13 +47,13 @@ interface AgentMonitorProps {
 }
 
 /**
- * Compact provider chip. Claude Code and Gemini keep their abbreviations
- * because they dominate the monitor; everything else shows its real label
- * rather than being lumped in as "CC".
+ * Compact provider chip. Claude Code keeps its abbreviation because it
+ * dominates the monitor; everything else shows its real label. Sessions from
+ * providers removed in the 2026-08 cleanup fall through to their raw stored
+ * string.
  */
 function providerLabel(provider: string): string {
   if (provider === "claude-code") return "CC";
-  if (provider === "gemini-cli") return "Gemini";
   return isChatProvider(provider) ? PROVIDER_LABELS[provider] : provider;
 }
 

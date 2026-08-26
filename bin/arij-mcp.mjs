@@ -81,7 +81,7 @@ const AGENT_TOOLS = [
   {
     name: "update_ticket_status",
     description:
-      "Move the ticket on the Arij board (backlog, todo, in_progress, review, done). Transitions are validated by Arij's workflow engine; review→done needs human approval and will be rejected — finish, report, and let the user approve. Call this instead of announcing a status change in prose.",
+      "Move the ticket on the Arij board (backlog, todo, in_progress, review, done). Targets whatever this session was launched for: a story-scoped session moves ITS OWN story, and the parent epic follows to review by itself once every sibling story is in review or done — do not try to move the epic yourself. Transitions are validated by Arij's workflow engine; done needs human approval and will be rejected — finish, report, and let the user approve. Call this instead of announcing a status change in prose.",
     inputSchema: {
       type: "object",
       properties: {

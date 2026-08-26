@@ -186,11 +186,9 @@ describe("resolveAgentForDispatch — segregation on", () => {
     seedDefaultResolution("claude-code");
     dbMockState.getQueue.push(SEGREGATION_ON);
     dbMockState.getQueue.push({ provider: "claude-code" });
-    // codex unavailable, several later options available: the first available
-    // option in PROVIDER_OPTIONS order (gemini-cli) must win.
-    availabilityState.available.add("gemini-cli");
-    availabilityState.available.add("opencode");
-    availabilityState.available.add("zai");
+    // codex unavailable, a later option available: the first available
+    // option in PROVIDER_OPTIONS order (oh-my-pi) must win.
+    availabilityState.available.add("oh-my-pi");
 
     const { resolveAgentForDispatch } = await import(
       "@/lib/agent-config/agent-resolution"
@@ -202,7 +200,7 @@ describe("resolveAgentForDispatch — segregation on", () => {
       REVIEW_CONTEXT_EPIC
     );
 
-    expect(result.provider).toBe("gemini-cli");
+    expect(result.provider).toBe("oh-my-pi");
     expect(result.segregated).toBe(true);
   });
 
@@ -343,14 +341,14 @@ describe("pickAlternativeReviewProvider — multiple exclusions", () => {
   it("skips both the builder and reviewer for a Full Auto second opinion", async () => {
     availabilityState.available.add("claude-code");
     availabilityState.available.add("codex");
-    availabilityState.available.add("gemini-cli");
+    availabilityState.available.add("oh-my-pi");
 
     const { pickAlternativeReviewProvider } = await import(
       "@/lib/agent-config/review-segregation"
     );
     await expect(
       pickAlternativeReviewProvider("claude-code", ["codex"])
-    ).resolves.toBe("gemini-cli");
+    ).resolves.toBe("oh-my-pi");
   });
 
   it("refuses the gate when no third installed provider exists", async () => {
@@ -368,14 +366,14 @@ describe("pickAlternativeReviewProvider — multiple exclusions", () => {
   it("applies an eligibility filter after excluding builder and reviewer", async () => {
     availabilityState.available.add("claude-code");
     availabilityState.available.add("codex");
-    availabilityState.available.add("gemini-cli");
+    availabilityState.available.add("oh-my-pi");
 
     const { pickAlternativeReviewProvider } = await import(
       "@/lib/agent-config/review-segregation"
     );
     await expect(
       pickAlternativeReviewProvider(
-        "gemini-cli",
+        "oh-my-pi",
         ["claude-code"],
         (provider) => provider === "codex"
       )
@@ -427,7 +425,7 @@ describe("findLastSuccessfulBuildProvider", () => {
   });
 
   it("returns the provider for a story target", async () => {
-    dbMockState.getQueue.push({ provider: "gemini-cli" });
+    dbMockState.getQueue.push({ provider: "oh-my-pi" });
     const { findLastSuccessfulBuildProvider } = await import(
       "@/lib/agent-config/review-segregation"
     );
@@ -437,7 +435,7 @@ describe("findLastSuccessfulBuildProvider", () => {
         epicId: "e1",
         storyId: "s1",
       })
-    ).toBe("gemini-cli");
+    ).toBe("oh-my-pi");
   });
 
   it("returns null without querying when the target has no epic or story", async () => {
@@ -463,13 +461,13 @@ describe("findLastSuccessfulBuildProvider", () => {
 describe("pickAlternativeReviewProvider", () => {
   it("returns the first available provider in stable order, skipping the builder", async () => {
     availabilityState.available.add("claude-code"); // builder — must be skipped
-    availabilityState.available.add("gemini-cli");
+    availabilityState.available.add("oh-my-pi");
     availabilityState.available.add("codex");
 
     const { pickAlternativeReviewProvider } = await import(
       "@/lib/agent-config/review-segregation"
     );
-    // PROVIDER_OPTIONS order: claude-code, codex, gemini-cli, ...
+    // PROVIDER_OPTIONS order: claude-code, codex, oh-my-pi
     expect(await pickAlternativeReviewProvider("claude-code")).toBe("codex");
   });
 
@@ -483,10 +481,10 @@ describe("pickAlternativeReviewProvider", () => {
 
   it("treats availability-check failures as unavailable", async () => {
     availabilityState.throwing.add("claude-code");
-    availabilityState.available.add("gemini-cli");
+    availabilityState.available.add("oh-my-pi");
     const { pickAlternativeReviewProvider } = await import(
       "@/lib/agent-config/review-segregation"
     );
-    expect(await pickAlternativeReviewProvider("codex")).toBe("gemini-cli");
+    expect(await pickAlternativeReviewProvider("codex")).toBe("oh-my-pi");
   });
 });

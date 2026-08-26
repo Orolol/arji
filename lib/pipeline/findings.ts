@@ -1,6 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { db as defaultDb, type ArijDatabase } from "@/lib/db";
 import { agentSessions, reviewComments } from "@/lib/db/schema";
+import { createId } from "@/lib/utils/nanoid";
+import { parseReviewReport } from "./parse-review-report";
 
 /**
  * Review-verdict assessment shared by the pipeline's review stage
@@ -255,6 +257,62 @@ export function isNegativeProseVerdict(output: string): boolean {
   );
 }
 
+/**
+ * Recovers reviewComments rows from the review report when the reviewer filed
+ * none through `submit_findings`.
+ *
+ * This is the repair for a channel that never carried anything: reviewComments
+ * was empty for the whole life of the database because codex-cli does not
+ * expose Arij's MCP server under `codex exec` (see parse-review-report.ts), so
+ * builders were dispatched with zero knowledge of what review had found and
+ * reviewers re-derived a fresh set of findings every cycle.
+ *
+ * Rows are written exactly as submit-findings writes them — author 'agent',
+ * status 'open', body prefixed `[<severity>] ` — so collectBlockingFindings,
+ * buildReviewFeedbackSection and get_ticket cannot tell the two sources apart.
+ *
+ * Naturally idempotent: it only runs when the window holds zero agent rows, so
+ * a second call for the same window sees the rows it just wrote and no-ops.
+ * Returns the number of rows created.
+ */
+export function ingestProseFindings(input: {
+  epicId: string;
+  sinceIso: string;
+  sessionOutput: string;
+  database?: ArijDatabase;
+}): number {
+  const database = input.database ?? defaultDb;
+
+  if (
+    countAgentReviewCommentsSince(input.epicId, input.sinceIso, database) > 0
+  ) {
+    return 0;
+  }
+
+  const parsed = parseReviewReport(input.sessionOutput);
+  if (parsed.length === 0) return 0;
+
+  const now = new Date().toISOString();
+  for (const finding of parsed) {
+    database
+      .insert(reviewComments)
+      .values({
+        id: createId(),
+        epicId: input.epicId,
+        filePath: finding.filePath,
+        lineNumber: finding.lineNumber,
+        body: `[${finding.severity}] ${finding.body}`,
+        author: "agent",
+        status: "open",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  }
+
+  return parsed.length;
+}
+
 /* ------------------------------------------------------------------ */
 /* The decision                                                        */
 /* ------------------------------------------------------------------ */
@@ -263,7 +321,7 @@ export interface ReviewAssessment {
   /** True when the review outcome blocks the run (verdict, findings, prose). */
   blocking: boolean;
   blockingFindings: BlockingFinding[];
-  /** Agent rows filed in the window, any status/severity. */
+  /** Rows filed through `submit_findings` in the window (pre-ingestion). */
   agentCommentCount: number;
   /** True when the prose scan decided the verdict. */
   usedProseFallback: boolean;
@@ -273,6 +331,8 @@ export interface ReviewAssessment {
   structuredVerdict: StructuredReviewVerdict | null;
   /** Which channel decided `blocking`, for the activity-log trail. */
   verdictSource: ReviewVerdictSource;
+  /** Rows recovered from the report by ingestProseFindings. */
+  proseIngestedCount: number;
 }
 
 /**
@@ -299,12 +359,31 @@ export function assessReviewOutcome(input: {
     input.sinceIso,
     database
   );
+  const proseNegative = isNegativeProseVerdict(input.sessionOutput);
+  const usedProseFallback = agentCommentCount === 0;
+
+  // Recover anchored findings from the report BEFORE collecting, so a
+  // prose-only review still hands the next builder file+line context.
+  //
+  // Ingestion deliberately does NOT move the verdict: when the tool channel
+  // stayed silent, the reviewer's own "**Overall Verdict: …**" line remains
+  // authoritative, exactly as before. Severity extraction is a heuristic, and
+  // letting it flip a run green (a report whose findings all parse as minor)
+  // would be a semantic change smuggled in behind a context fix.
+  const proseIngestedCount = usedProseFallback
+    ? ingestProseFindings({
+        epicId: input.epicId,
+        sinceIso: input.sinceIso,
+        sessionOutput: input.sessionOutput,
+        database,
+      })
+    : 0;
+
   const blockingFindings = collectBlockingFindings(
     input.epicId,
     input.sinceIso,
     database
   );
-  const proseNegative = isNegativeProseVerdict(input.sessionOutput);
   const structuredVerdict = readStructuredReviewVerdict(
     input.reviewSessionId,
     database
@@ -321,10 +400,10 @@ export function assessReviewOutcome(input: {
       proseNegative,
       structuredVerdict,
       verdictSource: "structured",
+      proseIngestedCount,
     };
   }
 
-  const usedProseFallback = agentCommentCount === 0;
   return {
     blocking: usedProseFallback ? proseNegative : blockingFindings.length > 0,
     blockingFindings,
@@ -333,6 +412,7 @@ export function assessReviewOutcome(input: {
     proseNegative,
     structuredVerdict: null,
     verdictSource: "prose",
+    proseIngestedCount,
   };
 }
 

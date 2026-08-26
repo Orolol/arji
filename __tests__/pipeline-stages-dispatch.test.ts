@@ -572,18 +572,18 @@ describe("fix stage dispatch (epic scope)", () => {
     await handle.settled;
   });
 
-  it("resumes a previous pi session with the id pi reported", async () => {
+  it("resumes a previous oh-my-pi session with the id omp reported", async () => {
     const { projectId, epicId } = seed("review");
     const buildSid = `build-${counter}`;
     insertSession({
       id: buildSid,
       projectId,
       epicId,
-      provider: "pi",
+      provider: "oh-my-pi",
       cliSessionId: "3f1c9a52-1b7e-4f21-9a6f-7b1c2d3e4f50",
     });
     resolutionMocks.resolveAgentByNamedId.mockReturnValue({
-      provider: "pi",
+      provider: "oh-my-pi",
       namedAgentId: null,
       name: null,
       model: null,
@@ -755,6 +755,146 @@ describe("review stage dispatch", () => {
     expect(row.prompt).toContain("- PASS — test: npm test (1200 ms)");
     expect(row.prompt).toContain("- PASS — lint: npm run lint (800 ms)");
     expect(row.prompt).not.toContain("clean");
+
+    await handle.settled;
+  });
+
+  it("carries still-open findings and the convergence rules into the review prompt", async () => {
+    const { projectId, epicId } = seed("review");
+    db.insert(reviewComments)
+      .values({
+        id: `rc-prior-${counter}`,
+        epicId,
+        filePath: "src/auth.ts",
+        lineNumber: 7,
+        body: "[critical] Token never expires",
+        author: "agent",
+        status: "open",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    processManagerState.result = {
+      success: true,
+      result: claudeEnvelope("**Overall Verdict: Complete**"),
+      duration: 900,
+    };
+
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+    const handle = await driver.launchStage({
+      stage: "review",
+      attempt: 1,
+      fixCycle: 2,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+    });
+
+    const prompt = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, handle.sessionId!))
+      .get()!.prompt!;
+
+    expect(prompt).toContain("## Findings Still Open From Previous Reviews");
+    // The reviewer sees the finding itself, anchored.
+    expect(prompt).toContain("[critical] Token never expires");
+    expect(prompt).toContain("src/auth.ts");
+    expect(prompt).toContain("**Line 7**");
+    // fixCycle is zero-based; the prompt speaks in human cycle numbers.
+    expect(prompt).toContain("This is review cycle 3");
+    // The two rules that make the loop terminate.
+    expect(prompt).toContain("FIXED or STILL OPEN");
+    expect(prompt).toContain("bound new findings to what this branch changed");
+
+    await handle.settled;
+  });
+
+  it("leaves the review prompt untouched when nothing is open", async () => {
+    const { projectId, epicId } = seed("review");
+    processManagerState.result = {
+      success: true,
+      result: claudeEnvelope("**Overall Verdict: Complete**"),
+      duration: 900,
+    };
+
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+    const handle = await driver.launchStage({
+      stage: "review",
+      attempt: 1,
+      fixCycle: 0,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+    });
+
+    // A first-cycle review must read exactly as it did before this section
+    // existed — no empty heading, no phantom cycle counter.
+    const prompt = db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, handle.sessionId!))
+      .get()!.prompt!;
+    expect(prompt).not.toContain("Findings Still Open");
+    expect(prompt).not.toContain("review cycle");
+
+    await handle.settled;
+  });
+
+  it("shows a story-scoped review the epic's open findings", async () => {
+    // reviewComments is epic-keyed: a sibling story's unfixed finding must
+    // stay visible to the next story's reviewer instead of being rediscovered
+    // from scratch as a brand-new Major.
+    const { projectId, epicId, storyId } = seed("review");
+    db.insert(reviewComments)
+      .values({
+        id: `rc-sibling-${counter}`,
+        epicId,
+        filePath: "src/sibling.ts",
+        lineNumber: 3,
+        body: "[major] Filed while reviewing another story",
+        author: "agent",
+        status: "open",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    processManagerState.result = {
+      success: true,
+      result: claudeEnvelope("**Overall Verdict: Complete**"),
+      duration: 900,
+    };
+
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "story",
+      epicId,
+      userStoryId: storyId,
+      buildNamedAgentId: null,
+    });
+    const handle = await driver.launchStage({
+      stage: "review",
+      attempt: 1,
+      fixCycle: 1,
+      previousAttemptSessionId: null,
+      lastCodeSessionId: null,
+    });
+
+    expect(
+      db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.id, handle.sessionId!))
+        .get()!.prompt!
+    ).toContain("[major] Filed while reviewing another story");
 
     await handle.settled;
   });

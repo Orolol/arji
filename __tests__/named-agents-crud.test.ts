@@ -157,16 +157,27 @@ describe("createNamedAgent", () => {
     expect(data!.model).toBe("");
   });
 
-  it("accepts gemini-cli as provider", async () => {
+  it("accepts oh-my-pi as provider", async () => {
+    const { createNamedAgent } = await import("@/lib/agent-config/named-agents");
+    const { data, error } = await createNamedAgent({
+      name: "Pi Flash",
+      provider: "oh-my-pi",
+      model: "pi-flash",
+    });
+    expect(error).toBeUndefined();
+    expect(data!.provider).toBe("oh-my-pi");
+    expect(data!.model).toBe("pi-flash");
+  });
+
+  it("rejects a removed legacy provider", async () => {
     const { createNamedAgent } = await import("@/lib/agent-config/named-agents");
     const { data, error } = await createNamedAgent({
       name: "Gemini Flash",
       provider: "gemini-cli",
       model: "gemini-2.0-flash",
     });
-    expect(error).toBeUndefined();
-    expect(data!.provider).toBe("gemini-cli");
-    expect(data!.model).toBe("gemini-2.0-flash");
+    expect(data).toBeNull();
+    expect(error).toContain("Invalid provider");
   });
 });
 
@@ -425,8 +436,8 @@ describe("resolveAgent", () => {
     });
     const { data: projectAgent } = await createNamedAgent({
       name: "Project Agent",
-      provider: "gemini-cli",
-      model: "gemini-2.0-flash",
+      provider: "oh-my-pi",
+      model: "pi-flash",
     });
 
     testDb.insert(schema.agentProviderDefaults)
@@ -443,15 +454,15 @@ describe("resolveAgent", () => {
       .values({
         id: "default-project",
         agentType: "build",
-        provider: "gemini-cli",
+        provider: "oh-my-pi",
         namedAgentId: projectAgent!.id,
         scope: "project-123",
       })
       .run();
 
     const result = await resolveAgent("build", "project-123");
-    expect(result.provider).toBe("gemini-cli");
-    expect(result.model).toBe("gemini-2.0-flash");
+    expect(result.provider).toBe("oh-my-pi");
+    expect(result.model).toBe("pi-flash");
     expect(result.name).toBe("Project Agent");
   });
 
@@ -492,8 +503,8 @@ describe("resolveAgent", () => {
     });
     const { data: projectAgent } = await createNamedAgent({
       name: "Project Lightweight",
-      provider: "gemini-cli",
-      model: "gemini-flash",
+      provider: "oh-my-pi",
+      model: "pi-flash",
     });
 
     testDb.insert(schema.agentProviderDefaults)
@@ -516,8 +527,8 @@ describe("resolveAgent", () => {
       .run();
 
     expect(resolveAgent("title_generation", "project-123")).toMatchObject({
-      provider: "gemini-cli",
-      model: "gemini-flash",
+      provider: "oh-my-pi",
+      model: "pi-flash",
       namedAgentId: projectAgent!.id,
     });
     expect(resolveAgent("title_generation", "another-project")).toMatchObject({
@@ -539,8 +550,8 @@ describe("resolveAgent", () => {
 
     const { data: mappedAgent } = await createNamedAgent({
       name: "Mapped Lightweight",
-      provider: "gemini-cli",
-      model: "gemini-flash",
+      provider: "oh-my-pi",
+      model: "pi-flash",
     });
     const { data: explicitAgent } = await createNamedAgent({
       name: "Explicit Choice",

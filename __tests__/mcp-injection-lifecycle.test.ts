@@ -287,7 +287,14 @@ describe("processManager.start() — MCP injection gating", () => {
   it("skips injection for unsupported providers without touching the db", () => {
     pmState.sessionRow = sessionRow();
 
-    processManager.start("s5", { mode: "code", prompt: "PLAIN" }, "gemini-cli");
+    // Legacy rows may still name a provider removed in the 2026-08 cleanup;
+    // the gate must short-circuit for them exactly as it did when the
+    // provider existed without an MCP surface.
+    processManager.start(
+      "s5",
+      { mode: "code", prompt: "PLAIN" },
+      "gemini-cli" as never,
+    );
 
     const options = pmState.providerSpawnedOptions[0];
     expect(options.mcp).toBeUndefined();
@@ -310,6 +317,25 @@ describe("processManager.start() — MCP injection gating", () => {
       "report_friction and then continue working",
     );
     expect(options.prompt as string).toContain("fire-and-forget");
+  });
+
+  it("injects for oh-my-pi with omp's single-underscore tool spelling", () => {
+    pmState.sessionRow = sessionRow();
+
+    processManager.start("s6b", { mode: "code", prompt: "BASE" }, "oh-my-pi");
+
+    const options = pmState.providerSpawnedOptions[0];
+    const mcp = options.mcp as McpSpawnConfig | undefined;
+    expect(mcp).toBeDefined();
+    expect(mcp!.allowedToolNames).toContain("mcp__arij_get_ticket");
+    expect(mcp!.allowedToolNames).not.toContain("mcp__arij__get_ticket");
+    expect(mcp!.env.ARIJ_MCP_TOKEN).toMatch(/^arij-mcp-/);
+
+    // the prompt names the tools in omp's spelling, never claude's
+    const prompt = options.prompt as string;
+    expect(prompt).toContain("## Arij tools");
+    expect(prompt).toContain("mcp__arij_*");
+    expect(prompt).not.toContain("mcp__arij__");
   });
 
   it("survives a broken db lookup and spawns without injection", () => {

@@ -141,18 +141,12 @@ export const BUILTIN_AGENT_PROMPTS: Record<AgentType, string> = {
  */
 export const DEFAULT_REVIEW_AGENT_PROMPT = `You are a code reviewer. Review the changes on this ticket's branch and report concrete problems: bugs, security issues, missing edge cases, and unclear naming. Reference files and lines. Do not restyle working code.`;
 
-export type AgentProvider =
-  | "claude-code"
-  | "codex"
-  | "gemini-cli"
-  | "mistral-vibe"
-  | "qwen-code"
-  | "opencode"
-  | "deepseek"
-  | "kimi"
-  | "zai"
-  | "pi"
-  | "oh-my-pi";
+/**
+ * Selectable CLI providers. Every entry must support per-spawn MCP
+ * injection of the Arij tool channel (lib/providers/types.ts documents the
+ * rule); CLIs without that surface were removed in the 2026-08 cleanup.
+ */
+export type AgentProvider = "claude-code" | "codex" | "oh-my-pi" | "agy";
 
 export const FALLBACK_PROVIDER: AgentProvider = "claude-code";
 /**
@@ -178,29 +172,15 @@ export type ChatModeProvider = AgentProvider | typeof OPENAI_COMPATIBLE_PROVIDER
 export const PROVIDER_OPTIONS: AgentProvider[] = [
   "claude-code",
   "codex",
-  "gemini-cli",
-  "mistral-vibe",
-  "qwen-code",
-  "opencode",
-  "deepseek",
-  "kimi",
-  "zai",
-  "pi",
   "oh-my-pi",
+  "agy",
 ];
 
 export const PROVIDER_LABELS: Record<ChatModeProvider, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
-  "gemini-cli": "Gemini CLI",
-  "mistral-vibe": "Mistral Vibe",
-  "qwen-code": "Qwen Code",
-  opencode: "OpenCode",
-  deepseek: "DeepSeek",
-  kimi: "Kimi",
-  zai: "Zai",
-  pi: "Pi",
   "oh-my-pi": "Oh My Pi",
+  agy: "Antigravity",
   "openai-compatible": "OpenAI-compatible",
 };
 

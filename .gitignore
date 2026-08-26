@@ -55,3 +55,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# arij install.sh — machine-specific MCP config and its backups
+/.mcp.json
+*.arij-backup-*

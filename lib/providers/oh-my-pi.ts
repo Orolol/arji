@@ -33,13 +33,21 @@
  *   tools mount as first-class tools instead — with the exact names Arij
  *   already spells into prompts (`mcp__arij_get_ticket`, …), calls verified
  *   to reach the server.
+ * - MCP: pi has none; omp reads mcp.json with ${VAR} expansion at load time,
+ *   so the Arij tool channel rides the child's environment (buildEnv).
+ *   Measured on 17.2.1: MCP tools are ORTHOGONAL to the `--tools` allowlist
+ *   — putting an MCP name into `--tools` is a fatal argv error ("Unknown
+ *   tools in --tools") that kills the spawn. So review sessions keep the
+ *   channel with no flag work at all (under the xdev-off overlay they mount
+ *   as first-class tools, see above).
+ *   See docs/architecture/mcp-provider-matrix.md.
  */
 
 import { writeFileSync } from "fs";
 import os from "os";
 import path from "path";
 import { PiProvider } from "./pi";
-import type { ProviderType } from "./types";
+import type { ProviderSpawnOptions, ProviderType } from "./types";
 
 /** omp built-ins that cannot modify the working tree. */
 export const OMP_READONLY_TOOLS = ["read", "grep", "glob"];
@@ -85,6 +93,38 @@ export class OhMyPiProvider extends PiProvider {
   /** The allowlist alone leaves `write` mounted — see the header. */
   protected restrictedToolsExtraArgs(): string[] {
     return ["--config", ompReadonlyOverlayPath()];
+  }
+
+  /**
+   * omp takes no per-spawn MCP flag: the `arij` entry install.sh writes into
+   * ~/.omp/agent/mcp.json references ${ARIJ_MCP_TOKEN}, ${ARIJ_BASE_URL} and
+   * ${ARIJ_MCP_TOOLSET:-agent}, and omp expands them when it loads the file
+   * — the child's environment is the only seam the per-session values can
+   * ride. Without `options.mcp` no variable is added, the entry's token
+   * expands empty, and the shim exits immediately (install.sh documents
+   * that as the launched-by-hand behavior).
+   *
+   * RESIDUAL EXPOSURE, accepted: the token lands in the child's process
+   * env, where the agent's own bash subshells inherit it — unlike
+   * claude-code, whose 0600 --mcp-config file keeps it out of env and argv
+   * both. Same trust boundary as codex's argv exposure: local-only, scoped
+   * to one session's board access, revoked when the session ends.
+   */
+  buildEnv(options: ProviderSpawnOptions): NodeJS.ProcessEnv {
+    const env = super.buildEnv(options);
+    if (!options.mcp) return env;
+    const merged = { ...env, ...options.mcp.env };
+    // The shim selects its toolset by key PRESENCE (agent configs emit no
+    // ARIJ_MCP_TOOLSET at all), and the mcp.json entry's
+    // `${ARIJ_MCP_TOOLSET:-agent}` default only applies when the key is
+    // ABSENT from this env. A value inherited from the Arij server's own
+    // environment would therefore silently flip every agent session's shim
+    // to the chat toolset — board-wide create/update/start_build on an
+    // agent token, fail-open. Only the channel's own value may pass.
+    if (!("ARIJ_MCP_TOOLSET" in options.mcp.env)) {
+      delete merged.ARIJ_MCP_TOOLSET;
+    }
+    return merged;
   }
 
   protected resumeArgs(cliSessionId: string): string[] {

@@ -10,6 +10,7 @@ import { parseClaudeOutput, isNoTextualOutputFallback } from "./json-parser";
 import {
   isMcpToolsEnabled,
   providerSupportsMcp,
+  arijMcpToolPrefix,
   buildMcpSpawnConfig,
   cleanupMcpConfigFile,
 } from "./mcp-injection";
@@ -110,9 +111,11 @@ class ClaudeProcessManager {
     // their own chat-toolset channel from lib/chat/cli-tool-channel.ts.
     // Strictly best-effort: a session must never fail to spawn because
     // injection did. Gates: settings toggle (absent row = enabled),
-    // provider support (claude-code/codex), an agent_sessions row — the row is
-    // the authority for the project scope the token binds to — and the agent
-    // type not being one of the strict document rewriters.
+    // provider support (claude-code/codex/oh-my-pi), an agent_sessions row —
+    // the row is the authority for the project scope the token binds to —
+    // and the agent type not being one of the strict document rewriters.
+    // The tool spelling and prompt prefix follow the provider (omp says
+    // mcp__arij_*, one underscore short — see arijMcpToolPrefix).
     try {
       if (providerSupportsMcp(provider) && isMcpToolsEnabled()) {
         const row = db
@@ -142,8 +145,11 @@ class ClaudeProcessManager {
           options.mcp = buildMcpSpawnConfig({
             token,
             agentType: row.agentType,
+            provider,
           });
-          options.prompt += "\n" + arijToolsSection(row.agentType ?? null);
+          options.prompt +=
+            "\n" +
+            arijToolsSection(row.agentType ?? null, arijMcpToolPrefix(provider));
         }
       }
     } catch (error) {

@@ -28,11 +28,9 @@ vi.mock("child_process", () => {
     },
   };
 });
-
 import { getProvider } from "@/lib/providers";
 import { ClaudeCodeProvider } from "@/lib/providers/claude-code";
 import { CodexProvider } from "@/lib/providers/codex";
-import { GeminiCliProvider } from "@/lib/providers/gemini-cli";
 import type { ProviderSpawnOptions } from "@/lib/providers/types";
 import { spawnClaude } from "@/lib/claude/spawn";
 
@@ -69,6 +67,11 @@ function createFakeChild() {
     },
     kill: vi.fn(),
     killed: false,
+    // Real ChildProcess fields the kill path reads: a live child reports a
+    // pid and null exit fields, which is what routes the signal to the group.
+    pid: 4242,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
     emitStdout(text: string) {
       for (const fn of stdoutListeners) fn(Buffer.from(text));
     },
@@ -112,10 +115,11 @@ describe("Provider Factory", () => {
     expect(provider.type).toBe("claude-code");
   });
 
-  it("returns GeminiCliProvider for 'gemini-cli'", () => {
-    const provider = getProvider("gemini-cli");
-    expect(provider.type).toBe("gemini-cli");
-    expect(provider).toBeInstanceOf(GeminiCliProvider);
+  it("falls back to claude-code for a legacy provider string", () => {
+    // Rows written before the 2026-08 MCP-only cleanup may still name a
+    // removed provider; the factory must not crash on them.
+    const provider = getProvider("gemini-cli" as never);
+    expect(provider.type).toBe("claude-code");
   });
 });
 
@@ -231,8 +235,69 @@ describe("CodexProvider", () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
       const session = provider.spawn(baseOptions);
+      const killSpy = vi
+        .spyOn(process, "kill")
+        .mockImplementation(() => true);
       const result = provider.cancel(session);
       expect(result).toBe(true);
+      // Negative pid = the whole process group, so the agent's own children
+      // (shells, test runners, dev servers) go down with it.
+      expect(killSpy).toHaveBeenCalledWith(-4242, "SIGTERM");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("escalates to SIGKILL when SIGTERM leaves the agent standing", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    try {
+      const session = provider.spawn(baseOptions);
+      provider.cancel(session);
+      expect(killSpy).toHaveBeenCalledWith(-4242, "SIGTERM");
+
+      // The child ignored SIGTERM: still no exitCode, still no signalCode.
+      // `child.killed` is true by now, which is exactly why the escalation
+      // must not be guarded on it — an agent that outran SIGTERM used to
+      // survive its own cancellation and keep writing to the worktree.
+      fakeChild.killed = true;
+      vi.advanceTimersByTime(5000);
+
+      expect(killSpy).toHaveBeenCalledWith(-4242, "SIGKILL");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not escalate once the agent has actually exited", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    try {
+      const session = provider.spawn(baseOptions);
+      provider.cancel(session);
+      killSpy.mockClear();
+
+      fakeChild.exitCode = 143;
+      vi.advanceTimersByTime(5000);
+
+      expect(killSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to the child alone when the group is already gone", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
+      const error = new Error("ESRCH") as NodeJS.ErrnoException;
+      error.code = "ESRCH";
+      throw error;
+    });
+    try {
+      const session = provider.spawn(baseOptions);
+      // A throwing group signal must not take the cancel path down with it.
+      expect(() => provider.cancel(session)).not.toThrow();
+      expect(killSpy).toHaveBeenCalledWith(-4242, "SIGTERM");
       expect(fakeChild.kill).toHaveBeenCalledWith("SIGTERM");
     } finally {
       vi.useRealTimers();
@@ -250,53 +315,5 @@ describe("CodexProvider", () => {
     expect(mockSpawn.mock.calls[0][0]).toBe("codex");
     const args = mockSpawn.mock.calls[0][1] as string[];
     expect(args.slice(0, 3)).toEqual(["exec", "resume", "cli-codex-1"]);
-  });
-});
-
-describe("GeminiCliProvider", () => {
-  const provider = new GeminiCliProvider();
-
-  it("has type 'gemini-cli'", () => {
-    expect(provider.type).toBe("gemini-cli");
-  });
-
-  it("spawn returns a ProviderSession with handle, kill, and promise", () => {
-    const session = provider.spawn(baseOptions);
-    expect(session.handle).toMatch(/^gemini-/);
-    expect(typeof session.kill).toBe("function");
-    expect(session.promise).toBeInstanceOf(Promise);
-  });
-
-  it("spawn resolves with ProviderResult from Gemini CLI", async () => {
-    const session = provider.spawn(baseOptions);
-    fakeChild.emitStdout(JSON.stringify({ result: "Gemini output" }));
-    fakeChild.emitClose(0);
-
-    const result = await session.promise;
-    expect(result.success).toBe(true);
-    expect(result.result).toContain("Gemini output");
-    expect(result.endedWithQuestion).toBe(false);
-  });
-
-  it("preserves endedWithQuestion from Gemini output", async () => {
-    const session = provider.spawn(baseOptions);
-    fakeChild.emitStdout("Need clarification AskUserQuestion");
-    fakeChild.emitClose(0);
-
-    const result = await session.promise;
-    expect(result.endedWithQuestion).toBe(true);
-  });
-
-  it("forwards cliSessionId and resumeSession as --resume args", () => {
-    provider.spawn({
-      ...baseOptions,
-      cliSessionId: "cli-gem-1",
-      resumeSession: true,
-    });
-
-    expect(mockSpawn).toHaveBeenCalledOnce();
-    expect(mockSpawn.mock.calls[0][0]).toBe("gemini");
-    const args = mockSpawn.mock.calls[0][1] as string[];
-    expect(args.slice(0, 2)).toEqual(["--resume", "cli-gem-1"]);
   });
 });

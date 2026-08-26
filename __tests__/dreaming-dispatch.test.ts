@@ -365,7 +365,7 @@ describe("dispatchDreamingSession", () => {
     expect(notification!.title).toContain("Project memory updated by Dreaming");
     expect(notification!.title).toContain("1 session analyzed");
     expect(notification!.title).toContain("120 → ");
-    expect(notification!.targetUrl).toBe(`/projects/${projectId}/documents`);
+    expect(notification!.targetUrl).toBe(`/projects/${projectId}/spec#memory-panel`);
     expect(notification!.sessionId).toBe(result.sessionId);
   });
 
@@ -378,7 +378,7 @@ describe("dispatchDreamingSession", () => {
       result: claudeEnvelope(
         DREAMING_MEMORY_SECTIONS.map(
           (title) => `## ${title}\n\n- a rule`
-        ).join("\n\n") + `\n${"- filler\n".repeat(2000)}`
+        ).join("\n\n") + `\n- ${"x".repeat(PROJECT_MEMORY_MAX_CHARS + 500)}`
       ),
       duration: 1000,
     };
@@ -389,7 +389,7 @@ describe("dispatchDreamingSession", () => {
     expect(getProjectMemoryContent(projectId)).toHaveLength(
       PROJECT_MEMORY_MAX_CHARS
     );
-    expect(PROJECT_MEMORY_MAX_CHARS).toBe(8000);
+    expect(PROJECT_MEMORY_MAX_CHARS).toBe(12000);
   });
 
   /**

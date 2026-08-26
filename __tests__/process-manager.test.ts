@@ -97,15 +97,15 @@ describe("Process Manager", () => {
       expect(info.provider).toBe("codex");
     });
 
-    it("starts a Gemini session when provider is gemini-cli", () => {
+    it("starts an omp session when provider is oh-my-pi", () => {
       const info = processManager.start(
-        "s2-gemini",
+        "s2-omp",
         { mode: "code", prompt: "test" },
-        "gemini-cli",
+        "oh-my-pi",
       );
-      expect(info.sessionId).toBe("s2-gemini");
+      expect(info.sessionId).toBe("s2-omp");
       expect(info.status).toBe("running");
-      expect(info.provider).toBe("gemini-cli");
+      expect(info.provider).toBe("oh-my-pi");
     });
 
     it("throws if session is already running", () => {

@@ -196,7 +196,8 @@ export function projectContextSections(
 }
 
 /**
- * Instructions for the Arij MCP tool channel (mcp__arij__* tools).
+ * Instructions for the Arij MCP tool channel (the mcp__arij tools, in the
+ * spawning provider's spelling).
  *
  * Deliberately called by NO builder function in prompt-builder.ts: the
  * section is appended centrally by processManager.start() — and only when
@@ -214,11 +215,23 @@ export function projectContextSections(
  * required because it is the fallback those drivers use when no structured
  * verdict was submitted, which is the only channel a provider without MCP
  * injection has.
+ *
+ * `toolPrefix` is the spawning provider's tool-name spelling
+ * (arijMcpToolPrefix in mcp-injection.ts): omp names the tools
+ * `mcp__arij_*`, one underscore short of claude/codex, and agy mounts them
+ * under their BARE names (empty prefix) — the default keeps claude/codex
+ * prompts byte-identical.
  */
-export function arijToolsSection(agentType: string | null): string {
+export function arijToolsSection(
+  agentType: string | null,
+  toolPrefix = "mcp__arij__",
+): string {
+  const naming = toolPrefix
+    ? `through MCP tools named ${toolPrefix}*`
+    : "through the arij MCP server's tools, mounted under their bare names";
   const base =
     "You are connected to Arij, the orchestrator that launched this session, " +
-    "through MCP tools named mcp__arij__*. Use them for structured signals " +
+    `${naming}. Use them for structured signals ` +
     "instead of prose conventions: get_ticket to re-read current ticket " +
     "state; post_comment for substantive progress/result notes; " +
     "create_bug to preserve an adjacent bug as a standalone, non-blocking " +

@@ -2,7 +2,8 @@
  * Arij MCP tool-channel injection — gating and per-session spawn config.
  *
  * Spawned agent sessions get a structured channel back to Arij: a stdio MCP
- * shim (bin/arij-mcp.mjs) exposing mcp__arij__* tools that bridge to the
+ * shim (bin/arij-mcp.mjs) exposing arij tools (mcp__arij__* on claude/codex,
+ * mcp__arij_* on omp — see arijMcpToolPrefix) that bridge to the
  * /api/mcp/* HTTP routes with a per-session bearer token
  * (lib/mcp/token-store.ts). This module decides WHEN a spawn gets the
  * channel and builds WHAT the providers inject; the single wiring point that
@@ -12,9 +13,11 @@
  *   1. The `mcp_tools_enabled` setting is not explicitly false — an ABSENT
  *      row means ENABLED (default on).
  *   2. The provider supports per-spawn MCP config injection: claude-code
- *      (--mcp-config <file>) and codex (-c mcp_servers.* overrides). gemini-cli is
- *      out for v1 — its CLI only reads MCP config from .gemini/settings.json
- *      files, which would mean writing config into user worktrees.
+ *      (--mcp-config <file>), codex (-c mcp_servers.* overrides) and
+ *      oh-my-pi (env vars expanded by its mcp.json entry at load time).
+ *      gemini-cli is out for v1 — its CLI only reads MCP config from
+ *      .gemini/settings.json files, which would mean writing config into
+ *      user worktrees.
  *   3. The session has an agent_sessions row (checked by the caller) — the
  *      row provides the project scope the token is bound to. Spawns without
  *      rows (generate-spec, import) get no injection by construction.
@@ -42,52 +45,89 @@ import type { McpSpawnConfig } from "@/lib/providers/types";
  */
 export const MCP_TOOLS_ENABLED_SETTING_KEY = "mcp_tools_enabled";
 
-/** MCP server name — the agent sees tools as `mcp__arij__<tool>`. */
+/**
+ * MCP server name — the agent sees tools as `mcp__arij__<tool>` (claude,
+ * codex) or `mcp__arij_<tool>` (omp); see arijMcpToolPrefix.
+ */
 export const ARIJ_MCP_SERVER_NAME = "arij";
 
 /** Path of the stdio shim, relative to the app root (the server's cwd). */
 export const ARIJ_MCP_SHIM_RELATIVE_PATH = ["bin", "arij-mcp.mjs"] as const;
 
-/** The agent tools, as exact allowlist entries (no wildcards). */
-export const ARIJ_MCP_ALLOWED_TOOL_NAMES = [
-  "mcp__arij__get_ticket",
-  "mcp__arij__update_ticket_status",
-  "mcp__arij__post_comment",
-  "mcp__arij__report_friction",
-  "mcp__arij__attach_artifact",
-  "mcp__arij__create_bug",
-  "mcp__arij__ask_question",
-  "mcp__arij__submit_findings",
-  "mcp__arij__submit_grading",
+/** The agent tools, as bare names (no server prefix). */
+export const ARIJ_MCP_AGENT_TOOLS = [
+  "get_ticket",
+  "update_ticket_status",
+  "post_comment",
+  "report_friction",
+  "attach_artifact",
+  "create_bug",
+  "ask_question",
+  "submit_findings",
+  "submit_grading",
   // Board-refinement tools. Agent toolset only: they reshape the planning
   // half of the board (priority, execution order, dependency edges, and the
   // Backlog <-> To do promotion), which is not something a chat turn should
   // be able to do — see ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES below, which
   // deliberately does not list them, and the AGENT_ONLY check the routes run.
-  "mcp__arij__set_priority",
-  "mcp__arij__reorder_tickets",
-  "mcp__arij__add_dependency",
-  "mcp__arij__remove_dependency",
-  "mcp__arij__promote_ticket",
+  "set_priority",
+  "reorder_tickets",
+  "add_dependency",
+  "remove_dependency",
+  "promote_ticket",
 ] as const;
 
 /**
- * The chat-toolset tools (CLI chat conversations), as exact allowlist
- * entries. Mirrors the fast-mode board tools (lib/chat/board-tools.ts);
+ * The chat-toolset tools (CLI chat conversations), as bare names. Mirrors
+ * the fast-mode board tools (lib/chat/board-tools.ts);
  * ask_question/report_friction/submit_findings/submit_grading are deliberately
  * absent — nothing holds a chat turn, chat turns have no durable session, and
  * chat tokens are rejected by those routes anyway.
  */
-export const ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES = [
-  "mcp__arij__list_tickets",
-  "mcp__arij__get_ticket",
-  "mcp__arij__create_ticket",
-  "mcp__arij__update_ticket",
-  "mcp__arij__update_ticket_status",
-  "mcp__arij__post_comment",
-  "mcp__arij__get_agent_status",
-  "mcp__arij__start_build",
+export const ARIJ_MCP_CHAT_TOOLS = [
+  "list_tickets",
+  "get_ticket",
+  "create_ticket",
+  "update_ticket",
+  "update_ticket_status",
+  "post_comment",
+  "get_agent_status",
+  "start_build",
 ] as const;
+
+/**
+ * How a provider's CLI prefixes the server's tool names. claude-code and
+ * codex join server and tool with a DOUBLE underscore
+ * (`mcp__arij__get_ticket`); omp joins with a SINGLE one
+ * (`mcp__arij_get_ticket`); agy flattens MCP tools to their BARE names
+ * (`get_ticket`, measured on 1.1.21). The spelling matters everywhere a
+ * tool is named — allowlists and prompt text alike: telling an omp or agy
+ * agent to call `mcp__arij__get_ticket` is telling it to call a tool that
+ * does not exist.
+ */
+export function arijMcpToolPrefix(provider: string): string {
+  if (provider === "agy") return "";
+  const separator = provider === "oh-my-pi" ? "_" : "__";
+  return `mcp__${ARIJ_MCP_SERVER_NAME}${separator}`;
+}
+
+/** One tool's full name in `provider`'s spelling. */
+export function arijMcpToolName(provider: string, tool: string): string {
+  return `${arijMcpToolPrefix(provider)}${tool}`;
+}
+
+/**
+ * The agent tools as exact allowlist entries (no wildcards), in the
+ * claude/codex spelling — the default used wherever no provider is named.
+ */
+export const ARIJ_MCP_ALLOWED_TOOL_NAMES = ARIJ_MCP_AGENT_TOOLS.map((t) =>
+  arijMcpToolName("claude-code", t),
+);
+
+/** The chat toolset as exact allowlist entries, claude/codex spelling. */
+export const ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES = ARIJ_MCP_CHAT_TOOLS.map((t) =>
+  arijMcpToolName("claude-code", t),
+);
 
 /** Which shim toolset a spawn config selects (ARIJ_MCP_TOOLSET env). */
 export type ArijMcpToolset = "agent" | "chat";
@@ -111,17 +151,20 @@ export const AGENT_TYPE_WITHHELD_TOOL_NAMES: Record<string, readonly string[]> =
   {
     // promote_ticket is refinement's channel for column moves: it is pinned
     // to the two planning columns and demands the missing question.
-    refinement: ["mcp__arij__update_ticket_status"],
+    refinement: ["update_ticket_status"],
   };
 
 /** The agent tools a given agent type may be offered. */
 export function allowedToolNamesForAgentType(
-  agentType: string | null | undefined
+  agentType: string | null | undefined,
+  provider = "claude-code",
 ): string[] {
   const withheld = new Set(
     (agentType && AGENT_TYPE_WITHHELD_TOOL_NAMES[agentType]) || []
   );
-  return ARIJ_MCP_ALLOWED_TOOL_NAMES.filter((name) => !withheld.has(name));
+  return ARIJ_MCP_AGENT_TOOLS.filter((tool) => !withheld.has(tool)).map((tool) =>
+    arijMcpToolName(provider, tool),
+  );
 }
 
 /**
@@ -160,11 +203,23 @@ export function isMcpToolsEnabled(): boolean {
 
 /**
  * Whether a provider has a per-spawn MCP injection surface. Verdicts from
- * the architecture contract: claude-code yes, codex yes, gemini-cli no
- * (revisit when the CLI is installed and gains a per-spawn override).
+ * the architecture contract (docs/architecture/mcp-provider-matrix.md):
+ * claude-code yes (--mcp-config file), codex yes (-c mcp_servers.*
+ * overrides), oh-my-pi yes (its mcp.json entry expands ${ARIJ_MCP_TOKEN}
+ * at load time, so the child's environment is the per-spawn surface — see
+ * OhMyPiProvider.buildEnv), agy yes (its static mcp_config.json entry
+ * spawns the shim from the CLI process, which inherits the child env —
+ * see AgyProvider.buildEnv). Since the 2026-08 cleanup every REGISTERED
+ * provider qualifies; the gate still matters for legacy DB rows naming a
+ * removed provider.
  */
 export function providerSupportsMcp(provider: string): boolean {
-  return provider === "claude-code" || provider === "codex";
+  return (
+    provider === "claude-code" ||
+    provider === "codex" ||
+    provider === "oh-my-pi" ||
+    provider === "agy"
+  );
 }
 
 /**
@@ -176,16 +231,22 @@ export function providerSupportsMcp(provider: string): boolean {
  *
  * The default (agent) toolset keeps the config byte-identical to before
  * toolsets existed: no ARIJ_MCP_TOOLSET key is emitted at all.
+ *
+ * `provider` selects ONLY the tool-name spelling of `allowedToolNames`
+ * (see arijMcpToolName); the default keeps existing claude/codex call
+ * sites byte-identical.
  */
 export function buildMcpSpawnConfig({
   token,
   toolset = "agent",
   agentType = null,
+  provider = "claude-code",
 }: {
   token: string;
   toolset?: ArijMcpToolset;
   /** Narrows the agent toolset — see AGENT_TYPE_WITHHELD_TOOL_NAMES. */
   agentType?: string | null;
+  provider?: string;
 }): McpSpawnConfig {
   return {
     serverName: ARIJ_MCP_SERVER_NAME,
@@ -198,8 +259,8 @@ export function buildMcpSpawnConfig({
     },
     allowedToolNames:
       toolset === "chat"
-        ? [...ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES]
-        : allowedToolNamesForAgentType(agentType),
+        ? ARIJ_MCP_CHAT_TOOLS.map((tool) => arijMcpToolName(provider, tool))
+        : allowedToolNamesForAgentType(agentType, provider),
   };
 }
 

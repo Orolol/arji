@@ -992,7 +992,7 @@ export default function SettingsPage() {
           <p className="text-sm text-muted-foreground">
             Each project can maintain a learned-memory document that is
             injected into every agent prompt (editable in the project&apos;s
-            Docs tab).
+            Spec &amp; Memory tab).
           </p>
         </div>
         <label className="flex items-start gap-2 text-sm cursor-pointer">

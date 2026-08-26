@@ -41,7 +41,7 @@ vi.mock("@/components/ui/select", () => ({
 let mockNamedAgents = [
   { id: "agent-1", name: "Claude Code (Sonnet)", provider: "claude-code", model: "claude-3-7-sonnet" },
   { id: "agent-2", name: "Codex (GPT-5)", provider: "codex", model: "gpt-5.3" },
-  { id: "agent-3", name: "Gemini CLI", provider: "gemini-cli", model: "gemini-2.0-flash" },
+  { id: "agent-3", name: "Oh My Pi (default)", provider: "oh-my-pi", model: "pi-large" },
 ];
 
 vi.mock("@/hooks/useNamedAgentsList", () => ({
@@ -108,10 +108,27 @@ describe("Unified Chat Agent & Provider Selection (Epic 0OQJfqU5gZ6S)", () => {
     expect(optionValues).toContain("agent-2");
     expect(optionValues).toContain("agent-3");
 
-    // CLI providers are present
-    expect(optionValues).toContain("codex");
-    expect(optionValues).toContain("gemini-cli");
-    expect(optionValues).toContain("pi");
+    // CLI providers are present — exactly the registered trio, in order.
+    const namedAgentIds = new Set(mockNamedAgents.map((a) => a.id));
+    const cliOptions = Array.from(select.options).filter(
+      (opt) => opt.value !== "openai-compatible" && !namedAgentIds.has(opt.value),
+    );
+    expect(cliOptions.map((opt) => opt.value)).toEqual([
+      "claude-code",
+      "codex",
+      "oh-my-pi",
+      "agy",
+    ]);
+    expect(cliOptions.map((opt) => opt.textContent)).toEqual([
+      "Claude Code (CLI)",
+      "Codex (CLI)",
+      "Oh My Pi (CLI)",
+      "Antigravity (CLI)",
+    ]);
+
+    // Removed providers no longer appear.
+    expect(optionValues).not.toContain("gemini-cli");
+    expect(optionValues).not.toContain("pi");
 
     // Check label for OpenAI-compatible
     const openAiOption = Array.from(select.options).find((opt) => opt.value === "openai-compatible");
@@ -184,7 +201,7 @@ describe("Unified Chat Agent & Provider Selection (Epic 0OQJfqU5gZ6S)", () => {
 
     expect(onSelect).toHaveBeenCalledWith({
       namedAgentId: "agent-3",
-      provider: "gemini-cli",
+      provider: "oh-my-pi",
     });
   });
   it("dispatches correct selection payload when switching to a CLI Provider", () => {
@@ -197,13 +214,13 @@ describe("Unified Chat Agent & Provider Selection (Epic 0OQJfqU5gZ6S)", () => {
     );
 
     fireEvent.change(screen.getByTestId("chat-agent-select"), {
-      target: { value: "gemini-cli" },
+      target: { value: "oh-my-pi" },
     });
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith({
       namedAgentId: null,
-      provider: "gemini-cli",
+      provider: "oh-my-pi",
     });
   });
 

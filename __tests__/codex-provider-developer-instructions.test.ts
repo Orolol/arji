@@ -62,6 +62,11 @@ function createFakeChild() {
     },
     kill: vi.fn(),
     killed: false,
+    // Real ChildProcess fields the kill path reads: a live child reports a
+    // pid and null exit fields, which is what routes the signal to the group.
+    pid: 4242,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
     emitStdout(text: string) {
       for (const fn of stdoutListeners) fn(Buffer.from(text));
     },
