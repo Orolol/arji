@@ -132,7 +132,7 @@ describe("EpicCard — agent activity indicator", () => {
     expect(container.querySelector(".progress-track .crawl-fill")).toBeTruthy();
   });
 
-  it("names the running action, provider and elapsed time on the card", () => {
+  it("names the running action and the agent name on the card", () => {
     render(
       <EpicCard
         epic={makeEpic()}
@@ -150,7 +150,8 @@ describe("EpicCard — agent activity indicator", () => {
 
     const line = screen.getByTestId("epic-activity-epic-1");
     expect(line.textContent).toContain("Build");
-    expect(line.textContent).toContain("Claude Code");
+    expect(line.textContent).toContain("Test Agent");
+    expect(line.textContent).not.toContain("Claude Code");
     expect(line).toHaveAttribute("aria-label", "Build active: Test Agent");
   });
 
