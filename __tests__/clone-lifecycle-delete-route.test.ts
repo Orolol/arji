@@ -291,6 +291,7 @@ describe("perProjectSettingKeys", () => {
       "agent_max_concurrent:proj-1",
       "webhook_url:proj-1",
       "pipeline_enabled:proj-1",
+      "pipeline_grader_enabled:proj-1",
       "pipeline_max_attempts:proj-1",
       "pipeline_max_fix_cycles:proj-1",
       "verify_commands:proj-1",
@@ -299,6 +300,7 @@ describe("perProjectSettingKeys", () => {
       "night_cost_cap_usd:proj-1",
       "dreaming_after_night_run:proj-1",
       "dreaming_last_cutoff:proj-1",
+      "ci_autofix_enabled:proj-1",
     ]);
   });
 });

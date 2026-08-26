@@ -18,7 +18,10 @@ const MIGRATION_TAG = "0028_project_clone_source";
 const NEW_COLUMNS = ["clone_source", "git_remote_url", "default_branch"];
 
 const journal = JSON.parse(
-  fs.readFileSync(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf-8")
+  fs.readFileSync(
+    path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"),
+    "utf-8",
+  ),
 ) as { entries: { idx: number; when: number; tag: string }[] };
 
 const tempDirs: string[] = [];
@@ -56,12 +59,12 @@ describe("0028_project_clone_source — migration file", () => {
   it("adds the three columns with ALTER TABLE statements", () => {
     const sql = fs.readFileSync(
       path.join(MIGRATIONS_FOLDER, `${MIGRATION_TAG}.sql`),
-      "utf-8"
+      "utf-8",
     );
 
     for (const column of NEW_COLUMNS) {
       expect(sql).toMatch(
-        new RegExp(`ALTER TABLE projects ADD COLUMN ${column} TEXT`, "i")
+        new RegExp(`ALTER TABLE projects ADD COLUMN ${column} TEXT`, "i"),
       );
     }
   });
@@ -103,7 +106,9 @@ describe("0028_project_clone_source — applied schema", () => {
   });
 
   it("mirrors the columns in lib/db/schema.ts", () => {
-    const declared = Object.values(getTableColumns(projects)).map((c) => c.name);
+    const declared = Object.values(getTableColumns(projects)).map(
+      (c) => c.name,
+    );
 
     expect(declared).toEqual(expect.arrayContaining(NEW_COLUMNS));
   });
@@ -115,13 +120,13 @@ describe("0028_project_clone_source — applied schema", () => {
       // A row written the pre-0028 way: no provenance columns mentioned.
       conn
         .prepare(
-          "INSERT INTO projects (id, name, git_repo_path) VALUES (?, ?, ?)"
+          "INSERT INTO projects (id, name, git_repo_path) VALUES (?, ?, ?)",
         )
         .run("p1", "Legacy project", "/home/user/code/legacy");
 
       const row = conn
         .prepare(
-          "SELECT name, git_repo_path, clone_source, git_remote_url, default_branch FROM projects WHERE id = ?"
+          "SELECT name, git_repo_path, clone_source, git_remote_url, default_branch FROM projects WHERE id = ?",
         )
         .get("p1") as Record<string, unknown>;
 
@@ -142,7 +147,7 @@ describe("0028_project_clone_source — applied schema", () => {
       conn
         .prepare(
           `INSERT INTO projects (id, name, git_repo_path, github_owner_repo, clone_source, git_remote_url, default_branch)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           "p2",
@@ -151,12 +156,12 @@ describe("0028_project_clone_source — applied schema", () => {
           "Orolol/arij",
           "github",
           "https://github.com/Orolol/arij.git",
-          "main"
+          "main",
         );
 
       const row = conn
         .prepare(
-          "SELECT clone_source, git_remote_url, default_branch FROM projects WHERE id = ?"
+          "SELECT clone_source, git_remote_url, default_branch FROM projects WHERE id = ?",
         )
         .get("p2");
 
@@ -176,7 +181,7 @@ describe("0028_project_clone_source — applied schema", () => {
     // the migrator replays entries strictly newer than the last stamped one,
     // so a stray later stamp would legitimately mask 0028. The later
     // migrations are safe to replay: 0029 is an idempotent rebuild, and the
-    // ADD COLUMN migrations after 0028 (0030, 0031, 0032) have their columns
+    // ADD COLUMN migrations after 0028 (0030 through 0033) have their columns
     // dropped here too — replaying an ALTER over an existing column would throw.
     withDb(file, (conn) => {
       initDb(conn);
@@ -187,6 +192,8 @@ describe("0028_project_clone_source — applied schema", () => {
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
       conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
+      conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
       const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')
@@ -227,9 +234,9 @@ describe("0028_project_clone_source — applied schema", () => {
       expect(() => initDb(conn)).not.toThrow();
 
       const stamped = (
-        conn
-          .prepare('SELECT created_at FROM "__drizzle_migrations"')
-          .all() as { created_at: number }[]
+        conn.prepare('SELECT created_at FROM "__drizzle_migrations"').all() as {
+          created_at: number;
+        }[]
       ).map((r) => Number(r.created_at));
       const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);
 

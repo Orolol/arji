@@ -16,6 +16,7 @@ import type {
 const driverMocks = vi.hoisted(() => ({
   launchStage: vi.fn(),
   assessReview: vi.fn(),
+  assessGrading: vi.fn(),
   readSessionStatus: vi.fn(() => "completed" as string | null),
   checkGuards: vi.fn(() => ({
     conflictSessionId: null as string | null,
@@ -40,6 +41,7 @@ vi.mock("@/lib/pipeline/stages", () => ({
   createPipelineStageDriver: vi.fn(() => ({
     launchStage: driverMocks.launchStage,
     assessReview: driverMocks.assessReview,
+    assessGrading: driverMocks.assessGrading,
     readSessionStatus: driverMocks.readSessionStatus,
     checkGuards: driverMocks.checkGuards,
     runDeterministicVerification: driverMocks.runDeterministicVerification,
@@ -54,9 +56,17 @@ const { db } = await import("@/lib/db");
 const { projects, epics, settings, ticketActivityLog } = await import(
   "@/lib/db/schema"
 );
-const { startPipelineRun, resolvePipelineEnabled, pipelineRegistry } =
-  await import("@/lib/pipeline");
-const { PIPELINE_REASONS, pipelineEnabledSettingKey } = await import(
+const {
+  startPipelineRun,
+  resolvePipelineEnabled,
+  resolvePipelineGraderEnabled,
+  pipelineRegistry,
+} = await import("@/lib/pipeline");
+const {
+  PIPELINE_REASONS,
+  pipelineEnabledSettingKey,
+  pipelineGraderEnabledSettingKey,
+} = await import(
   "@/lib/pipeline/constants"
 );
 const { pipelineMaxAttemptsSettingKey } = await import(
@@ -367,5 +377,23 @@ describe("resolvePipelineEnabled", () => {
       .values({ key: pipelineEnabledSettingKey(projectId), value: "false" })
       .run();
     expect(resolvePipelineEnabled(projectId)).toBe(false);
+  });
+
+  it("keeps grading OFF unless globally or per-project enabled", () => {
+    const { projectId } = seed();
+    expect(resolvePipelineGraderEnabled(projectId)).toBe(false);
+
+    db.insert(settings)
+      .values({ key: "pipeline_grader_enabled", value: "true" })
+      .run();
+    expect(resolvePipelineGraderEnabled(projectId)).toBe(true);
+
+    db.insert(settings)
+      .values({
+        key: pipelineGraderEnabledSettingKey(projectId),
+        value: "false",
+      })
+      .run();
+    expect(resolvePipelineGraderEnabled(projectId)).toBe(false);
   });
 });

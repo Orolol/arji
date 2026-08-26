@@ -240,6 +240,7 @@ export interface NamedAgent {
   name: string;
   provider: AgentProvider;
   model: string;
+  escalatesTo: string | null;
   createdAt: string | null;
 }
 
@@ -264,7 +265,12 @@ export function useNamedAgents() {
   }, [load]);
 
   const createNamedAgent = useCallback(
-    async (input: { name: string; provider: AgentProvider; model?: string }) => {
+    async (input: {
+      name: string;
+      provider: AgentProvider;
+      model?: string;
+      escalatesTo?: string | null;
+    }) => {
       const res = await fetch("/api/agent-config/named-agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -280,7 +286,12 @@ export function useNamedAgents() {
   const updateNamedAgent = useCallback(
     async (
       id: string,
-      updates: { name?: string; provider?: AgentProvider; model?: string },
+      updates: {
+        name?: string;
+        provider?: AgentProvider;
+        model?: string;
+        escalatesTo?: string | null;
+      },
     ) => {
       const res = await fetch(`/api/agent-config/named-agents/${id}`, {
         method: "PUT",

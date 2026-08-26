@@ -57,6 +57,12 @@ const REVIEW_CONTEXT_STORY = {
   storyId: "us-1",
 };
 
+const GRADING_CONTEXT_EPIC = {
+  purpose: "grading" as const,
+  projectId: "proj-1",
+  epicId: "epic-1",
+};
+
 /** Seeds resolveAgent's chain: no project override, global named assignment. */
 function seedDefaultResolution(provider: string) {
   const namedAgentId = `default-${provider}`;
@@ -153,6 +159,27 @@ describe("resolveAgentForDispatch — segregation on", () => {
     expect(result.segregated).toBe(true);
     expect(result.builderProvider).toBe("claude-code");
     expect(result.namedAgentId).toBeNull();
+  });
+
+  it("applies the same configured segregation to grading agents", async () => {
+    seedDefaultResolution("claude-code");
+    dbMockState.getQueue.push(SEGREGATION_ON);
+    dbMockState.getQueue.push({ provider: "claude-code" });
+    availabilityState.available.add("codex");
+
+    const { resolveAgentForDispatch } = await import(
+      "@/lib/agent-config/agent-resolution"
+    );
+    const result = await resolveAgentForDispatch(
+      "grading",
+      "proj-1",
+      null,
+      GRADING_CONTEXT_EPIC
+    );
+
+    expect(result.provider).toBe("codex");
+    expect(result.segregated).toBe(true);
+    expect(result.builderProvider).toBe("claude-code");
   });
 
   it("picks the alternative deterministically in stable PROVIDER_OPTIONS order", async () => {
@@ -309,6 +336,50 @@ describe("resolveAgentForDispatch — segregation on", () => {
 
     expect(result.provider).toBe("codex");
     expect(result.segregated).toBe(true);
+  });
+});
+
+describe("pickAlternativeReviewProvider — multiple exclusions", () => {
+  it("skips both the builder and reviewer for a Full Auto second opinion", async () => {
+    availabilityState.available.add("claude-code");
+    availabilityState.available.add("codex");
+    availabilityState.available.add("gemini-cli");
+
+    const { pickAlternativeReviewProvider } = await import(
+      "@/lib/agent-config/review-segregation"
+    );
+    await expect(
+      pickAlternativeReviewProvider("claude-code", ["codex"])
+    ).resolves.toBe("gemini-cli");
+  });
+
+  it("refuses the gate when no third installed provider exists", async () => {
+    availabilityState.available.add("claude-code");
+    availabilityState.available.add("codex");
+
+    const { pickAlternativeReviewProvider } = await import(
+      "@/lib/agent-config/review-segregation"
+    );
+    await expect(
+      pickAlternativeReviewProvider("claude-code", ["codex"])
+    ).resolves.toBeNull();
+  });
+
+  it("applies an eligibility filter after excluding builder and reviewer", async () => {
+    availabilityState.available.add("claude-code");
+    availabilityState.available.add("codex");
+    availabilityState.available.add("gemini-cli");
+
+    const { pickAlternativeReviewProvider } = await import(
+      "@/lib/agent-config/review-segregation"
+    );
+    await expect(
+      pickAlternativeReviewProvider(
+        "gemini-cli",
+        ["claude-code"],
+        (provider) => provider === "codex"
+      )
+    ).resolves.toBe("codex");
   });
 });
 

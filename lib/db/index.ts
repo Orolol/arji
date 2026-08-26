@@ -21,13 +21,41 @@ export type ArijDatabase = BetterSQLite3Database<typeof schema>;
 let _sqlite: Database.Database | null = null;
 let _db: ArijDatabase | null = null;
 
-function createConnection(): Database.Database {
+/**
+ * Where the SQLite file lives.
+ *
+ * `ARIJ_DB_PATH` overrides the default — vitest.setup.ts points every test
+ * file at its own temp database with it. Without that override a test that
+ * fails to mock `@/lib/db` (a detached `vi.mock`, a `vi.resetModules()`
+ * generation mismatch — see __tests__/helpers/db-mock.ts) opens the
+ * developer's real board and runs its fixtures against it: suites that call
+ * `db.delete(...)` in a `beforeEach` empty it. So under vitest, opening the
+ * default path is refused outright rather than silently destroying data.
+ */
+function resolveDatabaseFile(): string {
+  const override = process.env.ARIJ_DB_PATH;
+  if (override && override.trim()) {
+    const dir = path.dirname(override);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    return override;
+  }
+
+  if (process.env.VITEST) {
+    throw new Error(
+      "Refusing to open the production database (data/arij.db) from a test run. " +
+        "Mock @/lib/db, or set ARIJ_DB_PATH to a temp file — vitest.setup.ts does this for every test file.",
+    );
+  }
+
   const dataDir = path.join(process.cwd(), "data");
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
+  return path.join(dataDir, "arij.db");
+}
 
-  const connection = new Database(path.join(dataDir, "arij.db"));
+function createConnection(): Database.Database {
+  const connection = new Database(resolveDatabaseFile());
   connection.pragma("journal_mode = WAL");
   connection.pragma("foreign_keys = ON");
   return connection;

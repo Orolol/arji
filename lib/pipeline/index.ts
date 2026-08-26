@@ -11,6 +11,7 @@ import {
   DEFAULT_PIPELINE_MAX_ATTEMPTS,
   DEFAULT_PIPELINE_MAX_FIX_CYCLES,
   PIPELINE_ENABLED_SETTING_KEY,
+  PIPELINE_GRADER_ENABLED_SETTING_KEY,
   PIPELINE_MAX_ATTEMPTS_SETTING_KEY,
   PIPELINE_MAX_FIX_CYCLES_SETTING_KEY,
   PIPELINE_MAX_SESSIONS_PER_RUN,
@@ -19,6 +20,7 @@ import {
   parsePipelineMaxAttempts,
   parsePipelineMaxFixCycles,
   pipelineEnabledSettingKey,
+  pipelineGraderEnabledSettingKey,
   pipelineMaxAttemptsSettingKey,
   pipelineMaxFixCyclesSettingKey,
 } from "./constants";
@@ -89,6 +91,18 @@ export function resolvePipelineEnabled(projectId: string): boolean {
   for (const key of [
     pipelineEnabledSettingKey(projectId),
     PIPELINE_ENABLED_SETTING_KEY,
+  ]) {
+    const parsed = parsePipelineEnabledSetting(readSettingValue(key));
+    if (parsed !== null) return parsed;
+  }
+  return false;
+}
+
+/** Effective grader option: project override → global → OFF. */
+export function resolvePipelineGraderEnabled(projectId: string): boolean {
+  for (const key of [
+    pipelineGraderEnabledSettingKey(projectId),
+    PIPELINE_GRADER_ENABLED_SETTING_KEY,
   ]) {
     const parsed = parsePipelineEnabledSetting(readSettingValue(key));
     if (parsed !== null) return parsed;
@@ -225,6 +239,7 @@ export function startPipelineRun(input: StartPipelineRunInput): {
     },
     launchStage: driver.launchStage,
     runDeterministicVerification: driver.runDeterministicVerification,
+    gradingEnabled: resolvePipelineGraderEnabled(input.projectId),
     runVerifyGate: createVerifyGate({
       projectId: input.projectId,
       scope: input.scope,
@@ -232,6 +247,7 @@ export function startPipelineRun(input: StartPipelineRunInput): {
       userStoryId: input.userStoryId,
     }),
     assessReview: driver.assessReview,
+    assessGrading: driver.assessGrading,
     readSessionStatus: driver.readSessionStatus,
     checkGuards: driver.checkGuards,
     parkRejectedTicket: (lastCodeSessionId, reason) => {

@@ -82,6 +82,8 @@ describe("task-to-agent assignments", () => {
     expect(screen.getByText("All projects")).toBeTruthy();
     expect(screen.queryByText(/^Providers?$/i)).toBeNull();
     expect(screen.getAllByText(/specific agent/i).length).toBeGreaterThan(0);
+    expect(screen.getByText("Conversation Title")).toBeTruthy();
+    expect(screen.getByText("Import Analysis")).toBeTruthy();
   });
 
   it("assigns a named agent to a role immediately", async () => {

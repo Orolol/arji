@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { loadPromptComments } from "@/lib/claude/prompt-comments";
 import {
   epics,
   ticketComments,
@@ -16,6 +17,7 @@ import { createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
 import { buildTicketBuildPrompt } from "@/lib/claude/prompt-builder";
+import { isVisualProofEnabled } from "@/lib/claude/visual-proof";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import {
   classifySessionOutcome,
@@ -119,12 +121,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // Load context
-  const comments = db
-    .select()
-    .from(ticketComments)
-    .where(eq(ticketComments.userStoryId, storyId))
-    .orderBy(ticketComments.createdAt)
-    .all();
+  const comments = loadPromptComments({ userStoryId: storyId });
 
   const ticketBuildSystemPrompt = await resolveAgentPrompt(
     "ticket_build",
@@ -145,12 +142,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     [],
     epic,
     story,
-    comments.map((c) => ({
-      author: c.author as "user" | "agent",
-      content: c.content,
-      createdAt: c.createdAt ?? "",
-    })),
-    ticketBuildSystemPrompt
+    comments,
+
+    ticketBuildSystemPrompt,
+    { visualProofEnabled: isVisualProofEnabled() }
   );
 
   // Only user-written text can reference an Arij document; an agent comment

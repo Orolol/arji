@@ -13,6 +13,8 @@ import {
   buildReviewPrompt,
   buildMergeResolutionPrompt,
   buildEpicReviewPrompt,
+  buildGradingPrompt,
+  VISUAL_PROOF_SECTION,
   type PromptProject,
   type PromptDocument,
   type PromptMessage,
@@ -53,6 +55,11 @@ const story: PromptUserStory = {
   title: "As a dev I can configure prompts",
   description: "Add prompt editors for agent types",
   acceptanceCriteria: "- [ ] Editors are persisted\n- [ ] Changes apply immediately",
+};
+
+const gradingStory = {
+  id: "story-grade-1",
+  ...story,
 };
 
 const comments: PromptComment[] = [
@@ -113,8 +120,66 @@ describe("Prompt builder snapshot regression", () => {
     expect(buildBuildPrompt(project, docs, epic, [story], systemPrompt, comments)).toMatchSnapshot();
   });
 
+  it("buildBuildPrompt - visual proof enabled", () => {
+    expect(
+      buildBuildPrompt(project, docs, epic, [story], systemPrompt, comments, {
+        visualProofEnabled: true,
+      })
+    ).toMatchSnapshot();
+  });
+
   it("buildTicketBuildPrompt", () => {
     expect(buildTicketBuildPrompt(project, docs, epic, story, comments, systemPrompt)).toMatchSnapshot();
+  });
+
+  it("buildTicketBuildPrompt - visual proof enabled", () => {
+    expect(
+      buildTicketBuildPrompt(project, docs, epic, story, comments, systemPrompt, {
+        visualProofEnabled: true,
+      })
+    ).toMatchSnapshot();
+  });
+
+  it("keeps build prompts byte-identical when visual proof is omitted or off", () => {
+    const legacyEpicPrompt = buildBuildPrompt(
+      project,
+      docs,
+      epic,
+      [story],
+      systemPrompt,
+      comments
+    );
+    const explicitlyOffEpicPrompt = buildBuildPrompt(
+      project,
+      docs,
+      epic,
+      [story],
+      systemPrompt,
+      comments,
+      { visualProofEnabled: false }
+    );
+    const legacyStoryPrompt = buildTicketBuildPrompt(
+      project,
+      docs,
+      epic,
+      story,
+      comments,
+      systemPrompt
+    );
+    const explicitlyOffStoryPrompt = buildTicketBuildPrompt(
+      project,
+      docs,
+      epic,
+      story,
+      comments,
+      systemPrompt,
+      { visualProofEnabled: false }
+    );
+
+    expect(explicitlyOffEpicPrompt).toBe(legacyEpicPrompt);
+    expect(explicitlyOffStoryPrompt).toBe(legacyStoryPrompt);
+    expect(legacyEpicPrompt).not.toContain(VISUAL_PROOF_SECTION);
+    expect(legacyStoryPrompt).not.toContain(VISUAL_PROOF_SECTION);
   });
 
   it("buildReviewPrompt - security", () => {
@@ -147,5 +212,16 @@ describe("Prompt builder snapshot regression", () => {
 
   it("buildEpicReviewPrompt - bug ticket code_review", () => {
     expect(buildEpicReviewPrompt(project, docs, bugEpic, [], "code_review", systemPrompt, comments)).toMatchSnapshot();
+  });
+
+  it("buildGradingPrompt requires one structured grading per criterion", () => {
+    const prompt = buildGradingPrompt(project, docs, epic, [gradingStory], systemPrompt);
+
+    expect(prompt).toContain("story-grade-1");
+    expect(prompt).toContain("Editors are persisted");
+    expect(prompt).toContain("mcp__arij__submit_grading");
+    expect(prompt).toContain("MUST call");
+    expect(prompt).toContain("met | partial | missed");
+    expect(prompt).toContain("Do not judge general code quality");
   });
 });

@@ -137,8 +137,12 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "mcp__arij__get_ticket",
       "mcp__arij__update_ticket_status",
       "mcp__arij__post_comment",
+      "mcp__arij__report_friction",
+      "mcp__arij__attach_artifact",
+      "mcp__arij__create_bug",
       "mcp__arij__ask_question",
       "mcp__arij__submit_findings",
+      "mcp__arij__submit_grading",
     ]);
   });
 
@@ -405,7 +409,11 @@ describe("arijToolsSection", () => {
     expect(text.startsWith("## Arij tools\n\n")).toBe(true);
     expect(text).toContain("mcp__arij__*");
     expect(text).toContain("ask_question");
+    expect(text).toContain("create_bug");
     expect(text).toContain("update_ticket_status");
+    expect(text).toContain("report_friction and then continue working");
+    expect(text).toContain("fire-and-forget");
+    expect(text).toContain("never a reason to stop or leave the task unfinished");
     expect(text).not.toContain("submit_findings");
     expect(text).not.toContain("Overall Verdict");
   });
@@ -443,6 +451,35 @@ describe("arijToolsSection", () => {
     },
   );
 
+  it("presents submit_findings as the authoritative channel and the prose line as its fallback", () => {
+    const text = arijToolsSection("review_code");
+
+    // The structured channel decides the transition...
+    expect(text).toContain(
+      "submit_findings is the channel your review is read from"
+    );
+    expect(text).toContain(
+      "its verdict decides whether the ticket goes back for changes"
+    );
+    // ...open blocking findings still veto an approval (findings prime).
+    expect(text).toContain(
+      "an 'approved' verdict alongside an open [critical] or [major] finding still blocks"
+    );
+    // ...and the prose verdict survives, explicitly as the fallback, because
+    // providers without MCP injection have no other channel.
+    expect(text).toContain(
+      "it is the fallback Arij reads only when no submit_findings verdict was recorded"
+    );
+  });
+
+  it("tells grading sessions to submit the structured grading report", () => {
+    const text = arijToolsSection("grading");
+    expect(text).toContain("submit_grading");
+    expect(text).toContain("every acceptance criterion");
+    expect(text).not.toContain("submit_findings");
+    expect(text).not.toContain("You may move the ticket you are building");
+  });
+
   it.each([null, "chat", "merge", "memory_distill"])(
     "keeps the base section for non-review agent type %s",
     (agentType) => {
@@ -464,6 +501,10 @@ describe("isMcpExemptAgentType", () => {
   it("exempts the memory writers", () => {
     expect(isMcpExemptAgentType("dreaming")).toBe(true);
     expect(isMcpExemptAgentType("memory_distill")).toBe(true);
+  });
+
+  it("exempts the ticket-less failure digest report writer", () => {
+    expect(isMcpExemptAgentType("failure_digest")).toBe(true);
   });
 
   it("leaves every ticket-scoped agent on the channel", () => {
@@ -541,7 +582,10 @@ describe("buildMcpSpawnConfig", () => {
     expect(config.allowedToolNames).toEqual([...ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES]);
     // no agent-only tools leak into the chat allowlist
     expect(config.allowedToolNames).not.toContain("mcp__arij__ask_question");
+    expect(config.allowedToolNames).not.toContain("mcp__arij__report_friction");
+    expect(config.allowedToolNames).not.toContain("mcp__arij__attach_artifact");
     expect(config.allowedToolNames).not.toContain("mcp__arij__submit_findings");
+    expect(config.allowedToolNames).not.toContain("mcp__arij__submit_grading");
   });
 });
 

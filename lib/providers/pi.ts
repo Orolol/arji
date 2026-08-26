@@ -3,10 +3,14 @@
  *
  * CLI: pi --mode json [--tools <allowlist>] [--session <ID>] [--model <M>] -p <PROMPT>
  *
+ * Oversized prompts: pi's positional messages accept a `@path` form that
+ * inlines a file, so a prompt past the argv cap is written to a temp file and
+ * passed as `-p @<path> <framing message>` instead — see prompt-transport.ts.
+ *
  * Mode mapping: pi has no permission system — capability is expressed through
  * the tool allowlist, so read-only modes drop the mutating built-ins.
  * - plan    → --tools read,grep,find,ls
- * - analyze → --tools read,grep,find,ls
+ * - analyze → read-only tools plus write (create arji.json, no edit/bash)
  * - code    → default tool set (adds write, edit, bash)
  *
  * Resume: supported via `--session <ID>`, using the id of the session header
@@ -25,7 +29,13 @@ import { BaseCliProvider } from "./base-provider";
 import type {
   BaseProviderChunkCallbacks,
   ProviderExitInfo,
+  ProviderSpawnContext,
 } from "./base-provider";
+import {
+  promptExceedsArgv,
+  removePromptFile,
+  writePromptFile,
+} from "./prompt-transport";
 import type { StreamLogContext } from "@/lib/claude/logger";
 import type {
   ProviderResult,
@@ -33,8 +43,23 @@ import type {
   ProviderType,
 } from "./types";
 
+/**
+ * Message appended after a `@path` prompt file. `@path` arrives as a
+ * `<file name="…">` block inside the user turn, which reads as reference
+ * material; this restores the "these are your instructions" framing the
+ * prompt has when it rides argv.
+ */
+export const PI_PROMPT_FILE_FRAMING =
+  "The file above is the prompt for this session — follow it exactly as if its contents had been sent as this message.";
+
+/** Per-spawn state: the temp prompt file, when the prompt outgrew argv. */
+interface PiSpawnContext extends ProviderSpawnContext {
+  promptFilePath?: string;
+}
+
 /** Built-in pi tools that cannot modify the working tree. */
 export const PI_READONLY_TOOLS = ["read", "grep", "find", "ls"];
+const WRITE_TOOL = "write";
 
 /** An assistant turn as reported by a pi `message_end` event. */
 export interface PiAssistantMessage {
@@ -173,12 +198,12 @@ export class PiProvider extends BaseCliProvider {
   }
 
   /**
-   * Extra argv appended alongside the read-only allowlist. On pi the
+   * Extra argv appended alongside a restricted tool allowlist. On pi the
    * allowlist genuinely strips the mutating built-ins (verified on 0.84.2:
    * write is unavailable under `--tools read,grep,find,ls`), so there is
    * nothing to add; omp needs an overlay on top — see OhMyPiProvider.
    */
-  protected readonlyExtraArgs(): string[] {
+  protected restrictedToolsExtraArgs(): string[] {
     return [];
   }
 
@@ -186,15 +211,39 @@ export class PiProvider extends BaseCliProvider {
     return "Pi is not authenticated. Run `pi` and use /login, or set the provider API key.";
   }
 
-  buildArgs(options: ProviderSpawnOptions): string[] {
+  /**
+   * A prompt past the argv cap goes to a temp file; anything smaller keeps
+   * riding argv, which is the shape pi and omp are verified against.
+   */
+  protected prepareSpawn(
+    options: ProviderSpawnOptions,
+  ): ProviderSpawnContext | undefined {
+    if (!promptExceedsArgv(options.prompt)) return undefined;
+    return { promptFilePath: writePromptFile(this.type, options.prompt) };
+  }
+
+  protected cleanupSpawnContext(spawnContext?: ProviderSpawnContext): void {
+    removePromptFile((spawnContext as PiSpawnContext | undefined)?.promptFilePath);
+  }
+
+  buildArgs(
+    options: ProviderSpawnOptions,
+    spawnContext?: ProviderSpawnContext,
+  ): string[] {
     const { prompt, mode, model, cliSessionId, resumeSession } = options;
+    const promptFilePath = (spawnContext as PiSpawnContext | undefined)
+      ?.promptFilePath;
 
     const args: string[] = ["--mode", "json"];
 
-    // plan/analyze must not touch the working tree — drop write/edit/bash.
-    if (mode !== "code") {
+    // Plan/chat runs must not touch the working tree. Analyze adds only the
+    // write primitive required to create arji.json; edit and bash stay absent.
+    if (mode === "plan" || mode === "chat") {
       args.push("--tools", this.readonlyTools().join(","));
-      args.push(...this.readonlyExtraArgs());
+      args.push(...this.restrictedToolsExtraArgs());
+    } else if (mode === "analyze") {
+      args.push("--tools", [...this.readonlyTools(), WRITE_TOOL].join(","));
+      args.push(...this.restrictedToolsExtraArgs());
     }
 
     if (cliSessionId && resumeSession) {
@@ -205,7 +254,11 @@ export class PiProvider extends BaseCliProvider {
       args.push("--model", model);
     }
 
-    args.push("-p", prompt);
+    if (promptFilePath) {
+      args.push("-p", `@${promptFilePath}`, PI_PROMPT_FILE_FRAMING);
+    } else {
+      args.push("-p", prompt);
+    }
 
     return args;
   }

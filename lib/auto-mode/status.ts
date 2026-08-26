@@ -23,10 +23,13 @@ export interface AutoModeStatus {
    * the role has no explicit agent above. Off by default.
    */
   smartDispatch: boolean;
+  /** Require an independent provider's verdict before automatic merge. */
+  secondOpinion: boolean;
   /**
    * The scheduler's per-project `agent_max_concurrent` budget. Build + review
-   * concurrency live ABOVE it: when their sum exceeds this the dialog warns
-   * that the excess will queue. The mode never raises it silently.
+   * concurrency live ABOVE it (second opinions share the review budget): when
+   * their sum exceeds this the dialog warns that the excess will queue. The
+   * mode never raises it silently.
    * `null` means unlimited (Infinity does not survive JSON serialization).
    */
   effectiveSchedulerBudget: number | null;

@@ -11,8 +11,10 @@
  * Toolsets (ARIJ_MCP_TOOLSET): "agent" (default) is the ticket-scoped set for
  * build/review sessions launched on a ticket. "chat" is the board-scoped set
  * for CLI chat conversations — parity with the fast-mode board tools
- * (lib/chat/board-tools.ts): no ask_question/submit_findings (nothing holds a
- * chat turn), ticket_id always explicit (a chat token has no launch ticket).
+ * (lib/chat/board-tools.ts): no ask_question/report_friction/submit_findings/
+ * submit_grading (nothing holds a chat turn and chat turns are not durable
+ * agent sessions), ticket_id always explicit (a chat token has no launch
+ * ticket).
  * Only the active toolset's tools are listed AND callable.
  *
  * Deliberate constraints:
@@ -119,6 +121,102 @@ const AGENT_TOOLS = [
     },
   },
   {
+    name: "report_friction",
+    description:
+      "Record a tooling, documentation, test, or convention friction for this project. This writes only to Arij's friction register and never changes the board.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          enum: [
+            "broken_tooling",
+            "misleading_docs",
+            "flaky_test",
+            "unclear_convention",
+            "other",
+          ],
+          description: "Closed category describing the kind of friction.",
+        },
+        description: {
+          type: "string",
+          minLength: 1,
+          maxLength: 4000,
+          description: "Concise, actionable description of what was difficult.",
+        },
+        filePath: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2000,
+          description: "Optional repository-relative path related to the friction.",
+        },
+      },
+      required: ["category", "description"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "attach_artifact",
+    description:
+      "Attach a PNG, JPEG, or WebP screenshot as durable visual proof for this session. The path may be absolute or relative to the session worktree; the file must be inside that worktree, no larger than 5 MiB, and one of at most 10 artifacts for the session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          minLength: 1,
+          description:
+            "Path to the screenshot inside this session's worktree (absolute or worktree-relative).",
+        },
+        caption: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2000,
+          description: "Short explanation of what the screenshot demonstrates.",
+        },
+      },
+      required: ["path", "caption"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "create_bug",
+    description:
+      "Create a standalone, non-blocking bug ticket in this session's current Arij project when you discover an adjacent problem. The bug is attributed to this session, duplicate open titles are refused, and each session may create at most 5 bugs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description: "Short, specific bug title.",
+        },
+        description: {
+          type: "string",
+          minLength: 1,
+          maxLength: 10000,
+          description:
+            "Markdown with context, observed reproduction steps, and the actual error or behavior.",
+        },
+        severity: {
+          type: "string",
+          enum: ["low", "medium", "high", "critical"],
+          description: "Optional suggested severity.",
+        },
+        source_ticket_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+          description:
+            "Optional id or readable id of a source ticket in this project. Defaults to the ticket this session was launched for.",
+        },
+      },
+      required: ["title", "description"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "ask_question",
     description:
       "Ask the user a blocking question and stop working on the blocked part. This reliably marks the session as awaiting a reply and holds the ticket from advancing. Include full context and concrete options in one call, then end your turn.",
@@ -141,14 +239,15 @@ const AGENT_TOOLS = [
   {
     name: "submit_findings",
     description:
-      "(Review sessions) File structured review findings: each finding anchors to file_path+line and becomes an open review comment that blocks approval until resolved; include an overall verdict and summary. Still end your final message with the required '**Overall Verdict: …**' line.",
+      "(Review sessions) Submit your review: the verdict here is what Arij acts on — it decides whether the ticket goes back for changes. Each finding anchors to file_path+line and becomes an open review comment that blocks approval until resolved, so an 'approved' verdict alongside an open critical/major finding still blocks. Call this once, at the end, then still end your final message with the required '**Overall Verdict: …**' line (the fallback Arij reads only when no verdict was submitted).",
     inputSchema: {
       type: "object",
       properties: {
         verdict: {
           type: "string",
           enum: ["approved", "approved_with_minor_issues", "changes_requested"],
-          description: "Overall review verdict.",
+          description:
+            "Overall review verdict. Persisted on this session and read as the authoritative signal for the ticket's next transition.",
         },
         summary: {
           type: "string",
@@ -191,6 +290,58 @@ const AGENT_TOOLS = [
         },
       },
       required: ["verdict", "summary", "findings"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "submit_grading",
+    description:
+      "(Grading sessions) Submit one evidence-backed met, partial, or missed result for each acceptance criterion. Every storyId must belong to this session's ticket.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        gradings: {
+          type: "array",
+          minItems: 1,
+          maxItems: 100,
+          description: "Acceptance-criterion results for this ticket.",
+          items: {
+            type: "object",
+            properties: {
+              storyId: {
+                type: "string",
+                minLength: 1,
+                description: "User story id returned by get_ticket.",
+              },
+              criterion: {
+                type: "string",
+                minLength: 1,
+                maxLength: 4000,
+                description: "The acceptance criterion being evaluated.",
+              },
+              status: {
+                type: "string",
+                enum: ["met", "partial", "missed"],
+              },
+              evidence: {
+                type: "string",
+                minLength: 1,
+                maxLength: 4000,
+                description: "Concrete evidence for the grading decision.",
+              },
+            },
+            required: ["storyId", "criterion", "status", "evidence"],
+            additionalProperties: false,
+          },
+        },
+        summary: {
+          type: "string",
+          minLength: 1,
+          maxLength: 4000,
+          description: "Overall acceptance-criteria grading summary.",
+        },
+      },
+      required: ["gradings", "summary"],
       additionalProperties: false,
     },
   },

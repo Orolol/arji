@@ -8,6 +8,7 @@ import {
   AUTO_MODE_REVIEW_AGENT_SETTING_KEY,
   AUTO_MODE_REVIEW_CONCURRENCY_SETTING_KEY,
   AUTO_MODE_SMART_DISPATCH_SETTING_KEY,
+  FULL_AUTO_SECOND_OPINION_SETTING_KEY,
   DEFAULT_AUTO_BUILD_CONCURRENCY,
   DEFAULT_AUTO_REVIEW_CONCURRENCY,
   autoModeBuildAgentSettingKey,
@@ -16,6 +17,7 @@ import {
   autoModeReviewAgentSettingKey,
   autoModeReviewConcurrencySettingKey,
   autoModeSmartDispatchSettingKey,
+  fullAutoSecondOpinionSettingKey,
   parseAutoModeAgent,
   parseAutoModeConcurrency,
   parseAutoModeEnabled,
@@ -33,7 +35,7 @@ import {
  * its budget and the watchdog with its thresholds.
  */
 
-/** The twelve keys the resolver may need, read in a single query per call. */
+/** The fourteen keys the resolver may need, read in a single query per call. */
 function readSettingsMap(projectId: string): Map<string, string> {
   const keys = [
     autoModeEnabledSettingKey(projectId),
@@ -48,6 +50,8 @@ function readSettingsMap(projectId: string): Map<string, string> {
     AUTO_MODE_REVIEW_CONCURRENCY_SETTING_KEY,
     autoModeSmartDispatchSettingKey(projectId),
     AUTO_MODE_SMART_DISPATCH_SETTING_KEY,
+    fullAutoSecondOpinionSettingKey(projectId),
+    FULL_AUTO_SECOND_OPINION_SETTING_KEY,
   ];
 
   const rows = db
@@ -116,6 +120,12 @@ export function resolveAutoModeConfigForProject(
     smartDispatch: pick(
       autoModeSmartDispatchSettingKey(projectId),
       AUTO_MODE_SMART_DISPATCH_SETTING_KEY,
+      parseAutoModeEnabled,
+      false
+    ),
+    secondOpinion: pick(
+      fullAutoSecondOpinionSettingKey(projectId),
+      FULL_AUTO_SECOND_OPINION_SETTING_KEY,
       parseAutoModeEnabled,
       false
     ),

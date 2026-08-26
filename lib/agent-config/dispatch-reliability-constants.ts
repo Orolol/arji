@@ -52,13 +52,20 @@ export const DISPATCH_ROLE_AGENT_TYPES: Record<DispatchRole, AgentType[]> = {
     "review_code",
     "review_compliance",
     "review_feature",
+    "grading",
   ],
   merge: ["merge"],
-  qa: ["tech_check", "e2e_test"],
+  qa: ["tech_check", "e2e_test", "failure_digest"],
   chat: ["chat"],
   spec: ["spec_generation"],
   release: ["release_notes"],
-  maintenance: ["memory_distill", "dreaming", "forensic"],
+  maintenance: [
+    "title_generation",
+    "import_analysis",
+    "memory_distill",
+    "dreaming",
+    "forensic",
+  ],
 };
 
 export const DISPATCH_ROLE_LABELS: Record<DispatchRole, string> = {

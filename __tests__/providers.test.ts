@@ -178,6 +178,19 @@ describe("ClaudeCodeProvider", () => {
       })
     );
   });
+
+  it("forwards logIdentifier to spawnClaude", () => {
+    provider.spawn({
+      ...baseOptions,
+      logIdentifier: "title-project-1",
+    });
+
+    expect(spawnClaude).toHaveBeenCalledWith(
+      expect.objectContaining({
+        logIdentifier: "title-project-1",
+      })
+    );
+  });
 });
 
 describe("CodexProvider", () => {

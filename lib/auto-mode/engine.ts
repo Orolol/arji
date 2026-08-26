@@ -41,6 +41,13 @@ import {
   selectSmartDispatchAgent,
   type SmartDispatchPick,
 } from "@/lib/agent-config/smart-dispatch";
+import { createAutoModeSecondOpinionParkedNotification } from "@/lib/notifications/create";
+import {
+  dispatchSecondOpinion,
+  readSecondOpinionState,
+  type SecondOpinionDispatchResult,
+  type SecondOpinionState,
+} from "./second-opinion";
 
 /**
  * Full Auto Mode — the standing build / review / merge supervisor.
@@ -64,7 +71,7 @@ import {
  *   1. reconcile — drop in-flight ids whose session rows went terminal,
  *      crediting a completed session and charging a failed one to its ticket;
  *   2. merge     — free the Review column first; a clean merge is pure git,
- *      so it costs no slot and never waits on a budget;
+ *      except when the opt-in second-opinion gate first spends a review slot;
  *   3. review    — while fewer than M reviews of our own are in flight;
  *   4. build     — while fewer than N builds of our own are in flight.
  *
@@ -132,6 +139,20 @@ export interface AutoModeEngineDeps {
     projectId: string;
     stage: "build" | "review";
   }): Promise<SmartDispatchPick | null>;
+  dispatchSecondOpinion(input: {
+    projectId: string;
+    epicId: string;
+  }): Promise<SecondOpinionDispatchResult>;
+  readSecondOpinionState(
+    projectId: string,
+    epicId: string
+  ): SecondOpinionState;
+  notifySecondOpinionRejected(input: {
+    projectId: string;
+    epicId: string;
+    sessionId: string;
+    reason: string;
+  }): void;
   merge(
     projectId: string,
     epicId: string,
@@ -313,6 +334,9 @@ export const defaultAutoModeDeps: AutoModeEngineDeps = {
       );
       return null;
     }),
+  dispatchSecondOpinion,
+  readSecondOpinionState,
+  notifySecondOpinionRejected: createAutoModeSecondOpinionParkedNotification,
   merge: (projectId, epicId, options) =>
     tryAutoMerge(projectId, epicId, options),
   readSessionStatus: (sessionId) =>
@@ -358,6 +382,7 @@ export interface AutoModeSweepResult {
   merged: string[];
   mergeConflicts: string[];
   reviewsDispatched: string[];
+  secondOpinionsDispatched: string[];
   buildsDispatched: string[];
   parked: string[];
   inFlight: { build: number; review: number };
@@ -373,6 +398,7 @@ function emptyResult(
     merged: [],
     mergeConflicts: [],
     reviewsDispatched: [],
+    secondOpinionsDispatched: [],
     buildsDispatched: [],
     parked: [],
     inFlight: autoModeRegistry.countInFlight(projectId),
@@ -449,7 +475,7 @@ interface ReconcileOutcome {
 async function reconcileInFlight(
   projectId: string,
   deps: AutoModeEngineDeps,
-  parked: string[]
+  result: AutoModeSweepResult
 ): Promise<ReconcileOutcome> {
   // One command list per tick. Verification spawns real child processes and
   // this loop runs inside the per-project sweep mutex, so a three-command
@@ -516,6 +542,59 @@ async function reconcileInFlight(
 
     autoModeRegistry.removeInFlight(projectId, sessionId);
 
+    if (entry.purpose === "second-opinion") {
+      const gate = deps.readSecondOpinionState(projectId, entry.epicId);
+      if (gate.status === "rejected") {
+        parkRejectedSecondOpinion(
+          projectId,
+          entry.epicId,
+          gate,
+          deps,
+          result
+        );
+        continue;
+      }
+      if (gate.status === "retry") {
+        const failures = autoModeRegistry.recordFailure(
+          projectId,
+          entry.ticketId,
+          entry.epicId,
+          gate.reason
+        );
+        trace(
+          deps,
+          projectId,
+          entry.epicId,
+          AUTO_MODE_REASONS.dispatchFailed("second opinion", gate.reason),
+          sessionId
+        );
+        if (failures >= AUTO_MODE_MAX_CONSECUTIVE_FAILURES) {
+          result.parked.push(entry.ticketId);
+          trace(
+            deps,
+            projectId,
+            entry.epicId,
+            AUTO_MODE_REASONS.parked(failures),
+            sessionId
+          );
+          try {
+            deps.notifySecondOpinionRejected({
+              projectId,
+              epicId: entry.epicId,
+              sessionId,
+              reason: `gate failed to return usable evidence after ${failures} attempts: ${gate.reason}`,
+            });
+          } catch (error) {
+            console.warn(
+              "[auto-mode] Failed to create second-opinion failure notification:",
+              error instanceof Error ? error.message : error
+            );
+          }
+        }
+        continue;
+      }
+    }
+
     if (status === "completed" && !silentReview && !transitionRefused) {
       // Delivered code: run Arij's own checks BEFORE crediting the session,
       // because a red branch is not a success. Clearing the streak first
@@ -527,7 +606,7 @@ async function reconcileInFlight(
           deps,
           entry,
           sessionId,
-          parked
+          result.parked
         );
         verificationRan = verdict.ran;
         if (verdict.failed) continue;
@@ -548,7 +627,7 @@ async function reconcileInFlight(
         : `${entry.kind} session failed`
     );
     if (failures >= AUTO_MODE_MAX_CONSECUTIVE_FAILURES) {
-      parked.push(entry.ticketId);
+      result.parked.push(entry.ticketId);
       trace(
         deps,
         projectId,
@@ -881,6 +960,45 @@ function unparkTouchedTickets(
   return unparked;
 }
 
+function parkRejectedSecondOpinion(
+  projectId: string,
+  epicId: string,
+  state: Extract<SecondOpinionState, { status: "rejected" }>,
+  deps: AutoModeEngineDeps,
+  result: AutoModeSweepResult
+): void {
+  autoModeRegistry.removeInFlight(projectId, state.sessionId);
+  if (!autoModeRegistry.isParked(projectId, epicId)) {
+    autoModeRegistry.park(
+      projectId,
+      epicId,
+      epicId,
+      `second opinion rejected merge: ${state.reason}`
+    );
+  }
+  if (!result.parked.includes(epicId)) result.parked.push(epicId);
+  trace(
+    deps,
+    projectId,
+    epicId,
+    AUTO_MODE_REASONS.secondOpinionRejected(state.reason),
+    state.sessionId
+  );
+  try {
+    deps.notifySecondOpinionRejected({
+      projectId,
+      epicId,
+      sessionId: state.sessionId,
+      reason: state.reason,
+    });
+  } catch (error) {
+    console.warn(
+      "[auto-mode] Failed to create second-opinion notification:",
+      error instanceof Error ? error.message : error
+    );
+  }
+}
+
 /** One sweep for one project. Never throws — a bad tick must not kill the loop. */
 export async function sweepProject(
   projectId: string,
@@ -895,6 +1013,9 @@ export async function sweepProject(
     return emptyResult(projectId, "disabled");
   }
   autoModeRegistry.setEnabled(projectId, true);
+  if (!config.secondOpinion) {
+    autoModeRegistry.clearSecondOpinionSkips(projectId);
+  }
 
   if (!autoModeRegistry.tryLock(projectId)) {
     return emptyResult(projectId, "locked");
@@ -906,6 +1027,7 @@ export async function sweepProject(
     merged: [],
     mergeConflicts: [],
     reviewsDispatched: [],
+    secondOpinionsDispatched: [],
     buildsDispatched: [],
     parked: [],
     inFlight: { build: 0, review: 0 },
@@ -917,7 +1039,7 @@ export async function sweepProject(
     // before the same sweep decides whether to review or merge that epic.
     // The hold is bounded by verify_timeout_ms per command, and a tick that
     // arrives meanwhile simply reports "locked" rather than piling up.
-    const reconciled = await reconcileInFlight(projectId, deps, result.parked);
+    const reconciled = await reconcileInFlight(projectId, deps, result);
 
     // An epic whose checks were deferred is off limits for the rest of this
     // sweep. The selectors cannot see it on their own: their only
@@ -953,6 +1075,178 @@ export async function sweepProject(
       if (!stillEnabled(projectId, deps)) {
         result.skipped = "disabled";
         return result;
+      }
+
+      if (config.secondOpinion) {
+        const gate = deps.readSecondOpinionState(
+          projectId,
+          candidate.epicId
+        );
+        if (gate.status === "rejected") {
+          autoModeRegistry.clearSecondOpinionSkip(
+            projectId,
+            candidate.epicId
+          );
+          parkRejectedSecondOpinion(
+            projectId,
+            candidate.epicId,
+            gate,
+            deps,
+            result
+          );
+          continue;
+        }
+        if (gate.status === "approved") {
+          autoModeRegistry.clearSecondOpinionSkip(
+            projectId,
+            candidate.epicId
+          );
+        }
+        if (gate.status !== "approved") {
+          if (gate.status === "cancelled") {
+            const reason =
+              "the second-opinion session was cancelled; waiting for new user activity or a fresh review";
+            if (
+              autoModeRegistry.shouldTraceSecondOpinionSkip(
+                projectId,
+                candidate.epicId,
+                reason
+              )
+            ) {
+              trace(
+                deps,
+                projectId,
+                candidate.epicId,
+                AUTO_MODE_REASONS.skippedTargetMoved(
+                  "second opinion",
+                  reason
+                ),
+                gate.sessionId
+              );
+            }
+            continue;
+          }
+
+          const reviewsInFlight =
+            autoModeRegistry.countInFlight(projectId).review;
+          if (gate.status === "pending") {
+            continue;
+          }
+          if (config.reviewConcurrency <= 0) {
+            const reason =
+              "the review concurrency budget is 0, so no second opinion can be dispatched";
+            if (
+              autoModeRegistry.shouldTraceSecondOpinionSkip(
+                projectId,
+                candidate.epicId,
+                reason
+              )
+            ) {
+              trace(
+                deps,
+                projectId,
+                candidate.epicId,
+                AUTO_MODE_REASONS.skippedTargetMoved(
+                  "second opinion",
+                  reason
+                )
+              );
+            }
+            continue;
+          }
+          if (reviewsInFlight >= config.reviewConcurrency) {
+            continue;
+          }
+
+          const dispatched = await deps.dispatchSecondOpinion({
+            projectId,
+            epicId: candidate.epicId,
+          });
+          if (dispatched.conflictSessionId) {
+            trace(
+              deps,
+              projectId,
+              candidate.epicId,
+              AUTO_MODE_REASONS.skippedBusy,
+              dispatched.conflictSessionId
+            );
+            continue;
+          }
+          if (!dispatched.sessionId) {
+            if (dispatched.error) {
+              const failures = autoModeRegistry.recordFailure(
+                projectId,
+                candidate.epicId,
+                candidate.epicId,
+                dispatched.error
+              );
+              trace(
+                deps,
+                projectId,
+                candidate.epicId,
+                AUTO_MODE_REASONS.dispatchFailed(
+                  "second opinion",
+                  dispatched.error
+                )
+              );
+              if (failures >= AUTO_MODE_MAX_CONSECUTIVE_FAILURES) {
+                result.parked.push(candidate.epicId);
+                trace(
+                  deps,
+                  projectId,
+                  candidate.epicId,
+                  AUTO_MODE_REASONS.parked(failures)
+                );
+              }
+            } else if (dispatched.skipReason) {
+              if (
+                autoModeRegistry.shouldTraceSecondOpinionSkip(
+                  projectId,
+                  candidate.epicId,
+                  dispatched.skipReason
+                )
+              ) {
+                trace(
+                  deps,
+                  projectId,
+                  candidate.epicId,
+                  AUTO_MODE_REASONS.skippedTargetMoved(
+                    "second opinion",
+                    dispatched.skipReason
+                  )
+                );
+              }
+            }
+            continue;
+          }
+
+          autoModeRegistry.clearSecondOpinionSkip(
+            projectId,
+            candidate.epicId
+          );
+          autoModeRegistry.addInFlight(projectId, dispatched.sessionId, {
+            kind: "review",
+            purpose: "second-opinion",
+            ticketId: candidate.epicId,
+            epicId: candidate.epicId,
+          });
+          autoModeRegistry.recordDispatch(projectId, {
+            kind: "second-opinion",
+            epicId: candidate.epicId,
+            userStoryId: null,
+            sessionId: dispatched.sessionId,
+            detail: "pre-merge gate",
+          });
+          result.secondOpinionsDispatched.push(dispatched.sessionId);
+          trace(
+            deps,
+            projectId,
+            candidate.epicId,
+            AUTO_MODE_REASONS.secondOpinionDispatched,
+            dispatched.sessionId
+          );
+          continue;
+        }
       }
 
       // A conflict costs a merge-fix agent, and that agent IS a build — so it

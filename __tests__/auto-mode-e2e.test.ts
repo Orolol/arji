@@ -170,7 +170,7 @@ async function simulateDispatch(input: {
       epicId: input.epicId,
       userStoryId: input.userStoryId,
       status: "running",
-      mode: input.stage === "review" ? "plan" : "code",
+      mode: "code",
       agentType:
         input.stage === "review"
           ? "review_code"

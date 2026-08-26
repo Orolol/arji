@@ -5,9 +5,15 @@ import {
   real,
   index,
   uniqueIndex,
+  check,
   AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import type {
+  FrictionCategory,
+  FrictionStatus,
+} from "@/lib/frictions/constants";
+import type { RoutineKind } from "@/lib/routines/constants";
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
@@ -27,6 +33,40 @@ export const projects = sqliteTable("projects", {
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+export type { RoutineKind } from "@/lib/routines/constants";
+
+/**
+ * Durable routine definitions. Daily scheduling is interpreted in the
+ * server's local timezone; `lastRunAt` is written before dispatch so a
+ * process restart cannot replay a routine already claimed that day.
+ */
+export const routines = sqliteTable(
+  "routines",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<RoutineKind>().notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    timeOfDay: text("time_of_day").notNull(),
+    config: text("config").notNull().default("{}"),
+    lastRunAt: text("last_run_at"),
+    lastStatus: text("last_status"),
+  },
+  (table) => ({
+    projectKindUnique: uniqueIndex("routines_project_kind_unique").on(
+      table.projectId,
+      table.kind
+    ),
+    projectIdx: index("routines_project_idx").on(table.projectId),
+    enabledIdx: index("routines_enabled_idx").on(table.enabled),
+  })
+);
+
+export type Routine = typeof routines.$inferSelect;
+export type NewRoutine = typeof routines.$inferInsert;
 
 export const documents = sqliteTable("documents", {
   id: text("id").primaryKey(),
@@ -153,7 +193,7 @@ export const agentSessions = sqliteTable("agent_sessions", {
   epicId: text("epic_id").references(() => epics.id),
   userStoryId: text("user_story_id").references(() => userStories.id),
   status: text("status").default("queued"), // queued | running | completed | failed | cancelled
-  mode: text("mode").default("code"), // plan | code
+  mode: text("mode").default("code"), // plan | code | analyze | chat
   orchestrationMode: text("orchestration_mode").default("solo"), // solo | team
   provider: text("provider").default("claude-code"), // see PROVIDER_OPTIONS in lib/agent-config/constants.ts
   prompt: text("prompt"),
@@ -169,6 +209,13 @@ export const agentSessions = sqliteTable("agent_sessions", {
   // answered | asked_question | silent | error. NULL while running/queued,
   // for user-cancelled sessions, and for legacy rows.
   outcome: text("outcome"),
+  // Structured review verdict submitted through the MCP `submit_findings`
+  // tool: approved | approved_with_minor_issues | changes_requested. The
+  // authoritative transition signal for a review stage — see
+  // lib/pipeline/findings.ts. NULL for non-review sessions, for reviewers
+  // that never called the tool (providers without MCP), and for legacy rows;
+  // NULL is what selects the prose-verdict fallback.
+  reviewVerdict: text("review_verdict"),
   // Usage reported by the CLI at session end. NULL for legacy rows,
   // non-terminal sessions, and providers that do not report usage.
   inputTokens: integer("input_tokens"),
@@ -220,6 +267,91 @@ export const agentSessionChunks = sqliteTable(
     sessionStreamSequenceIdx: index(
       "agent_session_chunks_session_stream_sequence_idx"
     ).on(table.sessionId, table.streamType, table.sequence),
+  })
+);
+
+/**
+ * Structured DevX friction reported by an agent session.
+ *
+ * `agentSessionId` intentionally remains an attributed string rather than a
+ * foreign key: friction is durable project memory and must survive later
+ * session cleanup. The optional epic link is cleared if its ticket is
+ * deleted, while deleting the project removes the project-owned report.
+ */
+export const frictions = sqliteTable(
+  "frictions",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    epicId: text("epic_id").references(() => epics.id, {
+      onDelete: "set null",
+    }),
+    agentSessionId: text("agent_session_id").notNull(),
+    category: text("category").$type<FrictionCategory>().notNull(),
+    description: text("description").notNull(),
+    filePath: text("file_path"),
+    occurrences: integer("occurrences").notNull().default(1),
+    status: text("status").$type<FrictionStatus>().notNull().default("new"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectStatusOccurrencesIdx: index(
+      "frictions_project_status_occurrences_idx"
+    ).on(table.projectId, table.status, table.occurrences),
+    openDedupeIdx: index("frictions_open_dedupe_idx").on(
+      table.projectId,
+      table.category,
+      table.filePath,
+      table.status
+    ),
+    sessionIdx: index("frictions_session_idx").on(table.agentSessionId),
+    categoryCheck: check(
+      "frictions_category_check",
+      sql`${table.category} IN ('broken_tooling', 'misleading_docs', 'flaky_test', 'unclear_convention', 'other')`
+    ),
+    statusCheck: check(
+      "frictions_status_check",
+      sql`${table.status} IN ('new', 'triaged', 'converted', 'dismissed')`
+    ),
+    occurrencesCheck: check(
+      "frictions_occurrences_check",
+      sql`${table.occurrences} >= 1`
+    ),
+  })
+);
+
+/**
+ * A durable visual proof copied out of a session worktree while it still
+ * exists. `filename` is the generated basename below
+ * data/sessions/<session-id>/artifacts/; source paths are never persisted.
+ */
+export const sessionArtifacts = sqliteTable(
+  "session_artifacts",
+  {
+    id: text("id").primaryKey(),
+    agentSessionId: text("agent_session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    epicId: text("epic_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    caption: text("caption").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    sessionCreatedAtIdx: index("session_artifacts_session_created_at_idx").on(
+      table.agentSessionId,
+      table.createdAt
+    ),
+    epicCreatedAtIdx: index("session_artifacts_epic_created_at_idx").on(
+      table.epicId,
+      table.createdAt
+    ),
   })
 );
 
@@ -320,6 +452,10 @@ export const namedAgents = sqliteTable(
     provider: text("provider").notNull(), // see PROVIDER_OPTIONS in lib/agent-config/constants.ts
     model: text("model").notNull(),
     readableAgentName: text("readable_agent_name"), // Ancient Greek name
+    escalatesTo: text("escalates_to").references(
+      (): AnySQLiteColumn => namedAgents.id,
+      { onDelete: "set null" }
+    ),
     createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
@@ -405,6 +541,38 @@ export const reviewComments = sqliteTable(
   })
 );
 
+/**
+ * One atomic acceptance-criteria grading submitted by a grader session.
+ *
+ * `gradings` is the validated JSON array accepted by submit_grading. Keeping
+ * the array together preserves the report boundary: downstream pipeline and
+ * UI consumers can select the latest report without reconstructing one from
+ * independently timestamped criterion rows.
+ */
+export const gradingReports = sqliteTable(
+  "grading_reports",
+  {
+    id: text("id").primaryKey(),
+    epicId: text("epic_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "cascade" }),
+    agentSessionId: text("agent_session_id").references(
+      () => agentSessions.id,
+      { onDelete: "set null" }
+    ),
+    gradings: text("gradings").notNull(), // JSON: GradingEntry[]
+    summary: text("summary").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    epicCreatedAtIdx: index("grading_reports_epic_created_at_idx").on(
+      table.epicId,
+      table.createdAt
+    ),
+    sessionIdx: index("grading_reports_session_idx").on(table.agentSessionId),
+  })
+);
+
 export const gitSyncLog = sqliteTable("git_sync_log", {
   id: text("id").primaryKey(),
   // Nullable since 0029_git_sync_log_nullable_project: a clone is logged
@@ -464,7 +632,7 @@ export const qaReports = sqliteTable("qa_reports", {
   customPromptId: text("custom_prompt_id"),
   reportContent: text("report_content"),
   summary: text("summary"),
-  checkType: text("check_type").notNull().default("tech_check"), // tech_check | e2e_test
+  checkType: text("check_type").notNull().default("tech_check"), // tech_check | e2e_test | failure_digest
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   completedAt: text("completed_at"),
 });
@@ -548,6 +716,15 @@ export type NewTicketDependency = typeof ticketDependencies.$inferInsert;
 
 export type ReviewComment = typeof reviewComments.$inferSelect;
 export type NewReviewComment = typeof reviewComments.$inferInsert;
+
+export type GradingReport = typeof gradingReports.$inferSelect;
+export type NewGradingReport = typeof gradingReports.$inferInsert;
+
+export type Friction = typeof frictions.$inferSelect;
+export type NewFriction = typeof frictions.$inferInsert;
+
+export type SessionArtifact = typeof sessionArtifacts.$inferSelect;
+export type NewSessionArtifact = typeof sessionArtifacts.$inferInsert;
 
 export const ticketActivityLog = sqliteTable(
   "ticket_activity_log",

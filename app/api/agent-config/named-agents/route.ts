@@ -25,10 +25,16 @@ export async function POST(request: NextRequest) {
   const validated = await validateBody(createNamedAgentSchema, request);
   if (isValidationError(validated)) return validated;
 
-  const { name, provider, model } = validated.data;
+  const { name, provider, model, escalatesTo } = validated.data;
 
   try {
-    const result = await createNamedAgent({ id: createId(), name, provider, model });
+    const result = await createNamedAgent({
+      id: createId(),
+      name,
+      provider,
+      model,
+      escalatesTo,
+    });
     if (result.error) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }

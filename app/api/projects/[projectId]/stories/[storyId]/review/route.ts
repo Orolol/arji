@@ -52,6 +52,7 @@ import {
 import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import { transitionReviewRejected } from "@/lib/workflow/automatic-transitions";
+import { resolveReviewVerdict } from "@/lib/pipeline/findings";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
@@ -218,7 +219,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     fs.mkdirSync(logsDir, { recursive: true });
     const logsPath = path.join(logsDir, "logs.json");
 
-    const agentMode = reviewType === "feature_review" ? "code" : "plan";
+    // All review types run in code mode: plan mode refuses mutating MCP
+    // tools (submit_findings, create_bug) and read-only provider postures
+    // cut the tool channel. The reviewer's no-modification rule is a prompt
+    // contract (REVIEW_BOUNDARY_SECTION), not a harness restriction.
+    const agentMode = "code";
 
     // First review session can resume; subsequent ones start fresh. Resolved
     // per review type because each one may land on a different provider, and
@@ -334,16 +339,20 @@ export async function POST(request: NextRequest, { params }: Params) {
           });
         }
 
-        // If the review verdict indicates work is not done, revert
-        // the story back to in_progress
-        const lowerOutput = output.toLowerCase();
-        const isNegativeVerdict =
-          !askedQuestion &&
-          (lowerOutput.includes("changes requested") ||
-            lowerOutput.includes("not complete") ||
-            lowerOutput.includes("partially complete"));
+        // If the review verdict indicates work is not done, revert the story
+        // back to in_progress. Channels in priority order: the reviewer's
+        // persisted submit_findings verdict, else the prose scan of its final
+        // message (lib/pipeline/findings.ts owns the priority; a reviewer on
+        // a provider without MCP only ever produces the prose one).
+        const decision = askedQuestion
+          ? null
+          : resolveReviewVerdict({
+              epicId: epic.id,
+              reviewSessionId: sid,
+              sessionOutput: output,
+            });
 
-        if (isNegativeVerdict) {
+        if (decision?.negative) {
           const currentStory = db
             .select()
             .from(userStories)
@@ -358,6 +367,7 @@ export async function POST(request: NextRequest, { params }: Params) {
               userStoryId: storyId,
               sessionId: sid,
               reason: `Review verdict: changes requested (${lbl})`,
+              verdictSource: decision.source,
             });
           }
         }

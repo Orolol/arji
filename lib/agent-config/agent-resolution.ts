@@ -40,6 +40,26 @@ export interface ResolvedAgentConfig {
 /** Name of the seeded global default agent (inserted by lib/db/index.ts). */
 export const GLOBAL_DEFAULT_AGENT_NAME = "Claude Code";
 
+/**
+ * Historical defaults for lightweight direct tasks. These two call sites
+ * predate named-agent assignments and deliberately did not use the seeded
+ * (Opus) named agent: title generation pinned Haiku, while repository import
+ * let the Claude CLI choose its own default model. Keeping those defaults in
+ * the resolver makes the new mapping opt-in instead of silently making
+ * unconfigured background work more expensive.
+ */
+const BUILTIN_TASK_DEFAULTS: Partial<Record<AgentType, ResolvedAgent>> = {
+  title_generation: {
+    provider: FALLBACK_PROVIDER,
+    model: "haiku",
+    namedAgentId: null,
+  },
+  import_analysis: {
+    provider: FALLBACK_PROVIDER,
+    namedAgentId: null,
+  },
+};
+
 /** Maps a stored provider column to a known provider, or the fallback. */
 function normalizeProvider(value: string | null | undefined): AgentProvider {
   return value && isAgentProvider(value) ? value : FALLBACK_PROVIDER;
@@ -238,11 +258,11 @@ export interface ResolvedAgent {
 }
 
 /**
- * Dispatch context for {@link resolveAgentForDispatch}. Only review
- * dispatch routes pass this; build routes are unaffected.
+ * Dispatch context for {@link resolveAgentForDispatch}. Review and grading
+ * dispatches pass this; build routes are unaffected.
  */
 export interface AgentResolutionContext {
-  purpose: "review";
+  purpose: "review" | "grading";
   projectId: string;
   epicId?: string;
   storyId?: string;
@@ -303,6 +323,15 @@ export function resolveAgent(
     if (resolved) return resolved;
   }
 
+  // Preserve task-specific historical defaults before consulting the seeded
+  // catch-all agent. Assignments above still override these at project/global
+  // scope, and an explicit dispatch choice is handled by
+  // resolveAgentByNamedId before reaching this function.
+  const taskDefault = BUILTIN_TASK_DEFAULTS[agentType];
+  if (taskDefault) {
+    return { ...taskDefault };
+  }
+
   // Builtin fallback — resolve via global default named agent
   const defaultAgent = db
     .select()
@@ -360,8 +389,8 @@ export function resolveAgentByNamedId(
  *   1. An explicitly picked named agent ALWAYS wins — review-provider
  *      segregation never overrides the user's explicit choice.
  *   2. Standard default resolution (project → global → builtin chain).
- *   3. When `context.purpose === 'review'`, the global
- *      'review_provider_segregation' setting is enabled, and the default
+ *   3. For review/grading contexts, when the global
+ *      `review_provider_segregation` setting is enabled and the default
  *      resolution lands on the same provider that produced the target's
  *      last successful build (agentType build/ticket_build), the provider
  *      is redirected to the first available alternative in stable
@@ -398,7 +427,10 @@ export async function resolveAgentForDispatch(
   // 2. Default resolution chain.
   const base = resolveAgent(agentType, projectId);
 
-  if (!context || context.purpose !== "review") {
+  if (
+    !context ||
+    (context.purpose !== "review" && context.purpose !== "grading")
+  ) {
     return base;
   }
 

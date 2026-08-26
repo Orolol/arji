@@ -4,6 +4,7 @@ export const AGENT_TYPES = [
   "review_code",
   "review_compliance",
   "review_feature",
+  "grading",
   "chat",
   "spec_generation",
   "team_build",
@@ -12,9 +13,12 @@ export const AGENT_TYPES = [
   "tech_check",
   "e2e_test",
   "release_notes",
+  "title_generation",
+  "import_analysis",
   "memory_distill",
   "dreaming",
   "forensic",
+  "failure_digest",
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
@@ -77,6 +81,7 @@ export const AGENT_TYPE_LABELS: Record<AgentType, string> = {
   review_code: "Review: Code",
   review_compliance: "Review: Compliance",
   review_feature: "Review: Feature",
+  grading: "Acceptance Grading",
   chat: "Chat",
   spec_generation: "Spec Generation",
   team_build: "Team Build",
@@ -85,9 +90,12 @@ export const AGENT_TYPE_LABELS: Record<AgentType, string> = {
   tech_check: "Tech Check",
   e2e_test: "E2E Test",
   release_notes: "Release Notes",
+  title_generation: "Conversation Title",
+  import_analysis: "Import Analysis",
   memory_distill: "Memory Distill",
   dreaming: "Dreaming",
   forensic: "Forensic",
+  failure_digest: "Failure Digest",
 };
 
 export function isAgentType(value: string): value is AgentType {
@@ -107,6 +115,7 @@ export const BUILTIN_AGENT_PROMPTS: Record<AgentType, string> = {
   review_code: "",
   review_compliance: "",
   review_feature: "",
+  grading: "",
   chat: "",
   spec_generation: "",
   team_build: "",
@@ -115,9 +124,12 @@ export const BUILTIN_AGENT_PROMPTS: Record<AgentType, string> = {
   tech_check: "",
   e2e_test: "",
   release_notes: "",
+  title_generation: "",
+  import_analysis: "",
   memory_distill: "",
   dreaming: "",
   forensic: "",
+  failure_digest: "",
 };
 
 /**

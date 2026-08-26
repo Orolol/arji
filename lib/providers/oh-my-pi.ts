@@ -83,7 +83,7 @@ export class OhMyPiProvider extends PiProvider {
   }
 
   /** The allowlist alone leaves `write` mounted — see the header. */
-  protected readonlyExtraArgs(): string[] {
+  protected restrictedToolsExtraArgs(): string[] {
     return ["--config", ompReadonlyOverlayPath()];
   }
 

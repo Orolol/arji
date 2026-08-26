@@ -10,6 +10,7 @@ import {
   parsePipelineMaxAttempts,
   parsePipelineMaxFixCycles,
   resolvePipelineEnabledDefault,
+  resolvePipelineGraderEnabledDefault,
 } from "@/lib/pipeline/constants";
 import {
   DEFAULT_BUG_REGRESSION_COMMAND,
@@ -57,6 +58,7 @@ describe("Settings page — Autonomous Pipeline card", () => {
     await waitFor(() =>
       expect(screen.getByTestId("pipeline-enabled-toggle")).not.toBeChecked()
     );
+    expect(screen.getByTestId("pipeline-grader-toggle")).not.toBeChecked();
     expect(screen.getByLabelText("Attempts per stage")).toHaveValue(2);
     expect(screen.getByLabelText("Review → fix cycles")).toHaveValue(2);
   });
@@ -64,6 +66,7 @@ describe("Settings page — Autonomous Pipeline card", () => {
   it("hydrates the card from the stored settings", async () => {
     stored = {
       pipeline_enabled: true,
+      pipeline_grader_enabled: true,
       pipeline_max_attempts: 4,
       pipeline_max_fix_cycles: 0,
     };
@@ -73,6 +76,7 @@ describe("Settings page — Autonomous Pipeline card", () => {
     await waitFor(() =>
       expect(screen.getByTestId("pipeline-enabled-toggle")).toBeChecked()
     );
+    expect(screen.getByTestId("pipeline-grader-toggle")).toBeChecked();
     expect(screen.getByLabelText("Attempts per stage")).toHaveValue(4);
     expect(screen.getByLabelText("Review → fix cycles")).toHaveValue(0);
   });
@@ -89,6 +93,17 @@ describe("Settings page — Autonomous Pipeline card", () => {
       expect(patchCalls).toContainEqual({ pipeline_enabled: true })
     );
     expect(screen.getByTestId("pipeline-enabled-toggle")).toBeChecked();
+  });
+
+  it("PATCHes the independently opt-in grader setting", async () => {
+    render(<SettingsPage />);
+    await waitFor(() => screen.getByTestId("pipeline-grader-toggle"));
+
+    fireEvent.click(screen.getByTestId("pipeline-grader-toggle"));
+
+    await waitFor(() =>
+      expect(patchCalls).toContainEqual({ pipeline_grader_enabled: true })
+    );
   });
 
   it("PATCHes the caps and clamps out-of-range values", async () => {
@@ -341,5 +356,15 @@ describe("pipeline setting parsers", () => {
       resolvePipelineEnabledDefault({ "pipeline_enabled:p1": "true" }, "p1")
     ).toBe(true);
     expect(resolvePipelineEnabledDefault(null, "p1")).toBe(false);
+    expect(resolvePipelineGraderEnabledDefault({}, "p1")).toBe(false);
+    expect(
+      resolvePipelineGraderEnabledDefault(
+        {
+          pipeline_grader_enabled: true,
+          "pipeline_grader_enabled:p1": false,
+        },
+        "p1",
+      ),
+    ).toBe(false);
   });
 });

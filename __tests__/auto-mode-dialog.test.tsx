@@ -40,6 +40,7 @@ function statusFixture(patch: Partial<AutoModeStatus> = {}): AutoModeStatus {
     reviewAgent: null,
     reviewConcurrency: 1,
     smartDispatch: false,
+    secondOpinion: false,
     effectiveSchedulerBudget: 3,
     running: false,
     lastSweepAt: null,
@@ -114,7 +115,7 @@ describe("AutoModeDialog", () => {
     );
   });
 
-  it("persists the six settings through PUT and reports the new state", async () => {
+  it("persists the seven settings through PUT and reports the new state", async () => {
     const calls = installFetch(
       statusFixture(),
       statusFixture({ enabled: true, buildConcurrency: 3 })
@@ -146,6 +147,7 @@ describe("AutoModeDialog", () => {
       buildConcurrency: 3,
       reviewConcurrency: 1,
       smartDispatch: false,
+      secondOpinion: false,
     });
   });
 
@@ -164,6 +166,23 @@ describe("AutoModeDialog", () => {
     );
     expect(calls.find((c) => c.method === "PUT")!.body).toMatchObject({
       smartDispatch: true,
+    });
+  });
+
+  it("keeps the second-opinion gate off by default and persists opt-in", async () => {
+    const calls = installFetch(statusFixture());
+    render(<AutoModeDialog projectId="p1" open onOpenChange={() => {}} />);
+
+    const toggle = await screen.findByTestId("auto-mode-second-opinion");
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByTestId("auto-mode-save"));
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "PUT")).toBe(true)
+    );
+    expect(calls.find((call) => call.method === "PUT")!.body).toMatchObject({
+      secondOpinion: true,
     });
   });
 

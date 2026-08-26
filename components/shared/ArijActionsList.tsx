@@ -5,6 +5,7 @@ import {
   ArrowRightLeft,
   ClipboardList,
   HelpCircle,
+  ImageIcon,
   MessageSquare,
   Wrench,
 } from "lucide-react";
@@ -15,7 +16,13 @@ import type { LucideIcon } from "lucide-react";
  * (the session detail API returns these as plain JSON).
  */
 export interface ArijActionItem {
-  kind: "status_change" | "comment" | "question" | "findings" | "tool_call";
+  kind:
+    | "status_change"
+    | "comment"
+    | "question"
+    | "findings"
+    | "artifact"
+    | "tool_call";
   summary: string;
   detail?: string;
   at: string | null;
@@ -30,6 +37,7 @@ export const ARIJ_ACTION_ICONS: Record<ArijActionItem["kind"], LucideIcon> = {
   comment: MessageSquare,
   question: HelpCircle,
   findings: ClipboardList,
+  artifact: ImageIcon,
   tool_call: Wrench,
 };
 
@@ -42,6 +50,7 @@ export const ARIJ_ACTION_COLORS: Record<ArijActionItem["kind"], string> = {
   comment: "text-muted-foreground",
   question: "text-priority-yellow",
   findings: "text-agent",
+  artifact: "text-agent",
   tool_call: "text-meta",
 };
 
@@ -63,7 +72,7 @@ export function formatArijActionTime(at: string | null): string | null {
 /**
  * Compact "Arij actions" list on the session detail page: the structured
  * effects the agent had on the board (status changes, comments, questions,
- * review findings, MCP tool calls). Renders nothing when there are none —
+ * review findings, visual proofs, MCP tool calls). Renders nothing when there are none —
  * sessions without MCP injection stay visually unchanged.
  */
 export function ArijActionsList({ actions }: { actions?: ArijActionItem[] | null }) {

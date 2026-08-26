@@ -5,6 +5,7 @@ import {
 } from "@/lib/night/constants";
 import {
   pipelineEnabledSettingKey,
+  pipelineGraderEnabledSettingKey,
   pipelineMaxAttemptsSettingKey,
   pipelineMaxFixCyclesSettingKey,
 } from "@/lib/pipeline/constants";
@@ -17,6 +18,7 @@ import {
   verifyTimeoutMsSettingKey,
 } from "@/lib/verify/verify-constants";
 import { webhookSettingKey } from "@/lib/webhooks/send";
+import { ciAutofixEnabledSettingKey } from "@/lib/routines/settings";
 
 /**
  * Every `<key>:<projectId>` settings row a project can own.
@@ -35,6 +37,7 @@ export function perProjectSettingKeys(projectId: string): string[] {
     agentMaxConcurrentSettingKey(projectId),
     webhookSettingKey(projectId),
     pipelineEnabledSettingKey(projectId),
+    pipelineGraderEnabledSettingKey(projectId),
     pipelineMaxAttemptsSettingKey(projectId),
     pipelineMaxFixCyclesSettingKey(projectId),
     verifyCommandsSettingKey(projectId),
@@ -43,5 +46,6 @@ export function perProjectSettingKeys(projectId: string): string[] {
     nightCostCapSettingKey(projectId),
     dreamingAfterNightRunSettingKey(projectId),
     dreamingLastCutoffSettingKey(projectId),
+    ciAutofixEnabledSettingKey(projectId),
   ];
 }

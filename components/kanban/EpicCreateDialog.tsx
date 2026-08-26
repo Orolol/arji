@@ -29,6 +29,13 @@ interface EpicCreateDialogProps {
   projectId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Optional editable seed used by flows such as friction conversion. */
+  initialDraft?: ManualEpicDraft;
+  /** When present, creation atomically closes and links this friction. */
+  frictionId?: string;
+  dialogTitle?: string;
+  dialogDescription?: string;
+  submitLabel?: string;
   /** Fired after the epic lands so the board can refresh. */
   onCreated?: (epicId: string) => void;
 }
@@ -44,6 +51,11 @@ export function EpicCreateDialog({
   projectId,
   open,
   onOpenChange,
+  initialDraft,
+  frictionId,
+  dialogTitle = "New Epic",
+  dialogDescription = "Write the ticket yourself — no agent involved.",
+  submitLabel = "Create Epic",
   onCreated,
 }: EpicCreateDialogProps) {
   const [draft, setDraft] = useState<ManualEpicDraft>(createEmptyEpicDraft);
@@ -60,6 +72,21 @@ export function EpicCreateDialog({
   const storyTitleRefs = useRef(new Map<string, HTMLInputElement | null>());
 
   const validation = validateManualEpicDraft(draft);
+
+  useEffect(() => {
+    if (!open) return;
+    setDraft(
+      initialDraft
+        ? {
+            ...initialDraft,
+            userStories: initialDraft.userStories.map((story) => ({ ...story })),
+          }
+        : createEmptyEpicDraft(),
+    );
+    setCollapsedStories({});
+    setError(null);
+    setShowErrors(false);
+  }, [initialDraft, open]);
 
   /**
    * Sends the caret into a freshly added story block.
@@ -166,7 +193,9 @@ export function EpicCreateDialog({
       const res = await fetch(`/api/projects/${projectId}/epics`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildManualEpicPayload(draft)),
+        body: JSON.stringify(
+          buildManualEpicPayload(draft, frictionId ? { frictionId } : {}),
+        ),
       });
 
       const json = await res.json().catch(() => ({}));
@@ -195,9 +224,11 @@ export function EpicCreateDialog({
         data-testid="epic-create-dialog"
       >
         <DialogHeader>
-          <DialogTitle className="text-[16px] font-semibold">New Epic</DialogTitle>
+          <DialogTitle className="text-[16px] font-semibold">
+            {dialogTitle}
+          </DialogTitle>
           <DialogDescription className="text-[12.5px]">
-            Write the ticket yourself — no agent involved.
+            {dialogDescription}
           </DialogDescription>
         </DialogHeader>
 
@@ -442,7 +473,7 @@ export function EpicCreateDialog({
                 data-testid="epic-create-spinner"
               />
             )}
-            Create Epic
+            {submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

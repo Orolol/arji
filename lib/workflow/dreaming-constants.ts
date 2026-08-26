@@ -53,6 +53,10 @@ export const MEMORY_WRITER_AGENT_TYPES: readonly string[] = [
  */
 export const MCP_EXEMPT_AGENT_TYPES: readonly string[] = [
   ...MEMORY_WRITER_AGENT_TYPES,
+  // Project-level QA report writer: it has no ticket scope, and its entire
+  // response is persisted as the report body. Appending ticket-tool guidance
+  // would be both unusable and after its output contract.
+  "failure_digest",
 ];
 
 export function isMcpExemptAgentType(

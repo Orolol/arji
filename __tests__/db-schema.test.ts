@@ -49,6 +49,19 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       updatedAt: "updated_at",
     },
   },
+  routines: {
+    sqlName: "routines",
+    columns: {
+      id: "id",
+      projectId: "project_id",
+      kind: "kind",
+      enabled: "enabled",
+      timeOfDay: "time_of_day",
+      config: "config",
+      lastRunAt: "last_run_at",
+      lastStatus: "last_status",
+    },
+  },
   documents: {
     sqlName: "documents",
     columns: {
@@ -168,6 +181,7 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       lastNonEmptyText: "last_non_empty_text",
       error: "error",
       outcome: "outcome",
+      reviewVerdict: "review_verdict",
       inputTokens: "input_tokens",
       outputTokens: "output_tokens",
       totalCostUsd: "total_cost_usd",
@@ -199,6 +213,32 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       sequence: "sequence",
       chunkKey: "chunk_key",
       content: "content",
+      createdAt: "created_at",
+    },
+  },
+  frictions: {
+    sqlName: "frictions",
+    columns: {
+      id: "id",
+      projectId: "project_id",
+      epicId: "epic_id",
+      agentSessionId: "agent_session_id",
+      category: "category",
+      description: "description",
+      filePath: "file_path",
+      occurrences: "occurrences",
+      status: "status",
+      createdAt: "created_at",
+    },
+  },
+  sessionArtifacts: {
+    sqlName: "session_artifacts",
+    columns: {
+      id: "id",
+      agentSessionId: "agent_session_id",
+      epicId: "epic_id",
+      filename: "filename",
+      caption: "caption",
       createdAt: "created_at",
     },
   },
@@ -287,6 +327,7 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       provider: "provider",
       model: "model",
       readableAgentName: "readable_agent_name",
+      escalatesTo: "escalates_to",
       createdAt: "created_at",
     },
   },
@@ -329,6 +370,17 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       agentSessionId: "agent_session_id",
       createdAt: "created_at",
       updatedAt: "updated_at",
+    },
+  },
+  gradingReports: {
+    sqlName: "grading_reports",
+    columns: {
+      id: "id",
+      epicId: "epic_id",
+      agentSessionId: "agent_session_id",
+      gradings: "gradings",
+      summary: "summary",
+      createdAt: "created_at",
     },
   },
   gitSyncLog: {
@@ -531,6 +583,8 @@ const DEFAULTS: [string, string, unknown][] = [
   ["projects", "status", "ideation"],
   ["projects", "imported", 0],
   ["projects", "ticketCounter", 0],
+  ["routines", "enabled", true],
+  ["routines", "config", "{}"],
   ["documents", "kind", "text"],
   ["epics", "priority", 0],
   ["epics", "status", "backlog"],
@@ -547,6 +601,8 @@ const DEFAULTS: [string, string, unknown][] = [
   ["agentSessions", "orchestrationMode", "solo"],
   ["agentSessions", "provider", "claude-code"],
   ["agentSessionSequences", "nextSequence", 1],
+  ["frictions", "occurrences", 1],
+  ["frictions", "status", "new"],
   ["pullRequests", "status", "open"],
   ["pullRequests", "baseBranch", "main"],
   ["customReviewAgents", "position", 0],
@@ -568,6 +624,11 @@ describe("db schema: column defaults", () => {
 
 const NOT_NULL: [string, string][] = [
   ["projects", "name"],
+  ["routines", "projectId"],
+  ["routines", "kind"],
+  ["routines", "enabled"],
+  ["routines", "timeOfDay"],
+  ["routines", "config"],
   ["documents", "projectId"],
   ["documents", "originalFilename"],
   ["epics", "projectId"],
@@ -583,6 +644,17 @@ const NOT_NULL: [string, string][] = [
   ["agentSessionChunks", "streamType"],
   ["agentSessionChunks", "sequence"],
   ["agentSessionChunks", "content"],
+  ["frictions", "projectId"],
+  ["frictions", "agentSessionId"],
+  ["frictions", "category"],
+  ["frictions", "description"],
+  ["frictions", "occurrences"],
+  ["frictions", "status"],
+  ["frictions", "createdAt"],
+  ["sessionArtifacts", "agentSessionId"],
+  ["sessionArtifacts", "epicId"],
+  ["sessionArtifacts", "filename"],
+  ["sessionArtifacts", "caption"],
   ["releases", "version"],
   ["pullRequests", "number"],
   ["pullRequests", "url"],
@@ -604,6 +676,9 @@ const NOT_NULL: [string, string][] = [
   ["verifyReports", "startedAt"],
   ["verifyReports", "finishedAt"],
   ["verifyReports", "commands"],
+  ["gradingReports", "epicId"],
+  ["gradingReports", "gradings"],
+  ["gradingReports", "summary"],
   ["ticketActivityLog", "fromStatus"],
   ["ticketActivityLog", "toStatus"],
   ["ticketActivityLog", "actor"],
@@ -633,6 +708,8 @@ const NULLABLE: [string, string][] = [
   ["projects", "cloneSource"],
   ["projects", "gitRemoteUrl"],
   ["projects", "defaultBranch"],
+  ["routines", "lastRunAt"],
+  ["routines", "lastStatus"],
   ["epics", "prNumber"],
   ["epics", "prUrl"],
   ["epics", "prStatus"],
@@ -660,6 +737,9 @@ const NULLABLE: [string, string][] = [
   ["verifyReports", "agentSessionId"],
   ["notifications", "sessionId"],
   ["notifications", "agentType"],
+  ["gradingReports", "agentSessionId"],
+  ["frictions", "epicId"],
+  ["frictions", "filePath"],
 ];
 
 describe("db schema: nullable columns", () => {
@@ -675,6 +755,23 @@ describe("db schema: nullable columns", () => {
 type IndexSpec = { name: string; unique: boolean; columns: string[] };
 
 const INDEXES: Record<string, IndexSpec[]> = {
+  routines: [
+    {
+      name: "routines_project_kind_unique",
+      unique: true,
+      columns: ["project_id", "kind"],
+    },
+    {
+      name: "routines_project_idx",
+      unique: false,
+      columns: ["project_id"],
+    },
+    {
+      name: "routines_enabled_idx",
+      unique: false,
+      columns: ["enabled"],
+    },
+  ],
   documents: [
     {
       name: "documents_project_filename_unique",
@@ -702,6 +799,35 @@ const INDEXES: Record<string, IndexSpec[]> = {
       name: "agent_session_chunks_session_stream_sequence_idx",
       unique: false,
       columns: ["session_id", "stream_type", "sequence"],
+    },
+  ],
+  frictions: [
+    {
+      name: "frictions_project_status_occurrences_idx",
+      unique: false,
+      columns: ["project_id", "status", "occurrences"],
+    },
+    {
+      name: "frictions_open_dedupe_idx",
+      unique: false,
+      columns: ["project_id", "category", "file_path", "status"],
+    },
+    {
+      name: "frictions_session_idx",
+      unique: false,
+      columns: ["agent_session_id"],
+    },
+  ],
+  sessionArtifacts: [
+    {
+      name: "session_artifacts_session_created_at_idx",
+      unique: false,
+      columns: ["agent_session_id", "created_at"],
+    },
+    {
+      name: "session_artifacts_epic_created_at_idx",
+      unique: false,
+      columns: ["epic_id", "created_at"],
     },
   ],
   agentPrompts: [
@@ -767,6 +893,18 @@ const INDEXES: Record<string, IndexSpec[]> = {
       name: "verify_reports_epic_finished_idx",
       unique: false,
       columns: ["epic_id", "finished_at"],
+    },
+  ],
+  gradingReports: [
+    {
+      name: "grading_reports_epic_created_at_idx",
+      unique: false,
+      columns: ["epic_id", "created_at"],
+    },
+    {
+      name: "grading_reports_session_idx",
+      unique: false,
+      columns: ["agent_session_id"],
     },
   ],
   githubIssues: [
@@ -837,6 +975,9 @@ type ForeignKeySpec = {
 };
 
 const FOREIGN_KEYS: Record<string, ForeignKeySpec[]> = {
+  routines: [
+    { columns: ["project_id"], foreignTable: "projects", foreignColumns: ["id"], onDelete: "cascade" },
+  ],
   documents: [
     { columns: ["project_id"], foreignTable: "projects", foreignColumns: ["id"], onDelete: "cascade" },
   ],
@@ -870,12 +1011,24 @@ const FOREIGN_KEYS: Record<string, ForeignKeySpec[]> = {
     { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "cascade" },
     { columns: ["agent_session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "set null" },
   ],
+  gradingReports: [
+    { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "cascade" },
+    { columns: ["agent_session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "set null" },
+  ],
   notifications: [
     { columns: ["project_id"], foreignTable: "projects", foreignColumns: ["id"], onDelete: "cascade" },
     { columns: ["session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "set null" },
   ],
   agentSessionChunks: [
     { columns: ["session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "cascade" },
+  ],
+  frictions: [
+    { columns: ["project_id"], foreignTable: "projects", foreignColumns: ["id"], onDelete: "cascade" },
+    { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "set null" },
+  ],
+  sessionArtifacts: [
+    { columns: ["agent_session_id"], foreignTable: "agent_sessions", foreignColumns: ["id"], onDelete: "cascade" },
+    { columns: ["epic_id"], foreignTable: "epics", foreignColumns: ["id"], onDelete: "cascade" },
   ],
 };
 
@@ -901,6 +1054,52 @@ describe("db schema: foreign keys", () => {
 // ---------------------------------------------------------------------------
 
 describe("db schema: exported types", () => {
+  it("Friction select and insert shapes", () => {
+    const selected: schema.Friction = {
+      id: "friction-1",
+      projectId: "project-1",
+      epicId: "epic-1",
+      agentSessionId: "session-1",
+      category: "broken_tooling",
+      description: "Lint wrapper fails silently",
+      filePath: "scripts/lint.sh",
+      occurrences: 2,
+      status: "triaged",
+      createdAt: "2026-08-25T10:00:00.000Z",
+    };
+    const inserted: schema.NewFriction = {
+      id: "friction-2",
+      projectId: "project-1",
+      epicId: null,
+      agentSessionId: "session-2",
+      category: "other",
+      description: "A recurring inconvenience",
+    };
+    expect(selected.occurrences).toBe(2);
+    expect(inserted.epicId).toBeNull();
+  });
+
+  it("Routine select and insert shapes", () => {
+    const selected: schema.Routine = {
+      id: "routine_1",
+      projectId: "proj_1",
+      kind: "night_run",
+      enabled: true,
+      timeOfDay: "02:30",
+      config: "{}",
+      lastRunAt: null,
+      lastStatus: null,
+    };
+    const inserted: schema.NewRoutine = {
+      id: "routine_2",
+      projectId: "proj_1",
+      kind: "github_issue_sync",
+      timeOfDay: "09:00",
+    };
+    expect(selected.kind).toBe("night_run");
+    expect(inserted.kind).toBe("github_issue_sync");
+  });
+
   it("GitSyncLog select shape", () => {
     const log: schema.GitSyncLog = {
       id: "sl_1",

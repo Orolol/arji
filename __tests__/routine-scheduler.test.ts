@@ -1,0 +1,332 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Routine } from "@/lib/db/schema";
+import {
+  ROUTINE_SWEEP_INTERVAL_MS,
+  RoutineScheduler,
+  isRoutineDue,
+  isRoutineSchedulerRunning,
+  recoverInterruptedRoutineRuns,
+  startRoutineScheduler,
+  stopRoutineScheduler,
+  type RoutineSchedulerDeps,
+} from "@/lib/routines/scheduler";
+
+function routine(overrides: Partial<Routine> = {}): Routine {
+  return {
+    id: "routine-1",
+    projectId: "project-1",
+    kind: "night_run",
+    enabled: true,
+    timeOfDay: "09:30",
+    config: "{}",
+    lastRunAt: null,
+    lastStatus: null,
+    ...overrides,
+  };
+}
+
+function localDate(day: number, hours: number, minutes: number): Date {
+  return new Date(2026, 7, day, hours, minutes, 0, 0);
+}
+
+function schedulerDeps(
+  row: Routine,
+  execute: RoutineSchedulerDeps["execute"] = vi.fn(async () => ({
+    status: "completed" as const,
+    message: "launched",
+    targetUrl: "/projects/project-1",
+  })),
+): RoutineSchedulerDeps {
+  return {
+    listEnabledRoutines: vi.fn(() => [row]),
+    markStarted: vi.fn((_id, startedAt) => {
+      row.lastRunAt = startedAt;
+      row.lastStatus = "running";
+    }),
+    markFinished: vi.fn((_id, status) => {
+      row.lastStatus = status;
+    }),
+    execute,
+    notify: vi.fn(),
+  };
+}
+
+describe("isRoutineDue", () => {
+  it("waits until the configured local server time", () => {
+    const row = routine();
+    expect(isRoutineDue(row, localDate(25, 9, 29))).toBe(false);
+    expect(isRoutineDue(row, localDate(25, 9, 30))).toBe(true);
+    expect(isRoutineDue(row, localDate(25, 18, 0))).toBe(true);
+  });
+
+  it("does not run twice on the same local calendar day", () => {
+    const row = routine({ lastRunAt: localDate(25, 8, 0).toISOString() });
+    expect(isRoutineDue(row, localDate(25, 18, 0))).toBe(false);
+
+    row.lastRunAt = localDate(24, 23, 59).toISOString();
+    expect(isRoutineDue(row, localDate(25, 18, 0))).toBe(true);
+  });
+
+  it("ignores disabled, invalid-time, and unavailable daily kinds", () => {
+    expect(
+      isRoutineDue(routine({ enabled: false }), localDate(25, 12, 0)),
+    ).toBe(false);
+    expect(
+      isRoutineDue(routine({ timeOfDay: "25:00" }), localDate(25, 12, 0)),
+    ).toBe(false);
+    expect(
+      isRoutineDue(routine({ kind: "dreaming" }), localDate(25, 12, 0)),
+    ).toBe(false);
+  });
+
+  it("runs CI watch on its configured interval and survives restart state", () => {
+    const row = routine({
+      kind: "ci_watch",
+      config: JSON.stringify({ intervalMinutes: 10 }),
+      lastRunAt: localDate(25, 9, 20).toISOString(),
+    });
+
+    expect(isRoutineDue(row, localDate(25, 9, 29))).toBe(false);
+    expect(isRoutineDue(row, localDate(25, 9, 30))).toBe(true);
+    expect(isRoutineDue({ ...row, lastRunAt: null }, localDate(25, 1, 0))).toBe(
+      true,
+    );
+  });
+});
+
+describe("RoutineScheduler", () => {
+  it("persists the claim before dispatch and notifies the result", async () => {
+    const row = routine();
+    const deps = schedulerDeps(row);
+    const scheduler = new RoutineScheduler(deps);
+
+    const result = await scheduler.sweep(localDate(25, 9, 30));
+
+    expect(deps.markStarted).toHaveBeenCalledTimes(1);
+    expect(deps.execute).toHaveBeenCalledTimes(1);
+    expect(deps.markFinished).toHaveBeenCalledWith(row.id, "completed");
+    expect(deps.notify).toHaveBeenCalledWith({
+      projectId: row.projectId,
+      kind: "night_run",
+      status: "completed",
+      message: "launched",
+      targetUrl: "/projects/project-1",
+    });
+    expect(result).toEqual([
+      { routineId: row.id, status: "completed", message: "launched" },
+    ]);
+  });
+
+  it("keeps quiet CI polling durable without creating inbox noise", async () => {
+    const row = routine({ kind: "ci_watch" });
+    const deps = schedulerDeps(
+      row,
+      vi.fn(async () => ({
+        status: "skipped" as const,
+        message: "No open pull requests",
+        targetUrl: "/projects/project-1",
+        shouldNotify: false,
+      })),
+    );
+
+    const result = await new RoutineScheduler(deps).sweep(localDate(25, 9, 30));
+
+    expect(deps.markStarted).toHaveBeenCalledTimes(1);
+    expect(deps.markFinished).toHaveBeenCalledWith(row.id, "skipped");
+    expect(deps.notify).not.toHaveBeenCalled();
+    expect(result).toEqual([
+      {
+        routineId: row.id,
+        status: "skipped",
+        message: "No open pull requests",
+      },
+    ]);
+  });
+
+  it("uses lastRunAt to prevent replay after a server restart", async () => {
+    const row = routine();
+    const execute = vi.fn(async () => ({
+      status: "completed" as const,
+      message: "launched",
+      targetUrl: "/projects/project-1",
+    }));
+    const deps = schedulerDeps(row, execute);
+
+    await new RoutineScheduler(deps).sweep(localDate(25, 9, 30));
+    // A fresh object models the new process. Only the DB-backed row survives.
+    await new RoutineScheduler(deps).sweep(localDate(25, 18, 0));
+
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps concurrent sweeps from launching the same routine twice", async () => {
+    const row = routine();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const execute = vi.fn(async () => {
+      await gate;
+      return {
+        status: "completed" as const,
+        message: "launched",
+        targetUrl: "/projects/project-1",
+      };
+    });
+    const deps = schedulerDeps(row, execute);
+    // Simulate two sweeps that both loaded a stale pre-claim DB snapshot. The
+    // in-memory set, rather than lastRunAt, must close this race.
+    deps.listEnabledRoutines = vi.fn(() => [routine()]);
+    const scheduler = new RoutineScheduler(deps);
+
+    const first = scheduler.sweep(localDate(25, 9, 30));
+    expect(scheduler.isRunning(row.id)).toBe(true);
+    const second = await scheduler.sweep(localDate(25, 9, 30));
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(second).toEqual([
+      {
+        routineId: row.id,
+        status: "skipped",
+        message: "Routine is already running.",
+      },
+    ]);
+
+    release();
+    await first;
+    expect(scheduler.isRunning(row.id)).toBe(false);
+  });
+
+  it("records and notifies execution failures", async () => {
+    const row = routine({ kind: "github_issue_sync" });
+    const deps = schedulerDeps(
+      row,
+      vi.fn(async () => {
+        throw new Error("GitHub unavailable");
+      }),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await new RoutineScheduler(deps).sweep(localDate(25, 9, 30));
+
+    expect(deps.markFinished).toHaveBeenCalledWith(row.id, "failed");
+    expect(deps.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "github_issue_sync",
+        status: "failed",
+        message: "GitHub unavailable",
+      }),
+    );
+    expect(result[0].status).toBe("failed");
+    errorSpy.mockRestore();
+  });
+
+  it("notifies a persistent thrown error once until its message changes", async () => {
+    const row = routine({ kind: "ci_watch", lastRunAt: null });
+    let attempts = 0;
+    const execute = vi.fn(async () => {
+      attempts += 1;
+      throw new Error("GitHub unavailable");
+    });
+    const deps = schedulerDeps(row, execute);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The signature guard lives on the scheduler instance (globalThis in
+    // production), so the same instance must run every sweep.
+    const scheduler = new RoutineScheduler(deps);
+
+    // Each sweep must see the routine as due again (the durable claim does
+    // not stop retries); the in-memory signature guard is what suppresses
+    // the repeat notifications. Sweeps are spaced one default CI-watch
+    // interval apart so dueness alone never blocks a retry.
+    await scheduler.sweep(localDate(25, 9, 30));
+    await scheduler.sweep(localDate(25, 9, 45));
+    await scheduler.sweep(localDate(25, 10, 0));
+    expect(attempts).toBe(3);
+    expect(deps.notify).toHaveBeenCalledTimes(1);
+
+    // A changed error signature re-notifies.
+    execute.mockImplementation(async () => {
+      throw new Error("Project is not connected to a GitHub repository");
+    });
+    await scheduler.sweep(localDate(25, 10, 15));
+    expect(deps.notify).toHaveBeenCalledTimes(2);
+    expect(deps.notify).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: "failed",
+        message: "Project is not connected to a GitHub repository",
+      }),
+    );
+    errorSpy.mockRestore();
+  });
+});
+
+describe("interrupted routine recovery", () => {
+  it("marks stale running rows failed and notifies once", () => {
+    const interrupted = routine({
+      kind: "github_issue_sync",
+      lastStatus: "running",
+      lastRunAt: localDate(25, 9, 30).toISOString(),
+    });
+    const deps = {
+      listInterruptedRoutines: vi.fn(() => [interrupted]),
+      markFailed: vi.fn(),
+      notify: vi.fn(),
+    };
+
+    expect(recoverInterruptedRoutineRuns(deps)).toBe(1);
+    expect(deps.markFailed).toHaveBeenCalledWith(interrupted.id);
+    expect(deps.notify).toHaveBeenCalledWith({
+      projectId: interrupted.projectId,
+      kind: "github_issue_sync",
+      status: "failed",
+      message: "Routine execution was interrupted by a server restart.",
+      targetUrl: `/projects/${interrupted.projectId}`,
+    });
+  });
+
+  it("isolates a broken stale row so later recoveries still complete", () => {
+    const first = routine({ id: "broken", lastStatus: "running" });
+    const second = routine({ id: "healthy", lastStatus: "running" });
+    const deps = {
+      listInterruptedRoutines: vi.fn(() => [first, second]),
+      markFailed: vi.fn((routineId: string) => {
+        if (routineId === first.id) throw new Error("write failed");
+      }),
+      notify: vi.fn(),
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(recoverInterruptedRoutineRuns(deps)).toBe(1);
+    expect(deps.markFailed).toHaveBeenCalledTimes(2);
+    expect(deps.notify).toHaveBeenCalledTimes(1);
+    expect(deps.notify).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: second.projectId }),
+    );
+    errorSpy.mockRestore();
+  });
+});
+
+describe("routine timer singleton", () => {
+  beforeEach(() => {
+    stopRoutineScheduler();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    stopRoutineScheduler();
+    vi.useRealTimers();
+  });
+
+  it("starts one unref-compatible one-minute interval", () => {
+    const intervalSpy = vi.spyOn(globalThis, "setInterval");
+    startRoutineScheduler();
+    startRoutineScheduler();
+
+    expect(isRoutineSchedulerRunning()).toBe(true);
+    expect(intervalSpy).toHaveBeenCalledTimes(1);
+    expect(intervalSpy).toHaveBeenCalledWith(
+      expect.any(Function),
+      ROUTINE_SWEEP_INTERVAL_MS,
+    );
+  });
+});

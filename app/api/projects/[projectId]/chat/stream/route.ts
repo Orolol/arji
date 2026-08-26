@@ -5,7 +5,7 @@ import { eq, desc, and, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { resolveCliSessionId } from "@/lib/db/resolve-cli-session-id";
 import { spawnClaudeStream, spawnClaude } from "@/lib/claude/spawn";
-import { buildChatPrompt, buildEpicRefinementPrompt, buildEpicFinalizationPrompt, buildTitleGenerationPrompt } from "@/lib/claude/prompt-builder";
+import { buildChatPrompt, buildEpicRefinementPrompt, buildEpicFinalizationPrompt } from "@/lib/claude/prompt-builder";
 import { getProvider, type ProviderType } from "@/lib/providers";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
@@ -34,7 +34,6 @@ import { activityRegistry } from "@/lib/activity-registry";
 import {
   enrichPromptWithDocumentMentions,
   MentionResolutionError,
-  userAuthoredTexts,
   validateMentionsExist,
 } from "@/lib/documents/mentions";
 import {
@@ -50,6 +49,7 @@ import {
 import { getProjectOr404, isErrorResponse } from "@/lib/api/route-helpers";
 import { validateBody, isValidationError } from "@/lib/validation/validate";
 import { chatMessageSchema } from "@/lib/validation/chat-schemas";
+import { generateConversationTitle } from "@/lib/chat/title-generation";
 
 /**
  * The stored conversation provider, honoured for any provider the app
@@ -286,23 +286,17 @@ export async function POST(
           .where(eq(chatConversations.id, conversationId))
           .get();
         if (conv && (conv.label === "Brainstorm" || conv.label === "New Epic" || conv.label === "Chat")) {
-          const titlePrompt = buildTitleGenerationPrompt(userContent, fullContent);
-          spawnClaude({ mode: "plan", prompt: titlePrompt, model: "haiku" }).promise
-            .then((titleResult) => {
-              if (titleResult.success && titleResult.result) {
-                let title = titleResult.result.trim();
-                try {
-                  const parsed = JSON.parse(title);
-                  if (parsed.result) title = parsed.result;
-                  else if (typeof parsed === "string") title = parsed;
-                } catch { /* use raw */ }
-                title = title.replace(/^["']|["']$/g, "").trim();
-                if (title && title.length <= 60) {
-                  db.update(chatConversations)
-                    .set({ label: title })
-                    .where(eq(chatConversations.id, conversationId))
-                    .run();
-                }
+          void generateConversationTitle({
+            projectId,
+            userContent,
+            assistantContent: fullContent,
+          })
+            .then((title) => {
+              if (title) {
+                db.update(chatConversations)
+                  .set({ label: title })
+                  .where(eq(chatConversations.id, conversationId))
+                  .run();
               }
             })
             .catch(() => { /* ignore title gen errors */ });

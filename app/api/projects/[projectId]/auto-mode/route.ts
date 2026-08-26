@@ -15,6 +15,7 @@ import {
   autoModeReviewAgentSettingKey,
   autoModeReviewConcurrencySettingKey,
   autoModeSmartDispatchSettingKey,
+  fullAutoSecondOpinionSettingKey,
   parseAutoModeAgent,
   parseAutoModeConcurrency,
   parseAutoModeEnabled,
@@ -33,7 +34,7 @@ import type { AutoModeStatus } from "@/lib/auto-mode/status";
 /**
  * GET/PUT /api/projects/[projectId]/auto-mode
  *
- * The dialog's whole contract: the six persisted settings, the scheduler
+ * The dialog's whole contract: the seven persisted settings, the scheduler
  * budget they have to live inside, and a live picture of what the supervisor
  * is doing (in-flight counts, candidate counts, parked tickets, recent
  * dispatches).
@@ -71,6 +72,7 @@ function buildStatus(projectId: string): AutoModeStatus {
     reviewAgent: config.reviewAgent,
     reviewConcurrency: config.reviewConcurrency,
     smartDispatch: config.smartDispatch,
+    secondOpinion: config.secondOpinion,
     effectiveSchedulerBudget: (() => {
       // Unlimited is Infinity in-process, which JSON would silently turn
       // into null anyway — send the null contract explicitly.
@@ -206,6 +208,20 @@ export async function PUT(
       );
     }
     writes.push([autoModeSmartDispatchSettingKey(projectId), smartDispatch]);
+  }
+
+  if ("secondOpinion" in payload) {
+    const secondOpinion = parseAutoModeEnabled(payload.secondOpinion);
+    if (secondOpinion === null) {
+      return NextResponse.json(
+        { error: "`secondOpinion` must be a boolean." },
+        { status: 400 }
+      );
+    }
+    writes.push([
+      fullAutoSecondOpinionSettingKey(projectId),
+      secondOpinion,
+    ]);
   }
 
   try {

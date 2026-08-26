@@ -18,12 +18,22 @@
 export const PIPELINE_ENABLED_SETTING_KEY = "pipeline_enabled";
 
 /**
+ * Opt-in acceptance grader between verify and review. Absent means OFF so
+ * existing pipelines keep their historical build → verify → review flow.
+ */
+export const PIPELINE_GRADER_ENABLED_SETTING_KEY = "pipeline_grader_enabled";
+
+/**
  * Per-project override (`pipeline_enabled:<projectId>`), following the
  * `agent_max_concurrent:<projectId>` convention. Takes precedence over the
  * global key; an explicit request flag still beats both.
  */
 export function pipelineEnabledSettingKey(projectId: string): string {
   return `${PIPELINE_ENABLED_SETTING_KEY}:${projectId}`;
+}
+
+export function pipelineGraderEnabledSettingKey(projectId: string): string {
+  return `${PIPELINE_GRADER_ENABLED_SETTING_KEY}:${projectId}`;
 }
 
 /** Global settings key: per-stage attempt cap before the run gives up. */
@@ -101,6 +111,22 @@ export function resolvePipelineEnabledDefault(
   return parsePipelineEnabledSetting(settings[PIPELINE_ENABLED_SETTING_KEY]) ?? false;
 }
 
+/** Client-side effective grader setting: project override → global → OFF. */
+export function resolvePipelineGraderEnabledDefault(
+  settings: Record<string, unknown> | null | undefined,
+  projectId: string
+): boolean {
+  if (!settings) return false;
+  const perProject = parsePipelineEnabledSetting(
+    settings[pipelineGraderEnabledSettingKey(projectId)]
+  );
+  if (perProject !== null) return perProject;
+  return (
+    parsePipelineEnabledSetting(settings[PIPELINE_GRADER_ENABLED_SETTING_KEY]) ??
+    false
+  );
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -163,10 +189,16 @@ export const PIPELINE_REASON_PREFIX = "Pipeline ";
 export const PIPELINE_REASONS = {
   started: "Pipeline started (build → review → auto-fix)",
   reviewStarted: "Pipeline stage: review started",
+  gradingStarted: "Pipeline stage: acceptance grading started",
+  gradingPassed: "Pipeline grading: no missed acceptance criteria",
+  gradingMissed: (count: number, cycle: number, max: number) =>
+    `Pipeline grading: ${count} missed acceptance ${count === 1 ? "criterion" : "criteria"} — fix cycle ${cycle}/${max}`,
   fixStarted: (cycle: number, max: number) =>
     `Pipeline stage: fix started (cycle ${cycle}/${max})`,
   retry: (stage: string, attempt: number, max: number) =>
     `Pipeline retry: ${stage} attempt ${attempt}/${max}`,
+  effortEscalation: (stage: string, namedAgent: string) =>
+    `Pipeline effort escalation: ${stage} retried with ${namedAgent}`,
   escalation: (stage: string, provider: string) =>
     `Pipeline escalation: ${stage} retried on ${provider}`,
   pausedQuestion: (stage: string) =>
@@ -212,6 +244,8 @@ export const PIPELINE_REASONS = {
   failedRegressionGateCrashed: "Pipeline failed: regression gate crashed",
   /** The regression command failed to run (infrastructure / environment error). */
   failedRegressionCommandError: "Pipeline failed: regression command error",
+  failedGrading: (count: number, cycles: number) =>
+    `Pipeline failed: ${count} acceptance ${count === 1 ? "criterion remains" : "criteria remain"} missed after ${cycles} fix cycles`,
 } as const;
 
 /** True when an activity-log reason belongs to the pipeline trace. */
@@ -242,6 +276,7 @@ export function pipelineReasonTone(reason: string): PipelineReasonTone {
 
 export type PipelineState =
   | "running_build"
+  | "running_grading"
   | "running_review"
   | "running_fix"
   | "running_forensic"
@@ -250,7 +285,12 @@ export type PipelineState =
   | "paused_question"
   | "cancelled";
 
-export type PipelineStage = "build" | "review" | "fix" | "forensic";
+export type PipelineStage =
+  | "build"
+  | "grading"
+  | "review"
+  | "fix"
+  | "forensic";
 
 export interface PipelineRunSnapshot {
   runId: string;
@@ -281,6 +321,7 @@ export function isPipelineRunActive(state: PipelineState): boolean {
 
 export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
   build: "Build",
+  grading: "Grading",
   review: "Review",
   fix: "Fix",
   forensic: "Forensic",

@@ -8,6 +8,7 @@ import {
 } from "./logger";
 import { extractCliSessionIdFromOutput, hasAskUserQuestion } from "./json-parser";
 import { cleanupMcpConfigFile, writeMcpConfigFile } from "./mcp-injection";
+import { promptExceedsArgv } from "@/lib/providers/prompt-transport";
 import type { McpSpawnConfig } from "@/lib/providers/types";
 
 export interface ClaudeOptions {
@@ -145,7 +146,14 @@ export function buildClaudeArgs(
     args.push("--session-id", cliSessionId);
   }
 
-  args.push("--print", "-p", prompt);
+  if (promptExceedsArgv(prompt)) {
+    // Past MAX_ARG_STRLEN a prompt cannot be an argv element at all — claude
+    // reads it from stdin when --print is given none, and both spawners pipe
+    // it there. See lib/providers/prompt-transport.ts.
+    args.push("--print");
+  } else {
+    args.push("--print", "-p", prompt);
+  }
 
   if (model) {
     args.push("--model", model);
@@ -209,27 +217,57 @@ export function prepareClaudeSpawn(
  * The returned `kill` function can be called to abort the process early.
  */
 export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
-  const { prompt, cwd, cliSessionId } = options;
+  const { prompt, cwd, cliSessionId, logIdentifier } = options;
 
   const { args, mcpConfigPath } = prepareClaudeSpawn(options, "json");
 
   const effectiveCwd = cwd || process.cwd();
+  const promptOnStdin = promptExceedsArgv(prompt);
 
-  // Debug logging removed for production
+  let logCtx: StreamLogContext | null = null;
+  if (logIdentifier) {
+    try {
+      logCtx = createStreamLog(logIdentifier, args, prompt);
+    } catch {
+      // logging is best-effort
+    }
+  }
 
   let child: ChildProcess | null = null;
   let killed = false;
+  let logEnded = false;
 
   const promise = new Promise<ClaudeResult>((resolve) => {
     const startTime = Date.now();
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
 
+    const finishLog = (exitCode: number | null, error?: string): void => {
+      if (!logCtx || logEnded) return;
+      logEnded = true;
+      try {
+        const stdout = Buffer.concat(stdoutChunks).toString("utf-8").trim();
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
+        if (stdout) appendStreamEvent(logCtx, stdout);
+        if (stderr) appendStderrEvent(logCtx, stderr);
+        endStreamLog(logCtx, { exitCode, ...(error ? { error } : {}) });
+      } catch {
+        // logging is best-effort
+      }
+    };
+
     child = nodeSpawn("claude", args, {
       cwd: effectiveCwd,
       env: { ...process.env },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [promptOnStdin ? "pipe" : "ignore", "pipe", "pipe"],
     });
+
+    if (promptOnStdin) {
+      // EPIPE if claude exits before draining the prompt — that failure is
+      // already reported through the exit path.
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(prompt);
+    }
 
     child.stdout?.on("data", (chunk: Buffer) => {
       stdoutChunks.push(chunk);
@@ -244,6 +282,7 @@ export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
       // Spawn failure is terminal — the config file (and its token) must not
       // outlive the attempt.
       cleanupMcpConfigFile(mcpConfigPath);
+      finishLog(null, err.message);
 
       if (err.message.includes("ENOENT")) {
         resolve({
@@ -265,6 +304,7 @@ export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
       const duration = Date.now() - startTime;
       // Session end (normal exit, failure, or kill) — drop the token file.
       cleanupMcpConfigFile(mcpConfigPath);
+      finishLog(code, killed ? "Process was cancelled." : undefined);
       const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
       const stderr = Buffer.concat(stderrChunks).toString("utf-8");
       const parsedCliSessionId =
@@ -329,7 +369,7 @@ export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
     if (a === prompt && a.length > 50) return "<prompt>";
     return a;
   });
-  const command = `claude ${displayArgs.join(" ")}`;
+  const command = `claude ${displayArgs.join(" ")}${promptOnStdin ? " < <prompt>" : ""}`;
 
   return { promise, kill, command, mcpConfigPath: mcpConfigPath ?? undefined };
 }
@@ -378,6 +418,7 @@ export function spawnClaudeStream(options: ClaudeOptions): SpawnedClaudeStream {
   const { args, mcpConfigPath } = prepareClaudeSpawn(options, "stream-json");
 
   const effectiveCwd = cwd || process.cwd();
+  const promptOnStdin = promptExceedsArgv(prompt);
 
   // Debug logging removed for production
 
@@ -415,8 +456,13 @@ export function spawnClaudeStream(options: ClaudeOptions): SpawnedClaudeStream {
       child = nodeSpawn("claude", args, {
         cwd: effectiveCwd,
         env: { ...process.env },
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [promptOnStdin ? "pipe" : "ignore", "pipe", "pipe"],
       });
+
+      if (promptOnStdin) {
+        child.stdin?.on("error", () => {});
+        child.stdin?.end(prompt);
+      }
 
       let buffer = "";
 

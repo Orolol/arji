@@ -12,6 +12,7 @@ interface QaReport {
   id: string;
   projectId: string;
   status: string;
+  agentSessionId?: string | null;
   summary: string | null;
   reportContent: string | null;
   checkType?: string;
@@ -259,7 +260,12 @@ export function ReportDetail({
 
   const heading = useMemo(() => {
     if (!report) return "Report";
-    const label = report.checkType === "e2e_test" ? "E2E Test" : "Tech Check";
+    const label =
+      report.checkType === "e2e_test"
+        ? "E2E Test"
+        : report.checkType === "failure_digest"
+          ? "Failure Digest"
+          : "Tech Check";
     return `${label} #${report.id.slice(0, 8)}`;
   }, [report]);
 
@@ -353,8 +359,12 @@ export function ReportDetail({
   }
 
   const duration = formatDuration(report.createdAt, report.completedAt);
+  const isEmptyFailureDigest =
+    report.checkType === "failure_digest" && report.agentSessionId === null;
   const canCreateEpics =
-    report.status === "completed" && Boolean(report.reportContent);
+    report.status === "completed" &&
+    Boolean(report.reportContent) &&
+    !isEmptyFailureDigest;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-[16px] rounded-[12px] border border-border bg-card px-[24px] py-[22px]">
@@ -415,7 +425,9 @@ export function ReportDetail({
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             {report.checkType === "e2e_test"
               ? "E2E test is still running..."
-              : "Tech check is still running..."}
+              : report.checkType === "failure_digest"
+                ? "Failure digest is still running..."
+                : "Tech check is still running..."}
           </div>
         )}
 

@@ -2,9 +2,12 @@ import fs from "fs";
 import path from "path";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { loadPromptComments } from "@/lib/claude/prompt-comments";
 import {
   agentSessions,
   epics,
+  gradingReports,
+  namedAgents,
   projects,
   reviewComments,
   ticketComments,
@@ -56,11 +59,17 @@ import {
 import { resolveVerifyConfigForProject } from "@/lib/verify/config";
 import type { VerifyConfig } from "@/lib/verify/verify-constants";
 import { withVerificationWorktreeLock } from "@/lib/verify/execution-lock";
+import { isVisualProofEnabled } from "@/lib/claude/visual-proof";
 import { buildRegressionFixSection } from "@/lib/verify/regression-report";
 import { runVerification as executeVerification } from "@/lib/verify/runner";
 import { assertManagedEpicWorktreePath } from "@/lib/verify/worktree";
 import { readRegressionConfig } from "@/lib/pipeline/verify";
 import { emitTicketUpdated } from "@/lib/events/emit";
+import { dispatchGradingSession } from "@/lib/grading/dispatch";
+import {
+  buildGradingFixSection,
+  parseGradingEntries,
+} from "@/lib/grading/report";
 import {
   enrichPromptWithDocumentMentions,
   userAuthoredTexts,
@@ -84,10 +93,11 @@ import {
   createUnresolvedMentionsNotification,
 } from "@/lib/notifications/create";
 import { PIPELINE_REVIEW_TYPE } from "./constants";
-import { assessReviewOutcome } from "./findings";
+import { assessReviewOutcome, resolveReviewVerdict } from "./findings";
 import type {
   PipelineDeterministicVerificationOutcome,
   PipelineGuardCheck,
+  PipelineGradingAssessment,
   PipelineReviewAssessment,
   PipelineStageHandle,
   PipelineStageRequest,
@@ -111,11 +121,15 @@ import type {
  *                allows (validateResumeSession — failed sessions keep their
  *                cliSessionId; status is not checked), same provider/agent;
  *                fresh otherwise.
- *   attempt 3+ — ESCALATE: fresh session on the first available alternative
- *                provider (pickAlternativeReviewProvider — despite its name
- *                it is the generic alternate picker); same provider when no
- *                alternative CLI is installed. namedAgentId null, model
- *                undefined (provider default).
+ *   attempt 3  — when the failed named agent has escalatesTo configured,
+ *                start fresh on that stronger named agent (same provider).
+ *                Without that opt-in edge, this is byte-for-byte the legacy
+ *                provider-escalation attempt below.
+ *   attempt 3+ — ESCALATE to the first available alternative provider when
+ *                no model escalation occupied attempt 3; with an escalatesTo
+ *                edge, provider escalation starts at attempt 4. The generic
+ *                picker is pickAlternativeReviewProvider despite its name.
+ *                namedAgentId null, model undefined (provider default).
  *
  * Fix stages additionally resume the run's previous code-writing session on
  * attempt 1 and append the open review feedback + pipeline fix instructions
@@ -167,6 +181,10 @@ export interface PipelineStageDriver {
     sessionId: string;
     stageStartedAt: string;
   }): Promise<PipelineReviewAssessment>;
+  assessGrading(input: {
+    sessionId: string;
+    reportId: string;
+  }): Promise<PipelineGradingAssessment>;
   readSessionStatus(sessionId: string): string | null;
   checkGuards(ownSessionIds: string[]): PipelineGuardCheck;
 }
@@ -184,6 +202,9 @@ export function createPipelineStageDriver(
   return {
     launchStage: async (request) => {
       try {
+        if (request.stage === "grading") {
+          return await dispatchPipelineGradingStage(init);
+        }
         return await dispatchPipelineStage(init, request, reviewOutputs);
       } catch (error) {
         const message =
@@ -215,12 +236,39 @@ export function createPipelineStageDriver(
         epicId: init.epicId,
         sinceIso: stageStartedAt,
         sessionOutput: output,
+        reviewSessionId: sessionId || null,
       });
       return {
         blocking: assessment.blocking,
         blockingCount: assessment.blockingFindings.length,
         agentCommentCount: assessment.agentCommentCount,
         usedProseFallback: assessment.usedProseFallback,
+        verdictSource: assessment.verdictSource,
+        structuredVerdict: assessment.structuredVerdict,
+      };
+    },
+
+    assessGrading: async ({ sessionId, reportId }) => {
+      const report = db
+        .select()
+        .from(gradingReports)
+        .where(
+          and(
+            eq(gradingReports.id, reportId),
+            eq(gradingReports.epicId, init.epicId),
+            eq(gradingReports.agentSessionId, sessionId),
+          ),
+        )
+        .get();
+      const gradings = parseGradingEntries(report?.gradings);
+      if (!report || !gradings) {
+        throw new Error("Grading report is missing or malformed");
+      }
+      return {
+        reportId: report.id,
+        summary: report.summary,
+        gradings,
+        missed: gradings.filter((entry) => entry.status === "missed"),
       };
     },
 
@@ -232,6 +280,46 @@ export function createPipelineStageDriver(
         .get()?.status ?? null,
 
     checkGuards: (ownSessionIds) => checkPipelineGuards(init, ownSessionIds),
+  };
+}
+
+/** Adapts the reusable grader dispatcher to the pipeline stage contract. */
+async function dispatchPipelineGradingStage(
+  init: PipelineStageDriverInit,
+): Promise<PipelineStageHandle> {
+  const result = await dispatchGradingSession({
+    projectId: init.projectId,
+    epicId: init.epicId,
+    userStoryId: init.scope === "story" ? init.userStoryId : null,
+    batchRunId: init.batchRunId ?? null,
+  });
+
+  if (result.skipped) {
+    return {
+      sessionId: null,
+      settled: Promise.resolve({
+        sessionId: "",
+        success: true,
+        outcome: "answered",
+        error: null,
+        gradingReportId: null,
+        gradingSkipped: true,
+      }),
+      escalatedToProvider: null,
+    };
+  }
+
+  return {
+    sessionId: result.sessionId,
+    settled: result.settled.then((terminal) => ({
+      sessionId: terminal.sessionId,
+      success: terminal.success,
+      outcome: terminal.outcome,
+      error: terminal.error,
+      gradingReportId: terminal.reportId,
+      gradingSkipped: false,
+    })),
+    escalatedToProvider: null,
   };
 }
 
@@ -409,16 +497,55 @@ function readLastNonEmptyText(sessionId: string): string | null {
 interface PreviousSessionRow {
   id: string;
   provider: string | null;
+  namedAgentId: string | null;
 }
 
-function readSessionProvider(sessionId: string): PreviousSessionRow | null {
+function readSessionAgent(sessionId: string): PreviousSessionRow | null {
   return (
     db
-      .select({ id: agentSessions.id, provider: agentSessions.provider })
+      .select({
+        id: agentSessions.id,
+        provider: agentSessions.provider,
+        namedAgentId: agentSessions.namedAgentId,
+      })
       .from(agentSessions)
       .where(eq(agentSessions.id, sessionId))
       .get() ?? null
   );
+}
+
+function readEffortEscalationTarget(
+  namedAgentId: string,
+  provider: AgentProvider
+): ResolvedAgent | null {
+  const source = db
+    .select({ escalatesTo: namedAgents.escalatesTo })
+    .from(namedAgents)
+    .where(eq(namedAgents.id, namedAgentId))
+    .get();
+  if (!source?.escalatesTo) return null;
+
+  const target = db
+    .select({
+      id: namedAgents.id,
+      name: namedAgents.name,
+      provider: namedAgents.provider,
+      model: namedAgents.model,
+    })
+    .from(namedAgents)
+    .where(eq(namedAgents.id, source.escalatesTo))
+    .get();
+
+  // The write service enforces this invariant. Keep the dispatch-side check
+  // so a database edited outside Arij can never turn effort escalation into
+  // an unannounced provider switch.
+  if (!target || target.provider !== provider) return null;
+  return {
+    provider,
+    namedAgentId: target.id,
+    name: target.name,
+    model: target.model,
+  };
 }
 
 /**
@@ -451,6 +578,7 @@ function buildReviewFeedbackSection(
 
 interface ResolvedStageAgent {
   resolved: ResolvedAgent;
+  escalatedToNamedAgent: string | null;
   escalatedToProvider: AgentProvider | null;
 }
 
@@ -461,9 +589,11 @@ async function resolveStageAgent(
   codeAgentType: AgentType,
   reviewAgentType: AgentType
 ): Promise<ResolvedStageAgent> {
+  let configured: ResolvedAgent | null = null;
   const resolveConfigured = async (): Promise<ResolvedAgent> => {
+    if (configured) return configured;
     if (request.stage === "review") {
-      return resolveAgentForDispatch(
+      configured = await resolveAgentForDispatch(
         reviewAgentType,
         init.projectId,
         init.reviewNamedAgentId ?? null,
@@ -476,35 +606,67 @@ async function resolveStageAgent(
             : {}),
         }
       );
+      return configured;
     }
-    return resolveAgentByNamedId(
+    configured = resolveAgentByNamedId(
       codeAgentType,
       init.projectId,
       init.buildNamedAgentId
     );
+    return configured;
   };
 
   if (request.attempt < 3) {
-    return { resolved: await resolveConfigured(), escalatedToProvider: null };
+    return {
+      resolved: await resolveConfigured(),
+      escalatedToNamedAgent: null,
+      escalatedToProvider: null,
+    };
   }
 
-  // Escalation: fresh session on the first available alternative to the
-  // failed attempt's provider; same provider when none is installed. Named
-  // agent dropped, model left undefined (provider default).
+  // Escalation always starts fresh. If the failed named agent opted into a
+  // stronger same-provider model, that occupies attempt 3. Otherwise attempt
+  // 3 retains the exact historical alternative-provider path.
   const previous = request.previousAttemptSessionId
-    ? readSessionProvider(request.previousAttemptSessionId)
+    ? readSessionAgent(request.previousAttemptSessionId)
     : null;
   const baseProvider = (previous?.provider ??
     (await resolveConfigured()).provider) as AgentProvider;
+  if (request.attempt === 3) {
+    const sourceNamedAgentId =
+      previous !== null
+        ? previous.namedAgentId
+        : (await resolveConfigured()).namedAgentId ?? null;
+    if (sourceNamedAgentId) {
+      const effortTarget = readEffortEscalationTarget(
+        sourceNamedAgentId,
+        baseProvider
+      );
+      if (effortTarget) {
+        return {
+          resolved: effortTarget,
+          escalatedToNamedAgent:
+            effortTarget.name ?? effortTarget.namedAgentId ?? "stronger agent",
+          escalatedToProvider: null,
+        };
+      }
+    }
+  }
+
+  // Provider escalation: first available alternative to the failed attempt's
+  // provider; same provider when none is installed. The named agent is
+  // dropped and the provider's default model is used.
   const alternative = await pickAlternativeReviewProvider(baseProvider);
   if (alternative) {
     return {
       resolved: { provider: alternative, namedAgentId: null },
+      escalatedToNamedAgent: null,
       escalatedToProvider: alternative,
     };
   }
   return {
     resolved: { provider: baseProvider, namedAgentId: null },
+    escalatedToNamedAgent: null,
     escalatedToProvider: null,
   };
 }
@@ -552,12 +714,8 @@ async function dispatchPipelineStage(
   const isReview = request.stage === "review";
   const agentType = isReview ? reviewAgentType : codeAgentType;
 
-  const { resolved, escalatedToProvider } = await resolveStageAgent(
-    init,
-    request,
-    codeAgentType,
-    reviewAgentType
-  );
+  const { resolved, escalatedToNamedAgent, escalatedToProvider } =
+    await resolveStageAgent(init, request, codeAgentType, reviewAgentType);
 
   // ---------------------------------------------------------------------
   // Resume decision. Targets: attempt 2 resumes the failed attempt of THIS
@@ -607,22 +765,9 @@ async function dispatchPipelineStage(
     .orderBy(userStories.position)
     .all();
 
-  const comments = db
-    .select()
-    .from(ticketComments)
-    .where(
-      scope === "story" && userStoryId
-        ? eq(ticketComments.userStoryId, userStoryId)
-        : eq(ticketComments.epicId, epicId)
-    )
-    .orderBy(ticketComments.createdAt)
-    .all();
-
-  const promptComments: PromptComment[] = comments.map((c) => ({
-    author: c.author as "user" | "agent",
-    content: c.content,
-    createdAt: c.createdAt ?? "",
-  }));
+  const promptComments: PromptComment[] = loadPromptComments(
+    scope === "story" && userStoryId ? { userStoryId } : { epicId }
+  );
 
   const { worktreePath, branchName } = await createWorktree(
     project.gitRepoPath,
@@ -669,7 +814,8 @@ async function dispatchPipelineStage(
             epic,
             usList,
             buildSystemPrompt,
-            promptComments
+            promptComments,
+            { visualProofEnabled: isVisualProofEnabled() }
           )
         : buildTicketBuildPrompt(
             project,
@@ -677,7 +823,8 @@ async function dispatchPipelineStage(
             epic,
             story!,
             promptComments,
-            buildSystemPrompt
+            buildSystemPrompt,
+            { visualProofEnabled: isVisualProofEnabled() }
           );
 
     // Open review feedback (includes the blocking findings verbatim with
@@ -695,7 +842,17 @@ async function dispatchPipelineStage(
       prompt = prompt + "\n\n" + reviewContext;
     }
     if (request.stage === "fix") {
-      prompt = prompt + "\n\n" + PIPELINE_FIX_INSTRUCTIONS_SECTION;
+      // A grading-only fix must not be described as a code-review rejection.
+      // When open review findings also exist, retain both instruction blocks.
+      if (!request.gradingFailure || reviewContext) {
+        prompt = prompt + "\n\n" + PIPELINE_FIX_INSTRUCTIONS_SECTION;
+      }
+      if (request.gradingFailure) {
+        prompt =
+          prompt +
+          "\n\n" +
+          buildGradingFixSection(request.gradingFailure);
+      }
       // A regression-gate rejection carries its exact red→green verdict so
       // the agent repairs the real problem instead of guessing.
       if (request.verifyFailure) {
@@ -735,7 +892,7 @@ async function dispatchPipelineStage(
   const mentionEnrichment = enrichPromptWithDocumentMentions({
     projectId,
     prompt,
-    textSources: userAuthoredTexts(comments),
+    textSources: userAuthoredTexts(promptComments),
   });
   prompt = mentionEnrichment.prompt;
   createUnresolvedMentionsNotification({
@@ -753,7 +910,12 @@ async function dispatchPipelineStage(
   const logsDir = path.join(process.cwd(), "data", "sessions", sessionId);
   fs.mkdirSync(logsDir, { recursive: true });
   const logsPath = path.join(logsDir, "logs.json");
-  const agentMode = isReview ? "plan" : "code";
+  // Reviews run in code mode like builds: plan mode refuses mutating MCP
+  // tools (submit_findings, create_bug) regardless of the allowlist, and
+  // provider read-only postures cut the tool channel entirely. The
+  // no-modification rule for reviewers is a prompt contract
+  // (REVIEW_BOUNDARY_SECTION in prompt-builder), not a harness restriction.
+  const agentMode = "code";
 
   if (!isReview) {
     transitionBuildStarted({
@@ -906,7 +1068,12 @@ async function dispatchPipelineStage(
     }
   });
 
-  return { sessionId, settled, escalatedToProvider };
+  return {
+    sessionId,
+    settled,
+    escalatedToNamedAgent,
+    escalatedToProvider,
+  };
 }
 
 type StageResultPayload = ClaudeResult | undefined;
@@ -1022,12 +1189,18 @@ function finalizeReviewSession(input: {
     });
   }
 
-  const lowerOutput = output.toLowerCase();
-  const isNegativeVerdict =
-    !askedQuestion &&
-    (lowerOutput.includes("changes requested") ||
-      lowerOutput.includes("not complete") ||
-      lowerOutput.includes("partially complete"));
+  // Verdict channels, in priority order: the reviewer's persisted
+  // submit_findings verdict, else the prose scan of its final message (see
+  // lib/pipeline/findings.ts). A reviewer that asked a question delivered no
+  // verdict at all, so neither channel is consulted.
+  const decision = askedQuestion
+    ? null
+    : resolveReviewVerdict({
+        epicId,
+        reviewSessionId: sessionId,
+        sessionOutput: output,
+      });
+  const isNegativeVerdict = decision?.negative ?? false;
 
   if (scope === "epic") {
     if (result?.success) {
@@ -1060,6 +1233,7 @@ function finalizeReviewSession(input: {
         scope: "epic",
         reason: `Review verdict: changes requested (${PIPELINE_REVIEW_LABEL})`,
         sessionId,
+        verdictSource: decision?.source,
       });
     }
   } else if (userStoryId) {
@@ -1079,6 +1253,7 @@ function finalizeReviewSession(input: {
         userStoryId,
         reason: `Review verdict: changes requested (${PIPELINE_REVIEW_LABEL})`,
         sessionId,
+        verdictSource: decision?.source,
       });
     }
   }

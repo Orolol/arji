@@ -127,6 +127,11 @@ export class GeminiCliProvider extends BaseCliProvider {
 
     if (mode === "code") {
       args.push("-y");
+    } else if (mode === "analyze") {
+      // Imports need one file artifact, not autonomous shell execution over
+      // a repository the user may have only just cloned. Gemini's auto_edit
+      // posture approves file tools while leaving shell commands gated.
+      args.push("--approval-mode", "auto_edit");
     }
 
     if (model) {

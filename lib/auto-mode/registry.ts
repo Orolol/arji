@@ -4,7 +4,7 @@ import { AUTO_MODE_MAX_CONSECUTIVE_FAILURES } from "./constants";
  * In-process state of Full Auto Mode, modeled on NightRunRegistry.
  *
  * There is deliberately NO table: the mode's *configuration* is durable (the
- * five `settings` keys) but its *runtime* state is not. A server restart
+ * seven `settings` keys) but its *runtime* state is not. A server restart
  * therefore resumes the mode from settings with an empty in-flight set,
  * which is exactly right — the sessions it was tracking died with the
  * process and boot cleanup cancels/fails their rows like any other orphan.
@@ -25,6 +25,7 @@ export const AUTO_MODE_RECENT_LIMIT = 20;
 export type AutoModeDispatchKind =
   | "build"
   | "review"
+  | "second-opinion"
   | "merge"
   | "merge-fix"
   | "skip";
@@ -77,6 +78,8 @@ interface FailureEntry {
 /** What one in-flight session of the mode's own dispatch is working on. */
 export interface AutoModeInFlightEntry {
   kind: "build" | "review";
+  /** Distinguishes the opt-in pre-merge gate from an ordinary review slot. */
+  purpose?: "second-opinion";
   /** Story id for story-scoped work, else the epic id (the parking key). */
   ticketId: string;
   epicId: string;
@@ -115,6 +118,13 @@ interface AutoModeProjectState {
    * surface, so the count drives one notification instead of silence.
    */
   mergeGateRefusals: Map<string, number>;
+  /**
+   * Last stable reason why the pre-merge second-opinion gate could not be
+   * dispatched. The supervisor still probes on every sweep so installing a
+   * compatible provider takes effect immediately, but it writes the same
+   * activity trace only once instead of every 15 seconds.
+   */
+  secondOpinionSkipReasons: Map<string, string>;
 }
 
 function emptyState(): AutoModeProjectState {
@@ -128,6 +138,7 @@ function emptyState(): AutoModeProjectState {
     merging: new Set(),
     mergeDeferredUntil: new Map(),
     mergeGateRefusals: new Map(),
+    secondOpinionSkipReasons: new Map(),
   };
 }
 
@@ -255,6 +266,27 @@ export class AutoModeRegistry {
       (entry.kind === "build" ? build : review).push(sessionId);
     }
     return { build, review };
+  }
+
+  /** True only when this epic's second-opinion skip reason changed. */
+  shouldTraceSecondOpinionSkip(
+    projectId: string,
+    epicId: string,
+    reason: string
+  ): boolean {
+    const reasons = this.stateFor(projectId).secondOpinionSkipReasons;
+    if (reasons.get(epicId) === reason) return false;
+    reasons.set(epicId, reason);
+    return true;
+  }
+
+  /** A successful dispatch or usable verdict ends the stable skip. */
+  clearSecondOpinionSkip(projectId: string, epicId: string): void {
+    this.states.get(projectId)?.secondOpinionSkipReasons.delete(epicId);
+  }
+
+  clearSecondOpinionSkips(projectId: string): void {
+    this.states.get(projectId)?.secondOpinionSkipReasons.clear();
   }
 
   /** Every session id the mode is tracking — the driver's `ownSessionIds`. */

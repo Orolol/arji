@@ -194,6 +194,21 @@ describe("POST /api/projects/[projectId]/memory/distill", () => {
     });
   });
 
+  it("passes an explicit UI agent choice through to distill dispatch", async () => {
+    const projectId = seedProject();
+    const res = await DISTILL(
+      mockJsonRequest({ namedAgentId: "explicit-light-agent" }),
+      mockRouteContext({ projectId })
+    );
+
+    expect(res.status).toBe(200);
+    expect(dispatchMock).toHaveBeenCalledWith({
+      projectId,
+      sourceSessionId: null,
+      namedAgentId: "explicit-light-agent",
+    });
+  });
+
   /**
    * The UI only offers "Distill learnings" on a completed, non-memory-writer
    * session — but the endpoint must not depend on the UI for that. A direct
