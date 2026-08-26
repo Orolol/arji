@@ -10,6 +10,8 @@
  * - developer instructions injected via `-c developer_instructions="…"`
  * - actionable error detection for stream disconnects and missing login
  * - no CLI session ID extraction (codex output carries none)
+ * - a prompt past the argv cap is passed as the `-` positional and piped on
+ *   stdin, which both `codex exec` and `codex exec resume` accept
  */
 
 import fs from "fs";
@@ -20,10 +22,12 @@ import { CODEX_SUBAGENT_DEVELOPER_INSTRUCTIONS } from "@/lib/codex/constants";
 import type { StreamLogContext } from "@/lib/claude/logger";
 import {
   BaseCliProvider,
+  STDIN_PAYLOAD_KEY,
   type BaseProviderChunkCallbacks,
   type ProviderExitInfo,
   type ProviderSpawnContext,
 } from "./base-provider";
+import { promptExceedsArgv } from "./prompt-transport";
 import type {
   McpSpawnConfig,
   ProviderResult,
@@ -35,6 +39,8 @@ interface CodexSpawnContext extends ProviderSpawnContext {
   outputFile: string;
   /** Contents of the -o file, cached by extractResult() for chunk emission. */
   fileOutput?: string;
+  /** Set when the prompt outgrew argv and rides stdin behind a `-` positional. */
+  [STDIN_PAYLOAD_KEY]?: string;
 }
 
 /**
@@ -103,13 +109,16 @@ export class CodexProvider extends BaseCliProvider {
     return CODEX_SUBAGENT_DEVELOPER_INSTRUCTIONS;
   }
 
-  protected prepareSpawn(_options: ProviderSpawnOptions): CodexSpawnContext {
+  protected prepareSpawn(options: ProviderSpawnOptions): CodexSpawnContext {
     // Temp file for -o (reliable output capture)
     return {
       outputFile: path.join(
         os.tmpdir(),
         `codex-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`,
       ),
+      ...(promptExceedsArgv(options.prompt)
+        ? { [STDIN_PAYLOAD_KEY]: options.prompt }
+        : {}),
     };
   }
 
@@ -122,6 +131,13 @@ export class CodexProvider extends BaseCliProvider {
     const effectiveCwd = cwd || process.cwd();
     const isResume = !!(cliSessionId && resumeSession);
     const developerInstructions = this.developerInstructions;
+    // `-` tells codex to read the prompt from stdin, where BaseCliProvider
+    // pipes it — the prompt is too long for a single argv element.
+    const promptArg = (spawnContext as CodexSpawnContext | undefined)?.[
+      STDIN_PAYLOAD_KEY
+    ]
+      ? "-"
+      : prompt;
 
     // `codex exec resume <ID> <PROMPT>` is a separate subcommand with its own
     // flag set (no -C, -o, --color, -s).  Build args accordingly.
@@ -149,7 +165,7 @@ export class CodexProvider extends BaseCliProvider {
       }
 
       // Prompt as positional argument (after session ID)
-      args.push(prompt);
+      args.push(promptArg);
     } else {
       // --- normal (non-resume) exec ---
 
@@ -184,7 +200,7 @@ export class CodexProvider extends BaseCliProvider {
       }
 
       // Prompt as positional argument
-      args.push(prompt);
+      args.push(promptArg);
     }
 
     return args;

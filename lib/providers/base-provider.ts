@@ -28,6 +28,7 @@ import {
   extractCliSessionIdFromOutput,
   hasAskUserQuestion,
 } from "@/lib/claude/json-parser";
+import { findOversizedArg, oversizedArgMessage } from "./prompt-transport";
 import type {
   AgentProvider,
   ProviderResult,
@@ -46,6 +47,14 @@ export interface BaseProviderChunkCallbacks {
   onOutputChunk?: (chunk: { text: string; emittedAt: string }) => void;
   onResponseChunk?: (chunk: { text: string; emittedAt: string }) => void;
 }
+
+/**
+ * Key under which a spawn context carries text to pipe on the child's stdin.
+ * Providers that move an oversized prompt off argv (see prompt-transport.ts)
+ * set it from prepareSpawn(); when it is absent stdin stays closed, which is
+ * what every CLI Arij drives expects in print mode.
+ */
+export const STDIN_PAYLOAD_KEY = "stdinPayload";
 
 /**
  * Mutable per-spawn state created by prepareSpawn() and threaded through
@@ -88,6 +97,7 @@ export interface ProviderExitInfo {
  * - `buildExitError(code, stdout, stderr)` — error detection/mapping for non-zero exits
  * - `emitFinalChunks(result, callbacks, spawnContext)` — final output/response chunk emission
  * - `cleanupSpawnContext(spawnContext)` — release per-spawn resources (temp files, …)
+ * - `stdinPayload(spawnContext)` — text to pipe on stdin (default: none)
  * - `handleExit(info, callbacks, logCtx)` — custom exit handling for providers that need
  *   full control over how collected output becomes a ProviderResult
  * - `handlePrefix` / `logPrefix` — prefixes for session handles and NDJSON log names
@@ -290,6 +300,15 @@ export abstract class BaseCliProvider implements AgentProvider {
   protected cleanupSpawnContext(_spawnContext?: ProviderSpawnContext): void {}
 
   /**
+   * Text to pipe on the child's stdin, or null to leave stdin closed.
+   * Default: whatever prepareSpawn() stored under STDIN_PAYLOAD_KEY.
+   */
+  protected stdinPayload(spawnContext?: ProviderSpawnContext): string | null {
+    const payload = spawnContext?.[STDIN_PAYLOAD_KEY];
+    return typeof payload === "string" ? payload : null;
+  }
+
+  /**
    * Turn a finished process into a ProviderResult. This is the exit hook:
    * most providers customize behavior by overriding the narrower
    * extractResult/buildExitError/emitFinalChunks hooks that this default
@@ -368,6 +387,27 @@ export abstract class BaseCliProvider implements AgentProvider {
     const spawnContext = this.prepareSpawn(options);
     const args = this.buildArgs(options, spawnContext);
     const callbacks = this.buildChunkCallbacks(options);
+    const stdinPayload = this.stdinPayload(spawnContext);
+
+    // execve() would fail with a bare `spawn E2BIG` here — a provider that
+    // cannot move the prompt off argv says why instead.
+    const oversized = findOversizedArg(args);
+    if (oversized) {
+      this.cleanupSpawnContext(spawnContext);
+      return {
+        handle: `${this.handlePrefix}-${sessionId}`,
+        kill: () => {},
+        promise: Promise.resolve({
+          success: false,
+          error: oversizedArgMessage(
+            this.binaryName,
+            Buffer.byteLength(oversized, "utf8"),
+          ),
+          duration: 0,
+        }),
+        command: this.buildDisplayCommand(args, prompt),
+      };
+    }
 
     // Optional NDJSON logging
     let logCtx: StreamLogContext | null = null;
@@ -398,8 +438,15 @@ export abstract class BaseCliProvider implements AgentProvider {
       child = nodeSpawn(this.binaryName, args, {
         cwd: effectiveCwd,
         env: this.buildEnv(),
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [stdinPayload === null ? "ignore" : "pipe", "pipe", "pipe"],
       });
+
+      if (stdinPayload !== null) {
+        // EPIPE if the CLI exits before draining the prompt — that path is
+        // already reported through the exit code, so swallow it here.
+        child.stdin?.on("error", () => {});
+        child.stdin?.end(stdinPayload);
+      }
 
       child.stdout?.on("data", (chunk: Buffer) => {
         stdoutChunks.push(chunk);
@@ -491,7 +538,10 @@ export abstract class BaseCliProvider implements AgentProvider {
       }
     };
 
-    const command = this.buildDisplayCommand(args, prompt);
+    // The prompt is not in argv when it rides stdin — show the redirection so
+    // the command in the UI still accounts for it.
+    const display = this.buildDisplayCommand(args, prompt);
+    const command = stdinPayload === null ? display : `${display} < <prompt>`;
 
     return {
       handle: `${this.handlePrefix}-${sessionId}`,
