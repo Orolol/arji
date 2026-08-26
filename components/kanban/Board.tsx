@@ -33,7 +33,10 @@ import {
   type KanbanEpicAgentActivity,
 } from "@/lib/types/kanban";
 import { useKanban } from "@/hooks/useKanban";
+import { useBoardMerge } from "@/hooks/useBoardMerge";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
+import { isMergeReadyEpic } from "@/lib/kanban/merge-readiness";
+import type { ColumnSection } from "./Column";
 import { hasUnreadAiComment, isAiCommentAuthor } from "@/lib/kanban/unread-ai";
 import { BoardSkeleton } from "./BoardSkeleton";
 import type { FailedSessionInfo } from "@/lib/agent-sessions/latest-failure";
@@ -59,6 +62,10 @@ interface BoardProps {
   hideReleased?: boolean;
   /** Reports how many cards survive the active filters (drives the capture bar). */
   onVisibleCountChange?: (count: number) => void;
+  /** A Review card merged straight from the board. */
+  onMergeSuccess?: (epicId: string) => void;
+  /** Resolve Merge dispatched a conflict-resolution agent instead of landing. */
+  onMergeAgentDispatched?: (epicId: string, sessionId: string) => void;
 }
 
 /**
@@ -101,8 +108,23 @@ export function Board({
   onRetryBuild,
   hideReleased = false,
   onVisibleCountChange,
+  onMergeSuccess,
+  onMergeAgentDispatched,
 }: BoardProps) {
   const { board, loading, moveEpic, refresh } = useKanban(projectId, { onMoveError });
+
+  // Merging from a card reuses the ticket detail's approve route, so the
+  // board gains no rules of its own — see hooks/useBoardMerge.ts.
+  const boardMerge = useBoardMerge(projectId, {
+    onMerged: (epicId) => {
+      refresh();
+      onMergeSuccess?.(epicId);
+    },
+    onResolveDispatched: (epicId, sessionId) => {
+      refresh();
+      onMergeAgentDispatched?.(epicId, sessionId);
+    },
+  });
   // Optimistic overlay on the server-side read cursors: opening a ticket
   // clears its unread dot immediately, before the /api/inbox/read POST from
   // EpicDetail lands and the next board refresh returns the moved cursor.
@@ -228,6 +250,10 @@ export function Board({
     for (const status of DRAGGABLE_COLUMNS) {
       for (const epic of board.columns[status]) {
         const failedSession = failedSessions?.[epic.id];
+        // Merge affordances belong to the Review column alone: the signal is
+        // only meaningful there, and a Merge button on an In Progress card
+        // would be an invitation the approve route refuses.
+        const inReview = status === "review";
 
         views[epic.id] = {
           selected:
@@ -238,6 +264,12 @@ export function Board({
           unreadAi: unreadAiByEpicId[epic.id] || false,
           awaitingReply: isAwaitingReply(epic),
           failedSession,
+          mergeReadiness: inReview ? epic.mergeReadiness : undefined,
+          mergeState: inReview ? boardMerge.stateByEpic[epic.id] : undefined,
+          onMerge: inReview ? () => boardMerge.merge(epic.id) : undefined,
+          onResolveMerge: inReview
+            ? () => boardMerge.resolveMerge(epic.id)
+            : undefined,
           onToggleSelect: onToggleSelect
             ? () => onToggleSelect(epic.id)
             : undefined,
@@ -259,6 +291,7 @@ export function Board({
     activeAgentActivities,
     unreadAiByEpicId,
     failedSessions,
+    boardMerge,
     onToggleSelect,
     onLinkedAgentHoverChange,
     onRetryBuild,
@@ -293,6 +326,33 @@ export function Board({
     unreadAiByEpicId,
     failedSessions,
   ]);
+
+  /**
+   * The Review column, split into its two derived sections.
+   *
+   * The array handed to the Column is rebuilt as `[...ready, ...inReview]`
+   * rather than reusing the filtered list, so the SortableContext's item
+   * order can never drift from what is drawn — including in the moment after
+   * an optimistic drop, before the refresh recomputes the signal.
+   */
+  const reviewColumn = useMemo(() => {
+    const visible = visibleColumns.review;
+    const ready = visible.filter(isMergeReadyEpic);
+    const inReview = visible.filter((epic) => !isMergeReadyEpic(epic));
+
+    const sections: ColumnSection[] = [
+      {
+        key: "ready",
+        label: "Ready to merge",
+        epics: ready,
+        accent: true,
+        emptyHint: "Nothing cleared review yet.",
+      },
+      { key: "in-review", label: "In review", epics: inReview },
+    ];
+
+    return { epics: [...ready, ...inReview], sections };
+  }, [visibleColumns]);
 
   // How many cards the board is actually showing right now — the capture bar
   // reports it, so it has to follow the filters, not the raw board.
@@ -414,7 +474,14 @@ export function Board({
               <Column
                 key={status}
                 status={status}
-                epics={visibleColumns[status]}
+                epics={
+                  status === "review"
+                    ? reviewColumn.epics
+                    : visibleColumns[status]
+                }
+                sections={
+                  status === "review" ? reviewColumn.sections : undefined
+                }
                 onEpicClick={handleEpicClick}
                 epicViews={epicViews}
                 dragDisabled={filtersActive}

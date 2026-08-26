@@ -10,6 +10,7 @@ import {
   type ReorderItem,
   type ReleaseGroup,
 } from "@/lib/types/kanban";
+import { sortReviewColumn } from "@/lib/kanban/merge-readiness";
 
 interface ReleaseRow {
   id: string;
@@ -75,6 +76,15 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       for (const col of DRAGGABLE_COLUMNS) {
         columns[col].sort((a, b) => a.position - b.position);
       }
+
+      // Review is the one column whose order is not purely `position`:
+      // merge-ready tickets float to the top so the column's two sections are
+      // contiguous slices of ONE array. Sorting here rather than in the
+      // column component keeps a single order in play — drag indices, the
+      // optimistic splice in `moveEpic` and the persisted positions all agree
+      // with what the user sees, and section membership stays derived (a card
+      // dropped into the other section keeps its new position and snaps back).
+      columns.review = sortReviewColumn(columns.review);
 
       const releaseGroups: ReleaseGroup[] = releaseRows.map((rel) => {
         let epicIds: string[] = [];

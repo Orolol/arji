@@ -204,6 +204,19 @@ export default function KanbanPage() {
     }
   }, [projectId, namedAgentId, addToast]);
 
+  // A Review card merged itself through the approve route; the Board already
+  // reloaded the columns, so this only has to move the surrounding surfaces
+  // (agent activity, monitor) and say so.
+  const handleBoardMergeSuccess = useCallback(() => {
+    addToast("success", "Merged into the base branch");
+    setRefreshTrigger((t) => t + 1);
+  }, [addToast]);
+
+  const handleBoardMergeAgentDispatched = useCallback(() => {
+    addToast("success", "Merge conflict — resolution agent dispatched");
+    setRefreshTrigger((t) => t + 1);
+  }, [addToast]);
+
   useEffect(() => {
     const deleted = searchParams.get("deleted");
     if (!deleted) return;
@@ -752,6 +765,8 @@ export default function KanbanPage() {
                 onRetryBuild={handleRetryBuild}
                 hideReleased={panelOpen}
                 onVisibleCountChange={setVisibleCount}
+                onMergeSuccess={handleBoardMergeSuccess}
+                onMergeAgentDispatched={handleBoardMergeAgentDispatched}
               />
             </div>
 

@@ -14,9 +14,33 @@ import {
   type KanbanEpic,
 } from "@/lib/types/kanban";
 
+/**
+ * A derived, non-draggable grouping inside one column.
+ *
+ * Sections do NOT own their cards: `Column.epics` is still the single ordered
+ * list (drag indices are computed against it), and every section is a
+ * contiguous slice of it. Membership comes from a predicate the board
+ * evaluated — dropping a card "into" a section therefore changes its
+ * position, never its section.
+ */
+export interface ColumnSection {
+  key: string;
+  label: string;
+  epics: KanbanEpic[];
+  /** Draw the header in the primary colour (the "Ready to merge" slice). */
+  accent?: boolean;
+  /** Shown in place of the cards while the section is empty. */
+  emptyHint?: string;
+}
+
 interface ColumnProps {
   status: KanbanStatus;
   epics: KanbanEpic[];
+  /**
+   * Split the column into labelled slices. Their concatenation must equal
+   * `epics`, in the same order — see ColumnSection.
+   */
+  sections?: ColumnSection[];
   onEpicClick: (epicId: string) => void;
   /** Per-epic state and callbacks, keyed by epic id and built by the Board */
   epicViews?: Record<string, EpicCardView>;
@@ -90,9 +114,41 @@ function ColumnHeader({
   );
 }
 
+/**
+ * Section header inside a column: quieter than the column header (no rule,
+ * smaller type) so the column still reads as one unit, with the accent
+ * reserved for the slice that can act — "Ready to merge".
+ */
+function SectionHeader({
+  label,
+  count,
+  accent = false,
+  testId,
+}: {
+  label: string;
+  count: number;
+  accent?: boolean;
+  testId: string;
+}) {
+  return (
+    <div className="flex items-baseline justify-between" data-testid={testId}>
+      <span
+        className={cn(
+          "text-[10.5px] uppercase tracking-[.08em]",
+          accent ? "text-primary" : "text-meta"
+        )}
+      >
+        {label}
+      </span>
+      <span className="font-mono text-[10.5px] text-meta">{count}</span>
+    </div>
+  );
+}
+
 export function Column({
   status,
   epics,
+  sections,
   onEpicClick,
   epicViews,
   dragDisabled = false,
@@ -136,6 +192,25 @@ export function Column({
 
     prevEpicIdsRef.current = currentIds;
   }, [epics]);
+
+  const renderCard = (epic: KanbanEpic) => (
+    <div
+      key={epic.id}
+      className={
+        highlightedEpicIds.has(epic.id)
+          ? "animate-in fade-in slide-in-from-left-4 zoom-in-95 duration-500 motion-reduce:animate-none"
+          : ""
+      }
+    >
+      <EpicCard
+        epic={epic}
+        onClick={() => onEpicClick(epic.id)}
+        highlight={highlightedEpicIds.has(epic.id)}
+        view={epicViews?.[epic.id]}
+        dragDisabled={dragDisabled}
+      />
+    </div>
+  );
 
   return (
     <div
@@ -186,25 +261,34 @@ export function Column({
                   </>
                 )}
               </div>
-            ) : (
-              epics.map((epic) => (
+            ) : sections ? (
+              // Sections are drawn over the SAME ordered list the
+              // SortableContext above indexes, so the split is purely visual.
+              sections.map((section) => (
                 <div
-                  key={epic.id}
-                  className={
-                    highlightedEpicIds.has(epic.id)
-                      ? "animate-in fade-in slide-in-from-left-4 zoom-in-95 duration-500 motion-reduce:animate-none"
-                      : ""
-                  }
+                  key={section.key}
+                  className="flex flex-col gap-[10px]"
+                  data-testid={`column-section-${status}-${section.key}`}
                 >
-                  <EpicCard
-                    epic={epic}
-                    onClick={() => onEpicClick(epic.id)}
-                    highlight={highlightedEpicIds.has(epic.id)}
-                    view={epicViews?.[epic.id]}
-                    dragDisabled={dragDisabled}
+                  <SectionHeader
+                    label={section.label}
+                    count={section.epics.length}
+                    accent={section.accent}
+                    testId={`column-section-header-${status}-${section.key}`}
                   />
+                  {section.epics.length === 0 ? (
+                    section.emptyHint ? (
+                      <p className="text-[12px] text-meta">
+                        {section.emptyHint}
+                      </p>
+                    ) : null
+                  ) : (
+                    section.epics.map(renderCard)
+                  )}
                 </div>
               ))
+            ) : (
+              epics.map(renderCard)
             )}
           </div>
         </SortableContext>
