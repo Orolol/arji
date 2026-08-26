@@ -28,6 +28,8 @@ const dndHandlers = vi.hoisted(() => ({
   onDragEnd: null as
     | ((event: { active: { id: string }; over: { id: string } | null }) => void)
     | null,
+  /** Column the pointer is currently over, mirroring dnd-kit's `isOver`. */
+  overColumnId: null as string | null,
 }));
 
 vi.mock("@/hooks/useKanban", () => ({
@@ -60,9 +62,9 @@ vi.mock("@dnd-kit/core", () => ({
   useSensor: () => ({}),
   useSensors: () => [],
   closestCorners: vi.fn(),
-  useDroppable: () => ({
+  useDroppable: ({ id }: { id: string }) => ({
     setNodeRef: vi.fn(),
-    isOver: false,
+    isOver: dndHandlers.overColumnId === id,
   }),
 }));
 
@@ -119,6 +121,8 @@ function makeEpic(overrides: Partial<KanbanEpic> & { id: string }): KanbanEpic {
     latestCommentAuthor: null,
     latestCommentCreatedAt: null,
     ...overrides,
+    usWithCriteriaCount:
+      overrides.usWithCriteriaCount ?? overrides.usCount ?? 1,
   };
 }
 
@@ -156,6 +160,7 @@ describe("Kanban board dependency visibility", () => {
     mockKanbanState.moveEpic.mockClear();
     dndHandlers.onDragStart = null;
     dndHandlers.onDragEnd = null;
+    dndHandlers.overColumnId = null;
   });
 
   afterEach(() => {
@@ -173,10 +178,10 @@ describe("Kanban board dependency visibility", () => {
     render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
 
     expect(screen.getByTestId("epic-queue-rank-a")).toHaveTextContent("#1");
-    expect(screen.getByTestId("epic-queue-rank-a")).toHaveTextContent("Prochain");
+    expect(screen.getByTestId("epic-queue-rank-a")).toHaveTextContent("Next");
     expect(screen.queryByTestId("epic-queue-rank-b")).toBeNull();
     expect(screen.getByTestId("epic-queue-rank-c")).toHaveTextContent("#2");
-    expect(screen.getByTestId("epic-queue-rank-c")).not.toHaveTextContent("Prochain");
+    expect(screen.getByTestId("epic-queue-rank-c")).not.toHaveTextContent("Next");
   });
 
   it("shows blocked tickets with their open dependency targets", () => {
@@ -193,14 +198,14 @@ describe("Kanban board dependency visibility", () => {
     render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
 
     const blockedRow = screen.getByTestId("epic-blocked-b");
-    expect(blockedRow).toHaveTextContent("Attend : Epic A");
+    expect(blockedRow).toHaveTextContent("Waiting on: Epic A");
     // The delivered target never shows up as a blocker
     expect(blockedRow).not.toHaveTextContent("Epic D");
     // a card without open dependencies shows no blocked row
     expect(screen.queryByTestId("epic-blocked-a")).toBeNull();
   });
 
-  it("reports Backlog readiness as Pret n/3", () => {
+  it("reports Backlog readiness as Ready n/3", () => {
     const ready = makeEpic({
       id: "ready",
       title: "Ready",
@@ -226,11 +231,11 @@ describe("Kanban board dependency visibility", () => {
 
     render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
 
-    expect(screen.getByTestId("epic-readiness-ready")).toHaveTextContent("Prêt 3/3");
-    expect(screen.getByTestId("epic-readiness-partial")).toHaveTextContent("Prêt 2/3");
+    expect(screen.getByTestId("epic-readiness-ready")).toHaveTextContent("Ready 3/3");
+    expect(screen.getByTestId("epic-readiness-partial")).toHaveTextContent("Ready 2/3");
     // No open question + no description + no stories = 1 of 3
-    expect(screen.getByTestId("epic-readiness-bare")).toHaveTextContent("Prêt 1/3");
-    // Readiness is a Backlog-only signal: To Do cards get no chip
+    expect(screen.getByTestId("epic-readiness-bare")).toHaveTextContent("Ready 1/3");
+    // Queue ranking is a To Do-only signal: Backlog cards get no rank chip
     expect(screen.queryByTestId("epic-queue-rank-ready")).toBeNull();
   });
 
@@ -256,9 +261,14 @@ describe("Kanban board dependency visibility", () => {
     act(() => {
       vi.advanceTimersByTime(150);
     });
-    // b is a successor of a -> agent ring; z is unrelated -> dimmed
+    // b is a successor of a -> agent ring; z is unrelated -> dimmed.
+    // The dim is asserted on the computed style, not the class list: the card
+    // sets `opacity` inline for the drag state, and an inline declaration
+    // beats a non-`!important` class rule, so a class assertion would pass
+    // even when nothing reaches the screen.
     expect(cardB.className).toContain("ring-agent/50");
-    expect(cardZ.className).toContain("opacity-40");
+    expect(cardZ.style.opacity).toBe("0.4");
+    expect(cardB.style.opacity).toBe("1");
     expect(cardA.className).not.toContain("ring-agent/50");
 
     // Move to b: a becomes the highlighted predecessor
@@ -275,7 +285,58 @@ describe("Kanban board dependency visibility", () => {
       fireEvent.mouseLeave(cardB);
     });
     expect(cardA.className).not.toContain("ring-primary/50");
-    expect(cardZ.className).not.toContain("opacity-40");
+    expect(cardZ.style.opacity).toBe("1");
+  });
+
+  it("hovering a card with no dependencies dims nothing", () => {
+    vi.useFakeTimers();
+    const a = makeEpic({ id: "a", title: "Epic A" });
+    const b = makeEpic({ id: "b", title: "Epic B" });
+    const z = makeEpic({ id: "z", title: "Unrelated" });
+    setBoard({ todo: [a, b, z] });
+    // z has no edge in either direction; a and b are linked to each other.
+    setDependencies([{ ticketId: "b", dependsOnTicketId: "a" }]);
+
+    render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+
+    act(() => {
+      fireEvent.mouseEnter(cardOf("Unrelated"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+
+    // No focus at all: dimming every card while highlighting none would say
+    // nothing, and on a board with no dependency rows it would fire on any
+    // pointer rest.
+    for (const title of ["Epic A", "Epic B", "Unrelated"]) {
+      const card = cardOf(title);
+      expect(card.style.opacity).toBe("1");
+      expect(card.className).not.toContain("ring-primary/50");
+      expect(card.className).not.toContain("ring-agent/50");
+    }
+  });
+
+  it("drops the blocked label once the dependent itself is delivered", () => {
+    const late = makeEpic({ id: "late", title: "Late", status: "backlog" });
+    const shipped = makeEpic({ id: "shipped", title: "Shipped", status: "done" });
+    const open = makeEpic({ id: "open", title: "Open" });
+    setBoard({ backlog: [late], todo: [open], done: [shipped] });
+    // Both depend on a prerequisite that is still in Backlog. Full Auto
+    // ignores ticket_dependencies, so an epic really can merge ahead of one.
+    setDependencies([
+      { ticketId: "shipped", dependsOnTicketId: "late" },
+      { ticketId: "open", dependsOnTicketId: "late" },
+    ]);
+
+    render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+
+    // A delivered card never advertises a block it has already outlived
+    expect(screen.queryByTestId("epic-blocked-shipped")).toBeNull();
+    // ...while an undelivered dependent still does
+    expect(screen.getByTestId("epic-blocked-open")).toHaveTextContent(
+      "Waiting on: Late"
+    );
   });
 
   it("under a filter, drops land at the end of the target column", () => {
@@ -291,16 +352,29 @@ describe("Kanban board dependency visibility", () => {
     fireEvent.click(screen.getByTestId("filter-type-bug"));
 
     act(() => {
+      dndHandlers.overColumnId = "done";
       dndHandlers.onDragStart?.({ active: { id: "a" } });
     });
-    // The drop indicator moved to the bottom of the target column
+    // The drop indicator moved to the bottom of the target column...
     expect(screen.getByTestId("column-drop-end-done")).toBeInTheDocument();
+    // ...and only there: it follows the pointer, so the other columns stay
+    // clean. An indicator in all five columns indicates nothing.
+    expect(screen.queryByTestId("column-drop-end-todo")).toBeNull();
+    expect(screen.queryByTestId("column-drop-end-backlog")).toBeNull();
+    expect(screen.queryByTestId("column-drop-end-review")).toBeNull();
 
     act(() => {
+      dndHandlers.overColumnId = null;
       dndHandlers.onDragEnd?.({ active: { id: "a" }, over: { id: "d2" } });
     });
     // End of the done column, not the filtered-visible index
-    expect(mockKanbanState.moveEpic).toHaveBeenCalledWith("a", "todo", "done", 2);
+    expect(mockKanbanState.moveEpic).toHaveBeenCalledWith(
+      "a",
+      "todo",
+      "done",
+      2,
+      undefined
+    );
 
     // The drag is over: the indicator is gone again
     expect(screen.queryByTestId("column-drop-end-done")).toBeNull();
@@ -320,6 +394,97 @@ describe("Kanban board dependency visibility", () => {
     act(() => {
       dndHandlers.onDragEnd?.({ active: { id: "a" }, over: { id: "d2" } });
     });
-    expect(mockKanbanState.moveEpic).toHaveBeenLastCalledWith("a", "todo", "done", 1);
+    expect(mockKanbanState.moveEpic).toHaveBeenLastCalledWith(
+      "a",
+      "todo",
+      "done",
+      1,
+      undefined
+    );
+  });
+
+  it("warns — without blocking — when a backlog epic with open questions moves to To Do", () => {
+    const asked = makeEpic({
+      id: "asked",
+      title: "Asked",
+      status: "backlog",
+      latestSessionOutcome: "asked_question",
+      latestSessionEndedAt: "2026-08-01 00:00:00",
+    });
+    setBoard({ backlog: [asked] });
+    const onMoveWarning = vi.fn();
+
+    render(
+      <Board
+        projectId="proj-1"
+        onEpicClick={vi.fn()}
+        onMoveWarning={onMoveWarning}
+      />
+    );
+
+    act(() => {
+      dndHandlers.onDragEnd?.({ active: { id: "asked" }, over: { id: "todo" } });
+    });
+
+    // The move itself is never blocked — the user decides.
+    expect(mockKanbanState.moveEpic).toHaveBeenCalledWith(
+      "asked",
+      "backlog",
+      "todo",
+      0,
+      expect.any(Function)
+    );
+
+    // The warning rides moveEpic's accepted path, so nothing is said until
+    // the server has taken the move: a refused transition must not warn about
+    // a To Do placement that never happened.
+    expect(onMoveWarning).not.toHaveBeenCalled();
+
+    const onAccepted = mockKanbanState.moveEpic.mock.calls.at(-1)?.[4] as
+      | (() => void)
+      | undefined;
+    act(() => {
+      onAccepted?.();
+    });
+    expect(onMoveWarning).toHaveBeenCalledWith(
+      expect.stringContaining("open agent questions")
+    );
+  });
+
+  it("does not warn when the agent question has been answered", () => {
+    const answered = makeEpic({
+      id: "answered",
+      title: "Answered",
+      status: "backlog",
+      latestSessionOutcome: "asked_question",
+      latestSessionEndedAt: "2026-08-01 00:00:00",
+      latestUserCommentCreatedAt: "2026-08-01 01:00:00",
+    });
+    setBoard({ backlog: [answered] });
+    const onMoveWarning = vi.fn();
+
+    render(
+      <Board
+        projectId="proj-1"
+        onEpicClick={vi.fn()}
+        onMoveWarning={onMoveWarning}
+      />
+    );
+
+    act(() => {
+      dndHandlers.onDragEnd?.({
+        active: { id: "answered" },
+        over: { id: "todo" },
+      });
+    });
+
+    expect(mockKanbanState.moveEpic).toHaveBeenCalledWith(
+      "answered",
+      "backlog",
+      "todo",
+      0,
+      undefined
+    );
+    expect(onMoveWarning).not.toHaveBeenCalled();
   });
 });

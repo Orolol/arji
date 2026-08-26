@@ -30,6 +30,7 @@ const dndHandlers = vi.hoisted(() => ({
 vi.mock("@/hooks/useKanban", () => ({
   useKanban: () => ({
     board: mockKanbanState.board,
+    loading: false,
     refresh: mockKanbanState.refresh,
     moveEpic: mockKanbanState.moveEpic,
     dependencies: [],
@@ -273,7 +274,13 @@ describe("Kanban board filters and focus mode", () => {
     act(() => {
       dndHandlers.onDragEnd?.({ active: { id: epic.id }, over: { id: doneB.id } });
     });
-    expect(mockKanbanState.moveEpic).toHaveBeenCalledWith(epic.id, "todo", "done", 2);
+    expect(mockKanbanState.moveEpic).toHaveBeenCalledWith(
+      epic.id,
+      "todo",
+      "done",
+      2,
+      undefined
+    );
 
     // A same-column reorder under a filter stays a no-op: the visible
     // index would not match the board order.
@@ -287,7 +294,13 @@ describe("Kanban board filters and focus mode", () => {
     act(() => {
       dndHandlers.onDragEnd?.({ active: { id: epic.id }, over: { id: doneB.id } });
     });
-    expect(mockKanbanState.moveEpic).toHaveBeenLastCalledWith(epic.id, "todo", "done", 1);
+    expect(mockKanbanState.moveEpic).toHaveBeenLastCalledWith(
+      epic.id,
+      "todo",
+      "done",
+      1,
+      undefined
+    );
   });
 
   it("focus mode collapses Done and Released to headers with counts", () => {

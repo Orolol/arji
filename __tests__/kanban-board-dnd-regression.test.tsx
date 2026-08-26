@@ -125,6 +125,12 @@ describe("Board drag-and-drop regression", () => {
       });
     });
 
-    expect(mockKanban.moveEpic).toHaveBeenCalledWith("epic-1", "todo", "done", 0);
+    expect(mockKanban.moveEpic).toHaveBeenCalledWith(
+      "epic-1",
+      "todo",
+      "done",
+      0,
+      undefined
+    );
   });
 });

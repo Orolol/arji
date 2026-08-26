@@ -26,9 +26,12 @@ import {
 } from "./FilterBar";
 import {
   buildDependencyAdjacency,
+  buildDependencyFocus,
   computeBlockedBy,
   computeQueueRanks,
   computeReadiness,
+  dependencyFocusRole,
+  type DependencyFocusRole,
 } from "@/lib/kanban/queue";
 import {
   KANBAN_COLUMNS,
@@ -305,18 +308,29 @@ export function Board({
     [dependencies]
   );
 
-  const hoverFocusSets = useMemo(() => {
+  // A card with no dependency edges yields no focus at all: dimming the board
+  // while highlighting nothing communicates nothing, and on a project without
+  // dependency rows it would grey every card on any pointer rest.
+  const hoverFocus = useMemo(() => {
     if (!hoverFocusEpicId) return null;
-    return {
-      epicId: hoverFocusEpicId,
-      predecessors: new Set(
-        dependencyAdjacency.predecessors.get(hoverFocusEpicId) ?? []
-      ),
-      successors: new Set(
-        dependencyAdjacency.successors.get(hoverFocusEpicId) ?? []
-      ),
-    };
+    return buildDependencyFocus(hoverFocusEpicId, dependencyAdjacency);
   }, [hoverFocusEpicId, dependencyAdjacency]);
+
+  // Focus roles are kept out of `epicViews` on purpose: they change on every
+  // pointer move, and folding them into that map would hand every card a new
+  // view object — selection, agent activity, unread cursors and all — on each
+  // hover. A live drag owns the board's visuals, so focus yields to it.
+  const focusRoles = useMemo(() => {
+    const roles: Record<string, DependencyFocusRole> = {};
+    if (!hoverFocus || activeEpic !== null) return roles;
+    for (const status of DRAGGABLE_COLUMNS) {
+      for (const epic of board.columns[status]) {
+        const role = dependencyFocusRole(epic.id, hoverFocus);
+        if (role && role !== "focused") roles[epic.id] = role;
+      }
+    }
+    return roles;
+  }, [board, hoverFocus, activeEpic]);
 
   // Per-epic view models: the Board owns the assembly so Column and EpicCard
   // stay out of the business of forwarding one prop per card feature.
@@ -333,23 +347,6 @@ export function Board({
           const target = epicsById.get(targetId);
           return target?.readableId || target?.title || targetId;
         });
-        const focusDimmed =
-          !!hoverFocusSets &&
-          activeEpic === null &&
-          epic.id !== hoverFocusSets.epicId &&
-          !hoverFocusSets.predecessors.has(epic.id) &&
-          !hoverFocusSets.successors.has(epic.id);
-        const dependencyHighlight =
-          hoverFocusSets &&
-          activeEpic === null &&
-          epic.id !== hoverFocusSets.epicId
-            ? hoverFocusSets.predecessors.has(epic.id)
-              ? "predecessor"
-              : hoverFocusSets.successors.has(epic.id)
-                ? "successor"
-                : undefined
-            : undefined;
-
         views[epic.id] = {
           selected:
             selectedEpics?.has(epic.id) || autoIncludedEpics?.has(epic.id),
@@ -376,8 +373,6 @@ export function Board({
           blockedOn,
           readiness:
             epic.status === "backlog" ? computeReadiness(epic) : undefined,
-          dimmed: focusDimmed || undefined,
-          dependencyHighlight,
           onDependencyHoverChange: handleDependencyHoverChange,
         };
       }
@@ -395,11 +390,9 @@ export function Board({
     onToggleSelect,
     onLinkedAgentHoverChange,
     onRetryBuild,
-    activeEpic,
     blockedBy,
     epicsById,
     queueRanks,
-    hoverFocusSets,
     handleDependencyHoverChange,
   ]);
 
@@ -530,20 +523,28 @@ export function Board({
       if (currentIndex === targetIndex) return;
     }
 
-    moveEpic(activeId, activeResult.column, targetColumn, targetIndex);
-
     // Non-blocking warning: a Backlog epic that still has open agent
-    // questions lands in To Do but stays skipped by auto dispatch until
-    // answered.
-    if (
+    // questions may always be dragged to To Do, it just stays skipped by auto
+    // dispatch until answered. It fires from moveEpic's accepted path, never
+    // optimistically — a refused transition would otherwise warn about a
+    // placement that never happened, right before the error toast about it.
+    const warnAwaitingReply =
       activeResult.column === "backlog" &&
       targetColumn === "todo" &&
       isAwaitingReply(activeResult.epic)
-    ) {
-      onMoveWarning?.(
-        `"${activeResult.epic.title}" has open agent questions — it will be skipped by auto dispatch until answered.`
-      );
-    }
+        ? () =>
+            onMoveWarning?.(
+              `"${activeResult.epic.title}" has open agent questions — it will be skipped by auto dispatch until answered.`
+            )
+        : undefined;
+
+    moveEpic(
+      activeId,
+      activeResult.column,
+      targetColumn,
+      targetIndex,
+      warnAwaitingReply
+    );
   }
 
   return (
@@ -577,8 +578,8 @@ export function Board({
                 onEpicClick={handleEpicClick}
                 epicViews={epicViews}
                 dropAtEnd={filtersActive}
-                dragging={!!activeEpic}
                 filtersActive={filtersActive}
+                focusRoles={focusRoles}
               />
             )
           )}

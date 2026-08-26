@@ -46,14 +46,17 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       const [epicsRes, releasesRes, depsRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/epics`),
         fetch(`/api/projects/${projectId}/releases`),
-        fetch(`/api/projects/${projectId}/dependencies`),
+        // Dependency visibility is an enrichment, not the board itself: this
+        // request is made individually fallible so a network failure, an
+        // abort or a dev-server restart mid-poll cannot reject the Promise.all
+        // and leave the board unrendered.
+        fetch(`/api/projects/${projectId}/dependencies`).catch(() => null),
       ]);
       const epicsData = await epicsRes.json();
       const releasesData = await releasesRes.json();
-      // A dependency fetch failure must not take the board down.
       let depEdges: TicketDependencyEdge[] = [];
       try {
-        if (depsRes.ok) {
+        if (depsRes?.ok) {
           const depsData = await depsRes.json();
           depEdges = (depsData.data ?? []).map(
             (d: { ticketId: string; dependsOnTicketId: string }) => ({
@@ -131,7 +134,15 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       epicId: string,
       fromColumn: KanbanStatus,
       toColumn: KanbanStatus,
-      newIndex: number
+      newIndex: number,
+      /**
+       * Runs only once the server has accepted the move. The optimistic
+       * update above is not confirmation — a refused transition calls
+       * onMoveError and reloads instead, so anything the user should read as
+       * a consequence of the move (e.g. the board's awaiting-reply warning)
+       * belongs here rather than at the call site.
+       */
+      onMoveAccepted?: () => void
     ) => {
       if (fromColumn === "released" || toColumn === "released") return;
 
@@ -178,7 +189,9 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
               const errorMsg = data.error || "Failed to move epic";
               onMoveErrorRef.current?.(errorMsg);
               loadEpics();
+              return;
             }
+            onMoveAccepted?.();
           }).catch(() => {
             loadEpics();
           });

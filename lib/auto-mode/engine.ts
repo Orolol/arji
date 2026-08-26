@@ -14,6 +14,7 @@ import { buildDeterministicVerificationFixSection } from "@/lib/claude/prompt-bu
 import { createPipelineStageDriver } from "@/lib/pipeline/stages";
 import type { PipelineDeterministicVerificationOutcome } from "@/lib/pipeline/runner";
 import { assessEpicVerification } from "@/lib/verify/freshness";
+import { isDeliveredStatus } from "@/lib/types/kanban";
 import type { VerifyCommandResult } from "@/lib/verify/verify-constants";
 import type { AutoModeInFlightEntry } from "./registry";
 import {
@@ -87,9 +88,6 @@ const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 /** Statuses a build may still be dispatched onto, checked at the last moment. */
 const DISPATCHABLE_BUILD_STATUSES = new Set(["backlog", "todo", "in_progress"]);
-
-/** Epics past the finish line — never a valid dispatch target. */
-const DELIVERED_EPIC_STATUSES = new Set(["done", "released"]);
 
 /* ------------------------------------------------------------------ */
 /* Injection surface                                                   */
@@ -273,7 +271,7 @@ async function defaultDispatch(
           .from(epics)
           .where(eq(epics.id, input.epicId))
           .get()?.status ?? null;
-      if (DELIVERED_EPIC_STATUSES.has(epicStatus ?? "")) {
+      if (isDeliveredStatus(epicStatus)) {
         return {
           sessionId: null,
           error: null,

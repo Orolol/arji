@@ -8,6 +8,7 @@ import {
 } from "@dnd-kit/sortable";
 import { EpicCard, type EpicCardView } from "./EpicCard";
 import { cn } from "@/lib/utils";
+import type { DependencyFocusRole } from "@/lib/kanban/queue";
 import {
   COLUMN_LABELS,
   type KanbanStatus,
@@ -28,11 +29,14 @@ interface ColumnProps {
   /**
    * A filter is active, so any drop lands at the END of the target column —
    * the drop indicator moves to the bottom of the column while a card is
-   * dragged.
+   * dragged over it.
    */
   dropAtEnd?: boolean;
-  /** Some card is being dragged somewhere on the board. */
-  dragging?: boolean;
+  /**
+   * Each card's role in the board's active dependency hover focus, keyed by
+   * epic id. Separate from `epicViews` on purpose — see EpicCardProps.focus.
+   */
+  focusRoles?: Record<string, DependencyFocusRole>;
 }
 
 /**
@@ -102,8 +106,8 @@ export function Column({
   onEpicClick,
   epicViews,
   dropAtEnd = false,
-  dragging = false,
   filtersActive = false,
+  focusRoles,
 }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
@@ -206,11 +210,15 @@ export function Column({
                     onClick={() => onEpicClick(epic.id)}
                     highlight={highlightedEpicIds.has(epic.id)}
                     view={epicViews?.[epic.id]}
+                    focus={focusRoles?.[epic.id]}
                   />
                 </div>
               ))
             )}
-            {dropAtEnd && dragging && (
+            {/* `isOver`, not a board-scoped "a drag is happening" flag: the
+                indicator marks the column the pointer is actually over, the
+                same as the in-list slot above. */}
+            {dropAtEnd && isOver && (
               <div
                 className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
                 aria-hidden="true"

@@ -75,6 +75,14 @@ export async function GET(
         sql<number>`SUM(CASE WHEN ${userStories.status} = 'done' THEN 1 ELSE 0 END)`.as(
           "us_done"
         ),
+      // Stories carrying an actual rubric. The board's Backlog readiness
+      // criterion is "acceptance criteria present", which a story with an
+      // empty rubric does not satisfy — that is the state that makes the
+      // grading stage a no-op.
+      usWithCriteriaCount:
+        sql<number>`SUM(CASE WHEN TRIM(COALESCE(${userStories.acceptanceCriteria}, '')) <> '' THEN 1 ELSE 0 END)`.as(
+          "us_with_criteria_count"
+        ),
     })
     .from(userStories)
     .groupBy(userStories.epicId)
@@ -216,6 +224,7 @@ export async function GET(
       releaseId: epics.releaseId,
       usCount: sql<number>`COALESCE(${storyCounts.usCount}, 0)`,
       usDone: sql<number>`COALESCE(${storyCounts.usDone}, 0)`,
+      usWithCriteriaCount: sql<number>`COALESCE(${storyCounts.usWithCriteriaCount}, 0)`,
       latestCommentId: latestEpicComments.latestCommentId,
       latestCommentAuthor: latestEpicComments.latestCommentAuthor,
       latestCommentCreatedAt: latestEpicComments.latestCommentCreatedAt,

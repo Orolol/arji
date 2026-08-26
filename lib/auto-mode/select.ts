@@ -8,6 +8,7 @@ import {
   userStories,
 } from "@/lib/db/schema";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
+import { isDeliveredStatus } from "@/lib/types/kanban";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
 import { listPipelineRunsByProject } from "@/lib/pipeline/registry";
 import { dagBatchRegistry } from "@/lib/agents/dag-batch-registry";
@@ -57,9 +58,6 @@ const BUILDABLE_EPIC_STATUSES = new Set(["backlog", "todo", "in_progress"]);
 
 /** Story statuses the supervisor may dispatch a build for. */
 const BUILDABLE_STORY_STATUSES = new Set(["todo", "in_progress"]);
-
-/** Epics past the finish line — never candidates for anything. */
-const DELIVERED_EPIC_STATUSES = new Set(["done", "released"]);
 
 /**
  * Agent types that constitute "a review happened". Same family the workflow
@@ -541,7 +539,7 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
 /** Epic-level exclusions every selector applies before looking at status. */
 function isEpicSelectable(board: AutoModeBoard, epic: EpicRow): boolean {
   if (board.projectBlocked) return false;
-  if (DELIVERED_EPIC_STATUSES.has(epic.status ?? "")) return false;
+  if (isDeliveredStatus(epic.status)) return false;
   if (board.blockedEpicIds.has(epic.id)) return false;
   if (board.busyEpicIds.has(epic.id)) return false;
   if (board.parkedTicketIds.has(epic.id)) return false;

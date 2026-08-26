@@ -48,6 +48,22 @@ export function isBuildableStatus(status: string | null | undefined): boolean {
   return status != null && BUILDABLE_STATUS_SET.has(status);
 }
 
+/**
+ * The complement of BUILDABLE_STATUSES: a ticket past the finish line. It is
+ * never a dispatch candidate, and as a *dependency* it is an already-satisfied
+ * prerequisite. Single source for the board, the Full Auto selector and the
+ * dispatch engine — the rule used to be spelled out separately in each.
+ */
+export const DELIVERED_TICKET_STATUSES: ReadonlySet<string> = new Set([
+  "done",
+  "released",
+]);
+
+/** Whether a ticket status is terminal-delivered (see DELIVERED_TICKET_STATUSES). */
+export function isDeliveredStatus(status: string | null | undefined): boolean {
+  return status != null && DELIVERED_TICKET_STATUSES.has(status);
+}
+
 export const PRIORITY_LABELS: Record<number, string> = {
   0: "Low",
   1: "Medium",
@@ -85,6 +101,13 @@ export interface KanbanEpic {
   releaseId: string | null;
   usCount: number;
   usDone: number;
+  /**
+   * How many of the epic's user stories carry a non-empty acceptance-criteria
+   * rubric. Drives the Backlog readiness indicator: `usCount` alone is
+   * satisfied by a story with an empty rubric, which is exactly the state that
+   * makes the grading stage a no-op.
+   */
+  usWithCriteriaCount?: number;
   latestCommentId?: string | null;
   latestCommentAuthor?: string | null;
   latestCommentCreatedAt?: string | null;

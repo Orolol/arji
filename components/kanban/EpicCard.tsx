@@ -26,7 +26,10 @@ import {
   RefreshCw,
   Link2,
 } from "lucide-react";
-import { READINESS_TOTAL } from "@/lib/kanban/queue";
+import {
+  READINESS_TOTAL,
+  type DependencyFocusRole,
+} from "@/lib/kanban/queue";
 import type { FailedSessionInfo } from "@/lib/agent-sessions/latest-failure";
 import {
   isChatProvider,
@@ -74,10 +77,6 @@ export interface EpicCardView {
   blockedOn?: string[];
   /** How many of the READINESS_TOTAL Backlog readiness criteria are met. */
   readiness?: number;
-  /** Card is dimmed because another card's dependency hover focus is active. */
-  dimmed?: boolean;
-  /** Predecessor/successor of the hovered focus card. */
-  dependencyHighlight?: "predecessor" | "successor";
   /** Report dependency hover focus enter/leave (Board owns the 150 ms timer). */
   onDependencyHoverChange?: (epicId: string | null) => void;
 }
@@ -90,6 +89,13 @@ interface EpicCardProps {
   highlight?: boolean;
   /** Per-epic state and callbacks, built by the Board */
   view?: EpicCardView;
+  /**
+   * This card's role in the active dependency hover focus, if any. Kept off
+   * `view` deliberately: focus changes on every pointer move, and folding it
+   * into the view map would rebuild every card's view object — selection,
+   * agent activity, unread cursors and all — on each hover.
+   */
+  focus?: DependencyFocusRole;
 }
 
 /**
@@ -116,6 +122,7 @@ export function EpicCard({
   onClick,
   highlight = false,
   view = EMPTY_VIEW,
+  focus,
 }: EpicCardProps) {
   const {
     selected,
@@ -131,10 +138,10 @@ export function EpicCard({
     isNextEpic,
     blockedOn,
     readiness,
-    dimmed,
-    dependencyHighlight,
     onDependencyHoverChange,
   } = view;
+
+  const dimmed = focus === "dimmed";
 
   const {
     attributes,
@@ -159,10 +166,14 @@ export function EpicCard({
     prevHighlight.current = highlight;
   }, [highlight]);
 
+  // Opacity lives in the inline style because the drag opacity already does:
+  // an inline declaration beats any non-`!important` class rule, and Tailwind
+  // emits `.opacity-40` without `!important`, so a class-based dim would never
+  // reach the screen while this object is applied to the same element.
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
+    opacity: isDragging ? 0.5 : dimmed ? 0.4 : 1,
   };
 
   const activityLabel = activeAgentActivity
@@ -250,9 +261,9 @@ export function EpicCard({
           "rotate-[1.5deg] shadow-[0_8px_20px_rgba(58,48,44,.16)]",
         isHighlighted &&
           "ring-2 ring-primary/70 bg-primary/5 motion-reduce:ring-0 motion-reduce:bg-transparent",
-        dimmed && "opacity-40 saturate-50",
-        dependencyHighlight === "predecessor" && "ring-2 ring-primary/50",
-        dependencyHighlight === "successor" && "ring-2 ring-agent/50",
+        dimmed && "saturate-50",
+        focus === "predecessor" && "ring-2 ring-primary/50",
+        focus === "successor" && "ring-2 ring-agent/50",
       )}
     >
       <h4 className="line-clamp-2 text-[14px] font-medium leading-[1.35] [text-wrap:pretty]">
@@ -388,13 +399,13 @@ export function EpicCard({
             )}
             title={
               isNextEpic
-                ? "Prochain ticket de la file d'exécution"
-                : `Position ${queueRank} dans la file d'exécution To Do`
+                ? "Next up in the execution queue"
+                : `Position ${queueRank} in the To Do execution queue`
             }
             data-testid={`epic-queue-rank-${epic.id}`}
           >
             #{queueRank}
-            {isNextEpic && <span className="ml-[4px] font-sans">Prochain</span>}
+            {isNextEpic && <span className="ml-[4px] font-sans">Next</span>}
           </span>
         )}
         {isDraft && (
@@ -416,12 +427,12 @@ export function EpicCard({
             )}
             title={
               readiness === READINESS_TOTAL
-                ? "Prêt à déplacer en To Do : pas de question en attente, a une description, a des user stories"
-                : "Prêt quand : pas de question en attente · a une description · a des user stories"
+                ? "Ready for To Do: no open agent question, has a description, has acceptance criteria"
+                : "Ready when: no open agent question · has a description · has acceptance criteria"
             }
             data-testid={`epic-readiness-${epic.id}`}
           >
-            Prêt {readiness}/{READINESS_TOTAL}
+            Ready {readiness}/{READINESS_TOTAL}
           </span>
         )}
         {showDeliveredWithRemainingStories && (
@@ -470,11 +481,11 @@ export function EpicCard({
       {blockedOn && blockedOn.length > 0 && (
         <div
           className="flex items-center gap-[5px] font-mono text-[11px] text-destructive"
-          aria-label={`Attend : ${blockedOn.join(", ")}`}
+          aria-label={`Waiting on: ${blockedOn.join(", ")}`}
           data-testid={`epic-blocked-${epic.id}`}
         >
           <Link2 className="h-[12px] w-[12px] shrink-0" aria-hidden="true" />
-          <span className="truncate">Attend : {blockedOn.join(" ")}</span>
+          <span className="truncate">Waiting on: {blockedOn.join(" ")}</span>
         </div>
       )}
     </Card>
