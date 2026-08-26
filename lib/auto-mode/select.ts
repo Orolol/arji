@@ -82,6 +82,30 @@ export const BUILDABLE_STORY_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Epic statuses under which a STORY may still be built. Wider than
+ * `BUILDABLE_EPIC_STATUSES` by one value, `review`, and deliberately so.
+ *
+ * A story added while an epic-scoped build was running stays `todo` while
+ * the epic advances to `review` (docs/architecture/ticket-state-machine.md),
+ * and so does a story added to an epic that already sits in Review. That
+ * story still has to be written. `review → in_progress` is an allowed epic
+ * transition (lib/workflow/engine.ts), so the shared dispatch transition
+ * reopens the epic and the leftover story gets built — which is what the
+ * supervisor did before the Backlog narrowing, and what
+ * `selectMergeCandidates` counts on: it refuses to land an epic that still
+ * has an unbuilt story, so the two rules together mean the story is finished
+ * rather than merged around.
+ *
+ * Backlog stays excluded here: a Backlog epic is out of the execution queue
+ * whether or not one of its stories looks ready.
+ */
+export const STORY_PARENT_BUILDABLE_STATUSES: ReadonlySet<string> = new Set([
+  "todo",
+  "in_progress",
+  "review",
+]);
+
+/**
  * Agent types that constitute "a review happened". Same family the workflow
  * engine's `hasCompletedReview` recognises (lib/workflow/context.ts:42-51).
  */
@@ -583,14 +607,48 @@ function isEpicSelectable(board: AutoModeBoard, epic: EpicRow): boolean {
 }
 
 /**
- * Board order: position ASC — the column's visual reading order. Position is
- * the single source of truth for execution order: what the user sees is what
- * the supervisor runs (WYSIWYG). Priority stays a badge and a filter, never
- * a scheduling criterion; the "Sort by priority" button makes it visible in
- * the order by rewriting positions in bulk.
+ * Execution order of the candidate set: column rank, then position ASC.
+ *
+ * `position` is written PER COLUMN — creation uses `MAX(position) + 1`
+ * scoped to the target status, and the reorder route rewrites each column as
+ * 0..n-1 — so every column has its own position 0 and position alone is not
+ * a total order over a set that spans two columns. The build selector spans
+ * exactly two (To Do and unoccupied In Progress), so the column is the
+ * primary key and position the secondary one. Without that rule the
+ * cross-column tie would fall through to `epicRows`, which query 1 reads
+ * with no ORDER BY — i.e. to creation order, which is invisible on the board
+ * and unreachable by dragging.
+ *
+ * In Progress ranks before To Do: a ticket sitting there came back from a
+ * negative review, and finishing work already started beats opening a new
+ * front. Within a column, position ASC is the column's visual reading order
+ * — position is the single source of truth for execution order, so what the
+ * user sees is what the supervisor runs (WYSIWYG). Priority stays a badge
+ * and a filter, never a scheduling criterion; the "Sort by priority" button
+ * makes it visible in the order by rewriting positions in bulk.
+ *
+ * The `id` tiebreak only fires on a malformed board (two rows sharing a
+ * position after a partial write). It is arbitrary but deterministic, which
+ * beats "whatever SQLite returned first".
  */
+const EXECUTION_COLUMN_RANK: Readonly<Record<string, number>> = {
+  in_progress: 0,
+  todo: 1,
+};
+
+/** Columns the build selector does not span sort last, among themselves. */
+const UNRANKED_COLUMN = 2;
+
 function compareEpics(a: EpicRow, b: EpicRow): number {
-  return (a.position ?? 0) - (b.position ?? 0);
+  const byColumn =
+    (EXECUTION_COLUMN_RANK[a.status ?? ""] ?? UNRANKED_COLUMN) -
+    (EXECUTION_COLUMN_RANK[b.status ?? ""] ?? UNRANKED_COLUMN);
+  if (byColumn !== 0) return byColumn;
+
+  const byPosition = (a.position ?? 0) - (b.position ?? 0);
+  if (byPosition !== 0) return byPosition;
+
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /**
@@ -670,12 +728,11 @@ export function selectBuildCandidates(
 
     const stories = board.storiesByEpic.get(epic.id) ?? [];
 
-    // The epic itself must be in the execution queue. This covers both
-    // branches: a story-scoped dispatch would otherwise pull a Backlog epic
-    // into the queue through the shared dispatch transition.
-    if (!BUILDABLE_EPIC_STATUSES.has(epic.status ?? "")) continue;
-
     if (stories.length === 0) {
+      // A storyless epic IS the unit of work, so it must be in the execution
+      // queue itself: Backlog is out, and so is `review`, where the epic is
+      // waiting for a verdict rather than for code.
+      if (!BUILDABLE_EPIC_STATUSES.has(epic.status ?? "")) continue;
       candidates.push({
         scope: "epic",
         epicId: epic.id,
@@ -687,9 +744,13 @@ export function selectBuildCandidates(
       continue;
     }
 
-    // Story scope: the first buildable story by position. The parent may
-    // start in todo; the shared dispatch transition moves both parent and
-    // story to in_progress before the queued session row is created.
+    // Story scope: the first buildable story by position. The parent may sit
+    // in todo, in_progress or review (see STORY_PARENT_BUILDABLE_STATUSES);
+    // the shared dispatch transition moves both parent and story to
+    // in_progress before the queued session row is created. A story-scoped
+    // dispatch must never pull a Backlog epic into the queue that way.
+    if (!STORY_PARENT_BUILDABLE_STATUSES.has(epic.status ?? "")) continue;
+
     const next = stories.find((story) => {
       if (!BUILDABLE_STORY_STATUSES.has(story.status ?? "")) return false;
       if (board.busyStoryIds.has(story.id)) return false;
@@ -737,9 +798,38 @@ export function selectReviewCandidates(
 }
 
 /**
+ * Does this epic still have a story the supervisor is going to build?
+ *
+ * A story left `todo` or `in_progress` under a reviewed epic — added while an
+ * epic-scoped build was running, or added to an epic already in Review — makes
+ * the reviewed diff only part of the feature. The unattended merge path must
+ * not land that; the story is picked up as a build candidate instead
+ * (STORY_PARENT_BUILDABLE_STATUSES), which reopens the epic and finishes it.
+ *
+ * The gate is deliberately `BUILDABLE_STORY_STATUSES`, the exact set the build
+ * selector picks stories from, which makes the hold self-clearing: every story
+ * that blocks a merge is a story this same sweep will build, so the epic comes
+ * back to Review and lands. Widening the gate to "anything not in review/done"
+ * would also catch a `backlog` story, which the selector will never build —
+ * a permanent, silent merge stall. A Backlog story is out of the execution
+ * queue by the same rule Backlog epics are (see BUILDABLE_EPIC_STATUSES); the
+ * approval path reports it as a skipped story instead.
+ *
+ * A human can still approve or merge such an epic through the normal routes,
+ * where the unfinished stories are reported as `skippedStories` and shown on
+ * the card. Only the unattended path is refused.
+ */
+function hasStoryStillToBuild(board: AutoModeBoard, epic: EpicRow): boolean {
+  const stories = board.storiesByEpic.get(epic.id) ?? [];
+  return stories.some((story) =>
+    BUILDABLE_STORY_STATUSES.has(story.status ?? "")
+  );
+}
+
+/**
  * Epics whose review came back clean and whose branch can land: in `review`,
- * with a branch, reviewed since the last code change, and with zero open
- * review comments.
+ * with a branch, reviewed since the last code change, with zero open review
+ * comments, and with no story the build selector would still pick up.
  *
  * This is the supervisor's own gate, and it is STRICTER than the workflow
  * engine's `→ done` guards on purpose. The engine still has the last word —
@@ -759,6 +849,7 @@ export function selectMergeCandidates(
     .filter((epic) => !board.mergeDeferredEpicIds.has(epic.id))
     .filter((epic) => hasFreshCleanReview(board.sessionFactsByEpic.get(epic.id)))
     .filter((epic) => (board.openReviewCommentsByEpic.get(epic.id) ?? 0) === 0)
+    .filter((epic) => !hasStoryStillToBuild(board, epic))
     .map((epic) => ({
       epicId: epic.id,
       ticketId: epic.id,

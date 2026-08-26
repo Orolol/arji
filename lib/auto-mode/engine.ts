@@ -31,6 +31,7 @@ import { autoModeRegistry } from "./registry";
 import {
   BUILDABLE_EPIC_STATUSES,
   BUILDABLE_STORY_STATUSES,
+  STORY_PARENT_BUILDABLE_STATUSES,
   loadAutoModeBoard,
   selectBuildCandidates,
   selectMergeCandidates,
@@ -277,6 +278,9 @@ async function defaultDispatch(
     // separately — against the same set the selector uses, not merely against
     // done/released. A `todo` story must not drag its Backlog epic into the
     // execution queue here any more than it can in `selectBuildCandidates`.
+    // `review` is in that set: a leftover story under a reviewed epic is work
+    // that still has to be written, and the dispatch transition reopens the
+    // epic to do it.
     if (input.scope === "story") {
       const epicStatus =
         db
@@ -284,7 +288,7 @@ async function defaultDispatch(
           .from(epics)
           .where(eq(epics.id, input.epicId))
           .get()?.status ?? null;
-      if (!BUILDABLE_EPIC_STATUSES.has(epicStatus ?? "")) {
+      if (!STORY_PARENT_BUILDABLE_STATUSES.has(epicStatus ?? "")) {
         return {
           sessionId: null,
           error: null,

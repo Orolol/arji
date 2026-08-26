@@ -111,20 +111,34 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
    * "Sort by priority". Both send the same `{ items }` shape to the reorder
    * route; on failure the optimistic board is rolled back by re-reading the
    * server's order.
+   *
+   * `reorderOnly` says "never move anything" — see the route. Drag-and-drop
+   * does not set it, because moving a card between columns is the whole
+   * point there. A sort does, and the route then reports how many stale rows
+   * it left alone; any such row means the optimistic board is out of date,
+   * so re-read it.
    */
   const postReorder = useCallback(
-    (items: ReorderItem[], failureMessage: string) => {
+    (
+      items: ReorderItem[],
+      failureMessage: string,
+      options?: { reorderOnly?: boolean }
+    ) => {
       fetch(`/api/projects/${projectId}/epics/reorder`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items }),
+        body: JSON.stringify(
+          options?.reorderOnly ? { items, reorderOnly: true } : { items }
+        ),
       })
         .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
             onMoveErrorRef.current?.(data.error || failureMessage);
             loadEpics();
+            return;
           }
+          if ((data?.data?.skipped ?? 0) > 0) loadEpics();
         })
         .catch(() => {
           loadEpics();
@@ -205,6 +219,7 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       const sorted = [...board.columns[column]].sort(
         (a, b) => b.priority - a.priority
       );
+      if (sorted.length === 0) return;
 
       // Optimistic half: the reorder route rewrites the same positions.
       setBoard((prev) => {
@@ -222,7 +237,12 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
           status: column,
           position: idx,
         })),
-        "Failed to sort column"
+        "Failed to sort column",
+        // Sorting is never a move. Without this, a card the server has since
+        // promoted (Full Auto picking it up, another tab, an arji.json
+        // import) would be read as a requested transition — failing the whole
+        // sort, or worse, demoting the ticket out of the queue.
+        { reorderOnly: true }
       );
     },
     [board, postReorder]

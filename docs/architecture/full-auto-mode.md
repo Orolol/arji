@@ -145,32 +145,58 @@ Git is the constraint: there is one worktree and one branch **per epic**.
 
 ### Which tickets, in which order
 
-Two rules decide what a sweep may pick up, and both are deliberately the
-board's own rules rather than a scheduler-private heuristic.
+Three rules decide what a sweep may pick up, and all three are deliberately
+the board's own rules rather than scheduler-private heuristics.
 
-**Position is the only order.** `compareEpics` (`lib/auto-mode/select.ts`)
-sorts by `position ASC` and nothing else. Priority 0–3 is a badge and a filter,
-not a scheduling key: the card at the top of the column is the next one built,
-which is exactly what the board shows. **Sort by priority** in the Backlog and
-To Do headers is how priority reaches the scheduler — it rewrites the column's
-positions in bulk through the existing reorder route (priority DESC, ties
-keeping their current order), so the new display order *is* the new execution
-order. The button is disabled while a filter is active, because it writes
-positions for the whole column and a filtered view is a subset.
+**Column first, then position.** `compareEpics` (`lib/auto-mode/select.ts`)
+sorts by column rank, then `position ASC`, and never by priority. Priority 0–3
+is a badge and a filter, not a scheduling key: within a column, the card at
+the top is the next one built, which is exactly what the board shows.
+
+The column rank exists because `position` is written **per column** — creation
+uses `MAX(position) + 1` scoped to the target status, and the reorder route
+rewrites each column as 0..n-1 — so every column has its own position 0 and
+position alone cannot order a candidate set that spans two of them. **In
+Progress ranks before To Do**: a ticket sitting there came back from a negative
+review, and finishing work already started beats opening a new front. Without
+that explicit rule the cross-column tie would fall through to SQLite's row
+order, i.e. creation order, which is invisible on the board and unreachable by
+dragging.
+
+**Sort by priority** in the Backlog and To Do headers is how priority reaches
+the scheduler — it rewrites the column's positions in bulk through the
+existing reorder route (priority DESC, ties keeping their current order), so
+the new display order *is* the new execution order. It is disabled while a
+filter is active, because it writes positions for the whole column and a
+filtered view is a subset. It also sends `reorderOnly`, so a card the server
+has moved on from is left alone rather than transitioned: sorting is never a
+move.
 
 **Only To Do and In Progress are buildable.** `BUILDABLE_EPIC_STATUSES` is
 `{todo, in_progress}` — Backlog is the staging area, not the queue, and
 dragging a ticket back to it is the "not yet" gesture that takes it out of
 Full Auto's reach. The same exported set is what `defaultDispatch` re-checks
-at launch time (and, for story scope, what the parent epic is checked
-against), so the selector and the last-moment guard cannot disagree.
+at launch time, so the selector and the last-moment guard cannot disagree.
 
-**Dependencies are respected.** `selectBuildCandidates` skips a ticket with a
-direct or transitive prerequisite that is not `done`/`released`, using
-`findTicketsBlockedByDependencies` from `lib/dependencies/validation.ts` — the
-same module the batch route and the DAG wave runner use. The graph is loaded
-once per sweep and walked in memory. The skip is currently silent on the
-board; surfacing blocked/ready state on the card is a separate backlog item.
+One deliberate exception, `STORY_PARENT_BUILDABLE_STATUSES` (`{todo,
+in_progress, review}`): a **story** may also be built under a parent already in
+`review`. A story added while an epic-scoped build was running stays `todo`
+while the epic advances to Review, and so does a story added to an epic
+already sitting there — that work still has to be written, and `review →
+in_progress` is an allowed epic transition, so the dispatch reopens the epic
+and finishes it.
+
+Its counterpart is on the merge side: `selectMergeCandidates` refuses an epic
+that still carries a story the build selector would pick up
+(`BUILDABLE_STORY_STATUSES` — `todo` or `in_progress`), so the unattended path
+can never land a reviewed diff that is only part of the feature. The gate is
+tied to that exact set on purpose: every story that holds a merge is a story
+the same sweep will build, so the hold clears itself. A `backlog` story does
+not block — the selector would never build it, so blocking on it would be a
+permanent silent stall; it is out of the execution queue by the same rule
+Backlog epics are, and the approval path reports it as a skipped story
+instead. A human can still approve or merge such an epic through the normal
+routes.
 
 ---
 

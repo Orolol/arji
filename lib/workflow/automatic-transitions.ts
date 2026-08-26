@@ -97,8 +97,12 @@ function transitionStory(opts: {
 
 /**
  * Establish the no-orphan invariant before a queued build session is written:
- * its story (when scoped) and parent epic are both in_progress. Backlog is an
- * intentional build source, so Full Auto may safely pick backlog tickets too.
+ * its story (when scoped) and parent epic are both in_progress.
+ *
+ * Backlog is an intentional build source for manual dispatch, batch/night
+ * runs and pipelines — the transition below is what keeps that safe. Full
+ * Auto is the exception and no longer selects backlog at all: its execution
+ * queue starts at To Do (`BUILDABLE_EPIC_STATUSES` in lib/auto-mode/select.ts).
  */
 export function transitionBuildStarted(opts: {
   projectId: string;

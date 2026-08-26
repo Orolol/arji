@@ -264,6 +264,84 @@ describe("selectBuildCandidates", () => {
     ]);
   });
 
+  /**
+   * Positions are written per column (creation scopes MAX(position)+1 to the
+   * target status; the reorder route rewrites each column as 0..n-1), so the
+   * candidate set spanning To Do and In Progress has two position 0s.
+   */
+  it("ranks In Progress before To Do when positions collide across columns", () => {
+    // Inserted To Do first, so a fall-through to row/creation order would
+    // put it in front — which is precisely the bug this pins.
+    addEpic({ id: "a-todo", status: "todo", position: 0 });
+    addEpic({ id: "z-progress", status: "in_progress", position: 0 });
+
+    // Work already started finishes first; the user has a lever for it that
+    // dragging inside one column could never express.
+    expect(selectBuildCandidates(PROJECT_ID).map((c) => c.ticketId)).toEqual([
+      "z-progress",
+      "a-todo",
+    ]);
+  });
+
+  it("still reads position within each column, In Progress first", () => {
+    addEpic({ id: "todo-0", status: "todo", position: 0 });
+    addEpic({ id: "todo-1", status: "todo", position: 1 });
+    addEpic({ id: "prog-0", status: "in_progress", position: 0 });
+    addEpic({ id: "prog-1", status: "in_progress", position: 1 });
+
+    expect(selectBuildCandidates(PROJECT_ID).map((c) => c.ticketId)).toEqual([
+      "prog-0",
+      "prog-1",
+      "todo-0",
+      "todo-1",
+    ]);
+  });
+
+  it("breaks a same-column position collision deterministically, not by row order", () => {
+    // Only reachable through a partial position write, but the supervisor
+    // must not pick a different ticket on each sweep when it happens.
+    addEpic({ id: "b-dup", status: "todo", position: 2 });
+    addEpic({ id: "a-dup", status: "todo", position: 2 });
+
+    expect(selectBuildCandidates(PROJECT_ID).map((c) => c.ticketId)).toEqual([
+      "a-dup",
+      "b-dup",
+    ]);
+  });
+
+  /**
+   * A story added while an epic-scoped build was running stays `todo` while
+   * the epic advances to `review`; so does a story added to an epic already
+   * sitting in Review. Someone still has to write it.
+   */
+  it("builds a leftover story under an epic already in review", () => {
+    addEpic({ id: "e-review", status: "review", branchName: "feat/e-review" });
+    addStory({ id: "s-done", epicId: "e-review", status: "review", position: 0 });
+    addStory({ id: "s-left", epicId: "e-review", status: "todo", position: 1 });
+
+    const candidates = selectBuildCandidates(PROJECT_ID);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      scope: "story",
+      epicId: "e-review",
+      userStoryId: "s-left",
+    });
+  });
+
+  it("does not rebuild a storyless epic sitting in review", () => {
+    // Nothing is waiting to be written there — it is waiting for a verdict.
+    addEpic({ id: "e-review", status: "review", branchName: "feat/e-review" });
+
+    expect(selectBuildCandidates(PROJECT_ID)).toEqual([]);
+  });
+
+  it("never builds a story whose parent is in backlog, review or not", () => {
+    addEpic({ id: "e-backlog", status: "backlog" });
+    addStory({ id: "s-b", epicId: "e-backlog", status: "todo" });
+
+    expect(selectBuildCandidates(PROJECT_ID)).toEqual([]);
+  });
+
   it("never yields tickets whose epic is done or released", () => {
     addEpic({ id: "e-done", status: "done" });
     addEpic({ id: "e-released", status: "released" });
@@ -910,6 +988,53 @@ describe("selectMergeCandidates", () => {
     seedCleanlyReviewedEpic();
     expect(selectMergeCandidates(PROJECT_ID)).toEqual([
       expect.objectContaining({ epicId: "e1", branchName: "feat/e1" }),
+    ]);
+  });
+
+  /**
+   * The unattended merge path is the one that touches the base branch with
+   * nobody watching, so "the review was clean" is not enough — the reviewed
+   * diff also has to be the whole feature.
+   */
+  it("never merges an epic that still has an unbuilt story", () => {
+    seedCleanlyReviewedEpic();
+    addStory({ id: "s-built", epicId: "e1", status: "review", position: 0 });
+    addStory({ id: "s-left", epicId: "e1", status: "todo", position: 1 });
+
+    expect(selectMergeCandidates(PROJECT_ID)).toEqual([]);
+    // …and the leftover story is picked up as work instead of merged around.
+    expect(selectBuildCandidates(PROJECT_ID)).toEqual([
+      expect.objectContaining({ scope: "story", userStoryId: "s-left" }),
+    ]);
+  });
+
+  it("never merges while a story is still in progress", () => {
+    seedCleanlyReviewedEpic();
+    addStory({ id: "s-wip", epicId: "e1", status: "in_progress", position: 0 });
+
+    expect(selectMergeCandidates(PROJECT_ID)).toEqual([]);
+  });
+
+  it("is not held by a story parked in backlog", () => {
+    seedCleanlyReviewedEpic();
+    addStory({ id: "s-shelved", epicId: "e1", status: "backlog", position: 0 });
+
+    // The build selector will never pick a backlog story up, so blocking on
+    // one would hold the epic in Review for good with no way out. Backlog is
+    // out of the execution queue for stories exactly as it is for epics.
+    expect(selectBuildCandidates(PROJECT_ID)).toEqual([]);
+    expect(selectMergeCandidates(PROJECT_ID)).toEqual([
+      expect.objectContaining({ epicId: "e1" }),
+    ]);
+  });
+
+  it("merges once every story is in review or done", () => {
+    seedCleanlyReviewedEpic();
+    addStory({ id: "s-review", epicId: "e1", status: "review", position: 0 });
+    addStory({ id: "s-done", epicId: "e1", status: "done", position: 1 });
+
+    expect(selectMergeCandidates(PROJECT_ID)).toEqual([
+      expect.objectContaining({ epicId: "e1" }),
     ]);
   });
 

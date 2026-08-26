@@ -168,6 +168,21 @@ describe("story-scoped build guard", () => {
     expect(driverMocks.launchStage).not.toHaveBeenCalled();
   });
 
+  it("dispatches a leftover story under a parent already in review", async () => {
+    // The selector yields this candidate (a story added mid-build, or added
+    // to an epic already in Review), and `review -> in_progress` is an
+    // allowed epic transition, so the guard must not be the thing that
+    // strands it. Merging around it is blocked separately, in
+    // selectMergeCandidates.
+    targetStatusIs("todo");
+    setEpicStatus("review");
+
+    const result = await dispatchBuild("story");
+
+    expect(result.sessionId).toBe("build-session");
+    expect(result.skipReason).toBeUndefined();
+  });
+
   it("refuses a story whose parent epic was released", async () => {
     targetStatusIs("todo");
     setEpicStatus("released");

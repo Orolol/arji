@@ -14,7 +14,8 @@ not state transitions.
 | From | To | Trigger/reason | Production source |
 |---|---|---|---|
 | `backlog` | `todo` | planning / drag | epic PATCH, reorder, MCP |
-| `backlog` or `todo` | `in_progress` | build accepted; transition completes **before** `queued` session insert. Full Auto is the exception on the source side: it only ever selects and dispatches from `todo`/`in_progress` (`BUILDABLE_EPIC_STATUSES`), so a `backlog` build comes from a manual dispatch, a batch/night run or a pipeline | `automatic-transitions.ts` via manual build, batch/night, pipeline and Full Auto |
+| `backlog` or `todo` | `in_progress` | build accepted; transition completes **before** `queued` session insert. Full Auto is the exception on the source side: it selects and dispatches only from `todo`/`in_progress` (`BUILDABLE_EPIC_STATUSES`), so a `backlog` build comes from a manual dispatch, a batch/night run or a pipeline | `automatic-transitions.ts` via manual build, batch/night, pipeline and Full Auto |
+| `review` | `in_progress` | story-scoped build of a story left behind (added mid-build, or added to an epic already in Review); the epic reopens to finish it. Full Auto allows this one parent status beyond its buildable set (`STORY_PARENT_BUILDABLE_STATUSES`) and refuses to merge an epic with such a story | `automatic-transitions.ts` via `transitionBuildStarted` |
 | `in_progress` | `review` | successful build (`answered` and legacy successful outcomes); epic scope advances only stories already `in_progress` (a story added mid-build stays `todo`), story scope only promotes the parent after every story is `review`/`done` | `automatic-transitions.ts` |
 | current | current | failed build, unanswered question, successful story with siblings remaining, or refused terminal promotion; no status write, explicit activity reason, terminal handlers continue posting agent output. A refusal persists `transition_refused`, settles pipeline/wave work as failed, emits failure feedback, and counts toward Full Auto parking | terminal outcome helper / question handler |
 | `review` or `done` | `in_progress` | negative review / requested changes; the review session is already terminal | `automatic-transitions.ts` via review routes and pipeline |
@@ -28,12 +29,14 @@ terminal. `review → done` cannot be achieved by drag/API; its source must be
 `approve` or `merge`. An `in_progress` ticket cannot leave the column while a
 `build`, `ticket_build`, or `team_build` session is queued/running; review,
 chat, merge and auxiliary sessions do not own that column. Full Auto
-deliberately excludes backlog: only todo/in-progress are candidates, ordered
-by board `position` alone, and the driver owns the move to `in_progress`. A
-rejected review returning to `in_progress` remains automatically buildable. Epic approval advances only
-children already in `review`; todo/in-progress children are retained and named
-in the activity log, returned as `skippedStories`, and shown persistently on a
-delivered epic card as an unfinished-stories warning.
+deliberately excludes backlog: only todo/in-progress are candidates (plus a
+leftover story under a `review` parent), ordered by column rank then board
+`position` — In Progress drains before To Do — and the driver owns the move to
+`in_progress`. A rejected review returning to `in_progress` remains
+automatically buildable. Epic approval advances only children already in
+`review`; todo/in-progress children are retained and named in the activity
+log, returned as `skippedStories`, and shown persistently on a delivered epic
+card as an unfinished-stories warning.
 
 ## Exhaustive workflow-service call sites
 

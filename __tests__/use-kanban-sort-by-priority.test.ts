@@ -61,13 +61,17 @@ describe("useKanban.sortColumnByPriority", () => {
     });
   }
 
-  function reorderPosts(): Array<{ url: string; items: unknown }> {
+  function reorderPosts(): Array<{
+    url: string;
+    items: unknown;
+    reorderOnly?: boolean;
+  }> {
     return fetchSpy.mock.calls
       .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
-      .map(([url, init]) => ({
-        url: String(url),
-        items: JSON.parse((init as RequestInit).body as string).items,
-      }));
+      .map(([url, init]) => {
+        const body = JSON.parse((init as RequestInit).body as string);
+        return { url: String(url), items: body.items, reorderOnly: body.reorderOnly };
+      });
   }
 
   function epicLoadCount(): number {
@@ -238,6 +242,69 @@ describe("useKanban.sortColumnByPriority", () => {
       expect(onMoveError).toHaveBeenCalledWith("Reorder refused")
     );
     await waitFor(() => expect(epicLoadCount()).toBeGreaterThan(loadsBefore));
+  });
+
+  /**
+   * The payload states the status the client BELIEVES each card has, and the
+   * route reads a mismatch as a requested move. Sorting never moves a card,
+   * so it has to say so — otherwise a stale board makes the click either fail
+   * outright or demote a ticket out of Full Auto's queue.
+   */
+  it("declares the write as reorder-only", async () => {
+    const { result } = await mountBoard([
+      { id: "low", priority: 0 },
+      { id: "critical", priority: 3 },
+    ]);
+
+    act(() => {
+      result.current.sortColumnByPriority("todo");
+    });
+
+    expect(reorderPosts()[0].reorderOnly).toBe(true);
+  });
+
+  it("re-reads the board when the server left stale rows alone", async () => {
+    mockBoard([
+      { id: "low", priority: 0 },
+      { id: "critical", priority: 3 },
+    ]);
+    const { result } = renderHook(() => useKanban(PROJECT_ID));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const loadsBefore = epicLoadCount();
+
+    fetchSpy.mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          return new Response(
+            JSON.stringify({ data: { updated: 1, skipped: 1 } })
+          );
+        }
+        if (String(input).endsWith("/epics")) {
+          return new Response(
+            JSON.stringify({ data: seedEpics([{ id: "low", priority: 0 }]) })
+          );
+        }
+        return new Response(JSON.stringify({ data: [] }));
+      }
+    );
+
+    await act(async () => {
+      result.current.sortColumnByPriority("todo");
+    });
+
+    // A skipped row means the optimistic order describes a board that no
+    // longer exists; showing it would be the WYSIWYG promise broken quietly.
+    await waitFor(() => expect(epicLoadCount()).toBeGreaterThan(loadsBefore));
+  });
+
+  it("does not POST for an empty column", async () => {
+    const { result } = await mountBoard([{ id: "only-todo", priority: 1 }]);
+
+    act(() => {
+      result.current.sortColumnByPriority("backlog");
+    });
+
+    expect(reorderPosts()).toHaveLength(0);
   });
 
   it("never sorts the released column", async () => {
