@@ -114,7 +114,7 @@ describe("project layout chrome", () => {
       "href",
       "/projects/proj-1",
     );
-    expect(screen.getByRole("link", { name: "Spec" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Spec & Memory" })).toHaveAttribute(
       "href",
       "/projects/proj-1/spec",
     );

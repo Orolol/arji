@@ -9,6 +9,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "proj-1" }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
 // The editor/preview are heavy mention/markdown surfaces — the wiring under

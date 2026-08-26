@@ -44,6 +44,12 @@ const { GET, PUT } = await import(
 const { POST: DISTILL } = await import(
   "@/app/api/projects/[projectId]/memory/distill/route"
 );
+const { POST: RESTORE } = await import(
+  "@/app/api/projects/[projectId]/memory/restore/route"
+);
+const { eq } = await import("drizzle-orm");
+const { notifications } = await import("@/lib/db/schema");
+const { archiveProjectMemory } = await import("@/lib/documents/memory");
 
 let counter = 0;
 
@@ -79,6 +85,34 @@ describe("GET /api/projects/[projectId]/memory", () => {
       exists: false,
       updatedAt: null,
       maxChars: PROJECT_MEMORY_MAX_CHARS,
+      provenance: null,
+      archive: null,
+      pendingWriter: null,
+    });
+  });
+
+  it("serves provenance, the pre-dream archive, and a pending writer", async () => {
+    const projectId = seedProject();
+    await PUT(
+      mockJsonRequest({ content: "manual memory" }),
+      mockRouteContext({ projectId })
+    );
+    archiveProjectMemory(projectId, "manual memory");
+    db.insert(agentSessions)
+      .values({ id: "dream-1", projectId, agentType: "dreaming", status: "running" })
+      .run();
+
+    const res = await GET(mockNextRequest(), mockRouteContext({ projectId }));
+    const json = await res.json();
+
+    // Story 3: who wrote the document last.
+    expect(json.data.provenance).toMatchObject({ source: "manual", sessionId: null });
+    // Story 5: the one pre-dream snapshot the panel can restore from.
+    expect(json.data.archive?.content).toBe("manual memory");
+    // Story 4: an in-flight rewrite the manual save may supersede.
+    expect(json.data.pendingWriter).toEqual({
+      sessionId: "dream-1",
+      agentType: "dreaming",
     });
   });
 });
@@ -155,6 +189,64 @@ describe("PUT /api/projects/[projectId]/memory (edit round-trip)", () => {
       mockRouteContext({ projectId: "missing" })
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /api/projects/[projectId]/memory/restore", () => {
+  it("404s for an unknown project", async () => {
+    const res = await RESTORE(
+      mockNextRequest(),
+      mockRouteContext({ projectId: "missing" })
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("404s when no pre-dream snapshot exists yet", async () => {
+    const projectId = seedProject();
+    await PUT(mockJsonRequest({ content: "v1" }), mockRouteContext({ projectId }));
+
+    const res = await RESTORE(
+      mockNextRequest(),
+      mockRouteContext({ projectId })
+    );
+    const json = await res.json();
+    expect(res.status).toBe(404);
+    expect(json.error).toBe("No memory snapshot to restore yet");
+  });
+
+  /**
+   * The one-click restore (Story 5): the snapshot content goes back to the
+   * live document, the write is recorded as manual, the snapshot stays
+   * available, and the feed gets a first-class "restored" entry deep-linking
+   * to the memory panel.
+   */
+  it("restores the snapshot and records a manual provenance", async () => {
+    const projectId = seedProject();
+    await PUT(mockJsonRequest({ content: "v1" }), mockRouteContext({ projectId }));
+    archiveProjectMemory(projectId, "v1");
+    await PUT(mockJsonRequest({ content: "dreamed v2" }), mockRouteContext({ projectId }));
+
+    const res = await RESTORE(
+      mockNextRequest(),
+      mockRouteContext({ projectId })
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.data.content).toBe("v1");
+    expect(json.data.provenance).toMatchObject({ source: "manual", sessionId: null });
+    // The snapshot is not consumed by a restore: restore is repeatable.
+    expect(json.data.archive?.content).toBe("v1");
+
+    const rows = db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.projectId, projectId))
+      .all();
+    const restored = rows.find(
+      (row) => row.title === "Project memory restored from the pre-dream snapshot"
+    );
+    expect(restored).toBeDefined();
+    expect(restored!.targetUrl).toBe(`/projects/${projectId}/spec#memory-panel`);
   });
 });
 

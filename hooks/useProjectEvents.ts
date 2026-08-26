@@ -31,6 +31,11 @@ export function useProjectEvents(
       esRef.current = null;
     }
 
+    if (typeof EventSource === "undefined") {
+      setStatus("disconnected");
+      return;
+    }
+
     setStatus("connecting");
     const es = new EventSource(`/api/projects/${projectId}/events`);
     esRef.current = es;

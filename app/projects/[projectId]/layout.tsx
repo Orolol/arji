@@ -110,7 +110,7 @@ export default function ProjectLayout({
 
   const primaryTabs = [
     { href: boardHref, label: "Board", exact: true },
-    { href: `/projects/${projectId}/spec`, label: "Spec", exact: false },
+    { href: `/projects/${projectId}/spec`, label: "Spec & Memory", exact: false },
     { href: `/projects/${projectId}/sessions`, label: "Sessions", exact: false },
   ];
 
