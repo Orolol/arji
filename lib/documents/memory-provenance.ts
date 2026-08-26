@@ -28,7 +28,6 @@ export interface MemoryWriteProvenance {
   at: string;
 }
 
-
 /**
  * Reads the last-write provenance record for a project. Returns null when the
  * record is missing, unreadable, or carries an unknown source — callers treat

@@ -38,6 +38,11 @@ export default function DocumentsPage() {
       setError(data.error || "Failed to load documents.");
       return;
     }
+    // The learned project memory and its pre-dream snapshot live in the same
+    // table but have their own editor card in the Spec & Memory section — keep
+    // them out of the uploads list so they cannot be casually deleted like a
+    // reference document. The GET route filters them too; this is the same rule
+    // applied at both ends.
     const docs = (
       (data.data || []) as Array<Omit<Doc, "kind"> & { kind: string }>
     ).filter((doc) => !isInternalMemoryDocKind(doc.kind)) as Doc[];

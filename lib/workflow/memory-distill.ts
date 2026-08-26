@@ -70,6 +70,7 @@ import {
 import { isNightRunId } from "@/lib/night/constants";
 import { createMemoryDistilledNotification } from "@/lib/notifications/create";
 import { recordMemoryWriteProvenance } from "@/lib/documents/memory-provenance";
+import { emitSessionStarted } from "@/lib/events/emit";
 import { eventBus } from "@/lib/events/bus";
 import { MEMORY_WRITER_AGENT_TYPES } from "./dreaming-constants";
 import { isDreamingAfterNightRunEnabled } from "./dreaming";
@@ -622,6 +623,16 @@ export async function dispatchMemoryDistillSession(
     createdAt: now,
   });
 
+  try {
+    emitSessionStarted(
+      input.projectId,
+      sourceContext?.epicId ?? "",
+      sessionId,
+      "memory_distill"
+    );
+  } catch {
+    // Non-critical event emission
+  }
   agentScheduler.submit(input.projectId, sessionId, async () => {
     markSessionRunning(sessionId);
 

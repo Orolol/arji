@@ -84,6 +84,7 @@ import {
 } from "@/lib/documents/memory";
 import { createMemoryDreamedNotification } from "@/lib/notifications/create";
 import { recordMemoryWriteProvenance } from "@/lib/documents/memory-provenance";
+import { emitSessionStarted } from "@/lib/events/emit";
 import { eventBus } from "@/lib/events/bus";
 // Client-safe constants module (no db import) — no cycle back into the engine.
 import { NIGHT_STOPPED_ABORT_REASON } from "@/lib/night/constants";
@@ -1025,6 +1026,11 @@ export async function dispatchDreamingSession(
     createdAt: now,
   });
 
+  try {
+    emitSessionStarted(input.projectId, "", sessionId, DREAMING_AGENT_TYPE);
+  } catch {
+    // Non-critical event emission
+  }
   agentScheduler.submit(input.projectId, sessionId, async () => {
     markSessionRunning(sessionId);
 

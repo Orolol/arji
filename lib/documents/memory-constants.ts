@@ -103,6 +103,7 @@ export function parseMemoryAutoDistillSetting(value: unknown): boolean {
   if (typeof parsed === "string") return parsed.trim().toLowerCase() === "true";
   return false;
 }
+
 /**
  * Settings key prefix for the per-project memory-write provenance record
  * (`memory_provenance:<projectId>`). The value is a JSON

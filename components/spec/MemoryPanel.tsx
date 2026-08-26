@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { AlertTriangle, FileText, Moon, RotateCcw, Sparkles } from "lucide-react";
 import { SpecPreview } from "@/components/spec/SpecPreview";
 import { Button } from "@/components/ui/button";
@@ -13,31 +13,15 @@ import type {
   MemoryWriteProvenance,
   MemoryWriteSource,
 } from "@/lib/documents/memory-provenance";
-import {
-  DREAMING_MEMORY_SECTIONS,
-} from "@/lib/workflow/dreaming-constants";
+import { DREAMING_MEMORY_SECTIONS } from "@/lib/workflow/dreaming-constants";
+import { validateDreamedMemoryStructure } from "@/lib/workflow/dreaming-digest";
 
-export const DREAMING_MEMORY_TEMPLATE = `## Codebase pitfalls
-
-- 
-
-## Recurring agent mistakes
-
-- 
-
-## Strategies that work
-
-- 
-
-## Build instructions
-
-- `;
+export const DREAMING_MEMORY_TEMPLATE = DREAMING_MEMORY_SECTIONS.map(
+  (title) => `## ${title}\n\n- `
+).join("\n\n");
 
 export function hasAllDreamingSections(markdown: string): boolean {
-  if (!markdown || !markdown.trim()) return false;
-  return DREAMING_MEMORY_SECTIONS.every((section) =>
-    new RegExp(`^##\\s+${section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "im").test(markdown)
-  );
+  return validateDreamedMemoryStructure(markdown).valid;
 }
 
 /**
@@ -85,7 +69,6 @@ function sourceLabel(source: MemoryWriteSource | null | undefined): string {
   }
 }
 
-
 /**
  * The learned-memory panel of the Spec & Memory section (the "gérer la
  * section mémoire" epic):
@@ -103,6 +86,7 @@ function sourceLabel(source: MemoryWriteSource | null | undefined): string {
  */
 export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProps) {
   const hookParams = useParams();
+  const router = useRouter();
   const projectId = propsProjectId || (hookParams?.projectId as string) || "";
   const [content, setContent] = useState("");
   const [savedContent, setSavedContent] = useState("");
@@ -123,13 +107,15 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
   const [backgroundUpdateConflict, setBackgroundUpdateConflict] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const safeContent = content ?? "";
+  const safeContent = content;
   const overCap = safeContent.length > PROJECT_MEMORY_MAX_CHARS;
   const approachingCap =
     !overCap && safeContent.length >= Math.floor(PROJECT_MEMORY_MAX_CHARS * 0.85);
-  const dirty = safeContent !== (savedContent ?? "");
-  const conformsToDreaming = hasAllDreamingSections(safeContent);
-
+  const dirty = safeContent !== savedContent;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const validation = validateDreamedMemoryStructure(safeContent);
+  const conformsToDreaming = validation.valid;
   const applyEnvelope = useCallback(
     (envelope: MemoryEnvelope, keepLocalEdit: boolean) => {
       const incomingContent = envelope.content ?? "";
@@ -178,17 +164,33 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
     };
   }, [projectId, applyEnvelope]);
 
-  useProjectEvents(projectId, {
-    "memory:changed": () => {
-      if (!projectId) return;
-      fetch(`/api/projects/${projectId}/memory`)
-        .then((res) => (res.ok ? res.json() : Promise.reject(new Error())))
-        .then((data) => {
-          if (data?.data) applyEnvelope(data.data as MemoryEnvelope, dirty);
-        })
-        .catch(() => {});
-    },
+  const refetchMemory = useCallback(() => {
+    if (!projectId) return;
+    fetch(`/api/projects/${projectId}/memory`)
+      .then(async (res) => {
+        if (!res.ok) return null;
+        return (await res.json().catch(() => null)) as { data: MemoryEnvelope } | null;
+      })
+      .then((data) => {
+        if (data?.data) {
+          applyEnvelope(data.data, dirtyRef.current);
+        }
+      })
+      .catch(() => {});
+  }, [projectId, applyEnvelope]);
+
+  const { pollTick } = useProjectEvents(projectId, {
+    "memory:changed": () => refetchMemory(),
+    "session:started": () => refetchMemory(),
+    "session:completed": () => refetchMemory(),
+    "session:failed": () => refetchMemory(),
   });
+
+  useEffect(() => {
+    if (pollTick > 0) {
+      refetchMemory();
+    }
+  }, [pollTick, refetchMemory]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -276,7 +278,7 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
         );
         return;
       }
-      window.location.href = `/projects/${projectId}/sessions/${dreamSessionId}`;
+      router.push(`/projects/${projectId}/sessions/${dreamSessionId}`);
     } catch {
       setError("Failed to start the dreaming session.");
     } finally {
@@ -285,11 +287,23 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
   }
 
   function handleInsertSkeleton() {
-    if (safeContent.trim() && !confirm("Replace current memory content with the 4-sections Dreaming template?")) {
+    if (!safeContent.trim()) {
+      setContent(DREAMING_MEMORY_TEMPLATE);
+      setMessage("Inserted the 4-sections Dreaming skeleton.");
       return;
     }
-    setContent(DREAMING_MEMORY_TEMPLATE);
-    setMessage("Inserted the 4-sections Dreaming skeleton.");
+    const missing = DREAMING_MEMORY_SECTIONS.filter((section) =>
+      !new RegExp(`^##\\s+${section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "im").test(safeContent)
+    );
+    if (missing.length > 0) {
+      const toAppend = missing.map((title) => `## ${title}\n\n- `).join("\n\n");
+      const separator = safeContent.endsWith("\n\n") ? "" : safeContent.endsWith("\n") ? "\n" : "\n\n";
+      setContent(`${safeContent}${separator}${toAppend}`);
+      setMessage(`Appended missing Dreaming section(s): ${missing.join(", ")}.`);
+    } else {
+      setContent(DREAMING_MEMORY_TEMPLATE);
+      setMessage("Reset to the 4-sections Dreaming template.");
+    }
   }
 
   return (
@@ -397,7 +411,7 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
                 <span>
                   {!safeContent.trim()
                     ? "No project memory yet. Start with the 4 Dreaming sections:"
-                    : "Document is missing one or more Dreaming sections."}
+                    : `Dreaming structure hint: ${validation.reason || "missing or non-conforming sections"}.`}
                 </span>
               </div>
               <Button
@@ -407,7 +421,7 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
                 className="h-[24px] rounded-[6px] px-[9px] text-[11.5px]"
                 onClick={handleInsertSkeleton}
               >
-                Use 4-sections template
+                {!safeContent.trim() ? "Use 4-sections template" : "Append missing sections"}
               </Button>
             </div>
           )}

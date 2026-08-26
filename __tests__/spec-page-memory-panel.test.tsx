@@ -8,14 +8,37 @@
  * - Pre-dream snapshot restore with explicit confirmation
  * - Read-only mode and banner during active agent rewrite (pendingWriter)
  */
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import * as React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import SpecPage from "@/app/projects/[projectId]/spec/page";
 import { MemoryPanel, hasAllDreamingSections } from "@/components/spec/MemoryPanel";
 import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
+
+let activeMockEventSources: MockEventSource[] = [];
+
+class MockEventSource {
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor() {
+    activeMockEventSources.push(this);
+  }
+  close() {
+    activeMockEventSources = activeMockEventSources.filter((es) => es !== this);
+  }
+  emit(type: string, data: Record<string, unknown> = {}) {
+    this.onmessage?.({
+      data: JSON.stringify({ type, projectId: "proj-1", data, timestamp: new Date().toISOString() }),
+    });
+  }
+}
+(globalThis as Record<string, unknown>).EventSource = MockEventSource;
+
+const mockRouterPush = vi.fn();
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "project-mem-1" }),
+  useRouter: () => ({ push: mockRouterPush }),
 }));
 
 // Mock fetch globally for testing
@@ -319,5 +342,229 @@ describe("MemoryPanel component (Story 2, 3 & 4)", () => {
     // Editor and Save button are disabled in read-only mode
     expect(screen.getByTestId("memory-editor")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save memory" })).toBeDisabled();
+  });
+
+  it("preserves unsaved user edits when background update arrives, shows conflict notice, and loads new content on Discard", async () => {
+    // 1. Initial load
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Initial server memory",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: { source: "manual", sessionId: null, at: "2026-01-01T00:00:00.000Z" },
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    render(<MemoryPanel projectId="proj-1" mode="edit" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("memory-editor")).toHaveValue("Initial server memory");
+    });
+
+    // 2. User types an unsaved local edit (dirty = true)
+    const editor = screen.getByTestId("memory-editor");
+    fireEvent.change(editor, { target: { value: "My unsaved local draft" } });
+    expect(editor).toHaveValue("My unsaved local draft");
+
+    // 3. Background update arrives (e.g. Dreaming completed and emitted memory:changed)
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Updated background memory from agent",
+          exists: true,
+          updatedAt: "2026-01-01T01:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: { source: "dreaming", sessionId: "sess-dream-99", at: "2026-01-01T01:00:00.000Z" },
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    // Emit memory:changed SSE event
+    act(() => {
+      activeMockEventSources.forEach((es) => es.emit("memory:changed"));
+    });
+
+    // 4. Verify local draft is preserved and conflict notice is displayed
+    await waitFor(() => {
+      expect(screen.getByTestId("memory-conflict-notice")).toBeDefined();
+      expect(screen.getByText(/updated in the background while you were editing/i)).toBeDefined();
+    });
+    expect(editor).toHaveValue("My unsaved local draft");
+
+    // 5. User clicks Discard -> loads the NEW server content and clears conflict notice
+    const discardBtn = screen.getByRole("button", { name: "Discard" });
+    fireEvent.click(discardBtn);
+
+    expect(editor).toHaveValue("Updated background memory from agent");
+    expect(screen.queryByTestId("memory-conflict-notice")).toBeNull();
+  });
+
+  it("live syncs on session:started and memory:changed events without page reload", async () => {
+    // Initial mount with no writer
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Current memory text",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    render(<MemoryPanel projectId="proj-1" mode="edit" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("memory-editor")).toBeEnabled();
+    });
+    expect(screen.queryByTestId("memory-pending-writer-banner")).toBeNull();
+
+    // Background Dreaming starts -> emits session:started
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Current memory text",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: {
+            sessionId: "sess-dreaming-live",
+            agentType: "dreaming",
+          },
+        },
+      }),
+    });
+
+    act(() => {
+      activeMockEventSources.forEach((es) => es.emit("session:started"));
+    });
+
+    // Panel updates live to read-only mode with banner
+    await waitFor(() => {
+      expect(screen.getByTestId("memory-pending-writer-banner")).toBeDefined();
+      expect(screen.getByTestId("memory-editor")).toBeDisabled();
+    });
+
+    // Dreaming finishes -> emits memory:changed
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Newly dreamed memory text",
+          exists: true,
+          updatedAt: "2026-01-01T02:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: { source: "dreaming", sessionId: "sess-dreaming-live", at: "2026-01-01T02:00:00.000Z" },
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    act(() => {
+      activeMockEventSources.forEach((es) => es.emit("memory:changed"));
+    });
+
+    // Banner clears, editor re-enables and displays new content
+    await waitFor(() => {
+      expect(screen.queryByTestId("memory-pending-writer-banner")).toBeNull();
+      expect(screen.getByTestId("memory-editor")).toBeEnabled();
+      expect(screen.getByTestId("memory-editor")).toHaveValue("Newly dreamed memory text");
+    });
+  });
+
+  it("appends missing sections to non-empty memory rather than replacing the whole document", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "## Codebase pitfalls\n\n- Do not mutate state directly.",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    render(<MemoryPanel projectId="proj-1" mode="edit" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("memory-skeleton-suggestion")).toBeDefined();
+    });
+
+    const appendBtn = screen.getByRole("button", { name: /append missing sections/i });
+    fireEvent.click(appendBtn);
+
+    const editor = screen.getByTestId("memory-editor") as HTMLTextAreaElement;
+    expect(editor.value).toContain("## Codebase pitfalls\n\n- Do not mutate state directly.");
+    expect(editor.value).toContain("## Recurring agent mistakes");
+    expect(editor.value).toContain("## Strategies that work");
+    expect(editor.value).toContain("## Build instructions");
+    expect(hasAllDreamingSections(editor.value)).toBe(true);
+  });
+
+  it("navigates to dream session using router.push on manual dream", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "## Codebase pitfalls\n\n- Some note",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    render(<MemoryPanel projectId="proj-1" mode="edit" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Dream" })).toBeEnabled();
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          sessionId: "sess-dream-new-456",
+        },
+      }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Dream" }));
+
+    await waitFor(() => {
+      expect(mockRouterPush).toHaveBeenCalledWith("/projects/proj-1/sessions/sess-dream-new-456");
+    });
   });
 });

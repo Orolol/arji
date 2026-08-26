@@ -16,12 +16,12 @@ export type TicketEventType =
   | "session:progress"
   | "artifact:created"
   | "release:created"
-/**
- * `memory:changed` — emitted after the project memory document is written by
- * ANY path (manual save, restore, Dreaming, distillation). The Spec & Memory
- * panel re-fetches on it so every open view shows the fresh memory without
- * polling. Payload: `{ source: "manual" | "dreaming" | "distill" }`.
- */
+  /**
+   * `memory:changed` — emitted after the project memory document is written by
+   * ANY path (manual save, restore, Dreaming, distillation). The Spec & Memory
+   * panel re-fetches on it so every open view shows the fresh memory without
+   * polling. Payload: `{ source: "manual" | "dreaming" | "distill" }`.
+   */
   | "memory:changed";
 
 export interface TicketEvent {
