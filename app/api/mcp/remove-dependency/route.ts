@@ -2,9 +2,12 @@
  * POST /api/mcp/remove-dependency — the mcp__arij__remove_dependency tool.
  *
  * Part of the refinement toolset: the agent prunes stale dependency edges
- * while re-passing the board. Both endpoints must sit in Backlog / To do
- * (the refinement guardrail); removing an edge that is not there is a
- * reported no-op the agent can move past rather than an error.
+ * while re-passing the board. The guardrail is asymmetric: the DEPENDENT
+ * ticket must sit in Backlog / To do because it is the row being written to,
+ * while the prerequisite may be in any column — pruning an edge to work that
+ * has since shipped is exactly what this tool is for. Removing an edge that
+ * is not there is a reported no-op the agent can move past rather than an
+ * error.
  */
 
 import { NextRequest, NextResponse } from "next/server";

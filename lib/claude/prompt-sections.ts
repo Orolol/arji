@@ -281,9 +281,10 @@ export function arijToolsSection(agentType: string | null): string {
         "is no default ticket to fall back on. Your board tools are " +
         "set_priority, reorder_tickets, add_dependency, remove_dependency " +
         "and promote_ticket; each one requires a `reason` that is recorded " +
-        "in the ticket's activity log. They work on Backlog and To do only, " +
-        "and update_ticket_status is not your channel for moving work — " +
-        "promote_ticket is."
+        "in the ticket's activity log. They work on Backlog and To do only. " +
+        "update_ticket_status is withheld from this session and the route " +
+        "refuses it — promote_ticket is your only channel for a column " +
+        "move, and it demands the missing question when you send work back."
       : "";
 
   return section(

@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
   // One id twice would make the resulting order depend on which entry the
   // transaction happened to write last — reject rather than pick a winner.
   const seen = new Set<string>();
+  const seenPositions = new Set<number>();
   for (const item of body.items) {
     if (seen.has(item.ticket_id)) {
       return NextResponse.json(
@@ -67,6 +68,21 @@ export async function POST(request: NextRequest) {
       );
     }
     seen.add(item.ticket_id);
+
+    // Two tickets asking for the same rank is the same defect as a repeated
+    // id: the board sorts on `position` and breaks ties by fetch order, and
+    // the execution queue is derived from that — so a colliding ranking
+    // silently decides which ticket is "next".
+    if (seenPositions.has(item.position)) {
+      return NextResponse.json(
+        {
+          error: `Position ${item.position} is requested by more than one ticket. Every ticket in the batch needs a distinct rank.`,
+          code: "DUPLICATE_POSITION",
+        },
+        { status: 400 }
+      );
+    }
+    seenPositions.add(item.position);
   }
 
   // Resolve every target and guard each one: refinement only touches

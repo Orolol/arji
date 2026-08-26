@@ -7,6 +7,7 @@
  * server — and session errors surface through the page's notification rail
  * rather than being swallowed.
  */
+import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RefinementButton } from "@/components/kanban/RefinementButton";
@@ -299,6 +300,48 @@ describe("RefinementButton", () => {
     await waitFor(() =>
       expect(screen.getByTestId("refinement-button")).not.toBeDisabled()
     );
+  });
+
+  /**
+   * Regression: `onFinished` was called inside the `setStatus` updater.
+   * React requires updaters to be pure and double-invokes them under
+   * StrictMode — which the App Router enables by default — so the user got
+   * two "finished" toasts and two board reloads per pass in development.
+   */
+  it("fires onFinished exactly once under StrictMode", async () => {
+    // A controllable mock rather than a queue: StrictMode runs the effect
+    // twice per mount, so a fixed sequence would desync.
+    let serverSaysRunning = true;
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () =>
+        serverSaysRunning ? running().body : idle().body,
+    })) as unknown as typeof fetch;
+    const onFinished = vi.fn();
+
+    const view = (trigger: number) => (
+      <StrictMode>
+        <RefinementButton
+          projectId="proj-1"
+          onError={vi.fn()}
+          onFinished={onFinished}
+          refreshTrigger={trigger}
+          pollIntervalMs={0}
+        />
+      </StrictMode>
+    );
+
+    const { rerender } = render(view(0));
+    await waitFor(() =>
+      expect(screen.getByTestId("refinement-button")).toBeDisabled()
+    );
+
+    // The pass ends; the next status read sees idle.
+    serverSaysRunning = false;
+    rerender(view(1));
+
+    await waitFor(() => expect(onFinished).toHaveBeenCalled());
+    expect(onFinished).toHaveBeenCalledTimes(1);
   });
 
   it("stays usable when the status read fails", async () => {

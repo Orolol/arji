@@ -40,6 +40,15 @@ const EXPECTED_TOOL_NAMES = [
   "promote_ticket",
 ];
 
+/**
+ * PRIORITY_LABELS in lib/types/kanban.ts. The shim is plain .mjs and cannot
+ * import it, so the scale is duplicated in the tool description — and that
+ * string is the agent's only semantic anchor, since the board snapshot
+ * renders bare numbers. An off-by-one there silently inflates every priority
+ * the agent sets.
+ */
+const PRIORITY_SCALE_TEXT = "0 low, 1 medium, 2 high, 3 critical";
+
 const EXPECTED_CHAT_TOOL_NAMES = [
   "list_tickets",
   "get_ticket",
@@ -249,6 +258,24 @@ describe("startup", () => {
 });
 
 describe("tools/list", () => {
+  it("documents the board's real priority scale on set_priority", async () => {
+    const result = await client.request("tools/list", {});
+    const tool: any = result.tools.find(
+      (t: any) => t.name === "set_priority"
+    );
+    expect(tool).toBeDefined();
+
+    for (const text of [
+      tool.description,
+      tool.inputSchema.properties.priority.description,
+    ]) {
+      expect(text.toLowerCase()).toContain(PRIORITY_SCALE_TEXT);
+      // The old, wrong scale started at "none" and topped out at "high", so
+      // every medium/high judgement landed one notch too high on the board.
+      expect(text.toLowerCase()).not.toContain("0 none");
+    }
+  });
+
   it("declares exactly the Arij agent tools, in order, with schemas", async () => {
     const result = await client.request("tools/list", {});
 

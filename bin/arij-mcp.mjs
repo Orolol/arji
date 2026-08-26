@@ -353,7 +353,7 @@ const AGENT_TOOLS = [
   {
     name: "set_priority",
     description:
-      "Set a Backlog/To do ticket's priority (0 none, 1 low, 2 medium, 3 high). Refused for tickets in in_progress, review, done or released.",
+      "Set a Backlog/To do ticket's priority (0 low, 1 medium, 2 high, 3 critical). Refused for tickets in in_progress, review, done or released.",
     inputSchema: {
       type: "object",
       properties: {
@@ -365,7 +365,11 @@ const AGENT_TOOLS = [
         priority: {
           type: "integer",
           enum: [0, 1, 2, 3],
-          description: "0 none, 1 low, 2 medium, 3 high.",
+          // Must stay in sync with PRIORITY_LABELS (lib/types/kanban.ts) —
+          // this shim is plain .mjs and cannot import it. This string is the
+          // agent's only semantic anchor for the scale, so an off-by-one here
+          // silently inflates every priority the agent sets.
+          description: "0 low, 1 medium, 2 high, 3 critical.",
         },
         reason: {
           type: "string",

@@ -21,6 +21,7 @@ const processManagerState = vi.hoisted(() => ({
     unknown
   > | null,
   started: [] as string[],
+  startedOptions: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("@/lib/db", async () => {
@@ -31,8 +32,9 @@ vi.mock("@/lib/db", async () => {
 
 vi.mock("@/lib/claude/process-manager", () => ({
   processManager: {
-    start: vi.fn((sessionId: string) => {
+    start: vi.fn((sessionId: string, options: Record<string, unknown>) => {
       processManagerState.started.push(sessionId);
+      processManagerState.startedOptions.push(options);
     }),
     getStatus: vi.fn(() => processManagerState.status),
   },
@@ -60,9 +62,8 @@ vi.mock("fs", () => ({
 }));
 
 const { db } = await import("@/lib/db");
-const { agentSessions, epics, notifications, projects } = await import(
-  "@/lib/db/schema"
-);
+const { agentSessions, epics, notifications, projects, settings } =
+  await import("@/lib/db/schema");
 const {
   REFINEMENT_EMPTY_BOARD_REASON,
   RefinementDispatchError,
@@ -133,6 +134,7 @@ beforeEach(() => {
     result: { success: true },
   };
   processManagerState.started = [];
+  processManagerState.startedOptions = [];
 });
 
 describe("refinement agent type", () => {
@@ -143,7 +145,7 @@ describe("refinement agent type", () => {
 });
 
 describe("dispatchRefinementSession", () => {
-  it("creates a project-scoped code-mode session with no ticket", async () => {
+  it("creates a project-scoped chat-mode session with no ticket", async () => {
     const projectId = seedProject(["backlog", "todo"]);
     const result = await dispatchRefinementSession({ projectId });
 
@@ -163,8 +165,11 @@ describe("dispatchRefinementSession", () => {
     // call to name its target explicitly.
     expect(row!.epicId).toBeNull();
     expect(row!.userStoryId).toBeNull();
-    // Code mode — plan mode refuses the mutating tools the pass exists for.
-    expect(row!.mode).toBe("code");
+    // Chat mode: plan refuses the mutating tools the pass exists for, and
+    // code would mean bypassPermissions — full write access in the user's
+    // primary checkout, which this session runs in without a worktree.
+    expect(row!.mode).toBe("chat");
+    expect(processManagerState.startedOptions.at(-1)?.mode).toBe("chat");
     // The spawn actually happened for this session.
     expect(processManagerState.started).toContain(result.sessionId);
   });
@@ -331,6 +336,79 @@ describe("dispatchRefinementSession", () => {
     expect(settled.summary).toContain("promoted to To do");
     // And the registry is drained, so the session key cannot leak.
     expect(peekRefinementChanges(second.sessionId)).toEqual([]);
+  });
+
+  /**
+   * Regression: MCP injection is capability-gated to claude-code/codex, but
+   * agent resolution honours any named agent or provider default. On another
+   * provider the session spawned, received no tools, called nothing, and the
+   * report raised a *completed* notification reading "no changes — the board
+   * was already in shape" — affirmatively false, since the board was never
+   * judged.
+   */
+  it("refuses a provider that cannot carry the MCP tool channel", async () => {
+    const projectId = seedProject(["backlog", "todo"]);
+    const { resolveAgentForDispatch } = await import(
+      "@/lib/agent-config/agent-resolution"
+    );
+    (
+      resolveAgentForDispatch as unknown as {
+        mockResolvedValueOnce: (v: unknown) => void;
+      }
+    ).mockResolvedValueOnce({
+      provider: "gemini-cli",
+      namedAgentId: null,
+      name: null,
+      model: null,
+    });
+
+    await expect(dispatchRefinementSession({ projectId })).rejects.toMatchObject(
+      { status: 409, code: "PROVIDER_NOT_MCP_CAPABLE" }
+    );
+
+    // Refused before any session row exists — no misleading run to explain.
+    expect(
+      db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.projectId, projectId))
+        .all()
+    ).toHaveLength(0);
+  });
+
+  it("accepts codex, the other MCP-capable provider", async () => {
+    const projectId = seedProject(["backlog"]);
+    const { resolveAgentForDispatch } = await import(
+      "@/lib/agent-config/agent-resolution"
+    );
+    (
+      resolveAgentForDispatch as unknown as {
+        mockResolvedValueOnce: (v: unknown) => void;
+      }
+    ).mockResolvedValueOnce({
+      provider: "codex",
+      namedAgentId: null,
+      name: null,
+      model: null,
+    });
+
+    const result = await dispatchRefinementSession({ projectId });
+    expect(result.skipped).toBe(false);
+  });
+
+  it("refuses when the MCP tool channel is switched off globally", async () => {
+    const projectId = seedProject(["backlog", "todo"]);
+    db.insert(settings)
+      .values({ key: "mcp_tools_enabled", value: "false" })
+      .run();
+
+    try {
+      await expect(
+        dispatchRefinementSession({ projectId })
+      ).rejects.toMatchObject({ status: 409, code: "MCP_TOOLS_DISABLED" });
+    } finally {
+      db.delete(settings).where(eq(settings.key, "mcp_tools_enabled")).run();
+    }
   });
 
   it("rejects an unknown project", async () => {

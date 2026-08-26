@@ -327,6 +327,69 @@ describe("publishRefinementReport", () => {
     expect(withoutFullList[0]).toContain("1 ticket promoted to To do");
   });
 
+  /**
+   * Regression: comment targets were derived only from promotions and
+   * demotions, so a pass that re-ranked To do and fixed dependency edges
+   * posted no comment at all — and the itemised, ticket-linked breakdown the
+   * acceptance criteria ask for lives only inside a comment. This is the
+   * likely-common path: the prompt re-ranks on every run while promotion is
+   * gated on readiness and the agent is told to be conservative.
+   */
+  it("publishes the breakdown when no ticket changed column", () => {
+    const auth = { sessionId, agentType: REFINEMENT_AGENT_TYPE };
+    recordRefinementChange(
+      auth,
+      change({
+        kind: "reordered",
+        ticketId: reorderedId,
+        label: "E-3",
+        detail: "todo position 0",
+        reason: "Unblocked first.",
+      })
+    );
+    recordRefinementChange(
+      auth,
+      change({
+        kind: "dependency_added",
+        ticketId: promotedId,
+        label: "E-1",
+        detail: "now depends on E-3",
+        reason: "Needs the schema.",
+      })
+    );
+
+    const published = publishRefinementReport({
+      projectId,
+      sessionId,
+      succeeded: true,
+    });
+
+    expect(published.report.promoted).toHaveLength(0);
+    expect(published.report.demoted).toHaveLength(0);
+    // Exactly one comment, carrying the full itemised list with its links.
+    expect(published.commentedTicketIds).toHaveLength(1);
+
+    const body = comments(published.commentedTicketIds[0])[0].content;
+    expect(body).toContain("Re-ranked");
+    expect(body).toContain("Dependency edges added");
+    expect(body).toContain("Unblocked first.");
+    expect(body).toContain("Needs the schema.");
+    expect(body).toContain(`/projects/${projectId}?ticket=`);
+    // No focus block: this ticket did not move column.
+    expect(body).not.toContain("Promoted **Backlog → To do**");
+  });
+
+  it("still posts nothing when the pass changed nothing at all", () => {
+    const published = publishRefinementReport({
+      projectId,
+      sessionId,
+      succeeded: true,
+    });
+    expect(published.commentedTicketIds).toEqual([]);
+    // The notification still fires — see the no-op case below.
+    expect(published.notificationId).toBeTruthy();
+  });
+
   it("raises one notification carrying the aggregate", () => {
     seedChanges();
     const published = publishRefinementReport({

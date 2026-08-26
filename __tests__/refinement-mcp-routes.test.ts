@@ -58,6 +58,7 @@ import { POST as reorderTicketsRoute } from "@/app/api/mcp/reorder-tickets/route
 import { POST as addDependency } from "@/app/api/mcp/add-dependency/route";
 import { POST as removeDependency } from "@/app/api/mcp/remove-dependency/route";
 import { POST as promoteTicket } from "@/app/api/mcp/promote-ticket/route";
+import { POST as updateTicketStatus } from "@/app/api/mcp/update-ticket-status/route";
 
 type RouteHandler = (request: NextRequest) => Promise<Response>;
 
@@ -268,6 +269,78 @@ describe("refinement tools — availability", () => {
   });
 });
 
+/**
+ * Regression: the agent allowlist is flat per toolset, so a refinement
+ * session also held `update_ticket_status` — which writes with
+ * `source: "api"` and resolves any project ticket from an explicit
+ * ticket_id, walking straight past the `source: "refinement"` engine guard.
+ * `todo -> in_progress`, `review -> in_progress` and `done -> in_progress`
+ * all passed every guard, defeating the epic's "aucune écriture hors
+ * backlog/todo" rule. Only a prompt sentence stood in the way, which is
+ * exactly the mitigation the earlier round rejected.
+ */
+describe("update_ticket_status is closed to a refinement pass", () => {
+  it.each([
+    ["todo", () => todoA],
+    ["backlog", () => backlogA],
+    ["in_progress", () => inProgressId],
+  ])("refuses moving a %s ticket to in_progress", async (_label, pick) => {
+    const ticketId = pick();
+    const before = statusOf(ticketId);
+
+    const res = await call(
+      updateTicketStatus,
+      { ticket_id: ticketId, status: "in_progress", reason: "sneaking past" },
+      token
+    );
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe("REFINEMENT_TOOL_FORBIDDEN");
+    expect(statusOf(ticketId)).toBe(before);
+  });
+
+  it("refuses even a move it could have made through promote_ticket", async () => {
+    const res = await call(
+      updateTicketStatus,
+      { ticket_id: backlogA, status: "todo", reason: "wrong channel" },
+      token
+    );
+    expect(res.status).toBe(403);
+    // promote_ticket is the channel, and it demands its own justification.
+    expect((await res.json()).error).toContain("promote_ticket");
+    expect(statusOf(backlogA)).toBe("backlog");
+  });
+
+  it("still serves an ordinary build session", async () => {
+    const buildSessionId = createId();
+    db()
+      .insert(agentSessions)
+      .values({
+        id: buildSessionId,
+        projectId,
+        epicId: inProgressId,
+        status: "running",
+        agentType: "build",
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    const buildToken = mintMcpToken({
+      projectId,
+      sessionId: buildSessionId,
+      epicId: inProgressId,
+      agentType: "build",
+    });
+
+    const res = await call(
+      updateTicketStatus,
+      { status: "review", reason: "work delivered" },
+      buildToken
+    );
+    expect(res.status).toBe(200);
+    expect(statusOf(inProgressId)).toBe("review");
+  });
+});
+
 describe("set_priority", () => {
   it("writes the priority and journals the justification as the agent", async () => {
     const res = await call(
@@ -365,6 +438,28 @@ describe("reorder_tickets", () => {
     expect(activityFor(backlogA)).toHaveLength(0);
     const row = db().select().from(epics).where(eq(epics.id, backlogA)).get();
     expect(row?.position).toBe(0);
+  });
+
+  it("refuses two tickets asking for the same position", async () => {
+    // Same defect as a repeated id: the board sorts on `position` and breaks
+    // ties by fetch order, so a colliding ranking silently decides which
+    // ticket the execution queue calls "next".
+    const res = await call(
+      reorderTicketsRoute,
+      {
+        items: [
+          { ticket_id: backlogA, position: 0 },
+          { ticket_id: backlogB, position: 0 },
+        ],
+        reason: "Ambiguous ranking",
+      },
+      token
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("DUPLICATE_POSITION");
+    // Nothing written.
+    expect(activityFor(backlogA)).toHaveLength(0);
+    expect(activityFor(backlogB)).toHaveLength(0);
   });
 
   it("refuses a duplicated ticket id", async () => {

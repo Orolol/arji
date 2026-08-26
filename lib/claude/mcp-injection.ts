@@ -93,6 +93,38 @@ export const ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES = [
 export type ArijMcpToolset = "agent" | "chat";
 
 /**
+ * Tools withheld from specific agent types.
+ *
+ * The allowlist is otherwise flat per toolset, which is a hole once an agent
+ * type has a guardrail keyed on its OWN write path: a board refinement pass
+ * is confined to Backlog/To do by the `source: "refinement"` engine guard,
+ * but `update_ticket_status` writes with `source: "api"` and resolves any
+ * ticket in the project from an explicit ticket_id — so it walks straight
+ * past that guard and can move work out of Review or Done.
+ *
+ * Withholding the tool here means the spawn is never offered it. The route
+ * itself also refuses refinement tokens (app/api/mcp/update-ticket-status),
+ * which is the actual guard: an allowlist shapes what the model reaches for,
+ * a server-side check is what makes it impossible.
+ */
+export const AGENT_TYPE_WITHHELD_TOOL_NAMES: Record<string, readonly string[]> =
+  {
+    // promote_ticket is refinement's channel for column moves: it is pinned
+    // to the two planning columns and demands the missing question.
+    refinement: ["mcp__arij__update_ticket_status"],
+  };
+
+/** The agent tools a given agent type may be offered. */
+export function allowedToolNamesForAgentType(
+  agentType: string | null | undefined
+): string[] {
+  const withheld = new Set(
+    (agentType && AGENT_TYPE_WITHHELD_TOOL_NAMES[agentType]) || []
+  );
+  return ARIJ_MCP_ALLOWED_TOOL_NAMES.filter((name) => !withheld.has(name));
+}
+
+/**
  * Tolerant parse of the settings row value. Settings values are
  * JSON-encoded ("false"), but legacy bare strings are tolerated (pattern:
  * parseMemoryAutoDistillSetting). DEFAULT ON: anything that is not an
@@ -148,9 +180,12 @@ export function providerSupportsMcp(provider: string): boolean {
 export function buildMcpSpawnConfig({
   token,
   toolset = "agent",
+  agentType = null,
 }: {
   token: string;
   toolset?: ArijMcpToolset;
+  /** Narrows the agent toolset — see AGENT_TYPE_WITHHELD_TOOL_NAMES. */
+  agentType?: string | null;
 }): McpSpawnConfig {
   return {
     serverName: ARIJ_MCP_SERVER_NAME,
@@ -164,7 +199,7 @@ export function buildMcpSpawnConfig({
     allowedToolNames:
       toolset === "chat"
         ? [...ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES]
-        : [...ARIJ_MCP_ALLOWED_TOOL_NAMES],
+        : allowedToolNamesForAgentType(agentType),
   };
 }
 

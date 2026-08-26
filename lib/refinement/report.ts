@@ -225,12 +225,28 @@ export function publishRefinementReport(
     new Set([...report.promoted, ...report.demoted].map((c) => c.ticketId))
   );
 
-  // The itemised breakdown goes on the first moved ticket only; the others
-  // point at it. See formatRefinementComment for why.
-  const fullListTicketId = movedTicketIds[0];
+  // ...but the itemised, ticket-linked breakdown has to be published
+  // SOMEWHERE, and it only ever lives inside a comment. A conservative pass
+  // is the likely case, not a corner: the prompt re-ranks To do on every run
+  // while promotion is gated on readiness, so a run that reorders and fixes
+  // dependency edges without promoting anything is normal — and used to
+  // produce no comment at all, losing the ticket links the acceptance
+  // criteria ask for. When nothing changed column, fall back to the first
+  // ticket the pass touched at all.
+  const touchedTicketIds = Array.from(new Set(changes.map((c) => c.ticketId)));
+  const fullListTicketId = movedTicketIds[0] ?? touchedTicketIds[0];
+
+  // Comment on every moved ticket, plus the fallback host when there are no
+  // moved tickets but the pass did change something.
+  const commentTargets =
+    movedTicketIds.length > 0
+      ? movedTicketIds
+      : fullListTicketId
+        ? [fullListTicketId]
+        : [];
 
   const commentedTicketIds: string[] = [];
-  for (const ticketId of movedTicketIds) {
+  for (const ticketId of commentTargets) {
     const isFullList = ticketId === fullListTicketId;
     try {
       db.insert(ticketComments)

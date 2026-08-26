@@ -2,10 +2,12 @@
  * POST /api/mcp/add-dependency — the mcp__arij__add_dependency tool.
  *
  * Part of the refinement toolset: the agent completes or adjusts the
- * dependency graph while re-passing the board. Both endpoints of the new
- * edge must sit in Backlog / To do (the refinement guardrail), and the DAG
- * validation — no cycles, no cross-project edges, no self-edges — is the
- * existing shared dependency helper, not a second implementation.
+ * dependency graph while re-passing the board. The guardrail is asymmetric:
+ * the DEPENDENT ticket must sit in Backlog / To do because it is the row
+ * being written to, while the prerequisite may be in any column of the
+ * project — see the inline note below for why. The DAG validation — no
+ * cycles, no cross-project edges, no self-edges — is the existing shared
+ * dependency helper, not a second implementation.
  */
 
 import { NextRequest, NextResponse } from "next/server";

@@ -4,12 +4,20 @@
  * A refinement run is project-scoped, not ticket-scoped: the session row
  * carries no epicId, so every MCP call it makes names its target explicitly
  * and its token cannot default to "the ticket I was launched for". That is
- * also why it needs no worktree — it produces no code, so it runs in the
- * project's checkout with a prompt-level no-edit contract, the same shape
- * the review and grading agents use.
+ * also why it needs no worktree — it produces no code, so it runs directly in
+ * the project's checkout. That checkout is the user's own, which is why the
+ * no-edit rule here is enforced by the permission mode rather than left to a
+ * prompt sentence (review and grading get code mode, but inside an epic
+ * worktree where a stray edit lands on a feature branch).
  *
- * Code mode, not plan mode: the pass's entire deliverable is mutating MCP
- * calls, which plan mode refuses.
+ * Chat mode: the pass's entire deliverable is mutating MCP calls (which plan
+ * mode refuses), but it must not carry write access into the user's checkout
+ * the way code mode's bypassPermissions would. See the mode comment on
+ * createQueuedSession below.
+ *
+ * The dispatcher also refuses outright when the resolved provider cannot
+ * carry the MCP channel: a refinement run without tools is a silent no-op
+ * that would report "the board was already in shape".
  */
 import fs from "fs";
 import path from "path";
@@ -34,6 +42,10 @@ import {
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
 import { agentScheduler } from "@/lib/agents/scheduler";
+import {
+  isMcpToolsEnabled,
+  providerSupportsMcp,
+} from "@/lib/claude/mcp-injection";
 import { REFINEMENT_AGENT_TYPE } from "./constants";
 import { loadRefinementSnapshot, snapshotSize } from "./snapshot";
 import { publishRefinementReport, type RefinementReport } from "./report";
@@ -151,6 +163,28 @@ export async function dispatchRefinementSession(
     input.namedAgentId ?? null,
   );
 
+  // The pass's entire deliverable is mutating MCP calls, but the tool channel
+  // is capability-gated to claude-code/codex and can be switched off globally.
+  // Without it the session spawns, can call nothing, ends — and the report
+  // would raise a *completed* notification reading "no changes — the board
+  // was already in shape", which is affirmatively false: the board was never
+  // judged. Refuse before the session row exists, the way the Full Auto
+  // second opinion refuses rather than emit a verdict it did not reach.
+  if (!isMcpToolsEnabled()) {
+    throw new RefinementDispatchError(
+      "Board refinement needs the Arij MCP tool channel, which is disabled (setting `mcp_tools_enabled`).",
+      409,
+      "MCP_TOOLS_DISABLED",
+    );
+  }
+  if (!providerSupportsMcp(resolvedAgent.provider)) {
+    throw new RefinementDispatchError(
+      `Board refinement needs an MCP-capable provider; ${resolvedAgent.provider} cannot receive Arij's board tools. Assign a Claude Code or Codex agent to the refinement role.`,
+      409,
+      "PROVIDER_NOT_MCP_CAPABLE",
+    );
+  }
+
   const sessionId = createId();
   const now = new Date().toISOString();
   const logsDir = path.join(process.cwd(), "data", "sessions", sessionId);
@@ -168,10 +202,19 @@ export async function dispatchRefinementSession(
     // MCP call to name its ticket rather than defaulting to one.
     epicId: null,
     userStoryId: null,
-    // Code mode so the pass can call the mutating refinement tools — its
-    // entire deliverable — which plan mode refuses. The prompt forbids
-    // touching the repository.
-    mode: "code",
+    // Chat mode. The three-way choice matters here because this session runs
+    // in the user's PRIMARY checkout (no worktree, no branch):
+    //   - plan refuses mutating MCP tools, which are the whole deliverable;
+    //   - code means bypassPermissions, under which --allowedTools stops
+    //     restricting anything — Edit/Write/Bash auto-approved in the user's
+    //     working tree, with only a prompt sentence forbidding repo writes;
+    //   - chat is permission-mode "default" with a read-only allowlist, so
+    //     allowlisted MCP tools are auto-approved and everything else is
+    //     denied headlessly (see lib/claude/spawn.ts). Codex maps it to
+    //     `-s read-only` and still gets the MCP overrides.
+    // Chat is the only one that gives the board tools without pointing write
+    // access at the user's checkout.
+    mode: "chat",
     provider: resolvedAgent.provider,
     prompt,
     logsPath,
@@ -204,7 +247,8 @@ export async function dispatchRefinementSession(
       processManager.start(
         sessionId,
         {
-          mode: "code",
+          // Must match the persisted session mode — see createQueuedSession.
+          mode: "chat",
           prompt,
           cwd,
           model: resolvedAgent.model,

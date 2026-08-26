@@ -102,6 +102,15 @@ describe("buildRefinementPrompt", () => {
     expect(prompt).toContain("[NO ACCEPTANCE CRITERIA]");
   });
 
+  it("renders priority with its board label, not a bare number", () => {
+    // The board reads 0 Low / 1 Medium / 2 High / 3 Critical. A bare number
+    // in the snapshot leaves the agent to guess the scale from the tool
+    // description alone, which is how an off-by-one goes unnoticed.
+    const prompt = buildRefinementPrompt(project, snapshot());
+    expect(prompt).toContain("priority 2 = High");
+    expect(prompt).toContain("priority 0 = Low");
+  });
+
   it("states the Backlog/To do guardrail", () => {
     const prompt = buildRefinementPrompt(project, snapshot());
     expect(prompt).toContain("only touch Backlog and To do");

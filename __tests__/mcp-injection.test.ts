@@ -38,6 +38,7 @@ import { arijToolsSection } from "@/lib/claude/prompt-sections";
 import { isMcpExemptAgentType } from "@/lib/workflow/dreaming-constants";
 import {
   ARIJ_MCP_ALLOWED_TOOL_NAMES,
+  allowedToolNamesForAgentType,
   ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
   ARIJ_MCP_SERVER_NAME,
   buildMcpSpawnConfig,
@@ -232,6 +233,53 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "Write",
       ...ARIJ_MCP_ALLOWED_TOOL_NAMES,
     ]);
+  });
+});
+
+describe("allowedToolNamesForAgentType", () => {
+  it("gives an ordinary agent type the full agent toolset", () => {
+    expect(allowedToolNamesForAgentType("build")).toEqual([
+      ...ARIJ_MCP_ALLOWED_TOOL_NAMES,
+    ]);
+    expect(allowedToolNamesForAgentType(null)).toEqual([
+      ...ARIJ_MCP_ALLOWED_TOOL_NAMES,
+    ]);
+  });
+
+  /**
+   * A refinement pass is confined to Backlog/To do by an engine guard keyed
+   * on `source: "refinement"`. update_ticket_status writes with
+   * `source: "api"`, so it bypasses that guard entirely — the spawn must not
+   * be offered it. (The route refuses it too; that is the actual guard.)
+   */
+  it("withholds update_ticket_status from a refinement pass", () => {
+    const tools = allowedToolNamesForAgentType("refinement");
+    expect(tools).not.toContain("mcp__arij__update_ticket_status");
+    // Its own board tools are untouched.
+    for (const tool of [
+      "mcp__arij__promote_ticket",
+      "mcp__arij__reorder_tickets",
+      "mcp__arij__set_priority",
+      "mcp__arij__add_dependency",
+      "mcp__arij__remove_dependency",
+      "mcp__arij__post_comment",
+    ]) {
+      expect(tools).toContain(tool);
+    }
+    expect(tools).toHaveLength(ARIJ_MCP_ALLOWED_TOOL_NAMES.length - 1);
+  });
+
+  it("is applied by buildMcpSpawnConfig", () => {
+    const config = buildMcpSpawnConfig({
+      token: "t",
+      agentType: "refinement",
+    });
+    expect(config.allowedToolNames).not.toContain(
+      "mcp__arij__update_ticket_status"
+    );
+    expect(
+      buildMcpSpawnConfig({ token: "t", agentType: "build" }).allowedToolNames
+    ).toContain("mcp__arij__update_ticket_status");
   });
 });
 

@@ -27,6 +27,7 @@ import { DREAMING_MEMORY_SECTIONS } from "@/lib/workflow/dreaming-constants";
 import type { TelescopeCollectionResult } from "@/lib/telescope/collect";
 import { utf8Head } from "@/lib/routines/ci-autofix-limits";
 import type { RefinementSnapshot } from "@/lib/refinement/snapshot";
+import { PRIORITY_LABELS } from "@/lib/types/kanban";
 import { fenceOnly, neutralizeControlMarkup } from "./untrusted";
 
 // ---------------------------------------------------------------------------
@@ -2376,7 +2377,7 @@ function renderRefinementColumn(
   tickets.forEach((ticket, index) => {
     lines.push("");
     lines.push(
-      `  ${index + 1}. [${ticket.label}] ${ticket.title}  (${ticket.type}, priority ${ticket.priority}, position ${ticket.position})`,
+      `  ${index + 1}. [${ticket.label}] ${ticket.title}  (${ticket.type}, priority ${ticket.priority} = ${PRIORITY_LABELS[ticket.priority] ?? "unknown"}, position ${ticket.position})`,
     );
     lines.push(`     ticket_id: ${ticket.id}`);
     if (ticket.awaitingReply) {

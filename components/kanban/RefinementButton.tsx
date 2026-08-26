@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ListOrdered, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { RefinementStatus } from "@/app/api/projects/[projectId]/refinement/route";
@@ -55,6 +55,13 @@ export function RefinementButton({
   const [status, setStatus] = useState<RefinementStatus | null>(null);
   const [starting, setStarting] = useState(false);
   const isRunning = status?.running === true;
+  /**
+   * Previous running flag, kept in a ref rather than read inside a state
+   * updater. Updaters must be pure — React double-invokes them under
+   * StrictMode (on by default in the App Router), so firing `onFinished`
+   * from inside one gives the user two toasts and two board reloads per pass.
+   */
+  const wasRunning = useRef(false);
 
   // One effect owns both the initial read and the poll. `onFinished` fires on
   // the running → idle edge so the board reloads once the pass has actually
@@ -68,10 +75,10 @@ export function RefinementButton({
         .then((d) => {
           if (cancelled || !d?.data) return;
           const next = d.data as RefinementStatus;
-          setStatus((previous) => {
-            if (previous?.running && !next.running) onFinished?.();
-            return next;
-          });
+          const finished = wasRunning.current && !next.running;
+          wasRunning.current = next.running;
+          setStatus(next);
+          if (finished) onFinished?.();
         })
         .catch(() => {
           // A failed status read must never break the board toolbar.
@@ -125,6 +132,7 @@ export function RefinementButton({
         return;
       }
 
+      wasRunning.current = true;
       setStatus({
         running: true,
         sessionId: payload?.data?.sessionId ?? null,
