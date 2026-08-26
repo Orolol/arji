@@ -209,21 +209,43 @@ export function prepareClaudeSpawn(
  * The returned `kill` function can be called to abort the process early.
  */
 export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
-  const { prompt, cwd, cliSessionId } = options;
+  const { prompt, cwd, cliSessionId, logIdentifier } = options;
 
   const { args, mcpConfigPath } = prepareClaudeSpawn(options, "json");
 
   const effectiveCwd = cwd || process.cwd();
 
-  // Debug logging removed for production
+  let logCtx: StreamLogContext | null = null;
+  if (logIdentifier) {
+    try {
+      logCtx = createStreamLog(logIdentifier, args, prompt);
+    } catch {
+      // logging is best-effort
+    }
+  }
 
   let child: ChildProcess | null = null;
   let killed = false;
+  let logEnded = false;
 
   const promise = new Promise<ClaudeResult>((resolve) => {
     const startTime = Date.now();
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
+
+    const finishLog = (exitCode: number | null, error?: string): void => {
+      if (!logCtx || logEnded) return;
+      logEnded = true;
+      try {
+        const stdout = Buffer.concat(stdoutChunks).toString("utf-8").trim();
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
+        if (stdout) appendStreamEvent(logCtx, stdout);
+        if (stderr) appendStderrEvent(logCtx, stderr);
+        endStreamLog(logCtx, { exitCode, ...(error ? { error } : {}) });
+      } catch {
+        // logging is best-effort
+      }
+    };
 
     child = nodeSpawn("claude", args, {
       cwd: effectiveCwd,
@@ -244,6 +266,7 @@ export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
       // Spawn failure is terminal — the config file (and its token) must not
       // outlive the attempt.
       cleanupMcpConfigFile(mcpConfigPath);
+      finishLog(null, err.message);
 
       if (err.message.includes("ENOENT")) {
         resolve({
@@ -265,6 +288,7 @@ export function spawnClaude(options: ClaudeOptions): SpawnedClaude {
       const duration = Date.now() - startTime;
       // Session end (normal exit, failure, or kill) — drop the token file.
       cleanupMcpConfigFile(mcpConfigPath);
+      finishLog(code, killed ? "Process was cancelled." : undefined);
       const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
       const stderr = Buffer.concat(stderrChunks).toString("utf-8");
       const parsedCliSessionId =

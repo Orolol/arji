@@ -441,6 +441,19 @@ function reconcileInFlight(
             AUTO_MODE_REASONS.parked(failures),
             sessionId
           );
+          try {
+            deps.notifySecondOpinionRejected({
+              projectId,
+              epicId: entry.epicId,
+              sessionId,
+              reason: `gate failed to return usable evidence after ${failures} attempts: ${gate.reason}`,
+            });
+          } catch (error) {
+            console.warn(
+              "[auto-mode] Failed to create second-opinion failure notification:",
+              error instanceof Error ? error.message : error
+            );
+          }
         }
         continue;
       }
@@ -639,13 +652,58 @@ export async function sweepProject(
           );
         }
         if (gate.status !== "approved") {
+          if (gate.status === "cancelled") {
+            const reason =
+              "the second-opinion session was cancelled; waiting for new user activity or a fresh review";
+            if (
+              autoModeRegistry.shouldTraceSecondOpinionSkip(
+                projectId,
+                candidate.epicId,
+                reason
+              )
+            ) {
+              trace(
+                deps,
+                projectId,
+                candidate.epicId,
+                AUTO_MODE_REASONS.skippedTargetMoved(
+                  "second opinion",
+                  reason
+                ),
+                gate.sessionId
+              );
+            }
+            continue;
+          }
+
           const reviewsInFlight =
             autoModeRegistry.countInFlight(projectId).review;
-          if (
-            gate.status === "pending" ||
-            config.reviewConcurrency <= 0 ||
-            reviewsInFlight >= config.reviewConcurrency
-          ) {
+          if (gate.status === "pending") {
+            continue;
+          }
+          if (config.reviewConcurrency <= 0) {
+            const reason =
+              "the review concurrency budget is 0, so no second opinion can be dispatched";
+            if (
+              autoModeRegistry.shouldTraceSecondOpinionSkip(
+                projectId,
+                candidate.epicId,
+                reason
+              )
+            ) {
+              trace(
+                deps,
+                projectId,
+                candidate.epicId,
+                AUTO_MODE_REASONS.skippedTargetMoved(
+                  "second opinion",
+                  reason
+                )
+              );
+            }
+            continue;
+          }
+          if (reviewsInFlight >= config.reviewConcurrency) {
             continue;
           }
 

@@ -929,7 +929,7 @@ describe("merge step", () => {
       error: null,
       conflictSessionId: null,
       skipReason:
-        "no installed MCP-capable provider differs from both the builder and reviewer",
+        "no installed provider differs from both the builder and reviewer",
     });
     fakes.mergeOutcome({ status: "merged", commitHash: "forbidden", sessionId: null });
 
@@ -944,7 +944,27 @@ describe("merge step", () => {
       autoReasons("m1").filter(
         (reason) =>
           reason ===
-          "Auto mode skipped second opinion: no installed MCP-capable provider differs from both the builder and reviewer"
+          "Auto mode skipped second opinion: no installed provider differs from both the builder and reviewer"
+      )
+    ).toHaveLength(1);
+  });
+
+  it("holds and traces once when second opinion is enabled with a zero review budget", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true, reviewConcurrency: 0 });
+    seedMergeable();
+    fakes.mergeOutcome({ status: "merged", commitHash: "forbidden", sessionId: null });
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.secondOpinionDispatches).toEqual([]);
+    expect(fakes.merges).toEqual([]);
+    expect(
+      autoReasons("m1").filter(
+        (reason) =>
+          reason ===
+          "Auto mode skipped second opinion: the review concurrency budget is 0, so no second opinion can be dispatched"
       )
     ).toHaveLength(1);
   });
@@ -962,7 +982,7 @@ describe("merge step", () => {
       fakes.setSecondOpinionState("m1", {
         status: "retry",
         sessionId,
-        reason: "no structured submit_findings verdict was recorded",
+        reason: "no submit_findings or Overall Verdict evidence was recorded",
       });
       autoModeRegistry.addInFlight(PROJECT_ID, sessionId, {
         kind: "review",
@@ -976,8 +996,41 @@ describe("merge step", () => {
     }
 
     expect(fakes.merges).toEqual([]);
-    expect(fakes.secondOpinionNotifications).toEqual([]);
+    expect(fakes.secondOpinionNotifications).toEqual([
+      {
+        epicId: "m1",
+        sessionId: "second-opinion-no-verdict-3",
+        reason:
+          "gate failed to return usable evidence after 3 attempts: no submit_findings or Overall Verdict evidence was recorded",
+      },
+    ]);
     expect(autoModeRegistry.isParked(PROJECT_ID, "m1")).toBe(true);
+  });
+
+  it("does not charge or relaunch a cancelled second opinion", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true, reviewConcurrency: 1 });
+    seedMergeable();
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    const sessionId = first.secondOpinionsDispatched[0];
+    settle(fakes, sessionId, "cancelled", null);
+    fakes.setSecondOpinionState("m1", {
+      status: "cancelled",
+      sessionId,
+    });
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.secondOpinionDispatches).toEqual(["m1"]);
+    expect(fakes.merges).toEqual([]);
+    expect(autoModeRegistry.isParked(PROJECT_ID, "m1")).toBe(false);
+    expect(
+      autoReasons("m1").filter((reason) =>
+        reason.includes("the second-opinion session was cancelled")
+      )
+    ).toHaveLength(1);
   });
 
   it("merges only after a fresh structured second opinion approves", async () => {

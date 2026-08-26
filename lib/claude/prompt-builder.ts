@@ -1481,7 +1481,8 @@ export function buildSecondOpinionPrompt(
   userStories: PromptUserStory[],
   branchName: string,
   baseBranch: string,
-  finalDiff?: string
+  finalDiff?: string,
+  structuredToolsAvailable = true
 ): string {
   project = withProjectMemory(project);
   const parts: string[] = [];
@@ -1511,13 +1512,17 @@ ${finalDiff?.trim() || "(no committed diff)"}
 
 1. Inspect the embedded final diff and read only the surrounding code needed to validate it.
 2. Look only for merge-blocking defects: correctness regressions, security issues, destructive behaviour, or an acceptance criterion that the diff plainly does not implement. Do not restyle working code and do not edit files.
-3. Call \`mcp__arij__submit_findings\` exactly once. Use \`changes_requested\` and file/line-anchored \`critical\` or \`major\` findings for any blocker. Otherwise use \`approved\` (or \`approved_with_minor_issues\`) with an empty findings array; keep non-blocking suggestions in the summary so they do not become open merge blockers.
+${
+  structuredToolsAvailable
+    ? "3. Call `mcp__arij__submit_findings` exactly once. Use `changes_requested` and file/line-anchored `critical` or `major` findings for any blocker. Otherwise use `approved` (or `approved_with_minor_issues`) with an empty findings array; keep non-blocking suggestions in the summary so they do not become open merge blockers. The structured submission is authoritative."
+    : "3. This provider has no structured Arij findings channel. Put any blocker, with file and line, in the response and make the exact Overall Verdict line below authoritative."
+}
 4. End your response with exactly one of these lines:
    - \`**Overall Verdict: Approved**\`
    - \`**Overall Verdict: Approved with Minor Issues**\`
    - \`**Overall Verdict: Changes Requested**\`
 
-A missing structured verdict is a failed gate and the branch will not merge.`);
+A missing structured submission and missing Overall Verdict line is a failed gate, and the branch will not merge.`);
 
   return parts.filter(Boolean).join("\n");
 }

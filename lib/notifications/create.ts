@@ -428,8 +428,9 @@ export function createAutoModeMergeParkedNotification(input: {
 
 /**
  * Alarm raised when Full Auto's independent pre-merge reviewer vetoes the
- * branch. The session is the evidence, so unlike a git-conflict park this
- * notification deep-links directly to the completed second-opinion run.
+ * branch or repeatedly fails to return usable evidence. The session is the
+ * evidence, so unlike a git-conflict park this notification deep-links
+ * directly to the completed second-opinion run.
  */
 export function createAutoModeSecondOpinionParkedNotification(input: {
   projectId: string;

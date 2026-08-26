@@ -179,6 +179,7 @@ function addSecondOpinion(input: {
   status?: string;
   outcome?: string | null;
   verdict?: "approved" | "approved with minor issues" | "changes requested";
+  proseVerdict?: "Approved" | "Approved with Minor Issues" | "Changes Requested";
 }): void {
   db.insert(agentSessions)
     .values({
@@ -200,6 +201,18 @@ function addSecondOpinion(input: {
         epicId: EPIC_ID,
         author: "agent",
         content: `**Review findings (${input.verdict})**\n\nStructured result`,
+        agentSessionId: input.id,
+        createdAt: at(input.minute + 1),
+      })
+      .run();
+  }
+  if (input.proseVerdict) {
+    db.insert(ticketComments)
+      .values({
+        id: `prose-${input.id}`,
+        epicId: EPIC_ID,
+        author: "agent",
+        content: `**Independent second opinion**\n\n**Overall Verdict: ${input.proseVerdict}**`,
         agentSessionId: input.id,
         createdAt: at(input.minute + 1),
       })
@@ -328,14 +341,94 @@ describe("second-opinion structured gate", () => {
     });
   });
 
-  it("retries prose-only output instead of treating missing evidence as a veto", () => {
+  it("accepts the mandated Overall Verdict fallback when no structured channel is available", () => {
+    addOrdinaryReview("review-1", 1);
+    addSecondOpinion({
+      id: "opinion-1",
+      minute: 3,
+      proseVerdict: "Approved",
+    });
+
+    expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
+      status: "approved",
+      sessionId: "opinion-1",
+    });
+  });
+
+  it("rejects a negative Overall Verdict fallback", () => {
+    addOrdinaryReview("review-1", 1);
+    addSecondOpinion({
+      id: "opinion-1",
+      minute: 3,
+      proseVerdict: "Changes Requested",
+    });
+
+    expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
+      status: "rejected",
+      sessionId: "opinion-1",
+      reason: "changes requested",
+    });
+  });
+
+  it("keeps submit_findings authoritative over contradictory prose", () => {
+    addOrdinaryReview("review-1", 1);
+    addSecondOpinion({
+      id: "opinion-1",
+      minute: 3,
+      verdict: "approved",
+      proseVerdict: "Changes Requested",
+    });
+
+    expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
+      status: "approved",
+      sessionId: "opinion-1",
+    });
+  });
+
+  it("retries output that has neither structured nor fallback evidence", () => {
     addOrdinaryReview("review-1", 1);
     addSecondOpinion({ id: "opinion-1", minute: 3 });
 
     expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
       status: "retry",
       sessionId: "opinion-1",
-      reason: "no structured submit_findings verdict was recorded",
+      reason: "no submit_findings or Overall Verdict evidence was recorded",
+    });
+  });
+
+  it("does not accept an Overall Verdict line that is not the final line", () => {
+    addOrdinaryReview("review-1", 1);
+    addSecondOpinion({ id: "opinion-1", minute: 3 });
+    db.insert(ticketComments)
+      .values({
+        id: "prose-not-final",
+        epicId: EPIC_ID,
+        author: "agent",
+        content: "**Overall Verdict: Approved**\n\nAdditional unstructured text",
+        agentSessionId: "opinion-1",
+        createdAt: at(4),
+      })
+      .run();
+
+    expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
+      status: "retry",
+      sessionId: "opinion-1",
+      reason: "no submit_findings or Overall Verdict evidence was recorded",
+    });
+  });
+
+  it("holds a cancelled gate without charging or immediately relaunching it", () => {
+    addOrdinaryReview("review-1", 1);
+    addSecondOpinion({
+      id: "opinion-cancelled",
+      minute: 3,
+      status: "cancelled",
+      outcome: null,
+    });
+
+    expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
+      status: "cancelled",
+      sessionId: "opinion-cancelled",
     });
   });
 
@@ -396,10 +489,57 @@ describe("second-opinion structured gate", () => {
       sessionId: null,
     });
   });
+
+  it("normalizes mixed SQLite and ISO timestamps before choosing the latest review", () => {
+    db.insert(agentSessions)
+      .values([
+        {
+          id: "review-iso-earlier",
+          projectId: PROJECT_ID,
+          epicId: EPIC_ID,
+          status: "completed",
+          outcome: "answered",
+          agentType: "review_code",
+          provider: "claude-code",
+          createdAt: "2026-08-25T10:20:00.000Z",
+          endedAt: "2026-08-25T10:30:00.000Z",
+        },
+        {
+          id: "review-sqlite-later",
+          projectId: PROJECT_ID,
+          epicId: EPIC_ID,
+          status: "completed",
+          outcome: "answered",
+          agentType: "review_code",
+          provider: "codex",
+          createdAt: "2026-08-25 10:50:00",
+          endedAt: "2026-08-25 11:00:00",
+        },
+      ])
+      .run();
+    db.insert(agentSessions)
+      .values({
+        id: "opinion-between",
+        projectId: PROJECT_ID,
+        epicId: EPIC_ID,
+        status: "completed",
+        outcome: "answered",
+        agentType: "review_second_opinion",
+        provider: "gemini-cli",
+        createdAt: "2026-08-25T10:40:00.000Z",
+        endedAt: "2026-08-25T10:45:00.000Z",
+      })
+      .run();
+
+    expect(readSecondOpinionState(PROJECT_ID, EPIC_ID)).toEqual({
+      status: "missing",
+      sessionId: null,
+    });
+  });
 });
 
 describe("second-opinion provider selection", () => {
-  it("selects only an MCP-capable provider distinct from builder and reviewer", async () => {
+  it("selects an installed provider distinct from builder and reviewer", async () => {
     availabilityState.available.add("codex");
     availabilityState.available.add("gemini-cli");
 
@@ -408,17 +548,17 @@ describe("second-opinion provider selection", () => {
     ).resolves.toBe("codex");
   });
 
-  it("does not select an installed provider that cannot submit findings", async () => {
+  it("uses a non-MCP provider's exact fallback verdict when it is the segregated alternative", async () => {
     availabilityState.available.add("gemini-cli");
 
     await expect(
       pickSecondOpinionProvider("claude-code", "codex")
-    ).resolves.toBeNull();
+    ).resolves.toBe("gemini-cli");
   });
 });
 
 describe("second-opinion dispatch", () => {
-  it("runs a Team-build-aware, MCP-capable chat session with the final diff embedded", async () => {
+  it("runs a Team-build-aware, segregated plan session with the final diff embedded", async () => {
     addBuilder("team-build", 0, "team_build", "gemini-cli");
     addOrdinaryReview("review-1", 2, "claude-code");
     availabilityState.available.add("codex");
@@ -441,7 +581,7 @@ describe("second-opinion dispatch", () => {
       .where(eq(agentSessions.id, result.sessionId!))
       .get();
     expect(session).toMatchObject({
-      mode: "chat",
+      mode: "plan",
       provider: "codex",
       agentType: "review_second_opinion",
     });
@@ -454,7 +594,7 @@ describe("second-opinion dispatch", () => {
       sessionId: result.sessionId,
       provider: "codex",
       options: {
-        mode: "chat",
+        mode: "plan",
         cwd: "/repo-worktree",
       },
     });
@@ -477,7 +617,24 @@ describe("second-opinion prompt and notification", () => {
     expect(prompt).toContain("read-only");
     expect(prompt).toContain("mcp__arij__submit_findings");
     expect(prompt).toContain("exactly once");
-    expect(prompt).toContain("A missing structured verdict is a failed gate");
+    expect(prompt).toContain("The structured submission is authoritative");
+    expect(prompt).toContain("missing Overall Verdict line is a failed gate");
+  });
+
+  it("makes the exact Overall Verdict authoritative without structured tools", () => {
+    const prompt = buildSecondOpinionPrompt(
+      { name: "Arij", spec: "Keep merges safe", memory: null },
+      { title: "Gate merge", description: "Independent check", type: "feature" },
+      [],
+      "feature/gate",
+      "develop",
+      "diff --git a/lib/gate.ts b/lib/gate.ts\n+safe();",
+      false
+    );
+
+    expect(prompt).not.toContain("Call `mcp__arij__submit_findings`");
+    expect(prompt).toContain("no structured Arij findings channel");
+    expect(prompt).toContain("make the exact Overall Verdict line below authoritative");
   });
 
   it("creates one deduplicated notification deep-linked to the evidence session", () => {

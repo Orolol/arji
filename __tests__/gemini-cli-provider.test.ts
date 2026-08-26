@@ -149,7 +149,7 @@ describe("GeminiCliProvider", () => {
     expect(args).toContain("-y");
   });
 
-  it("auto-approves writes in analyze mode so imports can create arji.json", () => {
+  it("auto-approves edits but not shell commands in analyze mode", () => {
     const provider = new GeminiCliProvider();
 
     provider.spawn(
@@ -162,7 +162,11 @@ describe("GeminiCliProvider", () => {
     );
 
     const args = mockSpawn.mock.calls[0][1] as string[];
-    expect(args).toContain("-y");
+    expect(args).not.toContain("-y");
+    expect(args.slice(args.indexOf("--approval-mode"), args.indexOf("--approval-mode") + 2)).toEqual([
+      "--approval-mode",
+      "auto_edit",
+    ]);
   });
 
   it("maps onChunk to raw/output/response chunks", async () => {

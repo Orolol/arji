@@ -6,7 +6,7 @@
  * Mode mapping: pi has no permission system — capability is expressed through
  * the tool allowlist, so read-only modes drop the mutating built-ins.
  * - plan    → --tools read,grep,find,ls
- * - analyze → default tool set (the import task must write arji.json)
+ * - analyze → read-only tools plus write (create arji.json, no edit/bash)
  * - code    → default tool set (adds write, edit, bash)
  *
  * Resume: supported via `--session <ID>`, using the id of the session header
@@ -35,6 +35,7 @@ import type {
 
 /** Built-in pi tools that cannot modify the working tree. */
 export const PI_READONLY_TOOLS = ["read", "grep", "find", "ls"];
+const WRITE_TOOL = "write";
 
 /** An assistant turn as reported by a pi `message_end` event. */
 export interface PiAssistantMessage {
@@ -173,12 +174,12 @@ export class PiProvider extends BaseCliProvider {
   }
 
   /**
-   * Extra argv appended alongside the read-only allowlist. On pi the
+   * Extra argv appended alongside a restricted tool allowlist. On pi the
    * allowlist genuinely strips the mutating built-ins (verified on 0.84.2:
    * write is unavailable under `--tools read,grep,find,ls`), so there is
    * nothing to add; omp needs an overlay on top — see OhMyPiProvider.
    */
-  protected readonlyExtraArgs(): string[] {
+  protected restrictedToolsExtraArgs(): string[] {
     return [];
   }
 
@@ -191,11 +192,14 @@ export class PiProvider extends BaseCliProvider {
 
     const args: string[] = ["--mode", "json"];
 
-    // Plan/chat runs must not touch the working tree. Analyze intentionally
-    // keeps write available because repository import produces arji.json.
+    // Plan/chat runs must not touch the working tree. Analyze adds only the
+    // write primitive required to create arji.json; edit and bash stay absent.
     if (mode === "plan" || mode === "chat") {
       args.push("--tools", this.readonlyTools().join(","));
-      args.push(...this.readonlyExtraArgs());
+      args.push(...this.restrictedToolsExtraArgs());
+    } else if (mode === "analyze") {
+      args.push("--tools", [...this.readonlyTools(), WRITE_TOOL].join(","));
+      args.push(...this.restrictedToolsExtraArgs());
     }
 
     if (cliSessionId && resumeSession) {

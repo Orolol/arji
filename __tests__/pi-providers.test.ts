@@ -168,9 +168,13 @@ describe("PiProvider", () => {
       expect(args[args.indexOf("--tools") + 1]).toBe("read,grep,find,ls");
     });
 
-    it("leaves write tools enabled in analyze mode so imports can create arji.json", () => {
+    it("allows reads and one write tool in analyze mode without edit or bash", () => {
       const args = provider.buildArgs(baseOptions({ mode: "analyze" }));
-      expect(args).not.toContain("--tools");
+      expect(args[args.indexOf("--tools") + 1]).toBe(
+        "read,grep,find,ls,write",
+      );
+      expect(args.join(" ")).not.toContain("edit");
+      expect(args.join(" ")).not.toContain("bash");
     });
 
     it("needs no config overlay — pi's allowlist genuinely strips write", () => {
@@ -399,10 +403,14 @@ describe("OhMyPiProvider", () => {
     }
   });
 
-  it("keeps the full tool set in analyze mode so imports can create arji.json", () => {
+  it("allows reads and one write tool in analyze mode with the xdev overlay", () => {
     const args = provider.buildArgs(baseOptions({ mode: "analyze" }));
-    expect(args).not.toContain("--tools");
-    expect(args).not.toContain("--config");
+    expect(args[args.indexOf("--tools") + 1]).toBe(
+      "read,grep,glob,write",
+    );
+    expect(args).toContain("--config");
+    expect(args.join(" ")).not.toContain("edit");
+    expect(args.join(" ")).not.toContain("bash");
   });
 
   it("keeps the full tool set in code mode: no --tools, no overlay", () => {

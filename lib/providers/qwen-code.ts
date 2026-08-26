@@ -1,12 +1,12 @@
 /**
  * Qwen Code provider — wraps the `qwen` CLI (Qwen3-Coder).
  *
- * CLI: qwen -p <PROMPT> [--yolo] [--model <model>]
+ * CLI: qwen -p <PROMPT> [--approval-mode <mode>] [--model <model>]
  *
  * Mode mapping:
  * - plan    → no --yolo (read-only default)
  * - code    → --yolo (auto-approve)
- * - analyze → --yolo (the import task must write arji.json)
+ * - analyze → --approval-mode auto-edit (write arji.json, no shell approval)
  *
  * Resume: not supported (uses /resume internal command, not suitable for headless).
  * Output: plain text from stdout.
@@ -27,8 +27,10 @@ export class QwenCodeProvider extends BaseCliProvider {
 
     const args: string[] = ["-p", prompt];
 
-    if (mode === "code" || mode === "analyze") {
+    if (mode === "code") {
       args.push("--yolo");
+    } else if (mode === "analyze") {
+      args.push("--approval-mode", "auto-edit");
     }
 
     if (model) {

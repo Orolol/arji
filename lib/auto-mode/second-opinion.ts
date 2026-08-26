@@ -59,10 +59,18 @@ const ORDINARY_REVIEW_AGENT_TYPES = [
 const ACTIVE_SESSION_STATUSES = new Set(["queued", "running"]);
 const STRUCTURED_VERDICT_RE =
   /^\*\*Review findings \((approved|approved with minor issues|changes requested)\)\*\*/i;
+const PROSE_VERDICT_RE =
+  /^\*\*Overall Verdict:\s*(Approved with Minor Issues|Approved|Changes Requested)\*\*$/i;
+
+type GateVerdict =
+  | "approved"
+  | "approved with minor issues"
+  | "changes requested";
 
 export type SecondOpinionState =
   | { status: "missing"; sessionId: null }
   | { status: "pending"; sessionId: string }
+  | { status: "cancelled"; sessionId: string }
   | { status: "retry"; sessionId: string; reason: string }
   | { status: "approved"; sessionId: string }
   | { status: "rejected"; sessionId: string; reason: string };
@@ -76,9 +84,11 @@ export interface SecondOpinionDispatchResult {
 
 function timestamp(value: string | null | undefined): number | null {
   if (!value) return null;
-  const parsed = Date.parse(
-    value.includes("T") ? value : `${value.replace(" ", "T")}Z`
-  );
+  const normalized = value.replace(" ", "T");
+  const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized)
+    ? normalized
+    : `${normalized}Z`;
+  const parsed = Date.parse(zoned);
   return Number.isNaN(parsed) ? null : parsed;
 }
 
@@ -86,7 +96,7 @@ function latestOrdinaryReviewAt(
   projectId: string,
   epicId: string
 ): number | null {
-  const sessionAt = sql<string | null>`COALESCE(${agentSessions.endedAt}, ${agentSessions.completedAt}, ${agentSessions.createdAt})`;
+  const sessionAt = sql<string | null>`REPLACE(COALESCE(${agentSessions.endedAt}, ${agentSessions.completedAt}, ${agentSessions.createdAt}), ' ', 'T')`;
   const row = db
     .select({
       sessionAt,
@@ -114,8 +124,9 @@ function latestOrdinaryReviewAt(
  * ask for a fresh opinion after the ticket is unparked.
  */
 function latestUserCommentAt(epicId: string): number | null {
+  const commentAt = sql<string>`REPLACE(${ticketComments.createdAt}, ' ', 'T')`;
   const row = db
-    .select({ createdAt: ticketComments.createdAt })
+    .select({ createdAt: commentAt })
     .from(ticketComments)
     .where(
       and(
@@ -123,13 +134,14 @@ function latestUserCommentAt(epicId: string): number | null {
         eq(ticketComments.author, "user")
       )
     )
-    .orderBy(desc(ticketComments.createdAt))
+    .orderBy(desc(commentAt))
     .limit(1)
     .get();
   return timestamp(row?.createdAt);
 }
 
-function structuredVerdictForSession(sessionId: string): string | null {
+function structuredVerdictForSession(sessionId: string): GateVerdict | null {
+  const commentAt = sql<string>`REPLACE(${ticketComments.createdAt}, ' ', 'T')`;
   const comments = db
     .select({
       content: ticketComments.content,
@@ -137,16 +149,42 @@ function structuredVerdictForSession(sessionId: string): string | null {
     })
     .from(ticketComments)
     .where(eq(ticketComments.agentSessionId, sessionId))
-    .orderBy(desc(ticketComments.createdAt))
+    .orderBy(desc(commentAt))
     .all();
-  let newestVerdict: string | null = null;
+  let newestVerdict: GateVerdict | null = null;
   for (const comment of comments) {
     const verdict = comment.content
       .match(STRUCTURED_VERDICT_RE)?.[1]
-      ?.toLowerCase();
+      ?.toLowerCase() as GateVerdict | undefined;
     if (!verdict) continue;
     // The prompt requires exactly one submission. If an agent submits more
     // than once, a negative verdict must never be hidden by a stale approval.
+    if (verdict === "changes requested") return verdict;
+    newestVerdict ??= verdict;
+  }
+  return newestVerdict;
+}
+
+/**
+ * Compatibility evidence for providers whose read-only posture cannot call
+ * submit_findings. Structured submissions always win when present; this
+ * parser only consumes the exact final line the prompt mandates.
+ */
+function proseVerdictForSession(sessionId: string): GateVerdict | null {
+  const commentAt = sql<string>`REPLACE(${ticketComments.createdAt}, ' ', 'T')`;
+  const comments = db
+    .select({ content: ticketComments.content })
+    .from(ticketComments)
+    .where(eq(ticketComments.agentSessionId, sessionId))
+    .orderBy(desc(commentAt))
+    .all();
+  let newestVerdict: GateVerdict | null = null;
+  for (const comment of comments) {
+    const lastLine = comment.content.trim().split(/\r?\n/).at(-1)?.trim();
+    const verdict = lastLine
+      ?.match(PROSE_VERDICT_RE)?.[1]
+      ?.toLowerCase() as GateVerdict | undefined;
+    if (!verdict) continue;
     if (verdict === "changes requested") return verdict;
     newestVerdict ??= verdict;
   }
@@ -168,8 +206,10 @@ function openFindingCount(sessionId: string): number {
 
 /**
  * Reads the newest second opinion that is fresh relative to the ordinary
- * review. The structured submit_findings summary is authoritative here;
- * prose is deliberately not a pass signal for an unattended merge gate.
+ * review. A structured submit_findings summary is authoritative when the
+ * provider can produce one. The exact Overall Verdict line is the fail-safe
+ * for read-only/non-MCP providers, so missing tool-channel capability cannot
+ * turn an opted-in merge gate into a silent parking loop.
  */
 export function readSecondOpinionState(
   projectId: string,
@@ -178,6 +218,7 @@ export function readSecondOpinionState(
   const reviewedAt = latestOrdinaryReviewAt(projectId, epicId);
   if (reviewedAt === null) return { status: "missing", sessionId: null };
 
+  const createdAt = sql<string>`REPLACE(${agentSessions.createdAt}, ' ', 'T')`;
   const session = db
     .select()
     .from(agentSessions)
@@ -188,7 +229,7 @@ export function readSecondOpinionState(
         eq(agentSessions.agentType, SECOND_OPINION_AGENT_TYPE)
       )
     )
-    .orderBy(desc(agentSessions.createdAt))
+    .orderBy(desc(createdAt))
     .all()
     .find(
       (row) =>
@@ -198,13 +239,6 @@ export function readSecondOpinionState(
   if (!session) return { status: "missing", sessionId: null };
   if (ACTIVE_SESSION_STATUSES.has(session.status ?? "")) {
     return { status: "pending", sessionId: session.id };
-  }
-  if (session.status !== "completed" || session.outcome !== "answered") {
-    return {
-      status: "retry",
-      sessionId: session.id,
-      reason: `second-opinion session ended ${session.status ?? "without status"}/${session.outcome ?? "without outcome"}`,
-    };
   }
 
   const completedAt =
@@ -220,12 +254,24 @@ export function readSecondOpinionState(
     return { status: "missing", sessionId: null };
   }
 
-  const verdict = structuredVerdictForSession(session.id);
+  if (session.status === "cancelled") {
+    return { status: "cancelled", sessionId: session.id };
+  }
+  if (session.status !== "completed" || session.outcome !== "answered") {
+    return {
+      status: "retry",
+      sessionId: session.id,
+      reason: `second-opinion session ended ${session.status ?? "without status"}/${session.outcome ?? "without outcome"}`,
+    };
+  }
+
+  const verdict =
+    structuredVerdictForSession(session.id) ?? proseVerdictForSession(session.id);
   if (!verdict) {
     return {
       status: "retry",
       sessionId: session.id,
-      reason: "no structured submit_findings verdict was recorded",
+      reason: "no submit_findings or Overall Verdict evidence was recorded",
     };
   }
 
@@ -248,9 +294,10 @@ export function readSecondOpinionState(
 }
 
 /**
- * A structured second opinion needs the per-spawn MCP channel that carries
- * submit_findings. Keep the general segregation picker, but restrict this
- * gate to providers that can actually produce its authoritative evidence.
+ * Keeps the general segregation picker and excludes both prior authors. MCP
+ * capability is intentionally not a selection requirement: providers that
+ * cannot call submit_findings can still produce the exact fallback verdict
+ * from a read-only run.
  */
 export function pickSecondOpinionProvider(
   builderProvider: AgentProvider,
@@ -258,8 +305,7 @@ export function pickSecondOpinionProvider(
 ): Promise<AgentProvider | null> {
   return pickAlternativeReviewProvider(
     builderProvider,
-    [reviewerProvider],
-    providerSupportsMcp
+    [reviewerProvider]
   );
 }
 
@@ -325,15 +371,6 @@ export async function dispatchSecondOpinion(input: {
       throw new Error("Could not identify both the builder and reviewer providers");
     }
 
-    if (!isMcpToolsEnabled()) {
-      return {
-        sessionId: null,
-        error: null,
-        conflictSessionId: null,
-        skipReason: "structured MCP tools are disabled",
-      };
-    }
-
     const provider = await pickSecondOpinionProvider(
       builderProvider,
       reviewerProvider
@@ -344,7 +381,7 @@ export async function dispatchSecondOpinion(input: {
         error: null,
         conflictSessionId: null,
         skipReason:
-          "no installed MCP-capable provider differs from both the builder and reviewer",
+          "no installed provider differs from both the builder and reviewer",
       };
     }
 
@@ -368,7 +405,8 @@ export async function dispatchSecondOpinion(input: {
       stories,
       epic.branchName,
       baseBranch,
-      finalDiff
+      finalDiff,
+      isMcpToolsEnabled() && providerSupportsMcp(provider)
     );
 
     const sessionId = createId();
@@ -416,11 +454,7 @@ export async function dispatchSecondOpinion(input: {
       id: sessionId,
       projectId: input.projectId,
       epicId: input.epicId,
-      // Claude's plan permission mode refuses mutating MCP tools even when
-      // allowlisted. `chat` is the read-only repository posture that can
-      // still submit the structured verdict; the final diff is embedded in
-      // the prompt so Claude needs no Bash access.
-      mode: "chat",
+      mode: "plan",
       orchestrationMode: "solo",
       provider,
       prompt,
@@ -447,7 +481,7 @@ export async function dispatchSecondOpinion(input: {
       processManager.start(
         sessionId,
         {
-          mode: "chat",
+          mode: "plan",
           prompt,
           cwd: worktreePath,
           cliSessionId,

@@ -222,7 +222,7 @@ function NamedAgentRow({
           <Field
             id={`named-agent-escalation-${agent.id}`}
             label="Retry escalation"
-            hint="Optional — retry with this stronger model before trying a different CLI."
+            hint="Optional — uses attempt 3 for one stronger model; a different CLI then needs attempt 4. The default per-stage budget is 2."
           >
             <Select
               value={escalatesTo ?? "none"}
