@@ -143,7 +143,7 @@ export const DEFAULT_REVIEW_AGENT_PROMPT = `You are a code reviewer. Review the 
  * injection of the Arij tool channel (lib/providers/types.ts documents the
  * rule); CLIs without that surface were removed in the 2026-08 cleanup.
  */
-export type AgentProvider = "claude-code" | "codex" | "oh-my-pi";
+export type AgentProvider = "claude-code" | "codex" | "oh-my-pi" | "agy";
 
 export const FALLBACK_PROVIDER: AgentProvider = "claude-code";
 /**
@@ -170,12 +170,14 @@ export const PROVIDER_OPTIONS: AgentProvider[] = [
   "claude-code",
   "codex",
   "oh-my-pi",
+  "agy",
 ];
 
 export const PROVIDER_LABELS: Record<ChatModeProvider, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   "oh-my-pi": "Oh My Pi",
+  agy: "Antigravity",
   "openai-compatible": "OpenAI-compatible",
 };
 

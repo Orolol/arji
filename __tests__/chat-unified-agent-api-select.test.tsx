@@ -117,11 +117,13 @@ describe("Unified Chat Agent & Provider Selection (Epic 0OQJfqU5gZ6S)", () => {
       "claude-code",
       "codex",
       "oh-my-pi",
+      "agy",
     ]);
     expect(cliOptions.map((opt) => opt.textContent)).toEqual([
       "Claude Code (CLI)",
       "Codex (CLI)",
       "Oh My Pi (CLI)",
+      "Antigravity (CLI)",
     ]);
 
     // Removed providers no longer appear.

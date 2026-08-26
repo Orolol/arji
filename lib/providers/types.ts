@@ -14,7 +14,7 @@
  * that reason; see docs/architecture/mcp-provider-matrix.md before adding
  * one back.
  */
-export type ProviderType = "claude-code" | "codex" | "oh-my-pi";
+export type ProviderType = "claude-code" | "codex" | "oh-my-pi" | "agy";
 
 export type ProviderChunkStreamType = "response" | "raw" | "output";
 

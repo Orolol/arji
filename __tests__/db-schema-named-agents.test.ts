@@ -46,7 +46,12 @@ describe("Schema: namedAgents table and provider types", () => {
 
   it("PROVIDER_OPTIONS lists exactly the registered providers in stable order", async () => {
     const { PROVIDER_OPTIONS } = await import("@/lib/agent-config/constants");
-    expect(PROVIDER_OPTIONS).toEqual(["claude-code", "codex", "oh-my-pi"]);
+    expect(PROVIDER_OPTIONS).toEqual([
+      "claude-code",
+      "codex",
+      "oh-my-pi",
+      "agy",
+    ]);
   });
 
   it("ProviderType module in providers/types.ts is importable", async () => {

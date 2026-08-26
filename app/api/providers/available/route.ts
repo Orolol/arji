@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { getProvider, type ProviderType } from "@/lib/providers";
 
-const ALL_PROVIDERS: ProviderType[] = ["claude-code", "codex", "oh-my-pi"];
+const ALL_PROVIDERS: ProviderType[] = [
+  "claude-code",
+  "codex",
+  "oh-my-pi",
+  "agy",
+];
 
 export async function GET() {
   const results: Record<string, boolean> = {};

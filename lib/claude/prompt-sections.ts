@@ -194,16 +194,20 @@ export function projectContextSections(
  *
  * `toolPrefix` is the spawning provider's tool-name spelling
  * (arijMcpToolPrefix in mcp-injection.ts): omp names the tools
- * `mcp__arij_*`, one underscore short of claude/codex — the default keeps
- * claude/codex prompts byte-identical.
+ * `mcp__arij_*`, one underscore short of claude/codex, and agy mounts them
+ * under their BARE names (empty prefix) — the default keeps claude/codex
+ * prompts byte-identical.
  */
 export function arijToolsSection(
   agentType: string | null,
   toolPrefix = "mcp__arij__",
 ): string {
+  const naming = toolPrefix
+    ? `through MCP tools named ${toolPrefix}*`
+    : "through the arij MCP server's tools, mounted under their bare names";
   const base =
     "You are connected to Arij, the orchestrator that launched this session, " +
-    `through MCP tools named ${toolPrefix}*. Use them for structured signals ` +
+    `${naming}. Use them for structured signals ` +
     "instead of prose conventions: get_ticket to re-read current ticket " +
     "state; post_comment for substantive progress/result notes; " +
     "create_bug to preserve an adjacent bug as a standalone, non-blocking " +

@@ -13,6 +13,7 @@ const DEFAULT_PROVIDERS: Record<AgentProvider, boolean> = {
   "claude-code": false,
   codex: false,
   "oh-my-pi": false,
+  agy: false,
 };
 
 /**
@@ -33,6 +34,7 @@ export function useProvidersAvailable(): ProvidersAvailability {
           "claude-code": !!data["claude-code"],
           codex: !!data.codex,
           "oh-my-pi": !!data["oh-my-pi"],
+          agy: !!data.agy,
         });
       })
       .catch(() => {

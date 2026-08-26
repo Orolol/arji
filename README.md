@@ -2,7 +2,7 @@
 
 **Your AI-powered project manager that actually writes the code.**
 
-Arij is a local-first web app that lets you plan, organize, and build software projects using AI coding agents like Claude Code, OpenAI Codex, or Gemini CLI. Describe what you want, and Arij orchestrates the AI to implement it — managing git branches, worktrees, code reviews, and merges automatically.
+Arij is a local-first web app that lets you plan, organize, and build software projects using AI coding agents like Claude Code, OpenAI Codex, Oh My Pi, or Antigravity. Describe what you want, and Arij orchestrates the AI to implement it — managing git branches, worktrees, code reviews, and merges automatically.
 
 Everything runs on your machine. No cloud. No account. No telemetry.
 
@@ -59,14 +59,16 @@ Use whichever AI coding tool you prefer:
 |----------|-------------|
 | **Claude Code** | `claude` CLI — primary provider with plan + code modes |
 | **OpenAI Codex** | `codex` CLI via Codex SDK |
-| **Gemini CLI** | `gemini` CLI via Google |
-| **OpenCode** | `opencode` CLI — open-source, supports any model |
-| **Qwen Code** | `qwen` CLI — Alibaba's coding agent |
-| **Pi** | `pi` CLI — minimal terminal harness, runs any provider's models |
 | **Oh My Pi** | `omp` CLI — standalone multi-agent orchestrator (fork of pi) |
-| **Any CLI agent** | Any tool that accepts a `--prompt` flag works out of the box |
+| **Antigravity** | `agy` CLI — Google Antigravity's agent |
 
-Arij's provider system is designed to be extensible — if your favorite AI coding CLI accepts a prompt and outputs results, it can plug into Arij. Create "Named Agents" to mix and match providers and models — e.g., use Claude Opus for complex builds, Gemini Flash for quick bug fixes, or a local model via OpenCode for privacy-sensitive tasks.
+Every provider carries Arij's MCP tool channel per session — that is the bar
+for being on this list. Agents use it to move tickets, file review findings,
+attach artifacts, and ask questions; a CLI that cannot be handed a per-session
+MCP config silently degrades all of that, so providers without one were
+removed (see `docs/architecture/mcp-provider-matrix.md`). Create "Named
+Agents" to mix and match providers and models — e.g., use Claude Opus for
+complex builds and a lighter model for quick bug fixes.
 
 ### Automated Code Review
 
@@ -132,9 +134,10 @@ It refuses to touch a ticket another agent already has, and it never overrides a
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `npm install -g @anthropic-ai/claude-code`, then `claude auth`
   - [OpenAI Codex](https://github.com/openai/codex) — optional
   - [omp](https://omp.sh) (Oh My Pi) — optional
-  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) — optional
+  - Antigravity (`agy`) — optional
 
-`./install.sh` offers to install the first three for you.
+`./install.sh` offers to install the first three for you and registers the
+MCP tool channel with every installed CLI, `agy` included.
 
 ### Install & Run
 
@@ -271,7 +274,7 @@ All agent work happens in isolated git worktrees, so multiple features can be bu
 | UI | React 19, Tailwind CSS v4 + shadcn/ui |
 | Kanban drag & drop | dnd-kit |
 | Database | SQLite via better-sqlite3 + Drizzle ORM |
-| Agent execution | Claude Code CLI (`claude`) spawned as a child process — plus Codex, Gemini, and other CLI providers |
+| Agent execution | Claude Code CLI (`claude`) spawned as a child process — plus Codex, Oh My Pi, and Antigravity |
 
 ---
 
@@ -281,7 +284,7 @@ Arij is a single local Next.js app — no external services:
 
 - **Web UI** — App Router pages render the dashboard, Kanban board, and the Chat Panel (`app/`, `components/`).
 - **API routes** — server-side route handlers orchestrate planning, builds, reviews, and git operations (`app/api/`).
-- **Provider layer** — each AI CLI (Claude Code, Codex, Gemini, …) is wrapped in a provider that spawns the tool as a child process and parses its output (`lib/providers/`, `lib/claude/`).
+- **Provider layer** — each AI CLI (Claude Code, Codex, omp, agy) is wrapped in a provider that spawns the tool as a child process and parses its output (`lib/providers/`, `lib/claude/`).
 - **Database** — a local SQLite file managed with Drizzle ORM stores projects, epics, stories, sessions, and chat history (`lib/db/`).
 - **Git layer** — every build runs in its own git worktree on a dedicated branch, keeping parallel agent work isolated until you merge (`lib/git/`).
 

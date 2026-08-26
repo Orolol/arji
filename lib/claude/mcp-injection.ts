@@ -89,11 +89,14 @@ export const ARIJ_MCP_CHAT_TOOLS = [
  * How a provider's CLI prefixes the server's tool names. claude-code and
  * codex join server and tool with a DOUBLE underscore
  * (`mcp__arij__get_ticket`); omp joins with a SINGLE one
- * (`mcp__arij_get_ticket`). The spelling matters everywhere a tool is named
- * — allowlists and prompt text alike: telling an omp agent to call
- * `mcp__arij__get_ticket` is telling it to call a tool that does not exist.
+ * (`mcp__arij_get_ticket`); agy flattens MCP tools to their BARE names
+ * (`get_ticket`, measured on 1.1.21). The spelling matters everywhere a
+ * tool is named — allowlists and prompt text alike: telling an omp or agy
+ * agent to call `mcp__arij__get_ticket` is telling it to call a tool that
+ * does not exist.
  */
 export function arijMcpToolPrefix(provider: string): string {
+  if (provider === "agy") return "";
   const separator = provider === "oh-my-pi" ? "_" : "__";
   return `mcp__${ARIJ_MCP_SERVER_NAME}${separator}`;
 }
@@ -159,14 +162,18 @@ export function isMcpToolsEnabled(): boolean {
  * claude-code yes (--mcp-config file), codex yes (-c mcp_servers.*
  * overrides), oh-my-pi yes (its mcp.json entry expands ${ARIJ_MCP_TOKEN}
  * at load time, so the child's environment is the per-spawn surface — see
- * OhMyPiProvider.buildEnv), gemini-cli no (revisit when the CLI is
- * installed and gains a per-spawn override), pi no (no MCP support at all).
+ * OhMyPiProvider.buildEnv), agy yes (its static mcp_config.json entry
+ * spawns the shim from the CLI process, which inherits the child env —
+ * see AgyProvider.buildEnv). Since the 2026-08 cleanup every REGISTERED
+ * provider qualifies; the gate still matters for legacy DB rows naming a
+ * removed provider.
  */
 export function providerSupportsMcp(provider: string): boolean {
   return (
     provider === "claude-code" ||
     provider === "codex" ||
-    provider === "oh-my-pi"
+    provider === "oh-my-pi" ||
+    provider === "agy"
   );
 }
 

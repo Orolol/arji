@@ -14,6 +14,8 @@ import type { ProviderType } from "@/lib/providers/types";
  *
  * - claude-code: --resume <ID>
  * - oh-my-pi: --resume <ID> (standalone `omp` fork of pi; no --session flag)
+ * - agy: --conversation <ID> (verified on 1.1.21: the resumed turn recalls
+ *   first-turn context and echoes the same conversation_id)
  *
  * Codex is excluded even though `codex exec resume <ID>` exists and
  * `fix(codex): enable session resume` (b3d25eb, Feb 2026) wired it into the
@@ -23,16 +25,23 @@ import type { ProviderType } from "@/lib/providers/types";
  * 2026) settled it — "the build routes' local list ... wrongly includes
  * codex". This list is that verdict, in one place.
  */
-const RESUMABLE_PROVIDERS = new Set<ProviderType>(["claude-code", "oh-my-pi"]);
+const RESUMABLE_PROVIDERS = new Set<ProviderType>([
+  "claude-code",
+  "oh-my-pi",
+  "agy",
+]);
 
 /**
  * Providers that announce the session id they created, so dispatch must NOT
  * invent one for them: omp prints pi's `{"type":"session","id":…}` header
- * and `PiProvider.parseSessionId` reads it back. A pre-assigned id would be
- * stored, never used by the CLI, and then replayed into the resume flag on
- * a later run.
+ * and `PiProvider.parseSessionId` reads it back; agy's JSON envelope
+ * carries `conversation_id`. A pre-assigned id would be stored, never used
+ * by the CLI, and then replayed into the resume flag on a later run.
  */
-const SELF_REPORTED_SESSION_ID_PROVIDERS = new Set<ProviderType>(["oh-my-pi"]);
+const SELF_REPORTED_SESSION_ID_PROVIDERS = new Set<ProviderType>([
+  "oh-my-pi",
+  "agy",
+]);
 
 /**
  * Providers the dispatch routes pre-assign a session id for

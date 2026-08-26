@@ -10,11 +10,13 @@ import type { AgentProvider, ProviderType } from "./types";
 import { ClaudeCodeProvider } from "./claude-code";
 import { CodexProvider } from "./codex";
 import { OhMyPiProvider } from "./oh-my-pi";
+import { AgyProvider } from "./agy";
 
 const providers: Record<ProviderType, AgentProvider> = {
   "claude-code": new ClaudeCodeProvider(),
   codex: new CodexProvider(),
   "oh-my-pi": new OhMyPiProvider(),
+  agy: new AgyProvider(),
 };
 
 /**

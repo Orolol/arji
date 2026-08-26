@@ -1,12 +1,19 @@
 # MCP tool channel — provider matrix
 
-Which CLI providers can actually reach Arij's `mcp__arij__*` tools, how the
-config is handed to each, and what was measured rather than assumed.
+Which CLI providers can actually reach Arij's tool channel, how the config is
+handed to each, and what was measured rather than assumed.
 
 Audited 2026-08-20 after epic E-arij-096, where `review_comments` turned out to
 have been empty for the entire life of the database — every review had silently
 fallen back to prose, and every builder was dispatched without a single
 finding. See `lib/pipeline/parse-review-report.ts` for the recovery path.
+
+**2026-08-26 — MCP-only cleanup.** The channel became a hard requirement:
+every registered provider must support per-spawn injection, and the ones that
+could not were removed (gemini-cli, mistral-vibe, qwen-code, opencode,
+deepseek, kimi, zai, pi). Antigravity (`agy`) was added after live probing
+showed a working per-spawn seam. The sections about removed providers are kept
+below as the record of why they went.
 
 ## The gate
 
@@ -24,18 +31,29 @@ expansion" is.
 
 ## Matrix
 
-| Provider | Binary | Installed | Sessions to date | Channel | How config is passed |
-|---|---|---|---|---|---|
-| claude-code | `claude` 2.1.221 | yes | 94 | **yes** | `--mcp-config <file>` + `--strict-mcp-config`, tools named in `--allowedTools` |
-| codex | `codex` 0.148.0 | yes | 20 | **yes** | `-c mcp_servers.arij.*` TOML overrides + `--dangerously-bypass-approvals-and-sandbox` |
-| oh-my-pi | `omp` 17.2.1 | yes | 15 | **yes** | `mcp.json` entry (install.sh) + `ARIJ_*` env vars at spawn; MCP tools orthogonal to `--tools` (see below) |
-| pi | `pi` 0.84.2 | yes | 6 | no | no MCP surface (see below) |
-| gemini-cli | `gemini` | no | 0 | no | config-file only, no per-spawn flag |
-| deepseek, kimi, zai, qwen-code, opencode, mistral-vibe | various | no | 0 | no | not investigated — none installed, none ever dispatched |
+### Registered providers (all carry the channel)
+
+| Provider | Binary | Tool spelling | How config is passed |
+|---|---|---|---|
+| claude-code | `claude` | `mcp__arij__<tool>` | `--mcp-config <0600 file>` + `--strict-mcp-config`, tools named in `--allowedTools` |
+| codex | `codex` | `mcp__arij__<tool>` | `-c mcp_servers.arij.*` TOML overrides + `--dangerously-bypass-approvals-and-sandbox` |
+| oh-my-pi | `omp` | `mcp__arij_<tool>` (ONE underscore) | `mcp.json` entry (install.sh) + `ARIJ_*` env vars at spawn; MCP tools orthogonal to `--tools` (see below) |
+| agy | `agy` | `<tool>` (bare, no prefix) | static `agy mcp add arij …` entry (install.sh) + `ARIJ_*` env vars at spawn (see below) |
+
+The spelling column is why `arijMcpToolPrefix()` exists: an allowlist entry or
+prompt sentence in the wrong spelling names a tool that does not exist.
+
+### Removed 2026-08-26 (no per-spawn MCP surface)
+
+| Provider | Was installed | Sessions to date | Why removed |
+|---|---|---|---|
+| pi | yes (`pi` 0.84.2) | 6 | no MCP support at all (see below); lives on as the abstract base of oh-my-pi |
+| gemini-cli | no | 0 | config-file only, no per-spawn flag (see below) |
+| deepseek, kimi, zai, qwen-code, opencode, mistral-vibe | no | 0 | never installed, never dispatched, not investigated |
 
 Every provider class extends `BaseCliProvider` directly (except `oh-my-pi`,
-which extends `PiProvider`), and each spawns its own binary. None wraps the
-`claude` binary, so none inherits `--mcp-config` for free.
+which extends the abstract `PiProvider` base), and each spawns its own binary.
+None wraps the `claude` binary, so none inherits `--mcp-config` for free.
 
 ## claude-code — works, and it is proven in the data
 
@@ -156,7 +174,34 @@ default `auto` mode hides MCP tools behind a `search_tool_bm25` discovery step
 rather than putting them in the prompt. Worth pinning if Arij's five tools ever
 need to be unconditionally visible.
 
-## pi — no MCP
+## agy — wired 2026-08-26
+
+Measured live on agy 1.1.21 before adding the provider:
+
+- **Config**: user-global `~/.gemini/…/mcp_config.json`, owned by
+  `agy mcp add|remove|list`. No project scope, no per-spawn flag — but the
+  stdio MCP server is spawned BY the CLI process and **inherits its
+  environment** (verified with an env-dumping probe server: the CLI's own
+  `ARIJ_PROBE_MARKER` showed up in the server's env, parent cmdline was the
+  `agy -p …` process itself, not a daemon). So the omp pattern applies: a
+  static entry with no env of its own, per-session `ARIJ_*` values in the
+  child env (`AgyProvider.buildEnv`).
+- **Execution**: print mode auto-approves everything — writes, run_command
+  and MCP calls all execute with no bypass flag (a fake-token probe came back
+  `Error (UNAUTHORIZED)`, proving shim → HTTP round trip). `--mode plan`
+  blocks worktree writes while MCP calls still execute, so plan/chat/review
+  postures keep the channel.
+- **Tool names**: agy flattens MCP tools to bare names — the agent sees
+  `get_ticket`, `post_comment`, …, with a generic `call_mcp_tool` alongside.
+  `arijMcpToolPrefix("agy")` is the empty string.
+- **Workspace**: agy ignores the process cwd for file operations (a bare run
+  wrote into `$HOME`); every spawn passes `--add-dir <worktree>`.
+- **Sessions**: `--output-format json` prints
+  `{"conversation_id","status","response",…}`; `--conversation <id>` resumes
+  with recalled context. The id is self-reported
+  (`SELF_REPORTED_SESSION_ID_PROVIDERS`).
+
+## pi — no MCP (removed 2026-08-26)
 
 Pi has no built-in MCP support by design — it is extension-based, and MCP is an
 open feature request
@@ -170,7 +215,7 @@ reviewers must still end with `**Overall Verdict: …**`, and
 `ingestProseFindings` recovers anchored findings from the report whatever the
 provider.
 
-## gemini-cli — config-file only
+## gemini-cli — config-file only (removed 2026-08-26)
 
 MCP servers are read from `~/.gemini/settings.json` or a project-local
 `.gemini/settings.json`. There is no per-spawn flag, and the project form would

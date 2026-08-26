@@ -170,6 +170,12 @@ install_clis() {
   offer_cli "omp" omp \
     "curl -fsSL https://raw.githubusercontent.com/can1357/oh-my-pi/main/scripts/install.sh | sh" \
     "Oh My Pi. Reads MCP servers from mcp.json and expands \${VAR} at load time."
+
+  if ! have agy; then
+    printf '\n'
+    info "Antigravity (agy) has no scripted install — get it from its own installer,"
+    info "then re-run ./install.sh --skip-app --skip-cli to register the MCP entry."
+  fi
 }
 
 # ---------------------------------------------------------- 3. the channel --
@@ -297,6 +303,22 @@ configure_codex() {
   ok "codex: added $SERVER_NAME to config.toml"
 }
 
+configure_agy() {
+  have agy || { info "agy not installed — skipping its MCP config"; return 0; }
+
+  # agy's config is user-global and owned by `agy mcp` (writing the JSON by
+  # hand would race its own migrations between config paths). No env in the
+  # entry: measured on 1.1.21, agy spawns MCP servers from the CLI process
+  # itself and they inherit its environment, which is where Arij puts the
+  # per-session ARIJ_* values (AgyProvider.buildEnv). `add` also updates an
+  # existing entry, so this is idempotent.
+  if agy mcp add "$SERVER_NAME" "$(command -v node)" "$SHIM_PATH" >/dev/null 2>&1; then
+    ok "agy: registered $SERVER_NAME via \`agy mcp add\`"
+  else
+    warn "agy: \`agy mcp add\` failed — register the shim manually"
+  fi
+}
+
 configure_mcp() {
   step "MCP tool channel"
 
@@ -306,6 +328,7 @@ configure_mcp() {
   configure_claude
   configure_codex
   configure_omp
+  configure_agy
 
   printf '\n'
   warn "These entries carry \${ARIJ_MCP_TOKEN}, not a token."
