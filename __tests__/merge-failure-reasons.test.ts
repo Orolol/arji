@@ -11,6 +11,8 @@ import { describe, it, expect } from "vitest";
 import { AUTO_MODE_REASONS } from "@/lib/auto-mode/constants";
 import {
   buildApprovalMergeBlockedReason,
+  GIT_REFUSAL_MERGE_REASONS,
+  isGitRefusalMergeReason,
   isMergeFailureReason,
   MERGE_FAILURE_REASON_LIKE_PATTERNS,
   MERGE_FAILURE_REASON_PREFIXES,
@@ -109,6 +111,25 @@ describe("isMergeFailureReason", () => {
     expect(isMergeFailureReason(null)).toBe(false);
     expect(isMergeFailureReason(undefined)).toBe(false);
     expect(isMergeFailureReason("")).toBe(false);
+  });
+});
+
+describe("GIT_REFUSAL_MERGE_REASONS and isGitRefusalMergeReason", () => {
+  it("includes only conflict-shaped verdicts", () => {
+    expect(GIT_REFUSAL_MERGE_REASONS).toEqual(["conflict", "conflict-markers"]);
+  });
+
+  it("returns true for genuine conflict reasons", () => {
+    expect(isGitRefusalMergeReason("conflict")).toBe(true);
+    expect(isGitRefusalMergeReason("conflict-markers")).toBe(true);
+  });
+
+  it("returns false for non-conflict verdicts, errors, or missing reasons", () => {
+    expect(isGitRefusalMergeReason("branch-missing")).toBe(false);
+    expect(isGitRefusalMergeReason("error")).toBe(false);
+    expect(isGitRefusalMergeReason("something-else")).toBe(false);
+    expect(isGitRefusalMergeReason(undefined)).toBe(false);
+    expect(isGitRefusalMergeReason(null)).toBe(false);
   });
 });
 

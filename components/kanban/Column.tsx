@@ -120,11 +120,13 @@ function ColumnHeader({
  * reserved for the slice that can act — "Ready to merge".
  */
 function SectionHeader({
+  id,
   label,
   count,
   accent = false,
   testId,
 }: {
+  id?: string;
   label: string;
   count: number;
   accent?: boolean;
@@ -133,6 +135,7 @@ function SectionHeader({
   return (
     <div className="flex items-baseline justify-between" data-testid={testId}>
       <span
+        id={id}
         className={cn(
           "text-[10.5px] uppercase tracking-[.08em]",
           accent ? "text-primary" : "text-meta"
@@ -264,29 +267,35 @@ export function Column({
             ) : sections ? (
               // Sections are drawn over the SAME ordered list the
               // SortableContext above indexes, so the split is purely visual.
-              sections.map((section) => (
-                <div
-                  key={section.key}
-                  className="flex flex-col gap-[10px]"
-                  data-testid={`column-section-${status}-${section.key}`}
-                >
-                  <SectionHeader
-                    label={section.label}
-                    count={section.epics.length}
-                    accent={section.accent}
-                    testId={`column-section-header-${status}-${section.key}`}
-                  />
-                  {section.epics.length === 0 ? (
-                    section.emptyHint ? (
-                      <p className="text-[12px] text-meta">
-                        {section.emptyHint}
-                      </p>
-                    ) : null
-                  ) : (
-                    section.epics.map(renderCard)
-                  )}
-                </div>
-              ))
+              sections.map((section) => {
+                const headerId = `column-section-heading-${status}-${section.key}`;
+                return (
+                  <div
+                    key={section.key}
+                    role="group"
+                    aria-labelledby={headerId}
+                    className="flex flex-col gap-[10px]"
+                    data-testid={`column-section-${status}-${section.key}`}
+                  >
+                    <SectionHeader
+                      id={headerId}
+                      label={section.label}
+                      count={section.epics.length}
+                      accent={section.accent}
+                      testId={`column-section-header-${status}-${section.key}`}
+                    />
+                    {section.epics.length === 0 ? (
+                      section.emptyHint ? (
+                        <p className="text-[12px] text-meta">
+                          {section.emptyHint}
+                        </p>
+                      ) : null
+                    ) : (
+                      section.epics.map(renderCard)
+                    )}
+                  </div>
+                );
+              })
             ) : (
               epics.map(renderCard)
             )}

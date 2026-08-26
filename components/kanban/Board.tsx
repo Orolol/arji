@@ -127,17 +127,29 @@ export function Board({
   // Both handlers are memoised so the hook's own `useCallback`s stay stable;
   // an inline arrow here would change `merge`/`resolveMerge` on every render
   // and turn the `epicViews` memo below into a no-op.
+  //
+  // When the parent page supplies `onMergeSuccess` / `onMergeAgentDispatched`,
+  // the page bumps `refreshTrigger`, which drives `refresh()` via the
+  // `useEffect([refreshTrigger, refresh])` below. Calling `refresh()` here too
+  // would double-fetch `/epics` and `/releases` on every merge. The fallback
+  // `refresh()` only fires when no parent callback was passed.
   const handleMerged = useCallback(
     (epicId: string) => {
-      refresh();
-      onMergeSuccess?.(epicId);
+      if (onMergeSuccess) {
+        onMergeSuccess(epicId);
+      } else {
+        refresh();
+      }
     },
     [refresh, onMergeSuccess]
   );
   const handleResolveDispatched = useCallback(
     (epicId: string, sessionId: string) => {
-      refresh();
-      onMergeAgentDispatched?.(epicId, sessionId);
+      if (onMergeAgentDispatched) {
+        onMergeAgentDispatched(epicId, sessionId);
+      } else {
+        refresh();
+      }
     },
     [refresh, onMergeAgentDispatched]
   );

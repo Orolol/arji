@@ -433,6 +433,37 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
     expect(rows.map((row) => row.id)).toEqual(["mine"]);
   });
 
+  it("ignores another project's open findings rows", async () => {
+    seedReadyEpic("mine");
+
+    db.insert(projects)
+      .values({
+        id: "other-project-findings",
+        name: "Other",
+        gitRepoPath: "/tmp/other-findings",
+        createdAt: at(0),
+      })
+      .run();
+    db.insert(epics)
+      .values({
+        id: "theirs-findings",
+        projectId: "other-project-findings",
+        title: "theirs",
+        status: "review",
+        priority: 0,
+        position: 0,
+        branchName: "feature/theirs-findings",
+        createdAt: at(0),
+        updatedAt: at(0),
+      })
+      .run();
+    addOpenFinding("theirs-findings");
+    expect(await readinessOf("mine")).toMatchObject({
+      ready: true,
+      openFindings: 0,
+    });
+  });
+
   it("scopes every fact to its own epic", async () => {
     seedReadyEpic("clean", 0);
     seedReadyEpic("dirty", 1);

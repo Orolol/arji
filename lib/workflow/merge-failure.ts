@@ -67,7 +67,25 @@ export function buildApprovalMergeBlockedReason(input: {
  * resolve-merge, cuts a fresh branch off the default and merges an empty
  * diff — a repair that repairs nothing, under a label that promised one.
  */
-const GIT_REFUSAL_MERGE_REASONS = ["conflict", "conflict-markers"] as const;
+export const GIT_REFUSAL_MERGE_REASONS = [
+  "conflict",
+  "conflict-markers",
+] as const;
+
+export type GitRefusalMergeReason =
+  (typeof GIT_REFUSAL_MERGE_REASONS)[number];
+
+/**
+ * True when a merge verdict represents a genuine conflict that a
+ * merge-resolution agent or user can repair, rather than a broken repository,
+ * deleted branch, or guard refusal.
+ */
+export function isGitRefusalMergeReason(
+  reason: string | null | undefined
+): boolean {
+  if (typeof reason !== "string") return false;
+  return (GIT_REFUSAL_MERGE_REASONS as readonly string[]).includes(reason);
+}
 
 /**
  * Every reason head that means "the branch is still on the wrong side of

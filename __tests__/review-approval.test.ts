@@ -379,7 +379,9 @@ describe("Epic review approval", () => {
 
       expect(res.status).toBe(409);
       const json = await res.json();
-      expect(json.mergeFailed).toBe(true);
+      // Throws yield reason: "error", which is not a conflict. The board must
+      // NOT label this a conflict or offer Resolve merge.
+      expect(json.mergeFailed).toBe(false);
       expect(json.error).toContain("does not exist");
       expect(dbMockState.updateCalls).toEqual([]);
       expect(mocks.createApproveMergeFailedNotification).toHaveBeenCalledWith({
@@ -388,6 +390,35 @@ describe("Epic review approval", () => {
         error: "Cannot use simple-git on a directory that does not exist",
       });
       expect(mocks.endMergeWork).toHaveBeenCalledWith("p1", "epic-1");
+    });
+
+    it("does not flag branch-missing as a conflict or log approval merge blocked prefix", async () => {
+      mocks.mergeWorktree.mockResolvedValue({
+        merged: false,
+        error: "Branch not found",
+        reason: "branch-missing",
+      });
+      seed();
+      const res = await callApprove();
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.mergeFailed).toBe(false);
+      expect(json.error).toContain("Branch not found");
+
+      expect(mocks.logTransition).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: "p1",
+          epicId: "epic-1",
+          fromStatus: "review",
+          toStatus: "review",
+          actor: "system",
+          reason: expect.stringMatching(/merge failed \(branch-missing\)/),
+        })
+      );
+      // Verify it does NOT start with APPROVAL_MERGE_BLOCKED_PREFIX
+      const loggedReason = (mocks.logTransition.mock.calls[0][0] as { reason: string }).reason;
+      expect(loggedReason).not.toContain("Approval blocked: merge of ");
     });
 
     it("posts a ticket comment explaining the failed merge", async () => {

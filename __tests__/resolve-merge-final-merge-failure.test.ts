@@ -314,6 +314,28 @@ describe("Resolve-merge: final merge fails after the agent", () => {
     });
   });
 
+  it("returns mergeFailed: false on clean-path final merge non-conflict errors", async () => {
+    mocks.startMergeInWorktree.mockResolvedValue({
+      conflicted: false,
+      output: "Already up to date.",
+    });
+    mocks.mergeWorktree.mockResolvedValue({
+      merged: false,
+      error: "Git repository corrupted",
+      reason: "error",
+    });
+    seed();
+
+    const res = await callResolveMerge();
+    const json = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(json).toMatchObject({
+      error: "Git repository corrupted",
+      mergeFailed: false,
+    });
+  });
+
   it("still closes the epic when the final merge lands (control)", async () => {
     mocks.mergeWorktree.mockResolvedValue({
       merged: true,

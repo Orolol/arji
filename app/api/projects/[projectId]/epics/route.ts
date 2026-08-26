@@ -201,13 +201,21 @@ export async function GET(
   // per-card badge is the kind of cost that only shows up on a big board.
 
   // Open review findings per epic — the merge gate's blocking half.
+  // Scoped to the project via `epics` so SQLite does not scan review_comments
+  // across every project on an un-indexed status column.
   const openFindingCounts = db
     .select({
       epicId: reviewComments.epicId,
       openFindings: sql<number>`COUNT(*)`.as("open_findings"),
     })
     .from(reviewComments)
-    .where(eq(reviewComments.status, "open"))
+    .innerJoin(epics, eq(reviewComments.epicId, epics.id))
+    .where(
+      and(
+        eq(epics.projectId, projectId),
+        eq(reviewComments.status, "open")
+      )
+    )
     .groupBy(reviewComments.epicId)
     .as("open_finding_counts");
 

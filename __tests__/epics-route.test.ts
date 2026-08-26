@@ -129,6 +129,7 @@ vi.mock("@/lib/db", () => {
     where: ReturnType<typeof vi.fn>;
     orderBy: ReturnType<typeof vi.fn>;
     groupBy: ReturnType<typeof vi.fn>;
+    innerJoin: ReturnType<typeof vi.fn>;
     leftJoin: ReturnType<typeof vi.fn>;
     as: ReturnType<typeof vi.fn>;
     get: ReturnType<typeof vi.fn>;
@@ -141,6 +142,7 @@ vi.mock("@/lib/db", () => {
     where: vi.fn(),
     orderBy: vi.fn(),
     groupBy: vi.fn(),
+    innerJoin: vi.fn(),
     leftJoin: vi.fn(),
     as: vi.fn(),
     get: vi.fn(),
@@ -154,6 +156,7 @@ vi.mock("@/lib/db", () => {
   chain.where.mockReturnValue(chain);
   chain.orderBy.mockReturnValue(chain);
   chain.groupBy.mockReturnValue(chain);
+  chain.innerJoin.mockReturnValue(chain);
   chain.leftJoin.mockReturnValue(chain);
   chain.as.mockReturnValue({});
   chain.get.mockImplementation(() => mockDbState.getQueue.shift() ?? null);
@@ -338,7 +341,9 @@ describe("POST /api/projects/[projectId]/epics", () => {
     // story counts + latest comments + latest sessions + latest user comments
     // + session facts (cost AND review freshness, one scan) + latest grading
     // + ticket read cursors + open findings + merge failures
-    expect((db as unknown as { leftJoin: ReturnType<typeof vi.fn> }).leftJoin).toHaveBeenCalledTimes(9);
+    expect((db as unknown as { leftJoin: typeof vi.fn }).leftJoin).toHaveBeenCalledTimes(9);
+    // open findings scopes to project via innerJoin on epics
+    expect((db as unknown as { innerJoin: typeof vi.fn }).innerJoin).toHaveBeenCalledTimes(1);
     // story counts + session facts + latest user comments + open findings
     // + merge failures
     expect((db as unknown as { groupBy: ReturnType<typeof vi.fn> }).groupBy).toHaveBeenCalledTimes(5);

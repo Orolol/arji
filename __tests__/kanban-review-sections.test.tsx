@@ -320,7 +320,7 @@ describe("Merge affordances on Review cards", () => {
     ).toBeInTheDocument();
   });
 
-  it("merges through the existing approve route and refreshes the board", async () => {
+  it("merges through the existing approve route and notifies onMergeSuccess", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ data: { approved: true, merged: true } }),
@@ -339,9 +339,30 @@ describe("Merge affordances on Review cards", () => {
       `/api/projects/proj-1/epics/${ready.id}/approve`,
       { method: "POST" }
     );
-    expect(mockKanbanState.refresh).toHaveBeenCalled();
+    // When onMergeSuccess is passed, the parent page owns the refresh via
+    // refreshTrigger so the board does not double-reload.
+    expect(mockKanbanState.refresh).not.toHaveBeenCalled();
   });
 
+  it("refreshes directly on merge success when onMergeSuccess is omitted", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { approved: true, merged: true } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ready = makeEpic({ mergeReadiness: READY });
+    setReviewColumn([ready]);
+    renderBoard();
+
+    await userEvent.click(screen.getByTestId(`epic-merge-${ready.id}`));
+
+    await waitFor(() => expect(mockKanbanState.refresh).toHaveBeenCalled());
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/projects/proj-1/epics/${ready.id}/approve`,
+      { method: "POST" }
+    );
+  });
   it("shows the conflict and offers Resolve merge when the merge is refused", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,

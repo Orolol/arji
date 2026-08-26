@@ -33,6 +33,7 @@ import {
   createAgentAlreadyRunningPayload,
   getRunningSessionForTarget,
 } from "@/lib/agents/concurrency";
+import { isGitRefusalMergeReason } from "@/lib/workflow/merge-failure";
 import fs from "fs";
 import path from "path";
 import {
@@ -151,7 +152,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       // approve route sets. Callers use it to decide whether offering another
       // Resolve merge is a way out or just the same wall again.
       return NextResponse.json(
-        { error: finalMerge.error || "Final merge failed", mergeFailed: true },
+        {
+          error: finalMerge.error || "Final merge failed",
+          mergeFailed: isGitRefusalMergeReason(finalMerge.reason),
+        },
         { status: 500 }
       );
     }
