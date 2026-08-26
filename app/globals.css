@@ -1,6 +1,17 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+
+/* Tailwind's automatic source detection scans every non-gitignored file in the
+   repo. Arij stores agent-written text next to its code (the arji.json board
+   export, DB snapshots under data/), and a stray token in that text — e.g.
+   `has-[:a:hover]:border-slate-600` — is extracted as a real utility and fails
+   the CSS build. Pin the scan to the directories that actually hold markup. */
+@source "../app";
+@source "../components";
+@source "../hooks";
+@source "../lib";
+@source "../lib";
 
 @custom-variant dark (&:is(.dark *));
 
