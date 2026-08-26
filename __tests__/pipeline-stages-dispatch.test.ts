@@ -572,18 +572,18 @@ describe("fix stage dispatch (epic scope)", () => {
     await handle.settled;
   });
 
-  it("resumes a previous pi session with the id pi reported", async () => {
+  it("resumes a previous oh-my-pi session with the id omp reported", async () => {
     const { projectId, epicId } = seed("review");
     const buildSid = `build-${counter}`;
     insertSession({
       id: buildSid,
       projectId,
       epicId,
-      provider: "pi",
+      provider: "oh-my-pi",
       cliSessionId: "3f1c9a52-1b7e-4f21-9a6f-7b1c2d3e4f50",
     });
     resolutionMocks.resolveAgentByNamedId.mockReturnValue({
-      provider: "pi",
+      provider: "oh-my-pi",
       namedAgentId: null,
       name: null,
       model: null,

@@ -94,8 +94,8 @@ describe("Agent assignment resolver", () => {
         {
           id: "project-agent",
           name: "Project builder",
-          provider: "gemini-cli",
-          model: "gemini-2.5-pro",
+          provider: "oh-my-pi",
+          model: "pi-pro",
         },
       ],
     ];
@@ -105,7 +105,7 @@ describe("Agent assignment resolver", () => {
     const chat = merged.find((x) => x.agentType === "chat");
     const ticketBuild = merged.find((x) => x.agentType === "ticket_build");
 
-    expect(build?.provider).toBe("gemini-cli");
+    expect(build?.provider).toBe("oh-my-pi");
     expect(build?.source).toBe("project");
     expect(chat?.provider).toBe("codex");
     expect(chat?.source).toBe("global");
@@ -127,15 +127,15 @@ describe("Agent assignment resolver", () => {
       {
         // Second get: named agent lookup by id
         id: "na-1",
-        name: "Gemini Fast",
-        provider: "gemini-cli",
-        model: "gemini-2.0-flash",
+        name: "Pi Fast",
+        provider: "oh-my-pi",
+        model: "pi-flash",
       },
     ];
 
     const resolved = await resolveAgent("build", "proj-1");
-    expect(resolved.provider).toBe("gemini-cli");
-    expect(resolved.model).toBe("gemini-2.0-flash");
+    expect(resolved.provider).toBe("oh-my-pi");
+    expect(resolved.model).toBe("pi-flash");
     expect(resolved.namedAgentId).toBe("na-1");
   });
 });

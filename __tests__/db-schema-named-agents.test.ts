@@ -27,39 +27,29 @@ describe("Schema: namedAgents table and provider types", () => {
     expect(schema.namedAgents).toBeDefined();
   });
 
-  it("provider type union includes all providers", async () => {
+  it("provider type union includes exactly the registered providers", async () => {
     const { isAgentProvider } = await import("@/lib/agent-config/constants");
     expect(isAgentProvider("claude-code")).toBe(true);
     expect(isAgentProvider("codex")).toBe(true);
-    expect(isAgentProvider("gemini-cli")).toBe(true);
-    expect(isAgentProvider("mistral-vibe")).toBe(true);
-    expect(isAgentProvider("qwen-code")).toBe(true);
-    expect(isAgentProvider("opencode")).toBe(true);
-    expect(isAgentProvider("deepseek")).toBe(true);
-    expect(isAgentProvider("kimi")).toBe(true);
-    expect(isAgentProvider("zai")).toBe(true);
-    expect(isAgentProvider("pi")).toBe(true);
     expect(isAgentProvider("oh-my-pi")).toBe(true);
+    // Removed in the 2026-08 MCP cleanup — no longer valid providers.
+    expect(isAgentProvider("gemini-cli")).toBe(false);
+    expect(isAgentProvider("mistral-vibe")).toBe(false);
+    expect(isAgentProvider("qwen-code")).toBe(false);
+    expect(isAgentProvider("opencode")).toBe(false);
+    expect(isAgentProvider("deepseek")).toBe(false);
+    expect(isAgentProvider("kimi")).toBe(false);
+    expect(isAgentProvider("zai")).toBe(false);
+    expect(isAgentProvider("pi")).toBe(false);
     expect(isAgentProvider("invalid")).toBe(false);
   });
 
-  it("PROVIDER_OPTIONS includes all providers", async () => {
+  it("PROVIDER_OPTIONS lists exactly the registered providers in stable order", async () => {
     const { PROVIDER_OPTIONS } = await import("@/lib/agent-config/constants");
-    expect(PROVIDER_OPTIONS).toContain("claude-code");
-    expect(PROVIDER_OPTIONS).toContain("codex");
-    expect(PROVIDER_OPTIONS).toContain("gemini-cli");
-    expect(PROVIDER_OPTIONS).toContain("mistral-vibe");
-    expect(PROVIDER_OPTIONS).toContain("qwen-code");
-    expect(PROVIDER_OPTIONS).toContain("opencode");
-    expect(PROVIDER_OPTIONS).toContain("deepseek");
-    expect(PROVIDER_OPTIONS).toContain("kimi");
-    expect(PROVIDER_OPTIONS).toContain("zai");
-    expect(PROVIDER_OPTIONS).toContain("pi");
-    expect(PROVIDER_OPTIONS).toContain("oh-my-pi");
-    expect(PROVIDER_OPTIONS).toHaveLength(11);
+    expect(PROVIDER_OPTIONS).toEqual(["claude-code", "codex", "oh-my-pi"]);
   });
 
-  it("ProviderType in providers/types.ts includes gemini-cli", async () => {
+  it("ProviderType module in providers/types.ts is importable", async () => {
     // We can't test types at runtime directly, but we can test via the provider factory
     // which uses the ProviderType. The type system will catch issues at compile time.
     const types = await import("@/lib/providers/types");

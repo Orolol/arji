@@ -32,7 +32,6 @@ vi.mock("child_process", () => {
 import { getProvider } from "@/lib/providers";
 import { ClaudeCodeProvider } from "@/lib/providers/claude-code";
 import { CodexProvider } from "@/lib/providers/codex";
-import { GeminiCliProvider } from "@/lib/providers/gemini-cli";
 import type { ProviderSpawnOptions } from "@/lib/providers/types";
 import { spawnClaude } from "@/lib/claude/spawn";
 
@@ -117,10 +116,11 @@ describe("Provider Factory", () => {
     expect(provider.type).toBe("claude-code");
   });
 
-  it("returns GeminiCliProvider for 'gemini-cli'", () => {
-    const provider = getProvider("gemini-cli");
-    expect(provider.type).toBe("gemini-cli");
-    expect(provider).toBeInstanceOf(GeminiCliProvider);
+  it("falls back to claude-code for a legacy provider string", () => {
+    // Rows written before the 2026-08 MCP-only cleanup may still name a
+    // removed provider; the factory must not crash on them.
+    const provider = getProvider("gemini-cli" as never);
+    expect(provider.type).toBe("claude-code");
   });
 });
 
@@ -319,50 +319,3 @@ describe("CodexProvider", () => {
   });
 });
 
-describe("GeminiCliProvider", () => {
-  const provider = new GeminiCliProvider();
-
-  it("has type 'gemini-cli'", () => {
-    expect(provider.type).toBe("gemini-cli");
-  });
-
-  it("spawn returns a ProviderSession with handle, kill, and promise", () => {
-    const session = provider.spawn(baseOptions);
-    expect(session.handle).toMatch(/^gemini-/);
-    expect(typeof session.kill).toBe("function");
-    expect(session.promise).toBeInstanceOf(Promise);
-  });
-
-  it("spawn resolves with ProviderResult from Gemini CLI", async () => {
-    const session = provider.spawn(baseOptions);
-    fakeChild.emitStdout(JSON.stringify({ result: "Gemini output" }));
-    fakeChild.emitClose(0);
-
-    const result = await session.promise;
-    expect(result.success).toBe(true);
-    expect(result.result).toContain("Gemini output");
-    expect(result.endedWithQuestion).toBe(false);
-  });
-
-  it("preserves endedWithQuestion from Gemini output", async () => {
-    const session = provider.spawn(baseOptions);
-    fakeChild.emitStdout("Need clarification AskUserQuestion");
-    fakeChild.emitClose(0);
-
-    const result = await session.promise;
-    expect(result.endedWithQuestion).toBe(true);
-  });
-
-  it("forwards cliSessionId and resumeSession as --resume args", () => {
-    provider.spawn({
-      ...baseOptions,
-      cliSessionId: "cli-gem-1",
-      resumeSession: true,
-    });
-
-    expect(mockSpawn).toHaveBeenCalledOnce();
-    expect(mockSpawn.mock.calls[0][0]).toBe("gemini");
-    const args = mockSpawn.mock.calls[0][1] as string[];
-    expect(args.slice(0, 2)).toEqual(["--resume", "cli-gem-1"]);
-  });
-});

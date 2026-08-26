@@ -124,13 +124,16 @@ afterEach(() => {
 // Provider factory
 // ---------------------------------------------------------------------------
 
-describe("Provider factory — Pi providers", () => {
-  it("returns PiProvider for 'pi'", () => {
-    const provider = getProvider("pi");
-    expect(provider.type).toBe("pi");
-    expect(provider).toBeInstanceOf(PiProvider);
-  });
+/**
+ * Concrete stand-in: PiProvider went abstract when `pi` lost provider status
+ * in the 2026-08 MCP-only cleanup (no MCP support upstream). The base class
+ * behaviour is still exercised because omp inherits it byte-for-byte.
+ */
+class TestPiProvider extends PiProvider {
+  readonly type = "oh-my-pi" as const;
+}
 
+describe("Provider factory — Pi providers", () => {
   it("returns OhMyPiProvider for 'oh-my-pi'", () => {
     const provider = getProvider("oh-my-pi");
     expect(provider.type).toBe("oh-my-pi");
@@ -143,10 +146,9 @@ describe("Provider factory — Pi providers", () => {
 // ---------------------------------------------------------------------------
 
 describe("PiProvider", () => {
-  const provider: BaseCliProvider = new PiProvider();
+  const provider: BaseCliProvider = new TestPiProvider();
 
-  it("has type 'pi' and binary name 'pi'", () => {
-    expect(provider.type).toBe("pi");
+  it("keeps the pi binary name on the family base", () => {
     expect(provider.binaryName).toBe("pi");
   });
 
@@ -578,8 +580,9 @@ describe("pi stream helpers", () => {
 // ---------------------------------------------------------------------------
 
 describe("Resume classification — Pi providers", () => {
-  it("treats pi (--session) and oh-my-pi (--resume) as resumable", () => {
-    expect(isResumableProvider("pi")).toBe(true);
+  it("treats oh-my-pi (--resume) as resumable, and dropped pi as not", () => {
     expect(isResumableProvider("oh-my-pi")).toBe(true);
+    // Legacy rows may still say "pi"; the provider is gone, so no resume.
+    expect(isResumableProvider("pi")).toBe(false);
   });
 });

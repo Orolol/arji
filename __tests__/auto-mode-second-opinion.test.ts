@@ -189,7 +189,7 @@ function addSecondOpinion(input: {
       status: input.status ?? "completed",
       outcome: input.outcome === undefined ? "answered" : input.outcome,
       agentType: "review_second_opinion",
-      provider: "gemini-cli",
+      provider: "oh-my-pi",
       createdAt: at(input.minute),
       endedAt: at(input.minute + 1),
     })
@@ -525,7 +525,7 @@ describe("second-opinion structured gate", () => {
         status: "completed",
         outcome: "answered",
         agentType: "review_second_opinion",
-        provider: "gemini-cli",
+        provider: "oh-my-pi",
         createdAt: "2026-08-25T10:40:00.000Z",
         endedAt: "2026-08-25T10:45:00.000Z",
       })
@@ -541,25 +541,25 @@ describe("second-opinion structured gate", () => {
 describe("second-opinion provider selection", () => {
   it("selects an installed provider distinct from builder and reviewer", async () => {
     availabilityState.available.add("codex");
-    availabilityState.available.add("gemini-cli");
+    availabilityState.available.add("oh-my-pi");
 
     await expect(
-      pickSecondOpinionProvider("gemini-cli", "claude-code")
+      pickSecondOpinionProvider("oh-my-pi", "claude-code")
     ).resolves.toBe("codex");
   });
 
-  it("uses a non-MCP provider's exact fallback verdict when it is the segregated alternative", async () => {
-    availabilityState.available.add("gemini-cli");
+  it("falls back to the only remaining installed provider as the segregated alternative", async () => {
+    availabilityState.available.add("oh-my-pi");
 
     await expect(
       pickSecondOpinionProvider("claude-code", "codex")
-    ).resolves.toBe("gemini-cli");
+    ).resolves.toBe("oh-my-pi");
   });
 });
 
 describe("second-opinion dispatch", () => {
   it("runs a Team-build-aware, segregated plan session with the final diff embedded", async () => {
-    addBuilder("team-build", 0, "team_build", "gemini-cli");
+    addBuilder("team-build", 0, "team_build", "oh-my-pi");
     addOrdinaryReview("review-1", 2, "claude-code");
     availabilityState.available.add("codex");
 

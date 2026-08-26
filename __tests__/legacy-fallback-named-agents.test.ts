@@ -69,7 +69,10 @@ describe("resolveAgentByNamedId", () => {
     expect(result.name).toBe("Codex Fast");
   });
 
-  it("returns gemini-cli named agent correctly", async () => {
+  it("normalizes a legacy removed-provider named agent to the fallback provider", async () => {
+    // Stored row predates the 2026-08 cleanup: "gemini-cli" is no longer a
+    // registered provider. normalizeProvider() maps it to FALLBACK_PROVIDER
+    // while the row's model and name are returned as stored.
     dbMockState.getQueue = [
       {
         id: "gem-1",
@@ -85,7 +88,7 @@ describe("resolveAgentByNamedId", () => {
     );
     const result = resolveAgentByNamedId("build", "proj-1", "gem-1");
 
-    expect(result.provider).toBe("gemini-cli");
+    expect(result.provider).toBe("claude-code");
     expect(result.model).toBe("gemini-2.5-pro");
     expect(result.name).toBe("Gemini Pro");
   });
@@ -351,16 +354,16 @@ describe("resolveAgent fallback chain", () => {
       {
         id: "global-agent",
         name: "Global Agent",
-        provider: "gemini-cli",
-        model: "gemini-2.5-pro",
+        provider: "oh-my-pi",
+        model: "pi-pro",
       },
     ];
 
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
     const result = resolveAgent("build", "proj-1");
 
-    expect(result.provider).toBe("gemini-cli");
-    expect(result.model).toBe("gemini-2.5-pro");
+    expect(result.provider).toBe("oh-my-pi");
+    expect(result.model).toBe("pi-pro");
     expect(result.name).toBe("Global Agent");
   });
 

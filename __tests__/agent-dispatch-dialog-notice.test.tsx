@@ -35,12 +35,12 @@ describe("AgentDispatchDialog — notice slot", () => {
     render(
       <AgentDispatchDialog
         {...baseDialogProps}
-        notice="Review by Gemini CLI (builder was Claude Code)"
+        notice="Review by Oh My Pi (builder was Claude Code)"
       />
     );
 
     expect(screen.getByTestId("dispatch-notice")).toHaveTextContent(
-      "Review by Gemini CLI (builder was Claude Code)"
+      "Review by Oh My Pi (builder was Claude Code)"
     );
   });
 
@@ -61,7 +61,7 @@ describe("AgentActionsBar — segregation notice in the review dialog", () => {
           ok: true,
           json: async () => ({
             data: {
-              provider: "gemini-cli",
+              provider: "oh-my-pi",
               namedAgentId: null,
               name: null,
               segregated: true,
@@ -99,7 +99,7 @@ describe("AgentActionsBar — segregation notice in the review dialog", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("dispatch-notice")).toHaveTextContent(
-        "Review by Gemini CLI (builder was Claude Code)"
+        "Review by Oh My Pi (builder was Claude Code)"
       );
     });
 

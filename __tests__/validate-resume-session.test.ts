@@ -120,36 +120,29 @@ describe("validateResumeSession", () => {
     expect(result).toEqual({ cliSessionId: "cli-abc" });
   });
 
-  it("returns the cliSessionId of a pi session", () => {
+  it("returns the cliSessionId of an oh-my-pi session with the id omp reported", () => {
     dbMockState.getQueue = [
-      row({ cliSessionId: "3f1c9a52-1b7e-4f21-9a6f-7b1c2d3e4f50", provider: "pi" }),
+      row({
+        cliSessionId: "3f1c9a52-1b7e-4f21-9a6f-7b1c2d3e4f50",
+        provider: "oh-my-pi",
+      }),
     ];
     const result = validateResumeSession({
       resumeSessionId: "sess-1",
       epicId: "epic-1",
-      expectedProvider: "pi",
+      expectedProvider: "oh-my-pi",
     });
     expect(result).toEqual({
       cliSessionId: "3f1c9a52-1b7e-4f21-9a6f-7b1c2d3e4f50",
     });
   });
 
-  it("returns the cliSessionId of an oh-my-pi session", () => {
-    dbMockState.getQueue = [row({ cliSessionId: "cli-omp", provider: "oh-my-pi" })];
-    const result = validateResumeSession({
-      resumeSessionId: "sess-1",
-      epicId: "epic-1",
-      expectedProvider: "oh-my-pi",
-    });
-    expect(result).toEqual({ cliSessionId: "cli-omp" });
-  });
-
   it("returns null for a provider that cannot resume", () => {
-    dbMockState.getQueue = [row({ provider: "qwen-code" })];
+    dbMockState.getQueue = [row({ provider: "codex" })];
     const result = validateResumeSession({
       resumeSessionId: "sess-1",
       epicId: "epic-1",
-      expectedProvider: "qwen-code",
+      expectedProvider: "codex",
     });
     expect(result).toBeNull();
   });
@@ -159,18 +152,18 @@ describe("validateResumeSession", () => {
   // minted it, so a same-scope id from another provider must be refused.
   // ---------------------------------------------------------------------
 
-  it("refuses a gemini session id when launching pi", () => {
-    dbMockState.getQueue = [row({ cliSessionId: "cli-gemini", provider: "gemini-cli" })];
+  it("refuses a claude-code session id when launching oh-my-pi", () => {
+    dbMockState.getQueue = [row({ cliSessionId: "cli-claude", provider: "claude-code" })];
     const result = validateResumeSession({
       resumeSessionId: "sess-1",
       epicId: "epic-1",
-      expectedProvider: "pi",
+      expectedProvider: "oh-my-pi",
     });
     expect(result).toBeNull();
   });
 
-  it("refuses a pi session id when launching claude-code", () => {
-    dbMockState.getQueue = [row({ cliSessionId: "cli-pi", provider: "pi" })];
+  it("refuses an oh-my-pi session id when launching claude-code", () => {
+    dbMockState.getQueue = [row({ cliSessionId: "cli-omp", provider: "oh-my-pi" })];
     const result = validateResumeSession({
       resumeSessionId: "sess-1",
       epicId: "epic-1",
@@ -179,7 +172,9 @@ describe("validateResumeSession", () => {
     expect(result).toBeNull();
   });
 
-  it("refuses a pi session id when launching oh-my-pi", () => {
+  // Legacy rows from the removed pi provider must never resume into anything,
+  // not even its oh-my-pi fork: pi is no longer resumable at all.
+  it("refuses a legacy pi session id when launching oh-my-pi", () => {
     dbMockState.getQueue = [row({ cliSessionId: "cli-pi", provider: "pi" })];
     const result = validateResumeSession({
       resumeSessionId: "sess-1",
@@ -194,7 +189,7 @@ describe("validateResumeSession", () => {
     const result = validateResumeSession({
       resumeSessionId: "sess-1",
       epicId: "epic-1",
-      expectedProvider: "opencode",
+      expectedProvider: "oh-my-pi",
     });
     expect(result).toBeNull();
   });

@@ -1,19 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProvider, type ProviderType } from "@/lib/providers";
 
-const ALL_PROVIDERS: ProviderType[] = [
-  "claude-code",
-  "codex",
-  "gemini-cli",
-  "mistral-vibe",
-  "qwen-code",
-  "opencode",
-  "deepseek",
-  "kimi",
-  "zai",
-  "pi",
-  "oh-my-pi",
-];
+const ALL_PROVIDERS: ProviderType[] = ["claude-code", "codex", "oh-my-pi"];
 
 export async function GET() {
   const results: Record<string, boolean> = {};
@@ -35,31 +23,5 @@ export async function GET() {
     results[type] = available;
   }
 
-  // Backwards compat: codexInstalled and geminiInstalled
-  // codexInstalled = binary is on PATH even if not logged in
-  let codexInstalled = false;
-  try {
-    const { execSync } = await import("child_process");
-    execSync("which codex", { stdio: "ignore" });
-    codexInstalled = true;
-  } catch {
-    // not installed
-  }
-
-  let geminiInstalled = false;
-  try {
-    const { execSync } = await import("child_process");
-    execSync("which gemini", { stdio: "ignore" });
-    geminiInstalled = true;
-  } catch {
-    // not installed
-  }
-
-  return NextResponse.json({
-    data: {
-      ...results,
-      codexInstalled,
-      geminiInstalled,
-    },
-  });
+  return NextResponse.json({ data: results });
 }

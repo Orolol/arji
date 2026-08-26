@@ -7,9 +7,12 @@ describe("useProvidersAvailable", () => {
     vi.restoreAllMocks();
   });
 
-  it("reports codex available when the codex provider is available", async () => {
+  it("reports each provider from the availability payload", async () => {
     global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ data: { codex: true, codexInstalled: true } }),
+      json: () =>
+        Promise.resolve({
+          data: { "claude-code": true, codex: true, "oh-my-pi": false },
+        }),
     });
 
     const { result } = renderHook(() => useProvidersAvailable());
@@ -18,25 +21,9 @@ describe("useProvidersAvailable", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(result.current.codexAvailable).toBe(true);
-    expect(result.current.codexInstalled).toBe(true);
+    expect(result.current.providers["claude-code"]).toBe(true);
     expect(result.current.providers.codex).toBe(true);
-  });
-
-  it("reports codex unavailable when the codex provider is unavailable", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ data: { codex: false, codexInstalled: true } }),
-    });
-
-    const { result } = renderHook(() => useProvidersAvailable());
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-
-    expect(result.current.codexAvailable).toBe(false);
-    expect(result.current.codexInstalled).toBe(true);
-    expect(result.current.providers.codex).toBe(false);
+    expect(result.current.providers["oh-my-pi"]).toBe(false);
   });
 
   it("defaults every provider to unavailable when data is empty", async () => {
@@ -50,7 +37,6 @@ describe("useProvidersAvailable", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(result.current.codexAvailable).toBe(false);
     expect(Object.values(result.current.providers).every((v) => v === false)).toBe(
       true
     );
@@ -65,7 +51,6 @@ describe("useProvidersAvailable", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(result.current.codexAvailable).toBe(false);
     expect(Object.values(result.current.providers).every((v) => v === false)).toBe(
       true
     );

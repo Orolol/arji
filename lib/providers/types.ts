@@ -5,18 +5,16 @@
  * routes, review routes, and the process manager can work with any backend.
  */
 
-export type ProviderType =
-  | "claude-code"
-  | "codex"
-  | "gemini-cli"
-  | "mistral-vibe"
-  | "qwen-code"
-  | "opencode"
-  | "deepseek"
-  | "kimi"
-  | "zai"
-  | "pi"
-  | "oh-my-pi";
+/**
+ * Every provider here MUST support per-spawn injection of the Arij MCP tool
+ * channel (providerSupportsMcp in lib/claude/mcp-injection.ts) — the channel
+ * is how agents reach the board, so a CLI that cannot be handed a per-session
+ * MCP config is not eligible. The 2026-08 cleanup removed gemini-cli,
+ * mistral-vibe, qwen-code, opencode, deepseek, kimi, zai and pi for exactly
+ * that reason; see docs/architecture/mcp-provider-matrix.md before adding
+ * one back.
+ */
+export type ProviderType = "claude-code" | "codex" | "oh-my-pi";
 
 export type ProviderChunkStreamType = "response" | "raw" | "output";
 

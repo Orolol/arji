@@ -1,5 +1,12 @@
 /**
- * Pi provider — wraps the `pi` CLI (npm: @earendil-works/pi-coding-agent).
+ * Pi-family base — the shared CLI contract of the `pi` lineage
+ * (npm: @earendil-works/pi-coding-agent), today concretely shipped only as
+ * OhMyPiProvider (`omp`, a standalone pi fork). Pi itself is no longer a
+ * selectable provider: it has no MCP support at all (upstream
+ * earendil-works/pi#563 is still open), and every Arij provider must carry
+ * the per-spawn tool channel — see lib/providers/types.ts. The class stays
+ * because omp kept pi's `--mode json` event stream byte-compatible, so all
+ * the parsing below is shared.
  *
  * CLI: pi --mode json [--tools <allowlist>] [--session <ID>] [--model <M>] -p <PROMPT>
  *
@@ -175,8 +182,8 @@ export function findPiRunFailure(stdout: string, cliName = "Pi"): string | null 
   );
 }
 
-export class PiProvider extends BaseCliProvider {
-  readonly type: ProviderType = "pi";
+export abstract class PiProvider extends BaseCliProvider {
+  abstract readonly type: ProviderType;
 
   get binaryName(): string {
     return "pi";

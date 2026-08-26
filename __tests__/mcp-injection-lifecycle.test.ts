@@ -287,7 +287,14 @@ describe("processManager.start() — MCP injection gating", () => {
   it("skips injection for unsupported providers without touching the db", () => {
     pmState.sessionRow = sessionRow();
 
-    processManager.start("s5", { mode: "code", prompt: "PLAIN" }, "gemini-cli");
+    // Legacy rows may still name a provider removed in the 2026-08 cleanup;
+    // the gate must short-circuit for them exactly as it did when the
+    // provider existed without an MCP surface.
+    processManager.start(
+      "s5",
+      { mode: "code", prompt: "PLAIN" },
+      "gemini-cli" as never,
+    );
 
     const options = pmState.providerSpawnedOptions[0];
     expect(options.mcp).toBeUndefined();
