@@ -326,8 +326,7 @@ export function EpicCard({
                 >
                   <span className="breathing-dot h-[7px] w-[7px] shrink-0" />
                   <span className="truncate">
-                    {activityLabel} {"·"}{" "}
-                    {providerLabel(activeAgentActivity!.provider)}
+                    {activityLabel} {"·"} {activeAgentActivity!.agentName}
                     {elapsedText && ` · ${elapsedText}`}
                   </span>
                 </div>

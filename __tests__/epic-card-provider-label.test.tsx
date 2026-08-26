@@ -1,10 +1,8 @@
 /**
- * The activity chip resolves the provider through PROVIDER_LABELS for the
- * registered providers (claude-code, codex, oh-my-pi, openai-compatible),
- * keeps the legacy "Gemini" abbreviation for old gemini-cli rows, and falls
- * back to the raw provider string for anything else — including providers
- * removed in the 2026-08 MCP cleanup — instead of mislabeling them as
- * Claude Code.
+ * The activity chip shows the named agent's name (agentName), not the
+ * provider label. The provider label is secondary detail in the tooltip.
+ * Previously the chip rendered providerLabel(provider) instead of agentName
+ * (bug: "On affiche le nom du provider au lieu du nom de l'agent").
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -13,7 +11,7 @@ vi.mock("@dnd-kit/sortable", () => ({
   useSortable: () => ({
     attributes: {},
     listeners: {},
-    setNodeRef: vi.fn(),
+    setNodeRef: () => {},
     transform: null,
     transition: null,
     isDragging: false,
@@ -44,14 +42,14 @@ const baseEpic = {
   updatedAt: "2026-08-19T00:00:00.000Z",
   usCount: 3,
   usDone: 1,
-  type: "feature",
+  type: "feature" as const,
   linkedEpicId: null,
   images: null,
   readableId: null,
   releaseId: null,
 };
 
-function renderWithProvider(provider: string) {
+function renderWithActivity(provider: string, agentName = "agent 123abc") {
   render(
     <EpicCard
       epic={baseEpic}
@@ -59,7 +57,7 @@ function renderWithProvider(provider: string) {
         activity: {
           sessionId: "sess-1",
           actionType: "build",
-          agentName: "agent 123abc",
+          agentName,
           provider,
         },
       }}
@@ -68,39 +66,46 @@ function renderWithProvider(provider: string) {
   return screen.getByTestId("epic-activity-epic-1");
 }
 
-describe("EpicCard provider label", () => {
-  it("labels an Oh My Pi session as Oh My Pi", () => {
-    expect(renderWithProvider("oh-my-pi")).toHaveTextContent("Oh My Pi");
+describe("EpicCard agent name (not provider label) on activity chip", () => {
+  it("shows the agent name for an Oh My Pi session, not Oh My Pi", () => {
+    const indicator = renderWithActivity("oh-my-pi", "FlashOMP");
+    expect(indicator).toHaveTextContent("FlashOMP");
+    expect(indicator).toHaveTextContent("Build \u00b7 FlashOMP");
   });
 
-  it("labels a Codex session as Codex", () => {
-    expect(renderWithProvider("codex")).toHaveTextContent("Codex");
+  it("shows the agent name for a Codex session", () => {
+    const indicator = renderWithActivity("codex", "Atlas");
+    expect(indicator).toHaveTextContent("Atlas");
+    expect(indicator).toHaveTextContent("Build \u00b7 Atlas");
   });
 
-  it("keeps the established Claude Code label", () => {
-    expect(renderWithProvider("claude-code")).toHaveTextContent("Claude Code");
+  it("shows the agent name for a Claude Code session", () => {
+    const indicator = renderWithActivity("claude-code", "Sparrow");
+    expect(indicator).toHaveTextContent("Sparrow");
+    expect(indicator).toHaveTextContent("Build \u00b7 Sparrow");
   });
 
-  it("keeps the Gemini abbreviation for legacy gemini-cli rows", () => {
-    expect(renderWithProvider("gemini-cli")).toHaveTextContent("Gemini");
+  it("shows the agent name for a legacy gemini-cli row", () => {
+    const indicator = renderWithActivity("gemini-cli", "GeminiAgent");
+    expect(indicator).toHaveTextContent("GeminiAgent");
+    expect(indicator).toHaveTextContent("Build \u00b7 GeminiAgent");
   });
 
-  it("shows the raw string for the removed pi provider, not a Claude Code mislabel", () => {
-    const indicator = renderWithProvider("pi");
-    expect(indicator).toHaveTextContent("pi");
-    expect(indicator).not.toHaveTextContent("Pi");
-    expect(indicator).not.toHaveTextContent("Claude Code");
+  it("shows the agent name for removed pi provider", () => {
+    const indicator = renderWithActivity("pi", "NinferOMP");
+    expect(indicator).toHaveTextContent("NinferOMP");
+    expect(indicator).toHaveTextContent("Build \u00b7 NinferOMP");
   });
 
-  it("shows the raw string for the removed opencode provider, not a Claude Code mislabel", () => {
-    const indicator = renderWithProvider("opencode");
-    expect(indicator).toHaveTextContent("opencode");
-    expect(indicator).not.toHaveTextContent("Claude Code");
+  it("shows the agent name for removed opencode provider", () => {
+    const indicator = renderWithActivity("opencode", "CustomAgent");
+    expect(indicator).toHaveTextContent("CustomAgent");
+    expect(indicator).toHaveTextContent("Build \u00b7 CustomAgent");
   });
 
-  it("falls back to the raw value for an unknown provider", () => {
-    expect(renderWithProvider("some-future-cli")).toHaveTextContent(
-      "some-future-cli",
-    );
+  it("shows the agent name for an unknown provider", () => {
+    const indicator = renderWithActivity("some-future-cli", "FutureAgent");
+    expect(indicator).toHaveTextContent("FutureAgent");
+    expect(indicator).not.toHaveTextContent("some-future-cli");
   });
 });
