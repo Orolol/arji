@@ -22,6 +22,7 @@ const {
   agentSessions,
   ticketComments,
   reviewComments,
+  ticketDependencies,
 } = await import("@/lib/db/schema");
 const {
   loadAutoModeBoard,
@@ -166,9 +167,24 @@ function addOpenReviewComment(epicId: string): void {
     .run();
 }
 
+function addDependency(ticketId: string, dependsOnTicketId: string): void {
+  db.insert(ticketDependencies)
+    .values({
+      id: nextId("dep"),
+      ticketId,
+      dependsOnTicketId,
+      projectId: PROJECT_ID,
+      scopeType: "project",
+      scopeId: PROJECT_ID,
+      createdAt: at(0),
+    })
+    .run();
+}
+
 beforeEach(() => {
   db.delete(reviewComments).run();
   db.delete(ticketComments).run();
+  db.delete(ticketDependencies).run();
   db.delete(agentSessions).run();
   db.delete(userStories).run();
   db.delete(epics).run();
@@ -182,17 +198,33 @@ beforeEach(() => {
 /* ------------------------------------------------------------------ */
 
 describe("selectBuildCandidates", () => {
-  it("picks backlog, todo and in_progress epics without stories, epic-scoped", () => {
+  it("picks todo and in_progress epics without stories, epic-scoped", () => {
     addEpic({ id: "e-todo", status: "todo" });
     addEpic({ id: "e-progress", status: "in_progress" });
     addEpic({ id: "e-backlog", status: "backlog" });
     addEpic({ id: "e-review", status: "review" });
 
     const ids = selectBuildCandidates(PROJECT_ID).map((c) => c.ticketId);
-    expect(ids.sort()).toEqual(["e-backlog", "e-progress", "e-todo"]);
+    expect(ids.sort()).toEqual(["e-progress", "e-todo"]);
     expect(
       selectBuildCandidates(PROJECT_ID).every((c) => c.scope === "epic")
     ).toBe(true);
+  });
+
+  it("never builds a backlog epic, even when its stories are ready: the execution queue starts at To Do", () => {
+    addEpic({ id: "e-backlog", status: "backlog" });
+    addStory({ id: "s-b", epicId: "e-backlog", status: "todo" });
+
+    expect(selectBuildCandidates(PROJECT_ID)).toEqual([]);
+  });
+
+  it("never builds a storyless backlog epic", () => {
+    addEpic({ id: "e-backlog", status: "backlog" });
+    addEpic({ id: "e-todo", status: "todo" });
+
+    expect(selectBuildCandidates(PROJECT_ID).map((c) => c.ticketId)).toEqual([
+      "e-todo",
+    ]);
   });
 
   it("yields one story-scoped candidate for an epic that has stories", () => {
@@ -218,17 +250,17 @@ describe("selectBuildCandidates", () => {
     expect(selectBuildCandidates(PROJECT_ID)[0].userStoryId).toBe("s2");
   });
 
-  it("orders by epic priority DESC then position ASC", () => {
-    addEpic({ id: "low", status: "todo", priority: 0, position: 0 });
-    addEpic({ id: "high", status: "todo", priority: 3, position: 5 });
-    addEpic({ id: "mid-a", status: "todo", priority: 1, position: 2 });
-    addEpic({ id: "mid-b", status: "todo", priority: 1, position: 1 });
+  it("orders by position only: priority is a badge, not a scheduling key", () => {
+    addEpic({ id: "pos-0", status: "todo", priority: 5, position: 0 });
+    addEpic({ id: "pos-5", status: "todo", priority: 0, position: 5 });
+    addEpic({ id: "pos-3", status: "todo", priority: 4, position: 3 });
 
+    // The "Sort by priority" button makes priority visible in the queue by
+    // rewriting positions; the supervisor only ever reads positions.
     expect(selectBuildCandidates(PROJECT_ID).map((c) => c.ticketId)).toEqual([
-      "high",
-      "mid-b",
-      "mid-a",
-      "low",
+      "pos-0",
+      "pos-3",
+      "pos-5",
     ]);
   });
 
@@ -286,6 +318,57 @@ describe("selectBuildCandidates", () => {
 
     expect(selectBuildCandidates(PROJECT_ID).map((c) => c.ticketId)).toEqual([
       "e1",
+    ]);
+  });
+});
+
+describe("dependency gate", () => {
+  it("skips a candidate while a direct prerequisite is still in flight", () => {
+    addEpic({ id: "e-prereq", status: "in_progress", position: 0 });
+    addEpic({ id: "e-dep", status: "todo", position: 1 });
+    addDependency("e-dep", "e-prereq");
+
+    expect(selectBuildCandidates(PROJECT_ID).map((c) => c.ticketId)).toEqual([
+      "e-prereq",
+    ]);
+  });
+
+  it("blocks transitively: a two-hop chain holds the leaf", () => {
+    addEpic({ id: "e-root", status: "in_progress", position: 0 });
+    addEpic({ id: "e-mid", status: "todo", position: 1 });
+    addEpic({ id: "e-leaf", status: "todo", position: 2 });
+    addDependency("e-mid", "e-root");
+    addDependency("e-leaf", "e-mid");
+
+    expect(selectBuildCandidates(PROJECT_ID).map((c) => c.ticketId)).toEqual([
+      "e-root",
+    ]);
+  });
+
+  it("a candidate stays blocked while its prerequisite sits in review", () => {
+    addEpic({ id: "e-prereq", status: "review", branchName: "feat/e-prereq" });
+    addEpic({ id: "e-dep", status: "todo" });
+    addDependency("e-dep", "e-prereq");
+    addSession({
+      epicId: "e-prereq",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(10),
+      endedAt: at(11),
+    });
+
+    // Review is in flight, not delivered — the walk stops only at
+    // done/released.
+    expect(selectBuildCandidates(PROJECT_ID)).toEqual([]);
+  });
+
+  it("releases a candidate whose prerequisite is delivered", () => {
+    addEpic({ id: "e-done", status: "done" });
+    addEpic({ id: "e-dep", status: "todo" });
+    addDependency("e-dep", "e-done");
+
+    expect(selectBuildCandidates(PROJECT_ID).map((c) => c.ticketId)).toEqual([
+      "e-dep",
     ]);
   });
 });
@@ -1010,8 +1093,9 @@ describe("query budget", () => {
     try {
       const board = loadAutoModeBoard(PROJECT_ID);
       const queriesForBoard = selectSpy.mock.calls.length;
-      // Nine board queries; the sub-selects of the two window-function CTEs
-      // are built through the same `select` entry point, hence the ceiling.
+      // Ten board queries (nine + the dependency graph); the sub-selects of
+      // the two window-function CTEs are built through the same `select`
+      // entry point, hence the ceiling.
       expect(queriesForBoard).toBeLessThanOrEqual(12);
 
       selectSpy.mockClear();

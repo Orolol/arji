@@ -170,5 +170,62 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
     [projectId, loadEpics]
   );
 
-  return { board, loading, moveEpic, refresh: loadEpics };
+  /**
+   * "Sort by priority": rewrite the column's positions so the board's
+   * display order (position ASC) becomes priority DESC. Ties keep their
+   * current display order (stable sort), so the button is deterministic.
+   * Same bulk write as drag-and-drop — no status change, no transitions —
+   * and Full Auto then executes the column in exactly the order the board
+   * shows, which is the point of position being the source of truth.
+   */
+  const sortColumnByPriority = useCallback(
+    (column: KanbanStatus) => {
+      if (column === "released") return;
+
+      // Optimistic half: the reorder route rewrites the same positions.
+      setBoard((prev) => {
+        const next = {
+          columns: { ...prev.columns },
+          releaseGroups: prev.releaseGroups,
+        };
+        next.columns[column] = [...prev.columns[column]].sort(
+          (a, b) => b.priority - a.priority
+        );
+        return next;
+      });
+
+      setTimeout(() => {
+        setBoard((current) => {
+          const reorderItems: ReorderItem[] = current.columns[column].map(
+            (epic, idx) => ({
+              id: epic.id,
+              status: column,
+              position: idx,
+            })
+          );
+
+          fetch(`/api/projects/${projectId}/epics/reorder`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ items: reorderItems }),
+          })
+            .then(async (res) => {
+              if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                onMoveErrorRef.current?.(data.error || "Failed to sort column");
+                loadEpics();
+              }
+            })
+            .catch(() => {
+              loadEpics();
+            });
+
+          return current;
+        });
+      }, 0);
+    },
+    [projectId, loadEpics]
+  );
+
+  return { board, loading, moveEpic, sortColumnByPriority, refresh: loadEpics };
 }

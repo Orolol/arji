@@ -102,7 +102,8 @@ export function Board({
   hideReleased = false,
   onVisibleCountChange,
 }: BoardProps) {
-  const { board, loading, moveEpic, refresh } = useKanban(projectId, { onMoveError });
+  const { board, loading, moveEpic, sortColumnByPriority, refresh } =
+    useKanban(projectId, { onMoveError });
   // Optimistic overlay on the server-side read cursors: opening a ticket
   // clears its unread dot immediately, before the /api/inbox/read POST from
   // EpicDetail lands and the next board refresh returns the moved cursor.
@@ -419,6 +420,14 @@ export function Board({
                 epicViews={epicViews}
                 dragDisabled={filtersActive}
                 filtersActive={filtersActive}
+                onSortByPriority={
+                  // The two columns Full Auto executes: sorting by priority
+                  // rewrites positions, so priority order becomes the order
+                  // the supervisor runs (the AC's "what you see is what runs").
+                  status === "backlog" || status === "todo"
+                    ? () => sortColumnByPriority(status)
+                    : undefined
+                }
               />
             )
           )}

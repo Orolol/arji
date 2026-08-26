@@ -289,6 +289,51 @@ export function getTransitiveDependencies(
 }
 
 /**
+ * Which of `ticketIds` have at least one direct or transitive prerequisite
+ * that is not delivered (done/released)?
+ *
+ * Pure, pre-loaded twin of the batch route's guard: the graph and the status
+ * map are passed in once, so a whole sweep is classified without N+1
+ * round-trips. The walk shares `getTransitiveDependencies`' stop rule — a
+ * delivered prerequisite ends the branch, because everything behind it was
+ * delivered before it. A prerequisite missing from `statusOf` is treated as
+ * undelivered (conservative block, like the DB twin's `?? null`).
+ */
+export function findTicketsBlockedByDependencies(
+  graph: Map<string, Set<string>>,
+  statusOf: Map<string, string | null>,
+  ticketIds: Iterable<string>
+): Set<string> {
+  const blocked = new Set<string>();
+
+  for (const ticketId of ticketIds) {
+    const queue: string[] = [...(graph.get(ticketId) ?? [])];
+    const visited = new Set<string>();
+    let isBlocked = false;
+
+    while (queue.length > 0) {
+      const dep = queue.pop()!;
+      if (visited.has(dep)) continue;
+      visited.add(dep);
+
+      const status = statusOf.get(dep) ?? null;
+      if (status !== "done" && status !== "released") {
+        isBlocked = true;
+        break;
+      }
+
+      const deps = graph.get(dep);
+      if (deps) queue.push(...deps);
+    }
+
+    if (isBlocked) blocked.add(ticketId);
+  }
+
+  return blocked;
+}
+
+
+/**
  * Compute a topological ordering for the given tickets based on their
  * dependency graph. Returns tickets in execution order (dependencies first).
  * Returns layers (tiers) for parallel execution: tickets in the same layer

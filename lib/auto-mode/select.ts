@@ -7,6 +7,10 @@ import {
   ticketComments,
   userStories,
 } from "@/lib/db/schema";
+import {
+  findTicketsBlockedByDependencies,
+  loadProjectGraph,
+} from "@/lib/dependencies/validation";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
 import { listPipelineRunsByProject } from "@/lib/pipeline/registry";
@@ -24,7 +28,7 @@ import { autoModeRegistry } from "./registry";
  * what that split is for.
  *
  * Every selector shares one board snapshot built from a FIXED number of
- * queries (nine), never one lookup per ticket: the sweep runs every 15s on a
+ * queries (ten), never one lookup per ticket: the sweep runs every 15s on a
  * board that can hold hundreds of tickets, so an N+1 here would be a
  * per-sweep table scan storm.
  *
@@ -52,8 +56,14 @@ import { autoModeRegistry } from "./registry";
 
 const ACTIVE_SESSION_STATUSES = ["queued", "running"];
 
-/** Epic statuses the supervisor may dispatch a build for. */
-const BUILDABLE_EPIC_STATUSES = new Set(["backlog", "todo", "in_progress"]);
+/**
+ * Epic statuses the supervisor may dispatch a build for. Backlog is NOT
+ * buildable: the board's To Do / In Progress columns are the only execution
+ * queue, and a backlog ticket is not in the queue. Position — not priority —
+ * is the queue's order (see compareEpics); "Sort by priority" makes
+ * priority visible in the order by rewriting positions in bulk.
+ */
+const BUILDABLE_EPIC_STATUSES = new Set(["todo", "in_progress"]);
 
 /** Story statuses the supervisor may dispatch a build for. */
 const BUILDABLE_STORY_STATUSES = new Set(["todo", "in_progress"]);
@@ -125,7 +135,6 @@ export interface AutoMergeCandidate {
 interface EpicRow {
   id: string;
   status: string | null;
-  priority: number | null;
   position: number | null;
   branchName: string | null;
   title: string;
@@ -203,6 +212,13 @@ export interface AutoModeBoard {
    * dispatched to repair. Merge-only: they stay buildable and reviewable.
    */
   mergeDeferredEpicIds: Set<string>;
+  /**
+   * Dependency graph for the build selector's prerequisite gate: ticket →
+   * its direct prerequisites. The schema's FKs scope both ends to epics
+   * (epic-to-epic only), so a story's own prerequisites never block a
+   * build — the parent epic's prerequisites already cover its stories.
+   */
+  dependencyGraph: Map<string, Set<string>>;
 }
 
 /**
@@ -234,7 +250,7 @@ function loadRegistryExclusions(projectId: string): {
 }
 
 /**
- * One board snapshot per sweep. Nine queries, all bounded by the project —
+ * One board snapshot per sweep. Ten queries, all bounded by the project —
  * never one per ticket.
  */
 export function loadAutoModeBoard(projectId: string): AutoModeBoard {
@@ -243,7 +259,6 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     .select({
       id: epics.id,
       status: epics.status,
-      priority: epics.priority,
       position: epics.position,
       branchName: epics.branchName,
       title: epics.title,
@@ -506,6 +521,12 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     openReviewCommentsByEpic.set(row.epicId, Number(row.openCount ?? 0));
   }
 
+  // 10. The dependency graph, for the build selector's prerequisite gate:
+  // findTicketsBlockedByDependencies walks it in memory, applying the same
+  // stop-at-delivered rule the batch route applies — with no query per
+  // candidate.
+  const dependencyGraph = loadProjectGraph(projectId);
+
   const { blockedEpicIds, projectBlocked } = loadRegistryExclusions(projectId);
 
   // An epic with merge work outstanding is off-limits to EVERY selector: git
@@ -531,6 +552,7 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     openReviewCommentsByEpic,
     parkedTicketIds: autoModeRegistry.parkedTicketIds(projectId),
     mergeDeferredEpicIds: autoModeRegistry.mergeDeferredEpicIds(projectId),
+    dependencyGraph,
   };
 }
 
@@ -550,10 +572,14 @@ function isEpicSelectable(board: AutoModeBoard, epic: EpicRow): boolean {
   return true;
 }
 
-/** Board order: priority DESC, then position ASC (the kanban reading order). */
+/**
+ * Board order: position ASC — the column's visual reading order. Position is
+ * the single source of truth for execution order: what the user sees is what
+ * the supervisor runs (WYSIWYG). Priority stays a badge and a filter, never
+ * a scheduling criterion; the "Sort by priority" button makes it visible in
+ * the order by rewriting positions in bulk.
+ */
 function compareEpics(a: EpicRow, b: EpicRow): number {
-  const priority = (b.priority ?? 0) - (a.priority ?? 0);
-  if (priority !== 0) return priority;
   return (a.position ?? 0) - (b.position ?? 0);
 }
 
@@ -604,6 +630,12 @@ export function hasFreshCleanReview(facts: SessionFacts | undefined): boolean {
  * `getRunningSessionForTarget` in story scope also matches the parent epic's
  * sessions, so two stories of one epic can never run in parallel anyway.
  * An epic WITHOUT stories yields itself, epic-scoped.
+ *
+ * Prerequisite gate: a candidate whose direct or transitive prerequisite is
+ * not done/released is skipped this sweep. The decision is the shared walk
+ * in lib/dependencies/validation.ts, run in memory over the snapshot's
+ * graph + status map — one sweep, no query per candidate. A prerequisite
+ * missing from the status map blocks conservatively.
  */
 export function selectBuildCandidates(
   projectId: string,
@@ -611,13 +643,29 @@ export function selectBuildCandidates(
 ): AutoBuildCandidate[] {
   const candidates: AutoBuildCandidate[] = [];
 
+  // Prerequisite gate, pre-computed once for the whole sweep. Statuses come
+  // from the snapshot itself — the board already read them in query 1.
+  const statusOf = new Map<string, string | null>(
+    board.epics.map((epic) => [epic.id, epic.status ?? null])
+  );
+  const blockedByDeps = findTicketsBlockedByDependencies(
+    board.dependencyGraph,
+    statusOf,
+    board.epics.map((epic) => epic.id)
+  );
+
   for (const epic of [...board.epics].sort(compareEpics)) {
     if (!isEpicSelectable(board, epic)) continue;
+    if (blockedByDeps.has(epic.id)) continue;
 
     const stories = board.storiesByEpic.get(epic.id) ?? [];
 
+    // The epic itself must be in the execution queue. This covers both
+    // branches: a story-scoped dispatch would otherwise pull a Backlog epic
+    // into the queue through the shared dispatch transition.
+    if (!BUILDABLE_EPIC_STATUSES.has(epic.status ?? "")) continue;
+
     if (stories.length === 0) {
-      if (!BUILDABLE_EPIC_STATUSES.has(epic.status ?? "")) continue;
       candidates.push({
         scope: "epic",
         epicId: epic.id,
@@ -629,8 +677,8 @@ export function selectBuildCandidates(
       continue;
     }
 
-    // Story scope: the first buildable story by position. The parent may start
-    // in backlog/todo; the shared dispatch transition moves both parent and
+    // Story scope: the first buildable story by position. The parent may
+    // start in todo; the shared dispatch transition moves both parent and
     // story to in_progress before the queued session row is created.
     const next = stories.find((story) => {
       if (!BUILDABLE_STORY_STATUSES.has(story.status ?? "")) return false;
