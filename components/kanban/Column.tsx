@@ -148,6 +148,25 @@ function SectionHeader({
   );
 }
 
+/**
+ * The slot the dragged card would land in.
+ *
+ * Rendered LAST in whatever list it belongs to, because that is where the
+ * card actually goes: dropping on the column body (rather than on another
+ * card) resolves to `targetIndex = column.length` in the Board's
+ * `handleDragEnd` — an append. A placeholder drawn at the top would promise
+ * a rank the drop does not deliver.
+ */
+function DropPlaceholder({ status }: { status: KanbanStatus }) {
+  return (
+    <div
+      className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
+      aria-hidden="true"
+      data-testid={`column-drop-target-${status}`}
+    />
+  );
+}
+
 export function Column({
   status,
   epics,
@@ -237,19 +256,16 @@ export function Column({
         >
           <div className="flex min-h-[50px] flex-col gap-[12px]">
             {/* Drop target: the slot the card would land in, not a ring
-                around the whole column. For sectioned columns, dropping onto
-                the column body appends to the end, so the placeholder renders
-                at the bottom of the last section. */}
+                around the whole column. Dropping on the column body appends,
+                so the placeholder always trails the cards — at the bottom of
+                the column, or of the last section when the column is split. */}
             {epics.length === 0 ? (
               <div
                 className="rounded-[10px] border border-dashed border-border p-[15px] text-[13px] text-muted-foreground"
                 data-testid={`column-empty-${status}`}
               >
                 {isOver ? (
-                  <div
-                    className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
-                    aria-hidden="true"
-                  />
+                  <DropPlaceholder status={status} />
                 ) : filtersActive ? (
                   "Nothing matches the filters."
                 ) : (
@@ -296,16 +312,16 @@ export function Column({
                       section.epics.map(renderCard)
                     )}
                     {isOver && isLastSection && (
-                      <div
-                        className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
-                        aria-hidden="true"
-                      />
+                      <DropPlaceholder status={status} />
                     )}
                   </div>
                 );
               })
             ) : (
-              epics.map(renderCard)
+              <>
+                {epics.map(renderCard)}
+                {isOver && <DropPlaceholder status={status} />}
+              </>
             )}
           </div>
         </SortableContext>
