@@ -142,7 +142,11 @@ class ClaudeProcessManager {
             userStoryId: row.userStoryId,
             agentType: row.agentType,
           });
-          options.mcp = buildMcpSpawnConfig({ token, provider });
+          options.mcp = buildMcpSpawnConfig({
+            token,
+            agentType: row.agentType,
+            provider,
+          });
           options.prompt +=
             "\n" +
             arijToolsSection(row.agentType ?? null, arijMcpToolPrefix(provider));

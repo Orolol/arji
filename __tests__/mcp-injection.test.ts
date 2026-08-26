@@ -38,6 +38,7 @@ import { arijToolsSection } from "@/lib/claude/prompt-sections";
 import { isMcpExemptAgentType } from "@/lib/workflow/dreaming-constants";
 import {
   ARIJ_MCP_ALLOWED_TOOL_NAMES,
+  allowedToolNamesForAgentType,
   ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
   ARIJ_MCP_SERVER_NAME,
   arijMcpToolName,
@@ -145,6 +146,11 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "mcp__arij__ask_question",
       "mcp__arij__submit_findings",
       "mcp__arij__submit_grading",
+      "mcp__arij__set_priority",
+      "mcp__arij__reorder_tickets",
+      "mcp__arij__add_dependency",
+      "mcp__arij__remove_dependency",
+      "mcp__arij__promote_ticket",
     ]);
   });
 
@@ -229,6 +235,63 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "Write",
       ...ARIJ_MCP_ALLOWED_TOOL_NAMES,
     ]);
+  });
+});
+
+describe("allowedToolNamesForAgentType", () => {
+  it("gives an ordinary agent type the full agent toolset", () => {
+    expect(allowedToolNamesForAgentType("build")).toEqual([
+      ...ARIJ_MCP_ALLOWED_TOOL_NAMES,
+    ]);
+    expect(allowedToolNamesForAgentType(null)).toEqual([
+      ...ARIJ_MCP_ALLOWED_TOOL_NAMES,
+    ]);
+  });
+
+  /**
+   * A refinement pass is confined to Backlog/To do by an engine guard keyed
+   * on `source: "refinement"`. update_ticket_status writes with
+   * `source: "api"`, so it bypasses that guard entirely — the spawn must not
+   * be offered it. (The route refuses it too; that is the actual guard.)
+   */
+  it("withholds update_ticket_status from a refinement pass", () => {
+    const tools = allowedToolNamesForAgentType("refinement");
+    expect(tools).not.toContain("mcp__arij__update_ticket_status");
+    // Its own board tools are untouched.
+    for (const tool of [
+      "mcp__arij__promote_ticket",
+      "mcp__arij__reorder_tickets",
+      "mcp__arij__set_priority",
+      "mcp__arij__add_dependency",
+      "mcp__arij__remove_dependency",
+      "mcp__arij__post_comment",
+    ]) {
+      expect(tools).toContain(tool);
+    }
+    expect(tools).toHaveLength(ARIJ_MCP_ALLOWED_TOOL_NAMES.length - 1);
+  });
+
+  it("is applied by buildMcpSpawnConfig", () => {
+    const config = buildMcpSpawnConfig({
+      token: "t",
+      agentType: "refinement",
+    });
+    expect(config.allowedToolNames).not.toContain(
+      "mcp__arij__update_ticket_status"
+    );
+    expect(
+      buildMcpSpawnConfig({ token: "t", agentType: "build" }).allowedToolNames
+    ).toContain("mcp__arij__update_ticket_status");
+
+    const ompConfig = buildMcpSpawnConfig({
+      token: "t",
+      agentType: "refinement",
+      provider: "oh-my-pi",
+    });
+    expect(ompConfig.allowedToolNames).not.toContain(
+      "mcp__arij_update_ticket_status",
+    );
+    expect(ompConfig.allowedToolNames).toContain("mcp__arij_promote_ticket");
   });
 });
 
@@ -661,6 +724,11 @@ describe("buildMcpSpawnConfig", () => {
       "mcp__arij_ask_question",
       "mcp__arij_submit_findings",
       "mcp__arij_submit_grading",
+      "mcp__arij_set_priority",
+      "mcp__arij_reorder_tickets",
+      "mcp__arij_add_dependency",
+      "mcp__arij_remove_dependency",
+      "mcp__arij_promote_ticket",
     ]);
     // spelling is the ONLY divergence — server, shim and env are unchanged
     expect(config.env).toEqual(buildMcpSpawnConfig({ token: TOKEN }).env);

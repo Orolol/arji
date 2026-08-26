@@ -173,3 +173,25 @@ export function getProjectDependencies(projectId: string) {
     .where(eq(ticketDependencies.projectId, projectId))
     .all();
 }
+/**
+ * Delete a single dependency edge (ticket -> dependsOnTicket).
+ * The delete is project-scoped; a missing edge is a no-op.
+ * Returns how many rows were removed (0 or 1 — the edge is unique).
+ */
+export function deleteDependencyEdge(
+  projectId: string,
+  ticketId: string,
+  dependsOnTicketId: string
+): number {
+  const result = db
+    .delete(ticketDependencies)
+    .where(
+      and(
+        eq(ticketDependencies.projectId, projectId),
+        eq(ticketDependencies.ticketId, ticketId),
+        eq(ticketDependencies.dependsOnTicketId, dependsOnTicketId)
+      )
+    )
+    .run();
+  return Number(result.changes ?? 0);
+}

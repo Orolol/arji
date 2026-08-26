@@ -64,10 +64,33 @@ export interface TransitionContext {
   /** The actor initiating the transition */
   actor: "user" | "agent" | "system";
   /** The source route/action triggering this transition */
-  source?: "approve" | "merge" | "drag" | "api" | "build" | "review" | "release";
+  source?:
+    | "approve"
+    | "merge"
+    | "drag"
+    | "api"
+    | "build"
+    | "review"
+    | "release"
+    | "refinement";
 }
 
 const TRANSITION_GUARDS: TransitionGuard[] = [
+  // The board refinement re-pass may only shuffle work between Backlog and
+  // To do. This is the guardrail from the epic, and it lives here rather
+  // than in the refinement prompt or its MCP routes on purpose: an agent
+  // prompt is not a guard, and a route-level check only covers the routes
+  // that remember to call it. Anything claiming source "refinement" is held
+  // to the two planning columns, whatever asked for the move.
+  (ctx) => {
+    if (ctx.source !== "refinement") return null;
+    const planning = (status: KanbanStatus) =>
+      status === "backlog" || status === "todo";
+    if (!planning(ctx.fromStatus) || !planning(ctx.toStatus)) {
+      return "Refinement may only move tickets between Backlog and To do; In Progress, Review, Done and Released are out of its scope.";
+    }
+    return null;
+  },
   // A build session owns in_progress until its terminal handler promotes or
   // holds the ticket. Letting a concurrent drag move it would recreate the
   // active-session/orphaned-column state this engine is meant to prevent.

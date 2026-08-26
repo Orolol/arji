@@ -24,6 +24,7 @@ import { tryExportArjiJson } from "@/lib/sync/export";
 import { db } from "@/lib/db";
 import { userStories } from "@/lib/db/schema";
 import type { KanbanStatus } from "@/lib/types/kanban";
+import { REFINEMENT_AGENT_TYPE } from "@/lib/refinement/constants";
 
 const bodySchema = z
   .object({
@@ -36,6 +37,28 @@ const bodySchema = z
 export async function POST(request: NextRequest) {
   const auth = requireMcpToken(request);
   if (isErrorResponse(auth)) return auth;
+
+  // A board refinement pass is confined to Backlog/To do by the
+  // `source: "refinement"` engine guard. This route writes with
+  // `source: "api"` and resolves any ticket in the project from an explicit
+  // ticket_id, so it would walk straight past that guard — a refinement
+  // session could move work out of Review or Done. Its channel for column
+  // moves is promote_ticket, which is pinned to the two planning columns and
+  // demands the missing question on a demotion.
+  //
+  // The injected allowlist also withholds this tool from refinement spawns
+  // (AGENT_TYPE_WITHHELD_TOOL_NAMES); that shapes what the model reaches
+  // for, this is what makes it impossible.
+  if (auth.agentType === REFINEMENT_AGENT_TYPE) {
+    return NextResponse.json(
+      {
+        error:
+          "update_ticket_status is not available to a board refinement pass. Use promote_ticket to move a ticket between Backlog and To do.",
+        code: "REFINEMENT_TOOL_FORBIDDEN",
+      },
+      { status: 403 }
+    );
+  }
 
   const validated = await validateBody(bodySchema, request);
   if (isErrorResponse(validated)) return validated;

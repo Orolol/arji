@@ -12,6 +12,7 @@ import {
   DREAMING_AGENT_TYPE,
   MEMORY_WRITER_AGENT_TYPES,
 } from "@/lib/workflow/dreaming-constants";
+import { REFINEMENT_AGENT_TYPE } from "@/lib/refinement/constants";
 
 export interface UnifiedActivity {
   id: string;
@@ -26,7 +27,8 @@ export interface UnifiedActivity {
     | "release"
     | "memory"
     | "qa"
-    | "grading";
+    | "grading"
+    | "refinement";
   label: string;
   status: string;
   mode: string;
@@ -62,6 +64,13 @@ function inferDbActivityType(row: {
 
   if (row.agentType === "grading") {
     return "grading";
+  }
+
+  // Board refinement carries no epicId and runs in code mode, so neither the
+  // ticket join nor the mode heuristic below would classify it — without
+  // this the monitor would announce a planning pass as "Building".
+  if (row.agentType === REFINEMENT_AGENT_TYPE) {
+    return "refinement";
   }
 
   // Review agents run in code mode (the no-edit rule is a prompt contract),
@@ -138,6 +147,11 @@ function buildDbActivityLabel(
     return row.epicTitle
       ? `Grading: ${row.epicTitle}`
       : "Grading acceptance criteria";
+  }
+
+  if (type === "refinement") {
+    // Project-level pass over the planning columns — no ticket to name.
+    return "Refining the board";
   }
 
   if (type === "qa") {

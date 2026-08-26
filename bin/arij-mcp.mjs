@@ -345,6 +345,172 @@ const AGENT_TOOLS = [
       additionalProperties: false,
     },
   },
+  // --- Board refinement -------------------------------------------------
+  // These five reshape the planning half of the board. Every one requires a
+  // `reason`: Arij records it in the ticket's activity log, so a ticket the
+  // agent moved always explains itself. They are refused outside the
+  // Backlog and To do columns.
+  {
+    name: "set_priority",
+    description:
+      "Set a Backlog/To do ticket's priority (0 low, 1 medium, 2 high, 3 critical). Refused for tickets in in_progress, review, done or released.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticket_id: {
+          type: "string",
+          minLength: 1,
+          description: "Id of the ticket to re-prioritise, in this project.",
+        },
+        priority: {
+          type: "integer",
+          enum: [0, 1, 2, 3],
+          // Must stay in sync with PRIORITY_LABELS (lib/types/kanban.ts) —
+          // this shim is plain .mjs and cannot import it. This string is the
+          // agent's only semantic anchor for the scale, so an off-by-one here
+          // silently inflates every priority the agent sets.
+          description: "0 low, 1 medium, 2 high, 3 critical.",
+        },
+        reason: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
+          description:
+            "Required justification, recorded in the ticket activity log.",
+        },
+      },
+      required: ["ticket_id", "priority", "reason"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "reorder_tickets",
+    description:
+      "Re-rank Backlog/To do tickets by writing their board positions (0 = top of the column). Position is the board's single ordering source, the same one drag-and-drop writes. Send every ticket of the column you are ordering, each id once; this never changes a ticket's column.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          minItems: 1,
+          maxItems: 200,
+          description: "The tickets to place, with their target positions.",
+          items: {
+            type: "object",
+            properties: {
+              ticket_id: { type: "string", minLength: 1 },
+              position: {
+                type: "integer",
+                minimum: 0,
+                description: "0-based rank inside the ticket's column.",
+              },
+            },
+            required: ["ticket_id", "position"],
+            additionalProperties: false,
+          },
+        },
+        reason: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
+          description:
+            "Required justification for the new order, recorded on every ticket it moves.",
+        },
+      },
+      required: ["items", "reason"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "add_dependency",
+    description:
+      "Record that one Backlog/To do ticket depends on another (it cannot start until the other is done). Cycles are refused.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticket_id: {
+          type: "string",
+          minLength: 1,
+          description: "The dependent ticket — the one that must wait.",
+        },
+        depends_on_ticket_id: {
+          type: "string",
+          minLength: 1,
+          description: "The ticket it waits for.",
+        },
+        reason: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
+          description:
+            "Required justification for the edge, recorded in the activity log.",
+        },
+      },
+      required: ["ticket_id", "depends_on_ticket_id", "reason"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "remove_dependency",
+    description:
+      "Drop a dependency edge between two Backlog/To do tickets. Removing an edge that does not exist reports removed:false rather than failing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticket_id: {
+          type: "string",
+          minLength: 1,
+          description: "The dependent ticket the edge starts from.",
+        },
+        depends_on_ticket_id: {
+          type: "string",
+          minLength: 1,
+          description: "The ticket it currently waits for.",
+        },
+        reason: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
+          description:
+            "Required justification, recorded in the activity log.",
+        },
+      },
+      required: ["ticket_id", "depends_on_ticket_id", "reason"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "promote_ticket",
+    description:
+      "Move a ticket between Backlog and To do: promote it to 'todo' when it is ready to be picked up, or send it back to 'backlog' when it is not. Sending one back REQUIRES `question` — the missing answer — which is posted on the ticket. No other column is reachable through this tool.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticket_id: { type: "string", minLength: 1 },
+        status: {
+          type: "string",
+          enum: ["backlog", "todo"],
+          description: "Target column.",
+        },
+        reason: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
+          description:
+            "Required justification, recorded in the ticket activity log.",
+        },
+        question: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2000,
+          description:
+            "Required when status is 'backlog': the open question that has to be answered before the ticket is ready.",
+        },
+      },
+      required: ["ticket_id", "status", "reason"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 /**

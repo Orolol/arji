@@ -65,6 +65,16 @@ export const ARIJ_MCP_AGENT_TOOLS = [
   "ask_question",
   "submit_findings",
   "submit_grading",
+  // Board-refinement tools. Agent toolset only: they reshape the planning
+  // half of the board (priority, execution order, dependency edges, and the
+  // Backlog <-> To do promotion), which is not something a chat turn should
+  // be able to do — see ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES below, which
+  // deliberately does not list them, and the AGENT_ONLY check the routes run.
+  "set_priority",
+  "reorder_tickets",
+  "add_dependency",
+  "remove_dependency",
+  "promote_ticket",
 ] as const;
 
 /**
@@ -121,6 +131,41 @@ export const ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES = ARIJ_MCP_CHAT_TOOLS.map((t) =>
 
 /** Which shim toolset a spawn config selects (ARIJ_MCP_TOOLSET env). */
 export type ArijMcpToolset = "agent" | "chat";
+
+/**
+ * Tools withheld from specific agent types.
+ *
+ * The allowlist is otherwise flat per toolset, which is a hole once an agent
+ * type has a guardrail keyed on its OWN write path: a board refinement pass
+ * is confined to Backlog/To do by the `source: "refinement"` engine guard,
+ * but `update_ticket_status` writes with `source: "api"` and resolves any
+ * ticket in the project from an explicit ticket_id — so it walks straight
+ * past that guard and can move work out of Review or Done.
+ *
+ * Withholding the tool here means the spawn is never offered it. The route
+ * itself also refuses refinement tokens (app/api/mcp/update-ticket-status),
+ * which is the actual guard: an allowlist shapes what the model reaches for,
+ * a server-side check is what makes it impossible.
+ */
+export const AGENT_TYPE_WITHHELD_TOOL_NAMES: Record<string, readonly string[]> =
+  {
+    // promote_ticket is refinement's channel for column moves: it is pinned
+    // to the two planning columns and demands the missing question.
+    refinement: ["update_ticket_status"],
+  };
+
+/** The agent tools a given agent type may be offered. */
+export function allowedToolNamesForAgentType(
+  agentType: string | null | undefined,
+  provider = "claude-code",
+): string[] {
+  const withheld = new Set(
+    (agentType && AGENT_TYPE_WITHHELD_TOOL_NAMES[agentType]) || []
+  );
+  return ARIJ_MCP_AGENT_TOOLS.filter((tool) => !withheld.has(tool)).map((tool) =>
+    arijMcpToolName(provider, tool),
+  );
+}
 
 /**
  * Tolerant parse of the settings row value. Settings values are
@@ -194,13 +239,15 @@ export function providerSupportsMcp(provider: string): boolean {
 export function buildMcpSpawnConfig({
   token,
   toolset = "agent",
+  agentType = null,
   provider = "claude-code",
 }: {
   token: string;
   toolset?: ArijMcpToolset;
+  /** Narrows the agent toolset — see AGENT_TYPE_WITHHELD_TOOL_NAMES. */
+  agentType?: string | null;
   provider?: string;
 }): McpSpawnConfig {
-  const tools = toolset === "chat" ? ARIJ_MCP_CHAT_TOOLS : ARIJ_MCP_AGENT_TOOLS;
   return {
     serverName: ARIJ_MCP_SERVER_NAME,
     command: process.execPath,
@@ -210,7 +257,10 @@ export function buildMcpSpawnConfig({
       ARIJ_MCP_TOKEN: token,
       ...(toolset === "chat" ? { ARIJ_MCP_TOOLSET: "chat" as const } : {}),
     },
-    allowedToolNames: tools.map((t) => arijMcpToolName(provider, t)),
+    allowedToolNames:
+      toolset === "chat"
+        ? ARIJ_MCP_CHAT_TOOLS.map((tool) => arijMcpToolName(provider, tool))
+        : allowedToolNamesForAgentType(agentType, provider),
   };
 }
 

@@ -28,7 +28,6 @@ vi.mock("child_process", () => {
     },
   };
 });
-
 import { getProvider } from "@/lib/providers";
 import { ClaudeCodeProvider } from "@/lib/providers/claude-code";
 import { CodexProvider } from "@/lib/providers/codex";
@@ -318,4 +317,3 @@ describe("CodexProvider", () => {
     expect(args.slice(0, 3)).toEqual(["exec", "resume", "cli-codex-1"]);
   });
 });
-
