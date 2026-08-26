@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { UploadZone } from "@/components/documents/UploadZone";
 import { ScanProjectDialog } from "@/components/documents/ScanProjectDialog";
 import { DocumentViewer } from "@/components/documents/DocumentViewer";
-import { ProjectMemoryCard } from "@/components/documents/ProjectMemoryCard";
 import { Button } from "@/components/ui/button";
 import { FileText, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,7 +30,7 @@ export default function DocumentsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadDocs() {
+  const loadDocs = useCallback(async () => {
     setError(null);
     const res = await fetch(`/api/projects/${projectId}/documents`);
     const data = await res.json().catch(() => ({}));
@@ -39,22 +38,16 @@ export default function DocumentsPage() {
       setError(data.error || "Failed to load documents.");
       return;
     }
-    // The learned project memory and its pre-dream snapshot live in the same
-    // table but have their own editor card — keep them out of the uploads list
-    // so they cannot be casually deleted like a reference document. The GET
-    // route filters them too; this is the same rule applied at both ends.
     const docs = (
       (data.data || []) as Array<Omit<Doc, "kind"> & { kind: string }>
     ).filter((doc) => !isInternalMemoryDocKind(doc.kind)) as Doc[];
     setDocuments(docs);
-    if (selectedDoc && !docs.some((doc) => doc.id === selectedDoc.id)) {
-      setSelectedDoc(null);
-    }
-  }
+    setSelectedDoc((prev) => (prev && !docs.some((doc) => doc.id === prev.id) ? null : prev));
+  }, [projectId]);
 
   useEffect(() => {
     loadDocs();
-  }, [projectId]);
+  }, [loadDocs]);
 
   function handleUploaded() {
     loadDocs();
@@ -189,20 +182,9 @@ export default function DocumentsPage() {
               />
             </div>
           )}
-
-          {/* Below `lg` the aside is hidden, so the memory card — and with it
-              the only manual Dream button — renders here instead. It has to
-              live INSIDE the main column: as a sibling it became a second
-              flex item on a row-direction container and sat BESIDE the
-              documents, squeezing both, which is the opposite of the stack a
-              narrow screen needs. */}
-          <div className="lg:hidden">
-            <ProjectMemoryCard projectId={projectId} />
-          </div>
         </div>
 
         <aside className="hidden w-[340px] flex-none flex-col gap-[16px] lg:flex">
-          <ProjectMemoryCard projectId={projectId} />
           <div className="flex flex-col gap-[10px] rounded-[12px] border border-border p-[16px]">
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
               Mentions

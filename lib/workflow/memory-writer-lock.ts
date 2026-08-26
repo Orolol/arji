@@ -20,16 +20,24 @@ import { agentSessions } from "@/lib/db/schema";
 import { MEMORY_WRITER_AGENT_TYPES } from "./dreaming-constants";
 
 /**
- * True when ANY memory writer ('memory_distill' or 'dreaming') is queued or
- * running for the project.
+ * The memory writer currently holding the document for the project, or null
+ * when neither writer is in progress.
  *
- * Callers must re-check this synchronously immediately before inserting their
- * session row: an `await` between the check and the insert reopens the window
- * this guard exists to close.
+ * Unlike `hasPendingMemoryWriter`, returns the session itself so callers can
+ * LINK to the busy writer — the Spec & Memory panel's "view session"
+ * affordance and the 409 body of the memory routes both point at the
+ * queued/running rewrite's session page so the user can follow it.
  */
-export function hasPendingMemoryWriter(projectId: string): boolean {
+export interface PendingMemoryWriter {
+  sessionId: string;
+  agentType: string;
+}
+
+export function getPendingMemoryWriter(
+  projectId: string
+): PendingMemoryWriter | null {
   const row = db
-    .select({ id: agentSessions.id })
+    .select({ id: agentSessions.id, agentType: agentSessions.agentType })
     .from(agentSessions)
     .where(
       and(
@@ -39,7 +47,20 @@ export function hasPendingMemoryWriter(projectId: string): boolean {
       )
     )
     .get();
-  return !!row;
+  if (!row || !row.agentType) return null;
+  return { sessionId: row.id, agentType: row.agentType };
+}
+
+/**
+ * True when ANY memory writer ('memory_distill' or 'dreaming') is queued or
+ * running for the project.
+ *
+ * Callers must re-check this synchronously immediately before inserting their
+ * session row: an `await` between the check and the insert reopens the window
+ * this guard exists to close.
+ */
+export function hasPendingMemoryWriter(projectId: string): boolean {
+  return getPendingMemoryWriter(projectId) !== null;
 }
 
 /**

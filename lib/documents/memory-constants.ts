@@ -38,8 +38,14 @@ export const MEMORY_DOC_FILENAME = "Project memory";
  * in lib/claude/prompt-builder.ts plus the forensic prompt), so the ceiling
  * moves from ~1k to ~2k tokens of prompt per session — still an order of
  * magnitude under the spec and board context that ride alongside it.
+ *
+ * Raised 8000 → 12000 with the Spec & Memory panel
+ * (app/projects/[projectId]/spec): the memory panel now lives next to the
+ * spec with its own editor, and the four dreaming sections plus build
+ * instructions regularly hit the 8000 cap — a full dream rewrite landed with
+ * its last section cut off.
  */
-export const PROJECT_MEMORY_MAX_CHARS = 8000;
+export const PROJECT_MEMORY_MAX_CHARS = 12000;
 
 /**
  * `documents.kind` of the pre-dream memory snapshot.
@@ -97,3 +103,12 @@ export function parseMemoryAutoDistillSetting(value: unknown): boolean {
   if (typeof parsed === "string") return parsed.trim().toLowerCase() === "true";
   return false;
 }
+/**
+ * Settings key prefix for the per-project memory-write provenance record
+ * (`memory_provenance:<projectId>`). The value is a JSON
+ * `{ source: "manual" | "dreaming" | "distill", sessionId: string | null, at: ISO }`
+ * describing the LAST write of the project memory document — stored in
+ * `settings` (free-form keys, no migration needed) and served by the memory
+ * route's GET envelope so the panel can show who wrote the memory it renders.
+ */
+export const MEMORY_PROVENANCE_SETTING_KEY_PREFIX = "memory_provenance:";
