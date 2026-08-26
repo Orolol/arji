@@ -21,6 +21,8 @@ import { useCallback, useRef, useState } from "react";
 export interface BoardMergeState {
   /** A request is in flight for this epic. */
   pending?: boolean;
+  /** Another epic's merge is in flight on this project. */
+  locked?: boolean;
   /** Which request — the labels and the offered recovery differ. */
   action?: "merge" | "resolve";
   /** Last failure, kept until the next attempt or an explicit dismiss. */
@@ -32,7 +34,6 @@ export interface BoardMergeState {
    */
   conflict?: boolean;
 }
-
 export interface UseBoardMergeOptions {
   /** Called after a merge lands, or after Resolve Merge finishes cleanly. */
   onMerged?: (epicId: string) => void;
@@ -47,10 +48,11 @@ export function useBoardMerge(
   const [stateByEpic, setStateByEpic] = useState<
     Record<string, BoardMergeState>
   >({});
-
-  // Double-click protection that does not wait for a state flush: a second
-  // approve while the first is still running would race two git merges.
-  const inFlightRef = useRef<Set<string>>(new Set());
+  // Double-click and concurrent-merge protection that does not wait for a
+  // state flush: merges operate on the project repository's shared checkout,
+  // so only one merge or resolve request can run at a time per project.
+  const inFlightRef = useRef<string | null>(null);
+  const [activeEpicId, setActiveEpicId] = useState<string | null>(null);
 
   const patch = useCallback((epicId: string, next: BoardMergeState) => {
     setStateByEpic((prev) => ({ ...prev, [epicId]: next }));
@@ -62,13 +64,15 @@ export function useBoardMerge(
       action: "merge" | "resolve",
       request: () => Promise<void>
     ) => {
-      if (inFlightRef.current.has(epicId)) return;
-      inFlightRef.current.add(epicId);
+      if (inFlightRef.current !== null) return;
+      inFlightRef.current = epicId;
+      setActiveEpicId(epicId);
       patch(epicId, { pending: true, action, error: null, conflict: false });
       try {
         await request();
       } finally {
-        inFlightRef.current.delete(epicId);
+        inFlightRef.current = null;
+        setActiveEpicId(null);
       }
     },
     [patch]
@@ -154,5 +158,12 @@ export function useBoardMerge(
     [patch]
   );
 
-  return { stateByEpic, merge, resolveMerge, dismissError };
+  return {
+    stateByEpic,
+    activeEpicId,
+    isMerging: activeEpicId !== null,
+    merge,
+    resolveMerge,
+    dismissError,
+  };
 }

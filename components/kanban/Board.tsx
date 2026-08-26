@@ -155,6 +155,7 @@ export function Board({
   );
   const {
     stateByEpic: mergeStateByEpic,
+    activeEpicId: activeMergeEpicId,
     merge,
     resolveMerge,
     dismissError: dismissMergeError,
@@ -162,7 +163,6 @@ export function Board({
     onMerged: handleMerged,
     onResolveDispatched: handleResolveDispatched,
   });
-  // Optimistic overlay on the server-side read cursors: opening a ticket
   // clears its unread dot immediately, before the /api/inbox/read POST from
   // EpicDetail lands and the next board refresh returns the moved cursor.
   // Keyed by comment id so a NEWER agent comment re-raises the dot.
@@ -291,7 +291,16 @@ export function Board({
         // only meaningful there, and a Merge button on an In Progress card
         // would be an invitation the approve route refuses.
         const inReview = status === "review";
-
+        const isThisPending = activeMergeEpicId === epic.id;
+        const isLocked = activeMergeEpicId !== null && !isThisPending;
+        const baseMergeState = inReview ? mergeStateByEpic[epic.id] : undefined;
+        const mergeState = baseMergeState || isLocked
+          ? {
+              ...baseMergeState,
+              pending: isThisPending,
+              locked: isLocked,
+            }
+          : undefined;
         views[epic.id] = {
           selected:
             selectedEpics?.has(epic.id) || autoIncludedEpics?.has(epic.id),
@@ -302,7 +311,7 @@ export function Board({
           awaitingReply: isAwaitingReply(epic),
           failedSession,
           mergeReadiness: inReview ? epic.mergeReadiness : undefined,
-          mergeState: inReview ? mergeStateByEpic[epic.id] : undefined,
+          mergeState,
           agentBusy: busyEpicIds?.has(epic.id) || false,
           onMerge: inReview ? () => merge(epic.id) : undefined,
           onResolveMerge: inReview ? () => resolveMerge(epic.id) : undefined,
@@ -332,6 +341,7 @@ export function Board({
     failedSessions,
     busyEpicIds,
     mergeStateByEpic,
+    activeMergeEpicId,
     merge,
     resolveMerge,
     dismissMergeError,

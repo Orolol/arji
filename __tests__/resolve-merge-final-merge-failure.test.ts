@@ -374,6 +374,19 @@ describe("Resolve-merge: final merge fails after the agent", () => {
     );
   });
 
+  it("returns status 400 when attachWorktree fails because the branch is gone", async () => {
+    mocks.attachWorktree.mockRejectedValue(
+      new Error("Branch feature/epic-abc not found")
+    );
+    seed();
+
+    const res = await callResolveMerge();
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.error).toContain("Branch feature/epic-abc not found");
+  });
+
   it("still closes the epic when the final merge lands (control)", async () => {
     mocks.mergeWorktree.mockResolvedValue({
       merged: true,

@@ -46,15 +46,27 @@ function reasonPrefix(build: (argument: string) => string): string {
   return prefix;
 }
 
-/** Head of the reason `POST .../approve` logs when its merge failed. */
+/** Head of the reason `POST .../approve` logs when a merge hits conflicts. */
 export const APPROVAL_MERGE_BLOCKED_PREFIX = "Approval blocked: merge of ";
 
-/** The approve route's merge-failure reason — the only place it is spelled. */
+/** The approve route's merge-conflict reason. */
 export function buildApprovalMergeBlockedReason(input: {
   branchName: string;
   error: string;
 }): string {
   return `${APPROVAL_MERGE_BLOCKED_PREFIX}${input.branchName} failed — ${input.error}`;
+}
+
+/** Head of the reason `POST .../approve` logs when a branch has committed conflict markers. */
+export const APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX =
+  "Approval blocked: conflict markers on ";
+
+/** The approve route's conflict-markers reason. */
+export function buildApprovalConflictMarkersBlockedReason(input: {
+  branchName: string;
+  error: string;
+}): string {
+  return `${APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX}${input.branchName} — ${input.error}`;
 }
 
 /**
@@ -112,18 +124,52 @@ export function isGitRefusalMergeReason(
  *
  * The bar is git refusing over a conflict, not the merge failing to stick.
  */
-export const MERGE_FAILURE_REASON_PREFIXES: readonly string[] = [
+/**
+ * Prefixes that mean "the branch has a genuine git merge conflict against main".
+ */
+export const MERGE_CONFLICT_REASON_PREFIXES: readonly string[] = [
   APPROVAL_MERGE_BLOCKED_PREFIX,
-  // Constants: the whole string is its own prefix.
   AUTO_MODE_REASONS.mergeConflict,
   AUTO_MODE_REASONS.mergeConflictDeferred,
-  // Builders: probe for the fixed head, one prefix per conflict-shaped verdict.
-  ...MERGE_FAILURE_GIT_VERDICTS.map((reason) =>
-    reasonPrefix((error) => AUTO_MODE_REASONS.mergeFailed(reason, error))
+  reasonPrefix((error) => AUTO_MODE_REASONS.mergeFailed("conflict", error)),
+];
+
+/**
+ * Prefixes that mean "the branch contains committed conflict markers".
+ */
+export const CONFLICT_MARKERS_REASON_PREFIXES: readonly string[] = [
+  APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX,
+  reasonPrefix((error) =>
+    AUTO_MODE_REASONS.mergeFailed("conflict-markers", error)
   ),
 ];
 
-/** True when an activity-log reason records a merge that could not land. */
+export const MERGE_FAILURE_REASON_PREFIXES: readonly string[] = [
+  ...MERGE_CONFLICT_REASON_PREFIXES,
+  ...CONFLICT_MARKERS_REASON_PREFIXES,
+];
+
+/** True when an activity-log reason records a merge conflict. */
+export function isMergeConflictReason(
+  reason: string | null | undefined
+): boolean {
+  if (typeof reason !== "string") return false;
+  return MERGE_CONFLICT_REASON_PREFIXES.some((prefix) =>
+    reason.startsWith(prefix)
+  );
+}
+
+/** True when an activity-log reason records committed conflict markers. */
+export function isConflictMarkersReason(
+  reason: string | null | undefined
+): boolean {
+  if (typeof reason !== "string") return false;
+  return CONFLICT_MARKERS_REASON_PREFIXES.some((prefix) =>
+    reason.startsWith(prefix)
+  );
+}
+
+/** True when an activity-log reason records any merge failure. */
 export function isMergeFailureReason(
   reason: string | null | undefined
 ): boolean {
@@ -133,19 +179,18 @@ export function isMergeFailureReason(
   );
 }
 
-/**
- * The same prefixes as SQL `LIKE` patterns, for the board query's
- * `reason LIKE ...` filter.
- *
- * `%` and `_` are escaped with a backslash, so callers must pair these with
- * `ESCAPE '\'`. None of today's prefixes contain either character — the
- * escaping exists so a future reason that does cannot silently widen the
- * match to every activity row.
- */
+export const MERGE_CONFLICT_REASON_LIKE_PATTERNS: readonly string[] =
+  MERGE_CONFLICT_REASON_PREFIXES.map(
+    (prefix) => `${prefix.replace(/[\\%_]/g, "\\$&")}%`
+  );
+
+export const CONFLICT_MARKERS_REASON_LIKE_PATTERNS: readonly string[] =
+  CONFLICT_MARKERS_REASON_PREFIXES.map(
+    (prefix) => `${prefix.replace(/[\\%_]/g, "\\$&")}%`
+  );
+
 export const MERGE_FAILURE_REASON_LIKE_PATTERNS: readonly string[] =
   MERGE_FAILURE_REASON_PREFIXES.map(
     (prefix) => `${prefix.replace(/[\\%_]/g, "\\$&")}%`
   );
-
-/** Internals exposed for the contract tests; not part of the module's API. */
 export const __testables = { reasonPrefix };

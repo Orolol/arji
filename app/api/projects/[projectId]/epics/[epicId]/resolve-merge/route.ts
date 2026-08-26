@@ -120,7 +120,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     worktreePath = attached.worktreePath;
     branchName = attached.branchName;
   } catch (error) {
-    return errorResponse(error, "Failed to attach worktree for epic branch");
+    return errorResponse(error, "Failed to attach worktree for epic branch", 400);
   }
 
   // Start merge in worktree to surface conflicts. The base is the project's

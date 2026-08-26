@@ -298,10 +298,12 @@ export class AutoModeRegistry {
   // Merge work in flight
   // ---------------------------------------------------------------------
 
-  /** Claims the merge lock for an epic. False when one is already held. */
+  /** Claims the merge lock for an epic. False when another merge is already held in the project. */
   beginMergeWork(projectId: string, epicId: string): boolean {
     const state = this.stateFor(projectId);
-    if (state.merging.has(epicId)) return false;
+    // Git merges operate on the shared base checkout for the project repo,
+    // so only one merge can run at a time per project.
+    if (state.merging.size > 0) return false;
     state.merging.add(epicId);
     return true;
   }

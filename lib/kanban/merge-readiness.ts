@@ -39,11 +39,11 @@
 export type MergeBlocker =
   | "not_in_review"
   | "merge_conflict"
+  | "conflict_markers"
   | "open_findings"
   | "no_review"
   | "stale_review"
   | "no_branch";
-
 export interface MergeReadinessFacts {
   /** Board status of the epic. Only `review` can ever be merge-ready. */
   status?: string | null;
@@ -69,6 +69,10 @@ export interface MergeReadinessFacts {
    * track it — auto-mode carries the same fact in its own registry backoff.
    */
   lastMergeFailureAt?: string | null;
+  /** Newest activity entry recording a git merge conflict. */
+  lastMergeConflictAt?: string | null;
+  /** Newest activity entry recording committed conflict markers. */
+  lastConflictMarkersAt?: string | null;
 }
 
 export interface MergeReadiness {
@@ -123,14 +127,36 @@ export function hasFreshCleanReview(
 export function hasCurrentMergeFailure(
   facts: Pick<
     MergeReadinessFacts,
-    "lastMergeFailureAt" | "lastTerminalCodeAt"
+    "lastMergeFailureAt" | "lastMergeConflictAt" | "lastConflictMarkersAt" | "lastTerminalCodeAt"
   > | undefined
 ): boolean {
-  const failed = normalizeAt(facts?.lastMergeFailureAt);
+  return hasCurrentMergeConflict(facts) || hasCurrentConflictMarkers(facts);
+}
+
+export function hasCurrentMergeConflict(
+  facts: Pick<
+    MergeReadinessFacts,
+    "lastMergeFailureAt" | "lastMergeConflictAt" | "lastTerminalCodeAt"
+  > | undefined
+): boolean {
+  const failed = normalizeAt(facts?.lastMergeConflictAt ?? facts?.lastMergeFailureAt);
   if (!failed) return false;
   const coded = normalizeAt(facts?.lastTerminalCodeAt);
   if (!coded) return true;
   return failed > coded;
+}
+
+export function hasCurrentConflictMarkers(
+  facts: Pick<
+    MergeReadinessFacts,
+    "lastConflictMarkersAt" | "lastTerminalCodeAt"
+  > | undefined
+): boolean {
+  const markers = normalizeAt(facts?.lastConflictMarkersAt);
+  if (!markers) return false;
+  const coded = normalizeAt(facts?.lastTerminalCodeAt);
+  if (!coded) return true;
+  return markers > coded;
 }
 
 /**
@@ -150,7 +176,18 @@ export function evaluateMergeReadiness(
   });
 
   if (facts?.status !== "review") return blocked("not_in_review");
-  if (hasCurrentMergeFailure(facts)) return blocked("merge_conflict");
+
+  const hasConflict = hasCurrentMergeConflict(facts);
+  const hasMarkers = hasCurrentConflictMarkers(facts);
+  if (hasConflict && hasMarkers) {
+    const conflictAt = normalizeAt(facts?.lastMergeConflictAt ?? facts?.lastMergeFailureAt);
+    const markersAt = normalizeAt(facts?.lastConflictMarkersAt);
+    return markersAt && conflictAt && markersAt > conflictAt
+      ? blocked("conflict_markers")
+      : blocked("merge_conflict");
+  }
+  if (hasConflict) return blocked("merge_conflict");
+  if (hasMarkers) return blocked("conflict_markers");
   if (openFindings > 0) return blocked("open_findings");
   if (!facts.lastCleanReviewAt) return blocked("no_review");
   if (!hasFreshCleanReview(facts)) return blocked("stale_review");
@@ -178,6 +215,8 @@ export function describeMergeBlocker(
   switch (readiness?.blocker) {
     case "merge_conflict":
       return "Merge conflict — resolve before merging";
+    case "conflict_markers":
+      return "Branch contains unresolved conflict markers";
     case "open_findings":
       return readiness.openFindings === 1
         ? "1 open finding"

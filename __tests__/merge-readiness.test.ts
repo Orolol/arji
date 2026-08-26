@@ -85,6 +85,16 @@ describe("evaluateMergeReadiness", () => {
     ).toMatchObject({ blocker: "merge_conflict", openFindings: 3 });
   });
 
+  it("reports committed conflict markers when conflict-markers trace is present", () => {
+    expect(
+      evaluateMergeReadiness({
+        ...READY,
+        openFindings: 0,
+        lastConflictMarkersAt: "2026-08-20T13:00:00.000Z",
+      })
+    ).toMatchObject({ ready: false, blocker: "conflict_markers" });
+  });
+
   it("treats a review with no recorded code session as fresh", () => {
     expect(
       evaluateMergeReadiness({ ...READY, lastTerminalCodeAt: null })
@@ -177,6 +187,9 @@ describe("describeMergeBlocker", () => {
     expect(
       describeMergeBlocker({ ready: false, blocker: "merge_conflict", openFindings: 0 })
     ).toMatch(/conflict/i);
+    expect(
+      describeMergeBlocker({ ready: false, blocker: "conflict_markers", openFindings: 0 })
+    ).toBe("Branch contains unresolved conflict markers");
     expect(
       describeMergeBlocker({ ready: false, blocker: "stale_review", openFindings: 0 })
     ).toMatch(/outdated/i);

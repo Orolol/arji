@@ -32,9 +32,10 @@ const {
 const { GET } = await import("@/app/api/projects/[projectId]/epics/route");
 const { selectMergeCandidates } = await import("@/lib/auto-mode/select");
 const { AUTO_MODE_REASONS } = await import("@/lib/auto-mode/constants");
-const { buildApprovalMergeBlockedReason } = await import(
-  "@/lib/workflow/merge-failure"
-);
+const {
+  buildApprovalMergeBlockedReason,
+  buildApprovalConflictMarkersBlockedReason,
+} = await import("@/lib/workflow/merge-failure");
 const { autoModeRegistry } = await import("@/lib/auto-mode/registry");
 
 const PROJECT_ID = "proj-board";
@@ -330,6 +331,37 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
     });
   });
 
+  it("surfaces a failed approve-merge with conflict markers as conflict_markers blocker", async () => {
+    seedReadyEpic("markers");
+    addActivity({
+      epicId: "markers",
+      reason: buildApprovalConflictMarkersBlockedReason({
+        branchName: "feature/markers",
+        error: "Unresolved conflict markers in lib/foo.ts",
+      }),
+      createdAt: at(40),
+    });
+    expect(await readinessOf("markers")).toMatchObject({
+      ready: false,
+      blocker: "conflict_markers",
+    });
+  });
+
+  it("surfaces auto-mode's conflict-markers trace as conflict_markers blocker", async () => {
+    seedReadyEpic("auto-markers");
+    addActivity({
+      epicId: "auto-markers",
+      reason: AUTO_MODE_REASONS.mergeFailed(
+        "conflict-markers",
+        "Unresolved markers in lib/foo.ts"
+      ),
+      createdAt: at(40),
+    });
+    expect(await readinessOf("auto-markers")).toMatchObject({
+      blocker: "conflict_markers",
+    });
+  });
+
   it("surfaces auto-mode's conflict trace too", async () => {
     seedReadyEpic("auto-conflict");
     addActivity({
@@ -384,7 +416,8 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
     expect(row).not.toHaveProperty("openFindings");
     expect(row).not.toHaveProperty("lastCleanReviewAt");
     expect(row).not.toHaveProperty("lastTerminalCodeAt");
-    expect(row).not.toHaveProperty("lastMergeFailureAt");
+    expect(row).not.toHaveProperty("lastMergeConflictAt");
+    expect(row).not.toHaveProperty("lastConflictMarkersAt");
   });
 
   it("ignores another project's merge-failure rows", async () => {

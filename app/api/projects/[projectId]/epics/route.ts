@@ -44,7 +44,11 @@ import {
 } from "@/lib/grading/report";
 import { OPEN_FRICTION_STATUSES } from "@/lib/frictions/constants";
 import { evaluateMergeReadiness } from "@/lib/kanban/merge-readiness";
-import { MERGE_FAILURE_REASON_LIKE_PATTERNS } from "@/lib/workflow/merge-failure";
+import {
+  MERGE_CONFLICT_REASON_LIKE_PATTERNS,
+  CONFLICT_MARKERS_REASON_LIKE_PATTERNS,
+  MERGE_FAILURE_REASON_LIKE_PATTERNS,
+} from "@/lib/workflow/merge-failure";
 import {
   lastCleanReviewAtSql,
   lastTerminalCodeAtSql,
@@ -225,9 +229,23 @@ export async function GET(
   const latestMergeFailures = db
     .select({
       epicId: ticketActivityLog.epicId,
-      lastMergeFailureAt:
-        sql<string | null>`MAX(REPLACE(${ticketActivityLog.createdAt}, ' ', 'T'))`.as(
-          "last_merge_failure_at"
+      lastMergeConflictAt:
+        sql<string | null>`MAX(CASE WHEN ${or(
+          ...MERGE_CONFLICT_REASON_LIKE_PATTERNS.map(
+            (pattern) =>
+              sql`${ticketActivityLog.reason} LIKE ${pattern} ESCAPE '\\'`
+          )
+        )} THEN REPLACE(${ticketActivityLog.createdAt}, ' ', 'T') END)`.as(
+          "last_merge_conflict_at"
+        ),
+      lastConflictMarkersAt:
+        sql<string | null>`MAX(CASE WHEN ${or(
+          ...CONFLICT_MARKERS_REASON_LIKE_PATTERNS.map(
+            (pattern) =>
+              sql`${ticketActivityLog.reason} LIKE ${pattern} ESCAPE '\\'`
+          )
+        )} THEN REPLACE(${ticketActivityLog.createdAt}, ' ', 'T') END)`.as(
+          "last_conflict_markers_at"
         ),
     })
     .from(ticketActivityLog)
@@ -313,7 +331,8 @@ export async function GET(
       openFindings: openFindingCounts.openFindings,
       lastCleanReviewAt: epicSessionFacts.lastCleanReviewAt,
       lastTerminalCodeAt: epicSessionFacts.lastTerminalCodeAt,
-      lastMergeFailureAt: latestMergeFailures.lastMergeFailureAt,
+      lastMergeConflictAt: latestMergeFailures.lastMergeConflictAt,
+      lastConflictMarkersAt: latestMergeFailures.lastConflictMarkersAt,
     })
     .from(epics)
     .leftJoin(storyCounts, eq(epics.id, storyCounts.epicId))
@@ -344,7 +363,8 @@ export async function GET(
       openFindings,
       lastCleanReviewAt,
       lastTerminalCodeAt,
-      lastMergeFailureAt,
+      lastMergeConflictAt,
+      lastConflictMarkersAt,
       ...epic
     }) => ({
       ...epic,
@@ -357,7 +377,8 @@ export async function GET(
         openFindings,
         lastCleanReviewAt,
         lastTerminalCodeAt,
-        lastMergeFailureAt,
+        lastMergeConflictAt,
+        lastConflictMarkersAt,
       }),
     }),
   );

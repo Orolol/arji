@@ -240,18 +240,17 @@ export function Column({
                 around the whole column. For sectioned columns, dropping onto
                 the column body appends to the end, so the placeholder renders
                 at the bottom of the last section. */}
-            {isOver && !sections && (
-              <div
-                className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
-                aria-hidden="true"
-              />
-            )}
-            {epics.length === 0 && !isOver ? (
+            {epics.length === 0 ? (
               <div
                 className="rounded-[10px] border border-dashed border-border p-[15px] text-[13px] text-muted-foreground"
                 data-testid={`column-empty-${status}`}
               >
-                {filtersActive ? (
+                {isOver ? (
+                  <div
+                    className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
+                    aria-hidden="true"
+                  />
+                ) : filtersActive ? (
                   "Nothing matches the filters."
                 ) : (
                   <>

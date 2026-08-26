@@ -197,6 +197,8 @@ export function EpicCard({
   // offering a click the approve route would refuse (or, worse, one that
   // would pull the worktree out from under a build about to start).
   const mergePending = mergeState?.pending === true;
+  const mergeLocked = mergeState?.locked === true;
+  const mergeDisabled = mergePending || mergeLocked;
   const mergeBlocked = agentBusy || !!activeAgentActivity;
   const showMergeAction =
     !!onMerge && mergeReadiness?.ready === true && !mergeBlocked;
@@ -216,7 +218,8 @@ export function EpicCard({
     !!onResolveMerge &&
     !mergeBlocked &&
     (mergeState?.conflict === true ||
-      mergeReadiness?.blocker === "merge_conflict");
+      mergeReadiness?.blocker === "merge_conflict") &&
+    mergeReadiness?.blocker !== "conflict_markers";
 
   // Elapsed time ticker for active agent
   const [elapsedText, setElapsedText] = useState("");
@@ -349,7 +352,7 @@ export function EpicCard({
             e.stopPropagation();
             onMerge!();
           }}
-          disabled={mergePending}
+          disabled={mergeDisabled}
           className="inline-flex h-[27px] shrink-0 items-center justify-center gap-[6px] rounded-[7px] bg-primary px-[11px] text-[12.5px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60 motion-reduce:transition-none"
           aria-label={`Merge ${epic.title}`}
           data-testid={`epic-merge-${epic.id}`}
@@ -420,7 +423,7 @@ export function EpicCard({
             e.stopPropagation();
             onResolveMerge!();
           }}
-          disabled={mergePending}
+          disabled={mergeDisabled}
           className="inline-flex h-[27px] shrink-0 items-center justify-center gap-[6px] rounded-[7px] border border-border px-[11px] text-[12.5px] transition-colors hover:bg-band disabled:opacity-60 motion-reduce:transition-none"
           aria-label={`Resolve the merge conflict on ${epic.title}`}
           data-testid={`epic-resolve-merge-${epic.id}`}

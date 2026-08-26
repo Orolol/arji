@@ -23,7 +23,7 @@ import { createApproveMergeFailedNotification } from "@/lib/notifications/create
 import { autoModeRegistry } from "@/lib/auto-mode/registry";
 import {
   buildApprovalMergeBlockedReason,
-  isGitRefusalMergeReason,
+  buildApprovalConflictMarkersBlockedReason,
 } from "@/lib/workflow/merge-failure";
 import {
   createAgentAlreadyRunningPayload,
@@ -161,7 +161,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
     return NextResponse.json(
       {
         error:
-          "A merge is already in flight for this epic — retry in a moment.",
+          "A merge is already in flight for this project — retry in a moment.",
       },
       { status: 409 }
     );
@@ -211,7 +211,8 @@ export async function POST(_request: NextRequest, { params }: Params) {
 
       if (!result.merged) {
         const mergeError = result.error || "Merge failed";
-        const isConflict = isGitRefusalMergeReason(result.reason);
+        const isConflict = result.reason === "conflict";
+        const isConflictMarkers = result.reason === "conflict-markers";
         const now = new Date().toISOString();
 
         // The ticket is untouched on purpose: no comment resolution, no
@@ -228,6 +229,8 @@ export async function POST(_request: NextRequest, { params }: Params) {
               author: "agent",
               content: isConflict
                 ? `**Approval blocked — merge failed.** ${mergeError}\n\nThe ticket stays in review. Use Resolve Merge, then approve again.`
+                : isConflictMarkers
+                ? `**Approval blocked — unresolved conflict markers.** ${mergeError}\n\nThe ticket stays in review. Clean the conflict markers in the branch, then approve again.`
                 : `**Approval blocked — merge failed.** ${mergeError}\n\nThe ticket stays in review.`,
               createdAt: now,
             })
@@ -255,6 +258,11 @@ export async function POST(_request: NextRequest, { params }: Params) {
                   branchName: epic.branchName,
                   error: mergeError,
                 })
+              : isConflictMarkers
+              ? buildApprovalConflictMarkersBlockedReason({
+                  branchName: epic.branchName,
+                  error: mergeError,
+                })
               : `Approval blocked: merge failed (${result.reason ?? "unknown"}) on ${epic.branchName} — ${mergeError}`,
           });
         } catch (trailError) {
@@ -272,6 +280,8 @@ export async function POST(_request: NextRequest, { params }: Params) {
           {
             error: isConflict
               ? `Merge failed: ${mergeError}. The ticket stays in review — resolve the conflict (Resolve Merge) and approve again.`
+              : isConflictMarkers
+              ? `Merge failed: ${mergeError}. Unresolved conflict markers in branch — clean the markers and approve again.`
               : `Merge failed: ${mergeError}. The ticket stays in review.`,
             mergeFailed: isConflict,
           },

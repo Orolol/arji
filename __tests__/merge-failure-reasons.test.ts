@@ -11,9 +11,14 @@ import { describe, it, expect } from "vitest";
 import { AUTO_MODE_REASONS } from "@/lib/auto-mode/constants";
 import {
   buildApprovalMergeBlockedReason,
+  buildApprovalConflictMarkersBlockedReason,
   GIT_REFUSAL_MERGE_REASONS,
   isGitRefusalMergeReason,
+  isMergeConflictReason,
+  isConflictMarkersReason,
   isMergeFailureReason,
+  MERGE_CONFLICT_REASON_PREFIXES,
+  CONFLICT_MARKERS_REASON_PREFIXES,
   MERGE_FAILURE_REASON_LIKE_PATTERNS,
   MERGE_FAILURE_REASON_PREFIXES,
 } from "@/lib/workflow/merge-failure";
@@ -63,6 +68,16 @@ describe("isMergeFailureReason", () => {
     expect(isMergeFailureReason(reason)).toBe(true);
     expect(reason).toContain("feature/epic-1");
     expect(reason).toContain("Merge conflict in lib/db/schema.ts");
+  });
+
+  it("recognises the approve route's conflict-markers reason", () => {
+    const reason = buildApprovalConflictMarkersBlockedReason({
+      branchName: "feature/epic-1",
+      error: "Unresolved conflict markers in lib/db/schema.ts",
+    });
+    expect(isMergeFailureReason(reason)).toBe(true);
+    expect(isConflictMarkersReason(reason)).toBe(true);
+    expect(isMergeConflictReason(reason)).toBe(false);
   });
 
   it("ignores a WORKFLOW refusal — the readiness predicate explains those better", () => {
@@ -135,12 +150,34 @@ describe("GIT_REFUSAL_MERGE_REASONS and isGitRefusalMergeReason", () => {
   });
 });
 
+describe("isMergeConflictReason vs isConflictMarkersReason", () => {
+  it("differentiates merge conflicts from conflict markers", () => {
+    const conflict = AUTO_MODE_REASONS.mergeFailed("conflict", "boom");
+    const markers = AUTO_MODE_REASONS.mergeFailed("conflict-markers", "boom");
+
+    expect(isMergeConflictReason(conflict)).toBe(true);
+    expect(isConflictMarkersReason(conflict)).toBe(false);
+
+    expect(isConflictMarkersReason(markers)).toBe(true);
+    expect(isMergeConflictReason(markers)).toBe(false);
+  });
+});
+
 describe("MERGE_FAILURE_REASON_PREFIXES", () => {
   it("carries no leftover sentinel from probing the reason builders", () => {
     for (const prefix of MERGE_FAILURE_REASON_PREFIXES) {
       expect(prefix).not.toContain("\u0000");
       expect(prefix.length).toBeGreaterThan(0);
     }
+  });
+
+  it("partitions into conflict and conflict-marker prefixes", () => {
+    expect(MERGE_CONFLICT_REASON_PREFIXES.length).toBeGreaterThan(0);
+    expect(CONFLICT_MARKERS_REASON_PREFIXES.length).toBeGreaterThan(0);
+    expect(MERGE_FAILURE_REASON_PREFIXES).toEqual([
+      ...MERGE_CONFLICT_REASON_PREFIXES,
+      ...CONFLICT_MARKERS_REASON_PREFIXES,
+    ]);
   });
 
   it("exposes LIKE patterns that are the prefixes plus a wildcard", () => {

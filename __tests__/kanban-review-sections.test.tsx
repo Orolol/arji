@@ -91,6 +91,11 @@ const CONFLICT: MergeReadiness = {
   blocker: "merge_conflict",
   openFindings: 0,
 };
+const CONFLICT_MARKERS: MergeReadiness = {
+  ready: false,
+  blocker: "conflict_markers",
+  openFindings: 0,
+};
 
 let epicSeq = 0;
 function makeEpic(overrides?: Partial<KanbanEpic>): KanbanEpic {
@@ -318,6 +323,46 @@ describe("Merge affordances on Review cards", () => {
     expect(
       screen.getByTestId(`epic-resolve-merge-${conflict.id}`)
     ).toBeInTheDocument();
+  });
+
+  it("does not offer Resolve merge on a card with unresolved conflict markers", () => {
+    const markers = makeEpic({ mergeReadiness: CONFLICT_MARKERS });
+    setReviewColumn([markers]);
+    renderBoard();
+    expect(
+      screen.queryByTestId(`epic-resolve-merge-${markers.id}`)
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId(`epic-merge-blocked-${markers.id}`)
+    ).toHaveTextContent("Branch contains unresolved conflict markers");
+  });
+
+  it("disables other Merge buttons on the board while one merge is in flight", async () => {
+    let resolveApprove: (val: unknown) => void = () => {};
+    const approvePromise = new Promise((resolve) => {
+      resolveApprove = resolve;
+    });
+    const fetchMock = vi.fn().mockImplementation(() => approvePromise);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ready1 = makeEpic({ mergeReadiness: READY });
+    const ready2 = makeEpic({ mergeReadiness: READY });
+    setReviewColumn([ready1, ready2]);
+    renderBoard();
+
+    const button1 = screen.getByTestId(`epic-merge-${ready1.id}`);
+    const button2 = screen.getByTestId(`epic-merge-${ready2.id}`);
+    expect(button1).not.toBeDisabled();
+    expect(button2).not.toBeDisabled();
+
+    await userEvent.click(button1);
+
+    // Button 1 is pending/merging, and button 2 is locked/disabled
+    expect(button1).toBeDisabled();
+    expect(button1).toHaveTextContent("Merging...");
+    expect(button2).toBeDisabled();
+
+    resolveApprove({ ok: true, json: async () => ({ data: { approved: true } }) });
   });
 
   it("merges through the existing approve route and notifies onMergeSuccess", async () => {
