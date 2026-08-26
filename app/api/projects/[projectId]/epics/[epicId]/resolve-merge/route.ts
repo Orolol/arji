@@ -14,7 +14,7 @@ import {
 } from "@/lib/api/route-helpers";
 import { createId } from "@/lib/utils/nanoid";
 import {
-  createWorktree,
+  attachWorktree,
   isGitRepo,
   startMergeInWorktree,
   mergeWorktree,
@@ -107,13 +107,21 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
-  // Ensure worktree exists
-  const { worktreePath, branchName } = await createWorktree(
-    gitRepoPath,
-    epic.id,
-    epic.title,
-    { defaultBranch: project.defaultBranch }
-  );
+  // Ensure worktree exists for the epic's stored branch.
+  // `attachWorktree` attaches the worktree to `epic.branchName` rather than
+  // re-deriving the branch name from `epic.title`: if the epic title was
+  // edited since the branch was cut, `createWorktree` would derive a new name,
+  // cut a fresh branch off the default branch, and land an empty merge commit
+  // while leaving the real branch untouched.
+  let worktreePath: string;
+  let branchName: string;
+  try {
+    const attached = await attachWorktree(gitRepoPath, epic.branchName);
+    worktreePath = attached.worktreePath;
+    branchName = attached.branchName;
+  } catch (error) {
+    return errorResponse(error, "Failed to attach worktree for epic branch");
+  }
 
   // Start merge in worktree to surface conflicts. The base is the project's
   // resolved default branch — the same one `mergeWorktree` is handed below;

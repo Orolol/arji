@@ -58,27 +58,30 @@ export function buildApprovalMergeBlockedReason(input: {
 }
 
 /**
- * `MergeWorktreeResult.reason` values that mean the branch genuinely has a
- * conflict standing between it and `main`.
- *
- * `branch-missing` (already merged, or deleted by hand) and `error` (a broken
- * repo, a failed worktree removal) are NOT here. Labelling them a conflict
- * would put a Resolve merge button on the card, and that button re-enters
- * resolve-merge, cuts a fresh branch off the default and merges an empty
- * diff — a repair that repairs nothing, under a label that promised one.
+ * Git verdicts that indicate the branch is blocked by git-level conflict
+ * issues, used to build activity log prefix matchers for the blocker signal.
  */
-export const GIT_REFUSAL_MERGE_REASONS = [
+export const MERGE_FAILURE_GIT_VERDICTS = [
   "conflict",
   "conflict-markers",
 ] as const;
+
+/**
+ * `MergeWorktreeResult.reason` values that mean the branch has a conflict that
+ * a conflict-resolution agent or Resolve merge flow can genuinely repair.
+ *
+ * `conflict-markers` is NOT here because dispatching an agent to merge main
+ * would find a clean merge and leave committed conflict markers untouched.
+ * `branch-missing` and `error` are also excluded.
+ */
+export const GIT_REFUSAL_MERGE_REASONS = ["conflict"] as const;
 
 export type GitRefusalMergeReason =
   (typeof GIT_REFUSAL_MERGE_REASONS)[number];
 
 /**
  * True when a merge verdict represents a genuine conflict that a
- * merge-resolution agent or user can repair, rather than a broken repository,
- * deleted branch, or guard refusal.
+ * merge-resolution agent can repair.
  */
 export function isGitRefusalMergeReason(
   reason: string | null | undefined
@@ -115,7 +118,7 @@ export const MERGE_FAILURE_REASON_PREFIXES: readonly string[] = [
   AUTO_MODE_REASONS.mergeConflict,
   AUTO_MODE_REASONS.mergeConflictDeferred,
   // Builders: probe for the fixed head, one prefix per conflict-shaped verdict.
-  ...GIT_REFUSAL_MERGE_REASONS.map((reason) =>
+  ...MERGE_FAILURE_GIT_VERDICTS.map((reason) =>
     reasonPrefix((error) => AUTO_MODE_REASONS.mergeFailed(reason, error))
   ),
 ];

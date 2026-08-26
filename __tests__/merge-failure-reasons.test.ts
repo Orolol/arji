@@ -115,16 +115,18 @@ describe("isMergeFailureReason", () => {
 });
 
 describe("GIT_REFUSAL_MERGE_REASONS and isGitRefusalMergeReason", () => {
-  it("includes only conflict-shaped verdicts", () => {
-    expect(GIT_REFUSAL_MERGE_REASONS).toEqual(["conflict", "conflict-markers"]);
+  it("includes only genuine resolvable conflict verdicts", () => {
+    expect(GIT_REFUSAL_MERGE_REASONS).toEqual(["conflict"]);
   });
 
-  it("returns true for genuine conflict reasons", () => {
+  it("returns true for genuine conflict reason", () => {
     expect(isGitRefusalMergeReason("conflict")).toBe(true);
-    expect(isGitRefusalMergeReason("conflict-markers")).toBe(true);
   });
 
-  it("returns false for non-conflict verdicts, errors, or missing reasons", () => {
+  it("returns false for conflict-markers, non-conflict verdicts, errors, or missing reasons", () => {
+    // conflict-markers cannot be resolved by the resolve-merge agent (clean merge leaves markers),
+    // so it must not set mergeFailed: true or loop the Resolve merge button.
+    expect(isGitRefusalMergeReason("conflict-markers")).toBe(false);
     expect(isGitRefusalMergeReason("branch-missing")).toBe(false);
     expect(isGitRefusalMergeReason("error")).toBe(false);
     expect(isGitRefusalMergeReason("something-else")).toBe(false);

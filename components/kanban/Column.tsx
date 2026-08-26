@@ -237,8 +237,10 @@ export function Column({
         >
           <div className="flex min-h-[50px] flex-col gap-[12px]">
             {/* Drop target: the slot the card would land in, not a ring
-                around the whole column. */}
-            {isOver && (
+                around the whole column. For sectioned columns, dropping onto
+                the column body appends to the end, so the placeholder renders
+                at the bottom of the last section. */}
+            {isOver && !sections && (
               <div
                 className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
                 aria-hidden="true"
@@ -267,8 +269,9 @@ export function Column({
             ) : sections ? (
               // Sections are drawn over the SAME ordered list the
               // SortableContext above indexes, so the split is purely visual.
-              sections.map((section) => {
+              sections.map((section, idx) => {
                 const headerId = `column-section-heading-${status}-${section.key}`;
+                const isLastSection = idx === sections.length - 1;
                 return (
                   <div
                     key={section.key}
@@ -292,6 +295,12 @@ export function Column({
                       ) : null
                     ) : (
                       section.epics.map(renderCard)
+                    )}
+                    {isOver && isLastSection && (
+                      <div
+                        className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
+                        aria-hidden="true"
+                      />
                     )}
                   </div>
                 );

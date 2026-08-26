@@ -421,6 +421,21 @@ describe("Epic review approval", () => {
       expect(loggedReason).not.toContain("Approval blocked: merge of ");
     });
 
+    it("returns mergeFailed: false for conflict-markers so it does not loop Resolve merge", async () => {
+      mocks.mergeWorktree.mockResolvedValue({
+        merged: false,
+        error: "Unresolved conflict markers in lib/foo.ts",
+        reason: "conflict-markers",
+      });
+      seed();
+      const res = await callApprove();
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.mergeFailed).toBe(false);
+      expect(json.error).toContain("Unresolved conflict markers");
+    });
+
     it("posts a ticket comment explaining the failed merge", async () => {
       seed();
       await callApprove();

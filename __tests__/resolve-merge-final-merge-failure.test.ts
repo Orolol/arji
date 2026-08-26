@@ -19,6 +19,7 @@ import {
 const mocks = vi.hoisted(() => ({
   mergeWorktree: vi.fn(),
   createWorktree: vi.fn(),
+  attachWorktree: vi.fn(),
   isGitRepo: vi.fn(),
   startMergeInWorktree: vi.fn(),
   waitForProcessCompletion: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock("@/lib/workflow/transition-service", () => ({
 vi.mock("@/lib/git/manager", () => ({
   mergeWorktree: mocks.mergeWorktree,
   createWorktree: mocks.createWorktree,
+  attachWorktree: mocks.attachWorktree,
   isGitRepo: mocks.isGitRepo,
   startMergeInWorktree: mocks.startMergeInWorktree,
 }));
@@ -157,7 +159,7 @@ describe("Resolve-merge: final merge fails after the agent", () => {
     mocks.applyTransition.mockReturnValue({ valid: true });
     mocks.getRunningSessionForTarget.mockReturnValue(null);
     mocks.isGitRepo.mockResolvedValue(true);
-    mocks.createWorktree.mockResolvedValue({
+    mocks.attachWorktree.mockResolvedValue({
       worktreePath: "/tmp/worktrees/epic-abc",
       branchName: "feature/epic-abc",
     });
@@ -334,6 +336,42 @@ describe("Resolve-merge: final merge fails after the agent", () => {
       error: "Git repository corrupted",
       mergeFailed: false,
     });
+  });
+
+  it("attaches to the exact branch stored on the epic even when the title was edited", async () => {
+    // If the epic title was edited, createWorktree would re-derive the branch
+    // from the new title and cut an empty branch off main. attachWorktree must
+    // receive the epic's persisted branchName verbatim.
+    mocks.attachWorktree.mockResolvedValue({
+      worktreePath: "/tmp/worktrees/original-branch",
+      branchName: "feature/original-branch-name",
+    });
+    mocks.startMergeInWorktree.mockResolvedValue({
+      conflicted: false,
+      output: "Already up to date.",
+    });
+    mocks.mergeWorktree.mockResolvedValue({
+      merged: true,
+      commitHash: "xyz789",
+    });
+    dbMockState.getQueue.push(
+      mockProject,
+      { ...mockEpic, title: "Completely Edited Title", branchName: "feature/original-branch-name" },
+      null
+    );
+
+    await callResolveMerge();
+
+    expect(mocks.attachWorktree).toHaveBeenCalledWith(
+      "/tmp/repo",
+      "feature/original-branch-name"
+    );
+    expect(mocks.mergeWorktree).toHaveBeenCalledWith(
+      "/tmp/repo",
+      "feature/original-branch-name",
+      "/tmp/worktrees/original-branch",
+      expect.anything()
+    );
   });
 
   it("still closes the epic when the final merge lands (control)", async () => {
