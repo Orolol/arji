@@ -18,6 +18,7 @@
  * The two callers are not identical sets, and both differences are
  * deliberate: the board also passes merge failure timestamps
  * (`lastMergeConflictAt` / `lastConflictMarkersAt`; auto-mode carries
+ * that fact in its own registry backoff instead), and auto-mode additionally
  * applies the runtime exclusions below. What they share is the definition of
  * ready.
  *

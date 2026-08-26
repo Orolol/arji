@@ -644,10 +644,11 @@ export function selectReviewCandidates(
  * snapshot. Same shape the board list query assembles from its own SQL, so
  * both sides feed `evaluateMergeReadiness` identical input.
  *
- * `lastMergeFailureAt` is deliberately absent: the supervisor tracks a failed
- * merge in its own registry backoff (`mergeDeferredEpicIds`, applied below),
- * which is both fresher and scoped to the run — the activity-log trace the
- * board reads is for the UI, which has no registry to consult.
+ * Merge failure timestamps (`lastMergeConflictAt` / `lastConflictMarkersAt`)
+ * are deliberately absent: the supervisor tracks a failed merge in its own
+ * registry backoff (`mergeDeferredEpicIds`, applied below), which is both
+ * fresher and scoped to the run — the activity-log trace the board reads is
+ * for the UI, which has no registry to consult.
  */
 function mergeReadinessFacts(
   board: AutoModeBoard,

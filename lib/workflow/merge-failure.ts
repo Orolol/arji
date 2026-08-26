@@ -95,8 +95,7 @@ export function isGitRefusalMergeReason(
 }
 
 /**
- * Every reason head that means "the branch is still on the wrong side of
- * `main`, and GIT is the reason".
+ * Prefixes that mean "the branch has a genuine git merge conflict against main".
  *
  * Three auto-mode reasons are deliberately absent, all for the same rule —
  * the blocker must name what is actually in the way, and since
@@ -115,9 +114,6 @@ export function isGitRefusalMergeReason(
  *     verdict instead, and only the conflict-shaped ones are matched below.
  *
  * The bar is git refusing over a conflict, not the merge failing to stick.
- */
-/**
- * Prefixes that mean "the branch has a genuine git merge conflict against main".
  */
 export const MERGE_CONFLICT_REASON_PREFIXES: readonly string[] = [
   APPROVAL_MERGE_BLOCKED_PREFIX,
