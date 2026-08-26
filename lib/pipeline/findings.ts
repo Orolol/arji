@@ -5,7 +5,9 @@ import { createId } from "@/lib/utils/nanoid";
 import { sessionAtSql } from "@/lib/agent-sessions/session-time";
 import {
   isMcpToolsEnabled,
+  MCP_CAPABLE_PROVIDERS,
   MCP_CHANNEL_INJECTED,
+  MCP_CHANNEL_UNAVAILABLE,
   parseMcpChannelRecord,
   providerSupportsMcp,
 } from "@/lib/claude/mcp-injection";
@@ -261,6 +263,21 @@ export const ORDINARY_REVIEW_AGENT_TYPES = [
   "review_feature",
 ] as const;
 
+/** `['a','b']` → `'a','b'`, for the SQL `IN (…)` lists below. */
+function sqlLiteralList(values: readonly string[]): string {
+  return values.map((value) => `'${value}'`).join(",");
+}
+
+/** True for the four agent types the review gates count. */
+export function isOrdinaryReviewAgentType(
+  agentType: string | null | undefined
+): boolean {
+  return (
+    typeof agentType === "string" &&
+    (ORDINARY_REVIEW_AGENT_TYPES as readonly string[]).includes(agentType)
+  );
+}
+
 /** Structured verdicts that let a review pass on its own. */
 export const POSITIVE_STRUCTURED_VERDICTS: ReadonlyArray<StructuredReviewVerdict> =
   ["approved", "approved_with_minor_issues"];
@@ -302,6 +319,15 @@ export const POSITIVE_STRUCTURED_VERDICTS: ReadonlyArray<StructuredReviewVerdict
  * downstream needs the answer. Reading it as "this session filed rows" would
  * be wrong for every healthy review.
  *
+ * `isOrdinaryReview` bounds the rule to the four review types the gates count.
+ * `review_second_opinion` is deliberately outside it: that session is a Full
+ * Auto merge gate with its own PROSE fail-safe (`readSecondOpinionState`
+ * accepts an `Overall Verdict:` line), so an APPROVING gate routinely carries
+ * no structured verdict and no findings rows — the exact shape this rule
+ * refuses. Judging it here would charge an approving gate as a failure and
+ * park the epic it had just cleared. The exemption lives in the rule rather
+ * than in each caller because it has already been missed once that way.
+ *
  * `delivered` bounds the rule to reviews that actually RAN to a verdict:
  * `status = completed` and `outcome = answered`. A failed, cancelled, silent
  * or still-running review never claimed to have found nothing in the first
@@ -314,6 +340,8 @@ export interface ReviewChannelState {
   sessionId: string;
   provider: string;
   structuredVerdict: StructuredReviewVerdict | null;
+  /** The agent type is one of the four the gates count as a review. */
+  isOrdinaryReview: boolean;
   /** The session had a structured channel to file its verdict on. */
   mcpCapable: boolean;
   /**
@@ -358,6 +386,7 @@ export function readReviewChannelState(
       status: agentSessions.status,
       outcome: agentSessions.outcome,
       mcpChannel: agentSessions.mcpChannel,
+      agentType: agentSessions.agentType,
     })
     .from(agentSessions)
     .where(eq(agentSessions.id, sessionId))
@@ -365,6 +394,7 @@ export function readReviewChannelState(
   if (!row) return null;
 
   const provider = row.provider ?? "claude-code";
+  const isOrdinaryReview = isOrdinaryReviewAgentType(row.agentType);
   const delivered = row.status === "completed" && row.outcome === "answered";
   const structuredVerdict = isStructuredReviewVerdict(row.reviewVerdict)
     ? row.reviewVerdict
@@ -375,7 +405,7 @@ export function readReviewChannelState(
       ? providerSupportsMcp(provider) && isMcpToolsEnabled(database)
       : channelRecord === MCP_CHANNEL_INJECTED;
   const provedChannelWithRows =
-    mcpCapable && delivered && structuredVerdict === null
+    isOrdinaryReview && mcpCapable && delivered && structuredVerdict === null
       ? database
           .select({ id: reviewComments.id })
           .from(reviewComments)
@@ -387,11 +417,13 @@ export function readReviewChannelState(
     sessionId,
     provider,
     structuredVerdict,
+    isOrdinaryReview,
     mcpCapable,
     channelRecord,
     provedChannelWithRows,
     delivered,
     unverifiable:
+      isOrdinaryReview &&
       mcpCapable &&
       delivered &&
       structuredVerdict === null &&
@@ -407,6 +439,7 @@ export interface ReviewChannelRow {
   status: string | null;
   outcome: string | null;
   mcpChannel: string | null;
+  agentType: string | null;
 }
 
 /**
@@ -434,6 +467,7 @@ export function selectUnverifiableReviewSessionIds(
   const mcpToolsEnabled = () => (toggle ??= isMcpToolsEnabled(database));
 
   const candidates = rows.filter((row) => {
+    if (!isOrdinaryReviewAgentType(row.agentType)) return false;
     if (row.status !== "completed" || row.outcome !== "answered") return false;
     if (isStructuredReviewVerdict(row.reviewVerdict)) return false;
     const record = parseMcpChannelRecord(row.mcpChannel);
@@ -473,6 +507,71 @@ export function isReviewSessionUnverifiable(
   database: ArijDatabase = defaultDb
 ): boolean {
   return readReviewChannelState(sessionId, database)?.unverifiable ?? false;
+}
+
+/**
+ * The gating predicate as SQL: "is this review row CLEAN?".
+ *
+ * The JS side of this rule ({@link readReviewChannelState}) cannot serve the
+ * Full Auto merge gate, which asks the question of every session row of a
+ * project inside one conditional aggregation. So the predicate has a second
+ * expression — and the two disagreeing is not a cosmetic problem. When
+ * findings.ts says "verifiable" and the merge gate says "not clean", nothing
+ * charges the review (`reconcileInFlight` only charges an unverifiable one)
+ * and `needsReview` stays true every sweep: a reviewer dispatched forever on
+ * an epic that never parks. That is exactly what `mcp_channel = 'unavailable'`
+ * produced while only findings.ts read the column.
+ *
+ * The invariant, pinned by __tests__/review-gate-consistency.test.ts:
+ *
+ *     clean  ==  !unverifiable  &&  verdict != 'changes_requested'
+ *
+ * so the SQL below is the negation of the same four conditions the JS side
+ * applies — ordinary review type, channel actually had, no structured
+ * verdict, no findings rows of its own — with the explicit `changes_requested`
+ * no on top.
+ */
+export function cleanReviewVerdictSql(database: ArijDatabase = defaultDb) {
+  const mcpToolsEnabled = isMcpToolsEnabled(database);
+
+  // Same precedence as readReviewChannelState: the recorded wiring first, the
+  // provider reconstruction only for rows written before the column existed.
+  const hadChannel = sql`(CASE
+    WHEN ${agentSessions.mcpChannel} = ${MCP_CHANNEL_INJECTED} THEN 1
+    WHEN ${agentSessions.mcpChannel} = ${MCP_CHANNEL_UNAVAILABLE} THEN 0
+    WHEN ${mcpToolsEnabled ? sql`1` : sql`0`} = 1
+     AND COALESCE(${agentSessions.provider}, 'claude-code')
+         IN (${sql.raw(sqlLiteralList(MCP_CAPABLE_PROVIDERS))}) THEN 1
+    ELSE 0
+  END)`;
+
+  // COALESCE, not a bare IN: a NULL verdict makes `IN (…)` NULL, and SQLite
+  // would then propagate NULL through the whole conjunction. The final answer
+  // happens to come out right today because NULL reads as falsy in the CASE
+  // above it — but "no verdict" must be an explicit FALSE here, or the next
+  // term added to this expression inherits an accident.
+  const hasStructuredVerdict = sql`COALESCE(${agentSessions.reviewVerdict} IN (${sql.raw(
+    sqlLiteralList(STRUCTURED_REVIEW_VERDICTS)
+  )}), 0) = 1`;
+
+  // The escape hatch, correlated on the session: rows of its own prove the
+  // channel worked for it. Open ones still block the merge separately, via
+  // the board's open-review-comment count.
+  const provedChannelWithRows = sql`EXISTS (
+    SELECT 1 FROM ${reviewComments}
+    WHERE ${reviewComments.agentSessionId} = ${agentSessions.id}
+  )`;
+
+  const unverifiable = sql`(${agentSessions.agentType} IN (${sql.raw(
+    sqlLiteralList(ORDINARY_REVIEW_AGENT_TYPES)
+  )})
+    AND ${hadChannel} = 1
+    AND NOT ${hasStructuredVerdict}
+    AND NOT ${provedChannelWithRows})`;
+
+  return sql`(NOT ${unverifiable}
+    AND (${agentSessions.reviewVerdict} IS NULL
+         OR ${agentSessions.reviewVerdict} <> ${NEGATIVE_STRUCTURED_VERDICT}))`;
 }
 
 /**

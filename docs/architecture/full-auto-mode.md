@@ -235,6 +235,24 @@ file cannot be written), and in both cases the child never reaches an
 the provider would refuse such a review and tell the operator its reviewer
 "filed no verdict" — for a tool that session was never handed.
 
+**One predicate, two expressions.** This gate asks the question of every
+session row of a project inside one conditional aggregation, so it cannot call
+the JS rule per row — but it does not get its own copy either: the SQL comes
+from `cleanReviewVerdictSql` in `lib/pipeline/findings.ts`, beside the JS one,
+and `__tests__/review-gate-consistency.test.ts` pins them to the same table.
+The two disagreeing is not cosmetic. When findings.ts says "verifiable" and
+this gate says "not clean", `reconcileInFlight` charges nothing (it only
+charges an *unverifiable* review) while `needsReview` stays true every sweep —
+a reviewer dispatched forever on an epic that never parks.
+
+**The second opinion is exempt, everywhere.** `review_second_opinion` is a
+merge gate with its own prose fail-safe, so an APPROVING gate routinely
+carries no structured verdict and no findings rows — the exact shape the rule
+refuses. The exemption lives in the rule itself (`isOrdinaryReviewAgentType`),
+not in each caller: put in one caller, it was missed by the next, and an
+approving gate was charged as a failure until three of them parked the epic it
+had just cleared.
+
 **An unverifiable review is not a code failure.** It buys another REVIEW, not
 a rebuild: the ticket stays in Review (`resolveReviewVerdict` reports it
 without marking it negative), the pipeline's stage ladder re-runs the review,

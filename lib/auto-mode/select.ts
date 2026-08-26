@@ -15,12 +15,8 @@ import {
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
 import { isDeliveredStatus } from "@/lib/types/kanban";
 import {
-  isMcpToolsEnabled,
-  MCP_CAPABLE_PROVIDERS,
-} from "@/lib/claude/mcp-injection";
-import {
+  cleanReviewVerdictSql,
   ORDINARY_REVIEW_AGENT_TYPES,
-  POSITIVE_STRUCTURED_VERDICTS,
 } from "@/lib/pipeline/findings";
 import {
   normalizeAt,
@@ -141,20 +137,6 @@ const REVIEW_AGENT_TYPES_SQL = ORDINARY_REVIEW_AGENT_TYPES.map(
  * merge-fix agent rewrites the branch, so a review that predates it is stale.
  */
 const CODE_AGENT_TYPES_SQL = "'build','ticket_build','team_build','merge'";
-
-/**
- * The providers whose sessions get a per-spawn `submit_findings` channel, as
- * a SQL literal list. Derived from the single source of truth in
- * lib/claude/mcp-injection.ts so the gate cannot drift from the injector.
- */
-const MCP_CAPABLE_PROVIDERS_SQL = MCP_CAPABLE_PROVIDERS.map(
-  (provider) => `'${provider}'`
-).join(",");
-
-/** The structured verdicts that let a review pass, as a SQL literal list. */
-const POSITIVE_REVIEW_VERDICTS_SQL = POSITIVE_STRUCTURED_VERDICTS.map(
-  (verdict) => `'${verdict}'`
-).join(",");
 
 const TERMINAL_STATUSES_SQL = "'completed','failed','cancelled'";
 
@@ -407,35 +389,17 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
   // satisfy the epic's merge gate. The code branch deliberately keeps story
   // sessions — they commit to the same branch.
   //
-  // The verdict rule, per session row. `submit_findings` is the
-  // authoritative channel (lib/pipeline/findings.ts), so the SQL asks the
-  // same question that module asks: did this reviewer HAVE the channel?
+  // The verdict rule, per session row — NOT written here. `submit_findings`
+  // is the authoritative channel, and the module that owns that rule owns
+  // this expression too (lib/pipeline/findings.ts `cleanReviewVerdictSql`).
   //
-  //   - It had it (an MCP-capable provider, tools enabled) → only an
-  //     explicitly positive verdict is clean. `changes_requested` is an
-  //     explicit no; NULL is silence, and silence from a reviewer that could
-  //     have spoken is missing evidence, not approval. Counting that silence
-  //     is exactly how a review whose findings 401'd on the way in unlocked
-  //     the merge with nothing recorded.
-  //   - It did not (an MCP-less provider, or the global toggle off) → the
-  //     pre-existing rule, verbatim: NULL is clean, because the prose scan is
-  //     that reviewer's only verdict signal and this gate never read it.
-  //
-  // Reading the toggle at query time keeps an operator who disables the
-  // channel from finding the whole board unmergeable for want of verdicts
-  // nobody can produce any more.
-  const structuredVerdictRequired = isMcpToolsEnabled();
-  const cleanVerdictSql = structuredVerdictRequired
-    ? sql`(CASE
-        WHEN COALESCE(${agentSessions.provider}, 'claude-code')
-             IN (${sql.raw(MCP_CAPABLE_PROVIDERS_SQL)})
-        THEN ${agentSessions.reviewVerdict}
-             IN (${sql.raw(POSITIVE_REVIEW_VERDICTS_SQL)})
-        ELSE ${agentSessions.reviewVerdict} IS NULL
-             OR ${agentSessions.reviewVerdict} <> 'changes_requested'
-      END)`
-    : sql`(${agentSessions.reviewVerdict} IS NULL
-           OR ${agentSessions.reviewVerdict} <> 'changes_requested')`;
+  // The duplication this replaces was not cosmetic. While only findings.ts
+  // read `agent_sessions.mcp_channel`, a review whose channel Arij could not
+  // wire was judged by prose there and "not clean" here — so nothing charged
+  // it (reconcileInFlight only charges an unverifiable review) and
+  // `needsReview` stayed true every sweep: a reviewer dispatched forever on
+  // an epic that never parked.
+  const cleanVerdict = cleanReviewVerdictSql();
 
   const factRows = db
     .select({
@@ -445,7 +409,7 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
          AND ${agentSessions.userStoryId} IS NULL
          AND ${agentSessions.agentType} IN (${sql.raw(REVIEW_AGENT_TYPES_SQL)})
          AND ${agentSessions.outcome} = 'answered'
-         AND ${cleanVerdictSql}
+         AND ${cleanVerdict}
         THEN ${sessionAtSql()} END)`,
       lastTerminalCodeAt: sql<string | null>`MAX(CASE
         WHEN ${agentSessions.status} IN (${sql.raw(TERMINAL_STATUSES_SQL)})
