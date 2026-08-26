@@ -244,6 +244,34 @@ describe("runVerification", () => {
     expect(mockSpawn).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a real exit code for a command that exits just before the deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-25T10:00:00.000Z"));
+    const child = new FakeChild(4701);
+    mockSpawn.mockImplementationOnce(() => child);
+    const killGroup = vi.spyOn(process, "kill").mockReturnValue(true);
+
+    const pending = runVerification(
+      input({
+        timeoutMs: 250,
+        commands: [{ name: "test", command: "npm test" }],
+      })
+    );
+    // Exits inside the close-grace window: `close` is still pending because a
+    // descendant holds a pipe, so settlement is deferred past the deadline.
+    await vi.advanceTimersByTimeAsync(249);
+    child.exit(0);
+    await vi.advanceTimersByTimeAsync(VERIFY_CLOSE_GRACE_MS);
+
+    const report = await pending;
+    // It beat the deadline. Calling this a timeout would overwrite a real
+    // exit code with null in a row the merge gate reads as evidence.
+    expect(report.status).toBe("pass");
+    expect(report.commands[0].exitCode).toBe(0);
+    expect(report.commands[0].tail).not.toContain("timed out");
+    expect(killGroup).not.toHaveBeenCalled();
+  });
+
   it("settles unconditionally after the SIGKILL escalation when no close arrives", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-25T10:00:00.000Z"));

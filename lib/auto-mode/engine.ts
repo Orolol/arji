@@ -7,11 +7,13 @@ import {
   userStories,
 } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
+import { getRunningSessionForTarget } from "@/lib/agents/concurrency";
 import { logTransition } from "@/lib/workflow/log";
 import { transitionReviewRejected } from "@/lib/workflow/automatic-transitions";
 import { buildDeterministicVerificationFixSection } from "@/lib/claude/prompt-builder";
 import { createPipelineStageDriver } from "@/lib/pipeline/stages";
 import type { PipelineDeterministicVerificationOutcome } from "@/lib/pipeline/runner";
+import { assessEpicVerification } from "@/lib/verify/freshness";
 import type { VerifyCommandResult } from "@/lib/verify/verify-constants";
 import type { AutoModeInFlightEntry } from "./registry";
 import {
@@ -137,6 +139,12 @@ export interface AutoModeEngineDeps {
       namedAgentId: string | null;
       /** False when no build slot is free for a conflict-resolution agent. */
       dispatchConflictAgent: boolean;
+      /**
+       * True when this sweep's single verification slot is still free, so a
+       * merge candidate with no usable report may produce one instead of
+       * being refused forever.
+       */
+      verifyIfMissing?: boolean;
     }
   ): Promise<AutoMergeOutcome>;
   readSessionStatus(sessionId: string): string | null;
@@ -255,12 +263,25 @@ async function defaultDispatch(
     }
   }
 
+  // A review gets the mechanical evidence the pipeline's reviewer gets: a
+  // one-line-per-command PASS summary in its prompt. Full Auto now runs the
+  // same checks at the same point in the lifecycle, so withholding the report
+  // would just make the reviewer re-derive what Arij already proved. Only a
+  // report that still vouches for the branch is forwarded — the same
+  // freshness rule the merge gate uses.
+  const evidence =
+    input.stage === "review"
+      ? assessEpicVerification(input.projectId, input.epicId)
+      : null;
+  const verificationReport = evidence?.problem === null ? evidence.report : null;
+
   const handle = await driver.launchStage({
     stage: input.stage,
     attempt: 1,
     fixCycle: 0,
     previousAttemptSessionId: null,
     lastCodeSessionId: null,
+    ...(verificationReport ? { verificationReport } : {}),
   });
 
   if (!handle.sessionId) {
@@ -405,6 +426,20 @@ function trace(
   });
 }
 
+/** What reconcile hands the rest of the sweep. */
+interface ReconcileOutcome {
+  /**
+   * Epics whose delivered build was NOT verified this tick because the cap
+   * below deferred it. The rest of the sweep must leave them alone: their
+   * branch has no mechanical evidence yet, and next tick this loop will spawn
+   * commands into their worktree — where a review agent dispatched now would
+   * still be working.
+   */
+  deferredEpicIds: Set<string>;
+  /** True once a command list has run, which is the per-tick budget. */
+  verificationRan: boolean;
+}
+
 /**
  * Reconciles the in-flight map against the session rows: anything terminal
  * leaves the map, a completed session clears its ticket's failure streak and
@@ -415,7 +450,7 @@ async function reconcileInFlight(
   projectId: string,
   deps: AutoModeEngineDeps,
   parked: string[]
-): Promise<void> {
+): Promise<ReconcileOutcome> {
   // One command list per tick. Verification spawns real child processes and
   // this loop runs inside the per-project sweep mutex, so a three-command
   // config at the default 10-minute timeout could otherwise hold the lock for
@@ -424,6 +459,7 @@ async function reconcileInFlight(
   // the in-flight map on purpose: the ticket remains busy (no second build
   // lands on it) and the next tick, 15 seconds later, reconciles it.
   let verificationRan = false;
+  const deferredEpicIds = new Set<string>();
 
   for (const { sessionId, entry } of autoModeRegistry.listInFlight(projectId)) {
     const status = deps.readSessionStatus(sessionId);
@@ -463,6 +499,11 @@ async function reconcileInFlight(
       sessionOutcome !== "asked_question";
 
     if (deliveredCode && verificationRan) {
+      // Deferred, so the rest of this sweep must not act on the epic: a
+      // review dispatched now would still be running in the worktree the
+      // next tick spawns `npm test` into, and it would be reviewing a branch
+      // whose checks have never run.
+      deferredEpicIds.add(entry.epicId);
       trace(
         deps,
         projectId,
@@ -517,6 +558,8 @@ async function reconcileInFlight(
       );
     }
   }
+
+  return { deferredEpicIds, verificationRan };
 }
 
 /**
@@ -577,6 +620,32 @@ async function verifyDeliveredCode(
   // sweep kicked by that very transition would start a second, redundant pass
   // against the tree the retry is about to merge.
   if (autoModeRegistry.isMergeInFlight(projectId, entry.epicId)) {
+    return NOT_VERIFIED;
+  }
+
+  // Never spawn commands into a worktree an agent is live in. Normally the
+  // build that just delivered is the only session on the epic and it is
+  // terminal by now — but a deferred entry is reconciled a tick later, and
+  // anything (a human build, another mode, a review the previous sweep sent
+  // out) can have taken the worktree since. Two `next build` runs in one
+  // directory produce evidence that is garbage in either direction, and a
+  // failing verdict here would pull the ticket out from under a live review.
+  // The manual route refuses on exactly this check.
+  const activeSession = getRunningSessionForTarget({
+    scope: "epic",
+    projectId,
+    epicId: entry.epicId,
+  });
+  if (activeSession) {
+    trace(
+      deps,
+      projectId,
+      entry.epicId,
+      AUTO_MODE_REASONS.verificationSkipped(
+        `another agent is working in this epic's worktree (session ${activeSession.id})`
+      ),
+      sessionId
+    );
     return NOT_VERIFIED;
   }
 
@@ -848,7 +917,20 @@ export async function sweepProject(
     // before the same sweep decides whether to review or merge that epic.
     // The hold is bounded by verify_timeout_ms per command, and a tick that
     // arrives meanwhile simply reports "locked" rather than piling up.
-    await reconcileInFlight(projectId, deps, result.parked);
+    const reconciled = await reconcileInFlight(projectId, deps, result.parked);
+
+    // An epic whose checks were deferred is off limits for the rest of this
+    // sweep. The selectors cannot see it on their own: their only
+    // session-based exclusion is `busyEpicIds`, built from queued/running
+    // rows, and a deferred entry's session is already `completed`.
+    const skipUnverified = <T extends { epicId: string }>(
+      candidates: T[]
+    ): T[] =>
+      reconciled.deferredEpicIds.size === 0
+        ? candidates
+        : candidates.filter(
+            (candidate) => !reconciled.deferredEpicIds.has(candidate.epicId)
+          );
 
     // The snapshot already reflects the parks reconcile just recorded (it is
     // built after them); only an un-park invalidates its exclusion set.
@@ -861,7 +943,10 @@ export async function sweepProject(
     // 1. Merge — cheapest first, and it frees the Review column.
     // -----------------------------------------------------------------
     let mergedSomething = false;
-    for (const candidate of selectMergeCandidates(projectId, board)) {
+    let verifyBudget = reconciled.verificationRan ? 0 : 1;
+    for (const candidate of skipUnverified(
+      selectMergeCandidates(projectId, board)
+    )) {
       // Merging and dispatching both await real work, and the user can flip
       // the switch off mid-sweep. Re-reading the flag before every action is
       // the difference between "stop" and "stop after the current wave".
@@ -874,10 +959,17 @@ export async function sweepProject(
       // has to fit in the build budget like any other. Checked per candidate,
       // because the previous one may just have taken the last slot.
       const buildsInFlight = autoModeRegistry.countInFlight(projectId).build;
+      // One command list per tick across the WHOLE sweep: reconcile may have
+      // spent it already, and the first candidate offered the slot consumes
+      // it whether or not the gate turned out to need it. Anything else is
+      // back to holding the per-project mutex for command lists × epics.
+      const mayVerify = verifyBudget > 0;
+      if (mayVerify) verifyBudget -= 1;
       const outcome = await deps.merge(projectId, candidate.epicId, {
         namedAgentId: config.buildAgent,
         dispatchConflictAgent:
           config.buildConcurrency > 0 && buildsInFlight < config.buildConcurrency,
+        verifyIfMissing: mayVerify,
       });
 
       if (outcome.status === "merged") {
@@ -935,12 +1027,14 @@ export async function sweepProject(
       deps,
       config,
       budget: config.reviewConcurrency,
-      candidates: selectReviewCandidates(projectId, board).map((candidate) => ({
-        scope: "epic" as const,
-        epicId: candidate.epicId,
-        userStoryId: null,
-        ticketId: candidate.ticketId,
-      })),
+      candidates: skipUnverified(selectReviewCandidates(projectId, board)).map(
+        (candidate) => ({
+          scope: "epic" as const,
+          epicId: candidate.epicId,
+          userStoryId: null,
+          ticketId: candidate.ticketId,
+        })
+      ),
       result,
     });
 
@@ -950,12 +1044,14 @@ export async function sweepProject(
       deps,
       config,
       budget: config.buildConcurrency,
-      candidates: selectBuildCandidates(projectId, board).map((candidate) => ({
-        scope: candidate.scope,
-        epicId: candidate.epicId,
-        userStoryId: candidate.userStoryId,
-        ticketId: candidate.ticketId,
-      })),
+      candidates: skipUnverified(selectBuildCandidates(projectId, board)).map(
+        (candidate) => ({
+          scope: candidate.scope,
+          epicId: candidate.epicId,
+          userStoryId: candidate.userStoryId,
+          ticketId: candidate.ticketId,
+        })
+      ),
       result,
     });
   } catch (error) {

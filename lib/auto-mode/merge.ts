@@ -1,13 +1,12 @@
 import fs from "fs";
 import path from "path";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   agentSessions,
   epics,
   projects,
   ticketComments,
-  verifyReports,
 } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { agentScheduler } from "@/lib/agents/scheduler";
@@ -46,6 +45,8 @@ import {
   createAutoModeMergeParkedNotification,
 } from "@/lib/notifications/create";
 import { createPipelineStageDriver } from "@/lib/pipeline/stages";
+import { getRunningSessionForTarget } from "@/lib/agents/concurrency";
+import { assessEpicVerification } from "@/lib/verify/freshness";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import {
   AUTO_MERGE_CONFLICT_BACKOFF_MS,
@@ -113,6 +114,16 @@ export interface TryAutoMergeOptions {
    * true so a direct call still self-heals.
    */
   dispatchConflictAgent?: boolean;
+  /**
+   * Whether this call may RUN the deterministic checks when the epic has no
+   * usable report, rather than only asking for one.
+   *
+   * Off by default because the checks are real child processes and the caller
+   * owns the budget: the sweep allows one command list per tick across
+   * reconcile and merge combined, so a project with three merge candidates
+   * and no evidence does not hold the per-project mutex for an hour.
+   */
+  verifyIfMissing?: boolean;
 }
 
 const MERGE_ALLOWED_TOOLS = ["Edit", "Write", "Bash", "Read", "Glob", "Grep"];
@@ -293,80 +304,68 @@ export async function tryAutoMerge(
  * Refusal reason when deterministic verification is configured but cannot
  * vouch for this epic's branch, or null when the merge may proceed.
  *
- * The gate compares the newest `verify_reports` row for the epic against
- * the epic's last code-changing session (build/fix): a report that predates
- * that session describes a tree that no longer exists, and a failed or
- * missing report means nothing was proven. Verification not configured is
- * deliberately silent — the feature is off, not unsatisfied.
+ * The comparison itself lives in lib/verify/freshness.ts, shared with the
+ * review dispatch that forwards a passing report to the reviewer — the two
+ * must never disagree about what "fresh" means. Verification not configured
+ * is deliberately silent here: the feature is off, not unsatisfied.
  */
 function verificationGateReason(
   projectId: string,
   epicId: string
 ): string | null {
-  const config = resolveVerifyConfigForProject(projectId);
-  if (!config.enabled) return null;
-
-  const latestReport = db
-    .select({
-      status: verifyReports.status,
-      finishedAt: verifyReports.finishedAt,
-    })
-    .from(verifyReports)
-    .where(
-      and(
-        eq(verifyReports.projectId, projectId),
-        eq(verifyReports.epicId, epicId)
-      )
-    )
-    .orderBy(desc(verifyReports.finishedAt), desc(verifyReports.id))
-    .get();
-  if (!latestReport) {
-    return "deterministic verification has never run for this epic";
-  }
-  if (latestReport.status !== "pass") {
-    return "the latest deterministic verification did not pass";
-  }
-
-  const lastCodeSession = db
-    .select({
-      createdAt: agentSessions.createdAt,
-      endedAt: agentSessions.endedAt,
-    })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.projectId, projectId),
-        eq(agentSessions.epicId, epicId),
-        // "merge" belongs here: the conflict-resolution agent edits and
-        // commits into the very worktree about to be merged, so a report
-        // older than it describes a tree that no longer exists.
-        inArray(agentSessions.agentType, ["build", "fix", "merge"])
-      )
-    )
-    .orderBy(desc(agentSessions.createdAt))
-    .get();
-  if (!lastCodeSession) return null;
-
-  const codeEndedAt = lastCodeSession.endedAt ?? lastCodeSession.createdAt;
-  if (
-    codeEndedAt &&
-    normalizeInstant(latestReport.finishedAt) < normalizeInstant(codeEndedAt)
-  ) {
-    return "the passing verification predates the most recent code session";
-  }
-  return null;
+  if (!resolveVerifyConfigForProject(projectId).enabled) return null;
+  return assessEpicVerification(projectId, epicId).problem?.reason ?? null;
 }
 
 /**
- * Makes two stored timestamps lexically comparable. Reports always store ISO
- * ("2026-08-19T09:05:00.000Z") while a session row that fell back to the
- * schema default carries SQLite's "2026-08-19 09:05:00" — and 'T' (0x54)
- * sorts after ' ' (0x20), so an unnormalised comparison would call every ISO
- * report newer than any same-day default-format session and fail the
- * staleness check open.
+ * Runs Arij's checks for an epic whose evidence is absent or stale, then
+ * re-asks the gate. Returns the surviving refusal, or null to proceed.
+ *
+ * `runDeterministicVerification` is wired into the pipeline and into Full
+ * Auto's reconcile, so an epic BUILT BY EITHER has a report. An epic that
+ * arrived in Review any other way — a manual build with the (default-off)
+ * pipeline disabled, or one already sitting there when `verify_commands` was
+ * first configured — has no producer at all, and an ask-only gate would
+ * refuse it forever. Running the checks here is what the conflict retry
+ * already does; this is the same three lines for the ordinary path.
  */
-function normalizeInstant(value: string): string {
-  return value.includes("T") ? value : value.replace(" ", "T");
+async function verifyThenReask(
+  projectId: string,
+  epicId: string,
+  sessionId: string
+): Promise<string | null> {
+  // Same rule as the engine's reconcile: never spawn commands into a
+  // worktree an agent is live in.
+  const active = getRunningSessionForTarget({ scope: "epic", projectId, epicId });
+  if (active) return "another agent is working in this epic's worktree";
+
+  let skipReason: string | undefined;
+  try {
+    const outcome = await createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+      batchRunId: autoRunId(projectId),
+    }).runDeterministicVerification(sessionId);
+    skipReason = outcome.skipReason;
+  } catch (error) {
+    // Not rethrown: the gate below is what decides, and it reads persisted
+    // evidence rather than this call's return value. A crash simply leaves
+    // the newest report stale, which the gate reports as such — but the
+    // message is kept, because "the report predates the merge session" is
+    // two steps removed from the cause the caller can act on.
+    skipReason = error instanceof Error ? error.message : String(error);
+    console.warn(
+      "[auto-mode/merge] Deterministic verification crashed:",
+      skipReason
+    );
+  }
+
+  const gateReason = verificationGateReason(projectId, epicId);
+  if (!gateReason) return null;
+  return skipReason ? `${gateReason} (${skipReason})` : gateReason;
 }
 
 /**
@@ -460,7 +459,23 @@ async function runAutoMerge(
   // prose alone: require a PASSING deterministic verification produced no
   // earlier than the last code-changing session ended. A block is logged
   // and skipped (never parked) — the next passing report unlocks it.
-  const verificationBlock = verificationGateReason(projectId, epicId);
+  let verificationBlock = verificationGateReason(projectId, epicId);
+  if (verificationBlock && options.verifyIfMissing) {
+    // "Did not pass" is an answer, not missing evidence — re-running it would
+    // just burn the same minutes to reach the same verdict. Only absent or
+    // superseded evidence is worth producing.
+    const assessment = assessEpicVerification(projectId, epicId);
+    if (
+      assessment.problem?.kind !== "failed" &&
+      assessment.lastCodeSessionId
+    ) {
+      verificationBlock = await verifyThenReask(
+        projectId,
+        epicId,
+        assessment.lastCodeSessionId
+      );
+    }
+  }
   if (verificationBlock) {
     return refuseUnverifiedMerge({
       projectId,
@@ -821,34 +836,7 @@ async function verifyResolvedConflict(input: {
   sessionId: string;
 }): Promise<string | null> {
   if (!resolveVerifyConfigForProject(input.projectId).enabled) return null;
-
-  let skipReason: string | undefined;
-  try {
-    const outcome = await createPipelineStageDriver({
-      projectId: input.projectId,
-      scope: "epic",
-      epicId: input.epicId,
-      userStoryId: null,
-      buildNamedAgentId: null,
-      batchRunId: autoRunId(input.projectId),
-    }).runDeterministicVerification(input.sessionId);
-    skipReason = outcome.skipReason;
-  } catch (error) {
-    // Not rethrown: the gate below is what decides, and it reads persisted
-    // evidence rather than this call's return value. A crash simply leaves
-    // the newest report stale, which the gate reports as such — but the
-    // message is kept, because "the report predates the merge session" is
-    // two steps removed from the cause the caller can act on.
-    skipReason = error instanceof Error ? error.message : String(error);
-    console.warn(
-      "[auto-mode/merge] Deterministic verification crashed after a conflict fix:",
-      skipReason
-    );
-  }
-
-  const gateReason = verificationGateReason(input.projectId, input.epicId);
-  if (!gateReason) return null;
-  return skipReason ? `${gateReason} (${skipReason})` : gateReason;
+  return verifyThenReask(input.projectId, input.epicId, input.sessionId);
 }
 
 /**
@@ -957,6 +945,12 @@ async function retryMergeAfterFix(input: {
     return;
   }
 
+  // Drop the merge-fix session from the in-flight map, exactly as `park`
+  // does. It was charged to the build budget as a code session, so leaving it
+  // there hands the next sweep's reconcile a delivered build to verify — on
+  // an epic that is already `done` and whose worktree `mergeWorktree` removed.
+  // The result is a "we couldn't check this" skip traced onto a merged epic.
+  autoModeRegistry.removeInFlight(input.projectId, input.sessionId);
   autoModeRegistry.clearFailures(input.projectId, input.epicId);
   autoModeRegistry.recordDispatch(input.projectId, {
     kind: "merge",

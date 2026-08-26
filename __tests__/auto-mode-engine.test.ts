@@ -1261,6 +1261,97 @@ describe("deterministic verification", () => {
     );
   });
 
+  it("neither reviews nor merges an epic whose checks were deferred", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 2, reviewConcurrency: 1 });
+    addEpic({ id: "t1", status: "todo", position: 0 });
+    addEpic({ id: "t2", status: "todo", position: 1 });
+    fakes.verifyOutcome(failingReport());
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    expect(first.buildsDispatched).toHaveLength(2);
+    for (const sessionId of first.buildsDispatched) {
+      settle(fakes, sessionId, "completed");
+    }
+    db.update(epics).set({ status: "review" }).run();
+
+    const second = await sweepProject(PROJECT_ID, fakes.deps);
+
+    // t1's checks ran and failed; t2 was deferred. The selectors cannot see
+    // that on their own — their only session-based exclusion is built from
+    // queued/running rows, and t2's build session is `completed`.
+    expect(fakes.verifications).toHaveLength(1);
+    expect(second.reviewsDispatched).toEqual([]);
+    // Reviewing t2 now would spend an agent on an unverified branch AND put
+    // it in the worktree the next tick spawns `npm test` into.
+    expect(
+      db
+        .select()
+        .from(agentSessions)
+        .all()
+        .filter((row) => row.epicId === "t2" && row.agentType === "review_code")
+    ).toEqual([]);
+
+    // Once t2's own checks pass, the review it was owed goes out.
+    fakes.verifyOutcome({
+      ran: true,
+      result: {
+        id: "vr-t2",
+        projectId: PROJECT_ID,
+        epicId: "t2",
+        agentSessionId: null,
+        status: "pass",
+        startedAt: at(84),
+        finishedAt: at(85),
+        commands: [
+          { name: "test", command: "npm test", exitCode: 0, durationMs: 5, tail: "ok" },
+        ],
+      },
+    });
+    const third = await sweepProject(PROJECT_ID, fakes.deps);
+    expect(third.reviewsDispatched).toHaveLength(1);
+  });
+
+  it("refuses to run checks while another agent holds the worktree", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 0, reviewConcurrency: 0 });
+    addEpic({ id: "t1", status: "review" });
+    const sessionId = addSession({
+      epicId: "t1",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(1),
+      endedAt: at(2),
+    });
+    // A human build, another mode, or a review the previous sweep sent out.
+    addSession({
+      id: "intruder",
+      epicId: "t1",
+      status: "running",
+      agentType: "build",
+      createdAt: at(3),
+    });
+    autoModeRegistry.addInFlight(PROJECT_ID, sessionId, {
+      kind: "build",
+      ticketId: "t1",
+      epicId: "t1",
+    });
+    fakes.verifyOutcome(failingReport());
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    // Two `next build` runs in one directory produce evidence that is
+    // garbage in either direction, and a failing verdict would pull the
+    // ticket out from under the live session.
+    expect(fakes.verifications).toEqual([]);
+    expect(
+      allAutoReasons("t1").some((reason) =>
+        reason.includes("another agent is working in this epic's worktree")
+      )
+    ).toBe(true);
+    expect(db.select().from(epics).get()!.status).toBe("review");
+  });
+
   it("verifies one command list per sweep and defers the rest", async () => {
     const fakes = makeFakes();
     fakes.setConfig({ buildConcurrency: 2, reviewConcurrency: 0 });

@@ -675,7 +675,6 @@ describe("review stage dispatch", () => {
         projectId,
         epicId,
         agentSessionId: "s-build",
-        persisted: true,
         status: "pass",
         startedAt: "2026-08-25T10:00:00.000Z",
         finishedAt: "2026-08-25T10:00:02.000Z",

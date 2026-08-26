@@ -194,6 +194,11 @@ function runCommand(input: {
   timers.add(
     setTimeout(() => {
       if (!child || settled) return;
+      // The process may have exited just inside the close-grace window while
+      // a descendant still held a pipe. It beat the deadline, so reporting a
+      // timeout would overwrite a real exit code with null in a row the merge
+      // gate reads as evidence.
+      if (exitedAt !== null) return;
       timedOut = true;
       signalProcessGroup(child, "SIGTERM");
       timers.add(

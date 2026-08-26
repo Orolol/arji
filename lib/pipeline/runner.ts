@@ -2,10 +2,11 @@ import type { PipelineStage, PipelineState } from "./constants";
 import { PIPELINE_REASONS } from "./constants";
 import type { VerifyGate, VerifyGateOutcome } from "./verify";
 import type { RegressionReportPayload } from "@/lib/verify/regression-report";
+import type { VerificationResult } from "@/lib/verify/runner";
 import type {
-  VerificationResult,
+  VerificationReport,
   VerifyCommandResult,
-} from "@/lib/verify/runner";
+} from "@/lib/verify/verify-constants";
 
 /**
  * Autonomous pipeline state machine (build → review → auto-fix → forensic).
@@ -88,8 +89,13 @@ export interface PipelineStageRequest {
   verifyFailure?: RegressionReportPayload | null;
   /** Failed human-configured command whose tail must guide this fix stage. */
   verificationFailure?: VerifyCommandResult;
-  /** Passing mechanical evidence appended to this review stage's prompt. */
-  verificationReport?: VerificationResult;
+  /**
+   * Passing mechanical evidence appended to this review stage's prompt.
+   * Deliberately the client-safe report shape, not the runner's result: the
+   * prompt only projects `commands`, and Full Auto forwards a row it read
+   * back from `verify_reports` rather than one it just executed.
+   */
+  verificationReport?: VerificationReport;
 }
 
 /** Result of resolving and, when configured, running deterministic checks. */
