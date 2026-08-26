@@ -1076,6 +1076,16 @@ export async function dispatchDreamingSession(
       }
     }
 
+    try {
+      eventBus.emit({
+        type: result?.success && outcome === "answered" ? "session:completed" : "session:failed",
+        projectId: input.projectId,
+        data: { sessionId, agentType: DREAMING_AGENT_TYPE },
+        timestamp: completedAt,
+      });
+    } catch {
+      // Non-critical event emission
+    }
     // Only a delivered answer replaces the memory — silent runs, asked
     // questions and failures leave it exactly as it was.
     if (!result?.success || outcome !== "answered") {

@@ -13,17 +13,20 @@ import type {
   MemoryWriteProvenance,
   MemoryWriteSource,
 } from "@/lib/documents/memory-provenance";
-import { DREAMING_MEMORY_SECTIONS } from "@/lib/workflow/dreaming-constants";
-import { validateDreamedMemoryStructure } from "@/lib/workflow/dreaming-digest";
+import {
+  DREAMING_MEMORY_SECTIONS,
+  MEMORY_WRITER_AGENT_TYPES,
+} from "@/lib/workflow/dreaming-constants";
 
 export const DREAMING_MEMORY_TEMPLATE = DREAMING_MEMORY_SECTIONS.map(
   (title) => `## ${title}\n\n- `
 ).join("\n\n");
 
 export function hasAllDreamingSections(markdown: string): boolean {
-  return validateDreamedMemoryStructure(markdown).valid;
+  return DREAMING_MEMORY_SECTIONS.every((section) =>
+    new RegExp(`^##\\s+${section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "im").test(markdown)
+  );
 }
-
 /**
  * The pending-writer payload of the memory envelope (see
  * lib/workflow/memory-writer-lock): the in-flight memory writer, if any.
@@ -114,11 +117,20 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
   const dirty = safeContent !== savedContent;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
-  const validation = validateDreamedMemoryStructure(safeContent);
-  const conformsToDreaming = validation.valid;
+  const savedContentRef = useRef(savedContent);
+  savedContentRef.current = savedContent;
+  const pendingWriterRef = useRef(pendingWriter);
+  pendingWriterRef.current = pendingWriter;
+
+  const missingSections = DREAMING_MEMORY_SECTIONS.filter((section) =>
+    !new RegExp(`^##\\s+${section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "im").test(safeContent)
+  );
+  const hasMissingSections = missingSections.length > 0;
+
   const applyEnvelope = useCallback(
     (envelope: MemoryEnvelope, keepLocalEdit: boolean) => {
       const incomingContent = envelope.content ?? "";
+      const previousSaved = savedContentRef.current;
       setSavedContent(incomingContent);
       setUpdatedAt(envelope.updatedAt ?? null);
       setProvenance(envelope.provenance ?? null);
@@ -128,7 +140,9 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
         setContent(incomingContent);
         setBackgroundUpdateConflict(false);
       } else {
-        setBackgroundUpdateConflict(true);
+        if (incomingContent !== previousSaved) {
+          setBackgroundUpdateConflict(true);
+        }
       }
     },
     []
@@ -181,11 +195,33 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
 
   const { pollTick } = useProjectEvents(projectId, {
     "memory:changed": () => refetchMemory(),
-    "session:started": () => refetchMemory(),
-    "session:completed": () => refetchMemory(),
-    "session:failed": () => refetchMemory(),
+    "session:started": (event) => {
+      const agentType = typeof event.data?.agentType === "string" ? event.data.agentType : "";
+      if (MEMORY_WRITER_AGENT_TYPES.includes(agentType)) {
+        refetchMemory();
+      }
+    },
+    "session:completed": (event) => {
+      const agentType = typeof event.data?.agentType === "string" ? event.data.agentType : "";
+      const sessionId = typeof event.data?.sessionId === "string" ? event.data.sessionId : "";
+      if (
+        MEMORY_WRITER_AGENT_TYPES.includes(agentType) ||
+        (pendingWriterRef.current && pendingWriterRef.current.sessionId === sessionId)
+      ) {
+        refetchMemory();
+      }
+    },
+    "session:failed": (event) => {
+      const agentType = typeof event.data?.agentType === "string" ? event.data.agentType : "";
+      const sessionId = typeof event.data?.sessionId === "string" ? event.data.sessionId : "";
+      if (
+        MEMORY_WRITER_AGENT_TYPES.includes(agentType) ||
+        (pendingWriterRef.current && pendingWriterRef.current.sessionId === sessionId)
+      ) {
+        refetchMemory();
+      }
+    },
   });
-
   useEffect(() => {
     if (pollTick > 0) {
       refetchMemory();
@@ -301,8 +337,7 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
       setContent(`${safeContent}${separator}${toAppend}`);
       setMessage(`Appended missing Dreaming section(s): ${missing.join(", ")}.`);
     } else {
-      setContent(DREAMING_MEMORY_TEMPLATE);
-      setMessage("Reset to the 4-sections Dreaming template.");
+      setMessage("All 4 required Dreaming sections are already present.");
     }
   }
 
@@ -400,8 +435,8 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
         </p>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-[10px]">
-          {/* Skeleton suggestion banner when empty or non-conforming in edit mode */}
-          {mode === "edit" && !conformsToDreaming && !pendingWriter && (
+          {/* Skeleton suggestion banner when empty or missing required sections in edit mode */}
+          {mode === "edit" && hasMissingSections && !pendingWriter && (
             <div
               data-testid="memory-skeleton-suggestion"
               className="flex flex-none items-center justify-between gap-[8px] rounded-[8px] border border-dashed border-border bg-band/50 px-[12px] py-[8px] text-[12px] text-muted-foreground"
@@ -411,7 +446,7 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
                 <span>
                   {!safeContent.trim()
                     ? "No project memory yet. Start with the 4 Dreaming sections:"
-                    : `Dreaming structure hint: ${validation.reason || "missing or non-conforming sections"}.`}
+                    : `Missing Dreaming section(s): ${missingSections.join(", ")}.`}
                 </span>
               </div>
               <Button
@@ -425,7 +460,6 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
               </Button>
             </div>
           )}
-
           {mode === "edit" ? (
             <Textarea
               data-testid="memory-editor"
@@ -468,7 +502,7 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
                     size="sm"
                     className="h-[25px] rounded-[6px] px-[8px] text-[11.5px]"
                     onClick={handleRestore}
-                    disabled={restoring || saving}
+                    disabled={restoring || saving || dirty}
                   >
                     {restoring ? "Restoring..." : "Confirm"}
                   </Button>
@@ -488,7 +522,12 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
                   size="sm"
                   className="h-[25px] rounded-[6px] px-[9px] text-[11.5px]"
                   onClick={() => setConfirmingRestore(true)}
-                  disabled={restoring || saving || !!pendingWriter}
+                  disabled={restoring || saving || dirty || !!pendingWriter}
+                  title={
+                    dirty
+                      ? "Save or discard your edits first — restoring replaces the memory with the snapshot"
+                      : "Restore the memory to the pre-dream snapshot"
+                  }
                 >
                   <RotateCcw className="mr-1 h-3 w-3" />
                   Restore snapshot

@@ -678,6 +678,16 @@ export async function dispatchMemoryDistillSession(
       }
     }
 
+    try {
+      eventBus.emit({
+        type: result?.success && outcome === "answered" ? "session:completed" : "session:failed",
+        projectId: input.projectId,
+        data: { sessionId, agentType: "memory_distill" },
+        timestamp: completedAt,
+      });
+    } catch {
+      // Non-critical event emission
+    }
     // Only a delivered answer replaces the memory doc — silent runs, asked
     // questions, and failures leave it untouched.
     if (!result?.success || outcome !== "answered") {

@@ -456,7 +456,12 @@ describe("MemoryPanel component (Story 2, 3 & 4)", () => {
     });
 
     act(() => {
-      activeMockEventSources.forEach((es) => es.emit("session:started"));
+      activeMockEventSources.forEach((es) =>
+        es.emit("session:started", {
+          sessionId: "sess-dreaming-live",
+          agentType: "dreaming",
+        })
+      );
     });
 
     // Panel updates live to read-only mode with banner
@@ -566,5 +571,313 @@ describe("MemoryPanel component (Story 2, 3 & 4)", () => {
     await waitFor(() => {
       expect(mockRouterPush).toHaveBeenCalledWith("/projects/proj-1/sessions/sess-dream-new-456");
     });
+  });
+  it("does not show conflict notice when refetch returns identical content while dirty", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Initial server memory",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    render(<MemoryPanel projectId="proj-1" mode="edit" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("memory-editor")).toHaveValue("Initial server memory");
+    });
+
+    // User types local draft (dirty)
+    const editor = screen.getByTestId("memory-editor");
+    fireEvent.change(editor, { target: { value: "My unsaved local draft" } });
+    expect(editor).toHaveValue("My unsaved local draft");
+
+    // Background event triggers refetch, but server content has NOT changed
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Initial server memory",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    act(() => {
+      activeMockEventSources.forEach((es) => es.emit("memory:changed"));
+    });
+
+    // Local draft is preserved, but NO conflict notice is shown
+    await waitFor(() => {
+      expect(screen.queryByTestId("memory-conflict-notice")).toBeNull();
+    });
+    expect(editor).toHaveValue("My unsaved local draft");
+  });
+
+  it("clears pendingWriter banner when writer session completes without writing (session:completed)", async () => {
+    // 1. Initial mount with active writer
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Original memory",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: {
+            sessionId: "sess-dream-discarded",
+            agentType: "dreaming",
+          },
+        },
+      }),
+    });
+
+    render(<MemoryPanel projectId="proj-1" mode="edit" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("memory-pending-writer-banner")).toBeDefined();
+      expect(screen.getByTestId("memory-editor")).toBeDisabled();
+    });
+
+    // 2. Writer finishes without writing (e.g. discarded or no output) -> emits session:completed
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Original memory",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    act(() => {
+      activeMockEventSources.forEach((es) =>
+        es.emit("session:completed", {
+          sessionId: "sess-dream-discarded",
+          agentType: "dreaming",
+        })
+      );
+    });
+
+    // Banner clears and editor is re-enabled
+    await waitFor(() => {
+      expect(screen.queryByTestId("memory-pending-writer-banner")).toBeNull();
+      expect(screen.getByTestId("memory-editor")).toBeEnabled();
+    });
+  });
+
+  it("clears pendingWriter banner when writer session fails (session:failed)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Original memory",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: {
+            sessionId: "sess-distill-failed",
+            agentType: "memory_distill",
+          },
+        },
+      }),
+    });
+
+    render(<MemoryPanel projectId="proj-1" mode="edit" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("memory-pending-writer-banner")).toBeDefined();
+      expect(screen.getByTestId("memory-editor")).toBeDisabled();
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Original memory",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    act(() => {
+      activeMockEventSources.forEach((es) =>
+        es.emit("session:failed", {
+          sessionId: "sess-distill-failed",
+          agentType: "memory_distill",
+        })
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("memory-pending-writer-banner")).toBeNull();
+      expect(screen.getByTestId("memory-editor")).toBeEnabled();
+    });
+  });
+
+  it("does not refetch on unrelated session lifecycle events (e.g. build session)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Original memory",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    render(<MemoryPanel projectId="proj-1" mode="edit" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("memory-editor")).toBeEnabled();
+    });
+
+    const fetchCallCountBefore = mockFetch.mock.calls.length;
+
+    // Unrelated build session starts
+    act(() => {
+      activeMockEventSources.forEach((es) =>
+        es.emit("session:started", {
+          sessionId: "sess-build-123",
+          agentType: "build",
+        })
+      );
+    });
+
+    // No refetch triggered
+    expect(mockFetch.mock.calls.length).toBe(fetchCallCountBefore);
+  });
+
+  it("does not show structure hint when all 4 sections exist even with custom sections or preamble", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: `# Project overview\n\nSome preamble.\n\n## Codebase pitfalls\n\n- Pitfall\n\n## Recurring agent mistakes\n\n- Mistake\n\n## Strategies that work\n\n- Strategy\n\n## Build instructions\n\n- Build\n\n## Team conventions\n\n- Custom section`,
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    render(<MemoryPanel projectId="proj-1" mode="edit" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("memory-editor")).toBeEnabled();
+    });
+
+    // Structure hint is NOT displayed because all 4 required sections exist
+    expect(screen.queryByTestId("memory-skeleton-suggestion")).toBeNull();
+  });
+
+  it("handleInsertSkeleton leaves content untouched when all 4 sections already exist", async () => {
+    const memoryWithAllSections = `## Codebase pitfalls\n\n- 1\n\n## Recurring agent mistakes\n\n- 2\n\n## Strategies that work\n\n- 3\n\n## Build instructions\n\n- 4\n\n## Extra notes\n\n- Keep this!`;
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: memoryWithAllSections,
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: null,
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    render(<MemoryPanel projectId="proj-1" mode="edit" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("memory-editor")).toHaveValue(memoryWithAllSections);
+    });
+
+    // Even if somehow triggered, content is untouched
+    const editor = screen.getByTestId("memory-editor");
+    expect(editor).toHaveValue(memoryWithAllSections);
+  });
+
+  it("disables Restore snapshot button when editor is dirty with explanatory title", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          content: "Saved memory text",
+          exists: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          maxChars: PROJECT_MEMORY_MAX_CHARS,
+          provenance: null,
+          archive: {
+            content: "Old pre-dream snapshot",
+            updatedAt: "2025-12-31T00:00:00.000Z",
+          },
+          pendingWriter: null,
+        },
+      }),
+    });
+
+    render(<MemoryPanel projectId="proj-1" mode="edit" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /restore snapshot/i })).toBeEnabled();
+    });
+
+    // User edits textarea
+    const editor = screen.getByTestId("memory-editor");
+    fireEvent.change(editor, { target: { value: "Unsaved modifications" } });
+
+    // Restore snapshot button is disabled while dirty
+    const restoreBtn = screen.getByRole("button", { name: /restore snapshot/i });
+    expect(restoreBtn).toBeDisabled();
+    expect(restoreBtn).toHaveAttribute(
+      "title",
+      expect.stringMatching(/save or discard your edits first/i)
+    );
   });
 });
