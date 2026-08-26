@@ -125,6 +125,15 @@ export interface BoardState {
   releaseGroups?: ReleaseGroup[];
 }
 
+/**
+ * A project ticket-dependency edge (`ticket_dependencies` row, epic-level):
+ * `ticketId` depends on `dependsOnTicketId`.
+ */
+export interface TicketDependencyEdge {
+  ticketId: string;
+  dependsOnTicketId: string;
+}
+
 export interface ReorderItem {
   id: string;
   status: string;

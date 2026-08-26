@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -24,6 +24,12 @@ import {
   parseStoredFilters,
   type KanbanFilters,
 } from "./FilterBar";
+import {
+  buildDependencyAdjacency,
+  computeBlockedBy,
+  computeQueueRanks,
+  computeReadiness,
+} from "@/lib/kanban/queue";
 import {
   KANBAN_COLUMNS,
   DRAGGABLE_COLUMNS,
@@ -59,6 +65,8 @@ interface BoardProps {
   hideReleased?: boolean;
   /** Reports how many cards survive the active filters (drives the capture bar). */
   onVisibleCountChange?: (count: number) => void;
+  /** Non-blocking warning for risky moves (e.g. awaiting-reply epic to To Do). */
+  onMoveWarning?: (message: string) => void;
 }
 
 /**
@@ -101,8 +109,12 @@ export function Board({
   onRetryBuild,
   hideReleased = false,
   onVisibleCountChange,
+  onMoveWarning,
 }: BoardProps) {
-  const { board, loading, moveEpic, refresh } = useKanban(projectId, { onMoveError });
+  const { board, loading, moveEpic, refresh, dependencies } = useKanban(
+    projectId,
+    { onMoveError }
+  );
   // Optimistic overlay on the server-side read cursors: opening a ticket
   // clears its unread dot immediately, before the /api/inbox/read POST from
   // EpicDetail lands and the next board refresh returns the moved cursor.
@@ -220,6 +232,92 @@ export function Board({
     [markEpicAiCommentSeen, onEpicClick]
   );
 
+  // Dependency hover focus: 150 ms of intent on a card lights up its
+  // predecessors and successors and dims every other card. A commit timer
+  // keeps a card fly-by from flickering the board, and the focus is cleared
+  // on leave or the moment a drag starts, so it never competes with a drag.
+  const [hoverFocusEpicId, setHoverFocusEpicId] = useState<string | null>(null);
+  const hoverFocusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearHoverFocus = useCallback(() => {
+    if (hoverFocusTimer.current !== null) {
+      clearTimeout(hoverFocusTimer.current);
+      hoverFocusTimer.current = null;
+    }
+    setHoverFocusEpicId(null);
+  }, []);
+
+  const handleDependencyHoverChange = useCallback((epicId: string | null) => {
+    if (hoverFocusTimer.current !== null) {
+      clearTimeout(hoverFocusTimer.current);
+      hoverFocusTimer.current = null;
+    }
+    if (epicId === null) {
+      setHoverFocusEpicId(null);
+      return;
+    }
+    hoverFocusTimer.current = setTimeout(() => {
+      hoverFocusTimer.current = null;
+      setHoverFocusEpicId(epicId);
+    }, 150);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (hoverFocusTimer.current !== null) {
+        clearTimeout(hoverFocusTimer.current);
+      }
+    },
+    []
+  );
+
+  // Epic-level dependency visibility: which tickets are blocked, the
+  // predecessor/successor adjacency for hover highlighting, and the
+  // effective To Do queue.
+  const epicsById = useMemo(() => {
+    const m = new Map<string, KanbanEpic>();
+    for (const status of KANBAN_COLUMNS) {
+      for (const epic of board.columns[status]) m.set(epic.id, epic);
+    }
+    return m;
+  }, [board]);
+
+  const blockedBy = useMemo(() => {
+    const statusById = new Map<string, string>();
+    for (const epic of epicsById.values()) {
+      statusById.set(epic.id, epic.status);
+    }
+    return computeBlockedBy(dependencies, statusById);
+  }, [dependencies, epicsById]);
+
+  // Effective execution order: position order minus the tickets the board
+  // knows Full Auto would skip today (blocked or awaiting the user's reply).
+  const queueRanks = useMemo(
+    () =>
+      computeQueueRanks(board.columns.todo, (epic) => {
+        return blockedBy.has(epic.id) || isAwaitingReply(epic);
+      }),
+    [board, blockedBy]
+  );
+
+  const dependencyAdjacency = useMemo(
+    () => buildDependencyAdjacency(dependencies),
+    [dependencies]
+  );
+
+  const hoverFocusSets = useMemo(() => {
+    if (!hoverFocusEpicId) return null;
+    return {
+      epicId: hoverFocusEpicId,
+      predecessors: new Set(
+        dependencyAdjacency.predecessors.get(hoverFocusEpicId) ?? []
+      ),
+      successors: new Set(
+        dependencyAdjacency.successors.get(hoverFocusEpicId) ?? []
+      ),
+    };
+  }, [hoverFocusEpicId, dependencyAdjacency]);
+
   // Per-epic view models: the Board owns the assembly so Column and EpicCard
   // stay out of the business of forwarding one prop per card feature.
   const epicViews = useMemo(() => {
@@ -228,6 +326,29 @@ export function Board({
     for (const status of DRAGGABLE_COLUMNS) {
       for (const epic of board.columns[status]) {
         const failedSession = failedSessions?.[epic.id];
+
+        // A dependency target can sit in any column, so its label comes
+        // from the full-board index.
+        const blockedOn = (blockedBy.get(epic.id) ?? []).map((targetId) => {
+          const target = epicsById.get(targetId);
+          return target?.readableId || target?.title || targetId;
+        });
+        const focusDimmed =
+          !!hoverFocusSets &&
+          activeEpic === null &&
+          epic.id !== hoverFocusSets.epicId &&
+          !hoverFocusSets.predecessors.has(epic.id) &&
+          !hoverFocusSets.successors.has(epic.id);
+        const dependencyHighlight =
+          hoverFocusSets &&
+          activeEpic === null &&
+          epic.id !== hoverFocusSets.epicId
+            ? hoverFocusSets.predecessors.has(epic.id)
+              ? "predecessor"
+              : hoverFocusSets.successors.has(epic.id)
+                ? "successor"
+                : undefined
+            : undefined;
 
         views[epic.id] = {
           selected:
@@ -246,6 +367,18 @@ export function Board({
             onRetryBuild && failedSession
               ? () => onRetryBuild(epic.id)
               : undefined,
+          queueRank:
+            epic.status === "todo" ? queueRanks.get(epic.id) : undefined,
+          isNextEpic:
+            epic.status === "todo"
+              ? queueRanks.get(epic.id) === 1
+              : undefined,
+          blockedOn,
+          readiness:
+            epic.status === "backlog" ? computeReadiness(epic) : undefined,
+          dimmed: focusDimmed || undefined,
+          dependencyHighlight,
+          onDependencyHoverChange: handleDependencyHoverChange,
         };
       }
     }
@@ -262,12 +395,18 @@ export function Board({
     onToggleSelect,
     onLinkedAgentHoverChange,
     onRetryBuild,
+    activeEpic,
+    blockedBy,
+    epicsById,
+    queueRanks,
+    hoverFocusSets,
+    handleDependencyHoverChange,
   ]);
 
-  // Pure client-side filter layer over the board columns. While any filter is
-  // active, drag-and-drop is disabled entirely (see the guards in the drag
-  // handlers and the disabled flags threaded to Column/EpicCard): drop indices
-  // against a filtered list would not match the underlying board order.
+  // Pure client-side filter layer over the board columns. Filtering hides
+  // cards but never disables the board: cross-column drags stay live and
+  // land at the END of the target column, because a drop index read off a
+  // filtered list would not match the underlying board order.
   const activeFilterCount = countActiveFilters(filters);
   const filtersActive = activeFilterCount > 0;
 
@@ -332,20 +471,19 @@ export function Board({
   if (loading) return <BoardSkeleton />;
 
   function handleDragStart(event: DragStartEvent) {
-    // No drag while filtering: the visible order diverges from board order.
-    if (filtersActive) return;
     const found = findEpicById(event.active.id as string);
     if (!found) return;
     // Block dragging from the released column
     if (found.column === "released") return;
+    // A live drag owns the board's visual state: clear any dependency
+    // hover focus so its dimming never fights the drag overlay.
+    clearHoverFocus();
     setActiveEpic(found.epic);
   }
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveEpic(null);
-
-    // Dropping into a filtered view must be impossible, not just visually odd.
-    if (filtersActive) return;
+    clearHoverFocus();
 
     const { active, over } = event;
     if (!over) return;
@@ -373,11 +511,19 @@ export function Board({
       if (!overResult) return;
       if (overResult.column === "released") return;
       targetColumn = overResult.column;
-      targetIndex = board.columns[targetColumn].findIndex((e) => e.id === overId);
+      // Under a filter the visible order diverges from board order, so the
+      // card lands at the end of the target column — never at an index the
+      // filtered view would have implied.
+      targetIndex = filtersActive
+        ? board.columns[targetColumn].length
+        : board.columns[targetColumn].findIndex((e) => e.id === overId);
     }
 
     if (activeResult.column === targetColumn) {
-      // Same column reorder
+      // Same-column reorder. Under a filter this stays a no-op: the visible
+      // index does not match board order, and "append to end" would silently
+      // reorder cards the user cannot see.
+      if (filtersActive) return;
       const currentIndex = board.columns[targetColumn].findIndex(
         (e) => e.id === activeId
       );
@@ -385,6 +531,19 @@ export function Board({
     }
 
     moveEpic(activeId, activeResult.column, targetColumn, targetIndex);
+
+    // Non-blocking warning: a Backlog epic that still has open agent
+    // questions lands in To Do but stays skipped by auto dispatch until
+    // answered.
+    if (
+      activeResult.column === "backlog" &&
+      targetColumn === "todo" &&
+      isAwaitingReply(activeResult.epic)
+    ) {
+      onMoveWarning?.(
+        `"${activeResult.epic.title}" has open agent questions — it will be skipped by auto dispatch until answered.`
+      );
+    }
   }
 
   return (
@@ -417,7 +576,8 @@ export function Board({
                 epics={visibleColumns[status]}
                 onEpicClick={handleEpicClick}
                 epicViews={epicViews}
-                dragDisabled={filtersActive}
+                dropAtEnd={filtersActive}
+                dragging={!!activeEpic}
                 filtersActive={filtersActive}
               />
             )

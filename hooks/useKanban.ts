@@ -7,8 +7,9 @@ import {
   type KanbanStatus,
   type KanbanEpic,
   type BoardState,
-  type ReorderItem,
   type ReleaseGroup,
+  type TicketDependencyEdge,
+  type ReorderItem,
 } from "@/lib/types/kanban";
 
 interface ReleaseRow {
@@ -37,15 +38,34 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
   const [loading, setLoading] = useState(true);
   const onMoveErrorRef = useRef(options?.onMoveError);
   onMoveErrorRef.current = options?.onMoveError;
+  /** Epic-level dependency edges for the project (ticket_dependencies rows). */
+  const [dependencies, setDependencies] = useState<TicketDependencyEdge[]>([]);
 
   const loadEpics = useCallback(async () => {
     try {
-      const [epicsRes, releasesRes] = await Promise.all([
+      const [epicsRes, releasesRes, depsRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/epics`),
         fetch(`/api/projects/${projectId}/releases`),
+        fetch(`/api/projects/${projectId}/dependencies`),
       ]);
       const epicsData = await epicsRes.json();
       const releasesData = await releasesRes.json();
+      // A dependency fetch failure must not take the board down.
+      let depEdges: TicketDependencyEdge[] = [];
+      try {
+        if (depsRes.ok) {
+          const depsData = await depsRes.json();
+          depEdges = (depsData.data ?? []).map(
+            (d: { ticketId: string; dependsOnTicketId: string }) => ({
+              ticketId: d.ticketId,
+              dependsOnTicketId: d.dependsOnTicketId,
+            })
+          );
+        }
+      } catch {
+        // keep [] — the board renders, just without dependency visibility
+      }
+      setDependencies(depEdges);
       const epics: KanbanEpic[] = epicsData.data || [];
       const releaseRows: ReleaseRow[] = releasesData.data || [];
 
@@ -169,6 +189,11 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
     },
     [projectId, loadEpics]
   );
-
-  return { board, loading, moveEpic, refresh: loadEpics };
+  return {
+    board,
+    loading,
+    moveEpic,
+    refresh: loadEpics,
+    dependencies,
+  };
 }

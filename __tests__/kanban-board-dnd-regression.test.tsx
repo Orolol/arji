@@ -63,6 +63,7 @@ const mockKanban = vi.hoisted(() => ({
   loading: false,
   moveEpic: vi.fn(),
   refresh: vi.fn(),
+  dependencies: [],
 }));
 
 const dndHandlers = vi.hoisted(() => ({

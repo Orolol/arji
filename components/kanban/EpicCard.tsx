@@ -24,7 +24,9 @@ import {
   Bot,
   TriangleAlert,
   RefreshCw,
+  Link2,
 } from "lucide-react";
+import { READINESS_TOTAL } from "@/lib/kanban/queue";
 import type { FailedSessionInfo } from "@/lib/agent-sessions/latest-failure";
 import {
   isChatProvider,
@@ -64,6 +66,20 @@ export interface EpicCardView {
   onLinkedAgentHoverChange?: (activityId: string | null) => void;
   /** Called when user clicks the retry button on a failed session indicator */
   onRetryBuild?: () => void;
+  /** Effective position in the To Do execution queue (todo column only). */
+  queueRank?: number;
+  /** The card is queue position 1 — the "next up" ticket. */
+  isNextEpic?: boolean;
+  /** Readable ids of dependency targets that are not delivered yet. */
+  blockedOn?: string[];
+  /** How many of the READINESS_TOTAL Backlog readiness criteria are met. */
+  readiness?: number;
+  /** Card is dimmed because another card's dependency hover focus is active. */
+  dimmed?: boolean;
+  /** Predecessor/successor of the hovered focus card. */
+  dependencyHighlight?: "predecessor" | "successor";
+  /** Report dependency hover focus enter/leave (Board owns the 150 ms timer). */
+  onDependencyHoverChange?: (epicId: string | null) => void;
 }
 
 interface EpicCardProps {
@@ -74,8 +90,6 @@ interface EpicCardProps {
   highlight?: boolean;
   /** Per-epic state and callbacks, built by the Board */
   view?: EpicCardView;
-  /** Disable dnd-kit sortable wiring (set by the Board while filters are active) */
-  dragDisabled?: boolean;
 }
 
 /**
@@ -102,7 +116,6 @@ export function EpicCard({
   onClick,
   highlight = false,
   view = EMPTY_VIEW,
-  dragDisabled = false,
 }: EpicCardProps) {
   const {
     selected,
@@ -114,6 +127,13 @@ export function EpicCard({
     onToggleSelect,
     onLinkedAgentHoverChange,
     onRetryBuild,
+    queueRank,
+    isNextEpic,
+    blockedOn,
+    readiness,
+    dimmed,
+    dependencyHighlight,
+    onDependencyHoverChange,
   } = view;
 
   const {
@@ -123,7 +143,7 @@ export function EpicCard({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: epic.id, disabled: dragDisabled });
+  } = useSortable({ id: epic.id });
 
   const isDraft = isDraftEpic(epic);
 
@@ -188,15 +208,21 @@ export function EpicCard({
       {...listeners}
       onClick={handleCardClick}
       onMouseEnter={() => {
+        onDependencyHoverChange?.(epic.id);
         if (!linkedActivityId) return;
         onLinkedAgentHoverChange?.(linkedActivityId);
       }}
-      onMouseLeave={() => onLinkedAgentHoverChange?.(null)}
+      onMouseLeave={() => {
+        onDependencyHoverChange?.(null);
+        onLinkedAgentHoverChange?.(null);
+      }}
       onFocusCapture={() => {
+        onDependencyHoverChange?.(epic.id);
         if (!linkedActivityId) return;
         onLinkedAgentHoverChange?.(linkedActivityId);
       }}
       onBlurCapture={(event) => {
+        onDependencyHoverChange?.(null);
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
           return;
         }
@@ -223,7 +249,10 @@ export function EpicCard({
         isOverlay &&
           "rotate-[1.5deg] shadow-[0_8px_20px_rgba(58,48,44,.16)]",
         isHighlighted &&
-          "ring-2 ring-primary/70 bg-primary/5 motion-reduce:ring-0 motion-reduce:bg-transparent"
+          "ring-2 ring-primary/70 bg-primary/5 motion-reduce:ring-0 motion-reduce:bg-transparent",
+        dimmed && "opacity-40 saturate-50",
+        dependencyHighlight === "predecessor" && "ring-2 ring-primary/50",
+        dependencyHighlight === "successor" && "ring-2 ring-agent/50",
       )}
     >
       <h4 className="line-clamp-2 text-[14px] font-medium leading-[1.35] [text-wrap:pretty]">
@@ -349,6 +378,25 @@ export function EpicCard({
             {epic.usDone}/{epic.usCount} US
           </span>
         )}
+        {queueRank !== undefined && (
+          <span
+            className={cn(
+              "inline-flex items-center rounded-[4px] px-[5px] text-[10px]",
+              isNextEpic
+                ? "border border-agent-border bg-agent-bg text-agent"
+                : "text-muted-foreground"
+            )}
+            title={
+              isNextEpic
+                ? "Prochain ticket de la file d'exécution"
+                : `Position ${queueRank} dans la file d'exécution To Do`
+            }
+            data-testid={`epic-queue-rank-${epic.id}`}
+          >
+            #{queueRank}
+            {isNextEpic && <span className="ml-[4px] font-sans">Prochain</span>}
+          </span>
+        )}
         {isDraft && (
           <span
             className="inline-flex items-center rounded-[4px] border border-dashed border-muted-foreground/40 px-[5px] text-[10px] uppercase tracking-wide"
@@ -356,6 +404,24 @@ export function EpicCard({
             data-testid={`epic-draft-${epic.id}`}
           >
             Draft
+          </span>
+        )}
+        {readiness !== undefined && (
+          <span
+            className={cn(
+              "inline-flex items-center rounded-[4px] px-[5px] text-[10px]",
+              readiness === READINESS_TOTAL
+                ? "border border-agent-border bg-agent-bg text-agent"
+                : "border border-muted-foreground/30 text-muted-foreground"
+            )}
+            title={
+              readiness === READINESS_TOTAL
+                ? "Prêt à déplacer en To Do : pas de question en attente, a une description, a des user stories"
+                : "Prêt quand : pas de question en attente · a une description · a des user stories"
+            }
+            data-testid={`epic-readiness-${epic.id}`}
+          >
+            Prêt {readiness}/{READINESS_TOTAL}
           </span>
         )}
         {showDeliveredWithRemainingStories && (
@@ -401,6 +467,16 @@ export function EpicCard({
           </a>
         )}
       </div>
+      {blockedOn && blockedOn.length > 0 && (
+        <div
+          className="flex items-center gap-[5px] font-mono text-[11px] text-destructive"
+          aria-label={`Attend : ${blockedOn.join(", ")}`}
+          data-testid={`epic-blocked-${epic.id}`}
+        >
+          <Link2 className="h-[12px] w-[12px] shrink-0" aria-hidden="true" />
+          <span className="truncate">Attend : {blockedOn.join(" ")}</span>
+        </div>
+      )}
     </Card>
   );
 }

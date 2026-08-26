@@ -20,13 +20,19 @@ interface ColumnProps {
   onEpicClick: (epicId: string) => void;
   /** Per-epic state and callbacks, keyed by epic id and built by the Board */
   epicViews?: Record<string, EpicCardView>;
-  /** Disable drag-and-drop (set by the Board while filters are active) */
-  dragDisabled?: boolean;
   /**
    * Filters are hiding cards right now. An empty column then means "nothing
    * matches", not "nothing here" — inviting a capture would be a lie.
    */
   filtersActive?: boolean;
+  /**
+   * A filter is active, so any drop lands at the END of the target column —
+   * the drop indicator moves to the bottom of the column while a card is
+   * dragged.
+   */
+  dropAtEnd?: boolean;
+  /** Some card is being dragged somewhere on the board. */
+  dragging?: boolean;
 }
 
 /**
@@ -95,13 +101,11 @@ export function Column({
   epics,
   onEpicClick,
   epicViews,
-  dragDisabled = false,
+  dropAtEnd = false,
+  dragging = false,
   filtersActive = false,
 }: ColumnProps) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: status,
-    disabled: dragDisabled,
-  });
+  const { setNodeRef, isOver } = useDroppable({ id: status });
 
   // Track newly arrived epics for highlight animation
   const prevEpicIdsRef = useRef<Set<string>>(new Set());
@@ -159,8 +163,9 @@ export function Column({
         >
           <div className="flex min-h-[50px] flex-col gap-[12px]">
             {/* Drop target: the slot the card would land in, not a ring
-                around the whole column. */}
-            {isOver && (
+                around the whole column. Under an active filter the drop
+                always lands at the end, so the slot moves to the bottom. */}
+            {!dropAtEnd && isOver && (
               <div
                 className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
                 aria-hidden="true"
@@ -201,10 +206,16 @@ export function Column({
                     onClick={() => onEpicClick(epic.id)}
                     highlight={highlightedEpicIds.has(epic.id)}
                     view={epicViews?.[epic.id]}
-                    dragDisabled={dragDisabled}
                   />
                 </div>
               ))
+            )}
+            {dropAtEnd && dragging && (
+              <div
+                className="h-[64px] shrink-0 rounded-[11px] border border-dashed border-primary bg-primary/5"
+                aria-hidden="true"
+                data-testid={`column-drop-end-${status}`}
+              />
             )}
           </div>
         </SortableContext>
