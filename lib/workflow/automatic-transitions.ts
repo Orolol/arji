@@ -9,6 +9,7 @@ import { epics, userStories } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import {
+  applyEpicCascadeTransition,
   applyStoryTransition,
   applyTransition,
   logWorkflowDecision,
@@ -87,6 +88,8 @@ function transitionStory(opts: {
   reason: string;
   sessionId: string;
   validateOnly?: boolean;
+  /** False for the children of an epic-scoped cascade — see ApplyStoryTransitionOpts. */
+  logActivity?: boolean;
 }) {
   return applyStoryTransition({
     ...opts,
@@ -153,8 +156,11 @@ export function transitionBuildStarted(opts: {
 
   if (opts.validateOnly) return;
 
+  // A retry starts from in_progress, so the status write is intentionally a
+  // no-op; the cascade helper keeps the dispatch visible in the activity
+  // trail all the same.
   requireValid(
-    applyTransition({
+    applyEpicCascadeTransition({
       projectId: opts.projectId,
       epicId: opts.epicId,
       fromStatus: epicStatus,
@@ -165,18 +171,6 @@ export function transitionBuildStarted(opts: {
       sessionId: opts.sessionId,
     })
   );
-  // A retry starts from in_progress, so the status write is intentionally a
-  // no-op. Keep the dispatch visible in the activity trail all the same.
-  if (epicStatus === "in_progress") {
-    logWorkflowDecision({
-      projectId: opts.projectId,
-      epicId: opts.epicId,
-      status: epicStatus,
-      actor: "agent",
-      reason,
-      sessionId: opts.sessionId,
-    });
-  }
   for (const story of stories) {
     requireValid(
       transitionStory({
@@ -187,6 +181,9 @@ export function transitionBuildStarted(opts: {
         toStatus: "in_progress",
         reason,
         sessionId: opts.sessionId,
+        // Epic dispatch drags every story along: the epic's entry above is
+        // the movement, so the children stay out of the feed.
+        logActivity: opts.scope !== "epic",
       })
     );
   }
@@ -284,6 +281,9 @@ export function transitionBuildCompleted(opts: {
           toStatus: "review",
           reason,
           sessionId: opts.sessionId,
+          // The epic's promotion below is the movement; its stories ride
+          // along without one echo apiece in the ticket feed.
+          logActivity: false,
         });
         if (!storyTransition.valid) {
           return refused(
@@ -292,7 +292,7 @@ export function transitionBuildCompleted(opts: {
           );
         }
       }
-      const epicTransition = applyTransition({
+      const epicTransition = applyEpicCascadeTransition({
         projectId: opts.projectId,
         epicId: opts.epicId,
         fromStatus: epicStatus,
@@ -475,8 +475,14 @@ export function transitionReviewRejected(opts: {
     );
   }
 
+  // An epic-scoped rejection sends the whole ticket back, so it gets one
+  // line and its stories none. A story-scoped one keeps the story's own
+  // line, which is why it does not need the same-state fallback.
+  const cascading = opts.scope === "epic";
+  const applyEpic = cascading ? applyEpicCascadeTransition : applyTransition;
+
   requireValid(
-    applyTransition({
+    applyEpic({
       projectId: opts.projectId,
       epicId: opts.epicId,
       fromStatus: epicStatus,
@@ -499,6 +505,7 @@ export function transitionReviewRejected(opts: {
         source: "review",
         reason,
         sessionId: opts.sessionId,
+        logActivity: !cascading,
       })
     );
   }

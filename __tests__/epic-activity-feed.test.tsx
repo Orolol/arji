@@ -8,6 +8,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import {
   EpicActivityFeed,
   buildActivityFeed,
+  dropCascadeEchoes,
   SYSTEM_GROUP_WINDOW_MS,
   feedItemKind,
   matchesActivityFilter,
@@ -557,5 +558,122 @@ describe("long comment helpers (pure)", () => {
       )
     ).toEqual(["t1", "t2"]);
     expect(matchesActivityFilter(feed[0], "comments")).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Legacy per-story echoes (pure)                                      */
+/* ------------------------------------------------------------------ */
+
+describe("dropCascadeEchoes", () => {
+  /** An epic movement as it was recorded before the cascade fix. */
+  function legacyCascade(reason: string, storyIds: string[]) {
+    return [
+      transition("epic-move", at(0), {
+        actor: "agent",
+        sessionId: "s1",
+        fromStatus: "in_progress",
+        toStatus: "review",
+        reason,
+      }),
+      ...storyIds.map((storyId, index) =>
+        transition(`echo-${index}`, at(index + 1), {
+          actor: "agent",
+          sessionId: "s1",
+          fromStatus: "in_progress",
+          toStatus: "review",
+          reason: `Story ${storyId} — ${reason}`,
+        })
+      ),
+    ];
+  }
+
+  it("keeps one line for an epic movement that echoed every story", () => {
+    const entries = legacyCascade("Build completed successfully", [
+      "st-1",
+      "st-2",
+      "st-3",
+      "st-4",
+      "st-5",
+    ]);
+
+    expect(dropCascadeEchoes(entries).map((e) => e.id)).toEqual(["epic-move"]);
+  });
+
+  it("keeps a story line whose parent entry says something else", () => {
+    // A story-scoped build: the story reached review and the epic followed
+    // for its own reason. Two tickets moved, so two lines stay.
+    const entries = [
+      transition("story-move", at(0), {
+        actor: "agent",
+        sessionId: "s1",
+        fromStatus: "in_progress",
+        toStatus: "review",
+        reason: "Story st-1 — Build completed successfully",
+      }),
+      transition("epic-move", at(1), {
+        actor: "agent",
+        sessionId: "s1",
+        fromStatus: "in_progress",
+        toStatus: "review",
+        reason: "All stories are in review or done",
+      }),
+    ];
+
+    expect(dropCascadeEchoes(entries).map((e) => e.id)).toEqual([
+      "story-move",
+      "epic-move",
+    ]);
+  });
+
+  it("keeps story lines from a different session, actor or status pair", () => {
+    const reason = "Build completed successfully";
+    const entries = [
+      transition("epic-move", at(0), {
+        actor: "agent",
+        sessionId: "s1",
+        fromStatus: "in_progress",
+        toStatus: "review",
+        reason,
+      }),
+      transition("other-session", at(1), {
+        actor: "agent",
+        sessionId: "s2",
+        fromStatus: "in_progress",
+        toStatus: "review",
+        reason: `Story st-1 — ${reason}`,
+      }),
+      transition("other-statuses", at(2), {
+        actor: "agent",
+        sessionId: "s1",
+        fromStatus: "todo",
+        toStatus: "in_progress",
+        reason: `Story st-2 — ${reason}`,
+      }),
+    ];
+
+    expect(dropCascadeEchoes(entries).map((e) => e.id)).toEqual([
+      "epic-move",
+      "other-session",
+      "other-statuses",
+    ]);
+  });
+
+  it("never drops an entry that is not a story echo", () => {
+    const entries = [
+      transition("a", at(0), { actor: "agent", reason: "Build agent started" }),
+      transition("b", at(1), { actor: "agent", reason: "Build agent started" }),
+    ];
+
+    expect(dropCascadeEchoes(entries).map((e) => e.id)).toEqual(["a", "b"]);
+  });
+
+  it("folds the echoes out of the feed it builds", () => {
+    const feed = buildActivityFeed(
+      [],
+      legacyCascade("Build completed successfully", ["st-1", "st-2"])
+    );
+
+    expect(feed).toHaveLength(1);
   });
 });

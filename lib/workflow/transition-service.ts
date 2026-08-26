@@ -76,6 +76,19 @@ export interface ApplyStoryTransitionOpts {
    * approve flow, which bulk-resolves them as part of the same action.
    */
   assumeReviewCommentsResolved?: boolean;
+  /**
+   * Whether this story's move gets an activity row of its own. Default true.
+   *
+   * Pass `false` for the child writes of an epic-scoped cascade — a build
+   * start, a review promotion, a rejection or an approval that carries every
+   * story along with its parent. There the epic's single entry IS the
+   * movement, and one echo per story turns the ticket feed into N identical
+   * "moved In Progress → Review" lines. Refusals are logged either way: a
+   * refused child aborts the cascade, which is exactly what the trail needs
+   * to say. Use `applyEpicCascadeTransition` for the parent write so the
+   * movement keeps its line even when the epic's own status write is a no-op.
+   */
+  logActivity?: boolean;
 }
 
 function logRefusedTransition(opts: {
@@ -217,6 +230,7 @@ export function applyStoryTransition(
     requireCompletedReview = true,
     requireResolvedComments = true,
     assumeReviewCommentsResolved,
+    logActivity = true,
   } = opts;
 
   if (fromStatus === toStatus) return { valid: true };
@@ -257,16 +271,47 @@ export function applyStoryTransition(
     .set({ status: toStatus })
     .where(eq(userStories.id, userStoryId))
     .run();
-  logTransition({
-    projectId,
-    epicId,
-    fromStatus,
-    toStatus,
-    actor,
-    reason: `Story ${userStoryId} — ${reason}`,
-    sessionId,
-  });
+  if (logActivity) {
+    logTransition({
+      projectId,
+      epicId,
+      fromStatus,
+      toStatus,
+      actor,
+      reason: `Story ${userStoryId} — ${reason}`,
+      sessionId,
+    });
+  }
 
+  return { valid: true };
+}
+
+/**
+ * The parent write of an epic-scoped cascade: one activity line for the whole
+ * movement, children included.
+ *
+ * Identical to `applyTransition` except when the epic is already sitting in
+ * the target column — `applyTransition` treats that as a reorder no-op and
+ * logs nothing. That is right for a lone epic write, but here the children
+ * moved and their rows were folded away (`logActivity: false`), so returning
+ * silently would erase the movement from the trail. A same-state entry keeps
+ * it visible: the epic promoted by its own owning session through MCP, then
+ * completing with its stories, is the case that hits this.
+ */
+export function applyEpicCascadeTransition(
+  opts: ApplyTransitionOpts
+): ApplyTransitionResult {
+  if (opts.fromStatus !== opts.toStatus || opts.validateOnly) {
+    return applyTransition(opts);
+  }
+  logWorkflowDecision({
+    projectId: opts.projectId,
+    epicId: opts.epicId,
+    status: opts.fromStatus,
+    actor: opts.actor,
+    reason: opts.reason ?? `Ticket held in ${opts.fromStatus}`,
+    sessionId: opts.sessionId,
+  });
   return { valid: true };
 }
 
