@@ -216,6 +216,10 @@ describe("an epic movement writes one activity line, not one per story", () => {
         epicId: "e-approve",
         status: "completed",
         agentType: "review_code",
+        // A review that delivered its verdict: without one, an
+        // MCP-capable reviewer is unverifiable and review → done is
+        // refused for that reason instead (lib/pipeline/findings.ts).
+        reviewVerdict: "approved",
         mode: "plan",
       })
       .run();

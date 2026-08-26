@@ -115,6 +115,12 @@ function addSession(input: {
   agentType: string;
   /** Defaults to "answered" for completed sessions — what a real run stores. */
   outcome?: string | null;
+  /**
+   * Structured submit_findings verdict. Review rows need one: the provider
+   * defaults to claude-code, which HAS the tool, so silence on it is an
+   * unverifiable review rather than a clean one.
+   */
+  reviewVerdict?: string | null;
   createdAt: string;
   endedAt?: string | null;
 }): string {
@@ -134,6 +140,7 @@ function addSession(input: {
           : input.status === "completed"
             ? "answered"
             : null,
+      reviewVerdict: input.reviewVerdict ?? null,
       createdAt: input.createdAt,
       endedAt: input.endedAt ?? null,
     })
@@ -904,6 +911,10 @@ describe("merge step", () => {
       epicId: id,
       status: "completed",
       agentType: "review_code",
+      // The merge gate only counts a review whose verdict reached the
+      // database; a verdict-less claude-code row is unverifiable and would
+      // never be a merge candidate (lib/pipeline/findings.ts).
+      reviewVerdict: "approved",
       createdAt: at(3),
       endedAt: at(4),
     });
@@ -1785,6 +1796,7 @@ describe("mid-sweep disable", () => {
         epicId,
         status: "completed",
         agentType: "review_code",
+        reviewVerdict: "approved",
         createdAt: at(3),
         endedAt: at(4),
       });

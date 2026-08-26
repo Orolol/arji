@@ -67,6 +67,8 @@ interface ScriptedCliRun {
   /** Mutable status served by getStatus (flipped to simulate completion). */
   statusRef: { value: string };
   flipTo: string | null;
+  /** Runs when the script is bound to a session, with that session's id. */
+  onStart?: (sessionId: string) => void;
 }
 
 const cliState = vi.hoisted(() => ({
@@ -77,6 +79,7 @@ const cliState = vi.hoisted(() => ({
     result: Record<string, unknown> | undefined;
     statusRef: { value: string };
     flipTo: string | null;
+    onStart?: (sessionId: string) => void;
   }>,
   bySession: new Map<
     string,
@@ -130,6 +133,7 @@ vi.mock("@/lib/claude/process-manager", () => ({
       script.consumed = true;
       cliState.bySession.set(sessionId, script);
       cliState.starts.push({ sessionId, label: script.label });
+      script.onStart?.(sessionId);
       // The "CLI run": stays 'running' for ~40 fake-ms, then reaches its
       // scripted terminal status.
       if (script.flipTo) {
@@ -307,7 +311,8 @@ function forensicStage(title: string) {
 function scriptRun(
   label: string,
   match: ScriptedCliRun["match"],
-  result: Record<string, unknown> | undefined
+  result: Record<string, unknown> | undefined,
+  onStart?: (sessionId: string) => void
 ): ScriptedCliRun {
   const script: ScriptedCliRun = {
     label,
@@ -316,9 +321,31 @@ function scriptRun(
     result,
     statusRef: { value: "running" },
     flipTo: "completed",
+    onStart,
   };
   cliState.scripts.push(script);
   return script;
+}
+
+/**
+ * A passing review, filed the way a real one is: `submit_findings` persists
+ * the verdict on the calling session (agent_sessions.review_verdict). These
+ * runs resolve to claude-code, which HAS that channel, so a review that
+ * leaves the row NULL is unverifiable and blocks whatever its prose says
+ * (lib/pipeline/findings.ts).
+ */
+function scriptReviewPass(title: string): ScriptedCliRun {
+  return scriptRun(
+    `review-${title}`,
+    reviewStage(title),
+    cliOk("Overall Verdict: Complete."),
+    (sessionId) => {
+      db.update(agentSessions)
+        .set({ reviewVerdict: "approved" })
+        .where(eq(agentSessions.id, sessionId))
+        .run();
+    }
+  );
 }
 
 function unconsumedScripts(): string[] {
@@ -583,11 +610,7 @@ describe("night run e2e — clean diamond", () => {
     const { projectId, a, b, c, d, e } = seedDiamond();
     for (const epic of [a, b, c, d, e]) {
       scriptRun(`build-${epic.title}`, codeStage(epic.title), cliOk("Implemented."));
-      scriptRun(
-        `review-${epic.title}`,
-        reviewStage(epic.title),
-        cliOk("Overall Verdict: Complete — matches the spec.")
-      );
+      scriptReviewPass(epic.title);
     }
 
     const data = await dispatchNight(projectId, [a.id, b.id, c.id, d.id, e.id]);
@@ -733,7 +756,7 @@ describe("night run e2e — single failure under halt", () => {
       .run();
 
     scriptRun(`build-${a.title}`, codeStage(a.title), cliOk("Implemented."));
-    scriptRun(`review-${a.title}`, reviewStage(a.title), cliOk("Overall Verdict: Complete."));
+    scriptReviewPass(a.title);
     scriptRun(`build-${b.title}`, codeStage(b.title), cliFail("tsc exploded"));
     scriptRun(
       `forensic-${b.title}`,
@@ -741,7 +764,7 @@ describe("night run e2e — single failure under halt", () => {
       cliOk("Diagnostic: the build died on a type error.")
     );
     scriptRun(`build-${c.title}`, codeStage(c.title), cliOk("Implemented."));
-    scriptRun(`review-${c.title}`, reviewStage(c.title), cliOk("Overall Verdict: Complete."));
+    scriptReviewPass(c.title);
 
     const data = await dispatchNight(projectId, [a.id, b.id, c.id, d.id, e.id]);
     const runId = data.batchId;
@@ -845,7 +868,7 @@ describe("night run e2e — circuit breaker", () => {
       scriptRun(`forensic-${f.title}`, forensicStage(f.title), cliOk("Diagnostic."));
     }
     scriptRun(`build-${s.title}`, codeStage(s.title), cliOk("Implemented."));
-    scriptRun(`review-${s.title}`, reviewStage(s.title), cliOk("Overall Verdict: Complete."));
+    scriptReviewPass(s.title);
 
     const data = await dispatchNight(
       projectId,
@@ -925,7 +948,7 @@ describe("night run e2e — asked question", () => {
       })
     );
     scriptRun(`build-${i.title}`, codeStage(i.title), cliOk("Implemented."));
-    scriptRun(`review-${i.title}`, reviewStage(i.title), cliOk("Overall Verdict: Complete."));
+    scriptReviewPass(i.title);
 
     const data = await dispatchNight(projectId, [q.id, i.id, r.id]);
     const runId = data.batchId;
@@ -1003,7 +1026,13 @@ describe("night run e2e — cost cap", () => {
     scriptRun(
       `review-${c1.title}`,
       reviewStage(c1.title),
-      cliOk("Overall Verdict: Complete.", { costUsd: 2.5 })
+      cliOk("Overall Verdict: Complete.", { costUsd: 2.5 }),
+      (sessionId) => {
+        db.update(agentSessions)
+          .set({ reviewVerdict: "approved" })
+          .where(eq(agentSessions.id, sessionId))
+          .run();
+      }
     );
 
     const data = await dispatchNight(projectId, [c1.id, c2.id], {
@@ -1240,7 +1269,13 @@ describe("night run e2e — user stop", () => {
     scriptRun(
       `review-${p.title}`,
       reviewStage(p.title),
-      cliOk("Overall Verdict: Complete.", { costUsd: 0.25 })
+      cliOk("Overall Verdict: Complete.", { costUsd: 0.25 }),
+      (sessionId) => {
+        db.update(agentSessions)
+          .set({ reviewVerdict: "approved" })
+          .where(eq(agentSessions.id, sessionId))
+          .run();
+      }
     );
     // Deliberately NO scripts for q and r: if the stop failed to hold them
     // back, the process-manager mock throws "no CLI script matches".

@@ -176,13 +176,17 @@ beforeEach(() => {
         createdAt: now,
       },
       // Completed review on the review epic, so review→done rejections come
-      // from the approval guard, not the missing-review guard.
+      // from the approval guard, not the missing-review guard. The verdict
+      // matters: without one, a reviewer on an MCP-capable provider is
+      // unverifiable and the refusal would come from that guard instead
+      // (lib/pipeline/findings.ts).
       {
         id: createId(),
         projectId,
         epicId: reviewEpicId,
         status: "completed",
         agentType: "code_reviewer",
+        reviewVerdict: "approved",
         createdAt: now,
       },
     ])
@@ -1298,22 +1302,30 @@ describe("POST /api/mcp/submit-findings", () => {
   });
 
   it("leaves the verdict of every OTHER session untouched", async () => {
+    // Compared against a snapshot rather than against NULL: the seeded
+    // review epic already carries an `approved` row, and the claim under
+    // test is that the write is scoped to the token's own session — not
+    // that every other row happens to be empty.
+    const verdictsBefore = () =>
+      new Map(
+        db()
+          .select()
+          .from(agentSessions)
+          .where(ne(agentSessions.id, sessionId))
+          .all()
+          .map((row) => [row.id, row.reviewVerdict])
+      );
+    const before = verdictsBefore();
+
     const res = await call(
       submitFindingsPost,
-      { verdict: "approved", summary: "ok", findings: [] },
+      { verdict: "changes_requested", summary: "ok", findings: [] },
       token
     );
 
     expect(res.status).toBe(200);
-    const others = db()
-      .select()
-      .from(agentSessions)
-      .where(ne(agentSessions.id, sessionId))
-      .all();
-    expect(others.length).toBeGreaterThan(0);
-    for (const row of others) {
-      expect(row.reviewVerdict).toBeNull();
-    }
+    expect(before.size).toBeGreaterThan(0);
+    expect(verdictsBefore()).toEqual(before);
   });
 
   it("accepts an empty findings list (summary-only review)", async () => {

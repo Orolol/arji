@@ -14,6 +14,11 @@ import {
 } from "@/lib/dependencies/validation";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
 import { isDeliveredStatus } from "@/lib/types/kanban";
+import {
+  isMcpToolsEnabled,
+  MCP_CAPABLE_PROVIDERS,
+} from "@/lib/claude/mcp-injection";
+import { POSITIVE_STRUCTURED_VERDICTS } from "@/lib/pipeline/findings";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
 import { listPipelineRunsByProject } from "@/lib/pipeline/registry";
 import { dagBatchRegistry } from "@/lib/agents/dag-batch-registry";
@@ -124,6 +129,20 @@ const REVIEW_AGENT_TYPES_SQL =
  */
 const CODE_AGENT_TYPES_SQL = "'build','ticket_build','team_build','merge'";
 
+/**
+ * The providers whose sessions get a per-spawn `submit_findings` channel, as
+ * a SQL literal list. Derived from the single source of truth in
+ * lib/claude/mcp-injection.ts so the gate cannot drift from the injector.
+ */
+const MCP_CAPABLE_PROVIDERS_SQL = MCP_CAPABLE_PROVIDERS.map(
+  (provider) => `'${provider}'`
+).join(",");
+
+/** The structured verdicts that let a review pass, as a SQL literal list. */
+const POSITIVE_REVIEW_VERDICTS_SQL = POSITIVE_STRUCTURED_VERDICTS.map(
+  (verdict) => `'${verdict}'`
+).join(",");
+
 const TERMINAL_STATUSES_SQL = "'completed','failed','cancelled'";
 
 /**
@@ -209,6 +228,11 @@ interface SessionFacts {
    *   - NULL — a legacy row from before outcomes were classified. Treating it
    *     as clean would auto-merge on a verdict nobody ever recorded, so it
    *     earns exactly one fresh, properly classified review.
+   *   - answered by an MCP-capable reviewer that filed NO structured verdict
+   *     — the review ran and delivered nothing Arij can read. Excluding it
+   *     makes the epic reviewable again rather than mergeable, which is the
+   *     self-healing half: a broken findings channel now buys a re-review
+   *     (bounded by the same parking ladder), not a merge.
    */
   lastCleanReviewAt: string | null;
   /**
@@ -374,13 +398,36 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
   // satisfy the epic's merge gate. The code branch deliberately keeps story
   // sessions — they commit to the same branch.
   //
-  // A review that answered through submit_findings with `changes_requested`
-  // is NOT clean, findings or no findings: the verdict is the authoritative
-  // channel (lib/pipeline/findings.ts), so an explicit NO must never satisfy
-  // the merge gate. NULL stays clean — that is every MCP-less provider,
-  // whose only verdict signal is the prose scan this gate never read. Any
-  // other stored value (e.g. 'approved') keeps today's behaviour; unknown
-  // values are treated as absent, matching readStructuredReviewVerdict.
+  // The verdict rule, per session row. `submit_findings` is the
+  // authoritative channel (lib/pipeline/findings.ts), so the SQL asks the
+  // same question that module asks: did this reviewer HAVE the channel?
+  //
+  //   - It had it (an MCP-capable provider, tools enabled) → only an
+  //     explicitly positive verdict is clean. `changes_requested` is an
+  //     explicit no; NULL is silence, and silence from a reviewer that could
+  //     have spoken is missing evidence, not approval. Counting that silence
+  //     is exactly how a review whose findings 401'd on the way in unlocked
+  //     the merge with nothing recorded.
+  //   - It did not (an MCP-less provider, or the global toggle off) → the
+  //     pre-existing rule, verbatim: NULL is clean, because the prose scan is
+  //     that reviewer's only verdict signal and this gate never read it.
+  //
+  // Reading the toggle at query time keeps an operator who disables the
+  // channel from finding the whole board unmergeable for want of verdicts
+  // nobody can produce any more.
+  const structuredVerdictRequired = isMcpToolsEnabled();
+  const cleanVerdictSql = structuredVerdictRequired
+    ? sql`(CASE
+        WHEN COALESCE(${agentSessions.provider}, 'claude-code')
+             IN (${sql.raw(MCP_CAPABLE_PROVIDERS_SQL)})
+        THEN ${agentSessions.reviewVerdict}
+             IN (${sql.raw(POSITIVE_REVIEW_VERDICTS_SQL)})
+        ELSE ${agentSessions.reviewVerdict} IS NULL
+             OR ${agentSessions.reviewVerdict} <> 'changes_requested'
+      END)`
+    : sql`(${agentSessions.reviewVerdict} IS NULL
+           OR ${agentSessions.reviewVerdict} <> 'changes_requested')`;
+
   const factRows = db
     .select({
       epicId: agentSessions.epicId,
@@ -389,8 +436,7 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
          AND ${agentSessions.userStoryId} IS NULL
          AND ${agentSessions.agentType} IN (${sql.raw(REVIEW_AGENT_TYPES_SQL)})
          AND ${agentSessions.outcome} = 'answered'
-         AND (${agentSessions.reviewVerdict} IS NULL
-              OR ${agentSessions.reviewVerdict} <> 'changes_requested')
+         AND ${cleanVerdictSql}
         THEN ${SESSION_AT_SQL} END)`,
       lastTerminalCodeAt: sql<string | null>`MAX(CASE
         WHEN ${agentSessions.status} IN (${sql.raw(TERMINAL_STATUSES_SQL)})
@@ -736,10 +782,11 @@ function compareEpics(a: EpicRow, b: EpicRow): number {
  * auto-approves), so a naive "everything in review" selector would review the
  * same epic forever. The gate is temporal at its core — "has a review been
  * attempted since the last terminal code change?" is a fact, not a guess —
- * plus one verdict rule: since agent_sessions.review_verdict exists, a review
- * that answered `changes_requested` through submit_findings is not clean and
- * earns a fresh one (see lastCleanReviewAt). The prose fallback for MCP-less
- * providers is deliberately NOT parsed here; their rows stay NULL.
+ * plus the verdict rule: for a reviewer that HAD the submit_findings channel,
+ * only an explicitly positive verdict is clean — `changes_requested` and
+ * silence alike earn a fresh review (see lastCleanReviewAt). The prose
+ * fallback for MCP-less providers is deliberately NOT parsed here; their rows
+ * stay NULL and stay clean.
  *
  * "A review" means a completed, epic-scoped review that delivered a verdict —
  * see SessionFacts.lastCleanReviewAt for what is deliberately excluded and

@@ -1,5 +1,6 @@
 import type { PipelineStage, PipelineState } from "./constants";
 import { PIPELINE_REASONS } from "./constants";
+import type { ReviewVerdictSource } from "./findings";
 import type { VerifyGate, VerifyGateOutcome } from "./verify";
 import type { RegressionReportPayload } from "@/lib/verify/regression-report";
 import type { VerificationResult } from "@/lib/verify/runner";
@@ -136,9 +137,11 @@ export interface PipelineReviewAssessment {
   usedProseFallback: boolean;
   /**
    * Which channel decided: `structured` when the reviewer's persisted
-   * submit_findings verdict did, `prose` for the fallback path.
+   * submit_findings verdict did, `prose` for the fallback path,
+   * `unverifiable` when the reviewer had the structured channel and filed
+   * nothing on it (blocking on missing evidence, not on a finding).
    */
-  verdictSource?: "structured" | "prose";
+  verdictSource?: ReviewVerdictSource;
   /** The persisted submit_findings verdict, when the reviewer filed one. */
   structuredVerdict?: string | null;
 }

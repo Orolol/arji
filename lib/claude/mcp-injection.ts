@@ -34,7 +34,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db, type ArijDatabase } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { getAppBaseUrl } from "@/lib/webhooks/send";
 import type { McpSpawnConfig } from "@/lib/providers/types";
@@ -189,9 +189,17 @@ export function parseMcpToolsEnabledSetting(value: unknown): boolean {
   return true;
 }
 
-/** Reads the global toggle from the settings table. Absent row = enabled. */
-export function isMcpToolsEnabled(): boolean {
-  const row = db
+/**
+ * Reads the global toggle from the settings table. Absent row = enabled.
+ *
+ * `database` exists for the readers OUTSIDE the spawn path — the review
+ * reliability rules in lib/pipeline/findings.ts run against an injected
+ * handle in tests, and they must read the toggle from the same database they
+ * read the session rows from, or a test would judge sessions in one database
+ * against a setting in another.
+ */
+export function isMcpToolsEnabled(database: ArijDatabase = db): boolean {
+  const row = database
     .select({ value: settings.value })
     .from(settings)
     .where(eq(settings.key, MCP_TOOLS_ENABLED_SETTING_KEY))
@@ -212,14 +220,22 @@ export function isMcpToolsEnabled(): boolean {
  * see AgyProvider.buildEnv). Since the 2026-08 cleanup every REGISTERED
  * provider qualifies; the gate still matters for legacy DB rows naming a
  * removed provider.
+ *
+ * The list is exported because it is also a SQL predicate: the Full Auto
+ * merge gate (lib/auto-mode/select.ts) has to decide, per session ROW,
+ * whether a missing structured verdict is "this provider had no channel" or
+ * "this provider had a channel and stayed silent" — and that decision must
+ * not drift from the one this function makes.
  */
+export const MCP_CAPABLE_PROVIDERS = [
+  "claude-code",
+  "codex",
+  "oh-my-pi",
+  "agy",
+] as const;
+
 export function providerSupportsMcp(provider: string): boolean {
-  return (
-    provider === "claude-code" ||
-    provider === "codex" ||
-    provider === "oh-my-pi" ||
-    provider === "agy"
-  );
+  return (MCP_CAPABLE_PROVIDERS as readonly string[]).includes(provider);
 }
 
 /**

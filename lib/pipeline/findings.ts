@@ -2,13 +2,18 @@ import { and, eq } from "drizzle-orm";
 import { db as defaultDb, type ArijDatabase } from "@/lib/db";
 import { agentSessions, reviewComments } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
+import {
+  isMcpToolsEnabled,
+  providerSupportsMcp,
+} from "@/lib/claude/mcp-injection";
 import { parseReviewReport } from "./parse-review-report";
 
 /**
  * Review-verdict assessment shared by the pipeline's review stage
  * (lib/pipeline/stages.ts) and the review routes.
  *
- * THREE channels, in strict priority order.
+ * THREE channels, in strict priority order — plus one rule about SILENCE on
+ * the first of them (see UNVERIFIABLE REVIEWS at the bottom).
  *
  * 1. STRUCTURED VERDICT — authoritative. The MCP `submit_findings` tool
  *    persists its `verdict` on the calling session row
@@ -40,8 +45,25 @@ import { parseReviewReport } from "./parse-review-report";
  *    without MCP injection cannot call `submit_findings`, and
  *    review_provider_segregation can route a review to exactly those.
  *
- * Retro-compatibility: a review session with no persisted verdict behaves
- * bit-for-bit as before this module gained channel 1.
+ * UNVERIFIABLE REVIEWS. Channels 2 and 3 both read "the reviewer filed
+ * nothing" as "the reviewer found nothing" — which is only sound when the
+ * reviewer had no way to file. When the reviewer's provider DOES have the
+ * structured channel (providerSupportsMcp + the mcp_tools_enabled toggle),
+ * ran to a verdict, and NOTHING of it reached the database — no verdict on the session row and
+ * no review_comments rows attributed to it — its silence is missing
+ * evidence, not an approval: the tool call may have been rejected (a stale or
+ * never-delivered MCP token 401s every call — see
+ * lib/mcp/review-channel-failure.ts), or the reviewer may never have called
+ * it. Either way the review is UNVERIFIABLE and blocks, because the
+ * alternative is what this module was changed to stop: a review whose
+ * findings never reached the database counting as clean and unlocking the
+ * merge. A session that DID file rows proved its channel works, so it keeps
+ * channels 2 and 3 verbatim.
+ *
+ * Retro-compatibility: a review session on a provider WITHOUT the channel —
+ * or any session judged while `mcp_tools_enabled` is off — behaves
+ * bit-for-bit as before this module gained channel 1. That is the whole
+ * reason the prose fallback still exists.
  *
  * Timestamps are compared via Date.parse on BOTH sides so explicit ISO
  * strings (what submit_findings writes) and SQLite CURRENT_TIMESTAMP
@@ -179,8 +201,13 @@ export type StructuredReviewVerdict =
 export const NEGATIVE_STRUCTURED_VERDICT: StructuredReviewVerdict =
   "changes_requested";
 
-/** Which channel produced a verdict, for the activity-log trail. */
-export type ReviewVerdictSource = "structured" | "prose";
+/**
+ * Which channel produced a verdict, for the activity-log trail.
+ *
+ * `unverifiable` is not a channel the reviewer used — it is the ABSENCE of
+ * the structured one on a provider that had it.
+ */
+export type ReviewVerdictSource = "structured" | "prose" | "unverifiable";
 
 function isStructuredReviewVerdict(
   value: string | null | undefined
@@ -212,6 +239,132 @@ export function readStructuredReviewVerdict(
     ? row.reviewVerdict
     : null;
 }
+
+/* ------------------------------------------------------------------ */
+/* The silence rule — unverifiable reviews                             */
+/* ------------------------------------------------------------------ */
+
+/** Structured verdicts that let a review pass on its own. */
+export const POSITIVE_STRUCTURED_VERDICTS: ReadonlyArray<StructuredReviewVerdict> =
+  ["approved", "approved_with_minor_issues"];
+
+/**
+ * What the structured channel was worth for one review session.
+ *
+ * `mcpCapable` is the question the whole rule turns on: could this session
+ * have called `submit_findings` at all? It is the spawn-time gate, re-read —
+ * the provider's injection surface AND the global `mcp_tools_enabled`
+ * toggle, exactly the two conditions lib/claude/mcp-injection.ts applies
+ * when it decides whether to wire the channel up. Reading the toggle at
+ * judgement time rather than persisting it per session is deliberate: an
+ * operator who turns the channel off must not find every epic in the board
+ * suddenly unmergeable for want of a verdict nobody can produce any more.
+ *
+ * `filedFindings` is the escape hatch that keeps the rule about the CHANNEL
+ * rather than about the reviewer's manners. A session with review_comments
+ * rows of its own has proved the channel worked for it; a missing verdict is
+ * then the reviewer's own omission, and the pre-existing findings veto and
+ * prose fallback are exactly the right tools for it. Only total silence —
+ * no verdict AND no rows — is evidence that nothing got through.
+ *
+ * `delivered` bounds the rule to reviews that actually RAN to a verdict:
+ * `status = completed` and `outcome = answered`. A failed, cancelled, silent
+ * or still-running review never claimed to have found nothing in the first
+ * place — it is already handled as a failed attempt by the retry ladder and
+ * already excluded from the merge gate — so calling it unverifiable would
+ * only add a second, redundant refusal on top. Legacy rows with a NULL
+ * outcome predate classification and keep their pre-existing treatment.
+ */
+export interface ReviewChannelState {
+  sessionId: string;
+  provider: string;
+  structuredVerdict: StructuredReviewVerdict | null;
+  /** The session had a structured channel to file its verdict on. */
+  mcpCapable: boolean;
+  /** The session filed review_comments rows of its own through the tool. */
+  filedFindings: boolean;
+  /** The session ran to a verdict: completed AND outcome `answered`. */
+  delivered: boolean;
+  /**
+   * Had the channel and got nothing through it — no verdict, no rows. The
+   * silence that must not read as "reviewed, found nothing".
+   */
+  unverifiable: boolean;
+}
+
+/**
+ * The channel state of a review session, or null when there is no session to
+ * judge (no id, or a row that no longer exists). A null return means "no
+ * opinion" and leaves every caller on its pre-existing path.
+ *
+ * The provider column defaults to 'claude-code' in the schema and is NULL on
+ * rows old enough to predate it; both are read as claude-code so a legacy
+ * row is judged the way the session that wrote it actually ran.
+ */
+export function readReviewChannelState(
+  sessionId: string | null | undefined,
+  database: ArijDatabase = defaultDb
+): ReviewChannelState | null {
+  if (!sessionId) return null;
+  const row = database
+    .select({
+      provider: agentSessions.provider,
+      reviewVerdict: agentSessions.reviewVerdict,
+      status: agentSessions.status,
+      outcome: agentSessions.outcome,
+    })
+    .from(agentSessions)
+    .where(eq(agentSessions.id, sessionId))
+    .get();
+  if (!row) return null;
+
+  const provider = row.provider ?? "claude-code";
+  const delivered = row.status === "completed" && row.outcome === "answered";
+  const structuredVerdict = isStructuredReviewVerdict(row.reviewVerdict)
+    ? row.reviewVerdict
+    : null;
+  const mcpCapable =
+    providerSupportsMcp(provider) && isMcpToolsEnabled(database);
+  const filedFindings =
+    mcpCapable && delivered && structuredVerdict === null
+      ? database
+          .select({ id: reviewComments.id })
+          .from(reviewComments)
+          .where(eq(reviewComments.agentSessionId, sessionId))
+          .get() !== undefined
+      : false;
+
+  return {
+    sessionId,
+    provider,
+    structuredVerdict,
+    mcpCapable,
+    filedFindings,
+    delivered,
+    unverifiable:
+      mcpCapable && delivered && structuredVerdict === null && !filedFindings,
+  };
+}
+
+/**
+ * Convenience predicate for callers that only need the verdict of the rule
+ * (the workflow context, the board's Review column).
+ */
+export function isReviewSessionUnverifiable(
+  sessionId: string | null | undefined,
+  database: ArijDatabase = defaultDb
+): boolean {
+  return readReviewChannelState(sessionId, database)?.unverifiable ?? false;
+}
+
+/**
+ * The single sentence every unverifiable-review refusal shows. It names the
+ * tool because that is the actionable part: the reviewer's `submit_findings`
+ * call never landed, so there is nothing to trust and the fix is another
+ * review, not another opinion.
+ */
+export const UNVERIFIABLE_REVIEW_REASON =
+  "the reviewer filed no structured verdict through submit_findings, so its review cannot be verified";
 
 /**
  * Findings window for a review session dispatched outside the pipeline
@@ -329,6 +482,11 @@ export interface ReviewAssessment {
   proseNegative: boolean;
   /** Persisted submit_findings verdict of the review session, when any. */
   structuredVerdict: StructuredReviewVerdict | null;
+  /**
+   * True when the reviewer had the structured channel and filed no verdict
+   * on it — the review is unverifiable and blocks for that reason alone.
+   */
+  unverifiable: boolean;
   /** Which channel decided `blocking`, for the activity-log trail. */
   verdictSource: ReviewVerdictSource;
   /** Rows recovered from the report by ingestProseFindings. */
@@ -344,7 +502,8 @@ export interface ReviewAssessment {
  *
  * `verdictSource` is `structured` only when the persisted verdict decided.
  * The findings-row path is reported as `prose` because it is the same
- * pre-existing fallback branch, not a channel an agent chose deliberately.
+ * pre-existing fallback branch, not a channel an agent chose deliberately;
+ * `unverifiable` means no channel decided at all and the silence itself did.
  */
 export function assessReviewOutcome(input: {
   epicId: string;
@@ -384,10 +543,8 @@ export function assessReviewOutcome(input: {
     input.sinceIso,
     database
   );
-  const structuredVerdict = readStructuredReviewVerdict(
-    input.reviewSessionId,
-    database
-  );
+  const channel = readReviewChannelState(input.reviewSessionId, database);
+  const structuredVerdict = channel?.structuredVerdict ?? null;
 
   if (structuredVerdict) {
     return {
@@ -399,7 +556,27 @@ export function assessReviewOutcome(input: {
       usedProseFallback: false,
       proseNegative,
       structuredVerdict,
+      unverifiable: false,
       verdictSource: "structured",
+      proseIngestedCount,
+    };
+  }
+
+  // The reviewer could have spoken through the tool and did not. Neither the
+  // findings veto nor the prose scan can distinguish that from "found
+  // nothing", so neither gets to decide: the review blocks as unverifiable
+  // and the run earns a fresh one. Any recovered findings still ride along —
+  // they are the next builder's context even though they did not decide.
+  if (channel?.unverifiable) {
+    return {
+      blocking: true,
+      blockingFindings,
+      agentCommentCount,
+      usedProseFallback: false,
+      proseNegative,
+      structuredVerdict: null,
+      unverifiable: true,
+      verdictSource: "unverifiable",
       proseIngestedCount,
     };
   }
@@ -411,6 +588,7 @@ export function assessReviewOutcome(input: {
     usedProseFallback,
     proseNegative,
     structuredVerdict: null,
+    unverifiable: false,
     verdictSource: "prose",
     proseIngestedCount,
   };
@@ -424,6 +602,8 @@ export interface ReviewVerdictDecision {
   structuredVerdict: StructuredReviewVerdict | null;
   blockingFindings: BlockingFinding[];
   proseNegative: boolean;
+  /** The reviewer had the structured channel and filed no verdict on it. */
+  unverifiable: boolean;
 }
 
 /**
@@ -432,10 +612,13 @@ export interface ReviewVerdictDecision {
  * sends its ticket back to `in_progress`.
  *
  * Differs from {@link assessReviewOutcome} in its fallback ONLY: with no
- * structured verdict this is a pure prose scan, because these call sites
- * never consulted findings rows and retro-compatibility is bit-for-bit. With
- * a structured verdict, the findings veto applies over the session's own
- * window (`sinceIso`, defaulted from the session row).
+ * structured verdict AND no structured channel, this is a pure prose scan,
+ * because these call sites never consulted findings rows and
+ * retro-compatibility is bit-for-bit. With a structured verdict, the
+ * findings veto applies over the session's own window (`sinceIso`,
+ * defaulted from the session row). A reviewer that HAD the channel and
+ * stayed silent is negative — the ticket goes back to `in_progress` rather
+ * than resting in Review on a verdict nobody can read.
  */
 export function resolveReviewVerdict(input: {
   epicId: string;
@@ -447,18 +630,27 @@ export function resolveReviewVerdict(input: {
 }): ReviewVerdictDecision {
   const database = input.database ?? defaultDb;
   const proseNegative = isNegativeProseVerdict(input.sessionOutput);
-  const structuredVerdict = readStructuredReviewVerdict(
-    input.reviewSessionId,
-    database
-  );
+  const channel = readReviewChannelState(input.reviewSessionId, database);
+  const structuredVerdict = channel?.structuredVerdict ?? null;
 
   if (!structuredVerdict) {
+    if (channel?.unverifiable) {
+      return {
+        negative: true,
+        source: "unverifiable",
+        structuredVerdict: null,
+        blockingFindings: [],
+        proseNegative,
+        unverifiable: true,
+      };
+    }
     return {
       negative: proseNegative,
       source: "prose",
       structuredVerdict: null,
       blockingFindings: [],
       proseNegative,
+      unverifiable: false,
     };
   }
 
@@ -477,5 +669,6 @@ export function resolveReviewVerdict(input: {
     structuredVerdict,
     blockingFindings,
     proseNegative,
+    unverifiable: false,
   };
 }
