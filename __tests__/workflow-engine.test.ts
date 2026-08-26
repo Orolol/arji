@@ -449,3 +449,54 @@ describe("validateTransition — actor types", () => {
     expect(result.valid).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Refinement guardrail — source: "refinement" is pinned to Backlog / To do
+// ---------------------------------------------------------------------------
+
+describe("refinement source guardrail", () => {
+  it("allows backlog -> todo", () => {
+    const result = validateTransition(
+      ctx("backlog", "todo", { actor: "agent", source: "refinement" })
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("allows the demotion todo -> backlog", () => {
+    const result = validateTransition(
+      ctx("todo", "backlog", { actor: "agent", source: "refinement" })
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it.each([
+    ["backlog", "in_progress"],
+    ["todo", "in_progress"],
+    ["in_progress", "review"],
+    ["in_progress", "todo"],
+    ["review", "in_progress"],
+  ] as Array<[KanbanStatus, KanbanStatus]>)(
+    "refuses %s -> %s",
+    (from, to) => {
+      const result = validateTransition(
+        ctx(from, to, { actor: "agent", source: "refinement" })
+      );
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain("Refinement may only move tickets");
+    }
+  );
+
+  it("does not constrain other sources", () => {
+    const result = validateTransition(
+      ctx("backlog", "in_progress", { actor: "user", source: "drag" })
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("refuses the escape hatch even for a system actor", () => {
+    const result = validateTransition(
+      ctx("todo", "in_progress", { actor: "system", source: "refinement" })
+    );
+    expect(result.valid).toBe(false);
+  });
+});

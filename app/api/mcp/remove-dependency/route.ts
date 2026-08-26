@@ -1,0 +1,77 @@
+/**
+ * POST /api/mcp/remove-dependency — the mcp__arij__remove_dependency tool.
+ *
+ * Part of the refinement toolset: the agent prunes stale dependency edges
+ * while re-passing the board. Both endpoints must sit in Backlog / To do
+ * (the refinement guardrail); removing an edge that is not there is a
+ * reported no-op the agent can move past rather than an error.
+ */
+
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { isErrorResponse } from "@/lib/api/route-helpers";
+import { validateBody } from "@/lib/validation/validate";
+import { requireMcpToken } from "@/lib/mcp/http-auth";
+import {
+  refinementReasonSchema,
+  requireAgentSessionToken,
+  resolveRefinementTicket,
+  ticketLabel,
+} from "@/lib/mcp/refinement";
+import { deleteDependencyEdge } from "@/lib/dependencies/crud";
+import { logWorkflowDecision } from "@/lib/workflow/transition-service";
+import { tryExportArjiJson } from "@/lib/sync/export";
+
+const bodySchema = z
+  .object({
+    ticket_id: z.string().min(1),
+    depends_on_ticket_id: z.string().min(1),
+    reason: refinementReasonSchema,
+  })
+  .strict();
+
+export async function POST(request: NextRequest) {
+  const auth = requireMcpToken(request);
+  if (isErrorResponse(auth)) return auth;
+
+  const agentOnly = requireAgentSessionToken(auth, "remove_dependency");
+  if (agentOnly) return agentOnly;
+
+  const validated = await validateBody(bodySchema, request);
+  if (isErrorResponse(validated)) return validated;
+  const body = validated.data;
+
+  const found = resolveRefinementTicket(auth.projectId, body.ticket_id);
+  if (isErrorResponse(found)) return found;
+  const { epic } = found;
+
+  const foundDependency = resolveRefinementTicket(
+    auth.projectId,
+    body.depends_on_ticket_id
+  );
+  if (isErrorResponse(foundDependency)) return foundDependency;
+  const dependsOn = foundDependency.epic;
+
+  const removed = deleteDependencyEdge(auth.projectId, epic.id, dependsOn.id);
+
+  // Only journal a decision when an edge was actually removed.
+  if (removed > 0) {
+    logWorkflowDecision({
+      projectId: auth.projectId,
+      epicId: epic.id,
+      status: epic.status ?? "backlog",
+      actor: "agent",
+      reason: `No longer depends on ${ticketLabel(dependsOn)} — ${body.reason}`,
+      sessionId: auth.sessionId,
+    });
+    tryExportArjiJson(auth.projectId);
+  }
+
+  return NextResponse.json({
+    data: {
+      ticketId: epic.id,
+      dependsOnTicketId: dependsOn.id,
+      removed: removed > 0,
+    },
+  });
+}

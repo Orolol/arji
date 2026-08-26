@@ -33,6 +33,11 @@ const EXPECTED_TOOL_NAMES = [
   "ask_question",
   "submit_findings",
   "submit_grading",
+  "set_priority",
+  "reorder_tickets",
+  "add_dependency",
+  "remove_dependency",
+  "promote_ticket",
 ];
 
 const EXPECTED_CHAT_TOOL_NAMES = [
@@ -603,6 +608,13 @@ describe("chat toolset (ARIJ_MCP_TOOLSET=chat)", () => {
       "report_friction",
       "submit_findings",
       "submit_grading",
+      // The board-refinement tools are agent-only: a chat turn must not be
+      // able to re-rank, re-prioritise or promote board work.
+      "set_priority",
+      "reorder_tickets",
+      "add_dependency",
+      "remove_dependency",
+      "promote_ticket",
     ]) {
       const result = await chatClient.callTool(name, {});
       expect(result.isError).toBe(true);

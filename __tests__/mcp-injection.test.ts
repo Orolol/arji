@@ -143,6 +143,11 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "mcp__arij__ask_question",
       "mcp__arij__submit_findings",
       "mcp__arij__submit_grading",
+      "mcp__arij__set_priority",
+      "mcp__arij__reorder_tickets",
+      "mcp__arij__add_dependency",
+      "mcp__arij__remove_dependency",
+      "mcp__arij__promote_ticket",
     ]);
   });
 

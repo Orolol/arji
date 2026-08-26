@@ -59,6 +59,16 @@ export const ARIJ_MCP_ALLOWED_TOOL_NAMES = [
   "mcp__arij__ask_question",
   "mcp__arij__submit_findings",
   "mcp__arij__submit_grading",
+  // Board-refinement tools. Agent toolset only: they reshape the planning
+  // half of the board (priority, execution order, dependency edges, and the
+  // Backlog <-> To do promotion), which is not something a chat turn should
+  // be able to do — see ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES below, which
+  // deliberately does not list them, and the AGENT_ONLY check the routes run.
+  "mcp__arij__set_priority",
+  "mcp__arij__reorder_tickets",
+  "mcp__arij__add_dependency",
+  "mcp__arij__remove_dependency",
+  "mcp__arij__promote_ticket",
 ] as const;
 
 /**
