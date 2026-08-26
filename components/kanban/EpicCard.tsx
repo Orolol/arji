@@ -26,9 +26,9 @@ import {
   RefreshCw,
   Link2,
 } from "lucide-react";
-import {
-  READINESS_TOTAL,
-  type DependencyFocusRole,
+import type {
+  DependencyFocusRole,
+  ReadinessScore,
 } from "@/lib/kanban/queue";
 import type { FailedSessionInfo } from "@/lib/agent-sessions/latest-failure";
 import {
@@ -75,8 +75,8 @@ export interface EpicCardView {
   isNextEpic?: boolean;
   /** Readable ids of dependency targets that are not delivered yet. */
   blockedOn?: string[];
-  /** How many of the READINESS_TOTAL Backlog readiness criteria are met. */
-  readiness?: number;
+  /** Backlog readiness: criteria met out of the ones that apply to this card. */
+  readiness?: ReadinessScore;
   /** Report dependency hover focus enter/leave (Board owns the 150 ms timer). */
   onDependencyHoverChange?: (epicId: string | null) => void;
 }
@@ -115,6 +115,16 @@ const ACTIVITY_LABEL_BY_TYPE: Record<KanbanAgentActionType, string> = {
 };
 
 const EMPTY_VIEW: EpicCardView = {};
+
+/**
+ * Tooltip wording per readiness total. Bugs are scored out of 2 — their
+ * creation flow has no mandatory rubric — so naming acceptance criteria on a
+ * bug card would advertise a requirement that does not apply to it.
+ */
+const READINESS_CRITERIA: Record<number, string> = {
+  2: "no open agent question · has a description",
+  3: "no open agent question · has a description · has acceptance criteria",
+};
 
 export function EpicCard({
   epic,
@@ -233,10 +243,14 @@ export function EpicCard({
         onLinkedAgentHoverChange?.(linkedActivityId);
       }}
       onBlurCapture={(event) => {
-        onDependencyHoverChange?.(null);
+        // Focus moving WITHIN this card (body -> selection checkbox -> link)
+        // is not a leave. Clearing above this guard would drop the dependency
+        // focus and re-arm the 150 ms timer on every internal tab step, which
+        // is exactly the flicker that intent window exists to prevent.
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
           return;
         }
+        onDependencyHoverChange?.(null);
         onLinkedAgentHoverChange?.(null);
       }}
       data-selected={selected ? "true" : undefined}
@@ -417,22 +431,22 @@ export function EpicCard({
             Draft
           </span>
         )}
-        {readiness !== undefined && (
+        {readiness && (
           <span
             className={cn(
               "inline-flex items-center rounded-[4px] px-[5px] text-[10px]",
-              readiness === READINESS_TOTAL
+              readiness.met === readiness.total
                 ? "border border-agent-border bg-agent-bg text-agent"
                 : "border border-muted-foreground/30 text-muted-foreground"
             )}
             title={
-              readiness === READINESS_TOTAL
-                ? "Ready for To Do: no open agent question, has a description, has acceptance criteria"
-                : "Ready when: no open agent question · has a description · has acceptance criteria"
+              readiness.met === readiness.total
+                ? `Ready for To Do: ${READINESS_CRITERIA[readiness.total]}`
+                : `Ready when: ${READINESS_CRITERIA[readiness.total]}`
             }
             data-testid={`epic-readiness-${epic.id}`}
           >
-            Ready {readiness}/{READINESS_TOTAL}
+            Ready {readiness.met}/{readiness.total}
           </span>
         )}
         {showDeliveredWithRemainingStories && (
@@ -481,11 +495,13 @@ export function EpicCard({
       {blockedOn && blockedOn.length > 0 && (
         <div
           className="flex items-center gap-[5px] font-mono text-[11px] text-destructive"
-          aria-label={`Waiting on: ${blockedOn.join(", ")}`}
           data-testid={`epic-blocked-${epic.id}`}
         >
           <Link2 className="h-[12px] w-[12px] shrink-0" aria-hidden="true" />
-          <span className="truncate">Waiting on: {blockedOn.join(" ")}</span>
+          {/* Comma-separated: `readableId` is nullable, so entries fall back to
+              the epic title, and multi-word titles joined by a bare space read
+              as a single blocker. */}
+          <span className="truncate">Waiting on: {blockedOn.join(", ")}</span>
         </div>
       )}
     </Card>

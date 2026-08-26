@@ -79,8 +79,14 @@ export async function GET(
       // criterion is "acceptance criteria present", which a story with an
       // empty rubric does not satisfy — that is the state that makes the
       // grading stage a no-op.
+      //
+      // The explicit character set matters: SQLite's one-argument TRIM() strips
+      // U+0020 only, so a "\n" rubric would read as present here while
+      // lib/grading/dispatch.ts (JavaScript .trim()) reads it as absent. Both
+      // the stories PATCH route and lib/sync/import.ts persist the value
+      // untrimmed, so that rubric is reachable.
       usWithCriteriaCount:
-        sql<number>`SUM(CASE WHEN TRIM(COALESCE(${userStories.acceptanceCriteria}, '')) <> '' THEN 1 ELSE 0 END)`.as(
+        sql<number>`SUM(CASE WHEN TRIM(COALESCE(${userStories.acceptanceCriteria}, ''), ' ' || char(9) || char(10) || char(13)) <> '' THEN 1 ELSE 0 END)`.as(
           "us_with_criteria_count"
         ),
     })

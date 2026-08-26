@@ -20,6 +20,12 @@
  *    `ticket_dependencies` at all (its `blockedEpicIds` means "claimed by a
  *    pipeline, night run or merge" — an unrelated notion that happens to share
  *    the name). Full Auto will dispatch an epic this module greys out.
+ *  - Skips the board cannot see: `isEpicSelectable` also refuses epics in
+ *    `parkedTicketIds` (soft-parked after three consecutive failures) and
+ *    `busyEpicIds`. Both live in the in-process `autoModeRegistry`, not in the
+ *    database, and no API exposes them — so a parked epic keeps rank #1 and the
+ *    "next" badge while the supervisor will never dispatch it. This is the most
+ *    misleading divergence and the one this module has no way to close.
  *
  * Only the awaiting-reply exclusion is genuinely shared: both sides call
  * `isAwaitingReply`. Do not assume the rest agrees until the prerequisite epic
@@ -112,18 +118,29 @@ export interface DependencyFocus {
 }
 
 /**
- * Focus sets for the hovered card, or `null` when it has no dependency edges
- * at all. A card with no neighbours must produce no focus: dimming every other
- * card while highlighting none says nothing, and on a project with zero
- * dependency rows — the common case — it would grey the whole board on any
- * pointer rest.
+ * Focus sets for the hovered card, or `null` when the focus would dim cards
+ * without lighting anything up.
+ *
+ * `renderedIds` is the set of epics actually on screen, so the test is "has a
+ * VISIBLE neighbour", not "has an edge". An edge whose other end sits in the
+ * Released column, in a Done column collapsed by focus mode, or behind an
+ * active filter cannot be highlighted, and dimming the board to point at a card
+ * nobody can see communicates nothing. The hovered card itself must also still
+ * be rendered — that is what drops the focus when it is filtered away or moved
+ * by an SSE update, since React synthesises no mouseleave on unmount.
  */
 export function buildDependencyFocus(
   epicId: string,
   adjacency: DependencyAdjacency,
+  renderedIds: ReadonlySet<string>,
 ): DependencyFocus | null {
-  const predecessors = adjacency.predecessors.get(epicId) ?? [];
-  const successors = adjacency.successors.get(epicId) ?? [];
+  if (!renderedIds.has(epicId)) return null;
+  const predecessors = (adjacency.predecessors.get(epicId) ?? []).filter((id) =>
+    renderedIds.has(id),
+  );
+  const successors = (adjacency.successors.get(epicId) ?? []).filter((id) =>
+    renderedIds.has(id),
+  );
   if (predecessors.length === 0 && successors.length === 0) return null;
   return {
     epicId,
@@ -153,24 +170,31 @@ export function dependencyFocusRole(
   return "dimmed";
 }
 
-/** Total readiness criteria a Backlog card reports. */
-export const READINESS_TOTAL = 3;
+/** How many readiness criteria a card met, out of how many apply to it. */
+export interface ReadinessScore {
+  met: number;
+  total: number;
+}
 
 /**
  * Readiness of a Backlog card: no open agent question, a non-empty
- * description, and at least one user story carrying acceptance criteria.
- * Returns how many of the `READINESS_TOTAL` criteria are met.
+ * description, and — for feature epics — at least one user story carrying
+ * acceptance criteria.
  *
  * The third criterion counts stories with a non-empty rubric
  * (`usWithCriteriaCount`), not stories outright: a story with an empty rubric
- * is precisely what makes the grading stage a journalled no-op. Bug tickets
- * carry no stories, so they top out at 2/3 — the same ceiling the story-count
- * proxy gave them.
+ * is precisely what makes the grading stage a journalled no-op.
+ *
+ * Bug tickets are scored out of 2. Their creation flow is a direct form with no
+ * mandatory rubric, so a third criterion they structurally cannot meet would
+ * park every bug card permanently in the "not ready" style and advertise a
+ * requirement that does not exist for them.
  */
-export function computeReadiness(epic: KanbanEpic): number {
+export function computeReadiness(epic: KanbanEpic): ReadinessScore {
+  const rubricApplies = epic.type !== "bug";
   let met = 0;
   if (!isAwaitingReply(epic)) met += 1;
   if ((epic.description ?? "").trim().length > 0) met += 1;
-  if ((epic.usWithCriteriaCount ?? 0) > 0) met += 1;
-  return met;
+  if (rubricApplies && (epic.usWithCriteriaCount ?? 0) > 0) met += 1;
+  return { met, total: rubricApplies ? 3 : 2 };
 }

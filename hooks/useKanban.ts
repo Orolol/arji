@@ -37,9 +37,20 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
   });
   const [loading, setLoading] = useState(true);
   const onMoveErrorRef = useRef(options?.onMoveError);
-  onMoveErrorRef.current = options?.onMoveError;
   /** Epic-level dependency edges for the project (ticket_dependencies rows). */
   const [dependencies, setDependencies] = useState<TicketDependencyEdge[]>([]);
+  /**
+   * Latest committed board, readable outside a state updater. `moveEpic` needs
+   * the current columns to build its reorder payload; reading them from a
+   * `setBoard` updater instead would run that work — and the request it issues
+   * — twice under Strict Mode.
+   */
+  const boardRef = useRef(board);
+
+  useEffect(() => {
+    onMoveErrorRef.current = options?.onMoveError;
+    boardRef.current = board;
+  });
 
   const loadEpics = useCallback(async () => {
     try {
@@ -118,6 +129,7 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
         };
       });
 
+      boardRef.current = { columns, releaseGroups };
       setBoard({ columns, releaseGroups });
     } catch {
       // ignore
@@ -136,69 +148,63 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       toColumn: KanbanStatus,
       newIndex: number,
       /**
-       * Runs only once the server has accepted the move. The optimistic
-       * update above is not confirmation — a refused transition calls
-       * onMoveError and reloads instead, so anything the user should read as
-       * a consequence of the move (e.g. the board's awaiting-reply warning)
-       * belongs here rather than at the call site.
+       * Runs only once the server has accepted the move. The optimistic update
+       * below is not confirmation — a refused transition calls onMoveError and
+       * reloads instead, so anything the user should read as a consequence of
+       * the move (e.g. the board's awaiting-reply warning) belongs here rather
+       * than at the call site.
        */
       onMoveAccepted?: () => void
     ) => {
       if (fromColumn === "released" || toColumn === "released") return;
 
-      setBoard((prev) => {
-        const next = { columns: { ...prev.columns }, releaseGroups: prev.releaseGroups };
-        for (const col of KANBAN_COLUMNS) {
-          next.columns[col] = [...prev.columns[col]];
-        }
+      // Built here rather than inside a setBoard updater: React double-invokes
+      // updaters under Strict Mode, which would fire the request and the
+      // accepted-callback twice in development.
+      const prev = boardRef.current;
+      const next: BoardState = {
+        columns: { ...prev.columns },
+        releaseGroups: prev.releaseGroups,
+      };
+      for (const col of KANBAN_COLUMNS) {
+        next.columns[col] = [...prev.columns[col]];
+      }
 
-        const epicIndex = next.columns[fromColumn].findIndex(
-          (e) => e.id === epicId
-        );
-        if (epicIndex === -1) return prev;
-        const [epic] = next.columns[fromColumn].splice(epicIndex, 1);
+      const epicIndex = next.columns[fromColumn].findIndex(
+        (e) => e.id === epicId
+      );
+      if (epicIndex === -1) return;
+      const [epic] = next.columns[fromColumn].splice(epicIndex, 1);
+      next.columns[toColumn].splice(newIndex, 0, { ...epic, status: toColumn });
 
-        epic.status = toColumn;
-        next.columns[toColumn].splice(newIndex, 0, epic);
+      boardRef.current = next;
+      setBoard(next);
 
-        return next;
-      });
-
-      setTimeout(async () => {
-        setBoard((current) => {
-          const reorderItems: ReorderItem[] = [];
-          for (const col of DRAGGABLE_COLUMNS) {
-            if (col === fromColumn || col === toColumn) {
-              current.columns[col].forEach((epic, idx) => {
-                reorderItems.push({
-                  id: epic.id,
-                  status: col,
-                  position: idx,
-                });
-              });
-            }
-          }
-
-          fetch(`/api/projects/${projectId}/epics/reorder`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ items: reorderItems }),
-          }).then(async (res) => {
-            if (!res.ok) {
-              const data = await res.json().catch(() => ({}));
-              const errorMsg = data.error || "Failed to move epic";
-              onMoveErrorRef.current?.(errorMsg);
-              loadEpics();
-              return;
-            }
-            onMoveAccepted?.();
-          }).catch(() => {
-            loadEpics();
+      const reorderItems: ReorderItem[] = [];
+      for (const col of DRAGGABLE_COLUMNS) {
+        if (col === fromColumn || col === toColumn) {
+          next.columns[col].forEach((item, idx) => {
+            reorderItems.push({ id: item.id, status: col, position: idx });
           });
+        }
+      }
 
-          return current;
+      try {
+        const res = await fetch(`/api/projects/${projectId}/epics/reorder`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: reorderItems }),
         });
-      }, 0);
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          onMoveErrorRef.current?.(data.error || "Failed to move epic");
+          loadEpics();
+          return;
+        }
+        onMoveAccepted?.();
+      } catch {
+        loadEpics();
+      }
     },
     [projectId, loadEpics]
   );

@@ -7,17 +7,19 @@ import {
   validateDagIntegrity,
   type DependencyEdge,
 } from "@/lib/dependencies/validation";
+import { emitTicketDependenciesChanged } from "@/lib/events/emit";
 
 function edgeKey(edge: { ticketId: string; dependsOnTicketId: string }) {
   return `${edge.ticketId}::${edge.dependsOnTicketId}`;
 }
 
 /**
- * Insert one or more dependency edges with validation.
- * Validates: same-project constraint, no self-dependencies, DAG integrity.
- * Returns the created dependency records.
+ * Insert without emitting. Both public entry points below wrap this so a
+ * `setTicketDependencies` call — which deletes and re-inserts — announces the
+ * removed and the added endpoints together, in one pass, rather than emitting
+ * twice for the added ones.
  */
-export function createDependencies(
+function insertDependencies(
   projectId: string,
   edges: DependencyEdge[]
 ) {
@@ -82,6 +84,34 @@ export function createDependencies(
   return created;
 }
 
+/** Both endpoints of every edge — everyone whose board state just changed. */
+function affectedTicketIds(
+  edges: readonly { ticketId: string; dependsOnTicketId: string }[]
+): string[] {
+  return edges.flatMap((edge) => [edge.ticketId, edge.dependsOnTicketId]);
+}
+
+/** One announcement per ticket, however many edges named it. */
+function announceDependencyChange(projectId: string, ticketIds: string[]) {
+  emitTicketDependenciesChanged(projectId, new Set(ticketIds));
+}
+
+/**
+ * Insert one or more dependency edges with validation.
+ * Validates: same-project constraint, no self-dependencies, DAG integrity.
+ * Returns the created dependency records.
+ */
+export function createDependencies(
+  projectId: string,
+  edges: DependencyEdge[]
+) {
+  const created = insertDependencies(projectId, edges);
+  if (created.length > 0) {
+    announceDependencyChange(projectId, affectedTicketIds(created));
+  }
+  return created;
+}
+
 /**
  * Replace all dependencies for a ticket with a new set.
  * Validates DAG integrity for the new set.
@@ -91,19 +121,39 @@ export function setTicketDependencies(
   ticketId: string,
   dependsOnIds: string[]
 ) {
+  // Read the outgoing edges before dropping them: removing a dependency
+  // changes the board for the ex-prerequisite too, and after the delete there
+  // is nothing left to name it with.
+  const previous = db
+    .select({
+      ticketId: ticketDependencies.ticketId,
+      dependsOnTicketId: ticketDependencies.dependsOnTicketId,
+    })
+    .from(ticketDependencies)
+    .where(eq(ticketDependencies.ticketId, ticketId))
+    .all();
+
   // Remove all existing dependencies for this ticket
   db.delete(ticketDependencies)
     .where(eq(ticketDependencies.ticketId, ticketId))
     .run();
 
-  if (dependsOnIds.length === 0) return [];
-
   const edges: DependencyEdge[] = dependsOnIds.map((depId) => ({
     ticketId,
     dependsOnTicketId: depId,
   }));
+  const created = edges.length > 0 ? insertDependencies(projectId, edges) : [];
 
-  return createDependencies(projectId, edges);
+  const affected = [
+    ticketId,
+    ...affectedTicketIds(previous),
+    ...affectedTicketIds(created),
+  ];
+  if (previous.length > 0 || created.length > 0) {
+    announceDependencyChange(projectId, affected);
+  }
+
+  return created;
 }
 
 /**

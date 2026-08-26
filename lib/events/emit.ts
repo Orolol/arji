@@ -49,6 +49,23 @@ export function emitTicketDeleted(projectId: string, epicId: string) {
   emit("ticket:deleted", projectId, epicId, {});
 }
 
+/**
+ * A dependency edge was added or removed. Emitted for BOTH endpoints of every
+ * affected edge: the board derives blocked state, queue ranking and hover
+ * adjacency from the edge list, so a change is visible on the dependent and on
+ * its prerequisite alike. Without this the board's dependency data has no
+ * invalidation path at all — it is only refetched by the whole-board reload
+ * that ticket/session events drive.
+ */
+export function emitTicketDependenciesChanged(
+  projectId: string,
+  ticketIds: Iterable<string>
+) {
+  for (const ticketId of new Set(ticketIds)) {
+    emit("ticket:updated", projectId, ticketId, { fields: ["dependencies"] });
+  }
+}
+
 export function emitSessionStarted(
   projectId: string,
   epicId: string,

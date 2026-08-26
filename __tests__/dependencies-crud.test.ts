@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dbMockState, resetDbMockState } from "@/__tests__/helpers/db-mock";
 
-const { mockValidateSameProject, mockValidateDagIntegrity } = vi.hoisted(() => ({
+const {
+  mockValidateSameProject,
+  mockValidateDagIntegrity,
+  mockEmitDependenciesChanged,
+} = vi.hoisted(() => ({
   mockValidateSameProject: vi.fn(),
   mockValidateDagIntegrity: vi.fn(),
+  mockEmitDependenciesChanged: vi.fn(),
 }));
 
 const mockIdState = vi.hoisted(() => ({ value: 1 }));
@@ -27,6 +32,17 @@ vi.mock("@/lib/dependencies/validation", () => ({
   validateSameProject: mockValidateSameProject,
   validateDagIntegrity: mockValidateDagIntegrity,
 }));
+
+vi.mock("@/lib/events/emit", () => ({
+  emitTicketDependenciesChanged: mockEmitDependenciesChanged,
+}));
+
+/** Every ticket id announced across all emits, order-independent. */
+function announcedTicketIds(): string[] {
+  return mockEmitDependenciesChanged.mock.calls
+    .flatMap((call) => [...(call[1] as Iterable<string>)])
+    .sort();
+}
 
 describe("dependencies CRUD batching", () => {
   beforeEach(() => {
@@ -96,5 +112,67 @@ describe("dependencies CRUD batching", () => {
 
     expect(created).toEqual([]);
     expect(dbMockState.insertCalls).toHaveLength(0);
+    // Nothing changed, so nothing to invalidate.
+    expect(mockEmitDependenciesChanged).not.toHaveBeenCalled();
+  });
+});
+
+describe("dependency change events", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetDbMockState();
+    mockIdState.value = 1;
+  });
+
+  it("announces both endpoints of every created edge", async () => {
+    // The board derives blocked state and hover adjacency from the edge list,
+    // so a new edge changes the dependent AND the prerequisite.
+    dbMockState.allQueue = [[]];
+
+    const { createDependencies } = await import("@/lib/dependencies/crud");
+    createDependencies("proj-1", [
+      { ticketId: "epic-1", dependsOnTicketId: "epic-2" },
+    ]);
+
+    expect(mockEmitDependenciesChanged).toHaveBeenCalledTimes(1);
+    expect(mockEmitDependenciesChanged.mock.calls[0][0]).toBe("proj-1");
+    expect(announcedTicketIds()).toEqual(["epic-1", "epic-2"]);
+  });
+
+  it("announces the ex-prerequisite when a dependency is removed", async () => {
+    // setTicketDependencies replaces the whole set, so clearing it is how the
+    // UI deletes an edge. epic-2 loses a dependent and must be told.
+    dbMockState.allQueue = [[{ ticketId: "epic-1", dependsOnTicketId: "epic-2" }]];
+
+    const { setTicketDependencies } = await import("@/lib/dependencies/crud");
+    const created = setTicketDependencies("proj-1", "epic-1", []);
+
+    expect(created).toEqual([]);
+    expect(announcedTicketIds()).toEqual(["epic-1", "epic-2"]);
+  });
+
+  it("announces the old and the new prerequisite when an edge is swapped", async () => {
+    dbMockState.allQueue = [
+      // previous outgoing edges for epic-1
+      [{ ticketId: "epic-1", dependsOnTicketId: "epic-2" }],
+      // existing-edge probe inside the insert path: none match
+      [],
+    ];
+
+    const { setTicketDependencies } = await import("@/lib/dependencies/crud");
+    setTicketDependencies("proj-1", "epic-1", ["epic-3"]);
+
+    expect(announcedTicketIds()).toEqual(["epic-1", "epic-2", "epic-3"]);
+    // One pass, not one emit for the removal and another for the insert.
+    expect(mockEmitDependenciesChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays silent when a no-op replace changes nothing", async () => {
+    dbMockState.allQueue = [[]];
+
+    const { setTicketDependencies } = await import("@/lib/dependencies/crud");
+    setTicketDependencies("proj-1", "epic-1", []);
+
+    expect(mockEmitDependenciesChanged).not.toHaveBeenCalled();
   });
 });

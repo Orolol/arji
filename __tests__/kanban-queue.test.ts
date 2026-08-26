@@ -6,7 +6,6 @@ import {
   buildDependencyFocus,
   dependencyFocusRole,
   computeReadiness,
-  READINESS_TOTAL,
 } from "@/lib/kanban/queue";
 import type { KanbanEpic, TicketDependencyEdge } from "@/lib/types/kanban";
 
@@ -159,9 +158,10 @@ describe("buildDependencyAdjacency", () => {
 
 describe("buildDependencyFocus", () => {
   const adjacency = buildDependencyAdjacency([edge("x", "a"), edge("y", "x")]);
+  const allRendered = new Set(["x", "a", "y", "lonely"]);
 
   it("returns the predecessor and successor sets of the hovered ticket", () => {
-    const focus = buildDependencyFocus("x", adjacency);
+    const focus = buildDependencyFocus("x", adjacency, allRendered);
 
     expect(focus?.epicId).toBe("x");
     expect([...(focus?.predecessors ?? [])]).toEqual(["a"]);
@@ -171,20 +171,43 @@ describe("buildDependencyFocus", () => {
   it("returns null for a ticket with no edges at all", () => {
     // Otherwise hovering any card on a dependency-free board would dim every
     // other card while highlighting none.
-    expect(buildDependencyFocus("lonely", adjacency)).toBeNull();
-    expect(buildDependencyFocus("x", buildDependencyAdjacency([]))).toBeNull();
+    expect(buildDependencyFocus("lonely", adjacency, allRendered)).toBeNull();
+    expect(
+      buildDependencyFocus("x", buildDependencyAdjacency([]), allRendered)
+    ).toBeNull();
   });
 
   it("keeps a focus that has only one of the two sets", () => {
-    expect(buildDependencyFocus("a", adjacency)).not.toBeNull();
-    expect(buildDependencyFocus("y", adjacency)).not.toBeNull();
+    expect(buildDependencyFocus("a", adjacency, allRendered)).not.toBeNull();
+    expect(buildDependencyFocus("y", adjacency, allRendered)).not.toBeNull();
+  });
+
+  it("ignores neighbours that are not rendered", () => {
+    // x depends on a and is depended on by y. With neither on screen — a
+    // Released prerequisite, a Done column collapsed by focus mode, a filtered
+    // card — there is nothing to highlight, so there must be nothing to dim.
+    expect(buildDependencyFocus("x", adjacency, new Set(["x"]))).toBeNull();
+
+    // One visible neighbour is enough, and the invisible one is dropped.
+    const focus = buildDependencyFocus("x", adjacency, new Set(["x", "y"]));
+    expect([...(focus?.successors ?? [])]).toEqual(["y"]);
+    expect([...(focus?.predecessors ?? [])]).toEqual([]);
+  });
+
+  it("returns null when the hovered ticket itself is not rendered", () => {
+    // React synthesises no mouseleave on unmount, so a card filtered away or
+    // moved by an SSE update would otherwise leave the dim latched.
+    expect(
+      buildDependencyFocus("x", adjacency, new Set(["a", "y"]))
+    ).toBeNull();
   });
 });
 
 describe("dependencyFocusRole", () => {
   const focus = buildDependencyFocus(
     "x",
-    buildDependencyAdjacency([edge("x", "a"), edge("y", "x")])
+    buildDependencyAdjacency([edge("x", "a"), edge("y", "x")]),
+    new Set(["x", "a", "y", "unrelated"])
   );
 
   it("classifies the hovered ticket, its neighbours and the rest", () => {
@@ -207,8 +230,7 @@ describe("computeReadiness", () => {
       description: "A plan",
       usCount: 1,
     });
-    expect(computeReadiness(ready)).toBe(READINESS_TOTAL);
-    expect(READINESS_TOTAL).toBe(3);
+    expect(computeReadiness(ready)).toEqual({ met: 3, total: 3 });
   });
 
   it("counts a missing description against the score", () => {
@@ -219,7 +241,7 @@ describe("computeReadiness", () => {
       usCount: 1,
     });
     // No open question, no description, one story
-    expect(computeReadiness(noDescription)).toBe(2);
+    expect(computeReadiness(noDescription)).toEqual({ met: 2, total: 3 });
   });
 
   it("counts zero user stories against the score", () => {
@@ -229,7 +251,7 @@ describe("computeReadiness", () => {
       description: "A plan",
       usCount: 0,
     });
-    expect(computeReadiness(noStories)).toBe(2);
+    expect(computeReadiness(noStories)).toEqual({ met: 2, total: 3 });
   });
 
   it("counts stories with an empty rubric against the score", () => {
@@ -242,7 +264,7 @@ describe("computeReadiness", () => {
       usCount: 3,
       usWithCriteriaCount: 0,
     });
-    expect(computeReadiness(noCriteria)).toBe(2);
+    expect(computeReadiness(noCriteria)).toEqual({ met: 2, total: 3 });
   });
 
   it("credits the criterion as soon as one story carries a rubric", () => {
@@ -253,7 +275,7 @@ describe("computeReadiness", () => {
       usCount: 3,
       usWithCriteriaCount: 1,
     });
-    expect(computeReadiness(someCriteria)).toBe(READINESS_TOTAL);
+    expect(computeReadiness(someCriteria)).toEqual({ met: 3, total: 3 });
   });
 
   it("counts an open agent question against the score", () => {
@@ -265,7 +287,7 @@ describe("computeReadiness", () => {
       latestSessionOutcome: "asked_question",
       latestSessionEndedAt: "2026-08-01 00:00:00",
     });
-    expect(computeReadiness(asked)).toBe(2);
+    expect(computeReadiness(asked)).toEqual({ met: 2, total: 3 });
   });
 
   it("does not count a replied question as open", () => {
@@ -278,7 +300,7 @@ describe("computeReadiness", () => {
       latestSessionEndedAt: "2026-08-01 00:00:00",
       latestUserCommentCreatedAt: "2026-08-01 01:00:00",
     });
-    expect(computeReadiness(answered)).toBe(READINESS_TOTAL);
+    expect(computeReadiness(answered)).toEqual({ met: 3, total: 3 });
   });
 
   it("scores a bare captured idea as 1 of 3", () => {
@@ -288,6 +310,25 @@ describe("computeReadiness", () => {
       usCount: 0,
     });
     // No open question counts; the missing description and stories do not.
-    expect(computeReadiness(bare)).toBe(1);
+    expect(computeReadiness(bare)).toEqual({ met: 1, total: 3 });
+  });
+
+  it("scores a bug out of 2 — it has no rubric to carry", () => {
+    // A bug's creation flow is a direct form with no mandatory acceptance
+    // criteria, so a third criterion would strand every bug card below its
+    // total and advertise a requirement bugs do not have.
+    const bug = makeEpic({
+      id: "g",
+      status: "backlog",
+      type: "bug",
+      description: "Steps to reproduce",
+      usCount: 0,
+    });
+    expect(computeReadiness(bug)).toEqual({ met: 2, total: 2 });
+  });
+
+  it("still counts the two criteria a bug can miss", () => {
+    const bareBug = makeEpic({ id: "h", status: "backlog", type: "bug" });
+    expect(computeReadiness(bareBug)).toEqual({ met: 1, total: 2 });
   });
 });

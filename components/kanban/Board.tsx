@@ -241,6 +241,10 @@ export function Board({
   // on leave or the moment a drag starts, so it never competes with a drag.
   const [hoverFocusEpicId, setHoverFocusEpicId] = useState<string | null>(null);
   const hoverFocusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Read by handleDependencyHoverChange so it can bail during a drag without
+  // taking `activeEpic` as a dependency — that would change the callback's
+  // identity on every drag boundary and invalidate the whole epicViews map.
+  const activeEpicRef = useRef<KanbanEpic | null>(null);
 
   const clearHoverFocus = useCallback(() => {
     if (hoverFocusTimer.current !== null) {
@@ -259,6 +263,10 @@ export function Board({
       setHoverFocusEpicId(null);
       return;
     }
+    // A drag owns the board's visuals. mouseenter still fires on every card the
+    // pointer crosses (the DragOverlay is pointer-events:none), so without this
+    // each one would arm a timer that re-renders the Board to draw nothing.
+    if (activeEpicRef.current !== null) return;
     hoverFocusTimer.current = setTimeout(() => {
       hoverFocusTimer.current = null;
       setHoverFocusEpicId(epicId);
@@ -307,30 +315,6 @@ export function Board({
     () => buildDependencyAdjacency(dependencies),
     [dependencies]
   );
-
-  // A card with no dependency edges yields no focus at all: dimming the board
-  // while highlighting nothing communicates nothing, and on a project without
-  // dependency rows it would grey every card on any pointer rest.
-  const hoverFocus = useMemo(() => {
-    if (!hoverFocusEpicId) return null;
-    return buildDependencyFocus(hoverFocusEpicId, dependencyAdjacency);
-  }, [hoverFocusEpicId, dependencyAdjacency]);
-
-  // Focus roles are kept out of `epicViews` on purpose: they change on every
-  // pointer move, and folding them into that map would hand every card a new
-  // view object — selection, agent activity, unread cursors and all — on each
-  // hover. A live drag owns the board's visuals, so focus yields to it.
-  const focusRoles = useMemo(() => {
-    const roles: Record<string, DependencyFocusRole> = {};
-    if (!hoverFocus || activeEpic !== null) return roles;
-    for (const status of DRAGGABLE_COLUMNS) {
-      for (const epic of board.columns[status]) {
-        const role = dependencyFocusRole(epic.id, hoverFocus);
-        if (role && role !== "focused") roles[epic.id] = role;
-      }
-    }
-    return roles;
-  }, [board, hoverFocus, activeEpic]);
 
   // Per-epic view models: the Board owns the assembly so Column and EpicCard
   // stay out of the business of forwarding one prop per card feature.
@@ -426,6 +410,45 @@ export function Board({
     failedSessions,
   ]);
 
+  /**
+   * Epics with a card on screen right now. The dependency focus is judged
+   * against this, not the raw board: a neighbour in the Released column (which
+   * renders no focus), in a Done column collapsed by focus mode, or hidden
+   * behind a filter cannot be highlighted, so a focus naming only those would
+   * dim everything and point at nothing.
+   */
+  const renderedEpicIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const status of DRAGGABLE_COLUMNS) {
+      if (focusMode && status === "done") continue;
+      for (const epic of visibleColumns[status]) ids.add(epic.id);
+    }
+    return ids;
+  }, [visibleColumns, focusMode]);
+
+  const hoverFocus = useMemo(() => {
+    if (!hoverFocusEpicId) return null;
+    return buildDependencyFocus(
+      hoverFocusEpicId,
+      dependencyAdjacency,
+      renderedEpicIds
+    );
+  }, [hoverFocusEpicId, dependencyAdjacency, renderedEpicIds]);
+
+  // Focus roles are kept out of `epicViews` on purpose: they change on every
+  // pointer move, and folding them into that map would hand every card a new
+  // view object — selection, agent activity, unread cursors and all — on each
+  // hover. A live drag owns the board's visuals, so focus yields to it.
+  const focusRoles = useMemo(() => {
+    const roles: Record<string, DependencyFocusRole> = {};
+    if (!hoverFocus || activeEpic !== null) return roles;
+    for (const epicId of renderedEpicIds) {
+      const role = dependencyFocusRole(epicId, hoverFocus);
+      if (role && role !== "focused") roles[epicId] = role;
+    }
+    return roles;
+  }, [renderedEpicIds, hoverFocus, activeEpic]);
+
   // How many cards the board is actually showing right now — the capture bar
   // reports it, so it has to follow the filters, not the raw board.
   const visibleCount = useMemo(
@@ -471,10 +494,12 @@ export function Board({
     // A live drag owns the board's visual state: clear any dependency
     // hover focus so its dimming never fights the drag overlay.
     clearHoverFocus();
+    activeEpicRef.current = found.epic;
     setActiveEpic(found.epic);
   }
 
   function handleDragEnd(event: DragEndEvent) {
+    activeEpicRef.current = null;
     setActiveEpic(null);
     clearHoverFocus();
 
@@ -578,6 +603,7 @@ export function Board({
                 onEpicClick={handleEpicClick}
                 epicViews={epicViews}
                 dropAtEnd={filtersActive}
+                dropDisabled={filtersActive && activeEpic?.status === status}
                 filtersActive={filtersActive}
                 focusRoles={focusRoles}
               />

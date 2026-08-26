@@ -317,6 +317,139 @@ describe("Kanban board dependency visibility", () => {
     }
   });
 
+  it("keeps the focus while focus moves within the same card", () => {
+    vi.useFakeTimers();
+    const a = makeEpic({ id: "a", title: "Epic A" });
+    const b = makeEpic({ id: "b", title: "Epic B" });
+    const z = makeEpic({ id: "z", title: "Unrelated" });
+    setBoard({ todo: [a, b, z] });
+    setDependencies([{ ticketId: "b", dependsOnTicketId: "a" }]);
+
+    render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+    const cardA = cardOf("Epic A");
+    const cardZ = cardOf("Unrelated");
+
+    act(() => {
+      fireEvent.focusIn(cardA);
+    });
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(cardZ.style.opacity).toBe("0.4");
+
+    // Tabbing from the card body onto something inside it is not a leave.
+    // Clearing here would drop the focus and re-arm the 150 ms timer, so the
+    // dim would visibly blink on every internal tab step.
+    act(() => {
+      fireEvent.focusOut(cardA, { relatedTarget: cardA.firstChild });
+    });
+    expect(cardZ.style.opacity).toBe("0.4");
+
+    // Leaving the card for good does clear it.
+    act(() => {
+      fireEvent.focusOut(cardA, { relatedTarget: cardZ });
+    });
+    expect(cardZ.style.opacity).toBe("1");
+  });
+
+  it("does not dim when the only neighbour is off the draggable board", () => {
+    vi.useFakeTimers();
+    const x = makeEpic({ id: "x", title: "Dependent" });
+    const other = makeEpic({ id: "other", title: "Bystander" });
+    // y is Released: ReleasedColumn renders no focus roles, so highlighting it
+    // is impossible and dimming the board would point at nothing.
+    const y = makeEpic({ id: "y", title: "Shipped", status: "released" });
+    setBoard({ todo: [x, other], released: [y] });
+    setDependencies([{ ticketId: "x", dependsOnTicketId: "y" }]);
+
+    render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+
+    act(() => {
+      fireEvent.mouseEnter(cardOf("Dependent"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+
+    expect(cardOf("Bystander").style.opacity).toBe("1");
+    expect(cardOf("Dependent").style.opacity).toBe("1");
+  });
+
+  it("does not dim when focus mode collapses the neighbour's column", () => {
+    vi.useFakeTimers();
+    const x = makeEpic({ id: "x", title: "Dependent" });
+    const other = makeEpic({ id: "other", title: "Bystander" });
+    // "prerequisite is Done" is the normal end state, and focus mode is a
+    // one-click toggle that replaces the Done column with a collapsed slice.
+    const y = makeEpic({ id: "y", title: "Finished", status: "done" });
+    setBoard({ todo: [x, other], done: [y] });
+    setDependencies([{ ticketId: "x", dependsOnTicketId: "y" }]);
+
+    render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+
+    // Sanity: with Done rendered, the focus works and dims the bystander.
+    act(() => {
+      fireEvent.mouseEnter(cardOf("Dependent"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(cardOf("Bystander").style.opacity).toBe("0.4");
+    act(() => {
+      fireEvent.mouseLeave(cardOf("Dependent"));
+    });
+
+    fireEvent.click(screen.getByTestId("focus-mode-toggle"));
+    expect(screen.getByTestId("collapsed-column-done")).toBeInTheDocument();
+
+    act(() => {
+      fireEvent.mouseEnter(cardOf("Dependent"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(cardOf("Bystander").style.opacity).toBe("1");
+  });
+
+  it("renders a bug's Backlog readiness out of 2", () => {
+    // Bugs carry no user stories, so a third criterion would strand every bug
+    // card below its total forever.
+    const bug = makeEpic({
+      id: "bug",
+      title: "Crash",
+      status: "backlog",
+      type: "bug",
+      description: "Steps to reproduce",
+      usCount: 0,
+    });
+    setBoard({ backlog: [bug] });
+
+    render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+
+    expect(screen.getByTestId("epic-readiness-bug")).toHaveTextContent(
+      "Ready 2/2"
+    );
+  });
+
+  it("separates multiple blockers with a comma", () => {
+    // readableId is nullable, so entries fall back to the title; multi-word
+    // titles joined by a bare space read as one blocker.
+    const b = makeEpic({ id: "b", title: "Blocked" });
+    const p1 = makeEpic({ id: "p1", title: "Fix login redirect", status: "backlog" });
+    const p2 = makeEpic({ id: "p2", title: "Cache warmup", status: "backlog" });
+    setBoard({ todo: [b], backlog: [p1, p2] });
+    setDependencies([
+      { ticketId: "b", dependsOnTicketId: "p1" },
+      { ticketId: "b", dependsOnTicketId: "p2" },
+    ]);
+
+    render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+
+    expect(screen.getByTestId("epic-blocked-b")).toHaveTextContent(
+      "Waiting on: Fix login redirect, Cache warmup"
+    );
+  });
+
   it("drops the blocked label once the dependent itself is delivered", () => {
     const late = makeEpic({ id: "late", title: "Late", status: "backlog" });
     const shipped = makeEpic({ id: "shipped", title: "Shipped", status: "done" });
@@ -401,6 +534,35 @@ describe("Kanban board dependency visibility", () => {
       1,
       undefined
     );
+  });
+
+  it("shows no drop slot in the dragged card's own column under a filter", () => {
+    const a = makeEpic({ id: "a", title: "Epic A", type: "bug" });
+    const b = makeEpic({ id: "b", title: "Epic B", type: "bug" });
+    setBoard({ todo: [a, b] });
+
+    render(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("filter-type-bug"));
+
+    // Same-column drops are a deliberate no-op under a filter (the visible
+    // index does not match board order), so the column must not promise a slot
+    // it will silently refuse.
+    act(() => {
+      dndHandlers.overColumnId = "todo";
+      dndHandlers.onDragStart?.({ active: { id: "a" } });
+    });
+    expect(screen.queryByTestId("column-drop-end-todo")).toBeNull();
+
+    // A column that would accept the drop still shows one.
+    act(() => {
+      dndHandlers.overColumnId = null;
+      dndHandlers.onDragEnd?.({ active: { id: "a" }, over: null });
+    });
+    act(() => {
+      dndHandlers.overColumnId = "review";
+      dndHandlers.onDragStart?.({ active: { id: "a" } });
+    });
+    expect(screen.getByTestId("column-drop-end-review")).toBeInTheDocument();
   });
 
   it("warns — without blocking — when a backlog epic with open questions moves to To Do", () => {
