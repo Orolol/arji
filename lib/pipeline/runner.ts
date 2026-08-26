@@ -2,6 +2,10 @@ import type { PipelineStage, PipelineState } from "./constants";
 import { PIPELINE_REASONS } from "./constants";
 import type { VerifyGate, VerifyGateOutcome } from "./verify";
 import type { RegressionReportPayload } from "@/lib/verify/regression-report";
+import type {
+  GradingEntry,
+  GradingFailureContext,
+} from "@/lib/grading/report";
 
 /**
  * Autonomous pipeline state machine (build → review → auto-fix → forensic).
@@ -40,6 +44,10 @@ export interface PipelineStageResult {
   /** Session/workflow verdict (answered, asked_question, silent, error, or transition_refused). */
   outcome: string | null;
   error: string | null;
+  /** Exact structured report produced by a grading stage. */
+  gradingReportId?: string | null;
+  /** A rubric-free epic/story is a successful, journalled no-op. */
+  gradingSkipped?: boolean;
 }
 
 /** Stages the retry ladder applies to (forensic is dispatch-once). */
@@ -86,6 +94,8 @@ export interface PipelineStageRequest {
    * the precise failure reason. Null/absent for every other dispatch.
    */
   verifyFailure?: RegressionReportPayload | null;
+  /** Missed acceptance criteria that caused this fix dispatch. */
+  gradingFailure?: GradingFailureContext | null;
 }
 
 /** Verdict of the blocking-findings assessment after a successful review. */
@@ -97,6 +107,20 @@ export interface PipelineReviewAssessment {
   agentCommentCount: number;
   /** True when zero rows were filed and the prose scan decided instead. */
   usedProseFallback: boolean;
+  /**
+   * Which channel decided: `structured` when the reviewer's persisted
+   * submit_findings verdict did, `prose` for the fallback path.
+   */
+  verdictSource?: "structured" | "prose";
+  /** The persisted submit_findings verdict, when the reviewer filed one. */
+  structuredVerdict?: string | null;
+}
+
+export interface PipelineGradingAssessment {
+  reportId: string;
+  summary: string;
+  gradings: GradingEntry[];
+  missed: GradingEntry[];
 }
 
 /** Pre-dispatch guard probe (target conflicts + review-status guard). */
@@ -172,6 +196,11 @@ export interface RunPipelineOptions {
     sessionId: string;
     stageStartedAt: string;
   }): Promise<PipelineReviewAssessment>;
+  /** Reads and validates the exact report filed by a successful grader. */
+  assessGrading?(input: {
+    sessionId: string;
+    reportId: string;
+  }): Promise<PipelineGradingAssessment>;
   /**
    * Reads the stage session's row status. Called after every settle (a
    * 'cancelled' row means the user stopped the run) and by the cancel watch
@@ -200,6 +229,8 @@ export interface RunPipelineOptions {
    * to pre-regression runs.
    */
   runVerifyGate?: VerifyGate;
+  /** Opt-in only. False/absent preserves the pre-grader pipeline exactly. */
+  gradingEnabled?: boolean;
   /**
    * Parks a gate-rejected bug back to in_progress (guarded review →
    * in_progress) before the run terminates on regression exhaustion — the
@@ -220,6 +251,7 @@ export interface RunPipelineOptions {
 
 const RUNNING_STATE_BY_STAGE: Record<PipelineStageKind, PipelineState> = {
   build: "running_build",
+  grading: "running_grading",
   review: "running_review",
   fix: "running_fix",
 };
@@ -241,6 +273,8 @@ export async function runPipeline(
   let fixCycles = 0;
   let lastCodeSessionId: string | null = null;
   let reviewStageStartedAt = "";
+  let activeVerifyFailure: RegressionReportPayload | null = null;
+  let activeGradingFailure: GradingFailureContext | null = null;
   let handle: PipelineStageHandle = {
     sessionId: options.initialBuild.sessionId,
     settled: options.initialBuild.settled,
@@ -349,10 +383,10 @@ export async function runPipeline(
       return finish("failed", "target busy: another agent took the ticket");
     }
 
-    // Guard (c): the review stage requires the ticket to still sit in
-    // review|done (mirror of the review routes' status guard).
+    // Guard (c): observational grading and review both require the delivered
+    // target to still sit in review|done.
     if (
-      request.stage === "review" &&
+      (request.stage === "grading" || request.stage === "review") &&
       guard.reviewTargetStatus !== "review" &&
       guard.reviewTargetStatus !== "done"
     ) {
@@ -362,6 +396,13 @@ export async function runPipeline(
 
     stage = request.stage;
     stageAttempt = request.attempt;
+    if (request.stage === "fix") {
+      activeVerifyFailure = request.verifyFailure ?? null;
+      activeGradingFailure = request.gradingFailure ?? null;
+    } else {
+      activeVerifyFailure = null;
+      activeGradingFailure = null;
+    }
     callbacks.onStageChange?.(
       RUNNING_STATE_BY_STAGE[request.stage],
       request.stage,
@@ -402,6 +443,14 @@ export async function runPipeline(
     if (request.attempt === 1) {
       if (request.stage === "review") {
         callbacks.onTrace?.(PIPELINE_REASONS.reviewStarted, handle.sessionId);
+      } else if (request.stage === "grading") {
+        // A rubric-free dispatch writes its own explicit skip journal entry.
+        if (handle.sessionId) {
+          callbacks.onTrace?.(
+            PIPELINE_REASONS.gradingStarted,
+            handle.sessionId
+          );
+        }
       } else if (request.stage === "fix") {
         callbacks.onTrace?.(
           PIPELINE_REASONS.fixStarted(request.fixCycle, options.maxFixCycles),
@@ -446,6 +495,8 @@ export async function runPipeline(
         fixCycle: fixCycles,
         previousAttemptSessionId: handle.sessionId,
         lastCodeSessionId,
+        verifyFailure: stage === "fix" ? activeVerifyFailure : null,
+        gradingFailure: stage === "fix" ? activeGradingFailure : null,
       });
     }
 
@@ -510,7 +561,7 @@ export async function runPipeline(
 
     // asked_question at ANY stage pauses the run; the stage closure already
     // held the ticket, notified, and logged via handleAskedQuestionOutcome.
-    if (result.success && result.outcome === "asked_question") {
+    if (result.outcome === "asked_question") {
       callbacks.onTrace?.(
         PIPELINE_REASONS.pausedQuestion(stage),
         handle.sessionId
@@ -635,11 +686,101 @@ export async function runPipeline(
         continue;
       }
       const summary = await dispatch({
-        stage: "review",
+        stage: options.gradingEnabled ? "grading" : "review",
         attempt: 1,
         fixCycle: fixCycles,
         previousAttemptSessionId: null,
         lastCodeSessionId,
+      });
+      if (summary) return summary;
+      continue;
+    }
+
+    // Grading success is assessed only from the exact structured report id
+    // returned by this stage. A rubric-free target is an intentional no-op.
+    if (stage === "grading") {
+      if (result.gradingSkipped) {
+        const summary = await dispatch({
+          stage: "review",
+          attempt: 1,
+          fixCycle: fixCycles,
+          previousAttemptSessionId: null,
+          lastCodeSessionId,
+        });
+        if (summary) return summary;
+        continue;
+      }
+
+      let grading: PipelineGradingAssessment;
+      try {
+        if (!result.gradingReportId || !options.assessGrading) {
+          throw new Error("Grading stage completed without a readable report");
+        }
+        grading = await options.assessGrading({
+          sessionId: handle.sessionId ?? "",
+          reportId: result.gradingReportId,
+        });
+      } catch {
+        const summary = await handleStageFailure();
+        if (summary) return summary;
+        continue;
+      }
+
+      if (grading.missed.length === 0) {
+        callbacks.onTrace?.(PIPELINE_REASONS.gradingPassed, handle.sessionId);
+        const summary = await dispatch({
+          stage: "review",
+          attempt: 1,
+          fixCycle: fixCycles,
+          previousAttemptSessionId: null,
+          lastCodeSessionId,
+        });
+        if (summary) return summary;
+        continue;
+      }
+
+      if (fixCycles >= options.maxFixCycles) {
+        callbacks.onTrace?.(
+          PIPELINE_REASONS.failedGrading(grading.missed.length, fixCycles),
+          handle.sessionId
+        );
+        try {
+          options.parkRejectedTicket?.(
+            lastCodeSessionId,
+            "Acceptance grading found missed criteria after the fix-cycle budget was exhausted"
+          );
+        } catch (parkError) {
+          console.warn(
+            "[pipeline] Failed to park grading-rejected ticket:",
+            parkError instanceof Error ? parkError.message : parkError
+          );
+        }
+        return finish(
+          "failed",
+          `${grading.missed.length} acceptance ${grading.missed.length === 1 ? "criterion remains" : "criteria remain"} missed after ${fixCycles} fix cycles`
+        );
+      }
+
+      fixCycles += 1;
+      callbacks.onTrace?.(
+        PIPELINE_REASONS.gradingMissed(
+          grading.missed.length,
+          fixCycles,
+          options.maxFixCycles
+        ),
+        handle.sessionId
+      );
+      const summary = await dispatch({
+        stage: "fix",
+        attempt: 1,
+        fixCycle: fixCycles,
+        previousAttemptSessionId: null,
+        lastCodeSessionId,
+        gradingFailure: {
+          reportId: grading.reportId,
+          summary: grading.summary,
+          missed: grading.missed,
+        },
       });
       if (summary) return summary;
       continue;

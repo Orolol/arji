@@ -67,11 +67,13 @@ const AGENT_TYPE_LABELS: Record<string, string> = {
   review_compliance: "Compliance Review",
   review_feature: "Feature Review",
   review_second_opinion: "Second Opinion",
+  grading: "Acceptance Grading",
   merge: "Merge",
   tech_check: "Tech Check",
   memory_distill: "Memory Distill",
   dreaming: "Dreaming",
   forensic: "Forensic",
+  failure_digest: "Failure Digest",
 };
 
 /** Token-only colouring for the state pill. */

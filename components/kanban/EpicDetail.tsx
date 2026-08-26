@@ -45,6 +45,7 @@ import { EpicGitSection } from "./epic-detail/EpicGitSection";
 import { EpicUserStoriesSection } from "./epic-detail/EpicUserStoriesSection";
 import { TicketImagesSection } from "./epic-detail/TicketImagesSection";
 import { WhatTheAgentDid } from "./epic-detail/WhatTheAgentDid";
+import { SessionArtifactGallery } from "./epic-detail/SessionArtifactGallery";
 import { formatCostUsd } from "@/lib/utils/format-usage";
 import { formatElapsed } from "@/lib/utils/format-elapsed";
 import { formatDateTime } from "@/lib/utils/format-date";
@@ -101,6 +102,8 @@ interface EpicDetailProps {
   onMerged?: () => void;
   onDeleted?: () => void;
   onAgentConflict?: (args: { message: string; sessionUrl?: string }) => void;
+  /** Project SSE/fallback refresh counter from the board page. */
+  refreshTrigger?: number;
 }
 
 /**
@@ -126,10 +129,13 @@ export function EpicDetail({
   onMerged,
   onDeleted,
   onAgentConflict,
+  refreshTrigger = 0,
 }: EpicDetailProps) {
   const {
     epic,
     userStories,
+    gradingReport,
+    artifacts,
     loading,
     updateEpic,
     addUserStory,
@@ -151,6 +157,7 @@ export function EpicDetail({
     isRunning,
     sendToDev,
     sendToReview,
+    sendToGrading,
     resolveMerge,
     approve,
   } = useAgentDispatch(projectId, { kind: "epic", epicId });
@@ -217,6 +224,12 @@ export function EpicDetail({
   useEffect(() => {
     setPolling(isRunning);
   }, [isRunning, setPolling]);
+
+  // Grader completion arrives as session:completed over the project SSE.
+  // Refresh immediately so report badges do not wait for the next poll.
+  useEffect(() => {
+    if (refreshTrigger > 0) void refresh();
+  }, [refreshTrigger, refresh]);
 
   // Opening a ticket marks it read: move its ticket_read_cursors row to now
   // so the kanban unread dot and the cross-project inbox both clear.
@@ -319,6 +332,11 @@ export function EpicDetail({
 
   async function handleSendToReview(types: string[], namedAgentId?: string | null, resumeSessionId?: string) {
     await sendToReview(types, namedAgentId, resumeSessionId);
+    refresh();
+  }
+
+  async function handleSendToGrading(namedAgentId?: string | null) {
+    await sendToGrading(namedAgentId);
     refresh();
   }
 
@@ -578,6 +596,7 @@ export function EpicDetail({
                 activeSessionId={activeSession?.id || null}
                 onSendToDev={handleSendToDev}
                 onSendToReview={handleSendToReview}
+                onSendToGrading={handleSendToGrading}
                 onApprove={handleApprove}
                 onActionError={(error) => {
                   if (isAgentAlreadyRunningError(error)) {
@@ -656,7 +675,7 @@ export function EpicDetail({
               <WhatTheAgentDid
                 projectId={projectId}
                 epicId={epicId}
-                refreshToken={activeSession?.id ?? null}
+                refreshToken={`${activeSession?.id ?? ""}:${refreshTrigger}`}
               />
 
               {/* Key / value rows (priority & status moved to the header) */}
@@ -707,6 +726,7 @@ export function EpicDetail({
                 <EpicUserStoriesSection
                   projectId={projectId}
                   userStories={userStories}
+                  gradingReport={gradingReport}
                   newStoryTitle={newUSTitle}
                   onNewStoryTitleChange={setNewUSTitle}
                   onAddStory={handleAddUS}
@@ -768,6 +788,13 @@ export function EpicDetail({
                 value="review"
                 className="min-h-0 flex-1 overflow-y-auto px-[24px] py-[22px]"
               >
+                <SessionArtifactGallery
+                  projectId={projectId}
+                  artifacts={(artifacts ?? []).filter(
+                    (artifact) => artifact.epicId === epicId
+                  )}
+                  className="mb-[22px] border-b border-border-soft pb-[22px]"
+                />
                 <DiffViewer
                   projectId={projectId}
                   epicId={epicId}

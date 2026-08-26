@@ -1,5 +1,5 @@
 /**
- * Tests for the five /api/mcp/* routes (the HTTP backend of the agent tool
+ * Tests for the /api/mcp/* routes (the HTTP backend of the agent tool
  * channel).
  *
  * Real handlers against an isolated in-memory database built from the real
@@ -8,6 +8,9 @@
  * and revoked tokens alike), and scope enforcement — the token, never the
  * body, decides which project can be written to.
  */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import { createTestDb } from "@/lib/db/test-utils";
@@ -15,8 +18,10 @@ import { mockNextRequest } from "@/__tests__/helpers/db-mock";
 import {
   agentSessions,
   epics,
+  gradingReports,
   projects,
   reviewComments,
+  sessionArtifacts,
   ticketActivityLog,
   ticketComments,
   userStories,
@@ -28,7 +33,8 @@ import {
   revokeMcpTokensForSession,
   wasQuestionAskedViaMcp,
 } from "@/lib/mcp/token-store";
-import { eq } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
+import { eventBus, type TicketEvent } from "@/lib/events/bus";
 
 const testDb = vi.hoisted(() => ({
   instance: null as ReturnType<
@@ -51,8 +57,10 @@ vi.mock("@/lib/db", () => ({
 import { POST as getTicketPost } from "@/app/api/mcp/get-ticket/route";
 import { POST as updateStatusPost } from "@/app/api/mcp/update-ticket-status/route";
 import { POST as postCommentPost } from "@/app/api/mcp/post-comment/route";
+import { POST as attachArtifactPost } from "@/app/api/mcp/attach-artifact/route";
 import { POST as askQuestionPost } from "@/app/api/mcp/ask-question/route";
 import { POST as submitFindingsPost } from "@/app/api/mcp/submit-findings/route";
+import { POST as submitGradingPost } from "@/app/api/mcp/submit-grading/route";
 
 type RouteHandler = (request: NextRequest) => Promise<Response>;
 
@@ -198,11 +206,31 @@ describe("MCP route auth", () => {
     ["get-ticket", getTicketPost, {}],
     ["update-ticket-status", updateStatusPost, { status: "review" }],
     ["post-comment", postCommentPost, { body: "hello" }],
+    [
+      "attach-artifact",
+      attachArtifactPost,
+      { path: "proof.png", caption: "Visual proof" },
+    ],
     ["ask-question", askQuestionPost, { question: "which db?" }],
     [
       "submit-findings",
       submitFindingsPost,
       { verdict: "approved", summary: "ok", findings: [] },
+    ],
+    [
+      "submit-grading",
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId: "story-id",
+            criterion: "It works",
+            status: "met",
+            evidence: "Covered by a test",
+          },
+        ],
+        summary: "ok",
+      },
     ],
   ];
 
@@ -233,6 +261,153 @@ describe("MCP route auth", () => {
 
     expect(res.status).toBe(401);
     expect(json.code).toBe("UNAUTHORIZED");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// attach-artifact
+// ---------------------------------------------------------------------------
+
+describe("POST /api/mcp/attach-artifact", () => {
+  const pngHeader = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  ]);
+
+  function createWorktreeFixture() {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "arij-mcp-artifact-"));
+    const worktree = path.join(root, "worktree");
+    fs.mkdirSync(worktree);
+    db()
+      .update(agentSessions)
+      .set({ worktreePath: worktree })
+      .where(eq(agentSessions.id, sessionId))
+      .run();
+    return { root, worktree };
+  }
+
+  it("copies the file before returning and records an agent-readable artifact", async () => {
+    const { root, worktree } = createWorktreeFixture();
+    const source = path.join(worktree, "proof.png");
+    const durableSessionDir = path.join(
+      process.cwd(),
+      "data",
+      "sessions",
+      sessionId
+    );
+    fs.writeFileSync(source, Buffer.concat([pngHeader, Buffer.from("proof")]));
+
+    try {
+      const res = await call(
+        attachArtifactPost,
+        { path: "proof.png", caption: "Feature rendered successfully" },
+        token
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.data.artifact).toMatchObject({
+        agentSessionId: sessionId,
+        epicId,
+        caption: "Feature rendered successfully",
+      });
+      const row = db()
+        .select()
+        .from(sessionArtifacts)
+        .where(eq(sessionArtifacts.agentSessionId, sessionId))
+        .get();
+      expect(row).toEqual(json.data.artifact);
+
+      const durableFile = path.join(
+        durableSessionDir,
+        "artifacts",
+        row!.filename
+      );
+      fs.rmSync(worktree, { recursive: true });
+      expect(fs.readFileSync(durableFile)).toEqual(
+        Buffer.concat([pngHeader, Buffer.from("proof")])
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(durableSessionDir, { recursive: true, force: true });
+    }
+  });
+
+  it("emits a project-scoped SSE event after the durable artifact is registered", async () => {
+    const { root, worktree } = createWorktreeFixture();
+    const source = path.join(worktree, "proof.png");
+    const durableSessionDir = path.join(
+      process.cwd(),
+      "data",
+      "sessions",
+      sessionId
+    );
+    const events: TicketEvent[] = [];
+    const unsubscribe = eventBus.subscribe(projectId, (event) =>
+      events.push(event)
+    );
+    fs.writeFileSync(source, pngHeader);
+
+    try {
+      const res = await call(
+        attachArtifactPost,
+        { path: "proof.png", caption: "Feature rendered successfully" },
+        token
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "artifact:created",
+          projectId,
+          epicId,
+          data: {
+            sessionId,
+            artifactId: json.data.artifact.id,
+          },
+        })
+      );
+    } finally {
+      unsubscribe();
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(durableSessionDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns a readable coded error for traversal without copying", async () => {
+    const { root } = createWorktreeFixture();
+    const outside = path.join(root, "outside.png");
+    const durableSessionDir = path.join(
+      process.cwd(),
+      "data",
+      "sessions",
+      sessionId
+    );
+    fs.writeFileSync(outside, pngHeader);
+
+    try {
+      const res = await call(
+        attachArtifactPost,
+        { path: "../outside.png", caption: "Should not attach" },
+        token
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.code).toBe("PATH_OUTSIDE_WORKTREE");
+      expect(json.error).toContain("inside this session's worktree");
+      expect(
+        db()
+          .select()
+          .from(sessionArtifacts)
+          .where(eq(sessionArtifacts.agentSessionId, sessionId))
+          .all()
+      ).toHaveLength(0);
+      expect(fs.existsSync(durableSessionDir)).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(durableSessionDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1076,6 +1251,71 @@ describe("POST /api/mcp/submit-findings", () => {
     });
   });
 
+  it("persists the verdict on the calling session row", async () => {
+    // The structured verdict is what the transition drivers read
+    // (lib/pipeline/findings.ts); a summary-only review still has one.
+    const res = await call(
+      submitFindingsPost,
+      {
+        verdict: "changes_requested",
+        summary: "The retry path is still unbounded.",
+        findings: [],
+      },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    const session = db()
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .get();
+    expect(session?.reviewVerdict).toBe("changes_requested");
+  });
+
+  it("lets a second call overwrite the verdict — the last word wins", async () => {
+    await call(
+      submitFindingsPost,
+      { verdict: "changes_requested", summary: "First pass.", findings: [] },
+      token
+    );
+    await call(
+      submitFindingsPost,
+      {
+        verdict: "approved",
+        summary: "Re-read it; the concern was mine, not the code's.",
+        findings: [],
+      },
+      token
+    );
+
+    const session = db()
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .get();
+    expect(session?.reviewVerdict).toBe("approved");
+  });
+
+  it("leaves the verdict of every OTHER session untouched", async () => {
+    const res = await call(
+      submitFindingsPost,
+      { verdict: "approved", summary: "ok", findings: [] },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    const others = db()
+      .select()
+      .from(agentSessions)
+      .where(ne(agentSessions.id, sessionId))
+      .all();
+    expect(others.length).toBeGreaterThan(0);
+    for (const row of others) {
+      expect(row.reviewVerdict).toBeNull();
+    }
+  });
+
   it("accepts an empty findings list (summary-only review)", async () => {
     const res = await call(
       submitFindingsPost,
@@ -1159,5 +1399,203 @@ describe("POST /api/mcp/submit-findings", () => {
     );
 
     expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// submit-grading
+// ---------------------------------------------------------------------------
+
+describe("POST /api/mcp/submit-grading", () => {
+  function seedStory(storyId: string, parentEpicId = epicId) {
+    db()
+      .insert(userStories)
+      .values({
+        id: storyId,
+        epicId: parentEpicId,
+        title: `Story ${storyId}`,
+        acceptanceCriteria: "The criterion",
+        status: "in_progress",
+      })
+      .run();
+  }
+
+  it("stores one atomic report with strict grading statuses", async () => {
+    const storyId = createId();
+    seedStory(storyId);
+    const gradings = [
+      {
+        storyId,
+        criterion: "The happy path works",
+        status: "met",
+        evidence: "__tests__/feature.test.ts covers it",
+      },
+      {
+        storyId,
+        criterion: "The edge case is explained",
+        status: "partial",
+        evidence: "Implementation exists but lacks a regression test",
+      },
+      {
+        storyId,
+        criterion: "The fallback is implemented",
+        status: "missed",
+        evidence: "No fallback exists in the worktree",
+      },
+    ];
+
+    const res = await call(
+      submitGradingPost,
+      { gradings, summary: "One criterion still needs work." },
+      token
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.reportId).toEqual(expect.any(String));
+
+    const reports = db().select().from(gradingReports).all();
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      id: json.data.reportId,
+      epicId,
+      agentSessionId: sessionId,
+      summary: "One criterion still needs work.",
+    });
+    expect(JSON.parse(reports[0].gradings)).toEqual(gradings);
+  });
+
+  it("rejects an unknown status without persisting a report", async () => {
+    const storyId = createId();
+    seedStory(storyId);
+
+    const res = await call(
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId,
+            criterion: "The criterion",
+            status: "almost",
+            evidence: "Some evidence",
+          },
+        ],
+        summary: "Invalid",
+      },
+      token
+    );
+
+    expect(res.status).toBe(400);
+    expect(db().select().from(gradingReports).all()).toHaveLength(0);
+  });
+
+  it("rejects unknown payload keys at both levels", async () => {
+    const storyId = createId();
+    seedStory(storyId);
+
+    const res = await call(
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId,
+            criterion: "The criterion",
+            status: "met",
+            evidence: "Some evidence",
+            confidence: 0.9,
+          },
+        ],
+        summary: "Invalid",
+        verdict: "approved",
+      },
+      token
+    );
+
+    expect(res.status).toBe(400);
+    expect(db().select().from(gradingReports).all()).toHaveLength(0);
+  });
+
+  it("rejects a story outside the token epic with a readable error and no partial write", async () => {
+    const validStoryId = createId();
+    const outsideStoryId = createId();
+    seedStory(validStoryId);
+    seedStory(outsideStoryId, todoEpicId);
+
+    const res = await call(
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId: validStoryId,
+            criterion: "Valid criterion",
+            status: "met",
+            evidence: "Valid evidence",
+          },
+          {
+            storyId: outsideStoryId,
+            criterion: "Outside criterion",
+            status: "missed",
+            evidence: "Must not be written",
+          },
+        ],
+        summary: "Mixed scope",
+      },
+      token
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.code).toBe("STORY_NOT_IN_EPIC");
+    expect(json.error).toContain(outsideStoryId);
+    expect(json.error).toContain("does not belong to ticket");
+    expect(db().select().from(gradingReports).all()).toHaveLength(0);
+  });
+
+  it("always targets the token epic — ticket_id is rejected", async () => {
+    const storyId = createId();
+    seedStory(storyId);
+
+    const res = await call(
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId,
+            criterion: "The criterion",
+            status: "met",
+            evidence: "Some evidence",
+          },
+        ],
+        summary: "ok",
+        ticket_id: todoEpicId,
+      },
+      token
+    );
+
+    expect(res.status).toBe(400);
+    expect(db().select().from(gradingReports).all()).toHaveLength(0);
+  });
+
+  it("400s MISSING_TICKET for a ticketless session", async () => {
+    const res = await call(
+      submitGradingPost,
+      {
+        gradings: [
+          {
+            storyId: createId(),
+            criterion: "The criterion",
+            status: "met",
+            evidence: "Some evidence",
+          },
+        ],
+        summary: "ok",
+      },
+      noEpicToken
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.code).toBe("MISSING_TICKET");
+    expect(db().select().from(gradingReports).all()).toHaveLength(0);
   });
 });

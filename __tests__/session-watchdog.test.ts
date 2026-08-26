@@ -221,6 +221,27 @@ describe("SessionWatchdog.sweep detection", () => {
     expect(notificationsFor(sessionId)).toHaveLength(0);
   });
 
+  it("watches grading sessions and classifies their stalled notification", () => {
+    const { sessionId, epicId } = seedSession({
+      agentType: "grading",
+      epicStatus: "review",
+      startedAt: minutesAgo(8),
+    });
+
+    const flagged = new SessionWatchdog().sweep(NOW);
+
+    expect(flagged).toHaveLength(1);
+    expect(notificationsFor(sessionId)[0]).toMatchObject({
+      agentType: "grading",
+      title: `Agent seems stalled on E-wd-${counter}: Epic ${counter} — no output for 8m`,
+    });
+    expect(activityFor(epicId!)[0]).toMatchObject({
+      fromStatus: "review",
+      toStatus: "review",
+      sessionId,
+    });
+  });
+
   it("notifies without an activity-log entry for epic-less sessions", () => {
     const { sessionId } = seedSession({
       withEpic: false,

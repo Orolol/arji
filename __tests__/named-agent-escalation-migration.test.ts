@@ -1,4 +1,4 @@
-/** Migration coverage for named_agents.escalates_to (0033). */
+/** Migration coverage for named_agents.escalates_to (0039). */
 import Database from "better-sqlite3";
 import fs from "fs";
 import os from "os";
@@ -9,7 +9,7 @@ import { initDb } from "@/lib/db/init";
 import { namedAgents } from "@/lib/db/schema";
 
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "lib", "db", "migrations");
-const MIGRATION_TAG = "0033_named_agent_escalation";
+const MIGRATION_TAG = "0039_named_agent_escalation";
 const journal = JSON.parse(
   fs.readFileSync(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf-8")
 ) as { entries: { idx: number; when: number; tag: string }[] };
@@ -33,7 +33,7 @@ function withDb<T>(fn: (conn: Database.Database) => T): T {
   }
 }
 
-describe("0033_named_agent_escalation", () => {
+describe("0039_named_agent_escalation", () => {
   it("is a hand-written, last journal migration with a unique increasing timestamp", () => {
     const sql = fs.readFileSync(
       path.join(MIGRATIONS_FOLDER, `${MIGRATION_TAG}.sql`),
@@ -44,7 +44,7 @@ describe("0033_named_agent_escalation", () => {
     );
 
     const entry = journal.entries.find((candidate) => candidate.tag === MIGRATION_TAG);
-    expect(entry).toMatchObject({ idx: 32, when: 1786713000000 });
+    expect(entry).toMatchObject({ idx: 38, when: 1786713600000 });
     expect(journal.entries.at(-1)?.tag).toBe(MIGRATION_TAG);
     expect(new Set(journal.entries.map((candidate) => candidate.when)).size).toBe(
       journal.entries.length
@@ -90,7 +90,7 @@ describe("0033_named_agent_escalation", () => {
       "utf-8"
     );
     expect(initSource).toMatch(
-      /folderMillis:\s*1786713000000,\s*table:\s*"named_agents",\s*column:\s*"escalates_to"/
+      /folderMillis:\s*1786713600000,\s*table:\s*"named_agents",\s*column:\s*"escalates_to"/
     );
   });
 });

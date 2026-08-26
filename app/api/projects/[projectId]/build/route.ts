@@ -17,6 +17,7 @@ import {
   buildTeamBuildPrompt,
   type TeamEpic,
 } from "@/lib/claude/prompt-builder";
+import { isVisualProofEnabled } from "@/lib/claude/visual-proof";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import {
   classifySessionOutcome,
@@ -528,7 +529,9 @@ export async function POST(
       [],
       epic,
       us,
-      buildSystemPrompt
+      buildSystemPrompt,
+      undefined,
+      { visualProofEnabled: isVisualProofEnabled() }
     );
     // Same as team mode: nothing user-written to resolve mentions from.
     const enrichedPrompt = prompt;

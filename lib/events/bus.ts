@@ -14,6 +14,7 @@ export type TicketEventType =
   | "session:completed"
   | "session:failed"
   | "session:progress"
+  | "artifact:created"
   | "release:created";
 
 export interface TicketEvent {

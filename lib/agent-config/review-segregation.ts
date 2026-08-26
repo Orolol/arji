@@ -10,13 +10,13 @@ import {
 import { REVIEW_PROVIDER_SEGREGATION_SETTING_KEY } from "./review-segregation-constants";
 
 /**
- * Global settings key for the "Reviewer must differ from builder" toggle.
+ * Global settings key for the "Reviewer/grader must differ from builder" toggle.
  * Stored in the key/value settings table as the string 'true' / 'false'
  * (JSON-encoded by the settings PATCH route). Default: disabled.
  */
 export { REVIEW_PROVIDER_SEGREGATION_SETTING_KEY };
 
-/** Reads the global review-provider-segregation toggle (default false). */
+/** Reads the global evaluator-provider-segregation toggle (default false). */
 export function isReviewProviderSegregationEnabled(): boolean {
   const row = db
     .select()

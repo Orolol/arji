@@ -2,9 +2,11 @@ import fs from "fs";
 import path from "path";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { loadPromptComments } from "@/lib/claude/prompt-comments";
 import {
   agentSessions,
   epics,
+  gradingReports,
   namedAgents,
   projects,
   reviewComments,
@@ -52,8 +54,14 @@ import {
   buildTicketBuildPrompt,
   type PromptComment,
 } from "@/lib/claude/prompt-builder";
+import { isVisualProofEnabled } from "@/lib/claude/visual-proof";
 import { buildRegressionFixSection } from "@/lib/verify/regression-report";
 import { readRegressionConfig } from "@/lib/pipeline/verify";
+import { dispatchGradingSession } from "@/lib/grading/dispatch";
+import {
+  buildGradingFixSection,
+  parseGradingEntries,
+} from "@/lib/grading/report";
 import {
   enrichPromptWithDocumentMentions,
   userAuthoredTexts,
@@ -77,9 +85,10 @@ import {
   createUnresolvedMentionsNotification,
 } from "@/lib/notifications/create";
 import { PIPELINE_REVIEW_TYPE } from "./constants";
-import { assessReviewOutcome } from "./findings";
+import { assessReviewOutcome, resolveReviewVerdict } from "./findings";
 import type {
   PipelineGuardCheck,
+  PipelineGradingAssessment,
   PipelineReviewAssessment,
   PipelineStageHandle,
   PipelineStageRequest,
@@ -160,6 +169,10 @@ export interface PipelineStageDriver {
     sessionId: string;
     stageStartedAt: string;
   }): Promise<PipelineReviewAssessment>;
+  assessGrading(input: {
+    sessionId: string;
+    reportId: string;
+  }): Promise<PipelineGradingAssessment>;
   readSessionStatus(sessionId: string): string | null;
   checkGuards(ownSessionIds: string[]): PipelineGuardCheck;
 }
@@ -177,6 +190,9 @@ export function createPipelineStageDriver(
   return {
     launchStage: async (request) => {
       try {
+        if (request.stage === "grading") {
+          return await dispatchPipelineGradingStage(init);
+        }
         return await dispatchPipelineStage(init, request, reviewOutputs);
       } catch (error) {
         const message =
@@ -205,12 +221,39 @@ export function createPipelineStageDriver(
         epicId: init.epicId,
         sinceIso: stageStartedAt,
         sessionOutput: output,
+        reviewSessionId: sessionId || null,
       });
       return {
         blocking: assessment.blocking,
         blockingCount: assessment.blockingFindings.length,
         agentCommentCount: assessment.agentCommentCount,
         usedProseFallback: assessment.usedProseFallback,
+        verdictSource: assessment.verdictSource,
+        structuredVerdict: assessment.structuredVerdict,
+      };
+    },
+
+    assessGrading: async ({ sessionId, reportId }) => {
+      const report = db
+        .select()
+        .from(gradingReports)
+        .where(
+          and(
+            eq(gradingReports.id, reportId),
+            eq(gradingReports.epicId, init.epicId),
+            eq(gradingReports.agentSessionId, sessionId),
+          ),
+        )
+        .get();
+      const gradings = parseGradingEntries(report?.gradings);
+      if (!report || !gradings) {
+        throw new Error("Grading report is missing or malformed");
+      }
+      return {
+        reportId: report.id,
+        summary: report.summary,
+        gradings,
+        missed: gradings.filter((entry) => entry.status === "missed"),
       };
     },
 
@@ -222,6 +265,46 @@ export function createPipelineStageDriver(
         .get()?.status ?? null,
 
     checkGuards: (ownSessionIds) => checkPipelineGuards(init, ownSessionIds),
+  };
+}
+
+/** Adapts the reusable grader dispatcher to the pipeline stage contract. */
+async function dispatchPipelineGradingStage(
+  init: PipelineStageDriverInit,
+): Promise<PipelineStageHandle> {
+  const result = await dispatchGradingSession({
+    projectId: init.projectId,
+    epicId: init.epicId,
+    userStoryId: init.scope === "story" ? init.userStoryId : null,
+    batchRunId: init.batchRunId ?? null,
+  });
+
+  if (result.skipped) {
+    return {
+      sessionId: null,
+      settled: Promise.resolve({
+        sessionId: "",
+        success: true,
+        outcome: "answered",
+        error: null,
+        gradingReportId: null,
+        gradingSkipped: true,
+      }),
+      escalatedToProvider: null,
+    };
+  }
+
+  return {
+    sessionId: result.sessionId,
+    settled: result.settled.then((terminal) => ({
+      sessionId: terminal.sessionId,
+      success: terminal.success,
+      outcome: terminal.outcome,
+      error: terminal.error,
+      gradingReportId: terminal.reportId,
+      gradingSkipped: false,
+    })),
+    escalatedToProvider: null,
   };
 }
 
@@ -548,22 +631,9 @@ async function dispatchPipelineStage(
     .orderBy(userStories.position)
     .all();
 
-  const comments = db
-    .select()
-    .from(ticketComments)
-    .where(
-      scope === "story" && userStoryId
-        ? eq(ticketComments.userStoryId, userStoryId)
-        : eq(ticketComments.epicId, epicId)
-    )
-    .orderBy(ticketComments.createdAt)
-    .all();
-
-  const promptComments: PromptComment[] = comments.map((c) => ({
-    author: c.author as "user" | "agent",
-    content: c.content,
-    createdAt: c.createdAt ?? "",
-  }));
+  const promptComments: PromptComment[] = loadPromptComments(
+    scope === "story" && userStoryId ? { userStoryId } : { epicId }
+  );
 
   const { worktreePath, branchName } = await createWorktree(
     project.gitRepoPath,
@@ -610,7 +680,8 @@ async function dispatchPipelineStage(
             epic,
             usList,
             buildSystemPrompt,
-            promptComments
+            promptComments,
+            { visualProofEnabled: isVisualProofEnabled() }
           )
         : buildTicketBuildPrompt(
             project,
@@ -618,7 +689,8 @@ async function dispatchPipelineStage(
             epic,
             story!,
             promptComments,
-            buildSystemPrompt
+            buildSystemPrompt,
+            { visualProofEnabled: isVisualProofEnabled() }
           );
 
     // Open review feedback (includes the blocking findings verbatim with
@@ -636,7 +708,17 @@ async function dispatchPipelineStage(
       prompt = prompt + "\n\n" + reviewContext;
     }
     if (request.stage === "fix") {
-      prompt = prompt + "\n\n" + PIPELINE_FIX_INSTRUCTIONS_SECTION;
+      // A grading-only fix must not be described as a code-review rejection.
+      // When open review findings also exist, retain both instruction blocks.
+      if (!request.gradingFailure || reviewContext) {
+        prompt = prompt + "\n\n" + PIPELINE_FIX_INSTRUCTIONS_SECTION;
+      }
+      if (request.gradingFailure) {
+        prompt =
+          prompt +
+          "\n\n" +
+          buildGradingFixSection(request.gradingFailure);
+      }
       // A regression-gate rejection carries its exact red→green verdict so
       // the agent repairs the real problem instead of guessing.
       if (request.verifyFailure) {
@@ -659,7 +741,7 @@ async function dispatchPipelineStage(
   const mentionEnrichment = enrichPromptWithDocumentMentions({
     projectId,
     prompt,
-    textSources: userAuthoredTexts(comments),
+    textSources: userAuthoredTexts(promptComments),
   });
   prompt = mentionEnrichment.prompt;
   createUnresolvedMentionsNotification({
@@ -951,12 +1033,18 @@ function finalizeReviewSession(input: {
     });
   }
 
-  const lowerOutput = output.toLowerCase();
-  const isNegativeVerdict =
-    !askedQuestion &&
-    (lowerOutput.includes("changes requested") ||
-      lowerOutput.includes("not complete") ||
-      lowerOutput.includes("partially complete"));
+  // Verdict channels, in priority order: the reviewer's persisted
+  // submit_findings verdict, else the prose scan of its final message (see
+  // lib/pipeline/findings.ts). A reviewer that asked a question delivered no
+  // verdict at all, so neither channel is consulted.
+  const decision = askedQuestion
+    ? null
+    : resolveReviewVerdict({
+        epicId,
+        reviewSessionId: sessionId,
+        sessionOutput: output,
+      });
+  const isNegativeVerdict = decision?.negative ?? false;
 
   if (scope === "epic") {
     if (result?.success) {
@@ -989,6 +1077,7 @@ function finalizeReviewSession(input: {
         scope: "epic",
         reason: `Review verdict: changes requested (${PIPELINE_REVIEW_LABEL})`,
         sessionId,
+        verdictSource: decision?.source,
       });
     }
   } else if (userStoryId) {
@@ -1008,6 +1097,7 @@ function finalizeReviewSession(input: {
         userStoryId,
         reason: `Review verdict: changes requested (${PIPELINE_REVIEW_LABEL})`,
         sessionId,
+        verdictSource: decision?.source,
       });
     }
   }

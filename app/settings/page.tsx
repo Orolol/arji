@@ -8,6 +8,7 @@ import {
   DEFAULT_PIPELINE_MAX_ATTEMPTS,
   DEFAULT_PIPELINE_MAX_FIX_CYCLES,
   PIPELINE_ENABLED_SETTING_KEY,
+  PIPELINE_GRADER_ENABLED_SETTING_KEY,
   PIPELINE_MAX_ATTEMPTS_RANGE,
   PIPELINE_MAX_ATTEMPTS_SETTING_KEY,
   PIPELINE_MAX_FIX_CYCLES_RANGE,
@@ -111,6 +112,7 @@ export default function SettingsPage() {
   const [savingMcpTools, setSavingMcpTools] = useState(false);
   const [mcpToolsMessage, setMcpToolsMessage] = useState<string | null>(null);
   const [pipelineEnabled, setPipelineEnabled] = useState(false);
+  const [pipelineGraderEnabled, setPipelineGraderEnabled] = useState(false);
   const [pipelineMaxAttempts, setPipelineMaxAttempts] = useState(
     DEFAULT_PIPELINE_MAX_ATTEMPTS
   );
@@ -198,6 +200,13 @@ export default function SettingsPage() {
         setPipelineEnabled(
           parsePipelineEnabledSetting(d.data?.[PIPELINE_ENABLED_SETTING_KEY]) ??
             false
+        );
+        // Acceptance grading is independently opt-in and tri-state. An
+        // absent key preserves the existing verify → review pipeline.
+        setPipelineGraderEnabled(
+          parsePipelineEnabledSetting(
+            d.data?.[PIPELINE_GRADER_ENABLED_SETTING_KEY]
+          ) ?? false
         );
         setPipelineMaxAttempts(
           parsePipelineMaxAttempts(d.data?.[PIPELINE_MAX_ATTEMPTS_SETTING_KEY]) ??
@@ -294,6 +303,17 @@ export default function SettingsPage() {
       next
         ? "Autonomous pipeline enabled by default for new single-ticket builds."
         : "Autonomous pipeline disabled by default."
+    );
+  }
+
+  async function handleTogglePipelineGrader(next: boolean) {
+    setPipelineGraderEnabled(next);
+    await savePipelineSettings(
+      { [PIPELINE_GRADER_ENABLED_SETTING_KEY]: next },
+      () => setPipelineGraderEnabled(!next),
+      next
+        ? "Acceptance grading enabled between verify and review."
+        : "Acceptance grading disabled for autonomous pipelines."
     );
   }
 
@@ -1055,6 +1075,25 @@ export default function SettingsPage() {
             <span className="block text-muted-foreground">
               Pre-checks the &quot;Run full pipeline&quot; box in the Send to Dev
               dialog. Off by default; each dispatch can still override it.
+            </span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            data-testid="pipeline-grader-toggle"
+            checked={pipelineGraderEnabled}
+            disabled={savingPipeline}
+            onChange={(e) => handleTogglePipelineGrader(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium">Grade acceptance criteria</span>
+            <span className="block text-muted-foreground">
+              Runs an acceptance grader after verification and before code
+              review. Missed criteria consume the same fix-cycle budget. Off
+              by default.
             </span>
           </span>
         </label>

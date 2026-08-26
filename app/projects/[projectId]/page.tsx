@@ -86,6 +86,7 @@ export default function KanbanPage() {
     "session:completed": () => setRefreshTrigger((t) => t + 1),
     "session:failed": () => setRefreshTrigger((t) => t + 1),
     "session:progress": () => setRefreshTrigger((t) => t + 1),
+    "artifact:created": () => setRefreshTrigger((t) => t + 1),
     "release:created": () => setRefreshTrigger((t) => t + 1),
   });
 
@@ -494,6 +495,7 @@ export default function KanbanPage() {
                       projectId={projectId}
                       epicId={activeDetailTicketId}
                       open
+                      refreshTrigger={refreshTrigger}
                       onClose={handleCloseDetailPanel}
                       onAgentConflict={({ message, sessionUrl }) =>
                         addToast(

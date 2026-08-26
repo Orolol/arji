@@ -66,6 +66,7 @@ vi.mock("@/lib/db", () => {
       }),
       orderBy: vi.fn(() => chain),
       innerJoin: vi.fn(() => chain),
+      leftJoin: vi.fn(() => chain),
       get: vi.fn(() => {
         if (currentSelectTable === "projects") return mockProject;
         if (currentSelectTable === "epics") return mockEpic;

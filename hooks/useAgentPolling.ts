@@ -18,7 +18,9 @@ export interface UnifiedActivity {
     | "chat"
     | "spec_generation"
     | "release"
-    | "memory";
+    | "memory"
+    | "qa"
+    | "grading";
   label: string;
   status: string;
   mode: string;

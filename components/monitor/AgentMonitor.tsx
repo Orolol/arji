@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Brain,
+  ClipboardCheck,
   Hammer,
   Search,
   GitMerge,
@@ -73,6 +74,8 @@ const typeIcons: Record<UnifiedActivity["type"], typeof Hammer> = {
   spec_generation: Sparkles,
   release: FileText,
   memory: Brain,
+  qa: ClipboardCheck,
+  grading: ClipboardCheck,
 };
 
 export function AgentMonitor({

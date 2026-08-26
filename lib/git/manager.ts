@@ -45,7 +45,7 @@ export interface BaseBranchOptions {
  */
 export async function resolveDefaultBranch(
   repoPath: string,
-  preferred?: string | null
+  preferred?: string | null,
 ): Promise<string> {
   const git = getGit(repoPath);
   const branches = await git.branchLocal();
@@ -60,7 +60,7 @@ export async function createWorktree(
   repoPath: string,
   epicId: string,
   epicTitle: string,
-  options: BaseBranchOptions = {}
+  options: BaseBranchOptions = {},
 ): Promise<{ worktreePath: string; branchName: string }> {
   const git = getGit(repoPath);
   const branchName = epicBranchName(epicId, epicTitle);
@@ -115,7 +115,7 @@ export async function createWorktree(
  */
 export async function attachWorktree(
   repoPath: string,
-  branchName: string
+  branchName: string,
 ): Promise<{ worktreePath: string; branchName: string }> {
   const git = getGit(repoPath);
 
@@ -136,6 +136,23 @@ export async function attachWorktree(
 
   await git.raw(["worktree", "add", worktreePath, branchName]);
   return { worktreePath, branchName };
+}
+
+/**
+ * Resolves the commit a worktree currently sits on, or null when it cannot
+ * be determined. CI autofix compares this against the PR head SHA so the
+ * agent is told when its tree already carries commits CI never ran.
+ */
+export async function resolveWorktreeHead(
+  worktreePath: string,
+): Promise<string | null> {
+  try {
+    const head = await getGit(worktreePath).revparse(["HEAD"]);
+    const sha = head.trim();
+    return /^[0-9a-f]{40}$/i.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Why a merge did not happen — callers react very differently to each. */
@@ -205,7 +222,7 @@ async function grepFilesInRef(
   git: SimpleGit,
   ref: string,
   pattern: string,
-  files: string[]
+  files: string[],
 ): Promise<string[]> {
   const matches: string[] = [];
   for (let i = 0; i < files.length; i += GREP_PATHSPEC_BATCH) {
@@ -253,7 +270,7 @@ async function grepFilesInRef(
 async function findConflictMarkerFiles(
   git: SimpleGit,
   mainBranch: string,
-  branchName: string
+  branchName: string,
 ): Promise<string[]> {
   const diff = await git.raw([
     // Raw paths — see the quotepath note in grepFilesInRef.
@@ -272,11 +289,11 @@ async function findConflictMarkerFiles(
     git,
     branchName,
     "^<{7,} ",
-    changedFiles
+    changedFiles,
   );
   if (withStart.length === 0) return [];
   const withEnd = new Set(
-    await grepFilesInRef(git, branchName, "^>{7,} ", changedFiles)
+    await grepFilesInRef(git, branchName, "^>{7,} ", changedFiles),
   );
   return withStart.filter((file) => withEnd.has(file));
 }
@@ -288,7 +305,7 @@ async function findConflictMarkerFiles(
  */
 export async function captureMergeCheckpoint(
   repoPath: string,
-  branchName: string
+  branchName: string,
 ): Promise<MergeCheckpoint | null> {
   try {
     const git = getGit(repoPath);
@@ -309,7 +326,7 @@ export async function captureMergeCheckpoint(
  */
 export async function rollbackMerge(
   repoPath: string,
-  checkpoint: MergeCheckpoint
+  checkpoint: MergeCheckpoint,
 ): Promise<{ restored: boolean; error?: string }> {
   const git = getGit(repoPath);
   try {
@@ -345,7 +362,7 @@ export async function mergeWorktree(
   repoPath: string,
   branchName: string,
   worktreePath?: string,
-  options: BaseBranchOptions = {}
+  options: BaseBranchOptions = {},
 ): Promise<MergeWorktreeResult> {
   // simple-git throws SYNCHRONOUSLY when repoPath itself no longer exists —
   // that must come back as `merged: false` like every other pre-merge
@@ -384,7 +401,7 @@ export async function mergeWorktree(
     const markerFiles = await findConflictMarkerFiles(
       git,
       mainBranch,
-      branchName
+      branchName,
     );
     if (markerFiles.length > 0) {
       return {
@@ -434,7 +451,7 @@ export async function mergeWorktree(
   } catch (e) {
     console.warn(
       "[git] Merge landed but the commit hash lookup failed:",
-      e instanceof Error ? e.message : e
+      e instanceof Error ? e.message : e,
     );
   }
 
@@ -443,7 +460,7 @@ export async function mergeWorktree(
   } catch (e) {
     console.warn(
       `[git] Merge landed but deleting ${branchName} failed:`,
-      e instanceof Error ? e.message : e
+      e instanceof Error ? e.message : e,
     );
   }
 
@@ -458,16 +475,20 @@ export async function mergeWorktree(
  */
 export async function startMergeInWorktree(
   worktreePath: string,
-  targetBranch: string
+  targetBranch: string,
 ): Promise<{ conflicted: boolean; output: string }> {
   const git = getGit(worktreePath);
 
   try {
     // Fetch latest so the target branch ref is up to date
     const result = await git.merge([targetBranch]);
-    return { conflicted: false, output: result.result || "Merge completed cleanly." };
+    return {
+      conflicted: false,
+      output: result.result || "Merge completed cleanly.",
+    };
   } catch (e) {
-    const output = e instanceof Error ? e.message : "Merge failed with conflicts";
+    const output =
+      e instanceof Error ? e.message : "Merge failed with conflicts";
     // Check if there are actually conflicted files
     const status = await git.status();
     if (status.conflicted.length > 0) {

@@ -15,6 +15,7 @@ import { NamedAgentsTab } from "./NamedAgentsTab";
 import { StatsTab } from "./StatsTab";
 import { TaskAssignmentsTab } from "./TaskAssignmentsTab";
 import { Globe, FolderOpen, ChevronDown, ChevronRight } from "lucide-react";
+import { ProjectFrictionLink } from "@/components/frictions/ProjectFrictionLink";
 
 interface AgentConfigPanelProps {
   projectId?: string;
@@ -38,6 +39,8 @@ export function AgentConfigPanel({ projectId }: AgentConfigPanelProps) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
+      {projectId && <ProjectFrictionLink projectId={projectId} />}
+
       {/* Core — the default view, fits one screen. */}
       {!advancedOpen && (
         <div className="flex-1 min-h-0 flex flex-col">

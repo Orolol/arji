@@ -67,6 +67,14 @@ const mockSchema = vi.hoisted(() => ({
     completedAt: "completedAt",
     createdAt: "createdAt",
   },
+  gradingReports: {
+    __name: "gradingReports",
+    id: "id",
+    epicId: "epicId",
+    gradings: "gradings",
+    summary: "summary",
+    createdAt: "createdAt",
+  },
   ticketReadCursors: {
     __name: "ticketReadCursors",
     epicId: "epicId",
@@ -163,6 +171,7 @@ vi.mock("@/lib/db/schema", () => ({
   userStories: mockSchema.userStories,
   ticketComments: mockSchema.ticketComments,
   agentSessions: mockSchema.agentSessions,
+  gradingReports: mockSchema.gradingReports,
   ticketReadCursors: mockSchema.ticketReadCursors,
 }));
 
@@ -272,6 +281,15 @@ describe("POST /api/projects/[projectId]/epics", () => {
           latestSessionEndedAt: "2026-02-14T11:20:00.000Z",
           latestUserCommentCreatedAt: "2026-02-14T10:00:00.000Z",
           lastReadAt: "2026-02-14T11:00:00.000Z",
+          latestGradingEntries: JSON.stringify([
+            {
+              storyId: "story-1",
+              criterion: "The card refreshes",
+              status: "missed",
+              evidence: "No SSE refresh exists.",
+            },
+          ]),
+          gradingSummary: "One gap remains.",
         },
       ],
     ];
@@ -290,10 +308,12 @@ describe("POST /api/projects/[projectId]/epics", () => {
       latestSessionEndedAt: "2026-02-14T11:20:00.000Z",
       latestUserCommentCreatedAt: "2026-02-14T10:00:00.000Z",
       lastReadAt: "2026-02-14T11:00:00.000Z",
+      gradingStatus: "missed",
+      gradingSummary: "One gap remains.",
     });
     // story counts + latest comments + latest sessions + latest user comments
-    // + session costs + ticket read cursors
-    expect((db as unknown as { leftJoin: ReturnType<typeof vi.fn> }).leftJoin).toHaveBeenCalledTimes(6);
+    // + session costs + latest grading + ticket read cursors
+    expect((db as unknown as { leftJoin: ReturnType<typeof vi.fn> }).leftJoin).toHaveBeenCalledTimes(7);
     // story counts + session costs + latest user comments
     expect((db as unknown as { groupBy: ReturnType<typeof vi.fn> }).groupBy).toHaveBeenCalledTimes(3);
 

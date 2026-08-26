@@ -21,8 +21,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { TELESCOPE_MAX_WINDOW_DAYS } from "@/lib/telescope/constants";
 
-type CheckType = "tech_check" | "e2e_test";
+type CheckType = "tech_check" | "e2e_test" | "failure_digest";
 
 interface QaPrompt {
   id: string;
@@ -34,7 +35,11 @@ interface StartQaCheckDialogProps {
   projectId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onStarted?: (data: { reportId: string; sessionId: string }) => void;
+  onStarted?: (data: {
+    reportId: string;
+    sessionId: string | null;
+    noOp?: boolean;
+  }) => void;
 }
 
 const CHECK_TYPE_CONFIG: Record<CheckType, { title: string; description: string }> = {
@@ -45,6 +50,11 @@ const CHECK_TYPE_CONFIG: Record<CheckType, { title: string; description: string 
   e2e_test: {
     title: "Start E2E Test",
     description: "Run comprehensive end-to-end tests across all app features.",
+  },
+  failure_digest: {
+    title: "Start Failure Digest",
+    description:
+      "Analyze mechanically grouped recurring failures in a read-only plan session.",
   },
 };
 
@@ -59,6 +69,7 @@ export function StartQaCheckDialog({
   const [customPrompt, setCustomPrompt] = useState("");
   const [customPromptId, setCustomPromptId] = useState<string | null>(null);
   const [savePromptName, setSavePromptName] = useState("");
+  const [failureDigestWindowDays, setFailureDigestWindowDays] = useState("14");
   const [prompts, setPrompts] = useState<QaPrompt[]>([]);
   const [loadingPrompts, setLoadingPrompts] = useState(false);
   const [savingPrompt, setSavingPrompt] = useState(false);
@@ -94,6 +105,7 @@ export function StartQaCheckDialog({
     setCustomPrompt("");
     setCustomPromptId(null);
     setSavePromptName("");
+    setFailureDigestWindowDays("14");
     setError(null);
   }
 
@@ -156,20 +168,29 @@ export function StartQaCheckDialog({
           customPrompt,
           customPromptId,
           checkType,
+          ...(checkType === "failure_digest"
+            ? { windowDays: Number(failureDigestWindowDays) }
+            : {}),
         }),
       });
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok || !json.data) {
-        setError(json.error || `Failed to start ${checkType === "e2e_test" ? "E2E test" : "tech check"}`);
+        setError(json.error || `Failed to start ${config.title.replace(/^Start /, "")}`);
         return;
       }
 
-      onStarted?.(json.data as { reportId: string; sessionId: string });
+      onStarted?.(
+        json.data as {
+          reportId: string;
+          sessionId: string | null;
+          noOp?: boolean;
+        },
+      );
       onOpenChange(false);
       resetForm();
     } catch {
-      setError(`Failed to start ${checkType === "e2e_test" ? "E2E test" : "tech check"}`);
+      setError(`Failed to start ${config.title.replace(/^Start /, "")}`);
     } finally {
       setStarting(false);
     }
@@ -206,6 +227,7 @@ export function StartQaCheckDialog({
               <SelectContent>
                 <SelectItem value="tech_check">Tech Check</SelectItem>
                 <SelectItem value="e2e_test">E2E Test</SelectItem>
+                <SelectItem value="failure_digest">Failure Digest</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -217,6 +239,31 @@ export function StartQaCheckDialog({
                 E2E testing requires an agent with access to browser automation and testing tools
                 (e.g. Playwright, Puppeteer). Ensure your selected agent has the appropriate tool
                 permissions.
+              </p>
+            </div>
+          )}
+
+          {checkType === "failure_digest" && (
+            <div className="space-y-1.5">
+              <label
+                htmlFor="failure-digest-window"
+                className="text-[12.5px] text-muted-foreground"
+              >
+                Collection Window (days)
+              </label>
+              <Input
+                id="failure-digest-window"
+                type="number"
+                min={1}
+                max={TELESCOPE_MAX_WINDOW_DAYS}
+                step={1}
+                value={failureDigestWindowDays}
+                onChange={(event) => setFailureDigestWindowDays(event.target.value)}
+                className="h-[34px] w-32 rounded-[8px] text-[13px]"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                If the window is empty, Arij records a completed no-op report
+                without launching an agent.
               </p>
             </div>
           )}

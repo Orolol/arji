@@ -30,6 +30,7 @@ import {
   isChatProvider,
   PROVIDER_LABELS,
 } from "@/lib/agent-config/constants";
+import { GradingStatusBadge } from "@/components/grading/GradingStatusBadge";
 
 function providerLabel(provider?: string): string {
   if (!provider) return "Agent";
@@ -376,6 +377,15 @@ export function EpicCard({
           >
             <Bot className="h-3 w-3" />
           </span>
+        )}
+        {epic.gradingStatus && (
+          <GradingStatusBadge
+            status={epic.gradingStatus}
+            evidence={epic.gradingSummary}
+            label={`Criteria ${epic.gradingStatus}`}
+            testId={`epic-grading-${epic.id}`}
+            className="font-sans"
+          />
         )}
         <PriorityBadge priority={epic.priority} className="font-sans" />
         {epic.prNumber && epic.prUrl && (

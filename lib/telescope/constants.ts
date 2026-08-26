@@ -1,0 +1,2 @@
+export const TELESCOPE_WINDOW_DAYS = 14;
+export const TELESCOPE_MAX_WINDOW_DAYS = 365;

@@ -23,6 +23,7 @@ vi.mock("@/lib/db", () => {
     where: ReturnType<typeof vi.fn>;
     orderBy: ReturnType<typeof vi.fn>;
     innerJoin: ReturnType<typeof vi.fn>;
+    leftJoin: ReturnType<typeof vi.fn>;
     all: ReturnType<typeof vi.fn>;
     get: ReturnType<typeof vi.fn>;
     insert: ReturnType<typeof vi.fn>;
@@ -33,6 +34,7 @@ vi.mock("@/lib/db", () => {
     where: vi.fn(),
     orderBy: vi.fn(),
     innerJoin: vi.fn(),
+    leftJoin: vi.fn(),
     all: vi.fn(),
     get: vi.fn(),
     insert: vi.fn(),
@@ -44,6 +46,7 @@ vi.mock("@/lib/db", () => {
   chain.where.mockReturnValue(chain);
   chain.orderBy.mockReturnValue(chain);
   chain.innerJoin.mockReturnValue(chain);
+  chain.leftJoin.mockReturnValue(chain);
   chain.get.mockImplementation(() => mockDbState.getQueue.shift() ?? null);
   chain.all.mockImplementation(() => mockDbState.allQueue.shift() ?? []);
   chain.insert.mockReturnValue({

@@ -3,11 +3,14 @@ import { db } from "@/lib/db";
 import {
   agentSessions,
   epics,
+  frictions,
+  gradingReports,
   ticketComments,
+  ticketActivityLog,
   ticketReadCursors,
   userStories,
 } from "@/lib/db/schema";
-import { count, eq, sql, and } from "drizzle-orm";
+import { count, eq, sql, and, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { createDependencies } from "@/lib/dependencies/crud";
@@ -24,11 +27,37 @@ import { createEpicSchema } from "@/lib/validation/schemas";
 import { validateBody, isValidationError } from "@/lib/validation/validate";
 import { generateReadableId } from "@/lib/db/readable-id";
 import { emitTicketCreated } from "@/lib/events/emit";
+import { resolveOptionalMcpToken } from "@/lib/mcp/http-auth";
+import {
+  buildMcpCreateBugActivityReason,
+  MCP_CREATE_BUG_ACTION_HEADER,
+  MCP_CREATE_BUG_SOURCE_TICKET_HEADER,
+} from "@/lib/mcp/create-bug-contract";
+import {
+  findOpenDuplicateBug,
+  type OpenBugDuplicate,
+} from "@/lib/mcp/create-bug";
+import {
+  aggregateGradingStatus,
+  parseGradingEntries,
+} from "@/lib/grading/report";
+import { OPEN_FRICTION_STATUSES } from "@/lib/frictions/constants";
+
+class FrictionConversionConflict extends Error {}
 
 /** Optional prose: blank is absence, so it is stored as NULL, not `""`. */
 function trimmedOrNull(value: string | null | undefined): string | null {
   const trimmed = typeof value === "string" ? value.trim() : "";
   return trimmed.length > 0 ? trimmed : null;
+}
+
+class DuplicateMcpBugError extends Error {
+  constructor(readonly existingBug: OpenBugDuplicate) {
+    super(
+      `An open bug with the same normalized title already exists: ${existingBug.readableId ?? existingBug.id}.`
+    );
+    this.name = "DuplicateMcpBugError";
+  }
 }
 
 export async function GET(
@@ -119,6 +148,31 @@ export async function GET(
     .groupBy(agentSessions.epicId)
     .as("epic_session_costs");
 
+  const rankedGradingReports = db
+    .select({
+      epicId: gradingReports.epicId,
+      latestGradingEntries: gradingReports.gradings,
+      latestGradingSummary: gradingReports.summary,
+      latestGradingCreatedAt: gradingReports.createdAt,
+      rowNum: sql<number>`ROW_NUMBER() OVER (
+        PARTITION BY ${gradingReports.epicId}
+        ORDER BY ${gradingReports.createdAt} DESC, ${gradingReports.id} DESC
+      )`.as("grading_row_num"),
+    })
+    .from(gradingReports)
+    .as("ranked_grading_reports");
+
+  const latestGradingReports = db
+    .select({
+      epicId: rankedGradingReports.epicId,
+      latestGradingEntries: rankedGradingReports.latestGradingEntries,
+      latestGradingSummary: rankedGradingReports.latestGradingSummary,
+      latestGradingCreatedAt: rankedGradingReports.latestGradingCreatedAt,
+    })
+    .from(rankedGradingReports)
+    .where(eq(rankedGradingReports.rowNum, 1))
+    .as("latest_grading_reports");
+
   // Latest user-authored comment per epic — a user comment newer than the
   // asked_question session counts as the reply.
   const latestUserComments = db
@@ -169,6 +223,9 @@ export async function GET(
       latestSessionEndedAt: latestEpicSessions.latestSessionEndedAt,
       latestUserCommentCreatedAt: latestUserComments.latestUserCommentCreatedAt,
       sessionsCostUsd: epicSessionCosts.sessionsCostUsd,
+      latestGradingEntries: latestGradingReports.latestGradingEntries,
+      gradingSummary: latestGradingReports.latestGradingSummary,
+      gradingCreatedAt: latestGradingReports.latestGradingCreatedAt,
       // Per-epic read cursor (ticket_read_cursors) — the client derives the
       // "unread AI comment" dot from latestComment* vs this timestamp.
       lastReadAt: ticketReadCursors.lastReadAt,
@@ -179,6 +236,7 @@ export async function GET(
     .leftJoin(latestEpicSessions, eq(epics.id, latestEpicSessions.epicId))
     .leftJoin(latestUserComments, eq(epics.id, latestUserComments.epicId))
     .leftJoin(epicSessionCosts, eq(epics.id, epicSessionCosts.epicId))
+    .leftJoin(latestGradingReports, eq(epics.id, latestGradingReports.epicId))
     .leftJoin(ticketReadCursors, eq(epics.id, ticketReadCursors.epicId))
     .where(eq(epics.projectId, projectId))
     .orderBy(epics.position)
@@ -190,7 +248,14 @@ export async function GET(
     queryMs: Date.now() - queryStartedAt,
   });
 
-  return NextResponse.json({ data: result });
+  const data = result.map(({ latestGradingEntries, ...epic }) => ({
+    ...epic,
+    gradingStatus: aggregateGradingStatus(
+      parseGradingEntries(latestGradingEntries),
+    ),
+  }));
+
+  return NextResponse.json({ data });
 }
 
 export async function POST(
@@ -204,9 +269,68 @@ export async function POST(
 
   const body = validated.data;
 
+  // create_bug still enters through this exact UI route. A valid short-lived
+  // MCP token upgrades its creation audit from an ordinary UI write to a
+  // session-attributed agent write. Unauthenticated/spoofed headers are
+  // ignored, so callers cannot impersonate an agent session.
+  const optionalMcpAuth = resolveOptionalMcpToken(request);
+  const isAttributedAgentBug =
+    body.type === "bug" &&
+    request.headers.get(MCP_CREATE_BUG_ACTION_HEADER) === "create_bug" &&
+    optionalMcpAuth?.projectId === projectId &&
+    optionalMcpAuth.agentType !== "chat";
+
+  let sourceTicketForAudit: { id: string; readableId: string | null } | null = null;
+  if (isAttributedAgentBug) {
+    const sourceTicketId = request.headers.get(
+      MCP_CREATE_BUG_SOURCE_TICKET_HEADER,
+    );
+    if (sourceTicketId) {
+      sourceTicketForAudit =
+        db
+          .select({ id: epics.id, readableId: epics.readableId })
+          .from(epics)
+          .where(
+            and(
+              eq(epics.id, sourceTicketId),
+              eq(epics.projectId, projectId),
+            ),
+          )
+          .get() ?? null;
+    }
+  }
+
   const foundProject = getProjectOr404(projectId);
   if (isErrorResponse(foundProject)) return foundProject;
   const { project } = foundProject;
+
+  const sourceFriction = body.frictionId
+    ? db
+        .select({ id: frictions.id, status: frictions.status })
+        .from(frictions)
+        .where(
+          and(
+            eq(frictions.id, body.frictionId),
+            eq(frictions.projectId, projectId),
+          ),
+        )
+        .get()
+    : null;
+
+  if (body.frictionId && !sourceFriction) {
+    return NextResponse.json({ error: "Friction not found" }, { status: 404 });
+  }
+  if (
+    sourceFriction &&
+    !OPEN_FRICTION_STATUSES.includes(
+      sourceFriction.status as (typeof OPEN_FRICTION_STATUSES)[number],
+    )
+  ) {
+    return NextResponse.json(
+      { error: "Only an open friction can be converted", code: "FRICTION_CLOSED" },
+      { status: 409 },
+    );
+  }
 
   const now = new Date().toISOString();
 
@@ -220,10 +344,15 @@ export async function POST(
     acceptanceCriteria: trimmedOrNull(story.acceptanceCriteria),
   }));
 
+  // Friction conversions always enter through the ordinary backlog feature
+  // path, even if a caller tries to smuggle another board status or type.
+  const targetStatus = body.frictionId ? "backlog" : body.status || "backlog";
+  const targetType = body.frictionId ? "feature" : body.type || "feature";
+
   const maxPos = db
     .select({ max: sql<number>`COALESCE(MAX(position), -1)` })
     .from(epics)
-    .where(and(eq(epics.projectId, projectId), eq(epics.status, body.status || "backlog")))
+    .where(and(eq(epics.projectId, projectId), eq(epics.status, targetStatus)))
     .get();
 
   const id = createId();
@@ -308,6 +437,11 @@ export async function POST(
 
   try {
     db.transaction((tx) => {
+      if (isAttributedAgentBug) {
+        const duplicate = findOpenDuplicateBug(projectId, body.title, tx);
+        if (duplicate) throw new DuplicateMcpBugError(duplicate);
+      }
+
       // Inside the transaction on purpose: this bumps `projects.ticket_counter`,
       // so run outside it the increment would survive a rolled-back insert and
       // burn a readable id on an epic that never existed — a permanent gap in
@@ -315,7 +449,7 @@ export async function POST(
       const readableId = generateReadableId(
         projectId,
         project.name,
-        (body.type as "feature" | "bug") || "feature"
+        targetType as "feature" | "bug"
       );
       tx.insert(epics)
         .values({
@@ -324,14 +458,14 @@ export async function POST(
           title: body.title,
           description: body.description || null,
           priority: body.priority ?? 0,
-          status: body.status || "backlog",
+          status: targetStatus,
           position: (maxPos?.max ?? -1) + 1,
           branchName: body.branchName || null,
           confidence: body.confidence ?? null,
           evidence: body.evidence || null,
           createdAt: now,
           updatedAt: now,
-          type: body.type || "feature",
+          type: targetType,
           linkedEpicId: body.linkedEpicId || null,
           images: body.images ? JSON.stringify(body.images) : null,
           readableId: readableId || null,
@@ -340,8 +474,68 @@ export async function POST(
       if (storiesToInsert.length > 0) {
         tx.insert(userStories).values(storiesToInsert).run();
       }
+      if (body.frictionId) {
+        const result = tx
+          .update(frictions)
+          .set({ status: "converted", epicId: id })
+          .where(
+            and(
+              eq(frictions.id, body.frictionId),
+              eq(frictions.projectId, projectId),
+              inArray(frictions.status, [...OPEN_FRICTION_STATUSES]),
+            ),
+          )
+          .run();
+        if (result.changes !== 1) {
+          throw new FrictionConversionConflict();
+        }
+      }
+      if (isAttributedAgentBug && optionalMcpAuth) {
+        const sourceTicketRef =
+          sourceTicketForAudit?.readableId ??
+          sourceTicketForAudit?.id ??
+          "project-scoped session";
+        tx.insert(ticketActivityLog)
+          .values({
+            id: createId(),
+            projectId,
+            epicId: id,
+            fromStatus: body.status || "backlog",
+            toStatus: body.status || "backlog",
+            actor: "agent",
+            reason: buildMcpCreateBugActivityReason({
+              sourceTicketRef,
+              sourceStoryId: optionalMcpAuth.userStoryId,
+              sessionId: optionalMcpAuth.sessionId,
+            }),
+            sessionId: optionalMcpAuth.sessionId,
+            createdAt: now,
+          })
+          .run();
+      }
     });
   } catch (error) {
+    if (error instanceof FrictionConversionConflict) {
+      return NextResponse.json(
+        { error: "Friction is no longer open", code: "FRICTION_CLOSED" },
+        { status: 409 },
+      );
+    }
+    if (error instanceof DuplicateMcpBugError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: "DUPLICATE_BUG",
+          existing_bug: {
+            id: error.existingBug.id,
+            readable_id: error.existingBug.readableId,
+            title: error.existingBug.title,
+            status: error.existingBug.status,
+          },
+        },
+        { status: 409 }
+      );
+    }
     console.error("[epics/POST] Failed to create epic transaction:", error);
     return NextResponse.json({ error: "Failed to create epic" }, { status: 500 });
   }

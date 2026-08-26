@@ -3,6 +3,10 @@
  *
  * CLI: pi --mode json [--tools <allowlist>] [--session <ID>] [--model <M>] -p <PROMPT>
  *
+ * Oversized prompts: pi's positional messages accept a `@path` form that
+ * inlines a file, so a prompt past the argv cap is written to a temp file and
+ * passed as `-p @<path> <framing message>` instead — see prompt-transport.ts.
+ *
  * Mode mapping: pi has no permission system — capability is expressed through
  * the tool allowlist, so read-only modes drop the mutating built-ins.
  * - plan    → --tools read,grep,find,ls
@@ -25,13 +29,33 @@ import { BaseCliProvider } from "./base-provider";
 import type {
   BaseProviderChunkCallbacks,
   ProviderExitInfo,
+  ProviderSpawnContext,
 } from "./base-provider";
+import {
+  promptExceedsArgv,
+  removePromptFile,
+  writePromptFile,
+} from "./prompt-transport";
 import type { StreamLogContext } from "@/lib/claude/logger";
 import type {
   ProviderResult,
   ProviderSpawnOptions,
   ProviderType,
 } from "./types";
+
+/**
+ * Message appended after a `@path` prompt file. `@path` arrives as a
+ * `<file name="…">` block inside the user turn, which reads as reference
+ * material; this restores the "these are your instructions" framing the
+ * prompt has when it rides argv.
+ */
+export const PI_PROMPT_FILE_FRAMING =
+  "The file above is the prompt for this session — follow it exactly as if its contents had been sent as this message.";
+
+/** Per-spawn state: the temp prompt file, when the prompt outgrew argv. */
+interface PiSpawnContext extends ProviderSpawnContext {
+  promptFilePath?: string;
+}
 
 /** Built-in pi tools that cannot modify the working tree. */
 export const PI_READONLY_TOOLS = ["read", "grep", "find", "ls"];
@@ -187,8 +211,28 @@ export class PiProvider extends BaseCliProvider {
     return "Pi is not authenticated. Run `pi` and use /login, or set the provider API key.";
   }
 
-  buildArgs(options: ProviderSpawnOptions): string[] {
+  /**
+   * A prompt past the argv cap goes to a temp file; anything smaller keeps
+   * riding argv, which is the shape pi and omp are verified against.
+   */
+  protected prepareSpawn(
+    options: ProviderSpawnOptions,
+  ): ProviderSpawnContext | undefined {
+    if (!promptExceedsArgv(options.prompt)) return undefined;
+    return { promptFilePath: writePromptFile(this.type, options.prompt) };
+  }
+
+  protected cleanupSpawnContext(spawnContext?: ProviderSpawnContext): void {
+    removePromptFile((spawnContext as PiSpawnContext | undefined)?.promptFilePath);
+  }
+
+  buildArgs(
+    options: ProviderSpawnOptions,
+    spawnContext?: ProviderSpawnContext,
+  ): string[] {
     const { prompt, mode, model, cliSessionId, resumeSession } = options;
+    const promptFilePath = (spawnContext as PiSpawnContext | undefined)
+      ?.promptFilePath;
 
     const args: string[] = ["--mode", "json"];
 
@@ -210,7 +254,11 @@ export class PiProvider extends BaseCliProvider {
       args.push("--model", model);
     }
 
-    args.push("-p", prompt);
+    if (promptFilePath) {
+      args.push("-p", `@${promptFilePath}`, PI_PROMPT_FILE_FRAMING);
+    } else {
+      args.push("-p", prompt);
+    }
 
     return args;
   }

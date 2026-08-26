@@ -94,12 +94,14 @@ const AGENT_TYPE_LABELS: Record<string, string> = {
   review_compliance: "Compliance",
   review_feature: "Feature Review",
   review_second_opinion: "Second Opinion",
+  grading: "Acceptance Grading",
   merge: "Merge",
   tech_check: "Tech Check",
   release_notes: "Release Notes",
   memory_distill: "Memory Distill",
   dreaming: "Dreaming",
   forensic: "Forensic",
+  failure_digest: "Failure Digest",
 };
 
 const STATUS_CONFIG: Record<
