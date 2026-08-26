@@ -33,8 +33,29 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-const baseUrl = (process.env.ARIJ_BASE_URL ?? "").replace(/\/+$/, "");
-const token = process.env.ARIJ_MCP_TOKEN ?? "";
+/**
+ * An UNRESOLVED `${VAR}` reference from a host's MCP config, as a literal
+ * string. Hosts that interpolate their config files (omp's mcp.json, codex's
+ * config.toml, a hand-run claude's project .mcp.json) leave a placeholder
+ * whose variable is unset as-is rather than blanking it — measured on omp
+ * 18.0.5, whose entry carries `"ARIJ_MCP_TOKEN": "${ARIJ_MCP_TOKEN}"`.
+ *
+ * That literal is non-empty, so treating it as a value is what made the shim
+ * start, mount the whole toolset, and answer every call with
+ * "UNAUTHORIZED: Invalid or expired MCP token" — the agent sees tools it can
+ * never use. An unexpanded placeholder means "no value", exactly like an
+ * unset variable, so the shim must refuse to start instead.
+ */
+const UNEXPANDED_PLACEHOLDER = /\$\{[^}]*\}/;
+
+/** The variable's value, or "" when it is absent or an unexpanded placeholder. */
+function readEnv(name) {
+  const raw = process.env[name] ?? "";
+  return UNEXPANDED_PLACEHOLDER.test(raw) ? "" : raw;
+}
+
+const baseUrl = readEnv("ARIJ_BASE_URL").replace(/\/+$/, "");
+const token = readEnv("ARIJ_MCP_TOKEN");
 
 if (!baseUrl || !token) {
   process.stderr.write(
@@ -43,7 +64,7 @@ if (!baseUrl || !token) {
   process.exit(1);
 }
 
-const TOOLSET = process.env.ARIJ_MCP_TOOLSET === "chat" ? "chat" : "agent";
+const TOOLSET = readEnv("ARIJ_MCP_TOOLSET") === "chat" ? "chat" : "agent";
 
 // get_ticket always resolves the epic this session was launched for.
 const TICKET_ID_PROPERTY = {

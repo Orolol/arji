@@ -153,6 +153,50 @@ audit's checklist:
    that kills the spawn before the session starts. So no flag work at all:
    review sessions keep the channel, and MCP names must never be appended.
 
+### Re-probed on omp 18.0.5 — 2026-08-26
+
+The 17.2.1 findings above all still hold (env-carried token, orthogonal
+`--tools`, single-underscore names), verified end to end against a stub HTTP
+backend: a code-mode spawn and a read-only spawn (`--tools read,grep,glob` plus
+the xdev-off `--config` overlay) each reached `POST /api/mcp/get-ticket` with
+the exact bearer Arij put in the child's environment.
+
+What the re-probe DID overturn is the other half of the contract — what happens
+when a spawn carries NO channel. `install.sh` and `OhMyPiProvider` both claimed
+the entry's `${ARIJ_MCP_TOKEN}` "expands empty, and the shim exits immediately".
+It does not. omp expands placeholders at discovery time and leaves an
+**unresolved one as a literal string** (`mcp-config.md`: "unresolved
+placeholders remain literal strings"; the pre-connect pass then only substitutes
+values that are a bare variable NAME). Measured, with the variable unset:
+
+    POST /api/mcp/get-ticket   authorization: Bearer ${ARIJ_MCP_TOKEN}
+
+Non-empty, so the shim started, omp mounted all nine agent tools, and every call
+came back `UNAUTHORIZED: Invalid or expired MCP token` — the reported symptom,
+on every omp spawn that gets no channel: MCP-exempt agent types, a
+`mcp_tools_enabled: false` install, and each `getProvider(…).spawn()` site with
+no `agent_sessions` row (title generation, spec generation, import analysis).
+The agent sees the board tools, believes it filed its findings, and nothing
+lands.
+
+Two guards close it, either of which is sufficient alone; both are cheap and
+they fail in different directions:
+
+- `bin/arij-mcp.mjs` treats a value still containing `${…}` as no value at all
+  and exits 1, exactly like an unset variable. This is the guard that also
+  covers CLIs Arij does not spawn — a hand-run `omp`, `codex`, or `claude`
+  reading the same `${ARIJ_MCP_TOKEN}` entry — and it restores the behavior
+  `install.sh` has always advertised.
+- `OhMyPiProvider.buildEnv()` sets `ARIJ_MCP_TOKEN` to an explicitly EMPTY
+  string on channel-less spawns. An empty (but SET) variable does expand to
+  `""` — measured: the shim exits, omp reports the server as failed, and the
+  tools never mount, with no cached-tool-definition leak from earlier
+  successful runs. It also blanks any stale `ARIJ_MCP_TOKEN` inherited from
+  the Arij server's own environment.
+
+`agy` needs no equivalent: `agy mcp add` writes an entry with no `env` block at
+all, so its shim simply inherits an environment where the variables are absent.
+
 The `mcp.json` entry also passes `ARIJ_MCP_TOOLSET` through
 (`${ARIJ_MCP_TOOLSET:-agent}`), so a CLI chat turn on omp — which mints a
 chat-scoped token — selects the shim's board toolset instead of the agent
