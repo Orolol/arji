@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { loadPromptComments } from "@/lib/claude/prompt-comments";
 import {
   agentSessions,
   epics,
@@ -555,22 +556,9 @@ async function dispatchPipelineStage(
     .orderBy(userStories.position)
     .all();
 
-  const comments = db
-    .select()
-    .from(ticketComments)
-    .where(
-      scope === "story" && userStoryId
-        ? eq(ticketComments.userStoryId, userStoryId)
-        : eq(ticketComments.epicId, epicId)
-    )
-    .orderBy(ticketComments.createdAt)
-    .all();
-
-  const promptComments: PromptComment[] = comments.map((c) => ({
-    author: c.author as "user" | "agent",
-    content: c.content,
-    createdAt: c.createdAt ?? "",
-  }));
+  const promptComments: PromptComment[] = loadPromptComments(
+    scope === "story" && userStoryId ? { userStoryId } : { epicId }
+  );
 
   const { worktreePath, branchName } = await createWorktree(
     project.gitRepoPath,
@@ -678,7 +666,7 @@ async function dispatchPipelineStage(
   const mentionEnrichment = enrichPromptWithDocumentMentions({
     projectId,
     prompt,
-    textSources: userAuthoredTexts(comments),
+    textSources: userAuthoredTexts(promptComments),
   });
   prompt = mentionEnrichment.prompt;
   createUnresolvedMentionsNotification({

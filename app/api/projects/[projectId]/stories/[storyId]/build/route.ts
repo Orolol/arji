@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { loadPromptComments } from "@/lib/claude/prompt-comments";
 import {
   epics,
   ticketComments,
@@ -120,12 +121,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // Load context
-  const comments = db
-    .select()
-    .from(ticketComments)
-    .where(eq(ticketComments.userStoryId, storyId))
-    .orderBy(ticketComments.createdAt)
-    .all();
+  const comments = loadPromptComments({ userStoryId: storyId });
 
   const ticketBuildSystemPrompt = await resolveAgentPrompt(
     "ticket_build",
@@ -146,11 +142,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     [],
     epic,
     story,
-    comments.map((c) => ({
-      author: c.author as "user" | "agent",
-      content: c.content,
-      createdAt: c.createdAt ?? "",
-    })),
+    comments,
+
     ticketBuildSystemPrompt,
     { visualProofEnabled: isVisualProofEnabled() }
   );

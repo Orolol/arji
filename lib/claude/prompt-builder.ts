@@ -1046,14 +1046,7 @@ export function buildBuildPrompt(
   parts.push(userStoriesSection(userStories));
 
   // Comment history
-  if (comments && comments.length > 0) {
-    parts.push(`## Comment History\n`);
-    const formatted = comments.map((c) => {
-      const prefix = c.author === "user" ? "**User:**" : "**Agent:**";
-      return `${prefix}\n${c.content.trim()}`;
-    });
-    parts.push(formatted.join("\n\n") + "\n");
-  }
+  parts.push(commentHistorySection(comments));
 
   parts.push(`## Instructions
 
@@ -1171,6 +1164,62 @@ export interface PromptComment {
   author: "user" | "agent";
   content: string;
   createdAt: string;
+  /**
+   * `agent_type` of the session that posted the comment, when it came from an
+   * agent — the only thing that tells a review document apart from a build
+   * report. Loaded by lib/tickets/prompt-comments.ts; absent means "not a
+   * review", which is the safe default (the comment is kept).
+   */
+  agentType?: string | null;
+}
+
+/** Review agents are the `review_*` slice of AGENT_TYPES. */
+function isReviewComment(comment: PromptComment): boolean {
+  return (
+    typeof comment.agentType === "string" &&
+    comment.agentType.startsWith("review_")
+  );
+}
+
+/**
+ * Renders the comment history, keeping only the most recent review pass.
+ *
+ * A review agent posts its entire review document as a comment — the five
+ * passes on the epic that first hit MAX_ARG_STRLEN were 11 to 15 KB each,
+ * 52 % of a 137 KB prompt on their own. Each pass restates what is still
+ * open (findings are explicitly carried over as "unaddressed"), so the older
+ * documents are dead weight in a build or re-review prompt. Everything else —
+ * user comments, build reports, questions — is kept verbatim, and the elision
+ * is stated in place rather than performed silently.
+ */
+export function commentHistorySection(comments?: PromptComment[]): string {
+  if (!comments || comments.length === 0) return "";
+
+  const lastReviewIndex = comments.reduce(
+    (last, comment, index) => (isReviewComment(comment) ? index : last),
+    -1,
+  );
+  const elided = comments.filter(
+    (comment, index) => isReviewComment(comment) && index !== lastReviewIndex,
+  ).length;
+
+  const rendered: string[] = [];
+  let noticeEmitted = false;
+  comments.forEach((comment, index) => {
+    if (isReviewComment(comment) && index !== lastReviewIndex) {
+      if (!noticeEmitted) {
+        noticeEmitted = true;
+        rendered.push(
+          `_[${elided} earlier review pass${elided > 1 ? "es" : ""} omitted — superseded by the most recent review below.]_`,
+        );
+      }
+      return;
+    }
+    const prefix = comment.author === "user" ? "**User:**" : "**Agent:**";
+    rendered.push(`${prefix}\n${comment.content.trim()}`);
+  });
+
+  return `## Comment History\n\n${rendered.join("\n\n")}\n`;
 }
 
 /**
@@ -1217,14 +1266,7 @@ export function buildTicketBuildPrompt(
   }
 
   // Comment history
-  if (comments.length > 0) {
-    parts.push(`## Comment History\n`);
-    const formatted = comments.map((c) => {
-      const prefix = c.author === "user" ? "**User:**" : "**Agent:**";
-      return `${prefix}\n${c.content.trim()}`;
-    });
-    parts.push(formatted.join("\n\n") + "\n");
-  }
+  parts.push(commentHistorySection(comments));
 
   parts.push(`## Instructions
 
@@ -1658,14 +1700,7 @@ export function buildEpicReviewPrompt(
   }
 
   // Comment history
-  if (comments && comments.length > 0) {
-    parts.push(`## Comment History\n`);
-    const formatted = comments.map((c) => {
-      const prefix = c.author === "user" ? "**User:**" : "**Agent:**";
-      return `${prefix}\n${c.content.trim()}`;
-    });
-    parts.push(formatted.join("\n\n") + "\n");
-  }
+  parts.push(commentHistorySection(comments));
 
   // Review checklist — bug tickets get a dedicated checklist for feature_review
   if (isBug && reviewType === "feature_review") {

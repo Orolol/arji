@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { loadPromptComments } from "@/lib/claude/prompt-comments";
 import {
   epics,
   userStories,
@@ -198,18 +199,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     .all();
 
   // Load epic comments
-  const comments = db
-    .select()
-    .from(ticketComments)
-    .where(eq(ticketComments.epicId, epicId))
-    .orderBy(ticketComments.createdAt)
-    .all();
-
-  const promptComments = comments.map((c) => ({
-    author: c.author as "user" | "agent",
-    content: c.content,
-    createdAt: c.createdAt ?? "",
-  }));
+  const promptComments = loadPromptComments({ epicId });
 
   // Load open review comments (code review feedback). A CI autofix is a
   // narrowly-scoped session — its prompt ends with "fix only the code or
