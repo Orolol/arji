@@ -15,12 +15,14 @@
  * neither side can drift into its own idea of "ready" — which is exactly
  * what a second implementation would introduce.
  *
- * The two callers are not identical sets, and both differences are
+ * The two callers are not identical sets, and every difference is
  * deliberate: the board also passes merge failure timestamps
  * (`lastMergeConflictAt` / `lastConflictMarkersAt`; auto-mode carries
  * that fact in its own registry backoff instead), and auto-mode additionally
- * applies the runtime exclusions below. What they share is the definition of
- * ready.
+ * applies the runtime exclusions below plus `hasStoryStillToBuild` — an epic
+ * with an unbuilt story is refused to the UNATTENDED path only, because a
+ * human may still land it by hand (the approval route reports the unfinished
+ * stories as `skippedStories`). What they share is the definition of ready.
  *
  * Client-safe by convention (lib/kanban/*): pure functions, no database, no
  * server imports.
@@ -28,8 +30,10 @@
  * What is NOT here, on purpose: the supervisor's RUNTIME exclusions — a busy
  * ticket, a live pipeline/night-run owner, a parked ticket, a merge backoff.
  * Those live in in-memory registries, describe whether the supervisor may act
- * *right now*, and say nothing about whether the work is ready. Auto-mode
- * applies them alongside this predicate (see `selectMergeCandidates`).
+ * *right now*, and say nothing about whether the work is ready. Nor is
+ * `hasStoryStillToBuild`, which gates the unattended merge but not the human
+ * one. Auto-mode applies both alongside this predicate (see
+ * `selectMergeCandidates`).
  */
 
 /**

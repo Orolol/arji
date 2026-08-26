@@ -26,6 +26,7 @@ vi.mock("@/hooks/useKanban", () => ({
     loading: false,
     refresh: mockKanbanState.refresh,
     moveEpic: mockKanbanState.moveEpic,
+    dependencies: [],
   }),
 }));
 

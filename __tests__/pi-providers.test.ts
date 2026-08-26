@@ -42,7 +42,7 @@ import {
 } from "@/lib/providers/pi";
 import { OhMyPiProvider } from "@/lib/providers/oh-my-pi";
 import { isResumableProvider } from "@/lib/agent-sessions/validate-resume";
-import type { ProviderSpawnOptions } from "@/lib/providers/types";
+import type { McpSpawnConfig, ProviderSpawnOptions } from "@/lib/providers/types";
 import type { BaseCliProvider } from "@/lib/providers/base-provider";
 
 type Listener = (...args: unknown[]) => void;
@@ -124,13 +124,16 @@ afterEach(() => {
 // Provider factory
 // ---------------------------------------------------------------------------
 
-describe("Provider factory — Pi providers", () => {
-  it("returns PiProvider for 'pi'", () => {
-    const provider = getProvider("pi");
-    expect(provider.type).toBe("pi");
-    expect(provider).toBeInstanceOf(PiProvider);
-  });
+/**
+ * Concrete stand-in: PiProvider went abstract when `pi` lost provider status
+ * in the 2026-08 MCP-only cleanup (no MCP support upstream). The base class
+ * behaviour is still exercised because omp inherits it byte-for-byte.
+ */
+class TestPiProvider extends PiProvider {
+  readonly type = "oh-my-pi" as const;
+}
 
+describe("Provider factory — Pi providers", () => {
   it("returns OhMyPiProvider for 'oh-my-pi'", () => {
     const provider = getProvider("oh-my-pi");
     expect(provider.type).toBe("oh-my-pi");
@@ -143,10 +146,9 @@ describe("Provider factory — Pi providers", () => {
 // ---------------------------------------------------------------------------
 
 describe("PiProvider", () => {
-  const provider: BaseCliProvider = new PiProvider();
+  const provider: BaseCliProvider = new TestPiProvider();
 
-  it("has type 'pi' and binary name 'pi'", () => {
-    expect(provider.type).toBe("pi");
+  it("keeps the pi binary name on the family base", () => {
     expect(provider.binaryName).toBe("pi");
   });
 
@@ -180,6 +182,21 @@ describe("PiProvider", () => {
     it("needs no config overlay — pi's allowlist genuinely strips write", () => {
       const args = provider.buildArgs(baseOptions({ mode: "plan" }));
       expect(args).not.toContain("--config");
+    });
+
+    it("ignores an MCP config — pi has no MCP support (omp's rides env, not args)", () => {
+      const mcp: McpSpawnConfig = {
+        serverName: "arij",
+        command: "/usr/bin/node",
+        args: ["/app/bin/arij-mcp.mjs"],
+        env: { ARIJ_BASE_URL: "http://x", ARIJ_MCP_TOKEN: "t" },
+        allowedToolNames: ["mcp__arij_get_ticket"],
+      };
+      const args = provider.buildArgs(baseOptions({ mode: "plan", mcp }));
+      expect(args[args.indexOf("--tools") + 1]).toBe("read,grep,find,ls");
+      expect(provider.buildEnv(baseOptions({ mcp }))).toEqual({
+        ...process.env,
+      });
     });
 
     it("includes --session when resuming", () => {
@@ -448,6 +465,91 @@ describe("OhMyPiProvider", () => {
     expect(result.error).toContain("`omp`");
     expect(result.error).not.toContain("pi-coding-agent");
   });
+
+  describe("Arij MCP tool channel", () => {
+    const mcp: McpSpawnConfig = {
+      serverName: "arij",
+      command: "/usr/bin/node",
+      args: ["/app/bin/arij-mcp.mjs"],
+      env: {
+        ARIJ_BASE_URL: "http://localhost:3000",
+        ARIJ_MCP_TOKEN: "omp-test-token",
+      },
+      // omp spelling: single underscore between server and tool
+      allowedToolNames: ["mcp__arij_get_ticket", "mcp__arij_post_comment"],
+    };
+
+    it("injects the channel's env vars into the child environment", () => {
+      const env = provider.buildEnv(baseOptions({ mcp }));
+      expect(env.ARIJ_BASE_URL).toBe("http://localhost:3000");
+      expect(env.ARIJ_MCP_TOKEN).toBe("omp-test-token");
+      // still inherits the parent env rather than replacing it
+      expect(env.PATH).toBe(process.env.PATH);
+    });
+
+    it("neutralises omp's global arij entry when the spawn has no channel", () => {
+      // omp's ~/.omp/agent/mcp.json entry interpolates ${ARIJ_MCP_TOKEN} at
+      // discovery time, and an UNSET variable leaves the placeholder as a
+      // literal string (measured on omp 18.0.5). That literal is non-empty, so
+      // the shim starts, the CLI mounts the whole Arij toolset, and every call
+      // comes back "UNAUTHORIZED: Invalid or expired MCP token" — phantom tools
+      // for exempt agent types, `mcp_tools_enabled: false`, and every spawn with
+      // no agent_sessions row. An explicitly EMPTY value expands to "" instead,
+      // the shim exits, and the tools never mount (also measured).
+      const env = provider.buildEnv(baseOptions());
+      expect(env.ARIJ_MCP_TOKEN).toBe("");
+    });
+
+    it("leaves the rest of the parent environment untouched without a channel", () => {
+      const env = provider.buildEnv(baseOptions());
+      expect(env).toEqual({ ...process.env, ARIJ_MCP_TOKEN: "" });
+    });
+
+    it("passes the chat toolset selector through when the channel sets it", () => {
+      const chatMcp = {
+        ...mcp,
+        env: { ...mcp.env, ARIJ_MCP_TOOLSET: "chat" as const },
+      };
+      const env = provider.buildEnv(baseOptions({ mcp: chatMcp }));
+      expect(env.ARIJ_MCP_TOOLSET).toBe("chat");
+    });
+
+    it("strips an inherited toolset selector when the channel sets none", () => {
+      // The shim and the mcp.json entry both select the toolset by key
+      // PRESENCE, so a stray ARIJ_MCP_TOOLSET in the server's own env would
+      // silently flip agent sessions to the board-wide chat toolset.
+      vi.stubEnv("ARIJ_MCP_TOOLSET", "chat");
+      try {
+        const env = provider.buildEnv(baseOptions({ mcp }));
+        expect("ARIJ_MCP_TOOLSET" in env).toBe(false);
+        // …but only channel-carrying spawns are policed: a spawn without a
+        // channel keeps the parent env untouched, stray keys included.
+        const bare = provider.buildEnv(baseOptions());
+        expect(bare.ARIJ_MCP_TOOLSET).toBe("chat");
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it("keeps MCP names OUT of --tools — unknown names are a fatal omp argv error", () => {
+      // Measured on omp 17.2.1: --tools validates against built-in names
+      // only, and `Unknown tools in --tools: mcp__arij_…` kills the spawn.
+      // MCP tools stay mounted regardless of the allowlist, so non-code
+      // sessions keep the channel with the plain read-only list.
+      const args = provider.buildArgs(baseOptions({ mode: "plan", mcp }));
+      expect(args[args.indexOf("--tools") + 1]).toBe("read,grep,glob");
+    });
+
+    it("passes no --tools in code mode — omp's default set already has MCP", () => {
+      const args = provider.buildArgs(baseOptions({ mode: "code", mcp }));
+      expect(args).not.toContain("--tools");
+    });
+
+    it("keeps --tools to the restricted built-ins without a channel", () => {
+      const args = provider.buildArgs(baseOptions({ mode: "analyze" }));
+      expect(args[args.indexOf("--tools") + 1]).toBe("read,grep,glob,write");
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -490,8 +592,9 @@ describe("pi stream helpers", () => {
 // ---------------------------------------------------------------------------
 
 describe("Resume classification — Pi providers", () => {
-  it("treats pi (--session) and oh-my-pi (--resume) as resumable", () => {
-    expect(isResumableProvider("pi")).toBe(true);
+  it("treats oh-my-pi (--resume) as resumable, and dropped pi as not", () => {
     expect(isResumableProvider("oh-my-pi")).toBe(true);
+    // Legacy rows may still say "pi"; the provider is gone, so no resume.
+    expect(isResumableProvider("pi")).toBe(false);
   });
 });

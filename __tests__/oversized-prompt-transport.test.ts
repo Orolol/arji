@@ -31,9 +31,31 @@ import {
 import { PiProvider, PI_PROMPT_FILE_FRAMING } from "@/lib/providers/pi";
 import { OhMyPiProvider } from "@/lib/providers/oh-my-pi";
 import { CodexProvider } from "@/lib/providers/codex";
-import { GeminiCliProvider } from "@/lib/providers/gemini-cli";
+import { BaseCliProvider } from "@/lib/providers/base-provider";
 import { buildClaudeArgs } from "@/lib/claude/spawn";
 import type { ProviderSpawnOptions } from "@/lib/providers/types";
+
+/** Concrete stand-in for the abstract pi-family base (see pi-providers.test.ts). */
+class TestPiProvider extends PiProvider {
+  readonly type = "oh-my-pi" as const;
+}
+
+/**
+ * Minimal provider with NO out-of-band prompt transport, to exercise the
+ * base-class E2BIG guard now that every registered provider has one.
+ */
+class ArgvOnlyProvider extends BaseCliProvider {
+  readonly type = "oh-my-pi" as const;
+  get binaryName(): string {
+    return "argv-only";
+  }
+  buildArgs(options: ProviderSpawnOptions): string[] {
+    return ["-p", options.prompt];
+  }
+  extractResult(stdout: string): string {
+    return stdout;
+  }
+}
 
 type Listener = (...args: unknown[]) => void;
 
@@ -110,7 +132,7 @@ describe("prompt-transport", () => {
 
 describe("Pi family — oversized prompts go through a @file argument", () => {
   for (const [label, provider] of [
-    ["pi", new PiProvider()],
+    ["pi-family base", new TestPiProvider()],
     ["omp", new OhMyPiProvider()],
   ] as const) {
     it(`${label}: passes @<file> plus the framing message, and no argument is oversized`, async () => {
@@ -133,7 +155,7 @@ describe("Pi family — oversized prompts go through a @file argument", () => {
   }
 
   it("leaves a normal prompt on argv", () => {
-    new PiProvider().spawn(options(SMALL_PROMPT));
+    new TestPiProvider().spawn(options(SMALL_PROMPT));
     const args = mockSpawn.mock.calls[0][1] as string[];
     expect(args[args.indexOf("-p") + 1]).toBe(SMALL_PROMPT);
   });
@@ -190,7 +212,7 @@ describe("Claude Code — oversized prompts are read from stdin", () => {
 
 describe("Providers without an out-of-band channel", () => {
   it("fails with a readable message instead of a bare spawn E2BIG", async () => {
-    const session = new GeminiCliProvider().spawn(options(HUGE_PROMPT));
+    const session = new ArgvOnlyProvider().spawn(options(HUGE_PROMPT));
     const result = await session.promise;
 
     expect(mockSpawn).not.toHaveBeenCalled();

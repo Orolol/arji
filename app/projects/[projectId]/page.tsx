@@ -23,7 +23,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Hammer, Layers, Loader2, X, CheckCircle2, XCircle, Plus, Users, Search, GitMerge, Bot } from "lucide-react";
+import { Hammer, Layers, Loader2, X, CheckCircle2, XCircle, Plus, Users, Search, GitMerge, Bot, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BugCreateDialog } from "@/components/kanban/BugCreateDialog";
 import { EpicCreateDialog } from "@/components/kanban/EpicCreateDialog";
@@ -31,6 +31,7 @@ import { NightRunDialog } from "@/components/night/NightRunDialog";
 import { NightRunSummaryDialog } from "@/components/night/NightRunSummaryDialog";
 import { AutoModeDialog } from "@/components/auto-mode/AutoModeDialog";
 import { AutoModeToggle } from "@/components/auto-mode/AutoModeToggle";
+import { RefinementButton } from "@/components/kanban/RefinementButton";
 import { QuickCapture } from "@/components/kanban/QuickCapture";
 import type { KanbanEpicAgentActivity } from "@/lib/types/kanban";
 import { getActiveDetailTicketId, selectOnlyTicket } from "@/lib/kanban/selection";
@@ -38,7 +39,7 @@ import { useProjectEvents } from "@/hooks/useProjectEvents";
 
 interface Toast {
   id: string;
-  type: "success" | "error";
+  type: "success" | "error" | "warning";
   message: string;
   href?: string;
   actionLabel?: string;
@@ -183,7 +184,7 @@ export default function KanbanPage() {
   }, []);
 
   const addToast = useCallback((
-    type: "success" | "error",
+    type: "success" | "error" | "warning",
     message: string,
     action?: { href: string; label?: string }
   ) => {
@@ -202,6 +203,16 @@ export default function KanbanPage() {
       setToasts((t) => t.filter((toast) => toast.id !== id));
     }, 5000);
   }, []);
+
+  /**
+   * A refinement pass reshapes columns, priorities and dependency edges
+   * without emitting one event per write, so the board is reloaded once when
+   * the pass ends rather than trusting the incremental SSE stream.
+   */
+  const handleRefinementFinished = useCallback(() => {
+    setRefreshTrigger((t) => t + 1);
+    addToast("success", "Board refinement finished — see the notification for the summary");
+  }, [addToast]);
 
   const handleRetryBuild = useCallback(async (epicId: string) => {
     try {
@@ -575,6 +586,19 @@ export default function KanbanPage() {
                 onOpen={() => setAutoModeDialogOpen(true)}
                 refreshTrigger={refreshTrigger}
               />
+              <RefinementButton
+                projectId={projectId}
+                refreshTrigger={refreshTrigger}
+                onError={(message) => addToast("error", message)}
+                onNotice={(message) => addToast("success", message)}
+                onStarted={() =>
+                  addToast(
+                    "success",
+                    "Agent Refinement started — re-passing Backlog and To do"
+                  )
+                }
+                onFinished={handleRefinementFinished}
+              />
               <span className="ml-auto truncate text-[12.5px] text-muted-foreground">
                 {visibleCount} ticket{visibleCount === 1 ? "" : "s"} visible
                 {panelOpen && " · Released returns when the panel closes"}
@@ -784,6 +808,7 @@ export default function KanbanPage() {
                 activeAgentActivities={activeAgentActivities}
                 onLinkedAgentHoverChange={setHighlightedActivityId}
                 onMoveError={(error) => addToast("error", error)}
+                onMoveWarning={(message) => addToast("warning", message)}
                 failedSessions={failedSessions}
                 onRetryBuild={handleRetryBuild}
                 busyEpicIds={busyEpicIds}
@@ -813,11 +838,15 @@ export default function KanbanPage() {
               "flex items-center gap-2 rounded-[11px] border px-[14px] py-[10px] text-[13px] shadow-[0_18px_40px_rgba(58,48,44,.14)]",
               toast.type === "success"
                 ? "border-agent-border bg-agent-bg text-agent"
-                : "border-destructive/40 bg-card text-destructive"
+                : toast.type === "warning"
+                  ? "border-amber-500/40 bg-card text-amber-600 dark:text-amber-400"
+                  : "border-destructive/40 bg-card text-destructive"
             )}
           >
             {toast.type === "success" ? (
               <CheckCircle2 className="h-4 w-4" />
+            ) : toast.type === "warning" ? (
+              <TriangleAlert className="h-4 w-4" />
             ) : (
               <XCircle className="h-4 w-4" />
             )}

@@ -774,7 +774,7 @@ describe("POST /api/projects/[projectId]/chat/stream — OpenAI-compatible fast 
       conversation: {
         id: "conv1",
         type: "brainstorm",
-        provider: "gemini-cli",
+        provider: "oh-my-pi",
         label: "Brainstorm",
         status: "active",
         namedAgentId: null,
@@ -782,7 +782,7 @@ describe("POST /api/projects/[projectId]/chat/stream — OpenAI-compatible fast 
     });
     mockGetProvider.mockReturnValue({
       spawn: vi.fn(() => ({
-        promise: Promise.resolve({ success: true, result: "Codex response" }),
+        promise: Promise.resolve({ success: true, result: "CLI response" }),
         kill: vi.fn(),
       })),
     });
@@ -795,7 +795,7 @@ describe("POST /api/projects/[projectId]/chat/stream — OpenAI-compatible fast 
 
     expect(response.status).toBe(200);
     await readSseEvents(response);
-    expect(mockGetProvider).toHaveBeenCalledWith("gemini-cli");
+    expect(mockGetProvider).toHaveBeenCalledWith("oh-my-pi");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -839,22 +839,22 @@ describe("POST /api/projects/[projectId]/chat/stream — OpenAI-compatible fast 
 
   it("keeps the resolved model when the conversation provider matches the agent's", async () => {
     mockResolveAgentByNamedId.mockReturnValue({
-      provider: "gemini-cli",
-      model: "gemini-2.0-flash",
+      provider: "oh-my-pi",
+      model: "pi-large",
       namedAgentId: null,
     });
     seedFastModeConversation({
       conversation: {
         id: "conv1",
         type: "brainstorm",
-        provider: "gemini-cli",
+        provider: "oh-my-pi",
         label: "Brainstorm",
         status: "active",
         namedAgentId: null,
       },
     });
     const spawn = vi.fn(() => ({
-      promise: Promise.resolve({ success: true, result: "Gemini response" }),
+      promise: Promise.resolve({ success: true, result: "Omp response" }),
       kill: vi.fn(),
     }));
     mockGetProvider.mockReturnValue({ spawn });
@@ -867,7 +867,7 @@ describe("POST /api/projects/[projectId]/chat/stream — OpenAI-compatible fast 
     await readSseEvents(response);
 
     expect(spawn).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "gemini-2.0-flash" }),
+      expect.objectContaining({ model: "pi-large" }),
     );
   });
 });

@@ -65,6 +65,9 @@ export const DISPATCH_ROLE_AGENT_TYPES: Record<DispatchRole, AgentType[]> = {
     "memory_distill",
     "dreaming",
     "forensic",
+    // The board refinement re-pass: a project-level housekeeping run like the
+    // others here, not a build, review or QA dispatch.
+    "refinement",
   ],
 };
 

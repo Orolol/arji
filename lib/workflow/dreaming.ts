@@ -83,6 +83,9 @@ import {
   replaceProjectMemoryWithSnapshot,
 } from "@/lib/documents/memory";
 import { createMemoryDreamedNotification } from "@/lib/notifications/create";
+import { recordMemoryWriteProvenance } from "@/lib/documents/memory-provenance";
+import { emitSessionStarted } from "@/lib/events/emit";
+import { eventBus } from "@/lib/events/bus";
 // Client-safe constants module (no db import) — no cycle back into the engine.
 import { NIGHT_STOPPED_ABORT_REASON } from "@/lib/night/constants";
 import {
@@ -1023,6 +1026,11 @@ export async function dispatchDreamingSession(
     createdAt: now,
   });
 
+  try {
+    emitSessionStarted(input.projectId, "", sessionId, DREAMING_AGENT_TYPE);
+  } catch {
+    // Non-critical event emission
+  }
   agentScheduler.submit(input.projectId, sessionId, async () => {
     markSessionRunning(sessionId);
 
@@ -1068,6 +1076,16 @@ export async function dispatchDreamingSession(
       }
     }
 
+    try {
+      eventBus.emit({
+        type: result?.success && outcome === "answered" ? "session:completed" : "session:failed",
+        projectId: input.projectId,
+        data: { sessionId, agentType: DREAMING_AGENT_TYPE },
+        timestamp: completedAt,
+      });
+    } catch {
+      // Non-critical event emission
+    }
     // Only a delivered answer replaces the memory — silent runs, asked
     // questions and failures leave it exactly as it was.
     if (!result?.success || outcome !== "answered") {
@@ -1129,6 +1147,26 @@ export async function dispatchDreamingSession(
       }
       console.error(`${DREAMING_LOG_PREFIX} Failed to save dreamed memory`, error);
       return;
+    }
+
+    // Story 3: record who wrote the document, and tell every open memory
+    // view to re-fetch — the single channel every other write path uses.
+    try {
+      recordMemoryWriteProvenance(input.projectId, {
+        source: "dreaming",
+        sessionId,
+      });
+      eventBus.emit({
+        type: "memory:changed",
+        projectId: input.projectId,
+        data: { source: "dreaming" },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.warn(
+        `${DREAMING_LOG_PREFIX} Failed to record the dream memory write`,
+        error
+      );
     }
 
     // The single place the window advances — after, and only after, the memory

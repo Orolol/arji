@@ -20,7 +20,8 @@ export interface UnifiedActivity {
     | "release"
     | "memory"
     | "qa"
-    | "grading";
+    | "grading"
+    | "refinement";
   label: string;
   status: string;
   mode: string;

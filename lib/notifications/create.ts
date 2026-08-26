@@ -18,6 +18,10 @@ import {
 } from "@/lib/workflow/dreaming-constants";
 import type { TicketExecutionStatus } from "@/lib/dependencies/scheduler";
 import { ROUTINE_KIND_LABELS } from "@/lib/routines/constants";
+import {
+  REFINEMENT_AGENT_TYPE,
+  REFINEMENT_LABEL,
+} from "@/lib/refinement/constants";
 
 const MAX_NOTIFICATIONS = 200;
 
@@ -849,10 +853,10 @@ export function buildMemoryDreamedTitle(
  * that failed, stayed silent or found nothing new never gets here — see
  * lib/workflow/dreaming.ts).
  *
- * Deep-links to the project's Docs tab, where the memory card shows the new
- * text and lets the user edit or revert it: the actionable place is the
- * document, not the (already finished) session. Status "completed" — this is
- * good news, not an alarm.
+ * Deep-links to the Spec & Memory section, where the memory panel shows the
+ * new text (provenance, cap, the pre-dream snapshot to restore from, and the
+ * editor): the actionable place is the document, not the (already finished)
+ * session. Status "completed" — this is good news, not an alarm.
  */
 export function createMemoryDreamedNotification(
   input: MemoryDreamedNotificationInput
@@ -873,7 +877,83 @@ export function createMemoryDreamedNotification(
       agentType: DREAMING_AGENT_TYPE,
       status: "completed",
       title: buildMemoryDreamedTitle(input),
-      targetUrl: `/projects/${input.projectId}/documents`,
+      targetUrl: `/projects/${input.projectId}/spec#memory-panel`,
+    })
+    .run();
+
+  pruneNotifications();
+}
+
+/**
+ * Notification for a successful per-session distillation: the
+ * 'memory_distill' session merged what a just-finished run taught into the
+ * memory document. Deep-links to the SOURCE session when one was distilled —
+ * the run that taught the lesson: the user's interest is "what did my build
+ * learn", and the source session is where that run lives. A manual distill
+ * without a source session falls back to the distiller's own session page.
+ */
+export function createMemoryDistilledNotification(input: {
+  projectId: string;
+  /** The 'memory_distill' session that wrote the memory. */
+  sessionId: string;
+  /** The completed session whose learnings were merged in (manual: none). */
+  sourceSessionId?: string | null;
+}): void {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: input.sessionId,
+      agentType: "memory_distill",
+      status: "completed",
+      title: "Project memory updated by distillation",
+      targetUrl: `/projects/${input.projectId}/sessions/${
+        input.sourceSessionId ?? input.sessionId
+      }`,
+    })
+    .run();
+
+  pruneNotifications();
+}
+
+/**
+ * Notification for a manual write to the memory document: a hand save or a
+ * one-click restore of the pre-dream snapshot. Every memory write produces
+ * an activity entry in the project feed, manual ones included — the user
+ * (and any parallel agent session they can see) should be able to tell when
+ * someone poked the document by hand. Status "completed"; no session to
+ * link, so `sessionId`/`agentType` stay null.
+ */
+export function createMemoryManualWriteNotification(input: {
+  projectId: string;
+  /** True for a restore of the pre-dream snapshot, false for a hand save. */
+  restored: boolean;
+}): void {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      status: "completed",
+      title: input.restored
+        ? "Project memory restored from the pre-dream snapshot"
+        : "Project memory updated (manual edit)",
+      targetUrl: `/projects/${input.projectId}/spec#memory-panel`,
     })
     .run();
 
@@ -1072,6 +1152,54 @@ export function createNightRunSummaryNotification(
     .run();
 
   pruneNotifications();
+}
+
+export interface RefinementReportNotificationInput {
+  projectId: string;
+  /** The refinement session that made the pass. */
+  sessionId: string;
+  /** Aggregate line, e.g. "4 tickets promoted to To do · 2 sent back". */
+  summary: string;
+  /** False when the session failed or was cancelled part-way. */
+  succeeded: boolean;
+}
+
+/**
+ * Notification for a finished board refinement re-pass.
+ *
+ * Deep-links to the board rather than the session: the pass reshaped the
+ * planning columns, and that is where the user checks the result. A run that
+ * ended early still notifies — its partial writes are already on the board,
+ * so silence would leave unexplained movement.
+ */
+export function createRefinementReportNotification(
+  input: RefinementReportNotificationInput
+): string | null {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return null;
+
+  const id = createId();
+  db.insert(notifications)
+    .values({
+      id,
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: input.sessionId,
+      agentType: REFINEMENT_AGENT_TYPE,
+      status: input.succeeded ? "completed" : "failed",
+      title: input.succeeded
+        ? `${REFINEMENT_LABEL} — ${input.summary}`
+        : `${REFINEMENT_LABEL} ended early — ${input.summary}`,
+      targetUrl: `/projects/${input.projectId}`,
+    })
+    .run();
+
+  pruneNotifications();
+  return id;
 }
 
 function pruneNotifications(): void {

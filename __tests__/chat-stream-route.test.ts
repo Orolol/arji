@@ -187,7 +187,7 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
     expect(options.prompt).toContain("data/documents/proj1/diagram.png");
   });
 
-  it("enriches Gemini prompt with mentioned text and image document context", async () => {
+  it("enriches Oh My Pi prompt with mentioned text and image document context", async () => {
     const docsList = [
       {
         id: "doc-text",
@@ -209,8 +209,8 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
 
     dbMockState.getQueue = [
       { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
-      { id: "conv2", type: "brainstorm", provider: "gemini-cli", label: "Brainstorm" },
-      { id: "conv2", type: "brainstorm", provider: "gemini-cli", label: "Brainstorm" },
+      { id: "conv2", type: "brainstorm", provider: "oh-my-pi", label: "Brainstorm" },
+      { id: "conv2", type: "brainstorm", provider: "oh-my-pi", label: "Brainstorm" },
     ];
 
     dbMockState.allQueue = [
@@ -377,11 +377,11 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
     );
   });
 
-  it("falls back to fresh Gemini run when resume session is expired", async () => {
+  it("falls back to a fresh Oh My Pi run when the named agent's resume session is expired", async () => {
     mockResolveAgentByNamedId.mockReturnValue({
-      provider: "gemini-cli",
-      model: "gemini-2.0-flash",
-      namedAgentId: "agent-gemini",
+      provider: "oh-my-pi",
+      model: "pi-large",
+      namedAgentId: "agent-omp",
     });
 
     const firstSession = {
@@ -410,8 +410,8 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
       {
         id: "conv2",
         type: "brainstorm",
-        provider: "gemini-cli",
-        namedAgentId: "agent-gemini",
+        provider: "oh-my-pi",
+        namedAgentId: "agent-omp",
         cliSessionId: "expired-session",
         label: "Brainstorm",
       },
@@ -557,26 +557,22 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
     expect(assistantInsert.content).not.toContain('"type":"result"');
   });
 
-  it("falls back to a fresh run when a Gemini resume session is expired", async () => {
-    mockResolveAgentByNamedId.mockReturnValue({
-      provider: "gemini-cli",
-      model: undefined,
-      namedAgentId: null,
-    });
-
+  it("falls back to a fresh run when a raw oh-my-pi conversation's resume session is expired", async () => {
+    // No named agent: the conversation's stored provider overrides the
+    // chat default (claude-code) on its own.
     const firstSession = {
       promise: Promise.resolve({
         success: false,
         error: "session not found",
-        cliSessionId: "expired-gemini",
+        cliSessionId: "expired-omp",
       }),
       kill: vi.fn(),
     };
     const secondSession = {
       promise: Promise.resolve({
         success: true,
-        result: "Fresh gemini fallback",
-        cliSessionId: "new-gemini-session",
+        result: "Fresh omp fallback",
+        cliSessionId: "new-omp-session",
       }),
       kill: vi.fn(),
     };
@@ -588,11 +584,11 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
     dbMockState.getQueue = [
       { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
       {
-        id: "conv-gemini",
+        id: "conv-omp",
         type: "brainstorm",
-        provider: "gemini-cli",
+        provider: "oh-my-pi",
         namedAgentId: null,
-        cliSessionId: "expired-gemini",
+        cliSessionId: "expired-omp",
         label: "Chat",
       },
     ];
@@ -602,18 +598,18 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
 
     const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
     const response = await POST(
-      mockJsonRequest({ content: "Continue", conversationId: "conv-gemini" }),
+      mockJsonRequest({ content: "Continue", conversationId: "conv-omp" }),
       mockRouteContext({ projectId: "proj1" }),
     );
 
     expect(response.status).toBe(200);
     const events = await readSseEvents(response as unknown as Response);
-    expect(events.some((e) => e.delta === "Fresh gemini fallback")).toBe(true);
+    expect(events.some((e) => e.delta === "Fresh omp fallback")).toBe(true);
     expect(mockDynamicProviderSpawn).toHaveBeenCalledTimes(2);
     expect(mockDynamicProviderSpawn.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         prompt: "Continue",
-        cliSessionId: "expired-gemini",
+        cliSessionId: "expired-omp",
         resumeSession: true,
       }),
     );
@@ -681,57 +677,54 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
   });
 
   // -------------------------------------------------------------------
-  // Pi / Oh My Pi: the conversation APIs accept them, so chat must honour
-  // the stored provider instead of falling back to the chat default.
+  // Oh My Pi: the conversation APIs accept it, so chat must honour the
+  // stored provider instead of falling back to the chat default.
   // -------------------------------------------------------------------
 
-  it.each(["pi", "oh-my-pi"])(
-    "runs a stored %s conversation on that provider, not the chat default",
-    async (provider) => {
-      // The chat default stays claude-code; only the conversation says pi.
-      mockResolveAgentByNamedId.mockReturnValue({
-        provider: "claude-code",
-        model: undefined,
+  it("runs a stored oh-my-pi conversation on that provider, not the chat default", async () => {
+    // The chat default stays claude-code; only the conversation says omp.
+    mockResolveAgentByNamedId.mockReturnValue({
+      provider: "claude-code",
+      model: undefined,
+      namedAgentId: null,
+    });
+
+    mockDynamicProviderSpawn.mockReturnValueOnce({
+      promise: Promise.resolve({
+        success: true,
+        result: "Omp answered",
+        cliSessionId: "3f1c9a52-1b7e-4f21-9a6f-7b1c2d3e4f50",
+      }),
+      kill: vi.fn(),
+    });
+
+    dbMockState.getQueue = [
+      { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
+      {
+        id: "conv-omp",
+        type: "brainstorm",
+        provider: "oh-my-pi",
         namedAgentId: null,
-      });
+        cliSessionId: null,
+        label: "Chat",
+      },
+    ];
+    dbMockState.allQueue = [[]];
 
-      mockDynamicProviderSpawn.mockReturnValueOnce({
-        promise: Promise.resolve({
-          success: true,
-          result: "Pi answered",
-          cliSessionId: "3f1c9a52-1b7e-4f21-9a6f-7b1c2d3e4f50",
-        }),
-        kill: vi.fn(),
-      });
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockJsonRequest({ content: "Hello", conversationId: "conv-omp" }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
 
-      dbMockState.getQueue = [
-        { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
-        {
-          id: "conv-pi",
-          type: "brainstorm",
-          provider,
-          namedAgentId: null,
-          cliSessionId: null,
-          label: "Chat",
-        },
-      ];
-      dbMockState.allQueue = [[]];
+    expect(response.status).toBe(200);
+    const events = await readSseEvents(response as unknown as Response);
+    expect(events.some((e) => e.delta === "Omp answered")).toBe(true);
 
-      const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
-      const response = await POST(
-        mockJsonRequest({ content: "Hello", conversationId: "conv-pi" }),
-        mockRouteContext({ projectId: "proj1" }),
-      );
-
-      expect(response.status).toBe(200);
-      const events = await readSseEvents(response as unknown as Response);
-      expect(events.some((e) => e.delta === "Pi answered")).toBe(true);
-
-      expect(mockGetProvider).toHaveBeenCalledWith(provider);
-      expect(mockSpawnHelpers.spawnClaudeStream).not.toHaveBeenCalled();
-      // pi reports its own session id; minting one would store an id the CLI
-      // never used and replay it into `--session` next turn.
-      expect(mockDynamicProviderSpawn.mock.calls[0]?.[0].cliSessionId).toBeUndefined();
-    },
-  );
+    expect(mockGetProvider).toHaveBeenCalledWith("oh-my-pi");
+    expect(mockSpawnHelpers.spawnClaudeStream).not.toHaveBeenCalled();
+    // omp reports its own session id; minting one would store an id the CLI
+    // never used and replay it into the resume flag next turn.
+    expect(mockDynamicProviderSpawn.mock.calls[0]?.[0].cliSessionId).toBeUndefined();
+  });
 });

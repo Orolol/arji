@@ -32,14 +32,15 @@ export function resolveSessionOutput(
 ): string {
   // Try parsing the raw CLI output
   if (result?.result) {
-    const parsed = parseClaudeOutput(result.result).content;
-    if (parsed && !isNoTextualOutputFallback(parsed)) {
-      return parsed;
+    const raw = parseClaudeOutput(result.result).content;
+    if (raw && !isNoTextualOutputFallback(raw)) {
+      const parsed = stripPromptEcho(raw, sessionId);
+      if (parsed) return parsed;
     }
   }
 
   // Try lastNonEmptyText from DB
-  const lastText = getLastNonEmptyText(sessionId);
+  const lastText = stripPromptEcho(getLastNonEmptyText(sessionId), sessionId);
   if (lastText) {
     return lastText;
   }
@@ -47,6 +48,59 @@ export function resolveSessionOutput(
   // Fall back to error or default
   return result?.error || defaultMessage;
 }
+
+/**
+ * Prompts below this length are not worth echo-scrubbing: the exact-substring
+ * check could only fire on legitimately quoted short text.
+ */
+const PROMPT_ECHO_MIN_CHARS = 500;
+
+/** Replaces a stripped echo. Kept short — it can appear in ticket comments. */
+export const PROMPT_ECHO_MARKER =
+  "_[Arij: the session's raw output echoed its own prompt — echo removed.]_";
+
+/**
+ * Removes verbatim copies of the session's OWN prompt from its output.
+ *
+ * Some CLI failure modes (measured: omp exiting unauthenticated) echo the
+ * prompt to stdout, sometimes more than once. Left alone, that echo became a
+ * ticket comment, the next prompt embedded the comment history, the next
+ * failure echoed THAT — the geometric snowball that produced a 4.9 MB review
+ * prompt holding 81 nested copies of the project spec (2026-08-26). No
+ * consumer of a session's output ever wants the prompt back, so the scrub
+ * lives here, in the single choke point every dispatch path resolves
+ * output through.
+ *
+ * Exact-substring only: `agent_sessions.prompt` is the byte-exact string the
+ * CLI was spawned with, and the measured echoes were exact copies. Partial
+ * echoes are caught by the prompt-side per-comment budget
+ * (commentHistorySection in prompt-builder.ts).
+ */
+function stripPromptEcho(
+  output: string | null,
+  sessionId: string,
+): string | null {
+  if (!output) return output;
+  const prompt = getSessionPrompt(sessionId);
+  if (!prompt || prompt.length < PROMPT_ECHO_MIN_CHARS) return output;
+  if (!output.includes(prompt)) return output;
+
+  const stripped = output
+    .split(prompt)
+    .join(PROMPT_ECHO_MARKER)
+    // An n-times echo (the measured case was exactly twice) collapses to one
+    // marker instead of a marker per copy.
+    .replaceAll(
+      `${PROMPT_ECHO_MARKER}\n\n${PROMPT_ECHO_MARKER}`,
+      PROMPT_ECHO_MARKER,
+    )
+    .replaceAll(`${PROMPT_ECHO_MARKER}${PROMPT_ECHO_MARKER}`, PROMPT_ECHO_MARKER)
+    .trim();
+
+  // Nothing but the echo: report that as "no output", not as content.
+  return stripped === PROMPT_ECHO_MARKER ? null : stripped;
+}
+
 
 /**
  * Deterministically classifies a finished agent run into its delivery verdict.
@@ -94,14 +148,20 @@ export function classifySessionOutcome(
     return "asked_question";
   }
 
+  // Mirror resolveSessionOutput's echo scrub: a run whose only "output" is a
+  // copy of its own prompt delivered nothing.
   if (result.result) {
-    const parsed = parseClaudeOutput(result.result).content;
-    if (parsed && !isNoTextualOutputFallback(parsed)) {
+    const raw = parseClaudeOutput(result.result).content;
+    if (
+      raw &&
+      !isNoTextualOutputFallback(raw) &&
+      stripPromptEcho(raw, sessionId)
+    ) {
       return "answered";
     }
   }
 
-  if (getLastNonEmptyText(sessionId)) {
+  if (stripPromptEcho(getLastNonEmptyText(sessionId), sessionId)) {
     return "answered";
   }
 
@@ -126,6 +186,19 @@ export function extractSessionUsage(
   if (!result?.result) return undefined;
   const usage = extractUsageFromOutput(result.result);
   return usage ?? undefined;
+}
+
+function getSessionPrompt(sessionId: string): string | null {
+  try {
+    const row = db
+      .select({ prompt: agentSessions.prompt })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .get();
+    return row?.prompt ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function getLastNonEmptyText(sessionId: string): string | null {

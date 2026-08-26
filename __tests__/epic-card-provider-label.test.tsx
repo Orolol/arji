@@ -1,7 +1,10 @@
 /**
- * The activity chip used to label every provider except Gemini and Codex as
- * "Claude Code", so a Pi or OpenCode session showed the wrong agent on the
- * card. It now resolves through PROVIDER_LABELS.
+ * The activity chip resolves the provider through PROVIDER_LABELS for the
+ * registered providers (claude-code, codex, oh-my-pi, openai-compatible),
+ * keeps the legacy "Gemini" abbreviation for old gemini-cli rows, and falls
+ * back to the raw provider string for anything else — including providers
+ * removed in the 2026-08 MCP cleanup — instead of mislabeling them as
+ * Claude Code.
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -66,26 +69,33 @@ function renderWithProvider(provider: string) {
 }
 
 describe("EpicCard provider label", () => {
-  it("labels a Pi session as Pi", () => {
-    expect(renderWithProvider("pi")).toHaveTextContent("Pi");
-  });
-
   it("labels an Oh My Pi session as Oh My Pi", () => {
     expect(renderWithProvider("oh-my-pi")).toHaveTextContent("Oh My Pi");
   });
 
-  it("no longer mislabels other providers as Claude Code", () => {
-    const indicator = renderWithProvider("opencode");
-    expect(indicator).toHaveTextContent("OpenCode");
-    expect(indicator).not.toHaveTextContent("Claude Code");
+  it("labels a Codex session as Codex", () => {
+    expect(renderWithProvider("codex")).toHaveTextContent("Codex");
   });
 
   it("keeps the established Claude Code label", () => {
     expect(renderWithProvider("claude-code")).toHaveTextContent("Claude Code");
   });
 
-  it("keeps the established Gemini abbreviation", () => {
+  it("keeps the Gemini abbreviation for legacy gemini-cli rows", () => {
     expect(renderWithProvider("gemini-cli")).toHaveTextContent("Gemini");
+  });
+
+  it("shows the raw string for the removed pi provider, not a Claude Code mislabel", () => {
+    const indicator = renderWithProvider("pi");
+    expect(indicator).toHaveTextContent("pi");
+    expect(indicator).not.toHaveTextContent("Pi");
+    expect(indicator).not.toHaveTextContent("Claude Code");
+  });
+
+  it("shows the raw string for the removed opencode provider, not a Claude Code mislabel", () => {
+    const indicator = renderWithProvider("opencode");
+    expect(indicator).toHaveTextContent("opencode");
+    expect(indicator).not.toHaveTextContent("Claude Code");
   });
 
   it("falls back to the raw value for an unknown provider", () => {

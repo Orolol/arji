@@ -49,6 +49,32 @@ export function emitTicketDeleted(projectId: string, epicId: string) {
   emit("ticket:deleted", projectId, epicId, {});
 }
 
+/**
+ * A dependency edge was added or removed. Without this the board's dependency
+ * data has no invalidation path at all — it is only refetched by the
+ * whole-board reload that ticket/session events drive.
+ *
+ * ONE event carrying every affected ticket, not one event per ticket. Both
+ * endpoints of every changed edge matter (the board derives blocked state,
+ * queue ranking and hover adjacency from the edge list, so a change shows on
+ * the dependent and its prerequisite alike) — but the board page maps every
+ * `ticket:updated` to a whole-board reload, and SSE messages arrive in separate
+ * ticks so React cannot batch them. Per-ticket events turned one edit into N
+ * reloads; replacing `[q1]` with `[p1,p2,p3]` cost five. The ids ride in the
+ * payload for any consumer that wants them.
+ */
+export function emitTicketDependenciesChanged(
+  projectId: string,
+  ticketIds: Iterable<string>
+) {
+  const affected = [...new Set(ticketIds)];
+  if (affected.length === 0) return;
+  emit("ticket:updated", projectId, undefined, {
+    fields: ["dependencies"],
+    ticketIds: affected,
+  });
+}
+
 export function emitSessionStarted(
   projectId: string,
   epicId: string,

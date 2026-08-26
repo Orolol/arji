@@ -63,6 +63,7 @@ const mockKanban = vi.hoisted(() => ({
   loading: false,
   moveEpic: vi.fn(),
   refresh: vi.fn(),
+  dependencies: [],
 }));
 
 const dndHandlers = vi.hoisted(() => ({
@@ -124,6 +125,12 @@ describe("Board drag-and-drop regression", () => {
       });
     });
 
-    expect(mockKanban.moveEpic).toHaveBeenCalledWith("epic-1", "todo", "done", 0);
+    expect(mockKanban.moveEpic).toHaveBeenCalledWith(
+      "epic-1",
+      "todo",
+      "done",
+      0,
+      undefined
+    );
   });
 });

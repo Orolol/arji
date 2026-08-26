@@ -38,8 +38,11 @@ import { arijToolsSection } from "@/lib/claude/prompt-sections";
 import { isMcpExemptAgentType } from "@/lib/workflow/dreaming-constants";
 import {
   ARIJ_MCP_ALLOWED_TOOL_NAMES,
+  allowedToolNamesForAgentType,
   ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
   ARIJ_MCP_SERVER_NAME,
+  arijMcpToolName,
+  arijMcpToolPrefix,
   buildMcpSpawnConfig,
   cleanupMcpConfigFile,
   parseMcpToolsEnabledSetting,
@@ -143,6 +146,11 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "mcp__arij__ask_question",
       "mcp__arij__submit_findings",
       "mcp__arij__submit_grading",
+      "mcp__arij__set_priority",
+      "mcp__arij__reorder_tickets",
+      "mcp__arij__add_dependency",
+      "mcp__arij__remove_dependency",
+      "mcp__arij__promote_ticket",
     ]);
   });
 
@@ -227,6 +235,63 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "Write",
       ...ARIJ_MCP_ALLOWED_TOOL_NAMES,
     ]);
+  });
+});
+
+describe("allowedToolNamesForAgentType", () => {
+  it("gives an ordinary agent type the full agent toolset", () => {
+    expect(allowedToolNamesForAgentType("build")).toEqual([
+      ...ARIJ_MCP_ALLOWED_TOOL_NAMES,
+    ]);
+    expect(allowedToolNamesForAgentType(null)).toEqual([
+      ...ARIJ_MCP_ALLOWED_TOOL_NAMES,
+    ]);
+  });
+
+  /**
+   * A refinement pass is confined to Backlog/To do by an engine guard keyed
+   * on `source: "refinement"`. update_ticket_status writes with
+   * `source: "api"`, so it bypasses that guard entirely — the spawn must not
+   * be offered it. (The route refuses it too; that is the actual guard.)
+   */
+  it("withholds update_ticket_status from a refinement pass", () => {
+    const tools = allowedToolNamesForAgentType("refinement");
+    expect(tools).not.toContain("mcp__arij__update_ticket_status");
+    // Its own board tools are untouched.
+    for (const tool of [
+      "mcp__arij__promote_ticket",
+      "mcp__arij__reorder_tickets",
+      "mcp__arij__set_priority",
+      "mcp__arij__add_dependency",
+      "mcp__arij__remove_dependency",
+      "mcp__arij__post_comment",
+    ]) {
+      expect(tools).toContain(tool);
+    }
+    expect(tools).toHaveLength(ARIJ_MCP_ALLOWED_TOOL_NAMES.length - 1);
+  });
+
+  it("is applied by buildMcpSpawnConfig", () => {
+    const config = buildMcpSpawnConfig({
+      token: "t",
+      agentType: "refinement",
+    });
+    expect(config.allowedToolNames).not.toContain(
+      "mcp__arij__update_ticket_status"
+    );
+    expect(
+      buildMcpSpawnConfig({ token: "t", agentType: "build" }).allowedToolNames
+    ).toContain("mcp__arij__update_ticket_status");
+
+    const ompConfig = buildMcpSpawnConfig({
+      token: "t",
+      agentType: "refinement",
+      provider: "oh-my-pi",
+    });
+    expect(ompConfig.allowedToolNames).not.toContain(
+      "mcp__arij_update_ticket_status",
+    );
+    expect(ompConfig.allowedToolNames).toContain("mcp__arij_promote_ticket");
   });
 });
 
@@ -348,6 +413,37 @@ describe("CodexProvider.buildArgs — -c mcp_servers overrides", () => {
   }
 
   const spawnContext = { outputFile: "/tmp/codex-out-test.txt" };
+
+  it.each(["code", "plan", "analyze", "chat"] as const)(
+    "opens the approval gate in %s mode, so MCP tool calls can land",
+    (mode) => {
+      // `codex exec` refuses every MCP tool call unless approvals are
+      // bypassed — its closed stdin reads as a refusal. Measured on 0.148:
+      // read-only and workspace-write both start the server and then refuse
+      // the call. A sandboxed codex agent is an agent with no tool channel,
+      // so all modes get the same posture.
+      const args = provider.buildArgs(
+        baseOptions({ mode, mcp: sampleMcp }),
+        spawnContext,
+      );
+      expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
+      expect(args).not.toContain("-s");
+    },
+  );
+
+  it("opens the same gate on the resume subcommand", () => {
+    const args = provider.buildArgs(
+      baseOptions({
+        mode: "plan",
+        mcp: sampleMcp,
+        cliSessionId: "cli-1",
+        resumeSession: true,
+      }),
+      spawnContext,
+    );
+    expect(args.slice(0, 2)).toEqual(["exec", "resume"]);
+    expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
+  });
 
   it("adds the three TOML overrides in the non-resume branch, before the prompt", () => {
     const args = provider.buildArgs(baseOptions({ mcp: sampleMcp }), spawnContext);
@@ -489,6 +585,13 @@ describe("arijToolsSection", () => {
       expect(text).not.toContain("You may move the ticket you are building");
     },
   );
+
+  it("renders the provider's own tool spelling when given a prefix", () => {
+    const text = arijToolsSection("build", arijMcpToolPrefix("oh-my-pi"));
+    expect(text).toContain("mcp__arij_*");
+    // the double-underscore claude spelling must not leak into an omp prompt
+    expect(text).not.toContain("mcp__arij__");
+  });
 });
 
 /**
@@ -547,12 +650,33 @@ describe("providerSupportsMcp — contract verdicts", () => {
   it.each([
     ["claude-code", true],
     ["codex", true],
+    ["oh-my-pi", true],
+    ["pi", false],
     ["gemini-cli", false],
     ["mistral-vibe", false],
     ["qwen-code", false],
     ["opencode", false],
   ])("%s -> %s", (provider, expected) => {
     expect(providerSupportsMcp(provider)).toBe(expected);
+  });
+});
+
+describe("arijMcpToolPrefix / arijMcpToolName — per-provider spelling", () => {
+  it.each([
+    ["claude-code", "mcp__arij__"],
+    ["codex", "mcp__arij__"],
+    ["oh-my-pi", "mcp__arij_"],
+  ])("%s spells the prefix %s", (provider, prefix) => {
+    expect(arijMcpToolPrefix(provider)).toBe(prefix);
+  });
+
+  it("names an omp tool with a single separating underscore", () => {
+    expect(arijMcpToolName("oh-my-pi", "get_ticket")).toBe(
+      "mcp__arij_get_ticket",
+    );
+    expect(arijMcpToolName("claude-code", "get_ticket")).toBe(
+      "mcp__arij__get_ticket",
+    );
   });
 });
 
@@ -586,6 +710,45 @@ describe("buildMcpSpawnConfig", () => {
     expect(config.allowedToolNames).not.toContain("mcp__arij__attach_artifact");
     expect(config.allowedToolNames).not.toContain("mcp__arij__submit_findings");
     expect(config.allowedToolNames).not.toContain("mcp__arij__submit_grading");
+  });
+
+  it("spells the allowlist in omp's single-underscore form for oh-my-pi", () => {
+    const config = buildMcpSpawnConfig({ token: TOKEN, provider: "oh-my-pi" });
+    expect(config.allowedToolNames).toEqual([
+      "mcp__arij_get_ticket",
+      "mcp__arij_update_ticket_status",
+      "mcp__arij_post_comment",
+      "mcp__arij_report_friction",
+      "mcp__arij_attach_artifact",
+      "mcp__arij_create_bug",
+      "mcp__arij_ask_question",
+      "mcp__arij_submit_findings",
+      "mcp__arij_submit_grading",
+      "mcp__arij_set_priority",
+      "mcp__arij_reorder_tickets",
+      "mcp__arij_add_dependency",
+      "mcp__arij_remove_dependency",
+      "mcp__arij_promote_ticket",
+    ]);
+    // spelling is the ONLY divergence — server, shim and env are unchanged
+    expect(config.env).toEqual(buildMcpSpawnConfig({ token: TOKEN }).env);
+  });
+
+  it("applies the omp spelling to the chat toolset too", () => {
+    const config = buildMcpSpawnConfig({
+      token: TOKEN,
+      toolset: "chat",
+      provider: "oh-my-pi",
+    });
+    expect(config.env.ARIJ_MCP_TOOLSET).toBe("chat");
+    expect(config.allowedToolNames).toContain("mcp__arij_create_ticket");
+    expect(config.allowedToolNames).not.toContain("mcp__arij__create_ticket");
+  });
+
+  it("keeps an explicit claude-code provider byte-identical to the default", () => {
+    expect(buildMcpSpawnConfig({ token: TOKEN, provider: "claude-code" })).toEqual(
+      buildMcpSpawnConfig({ token: TOKEN }),
+    );
   });
 });
 

@@ -13,14 +13,9 @@ import type { ProviderType } from "@/lib/providers/types";
  * Providers whose CLI can continue a previous session.
  *
  * - claude-code: --resume <ID>
- * - gemini-cli: --resume <ID>
- * - mistral-vibe: --resume <ID>
- * - opencode: --session <ID>
- * - kimi: --continue (directory-scoped)
- * - pi: --session <ID>
  * - oh-my-pi: --resume <ID> (standalone `omp` fork of pi; no --session flag)
- *
- * Non-resumable: codex, qwen-code, deepseek, zai.
+ * - agy: --conversation <ID> (verified on 1.1.21: the resumed turn recalls
+ *   first-turn context and echoes the same conversation_id)
  *
  * Codex is excluded even though `codex exec resume <ID>` exists and
  * `fix(codex): enable session resume` (b3d25eb, Feb 2026) wired it into the
@@ -32,35 +27,30 @@ import type { ProviderType } from "@/lib/providers/types";
  */
 const RESUMABLE_PROVIDERS = new Set<ProviderType>([
   "claude-code",
-  "gemini-cli",
-  "mistral-vibe",
-  "opencode",
-  "kimi",
-  "pi",
   "oh-my-pi",
+  "agy",
 ]);
 
 /**
  * Providers that announce the session id they created, so dispatch must NOT
- * invent one for them: pi prints a `{"type":"session","id":…}` header and
- * `PiProvider.parseSessionId` reads it back (omp emits the same header). A
- * pre-assigned id would be stored, never used by the CLI, and then replayed
- * into the resume flag on a later run.
+ * invent one for them: omp prints pi's `{"type":"session","id":…}` header
+ * and `PiProvider.parseSessionId` reads it back; agy's JSON envelope
+ * carries `conversation_id`. A pre-assigned id would be stored, never used
+ * by the CLI, and then replayed into the resume flag on a later run.
  */
 const SELF_REPORTED_SESSION_ID_PROVIDERS = new Set<ProviderType>([
-  "pi",
   "oh-my-pi",
+  "agy",
 ]);
 
 /**
  * Providers the dispatch routes pre-assign a session id for
  * (`crypto.randomUUID()`, recorded before the agent starts). Claude Code
- * consumes it via `--session-id`; gemini-cli and codex are kept because
- * their stored id has always come from this pre-assignment.
+ * consumes it via `--session-id`; codex is kept because its stored id has
+ * always come from this pre-assignment.
  */
 const ASSIGNED_SESSION_ID_PROVIDERS = new Set<ProviderType>([
   "claude-code",
-  "gemini-cli",
   "codex",
 ]);
 

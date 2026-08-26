@@ -4,9 +4,14 @@ import {
   agentSessions,
   epics,
   reviewComments,
+  ticketActivityLog,
   ticketComments,
   userStories,
 } from "@/lib/db/schema";
+import {
+  findTicketsBlockedByDependencies,
+  loadProjectGraph,
+} from "@/lib/dependencies/validation";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
 import {
   evaluateMergeReadiness,
@@ -17,11 +22,13 @@ import {
   lastCleanReviewAtSql,
   lastTerminalCodeAtSql,
 } from "@/lib/workflow/review-freshness";
+import { isDeliveredStatus } from "@/lib/types/kanban";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
 import { listPipelineRunsByProject } from "@/lib/pipeline/registry";
 import { dagBatchRegistry } from "@/lib/agents/dag-batch-registry";
 import { nightRunRegistry } from "@/lib/night/registry";
 import { autoModeRegistry } from "./registry";
+import { AUTO_MODE_MAX_REVIEW_REJECTIONS } from "./constants";
 
 /**
  * Candidate selection for Full Auto Mode: which tickets may be built,
@@ -33,7 +40,7 @@ import { autoModeRegistry } from "./registry";
  * what that split is for.
  *
  * Every selector shares one board snapshot built from a FIXED number of
- * queries (nine), never one lookup per ticket: the sweep runs every 15s on a
+ * queries (ten), never one lookup per ticket: the sweep runs every 15s on a
  * board that can hold hundreds of tickets, so an N+1 here would be a
  * per-sweep table scan storm.
  *
@@ -52,6 +59,11 @@ import { autoModeRegistry } from "./registry";
  *                exactly like a ticket bounced back from review, so without
  *                this guard the supervisor would bulldoze the question.
  *   parked       the supervisor already failed on this ticket three times.
+ *   rejected     the epic has been bounced review → in_progress three times
+ *                since the user last spoke. Distinct from `parked` because a
+ *                rejected review is a SUCCESSFUL session, so it never charges
+ *                the failure ladder — this is the only guard that ends a
+ *                build/review/build loop made entirely of green sessions.
  *   delivered    the epic is done/released — nothing to schedule.
  */
 
@@ -61,18 +73,57 @@ import { autoModeRegistry } from "./registry";
 
 const ACTIVE_SESSION_STATUSES = ["queued", "running"];
 
-/** Epic statuses the supervisor may dispatch a build for. */
-const BUILDABLE_EPIC_STATUSES = new Set(["backlog", "todo", "in_progress"]);
+/**
+ * Epic statuses the supervisor may dispatch a build for. Backlog is NOT
+ * buildable: the board's To Do / In Progress columns are the only execution
+ * queue, and a backlog ticket is not in the queue. Position — not priority —
+ * is the queue's order (see compareEpics); "Sort by priority" makes
+ * priority visible in the order by rewriting positions in bulk.
+ */
+export const BUILDABLE_EPIC_STATUSES: ReadonlySet<string> = new Set([
+  "todo",
+  "in_progress",
+]);
 
-/** Story statuses the supervisor may dispatch a build for. */
-const BUILDABLE_STORY_STATUSES = new Set(["todo", "in_progress"]);
-
-/** Epics past the finish line — never candidates for anything. */
-const DELIVERED_EPIC_STATUSES = new Set(["done", "released"]);
+/**
+ * Story statuses the supervisor may dispatch a build for.
+ *
+ * Exported for the same reason as the epic set: `defaultDispatch`'s
+ * last-moment guard (lib/auto-mode/engine.ts) re-checks the very statuses the
+ * selector matched on, and a second copy of that vocabulary would drift.
+ */
+export const BUILDABLE_STORY_STATUSES: ReadonlySet<string> = new Set([
+  "todo",
+  "in_progress",
+]);
 
 // The review/code freshness aggregates moved to lib/workflow/review-freshness.ts
 // so the board list query derives "ready to merge" from the very same SQL —
 // see lib/kanban/merge-readiness.ts for why one definition matters.
+
+/**
+ * Epic statuses under which a STORY may still be built. Wider than
+ * `BUILDABLE_EPIC_STATUSES` by one value, `review`, and deliberately so.
+ *
+ * A story added while an epic-scoped build was running stays `todo` while
+ * the epic advances to `review` (docs/architecture/ticket-state-machine.md),
+ * and so does a story added to an epic that already sits in Review. That
+ * story still has to be written. `review → in_progress` is an allowed epic
+ * transition (lib/workflow/engine.ts), so the shared dispatch transition
+ * reopens the epic and the leftover story gets built — which is what the
+ * supervisor did before the Backlog narrowing, and what
+ * `selectMergeCandidates` counts on: it refuses to land an epic that still
+ * has an unbuilt story, so the two rules together mean the story is finished
+ * rather than merged around.
+ *
+ * Backlog stays excluded here: a Backlog epic is out of the execution queue
+ * whether or not one of its stories looks ready.
+ */
+export const STORY_PARENT_BUILDABLE_STATUSES: ReadonlySet<string> = new Set([
+  "todo",
+  "in_progress",
+  "review",
+]);
 
 /** JS-side twin of the SQL timestamp normalisation, for comparing timestamps. */
 export function normalizeAt(value: string): string {
@@ -115,7 +166,6 @@ export interface AutoMergeCandidate {
 interface EpicRow {
   id: string;
   status: string | null;
-  priority: number | null;
   position: number | null;
   branchName: string | null;
   title: string;
@@ -187,12 +237,32 @@ export interface AutoModeBoard {
   lastUserCommentByEpic: Map<string, string>;
   lastUserCommentByStory: Map<string, string>;
   openReviewCommentsByEpic: Map<string, number>;
+  /**
+   * How many times each epic has been bounced review → in_progress since the
+   * user last commented on it. At AUTO_MODE_MAX_REVIEW_REJECTIONS the epic
+   * stops being selectable for anything — see isEpicSelectable.
+   */
+  reviewRejectionsByEpic: Map<string, number>;
+  /**
+   * When each epic was last bounced out of review (counting only the bounces
+   * above). This is the moment a spent budget is parked AT, so the un-park
+   * check ("did the user speak since?") lines up with the same reset event the
+   * counter uses, instead of anchoring on wall-clock now.
+   */
+  lastReviewRejectionAtByEpic: Map<string, string>;
   parkedTicketIds: Set<string>;
   /**
    * Epics whose merge is on a short backoff after a conflict nobody could be
    * dispatched to repair. Merge-only: they stay buildable and reviewable.
    */
   mergeDeferredEpicIds: Set<string>;
+  /**
+   * Dependency graph for the build selector's prerequisite gate: ticket →
+   * its direct prerequisites. The schema's FKs scope both ends to epics
+   * (epic-to-epic only), so a story's own prerequisites never block a
+   * build — the parent epic's prerequisites already cover its stories.
+   */
+  dependencyGraph: Map<string, Set<string>>;
 }
 
 /**
@@ -224,7 +294,7 @@ function loadRegistryExclusions(projectId: string): {
 }
 
 /**
- * One board snapshot per sweep. Nine queries, all bounded by the project —
+ * One board snapshot per sweep. Ten queries, all bounded by the project —
  * never one per ticket.
  */
 export function loadAutoModeBoard(projectId: string): AutoModeBoard {
@@ -233,7 +303,6 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     .select({
       id: epics.id,
       status: epics.status,
-      priority: epics.priority,
       position: epics.position,
       branchName: epics.branchName,
       title: epics.title,
@@ -476,6 +545,50 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     openReviewCommentsByEpic.set(row.epicId, Number(row.openCount ?? 0));
   }
 
+  // 10. The dependency graph, for the build selector's prerequisite gate:
+  // findTicketsBlockedByDependencies walks it in memory, applying the same
+  // stop-at-delivered rule the batch route applies — with no query per
+  // candidate.
+  const dependencyGraph = loadProjectGraph(projectId);
+
+  // 11. Rejected reviews per epic — the review→in_progress bounces that the
+  // failure ladder cannot see, because each one is a cleanly completed
+  // session. Only entries newer than the epic's last user comment count, so a
+  // human replying to the ticket resets the budget (same un-park convention as
+  // lastUserCommentByEpic serves for the failure ladder).
+  const reviewRejectionRows = db
+    .select({
+      epicId: ticketActivityLog.epicId,
+      createdAt: ticketActivityLog.createdAt,
+    })
+    .from(ticketActivityLog)
+    .innerJoin(epics, eq(ticketActivityLog.epicId, epics.id))
+    .where(
+      and(
+        eq(epics.projectId, projectId),
+        eq(ticketActivityLog.fromStatus, "review"),
+        eq(ticketActivityLog.toStatus, "in_progress")
+      )
+    )
+    .all();
+
+  const reviewRejectionsByEpic = new Map<string, number>();
+  const lastReviewRejectionAtByEpic = new Map<string, string>();
+  for (const row of reviewRejectionRows) {
+    if (!row.epicId || !row.createdAt) continue;
+    const at = normalizeAt(row.createdAt);
+    const resetAt = epicUserCommentAt.get(row.epicId);
+    if (resetAt && at <= normalizeAt(resetAt)) continue;
+    reviewRejectionsByEpic.set(
+      row.epicId,
+      (reviewRejectionsByEpic.get(row.epicId) ?? 0) + 1
+    );
+    const previous = lastReviewRejectionAtByEpic.get(row.epicId);
+    if (!previous || at > previous) {
+      lastReviewRejectionAtByEpic.set(row.epicId, at);
+    }
+  }
+
   const { blockedEpicIds, projectBlocked } = loadRegistryExclusions(projectId);
 
   // An epic with merge work outstanding is off-limits to EVERY selector: git
@@ -499,8 +612,11 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     lastUserCommentByEpic: epicUserCommentAt,
     lastUserCommentByStory: storyUserCommentAt,
     openReviewCommentsByEpic,
+    reviewRejectionsByEpic,
+    lastReviewRejectionAtByEpic,
     parkedTicketIds: autoModeRegistry.parkedTicketIds(projectId),
     mergeDeferredEpicIds: autoModeRegistry.mergeDeferredEpicIds(projectId),
+    dependencyGraph,
   };
 }
 
@@ -508,23 +624,80 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
 /* Shared predicates                                                   */
 /* ------------------------------------------------------------------ */
 
+/**
+ * True once an epic has spent its review-rejection budget — the supervisor
+ * has re-dispatched it AUTO_MODE_MAX_REVIEW_REJECTIONS times without ever
+ * reaching a clean review, so it stops and leaves the ticket for a human.
+ *
+ * Exported so the engine can report the count in the activity trace, and so
+ * the exclusion is testable without building a whole board.
+ */
+export function isReviewRejectionBudgetSpent(
+  board: AutoModeBoard,
+  epicId: string
+): boolean {
+  return (
+    (board.reviewRejectionsByEpic.get(epicId) ?? 0) >=
+    AUTO_MODE_MAX_REVIEW_REJECTIONS
+  );
+}
+
 /** Epic-level exclusions every selector applies before looking at status. */
 function isEpicSelectable(board: AutoModeBoard, epic: EpicRow): boolean {
   if (board.projectBlocked) return false;
-  if (DELIVERED_EPIC_STATUSES.has(epic.status ?? "")) return false;
+  if (isDeliveredStatus(epic.status)) return false;
   if (board.blockedEpicIds.has(epic.id)) return false;
   if (board.busyEpicIds.has(epic.id)) return false;
   if (board.parkedTicketIds.has(epic.id)) return false;
+  if (isReviewRejectionBudgetSpent(board, epic.id)) return false;
   const awaiting = board.awaitingByEpic.get(epic.id);
   if (awaiting && isAwaitingReply(awaiting)) return false;
   return true;
 }
 
-/** Board order: priority DESC, then position ASC (the kanban reading order). */
+/**
+ * Execution order of the candidate set: column rank, then position ASC.
+ *
+ * `position` is written PER COLUMN — creation uses `MAX(position) + 1`
+ * scoped to the target status, and the reorder route rewrites each column as
+ * 0..n-1 — so every column has its own position 0 and position alone is not
+ * a total order over a set that spans two columns. The build selector spans
+ * exactly two (To Do and unoccupied In Progress), so the column is the
+ * primary key and position the secondary one. Without that rule the
+ * cross-column tie would fall through to `epicRows`, which query 1 reads
+ * with no ORDER BY — i.e. to creation order, which is invisible on the board
+ * and unreachable by dragging.
+ *
+ * In Progress ranks before To Do: a ticket sitting there came back from a
+ * negative review, and finishing work already started beats opening a new
+ * front. Within a column, position ASC is the column's visual reading order
+ * — position is the single source of truth for execution order, so what the
+ * user sees is what the supervisor runs (WYSIWYG). Priority stays a badge
+ * and a filter, never a scheduling criterion; the "Sort by priority" button
+ * makes it visible in the order by rewriting positions in bulk.
+ *
+ * The `id` tiebreak only fires on a malformed board (two rows sharing a
+ * position after a partial write). It is arbitrary but deterministic, which
+ * beats "whatever SQLite returned first".
+ */
+const EXECUTION_COLUMN_RANK: Readonly<Record<string, number>> = {
+  in_progress: 0,
+  todo: 1,
+};
+
+/** Columns the build selector does not span sort last, among themselves. */
+const UNRANKED_COLUMN = 2;
+
 function compareEpics(a: EpicRow, b: EpicRow): number {
-  const priority = (b.priority ?? 0) - (a.priority ?? 0);
-  if (priority !== 0) return priority;
-  return (a.position ?? 0) - (b.position ?? 0);
+  const byColumn =
+    (EXECUTION_COLUMN_RANK[a.status ?? ""] ?? UNRANKED_COLUMN) -
+    (EXECUTION_COLUMN_RANK[b.status ?? ""] ?? UNRANKED_COLUMN);
+  if (byColumn !== 0) return byColumn;
+
+  const byPosition = (a.position ?? 0) - (b.position ?? 0);
+  if (byPosition !== 0) return byPosition;
+
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /**
@@ -565,6 +738,12 @@ export { hasFreshCleanReview };
  * `getRunningSessionForTarget` in story scope also matches the parent epic's
  * sessions, so two stories of one epic can never run in parallel anyway.
  * An epic WITHOUT stories yields itself, epic-scoped.
+ *
+ * Prerequisite gate: a candidate whose direct or transitive prerequisite is
+ * not done/released is skipped this sweep. The decision is the shared walk
+ * in lib/dependencies/validation.ts, run in memory over the snapshot's
+ * graph + status map — one sweep, no query per candidate. A prerequisite
+ * missing from the status map blocks conservatively.
  */
 export function selectBuildCandidates(
   projectId: string,
@@ -572,12 +751,27 @@ export function selectBuildCandidates(
 ): AutoBuildCandidate[] {
   const candidates: AutoBuildCandidate[] = [];
 
+  // Prerequisite gate, pre-computed once for the whole sweep. Statuses come
+  // from the snapshot itself — the board already read them in query 1.
+  const statusOf = new Map<string, string | null>(
+    board.epics.map((epic) => [epic.id, epic.status ?? null])
+  );
+  const blockedByDeps = findTicketsBlockedByDependencies(
+    board.dependencyGraph,
+    statusOf,
+    board.epics.map((epic) => epic.id)
+  );
+
   for (const epic of [...board.epics].sort(compareEpics)) {
     if (!isEpicSelectable(board, epic)) continue;
+    if (blockedByDeps.has(epic.id)) continue;
 
     const stories = board.storiesByEpic.get(epic.id) ?? [];
 
     if (stories.length === 0) {
+      // A storyless epic IS the unit of work, so it must be in the execution
+      // queue itself: Backlog is out, and so is `review`, where the epic is
+      // waiting for a verdict rather than for code.
       if (!BUILDABLE_EPIC_STATUSES.has(epic.status ?? "")) continue;
       candidates.push({
         scope: "epic",
@@ -590,9 +784,13 @@ export function selectBuildCandidates(
       continue;
     }
 
-    // Story scope: the first buildable story by position. The parent may start
-    // in backlog/todo; the shared dispatch transition moves both parent and
-    // story to in_progress before the queued session row is created.
+    // Story scope: the first buildable story by position. The parent may sit
+    // in todo, in_progress or review (see STORY_PARENT_BUILDABLE_STATUSES);
+    // the shared dispatch transition moves both parent and story to
+    // in_progress before the queued session row is created. A story-scoped
+    // dispatch must never pull a Backlog epic into the queue that way.
+    if (!STORY_PARENT_BUILDABLE_STATUSES.has(epic.status ?? "")) continue;
+
     const next = stories.find((story) => {
       if (!BUILDABLE_STORY_STATUSES.has(story.status ?? "")) return false;
       if (board.busyStoryIds.has(story.id)) return false;
@@ -665,15 +863,50 @@ function mergeReadinessFacts(
 }
 
 /**
+ * Does this epic still have a story the supervisor is going to build?
+ *
+ * A story left `todo` or `in_progress` under a reviewed epic — added while an
+ * epic-scoped build was running, or added to an epic already in Review — makes
+ * the reviewed diff only part of the feature. The unattended merge path must
+ * not land that; the story is picked up as a build candidate instead
+ * (STORY_PARENT_BUILDABLE_STATUSES), which reopens the epic and finishes it.
+ *
+ * The gate is deliberately `BUILDABLE_STORY_STATUSES`, the exact set the build
+ * selector picks stories from, which makes the hold self-clearing: every story
+ * that blocks a merge is a story this same sweep will build, so the epic comes
+ * back to Review and lands. Widening the gate to "anything not in review/done"
+ * would also catch a `backlog` story, which the selector will never build —
+ * a permanent, silent merge stall. A Backlog story is out of the execution
+ * queue by the same rule Backlog epics are (see BUILDABLE_EPIC_STATUSES); the
+ * approval path reports it as a skipped story instead.
+ *
+ * Deliberately NOT part of `evaluateMergeReadiness`, even though it reads like
+ * a readiness fact: a human may still approve or merge such an epic through
+ * the normal routes, where the unfinished stories are reported as
+ * `skippedStories` and shown on the card. Only the UNATTENDED path is refused,
+ * so this belongs with the supervisor's other exclusions rather than in the
+ * shared predicate the board's "Ready to merge" section renders — a card that
+ * a click would happily merge must not be filed under "not ready".
+ */
+function hasStoryStillToBuild(board: AutoModeBoard, epic: EpicRow): boolean {
+  const stories = board.storiesByEpic.get(epic.id) ?? [];
+  return stories.some((story) =>
+    BUILDABLE_STORY_STATUSES.has(story.status ?? "")
+  );
+}
+
+/**
  * Epics whose review came back clean and whose branch can land: in `review`,
- * with a branch, reviewed since the last code change, and with zero open
- * review comments.
+ * with a branch, reviewed since the last code change, with zero open review
+ * comments, and with no story the build selector would still pick up.
  *
  * The readiness half is `evaluateMergeReadiness` — the same call the board
- * API makes, so a "Ready to merge" card and a supervisor merge candidate are
- * the same set by construction. What stays here are the supervisor's RUNTIME
- * exclusions (busy, owned, parked, backed off), which are about whether it
- * may act right now, not about whether the work is ready.
+ * API makes, so a "Ready to merge" card and a supervisor merge candidate agree
+ * on what "reviewed and landable" means by construction. What stays here are
+ * the exclusions that are the SUPERVISOR's alone: the runtime ones (busy,
+ * owned, parked, backed off), which are about whether it may act right now,
+ * and `hasStoryStillToBuild`, which refuses the unattended merge of a
+ * half-built epic a human is still allowed to land by hand.
  *
  * This gate is STRICTER than the workflow engine's `→ done` guards on
  * purpose. The engine still has the last word — `applyTransition` refuses
@@ -689,7 +922,10 @@ export function selectMergeCandidates(
     .sort(compareEpics)
     .filter((epic) => isEpicSelectable(board, epic))
     .filter((epic) => !board.mergeDeferredEpicIds.has(epic.id))
-    .filter((epic) => evaluateMergeReadiness(mergeReadinessFacts(board, epic)).ready)
+    .filter(
+      (epic) => evaluateMergeReadiness(mergeReadinessFacts(board, epic)).ready
+    )
+    .filter((epic) => !hasStoryStillToBuild(board, epic))
     .map((epic) => ({
       epicId: epic.id,
       ticketId: epic.id,

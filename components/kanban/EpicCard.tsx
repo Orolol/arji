@@ -28,12 +28,17 @@ import {
   TriangleAlert,
   RefreshCw,
   X,
+  Link2,
 } from "lucide-react";
 import {
   describeMergeBlocker,
   type MergeReadiness,
 } from "@/lib/kanban/merge-readiness";
 import type { BoardMergeState } from "@/hooks/useBoardMerge";
+import type {
+  DependencyFocusRole,
+  ReadinessScore,
+} from "@/lib/kanban/queue";
 import type { FailedSessionInfo } from "@/lib/agent-sessions/latest-failure";
 import {
   isChatProvider,
@@ -95,6 +100,20 @@ export interface EpicCardView {
   onLinkedAgentHoverChange?: (activityId: string | null) => void;
   /** Called when user clicks the retry button on a failed session indicator */
   onRetryBuild?: () => void;
+  /** Effective position in the To Do execution queue (todo column only). */
+  queueRank?: number;
+  /** The card is queue position 1 — the "next up" ticket. */
+  isNextEpic?: boolean;
+  /** Readable ids of dependency targets that are not delivered yet. */
+  blockedOn?: string[];
+  /** Backlog readiness: criteria met out of the ones that apply to this card. */
+  readiness?: ReadinessScore;
+  /**
+   * Report this card gaining (`true`) or losing (`false`) the pointer/keyboard
+   * focus. The Board owns the 150 ms intent timer and only retracts a focus the
+   * same card armed, so the id travels in both directions.
+   */
+  onDependencyHoverChange?: (epicId: string, active: boolean) => void;
 }
 
 interface EpicCardProps {
@@ -105,8 +124,13 @@ interface EpicCardProps {
   highlight?: boolean;
   /** Per-epic state and callbacks, built by the Board */
   view?: EpicCardView;
-  /** Disable dnd-kit sortable wiring (set by the Board while filters are active) */
-  dragDisabled?: boolean;
+  /**
+   * This card's role in the active dependency hover focus, if any. Kept off
+   * `view` deliberately: focus changes on every pointer move, and folding it
+   * into the view map would rebuild every card's view object — selection,
+   * agent activity, unread cursors and all — on each hover.
+   */
+  focus?: DependencyFocusRole;
 }
 
 /**
@@ -127,13 +151,23 @@ const ACTIVITY_LABEL_BY_TYPE: Record<KanbanAgentActionType, string> = {
 
 const EMPTY_VIEW: EpicCardView = {};
 
+/**
+ * Tooltip wording per readiness total. Bugs are scored out of 2 — their
+ * creation flow has no mandatory rubric — so naming acceptance criteria on a
+ * bug card would advertise a requirement that does not apply to it.
+ */
+const READINESS_CRITERIA: Record<number, string> = {
+  2: "no open agent question · has a description",
+  3: "no open agent question · has a description · has acceptance criteria",
+};
+
 export function EpicCard({
   epic,
   isOverlay,
   onClick,
   highlight = false,
   view = EMPTY_VIEW,
-  dragDisabled = false,
+  focus,
 }: EpicCardProps) {
   const {
     selected,
@@ -151,7 +185,33 @@ export function EpicCard({
     onToggleSelect,
     onLinkedAgentHoverChange,
     onRetryBuild,
+    queueRank,
+    isNextEpic,
+    blockedOn,
+    readiness,
+    onDependencyHoverChange,
   } = view;
+
+  const dimmed = focus === "dimmed";
+
+  // React fires no mouseleave when a card unmounts, and a card that changes
+  // column re-mounts under a different Column — so a hovered ticket moved by an
+  // SSE update would otherwise leave the board dimmed with the pointer nowhere
+  // near a card. The card reports its own departure on the way out.
+  const hoverChangeRef = useRef(onDependencyHoverChange);
+  useEffect(() => {
+    hoverChangeRef.current = onDependencyHoverChange;
+  });
+  useEffect(
+    () => () => {
+      hoverChangeRef.current?.(epic.id, false);
+    },
+    [epic.id]
+  );
+  // Story 2 asks for a greyed card, not just a label: a blocked ticket has to
+  // be legible at a glance in a dense column, where the 11px "Waiting on:" row
+  // is the first thing to scroll out of view.
+  const blocked = !!blockedOn?.length;
 
   const {
     attributes,
@@ -160,7 +220,7 @@ export function EpicCard({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: epic.id, disabled: dragDisabled });
+  } = useSortable({ id: epic.id });
 
   const isDraft = isDraftEpic(epic);
 
@@ -176,10 +236,17 @@ export function EpicCard({
     prevHighlight.current = highlight;
   }, [highlight]);
 
+  // Every opacity state lives in this inline object because the drag opacity
+  // does: an inline declaration beats any non-`!important` class rule, and
+  // Tailwind emits `.opacity-*` without `!important`, so a class-based variant
+  // would never reach the screen while this object is applied to the same
+  // element. Ordered by precedence — a card being dragged reads as dragged
+  // first, an unrelated card under a hover focus recedes furthest, and blocked
+  // is the resting state that has to stay readable.
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
+    opacity: isDragging ? 0.5 : dimmed ? 0.4 : blocked ? 0.62 : 1,
   };
 
   const activityLabel = activeAgentActivity
@@ -254,18 +321,28 @@ export function EpicCard({
       {...listeners}
       onClick={handleCardClick}
       onMouseEnter={() => {
+        onDependencyHoverChange?.(epic.id, true);
         if (!linkedActivityId) return;
         onLinkedAgentHoverChange?.(linkedActivityId);
       }}
-      onMouseLeave={() => onLinkedAgentHoverChange?.(null)}
+      onMouseLeave={() => {
+        onDependencyHoverChange?.(epic.id, false);
+        onLinkedAgentHoverChange?.(null);
+      }}
       onFocusCapture={() => {
+        onDependencyHoverChange?.(epic.id, true);
         if (!linkedActivityId) return;
         onLinkedAgentHoverChange?.(linkedActivityId);
       }}
       onBlurCapture={(event) => {
+        // Focus moving WITHIN this card (body -> selection checkbox -> link)
+        // is not a leave. Clearing above this guard would drop the dependency
+        // focus and re-arm the 150 ms timer on every internal tab step, which
+        // is exactly the flicker that intent window exists to prevent.
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
           return;
         }
+        onDependencyHoverChange?.(epic.id, false);
         onLinkedAgentHoverChange?.(null);
       }}
       data-selected={selected ? "true" : undefined}
@@ -289,7 +366,14 @@ export function EpicCard({
         isOverlay &&
           "rotate-[1.5deg] shadow-[0_8px_20px_rgba(58,48,44,.16)]",
         isHighlighted &&
-          "ring-2 ring-primary/70 bg-primary/5 motion-reduce:ring-0 motion-reduce:bg-transparent"
+          "ring-2 ring-primary/70 bg-primary/5 motion-reduce:ring-0 motion-reduce:bg-transparent",
+        dimmed && "saturate-50",
+        // Desaturation carries the "greyed" reading that opacity alone does
+        // not; the destructive-tinted border keeps the state findable once the
+        // card is muted. Both yield to an active hover focus.
+        blocked && !dimmed && "saturate-[.55] border-destructive/40",
+        focus === "predecessor" && "ring-2 ring-primary/50",
+        focus === "successor" && "ring-2 ring-agent/50",
       )}
     >
       <h4 className="line-clamp-2 text-[14px] font-medium leading-[1.35] [text-wrap:pretty]">
@@ -522,6 +606,25 @@ export function EpicCard({
             {epic.usDone}/{epic.usCount} US
           </span>
         )}
+        {queueRank !== undefined && (
+          <span
+            className={cn(
+              "inline-flex items-center rounded-[4px] px-[5px] text-[10px]",
+              isNextEpic
+                ? "border border-agent-border bg-agent-bg text-agent"
+                : "text-muted-foreground"
+            )}
+            title={
+              isNextEpic
+                ? "Next in board order. Full Auto sorts by priority first, so its dispatch order can differ."
+                : `Position ${queueRank} in board order`
+            }
+            data-testid={`epic-queue-rank-${epic.id}`}
+          >
+            #{queueRank}
+            {isNextEpic && <span className="ml-[4px] font-sans">Next</span>}
+          </span>
+        )}
         {isDraft && (
           <span
             className="inline-flex items-center rounded-[4px] border border-dashed border-muted-foreground/40 px-[5px] text-[10px] uppercase tracking-wide"
@@ -529,6 +632,24 @@ export function EpicCard({
             data-testid={`epic-draft-${epic.id}`}
           >
             Draft
+          </span>
+        )}
+        {readiness && (
+          <span
+            className={cn(
+              "inline-flex items-center rounded-[4px] px-[5px] text-[10px]",
+              readiness.met === readiness.total
+                ? "border border-agent-border bg-agent-bg text-agent"
+                : "border border-muted-foreground/30 text-muted-foreground"
+            )}
+            title={
+              readiness.met === readiness.total
+                ? `Ready for To Do: ${READINESS_CRITERIA[readiness.total]}`
+                : `Ready when: ${READINESS_CRITERIA[readiness.total]}`
+            }
+            data-testid={`epic-readiness-${epic.id}`}
+          >
+            Ready {readiness.met}/{readiness.total}
           </span>
         )}
         {showDeliveredWithRemainingStories && (
@@ -574,6 +695,18 @@ export function EpicCard({
           </a>
         )}
       </div>
+      {blockedOn && blockedOn.length > 0 && (
+        <div
+          className="flex items-center gap-[5px] font-mono text-[11px] text-destructive"
+          data-testid={`epic-blocked-${epic.id}`}
+        >
+          <Link2 className="h-[12px] w-[12px] shrink-0" aria-hidden="true" />
+          {/* Comma-separated: `readableId` is nullable, so entries fall back to
+              the epic title, and multi-word titles joined by a bare space read
+              as a single blocker. */}
+          <span className="truncate">Waiting on: {blockedOn.join(", ")}</span>
+        </div>
+      )}
     </Card>
   );
 }

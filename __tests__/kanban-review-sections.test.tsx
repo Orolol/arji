@@ -39,6 +39,10 @@ vi.mock("@/hooks/useKanban", () => ({
     loading: false,
     refresh: mockKanbanState.refresh,
     moveEpic: mockKanbanState.moveEpic,
+    sortColumnByPriority: vi.fn(),
+    // The Board feeds these edges to `computeBlockedBy`, which iterates them:
+    // the real hook always hands over an array, so the mock must too.
+    dependencies: [],
   }),
 }));
 

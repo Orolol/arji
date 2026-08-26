@@ -98,7 +98,7 @@ describe("sessions/resumable route", () => {
    * The DB rows are deliberately non-empty: the endpoint must refuse on the
    * provider's capability, not just happen to find nothing.
    */
-  it.each(["codex", "qwen-code", "deepseek", "zai"])(
+  it.each(["codex"])(
     "returns empty data for the non-resumable provider %s",
     async (provider) => {
       mockResolveAgent.mockReturnValue({ provider, namedAgentId: null });
@@ -132,14 +132,14 @@ describe("sessions/resumable route", () => {
     },
   );
 
-  it.each(["pi", "oh-my-pi"])(
+  it.each(["oh-my-pi"])(
     "filters to the resolved provider's own sessions for %s",
     async (provider) => {
       mockResolveAgent.mockReturnValue({ provider, namedAgentId: null });
       mockState.allQueue = [
         [
           {
-            id: "sess-pi",
+            id: "sess-omp",
             cliSessionId: "3f1c9a52-1b7e-4f21-9a6f-7b1c2d3e4f50",
             provider,
             namedAgentId: null,
@@ -170,8 +170,8 @@ describe("sessions/resumable route", () => {
 
   it("filters by resolved provider and named agent when agentType is present", async () => {
     mockResolveAgentByNamedId.mockReturnValue({
-      provider: "gemini-cli",
-      namedAgentId: "agent-gem",
+      provider: "oh-my-pi",
+      namedAgentId: "agent-omp",
     });
     mockState.allQueue = [
       [
@@ -179,8 +179,8 @@ describe("sessions/resumable route", () => {
           id: "sess-1",
           cliSessionId: "cli-1",
           claudeSessionId: null,
-          provider: "gemini-cli",
-          namedAgentId: "agent-gem",
+          provider: "oh-my-pi",
+          namedAgentId: "agent-omp",
           agentType: "ticket_build",
           lastNonEmptyText: "done",
           completedAt: "2026-02-14T00:00:00.000Z",
@@ -193,7 +193,7 @@ describe("sessions/resumable route", () => {
     );
     const res = await GET(
       mockNextRequest({
-          url: "http://localhost/api/projects/proj-1/sessions/resumable?epicId=epic-1&userStoryId=story-1&agentType=ticket_build&namedAgentId=agent-gem&provider=claude-code",
+          url: "http://localhost/api/projects/proj-1/sessions/resumable?epicId=epic-1&userStoryId=story-1&agentType=ticket_build&namedAgentId=agent-omp&provider=claude-code",
       }),
       mockRouteContext({ projectId: "proj-1" }),
     );
@@ -205,14 +205,14 @@ describe("sessions/resumable route", () => {
     expect(mockResolveAgentByNamedId).toHaveBeenCalledWith(
       "ticket_build",
       "proj-1",
-      "agent-gem",
+      "agent-omp",
     );
-    expect(drizzle.eq).toHaveBeenCalledWith("agentSessions.provider", "gemini-cli");
-    expect(drizzle.eq).toHaveBeenCalledWith("agentSessions.namedAgentId", "agent-gem");
+    expect(drizzle.eq).toHaveBeenCalledWith("agentSessions.provider", "oh-my-pi");
+    expect(drizzle.eq).toHaveBeenCalledWith("agentSessions.namedAgentId", "agent-omp");
   });
 
   it("resolves provider from namedAgentId when agentType is absent", async () => {
-    mockState.getQueue = [{ id: "agent-gem", provider: "gemini-cli" }];
+    mockState.getQueue = [{ id: "agent-omp", provider: "oh-my-pi" }];
     mockState.allQueue = [[{ id: "sess-2", cliSessionId: "cli-2" }]];
 
     const { GET } = await import(
@@ -220,7 +220,7 @@ describe("sessions/resumable route", () => {
     );
     const res = await GET(
       mockNextRequest({
-          url: "http://localhost/api/projects/proj-1/sessions/resumable?namedAgentId=agent-gem&provider=claude-code",
+          url: "http://localhost/api/projects/proj-1/sessions/resumable?namedAgentId=agent-omp&provider=claude-code",
       }),
       mockRouteContext({ projectId: "proj-1" }),
     );
@@ -228,9 +228,9 @@ describe("sessions/resumable route", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.data).toHaveLength(1);
-    expect(drizzle.eq).toHaveBeenCalledWith("namedAgents.id", "agent-gem");
-    expect(drizzle.eq).toHaveBeenCalledWith("agentSessions.provider", "gemini-cli");
-    expect(drizzle.eq).toHaveBeenCalledWith("agentSessions.namedAgentId", "agent-gem");
+    expect(drizzle.eq).toHaveBeenCalledWith("namedAgents.id", "agent-omp");
+    expect(drizzle.eq).toHaveBeenCalledWith("agentSessions.provider", "oh-my-pi");
+    expect(drizzle.eq).toHaveBeenCalledWith("agentSessions.namedAgentId", "agent-omp");
   });
 
   it("returns empty when namedAgentId is unknown and agentType is absent", async () => {

@@ -7,7 +7,14 @@
  */
 
 import { ticketImageAbsolutePaths } from "@/lib/uploads/ticket-image-paths";
+import {
+  UNTRUSTED_CONTENT_NOTICE,
+  fenceOnly,
+  fenceUntrusted,
+  neutralizeControlMarkup,
+} from "./untrusted";
 import { TICKET_MOVING_AGENT_TYPES } from "@/lib/agent-config/constants";
+import { REFINEMENT_AGENT_TYPE } from "@/lib/refinement/constants";
 
 import type {
   PromptDocument,
@@ -32,13 +39,20 @@ export function systemSection(systemPrompt: string | null | undefined): string {
   return `# System Instructions\n\n${systemPrompt.trim()}\n\n`;
 }
 
-/** Formats reference documents separated by `---`. */
+/**
+ * Formats reference documents separated by `---`.
+ *
+ * Document bodies come from uploads and repository scans — content Arij did
+ * not write — so each one is fenced and labelled as data.
+ */
 export function documentsSection(documents: PromptDocument[]): string {
   if (documents.length === 0) return "";
   const parts = documents.map(
-    (doc) => `### ${doc.name}\n\n${doc.contentMd.trim()}`,
+    (doc) => `### ${doc.name}\n\n${fenceOnly(doc.contentMd)}`,
   );
-  return `## Reference Documents\n\n${parts.join("\n\n---\n\n")}\n`;
+  // The notice covers the whole section rather than every document: it is
+  // the same statement each time, and repeating it is pure token cost.
+  return `## Reference Documents\n\n${UNTRUSTED_CONTENT_NOTICE}\n\n${parts.join("\n\n---\n\n")}\n`;
 }
 
 /** Lists existing epic titles for deduplication context. */
@@ -67,14 +81,21 @@ export function projectHeader(name: string): string {
   return `# Project: ${name}\n`;
 }
 
-/** Alias for `section("Project Description", ...)`. */
+/**
+ * Project description. Not fenced — descriptions are short and read better
+ * inline — but control markup is still neutralised: a description is user-
+ * and agent-writable text like any other stored field.
+ */
 export function descriptionSection(description: string | null | undefined): string {
-  return section("Project Description", description);
+  if (!description || description.trim().length === 0) return "";
+  return section("Project Description", neutralizeControlMarkup(description));
 }
 
-/** Alias for `section("Project Specification", ...)`. */
 export function specSection(spec: string | null | undefined): string {
-  return section("Project Specification", spec);
+  if (!spec || spec.trim().length === 0) return "";
+  // Fenced: the specification is rewritten by an agent session, so it is
+  // stored content, not prompt the builder wrote. See lib/claude/untrusted.ts.
+  return section("Project Specification", fenceUntrusted(spec));
 }
 
 /** Heading used for the learned project memory block in every agent prompt. */
@@ -89,7 +110,10 @@ export const PROJECT_MEMORY_HEADING =
  * (PROJECT_MEMORY_MAX_CHARS in lib/documents/memory-constants.ts).
  */
 export function memorySection(memory: string | null | undefined): string {
-  return section(PROJECT_MEMORY_HEADING, memory);
+  if (!memory || memory.trim().length === 0) return "";
+  // Fenced for the same reason as the spec: distillation and Dreaming are
+  // agent sessions, so the memory document is agent-written content.
+  return section(PROJECT_MEMORY_HEADING, fenceUntrusted(memory));
 }
 
 /** Heading under which a ticket's attached screenshots are listed. */
@@ -172,7 +196,8 @@ export function projectContextSections(
 }
 
 /**
- * Instructions for the Arij MCP tool channel (mcp__arij__* tools).
+ * Instructions for the Arij MCP tool channel (the mcp__arij tools, in the
+ * spawning provider's spelling).
  *
  * Deliberately called by NO builder function in prompt-builder.ts: the
  * section is appended centrally by processManager.start() — and only when
@@ -190,11 +215,23 @@ export function projectContextSections(
  * required because it is the fallback those drivers use when no structured
  * verdict was submitted, which is the only channel a provider without MCP
  * injection has.
+ *
+ * `toolPrefix` is the spawning provider's tool-name spelling
+ * (arijMcpToolPrefix in mcp-injection.ts): omp names the tools
+ * `mcp__arij_*`, one underscore short of claude/codex, and agy mounts them
+ * under their BARE names (empty prefix) — the default keeps claude/codex
+ * prompts byte-identical.
  */
-export function arijToolsSection(agentType: string | null): string {
+export function arijToolsSection(
+  agentType: string | null,
+  toolPrefix = "mcp__arij__",
+): string {
+  const naming = toolPrefix
+    ? `through MCP tools named ${toolPrefix}*`
+    : "through the arij MCP server's tools, mounted under their bare names";
   const base =
     "You are connected to Arij, the orchestrator that launched this session, " +
-    "through MCP tools named mcp__arij__*. Use them for structured signals " +
+    `${naming}. Use them for structured signals ` +
     "instead of prose conventions: get_ticket to re-read current ticket " +
     "state; post_comment for substantive progress/result notes; " +
     "create_bug to preserve an adjacent bug as a standalone, non-blocking " +
@@ -244,5 +281,27 @@ export function arijToolsSection(agentType: string | null): string {
         "a substitute for the tool call."
       : "";
 
-  return section("Arij tools", base + buildExtra + reviewExtra + gradingExtra);
+  // A refinement pass is attached to the board, not to a ticket: its session
+  // row carries no epicId, so the base sentence about "the ticket this
+  // session was launched for" would describe something it does not have.
+  // Naming the board tools and the ticket_id requirement here keeps the tool
+  // surface honest for the one agent type that is project-scoped and still
+  // writes to tickets.
+  const refinementExtra =
+    agentType === REFINEMENT_AGENT_TYPE
+      ? " This session is attached to the project board, not to a single " +
+        "ticket, so every call must name its target with ticket_id — there " +
+        "is no default ticket to fall back on. Your board tools are " +
+        "set_priority, reorder_tickets, add_dependency, remove_dependency " +
+        "and promote_ticket; each one requires a `reason` that is recorded " +
+        "in the ticket's activity log. They work on Backlog and To do only. " +
+        "update_ticket_status is withheld from this session and the route " +
+        "refuses it — promote_ticket is your only channel for a column " +
+        "move, and it demands the missing question when you send work back."
+      : "";
+
+  return section(
+    "Arij tools",
+    base + buildExtra + reviewExtra + gradingExtra + refinementExtra,
+  );
 }

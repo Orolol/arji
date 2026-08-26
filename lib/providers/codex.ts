@@ -53,6 +53,10 @@ interface CodexSpawnContext extends ProviderSpawnContext {
  * so localhost HTTP works in all sandbox modes; no allowlist flag exists or
  * is needed — configured servers' tools are exposed directly.
  *
+ * Registering the server is necessary but NOT sufficient: `codex exec` gates
+ * every tool CALL on an approval prompt that its own closed stdin refuses.
+ * See codexApprovalArgs() for the measurements and the flag that opens it.
+ *
  * RESIDUAL EXPOSURE, accepted: unlike claude's `--mcp-config`, which takes a
  * file path (see lib/claude/spawn.ts — that is why the claude token is NOT in
  * argv), codex's `-c` mechanism has no file form, so the bearer token has to
@@ -64,6 +68,41 @@ interface CodexSpawnContext extends ProviderSpawnContext {
  * log (beforeSpawn), and the NDJSON log header (redactMcpToken in
  * lib/claude/logger.ts). Revisit if codex gains a config-file override.
  */
+/**
+ * Approval/sandbox flags for `codex exec`. One answer for every mode, on
+ * purpose.
+ *
+ * `codex exec` closes stdin, so its approval prompt reads EOF and treats it as
+ * a REFUSAL. Every MCP tool call is gated on that prompt, which is why review
+ * sessions — the ones that ran `-s read-only` — could never file a finding
+ * through submit_findings and silently fell back to prose for the whole life
+ * of the database (see lib/pipeline/parse-review-report.ts). Measured on
+ * codex-cli 0.148.0 with a stdio probe server:
+ *
+ *   -s read-only        server starts, tool call refused
+ *   -s workspace-write  server starts, tool call refused
+ *                       ("the tool requires approval, but approvals are disabled")
+ *   --dangerously-…     server starts, tool call COMPLETES
+ *
+ * The two are welded together in this CLI: the only switch that opens the
+ * approval gate also drops the sandbox, and none of the config keys that look
+ * like they should help (`approval_policy`, `tools_require_approval`,
+ * `mcp_approval_policy`, `trusted_mcp_servers`) have any effect — upstream
+ * openai/codex#24135, still open. So a sandboxed codex agent is an agent with
+ * no tool channel, and the sandbox was already costing more than it saved:
+ * under `-s read-only` reviewers could not create a temp directory, so vitest
+ * and playwright refused to run and every review was signed off without the
+ * suite ever executing.
+ *
+ * What actually contains these agents is the same thing that contains the
+ * claude-code ones, which have run `--permission-mode bypassPermissions` all
+ * along: a disposable per-ticket git worktree. Narrow this the moment codex
+ * grows a real non-interactive approval setting.
+ */
+function codexApprovalArgs(): string[] {
+  return ["--dangerously-bypass-approvals-and-sandbox"];
+}
+
 function buildCodexMcpOverrideArgs(mcp: McpSpawnConfig): string[] {
   const prefix = `mcp_servers.${mcp.serverName}`;
   // All env keys ride the inline table (base URL, token, and the optional
@@ -126,8 +165,9 @@ export class CodexProvider extends BaseCliProvider {
     options: ProviderSpawnOptions,
     spawnContext?: ProviderSpawnContext,
   ): string[] {
-    const { mode, prompt, cwd, model, cliSessionId, resumeSession, mcp } =
-      options;
+    // No `mode` here: unlike the other providers, every codex exec gets the
+    // same approval/sandbox posture — see codexApprovalArgs().
+    const { prompt, cwd, model, cliSessionId, resumeSession, mcp } = options;
     const effectiveCwd = cwd || process.cwd();
     const isResume = !!(cliSessionId && resumeSession);
     const developerInstructions = this.developerInstructions;
@@ -147,9 +187,7 @@ export class CodexProvider extends BaseCliProvider {
       args.push("resume", cliSessionId!);
 
       // resume only supports a subset of flags
-      if (mode === "code") {
-        args.push("--dangerously-bypass-approvals-and-sandbox");
-      }
+      args.push(...codexApprovalArgs());
       args.push("--skip-git-repo-check");
 
       if (model) {
@@ -169,14 +207,7 @@ export class CodexProvider extends BaseCliProvider {
     } else {
       // --- normal (non-resume) exec ---
 
-      // Sandbox mode
-      if (mode === "code") {
-        args.push("--dangerously-bypass-approvals-and-sandbox");
-      } else if (mode === "analyze") {
-        args.push("-s", "workspace-write");
-      } else {
-        args.push("-s", "read-only");
-      }
+      args.push(...codexApprovalArgs());
 
       args.push("-C", effectiveCwd);
       args.push("--skip-git-repo-check");

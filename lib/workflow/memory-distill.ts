@@ -68,6 +68,10 @@ import {
   parseMemoryAutoDistillSetting,
 } from "@/lib/documents/memory-constants";
 import { isNightRunId } from "@/lib/night/constants";
+import { createMemoryDistilledNotification } from "@/lib/notifications/create";
+import { recordMemoryWriteProvenance } from "@/lib/documents/memory-provenance";
+import { emitSessionStarted } from "@/lib/events/emit";
+import { eventBus } from "@/lib/events/bus";
 import { MEMORY_WRITER_AGENT_TYPES } from "./dreaming-constants";
 import { isDreamingAfterNightRunEnabled } from "./dreaming";
 import {
@@ -619,6 +623,16 @@ export async function dispatchMemoryDistillSession(
     createdAt: now,
   });
 
+  try {
+    emitSessionStarted(
+      input.projectId,
+      sourceContext?.epicId ?? "",
+      sessionId,
+      "memory_distill"
+    );
+  } catch {
+    // Non-critical event emission
+  }
   agentScheduler.submit(input.projectId, sessionId, async () => {
     markSessionRunning(sessionId);
 
@@ -664,6 +678,16 @@ export async function dispatchMemoryDistillSession(
       }
     }
 
+    try {
+      eventBus.emit({
+        type: result?.success && outcome === "answered" ? "session:completed" : "session:failed",
+        projectId: input.projectId,
+        data: { sessionId, agentType: "memory_distill" },
+        timestamp: completedAt,
+      });
+    } catch {
+      // Non-critical event emission
+    }
     // Only a delivered answer replaces the memory doc — silent runs, asked
     // questions, and failures leave it untouched.
     if (!result?.success || outcome !== "answered") {
@@ -701,6 +725,31 @@ export async function dispatchMemoryDistillSession(
         error
       );
       return;
+    }
+
+    // Story 3: record who wrote the document and tell every open memory view
+    // to re-fetch — the single channel every other write path uses.
+    try {
+      recordMemoryWriteProvenance(input.projectId, {
+        source: "distill",
+        sessionId,
+      });
+      eventBus.emit({
+        type: "memory:changed",
+        projectId: input.projectId,
+        data: { source: "distill" },
+        timestamp: new Date().toISOString(),
+      });
+      createMemoryDistilledNotification({
+        projectId: input.projectId,
+        sessionId,
+        sourceSessionId: input.sourceSessionId,
+      });
+    } catch (error) {
+      console.warn(
+        "[memory-distill] Failed to record the distilled memory write",
+        error
+      );
     }
 
     if (sourceContext?.epicId) {
