@@ -17,7 +17,9 @@
  *   - review verdict channels: a structured submit_findings verdict on the
  *     session row outranks the prose scan in BOTH directions, and the
  *     activity trail records which channel decided,
- *   - escalation (attempt >= 3): alternative provider, namedAgentId null,
+ *   - escalation: attempt 3 uses a configured stronger same-provider named
+ *     agent before attempt 4 changes provider; without configuration attempt
+ *     3 retains the legacy alternative-provider behaviour,
  *   - guard probe: foreign active session flagged, own sessions ignored,
  *     scope-correct review-target status.
  */
@@ -173,6 +175,7 @@ function insertSession(input: {
   cliSessionId?: string | null;
   status?: string;
   agentType?: string;
+  namedAgentId?: string | null;
 }) {
   db.insert(agentSessions)
     .values({
@@ -184,6 +187,7 @@ function insertSession(input: {
       cliSessionId: input.cliSessionId ?? null,
       status: input.status ?? "completed",
       agentType: input.agentType ?? "build",
+      namedAgentId: input.namedAgentId ?? null,
       mode: "code",
       createdAt: new Date().toISOString(),
     })
@@ -926,7 +930,7 @@ describe("review stage dispatch", () => {
     });
   });
 
-  it("escalates attempt >= 3 to the alternative provider with no named agent", async () => {
+  it("keeps the legacy attempt-3 provider escalation without escalatesTo", async () => {
     const { projectId, epicId } = seed("review");
     const prevSid = `review-prev-${counter}`;
     insertSession({
@@ -956,6 +960,8 @@ describe("review stage dispatch", () => {
     expect(
       resolutionMocks.pickAlternativeReviewProvider
     ).toHaveBeenCalledWith("claude-code");
+    expect(resolutionMocks.resolveAgentForDispatch).not.toHaveBeenCalled();
+    expect(handle.escalatedToNamedAgent).toBeNull();
     expect(handle.escalatedToProvider).toBe("codex");
 
     const row = db
@@ -970,6 +976,103 @@ describe("review stage dispatch", () => {
     });
     expect(startOpts().provider).toBe("codex");
     await handle.settled;
+  });
+
+  it("uses the stronger same-provider agent before the alternative provider", async () => {
+    const { projectId, epicId } = seed("review");
+    const strongerId = `review-stronger-${counter}`;
+    const baseId = `review-base-${counter}`;
+    db.insert(namedAgents)
+      .values([
+        {
+          id: strongerId,
+          name: `Stronger reviewer ${counter}`,
+          provider: "claude-code",
+          model: "claude-opus-4-6",
+        },
+        {
+          id: baseId,
+          name: `Base reviewer ${counter}`,
+          provider: "claude-code",
+          model: "claude-sonnet-4-6",
+          escalatesTo: strongerId,
+        },
+      ])
+      .run();
+    const resumedAttemptId = `review-resumed-${counter}`;
+    insertSession({
+      id: resumedAttemptId,
+      projectId,
+      epicId,
+      provider: "claude-code",
+      status: "failed",
+      agentType: "review_code",
+      namedAgentId: baseId,
+    });
+
+    const driver = createPipelineStageDriver({
+      projectId,
+      scope: "epic",
+      epicId,
+      userStoryId: null,
+      buildNamedAgentId: null,
+    });
+    const effortHandle = await driver.launchStage({
+      stage: "review",
+      attempt: 3,
+      fixCycle: 0,
+      previousAttemptSessionId: resumedAttemptId,
+      lastCodeSessionId: null,
+    });
+
+    expect(
+      resolutionMocks.pickAlternativeReviewProvider
+    ).not.toHaveBeenCalled();
+    expect(effortHandle.escalatedToNamedAgent).toBe(
+      `Stronger reviewer ${counter}`
+    );
+    expect(effortHandle.escalatedToProvider).toBeNull();
+    expect(
+      db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.id, effortHandle.sessionId!))
+        .get()
+    ).toMatchObject({
+      provider: "claude-code",
+      namedAgentId: strongerId,
+      namedAgentName: `Stronger reviewer ${counter}`,
+      model: "claude-opus-4-6",
+    });
+    expect(startOpts().provider).toBe("claude-code");
+    await effortHandle.settled;
+
+    const providerHandle = await driver.launchStage({
+      stage: "review",
+      attempt: 4,
+      fixCycle: 0,
+      previousAttemptSessionId: effortHandle.sessionId,
+      lastCodeSessionId: null,
+    });
+
+    expect(
+      resolutionMocks.pickAlternativeReviewProvider
+    ).toHaveBeenCalledWith("claude-code");
+    expect(providerHandle.escalatedToNamedAgent).toBeNull();
+    expect(providerHandle.escalatedToProvider).toBe("codex");
+    expect(
+      db
+        .select()
+        .from(agentSessions)
+        .where(eq(agentSessions.id, providerHandle.sessionId!))
+        .get()
+    ).toMatchObject({
+      provider: "codex",
+      namedAgentId: null,
+      model: null,
+    });
+    expect(startOpts(1).provider).toBe("codex");
+    await providerHandle.settled;
   });
 });
 

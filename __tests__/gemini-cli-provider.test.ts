@@ -149,6 +149,26 @@ describe("GeminiCliProvider", () => {
     expect(args).toContain("-y");
   });
 
+  it("auto-approves edits but not shell commands in analyze mode", () => {
+    const provider = new GeminiCliProvider();
+
+    provider.spawn(
+      baseOptions({
+        sessionId: "analyze-test",
+        prompt: "Analyze the repository and write arji.json",
+        cwd: "/tmp",
+        mode: "analyze",
+      })
+    );
+
+    const args = mockSpawn.mock.calls[0][1] as string[];
+    expect(args).not.toContain("-y");
+    expect(args.slice(args.indexOf("--approval-mode"), args.indexOf("--approval-mode") + 2)).toEqual([
+      "--approval-mode",
+      "auto_edit",
+    ]);
+  });
+
   it("maps onChunk to raw/output/response chunks", async () => {
     const provider = new GeminiCliProvider();
 

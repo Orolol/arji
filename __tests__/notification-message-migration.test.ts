@@ -215,10 +215,11 @@ describe("0031_notification_message — applied schema", () => {
       initDb(conn);
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
       // Un-stamping from 0031 replays every LATER migration too, and an ADD
-      // COLUMN is not a no-op the second time — so 0032/0033's columns have
-      // to go back as well.
+      // COLUMN is not a no-op the second time — so later migration columns
+      // have to go back as well.
       conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
+      conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
       const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')

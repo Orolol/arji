@@ -18,6 +18,7 @@ testSqlite.exec(`
     provider TEXT NOT NULL,
     model TEXT NOT NULL,
     readable_agent_name TEXT,
+    escalates_to TEXT REFERENCES named_agents(id) ON DELETE SET NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
   CREATE UNIQUE INDEX named_agents_name_unique ON named_agents (name);
@@ -196,6 +197,87 @@ describe("updateNamedAgent", () => {
     expect(data).toBeNull();
     expect(error).toContain("already exists");
   });
+
+  it("configures a same-provider escalation target", async () => {
+    const { createNamedAgent, updateNamedAgent } = await import(
+      "@/lib/agent-config/named-agents"
+    );
+    const { data: stronger } = await createNamedAgent({
+      name: "Stronger",
+      provider: "claude-code",
+      model: "opus",
+    });
+    const { data: base } = await createNamedAgent({
+      name: "Base",
+      provider: "claude-code",
+      model: "sonnet",
+    });
+
+    const { data, error } = await updateNamedAgent(base!.id, {
+      escalatesTo: stronger!.id,
+    });
+
+    expect(error).toBeUndefined();
+    expect(data?.escalatesTo).toBe(stronger!.id);
+  });
+
+  it("rejects direct and transitive escalation cycles", async () => {
+    const { createNamedAgent, updateNamedAgent } = await import(
+      "@/lib/agent-config/named-agents"
+    );
+    const { data: first } = await createNamedAgent({
+      name: "First",
+      provider: "codex",
+      model: "gpt-5-mini",
+    });
+    const { data: second } = await createNamedAgent({
+      name: "Second",
+      provider: "codex",
+      model: "gpt-5",
+    });
+    const { data: third } = await createNamedAgent({
+      name: "Third",
+      provider: "codex",
+      model: "gpt-5-pro",
+    });
+
+    expect(
+      (await updateNamedAgent(first!.id, { escalatesTo: first!.id })).error
+    ).toContain("cycle");
+    expect(
+      (await updateNamedAgent(first!.id, { escalatesTo: second!.id })).data
+    ).not.toBeNull();
+    expect(
+      (await updateNamedAgent(second!.id, { escalatesTo: third!.id })).data
+    ).not.toBeNull();
+
+    const rejected = await updateNamedAgent(third!.id, {
+      escalatesTo: first!.id,
+    });
+    expect(rejected.data).toBeNull();
+    expect(rejected.error).toContain("cycle");
+    expect((await updateNamedAgent(third!.id, {})).data?.escalatesTo).toBeNull();
+  });
+
+  it("rejects escalation edges across providers", async () => {
+    const { createNamedAgent, updateNamedAgent } = await import(
+      "@/lib/agent-config/named-agents"
+    );
+    const { data: claude } = await createNamedAgent({
+      name: "Claude",
+      provider: "claude-code",
+    });
+    const { data: codex } = await createNamedAgent({
+      name: "Codex",
+      provider: "codex",
+    });
+
+    const rejected = await updateNamedAgent(claude!.id, {
+      escalatesTo: codex!.id,
+    });
+    expect(rejected.data).toBeNull();
+    expect(rejected.error).toContain("same provider");
+  });
 });
 
 describe("deleteNamedAgent", () => {
@@ -243,9 +325,44 @@ describe("deleteNamedAgent", () => {
 
     expect(row?.namedAgentId).toBeNull();
   });
+
+  it("nullifies an escalation edge when its target is deleted", async () => {
+    const { createNamedAgent, deleteNamedAgent, updateNamedAgent } = await import(
+      "@/lib/agent-config/named-agents"
+    );
+    const { data: target } = await createNamedAgent({
+      name: "Target",
+      provider: "claude-code",
+      model: "opus",
+    });
+    const { data: source } = await createNamedAgent({
+      name: "Source",
+      provider: "claude-code",
+      model: "sonnet",
+    });
+    await updateNamedAgent(source!.id, { escalatesTo: target!.id });
+
+    await deleteNamedAgent(target!.id);
+
+    expect((await updateNamedAgent(source!.id, {})).data?.escalatesTo).toBeNull();
+  });
 });
 
 describe("resolveAgent", () => {
+  it("preserves the historical lightweight defaults when no task mapping exists", async () => {
+    const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
+
+    expect(resolveAgent("title_generation", "project-123")).toEqual({
+      provider: "claude-code",
+      model: "haiku",
+      namedAgentId: null,
+    });
+    expect(resolveAgent("import_analysis", "project-123")).toEqual({
+      provider: "claude-code",
+      namedAgentId: null,
+    });
+  });
+
   it("returns fallback when no defaults configured", async () => {
     const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
     const result = await resolveAgent("build");
@@ -362,5 +479,94 @@ describe("resolveAgent", () => {
     expect(result.provider).toBe("codex");
     expect(result.model).toBe("gpt-5");
     expect(result.name).toBe("Global Agent");
+  });
+
+  it("resolves an agentType mapping through project, global, then builtin", async () => {
+    const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
+    const { createNamedAgent } = await import("@/lib/agent-config/named-agents");
+
+    const { data: globalAgent } = await createNamedAgent({
+      name: "Global Lightweight",
+      provider: "codex",
+      model: "gpt-5-mini",
+    });
+    const { data: projectAgent } = await createNamedAgent({
+      name: "Project Lightweight",
+      provider: "gemini-cli",
+      model: "gemini-flash",
+    });
+
+    testDb.insert(schema.agentProviderDefaults)
+      .values({
+        id: "title-global",
+        agentType: "title_generation",
+        provider: globalAgent!.provider,
+        namedAgentId: globalAgent!.id,
+        scope: "global",
+      })
+      .run();
+    testDb.insert(schema.agentProviderDefaults)
+      .values({
+        id: "title-project",
+        agentType: "title_generation",
+        provider: projectAgent!.provider,
+        namedAgentId: projectAgent!.id,
+        scope: "project-123",
+      })
+      .run();
+
+    expect(resolveAgent("title_generation", "project-123")).toMatchObject({
+      provider: "gemini-cli",
+      model: "gemini-flash",
+      namedAgentId: projectAgent!.id,
+    });
+    expect(resolveAgent("title_generation", "another-project")).toMatchObject({
+      provider: "codex",
+      model: "gpt-5-mini",
+      namedAgentId: globalAgent!.id,
+    });
+    expect(resolveAgent("import_analysis", "project-123")).toEqual({
+      provider: "claude-code",
+      namedAgentId: null,
+    });
+  });
+
+  it("keeps an explicit UI agent choice ahead of the agentType mapping", async () => {
+    const { resolveAgentByNamedId } = await import(
+      "@/lib/agent-config/agent-resolution"
+    );
+    const { createNamedAgent } = await import("@/lib/agent-config/named-agents");
+
+    const { data: mappedAgent } = await createNamedAgent({
+      name: "Mapped Lightweight",
+      provider: "gemini-cli",
+      model: "gemini-flash",
+    });
+    const { data: explicitAgent } = await createNamedAgent({
+      name: "Explicit Choice",
+      provider: "codex",
+      model: "gpt-5",
+    });
+    testDb.insert(schema.agentProviderDefaults)
+      .values({
+        id: "distill-project",
+        agentType: "memory_distill",
+        provider: mappedAgent!.provider,
+        namedAgentId: mappedAgent!.id,
+        scope: "project-123",
+      })
+      .run();
+
+    expect(
+      resolveAgentByNamedId(
+        "memory_distill",
+        "project-123",
+        explicitAgent!.id
+      )
+    ).toMatchObject({
+      provider: "codex",
+      model: "gpt-5",
+      namedAgentId: explicitAgent!.id,
+    });
   });
 });

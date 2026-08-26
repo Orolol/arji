@@ -339,6 +339,50 @@ describe("resolveAgentForDispatch — segregation on", () => {
   });
 });
 
+describe("pickAlternativeReviewProvider — multiple exclusions", () => {
+  it("skips both the builder and reviewer for a Full Auto second opinion", async () => {
+    availabilityState.available.add("claude-code");
+    availabilityState.available.add("codex");
+    availabilityState.available.add("gemini-cli");
+
+    const { pickAlternativeReviewProvider } = await import(
+      "@/lib/agent-config/review-segregation"
+    );
+    await expect(
+      pickAlternativeReviewProvider("claude-code", ["codex"])
+    ).resolves.toBe("gemini-cli");
+  });
+
+  it("refuses the gate when no third installed provider exists", async () => {
+    availabilityState.available.add("claude-code");
+    availabilityState.available.add("codex");
+
+    const { pickAlternativeReviewProvider } = await import(
+      "@/lib/agent-config/review-segregation"
+    );
+    await expect(
+      pickAlternativeReviewProvider("claude-code", ["codex"])
+    ).resolves.toBeNull();
+  });
+
+  it("applies an eligibility filter after excluding builder and reviewer", async () => {
+    availabilityState.available.add("claude-code");
+    availabilityState.available.add("codex");
+    availabilityState.available.add("gemini-cli");
+
+    const { pickAlternativeReviewProvider } = await import(
+      "@/lib/agent-config/review-segregation"
+    );
+    await expect(
+      pickAlternativeReviewProvider(
+        "gemini-cli",
+        ["claude-code"],
+        (provider) => provider === "codex"
+      )
+    ).resolves.toBe("codex");
+  });
+});
+
 describe("isReviewProviderSegregationEnabled", () => {
   async function loadHelper() {
     const mod = await import("@/lib/agent-config/review-segregation");

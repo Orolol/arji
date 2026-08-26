@@ -267,6 +267,13 @@
       "when": 1786713500000,
       "tag": "0038_frictions",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1786713600000,
+      "tag": "0039_named_agent_escalation",
+      "breakpoints": true
     }
   ]
 }

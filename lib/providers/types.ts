@@ -64,9 +64,11 @@ export interface ProviderSpawnOptions {
   /** Working directory for the agent. */
   cwd: string;
   /**
-   * Agent mode: "plan" = read-only, "code" = full write access. "chat" is
-   * claude-code's conversational mode (read-only repo, MCP board tools
-   * allowed); providers without a distinct chat posture treat it as "plan".
+   * Agent mode: "plan" = read-only, "code" = full write access, "analyze" =
+   * repository analysis with enough write access to create its requested
+   * artifact. "chat" is claude-code's conversational mode (read-only repo,
+   * MCP board tools allowed); providers without a distinct chat posture
+   * treat it as "plan".
    */
   mode: "plan" | "code" | "analyze" | "chat";
   /** Explicit list of allowed tools (Claude Code only). */

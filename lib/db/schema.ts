@@ -193,7 +193,7 @@ export const agentSessions = sqliteTable("agent_sessions", {
   epicId: text("epic_id").references(() => epics.id),
   userStoryId: text("user_story_id").references(() => userStories.id),
   status: text("status").default("queued"), // queued | running | completed | failed | cancelled
-  mode: text("mode").default("code"), // plan | code
+  mode: text("mode").default("code"), // plan | code | analyze | chat
   orchestrationMode: text("orchestration_mode").default("solo"), // solo | team
   provider: text("provider").default("claude-code"), // see PROVIDER_OPTIONS in lib/agent-config/constants.ts
   prompt: text("prompt"),
@@ -452,6 +452,10 @@ export const namedAgents = sqliteTable(
     provider: text("provider").notNull(), // see PROVIDER_OPTIONS in lib/agent-config/constants.ts
     model: text("model").notNull(),
     readableAgentName: text("readable_agent_name"), // Ancient Greek name
+    escalatesTo: text("escalates_to").references(
+      (): AnySQLiteColumn => namedAgents.id,
+      { onDelete: "set null" }
+    ),
     createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({

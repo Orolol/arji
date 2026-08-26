@@ -713,8 +713,9 @@ code fence and do not add commentary before or after it.
 
 /**
  * Builds the prompt for analyzing an existing project directory.
- * Claude Code runs in analyze mode within the target project's directory
- * and writes the structured JSON assessment to `arji.json` at the project root.
+ * The configured provider runs in analyze mode within the target project's
+ * directory and writes the structured JSON assessment to `arji.json` at the
+ * project root.
  */
 export function buildImportPrompt(systemPrompt?: string | null): string {
   const parts: string[] = [];
@@ -895,15 +896,17 @@ ABSOLUTE REQUIREMENTS:
 export function buildTitleGenerationPrompt(
   firstUserMessage: string,
   firstAssistantResponse: string,
+  systemPrompt?: string | null,
 ): string {
   const trimmedResponse = firstAssistantResponse.slice(0, 500);
-  return [
+  const taskPrompt = [
     "Generate a concise 2-4 word title for this conversation. Return ONLY the title text, nothing else.",
     "",
     `User: ${firstUserMessage}`,
     "",
     `Assistant: ${trimmedResponse}`,
   ].join("\n");
+  return [systemSection(systemPrompt), taskPrompt].filter(Boolean).join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -1772,6 +1775,68 @@ ${isBug ? "**IMPORTANT: This is a BUG FIX review.** Focus exclusively on the bug
 Your response should be a well-formatted markdown report.
 `);
   }
+
+  return parts.filter(Boolean).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// 11b. Full Auto pre-merge second opinion
+// ---------------------------------------------------------------------------
+
+/**
+ * Short, read-only review of the final epic diff. Unlike the normal review
+ * prompt this is a merge gate, not another broad QA pass: it asks an
+ * independent provider to look only for reasons the already-reviewed branch
+ * must not land and requires the structured MCP verdict the supervisor reads.
+ */
+export function buildSecondOpinionPrompt(
+  project: PromptProject,
+  epic: PromptEpic,
+  userStories: PromptUserStory[],
+  branchName: string,
+  baseBranch: string,
+  finalDiff?: string,
+  structuredToolsAvailable = true
+): string {
+  project = withProjectMemory(project);
+  const parts: string[] = [];
+
+  parts.push(projectContextSections(project, []));
+  parts.push(`## Epic Awaiting Merge\n`);
+  parts.push(`### ${epic.title}\n`);
+  if (epic.description) parts.push(`${epic.description.trim()}\n`);
+  if (epic.type !== "bug") {
+    parts.push(userStoriesSection(userStories, { checkmark: false }));
+  }
+
+  parts.push(`## Independent Second Opinion
+
+Branch: \`${branchName}\`
+Base branch: \`${baseBranch}\`
+
+This epic already passed its normal review. Perform one short, independent,
+read-only pass over the **final branch diff** before Full Auto merges it.
+
+The exact output of \`git diff ${baseBranch}...HEAD\` is embedded below. Read
+only the surrounding code needed to validate it; do not edit files.
+
+\`\`\`diff
+${finalDiff?.trim() || "(no committed diff)"}
+\`\`\`
+
+1. Inspect the embedded final diff and read only the surrounding code needed to validate it.
+2. Look only for merge-blocking defects: correctness regressions, security issues, destructive behaviour, or an acceptance criterion that the diff plainly does not implement. Do not restyle working code and do not edit files.
+${
+  structuredToolsAvailable
+    ? "3. Call `mcp__arij__submit_findings` exactly once. Use `changes_requested` and file/line-anchored `critical` or `major` findings for any blocker. Otherwise use `approved` (or `approved_with_minor_issues`) with an empty findings array; keep non-blocking suggestions in the summary so they do not become open merge blockers. The structured submission is authoritative."
+    : "3. This provider has no structured Arij findings channel. Put any blocker, with file and line, in the response and make the exact Overall Verdict line below authoritative."
+}
+4. End your response with exactly one of these lines:
+   - \`**Overall Verdict: Approved**\`
+   - \`**Overall Verdict: Approved with Minor Issues**\`
+   - \`**Overall Verdict: Changes Requested**\`
+
+A missing structured submission and missing Overall Verdict line is a failed gate, and the branch will not merge.`);
 
   return parts.filter(Boolean).join("\n");
 }

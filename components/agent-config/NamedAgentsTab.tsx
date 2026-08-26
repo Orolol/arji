@@ -80,23 +80,31 @@ function CliSelect({
 
 function NamedAgentRow({
   agent,
+  agents,
   availability,
   availabilityLoading,
   onUpdate,
   onDelete,
 }: {
   agent: NamedAgent;
+  agents: NamedAgent[];
   availability: ProvidersAvailability["providers"];
   availabilityLoading: boolean;
   onUpdate: (
     agentId: string,
-    payload: { name?: string; provider?: AgentProvider; model?: string }
+    payload: {
+      name?: string;
+      provider?: AgentProvider;
+      model?: string;
+      escalatesTo?: string | null;
+    }
   ) => Promise<{ ok: boolean; error?: string }>;
   onDelete: (agentId: string) => Promise<boolean>;
 }) {
   const [name, setName] = useState(agent.name);
   const [provider, setProvider] = useState<AgentProvider>(agent.provider);
   const [model, setModel] = useState(agent.model);
+  const [escalatesTo, setEscalatesTo] = useState(agent.escalatesTo);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +112,8 @@ function NamedAgentRow({
   const dirty =
     name !== agent.name ||
     provider !== agent.provider ||
-    model !== agent.model;
+    model !== agent.model ||
+    escalatesTo !== agent.escalatesTo;
 
   async function handleSave() {
     if (!dirty || !name.trim()) return;
@@ -117,6 +126,7 @@ function NamedAgentRow({
         name: nextName,
         provider,
         model: nextModel,
+        escalatesTo,
       });
       if (result.ok) {
         setName(nextName);
@@ -180,7 +190,16 @@ function NamedAgentRow({
           <CliSelect
             id={`named-agent-cli-${agent.id}`}
             value={provider}
-            onChange={setProvider}
+            onChange={(nextProvider) => {
+              setProvider(nextProvider);
+              if (
+                escalatesTo &&
+                agents.find((candidate) => candidate.id === escalatesTo)
+                  ?.provider !== nextProvider
+              ) {
+                setEscalatesTo(null);
+              }
+            }}
             availability={availability}
             availabilityLoading={availabilityLoading}
             disabled={saving || deleting}
@@ -199,6 +218,43 @@ function NamedAgentRow({
             className="h-8 text-sm"
           />
         </Field>
+        <div className="md:col-span-2">
+          <Field
+            id={`named-agent-escalation-${agent.id}`}
+            label="Retry escalation"
+            hint="Optional — uses attempt 3 for one stronger model; a different CLI then needs attempt 4. The default per-stage budget is 2."
+          >
+            <Select
+              value={escalatesTo ?? "none"}
+              onValueChange={(value) =>
+                setEscalatesTo(value === "none" ? null : value)
+              }
+              disabled={saving || deleting}
+            >
+              <SelectTrigger
+                id={`named-agent-escalation-${agent.id}`}
+                className="h-8 text-sm"
+              >
+                <SelectValue placeholder="No model escalation" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No model escalation</SelectItem>
+                {agents
+                  .filter(
+                    (candidate) =>
+                      candidate.id !== agent.id &&
+                      candidate.provider === provider
+                  )
+                  .map((candidate) => (
+                    <SelectItem key={candidate.id} value={candidate.id}>
+                      {candidate.name}
+                      {candidate.model ? ` — ${candidate.model}` : " — CLI default"}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        </div>
       </div>
 
       {error && (
@@ -363,6 +419,7 @@ export function NamedAgentsTab() {
             <NamedAgentRow
               key={agent.id}
               agent={agent}
+              agents={data}
               availability={availability}
               availabilityLoading={availabilityLoading}
               onUpdate={updateNamedAgent}

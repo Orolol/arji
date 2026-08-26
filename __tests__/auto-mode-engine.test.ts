@@ -15,6 +15,7 @@ import type {
   AutoModeEngineDeps,
 } from "@/lib/auto-mode/engine";
 import type { SmartDispatchPick } from "@/lib/agent-config/smart-dispatch";
+import type { SecondOpinionState } from "@/lib/auto-mode/second-opinion";
 
 vi.mock("@/lib/db", async () => {
   const { createTestDb } = await import("@/lib/db/test-utils");
@@ -29,6 +30,7 @@ const {
   userStories,
   agentSessions,
   ticketComments,
+  reviewComments,
   ticketActivityLog,
   settings,
 } = await import("@/lib/db/schema");
@@ -156,6 +158,13 @@ interface Fakes {
   sessionStatus: Map<string, string>;
   /** Delivery verdicts, keyed by session id. */
   sessionOutcome: Map<string, string>;
+  secondOpinionDispatches: string[];
+  secondOpinionNotifications: Array<{
+    epicId: string;
+    sessionId: string;
+    reason: string;
+  }>;
+  setSecondOpinionState(epicId: string, state: SecondOpinionState): void;
   setConfig(patch: Partial<ReturnType<AutoModeEngineDeps["resolveConfig"]>>): void;
   failNextDispatch(times: number, error?: string): void;
   conflictNextDispatch(sessionId: string): void;
@@ -173,6 +182,9 @@ function makeFakes(): Fakes {
   const smartPicks = new Map<string, SmartDispatchPick | null>();
   const sessionStatus = new Map<string, string>();
   const sessionOutcome = new Map<string, string>();
+  const secondOpinionStates = new Map<string, SecondOpinionState>();
+  const secondOpinionDispatches: string[] = [];
+  const secondOpinionNotifications: Fakes["secondOpinionNotifications"] = [];
   let dispatchFailures = 0;
   let dispatchError = "dispatch exploded";
   let conflictSessionId: string | null = null;
@@ -186,6 +198,7 @@ function makeFakes(): Fakes {
     reviewAgent: "review-agent" as string | null,
     reviewConcurrency: DEFAULT_AUTO_REVIEW_CONCURRENCY,
     smartDispatch: false,
+    secondOpinion: false,
   };
 
   const deps: AutoModeEngineDeps = {
@@ -196,6 +209,33 @@ function makeFakes(): Fakes {
     },
     resolveConfig: () => ({ ...config }),
     loadBoard: (projectId) => loadAutoModeBoard(projectId),
+    dispatchSecondOpinion: async ({ projectId, epicId }) => {
+      secondOpinionDispatches.push(epicId);
+      seq += 1;
+      const sessionId = `fake-second-opinion-${seq}`;
+      sessionStatus.set(sessionId, "running");
+      secondOpinionStates.set(epicId, { status: "pending", sessionId });
+      db.insert(agentSessions)
+        .values({
+          id: sessionId,
+          projectId,
+          epicId,
+          status: "running",
+          agentType: "review_second_opinion",
+          batchRunId: `auto_${projectId}`,
+          createdAt: at(50 + seq),
+        })
+        .run();
+      return { sessionId, error: null, conflictSessionId: null };
+    },
+    readSecondOpinionState: (_projectId, epicId) =>
+      secondOpinionStates.get(epicId) ?? {
+        status: "missing",
+        sessionId: null,
+      },
+    notifySecondOpinionRejected: ({ epicId, sessionId, reason }) => {
+      secondOpinionNotifications.push({ epicId, sessionId, reason });
+    },
     dispatch: async (input) => {
       dispatches.push(input);
       if (conflictSessionId) {
@@ -260,6 +300,11 @@ function makeFakes(): Fakes {
     smartLookups,
     sessionStatus,
     sessionOutcome,
+    secondOpinionDispatches,
+    secondOpinionNotifications,
+    setSecondOpinionState(epicId, state) {
+      secondOpinionStates.set(epicId, state);
+    },
     setConfig(patch) {
       config = { ...config, ...patch };
     },
@@ -309,6 +354,7 @@ function autoReasons(epicId: string): string[] {
 }
 
 beforeEach(() => {
+  db.delete(reviewComments).run();
   db.delete(ticketComments).run();
   db.delete(ticketActivityLog).run();
   db.delete(agentSessions).run();
@@ -832,6 +878,226 @@ describe("merge step", () => {
     expect(fakes.merges).toEqual(["m1"]);
     expect(result.merged).toEqual(["m1"]);
     expect(result.inFlight).toEqual({ build: 0, review: 0 });
+    expect(fakes.secondOpinionDispatches).toEqual([]);
+  });
+
+  it("spends one review-budget slot on an opted-in second opinion before merge", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true, reviewConcurrency: 1 });
+    seedMergeable();
+    fakes.mergeOutcome({ status: "merged", commitHash: "c1", sessionId: null });
+
+    const result = await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.merges).toEqual([]);
+    expect(fakes.secondOpinionDispatches).toEqual(["m1"]);
+    expect(result.secondOpinionsDispatched).toHaveLength(1);
+    expect(result.inFlight).toEqual({ build: 0, review: 1 });
+    expect(autoModeRegistry.snapshot(PROJECT_ID).recentDispatches[0]).toMatchObject({
+      kind: "second-opinion",
+      epicId: "m1",
+      sessionId: result.secondOpinionsDispatched[0],
+    });
+  });
+
+  it("waits for review capacity instead of merging around the second-opinion budget", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true, reviewConcurrency: 1 });
+    seedMergeable();
+    fakes.sessionStatus.set("review-slot", "running");
+    autoModeRegistry.setEnabled(PROJECT_ID, true);
+    autoModeRegistry.addInFlight(PROJECT_ID, "review-slot", {
+      kind: "review",
+      ticketId: "other",
+      epicId: "other",
+    });
+
+    const result = await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(result.secondOpinionsDispatched).toEqual([]);
+    expect(fakes.secondOpinionDispatches).toEqual([]);
+    expect(fakes.merges).toEqual([]);
+    expect(result.inFlight.review).toBe(1);
+  });
+
+  it("holds the merge and traces an unavailable verdict provider only once", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true, reviewConcurrency: 1 });
+    seedMergeable();
+    fakes.deps.dispatchSecondOpinion = async () => ({
+      sessionId: null,
+      error: null,
+      conflictSessionId: null,
+      skipReason:
+        "no installed provider differs from both the builder and reviewer",
+    });
+    fakes.mergeOutcome({ status: "merged", commitHash: "forbidden", sessionId: null });
+
+    const result = await sweepProject(PROJECT_ID, fakes.deps);
+    const repeated = await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.merges).toEqual([]);
+    expect(result.secondOpinionsDispatched).toEqual([]);
+    expect(repeated.secondOpinionsDispatched).toEqual([]);
+    expect(result.parked).toEqual([]);
+    expect(
+      autoReasons("m1").filter(
+        (reason) =>
+          reason ===
+          "Auto mode skipped second opinion: no installed provider differs from both the builder and reviewer"
+      )
+    ).toHaveLength(1);
+  });
+
+  it("holds and traces once when second opinion is enabled with a zero review budget", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true, reviewConcurrency: 0 });
+    seedMergeable();
+    fakes.mergeOutcome({ status: "merged", commitHash: "forbidden", sessionId: null });
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.secondOpinionDispatches).toEqual([]);
+    expect(fakes.merges).toEqual([]);
+    expect(
+      autoReasons("m1").filter(
+        (reason) =>
+          reason ===
+          "Auto mode skipped second opinion: the review concurrency budget is 0, so no second opinion can be dispatched"
+      )
+    ).toHaveLength(1);
+  });
+
+  it("bounds missing structured verdicts with the review failure ladder", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true, reviewConcurrency: 0 });
+    seedMergeable();
+    autoModeRegistry.setEnabled(PROJECT_ID, true);
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const sessionId = `second-opinion-no-verdict-${attempt}`;
+      fakes.sessionStatus.set(sessionId, "completed");
+      fakes.sessionOutcome.set(sessionId, "answered");
+      fakes.setSecondOpinionState("m1", {
+        status: "retry",
+        sessionId,
+        reason: "no submit_findings or Overall Verdict evidence was recorded",
+      });
+      autoModeRegistry.addInFlight(PROJECT_ID, sessionId, {
+        kind: "review",
+        purpose: "second-opinion",
+        ticketId: "m1",
+        epicId: "m1",
+      });
+
+      const result = await sweepProject(PROJECT_ID, fakes.deps);
+      expect(result.parked).toEqual(attempt === 3 ? ["m1"] : []);
+    }
+
+    expect(fakes.merges).toEqual([]);
+    expect(fakes.secondOpinionNotifications).toEqual([
+      {
+        epicId: "m1",
+        sessionId: "second-opinion-no-verdict-3",
+        reason:
+          "gate failed to return usable evidence after 3 attempts: no submit_findings or Overall Verdict evidence was recorded",
+      },
+    ]);
+    expect(autoModeRegistry.isParked(PROJECT_ID, "m1")).toBe(true);
+  });
+
+  it("does not charge or relaunch a cancelled second opinion", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true, reviewConcurrency: 1 });
+    seedMergeable();
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    const sessionId = first.secondOpinionsDispatched[0];
+    settle(fakes, sessionId, "cancelled", null);
+    fakes.setSecondOpinionState("m1", {
+      status: "cancelled",
+      sessionId,
+    });
+
+    await sweepProject(PROJECT_ID, fakes.deps);
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.secondOpinionDispatches).toEqual(["m1"]);
+    expect(fakes.merges).toEqual([]);
+    expect(autoModeRegistry.isParked(PROJECT_ID, "m1")).toBe(false);
+    expect(
+      autoReasons("m1").filter((reason) =>
+        reason.includes("the second-opinion session was cancelled")
+      )
+    ).toHaveLength(1);
+  });
+
+  it("merges only after a fresh structured second opinion approves", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true });
+    seedMergeable();
+    fakes.setSecondOpinionState("m1", {
+      status: "approved",
+      sessionId: "second-opinion-ok",
+    });
+    fakes.mergeOutcome({ status: "merged", commitHash: "c1", sessionId: null });
+
+    const result = await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.secondOpinionDispatches).toEqual([]);
+    expect(fakes.merges).toEqual(["m1"]);
+    expect(result.merged).toEqual(["m1"]);
+  });
+
+  it("parks, notifies and never merges on a negative second opinion", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true });
+    seedMergeable();
+    fakes.setSecondOpinionState("m1", {
+      status: "rejected",
+      sessionId: "second-opinion-no",
+      reason: "1 blocking finding",
+    });
+    // The open finding removes m1 from the merge selector. Reconciliation of
+    // the tracked gate must still park and notify before candidate selection.
+    db.insert(reviewComments)
+      .values({
+        id: "second-opinion-blocker",
+        epicId: "m1",
+        filePath: "lib/unsafe.ts",
+        lineNumber: 7,
+        body: "[major] unsafe merge",
+        author: "agent",
+        status: "open",
+        agentSessionId: "second-opinion-no",
+      })
+      .run();
+    fakes.sessionStatus.set("second-opinion-no", "completed");
+    autoModeRegistry.setEnabled(PROJECT_ID, true);
+    autoModeRegistry.addInFlight(PROJECT_ID, "second-opinion-no", {
+      kind: "review",
+      purpose: "second-opinion",
+      ticketId: "m1",
+      epicId: "m1",
+    });
+    fakes.mergeOutcome({ status: "merged", commitHash: "forbidden", sessionId: null });
+
+    const result = await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(fakes.merges).toEqual([]);
+    expect(result.parked).toEqual(["m1"]);
+    expect(autoModeRegistry.isParked(PROJECT_ID, "m1")).toBe(true);
+    expect(fakes.secondOpinionNotifications).toEqual([
+      {
+        epicId: "m1",
+        sessionId: "second-opinion-no",
+        reason: "1 blocking finding",
+      },
+    ]);
+    expect(autoReasons("m1")).toContain(
+      "Auto mode parked this ticket after the second opinion rejected the merge: 1 blocking finding"
+    );
   });
 
   it("charges a merge-fix session to the build budget", async () => {

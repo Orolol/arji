@@ -117,6 +117,15 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
     table: "agent_sessions",
     column: "review_verdict",
   },
+  // 0039_named_agent_escalation. Renumbered off 0033's slot, which main's
+  // grading-reports migration had already taken: the `when` IS the migrator's
+  // identity, so it moved past main's whole tail (0038_frictions) rather than
+  // colliding with any migration a database may already have applied.
+  {
+    folderMillis: 1786713600000,
+    table: "named_agents",
+    column: "escalates_to",
+  },
 ];
 
 /** Default on-disk location of the drizzle migration files. */

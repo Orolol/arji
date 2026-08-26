@@ -327,6 +327,7 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       provider: "provider",
       model: "model",
       readableAgentName: "readable_agent_name",
+      escalatesTo: "escalates_to",
       createdAt: "created_at",
     },
   },

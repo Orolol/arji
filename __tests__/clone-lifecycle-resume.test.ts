@@ -231,10 +231,11 @@ describe("import short-circuit on a reused clone", () => {
     expect(json.data.fromExistingFile).toBe(true);
     expect(json.data.preview.project.name).toBe("Demo");
     expect(json.data.path).toBe(fs.realpathSync(clonePath));
-    // The point of the short-circuit: no LLM was spawned.
-    expect(spawnClaude).not.toHaveBeenCalled();
+    // The point of the short-circuit: no LLM provider was even resolved for
+    // spawning, regardless of which import-analysis mapping is configured.
+    expect(getProvider).not.toHaveBeenCalled();
   });
 });
 
-const spawnClaude = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/claude/spawn", () => ({ spawnClaude }));
+const getProvider = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/providers", () => ({ getProvider }));

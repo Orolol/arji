@@ -199,9 +199,13 @@ describe("QwenCodeProvider", () => {
       expect(args).not.toContain("--yolo");
     });
 
-    it("does not include --yolo for analyze mode", () => {
+    it("auto-approves edits without enabling yolo in analyze mode", () => {
       const args = provider.buildArgs({ ...baseOptions, mode: "analyze" });
       expect(args).not.toContain("--yolo");
+      expect(args.slice(args.indexOf("--approval-mode"), args.indexOf("--approval-mode") + 2)).toEqual([
+        "--approval-mode",
+        "auto-edit",
+      ]);
     });
 
     it("includes --model when model is specified", () => {

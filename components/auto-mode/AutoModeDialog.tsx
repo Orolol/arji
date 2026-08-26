@@ -111,6 +111,7 @@ export function AutoModeDialog({
     String(DEFAULT_AUTO_REVIEW_CONCURRENCY)
   );
   const [smartDispatch, setSmartDispatch] = useState(false);
+  const [secondOpinion, setSecondOpinion] = useState(false);
 
   const applyStatus = useCallback(
     (next: AutoModeStatus, fallbackAgent: string | null) => {
@@ -121,6 +122,7 @@ export function AutoModeDialog({
       setBuildConcurrency(String(next.buildConcurrency));
       setReviewConcurrency(String(next.reviewConcurrency));
       setSmartDispatch(next.smartDispatch);
+      setSecondOpinion(next.secondOpinion);
     },
     []
   );
@@ -178,6 +180,7 @@ export function AutoModeDialog({
           buildConcurrency: buildBudget,
           reviewConcurrency: reviewBudget,
           smartDispatch,
+          secondOpinion,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -311,7 +314,6 @@ export function AutoModeDialog({
             <OptionRow
               label="Pick the agent by track record"
               hint="Only for roles left empty above: dispatches the named agent with the best 30-day success rate, once it has at least 5 finished runs for that role."
-              last
             >
               <input
                 type="checkbox"
@@ -320,6 +322,22 @@ export function AutoModeDialog({
                 aria-label="Pick the agent by track record"
                 checked={smartDispatch}
                 onChange={(e) => setSmartDispatch(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-border"
+              />
+            </OptionRow>
+
+            <OptionRow
+              label="Independent second opinion"
+              hint="Before merge, spends one review slot on a short read-only pass by a provider different from both the builder and reviewer."
+              last
+            >
+              <input
+                type="checkbox"
+                role="switch"
+                data-testid="auto-mode-second-opinion"
+                aria-label="Independent second opinion"
+                checked={secondOpinion}
+                onChange={(e) => setSecondOpinion(e.target.checked)}
                 className="h-3.5 w-3.5 rounded border-border"
               />
             </OptionRow>
