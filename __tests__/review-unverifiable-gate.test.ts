@@ -51,6 +51,7 @@ import {
 } from "@/lib/db/schema";
 import {
   assessReviewOutcome,
+  listUnverifiableReviewEpicIds,
   readReviewChannelState,
   resolveReviewVerdict,
 } from "@/lib/pipeline/findings";
@@ -397,6 +398,106 @@ describe("selectMergeCandidates", () => {
     expect(selectMergeCandidates(PROJECT_ID, board).map((c) => c.epicId)).toEqual([
       EPIC_ID,
     ]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The board read model                                                */
+/* ------------------------------------------------------------------ */
+
+describe("listUnverifiableReviewEpicIds", () => {
+  it("reports the epic whose latest delivered review filed nothing", () => {
+    insertReviewSession({ provider: "claude-code" });
+    expect([...listUnverifiableReviewEpicIds(PROJECT_ID, db())]).toEqual([
+      EPIC_ID,
+    ]);
+  });
+
+  it("clears once a later review delivers a verdict", () => {
+    insertReviewSession({ provider: "claude-code" });
+    db()
+      .insert(agentSessions)
+      .values({
+        id: "session-review-late",
+        projectId: PROJECT_ID,
+        epicId: EPIC_ID,
+        status: "completed",
+        outcome: "answered",
+        agentType: "review_code",
+        provider: "claude-code",
+        reviewVerdict: "approved",
+        startedAt: "2026-08-20T11:00:00.000Z",
+        endedAt: "2026-08-20T11:30:00.000Z",
+        createdAt: "2026-08-20T11:00:00.000Z",
+      })
+      .run();
+    expect(listUnverifiableReviewEpicIds(PROJECT_ID, db()).size).toBe(0);
+  });
+
+  it("spares a review that filed findings rows of its own", () => {
+    const sessionId = insertReviewSession({ provider: "claude-code" });
+    db()
+      .insert(reviewComments)
+      .values({
+        id: "rc-1",
+        epicId: EPIC_ID,
+        filePath: "lib/providers/index.ts",
+        lineNumber: 12,
+        body: "[major] undocumented flag",
+        author: "agent",
+        status: "open",
+        agentSessionId: sessionId,
+        createdAt: "2026-08-20T10:20:00.000Z",
+        updatedAt: "2026-08-20T10:20:00.000Z",
+      })
+      .run();
+    expect(listUnverifiableReviewEpicIds(PROJECT_ID, db()).size).toBe(0);
+  });
+
+  it("spares MCP-less providers and a globally disabled channel", () => {
+    insertReviewSession({ provider: "gemini-cli" });
+    expect(listUnverifiableReviewEpicIds(PROJECT_ID, db()).size).toBe(0);
+
+    db().delete(agentSessions).run();
+    insertReviewSession({ provider: "claude-code" });
+    db()
+      .insert(settings)
+      .values({ key: "mcp_tools_enabled", value: "false" })
+      .run();
+    expect(listUnverifiableReviewEpicIds(PROJECT_ID, db()).size).toBe(0);
+  });
+
+  it("ignores story-scoped reviews and reviews that never delivered", () => {
+    db()
+      .insert(agentSessions)
+      .values([
+        {
+          id: "session-review-failed",
+          projectId: PROJECT_ID,
+          epicId: EPIC_ID,
+          status: "failed",
+          outcome: null,
+          agentType: "review_code",
+          provider: "claude-code",
+          startedAt: REVIEW_STARTED_AT,
+          endedAt: REVIEW_ENDED_AT,
+          createdAt: REVIEW_STARTED_AT,
+        },
+        {
+          id: "session-review-silent",
+          projectId: PROJECT_ID,
+          epicId: EPIC_ID,
+          status: "completed",
+          outcome: "silent",
+          agentType: "review_code",
+          provider: "claude-code",
+          startedAt: REVIEW_STARTED_AT,
+          endedAt: REVIEW_ENDED_AT,
+          createdAt: REVIEW_STARTED_AT,
+        },
+      ])
+      .run();
+    expect(listUnverifiableReviewEpicIds(PROJECT_ID, db()).size).toBe(0);
   });
 });
 

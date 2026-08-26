@@ -25,6 +25,7 @@ import {
   TriangleAlert,
   RefreshCw,
   Link2,
+  ShieldAlert,
 } from "lucide-react";
 import type {
   DependencyFocusRole,
@@ -221,6 +222,11 @@ export function EpicCard({
   const showDeliveredWithRemainingStories =
     (epic.status === "done" || epic.status === "released") &&
     remainingStories > 0;
+  // The Review column's blocking reason: the last review ran but nothing it
+  // found reached Arij, so neither the merge nor review → done will accept
+  // it. Only meaningful while the ticket is actually waiting on a review.
+  const showUnverifiableReview =
+    epic.status === "review" && !!epic.reviewUnverifiable;
 
   // Elapsed time ticker for active agent
   const [elapsedText, setElapsedText] = useState("");
@@ -487,6 +493,16 @@ export function EpicCard({
           >
             <TriangleAlert className="h-3 w-3" aria-hidden="true" />
             {remainingStories} {remainingStories === 1 ? "story" : "stories"} left
+          </span>
+        )}
+        {showUnverifiableReview && (
+          <span
+            className="inline-flex items-center gap-1 rounded-[4px] border border-destructive/40 px-[5px] text-[10px] text-destructive"
+            title="The last review filed no verdict through submit_findings — nothing it found was recorded, so this epic cannot be merged or approved. Run another review."
+            data-testid={`epic-review-unverifiable-${epic.id}`}
+          >
+            <ShieldAlert className="h-3 w-3" aria-hidden="true" />
+            Review unverifiable
           </span>
         )}
         {hasUnreadAiUpdate && (

@@ -131,6 +131,14 @@ export interface KanbanEpic {
   latestUserCommentCreatedAt?: string | null;
   /** The epic's read cursor (ticket_read_cursors.last_read_at), if any. */
   lastReadAt?: string | null;
+  /**
+   * True when the epic's latest delivered review could not file anything
+   * through `submit_findings` — no verdict, no findings — on a provider that
+   * has the tool. The review therefore proves nothing, and the merge and
+   * review → done gates both refuse (lib/pipeline/findings.ts). Surfaced on
+   * the card as the Review column's blocking reason.
+   */
+  reviewUnverifiable?: boolean;
   /** Aggregate of the latest atomic acceptance-grading report. */
   gradingStatus?: GradingStatus | null;
   gradingSummary?: string | null;

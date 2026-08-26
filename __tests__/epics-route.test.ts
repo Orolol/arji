@@ -81,6 +81,20 @@ const mockSchema = vi.hoisted(() => ({
     lastReadAt: "lastReadAt",
     updatedAt: "updatedAt",
   },
+  // Read by the route's unverifiable-review pass
+  // (listUnverifiableReviewEpicIds): the mcp_tools_enabled toggle, then the
+  // latest delivered review per epic and the rows it filed.
+  settings: {
+    __name: "settings",
+    key: "key",
+    value: "value",
+  },
+  reviewComments: {
+    __name: "reviewComments",
+    id: "id",
+    epicId: "epicId",
+    agentSessionId: "agentSessionId",
+  },
 }));
 
 const mockDbState = vi.hoisted(() => ({
@@ -173,6 +187,8 @@ vi.mock("@/lib/db/schema", () => ({
   agentSessions: mockSchema.agentSessions,
   gradingReports: mockSchema.gradingReports,
   ticketReadCursors: mockSchema.ticketReadCursors,
+  settings: mockSchema.settings,
+  reviewComments: mockSchema.reviewComments,
 }));
 
 vi.mock("@/lib/utils/nanoid", () => ({
@@ -310,6 +326,9 @@ describe("POST /api/projects/[projectId]/epics", () => {
       lastReadAt: "2026-02-14T11:00:00.000Z",
       gradingStatus: "missed",
       gradingSummary: "One gap remains.",
+      // The Review column's blocking flag ships with every row; this board
+      // has no unverifiable review, so it reads false rather than absent.
+      reviewUnverifiable: false,
     });
     // story counts + latest comments + latest sessions + latest user comments
     // + session costs + latest grading + ticket read cursors

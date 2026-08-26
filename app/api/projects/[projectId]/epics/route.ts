@@ -42,6 +42,7 @@ import {
   parseGradingEntries,
 } from "@/lib/grading/report";
 import { OPEN_FRICTION_STATUSES } from "@/lib/frictions/constants";
+import { listUnverifiableReviewEpicIds } from "@/lib/pipeline/findings";
 
 class FrictionConversionConflict extends Error {}
 
@@ -263,11 +264,16 @@ export async function GET(
     queryMs: Date.now() - queryStartedAt,
   });
 
+  // Two queries for the whole board, not one per epic — see
+  // listUnverifiableReviewEpicIds.
+  const unverifiableReviewEpicIds = listUnverifiableReviewEpicIds(projectId);
+
   const data = result.map(({ latestGradingEntries, ...epic }) => ({
     ...epic,
     gradingStatus: aggregateGradingStatus(
       parseGradingEntries(latestGradingEntries),
     ),
+    reviewUnverifiable: unverifiableReviewEpicIds.has(epic.id),
   }));
 
   return NextResponse.json({ data });

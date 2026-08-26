@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db as defaultDb, type ArijDatabase } from "@/lib/db";
 import { agentSessions, reviewComments } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
@@ -355,6 +355,97 @@ export function isReviewSessionUnverifiable(
   database: ArijDatabase = defaultDb
 ): boolean {
   return readReviewChannelState(sessionId, database)?.unverifiable ?? false;
+}
+
+/**
+ * The epics of a project whose LATEST delivered review is unverifiable —
+ * the board's read model for the Review column's blocking reason.
+ *
+ * Latest, not any: an epic re-reviewed after a broken round is no longer
+ * blocked by the broken one, and the column should say so the moment the
+ * channel comes back.
+ *
+ * Two queries regardless of board size, which is why this exists instead of
+ * calling {@link readReviewChannelState} per epic: one window-function scan
+ * for the newest delivered epic-scoped review per epic, and one `IN` lookup
+ * that drops the sessions which did file rows. Callers that already hold a
+ * single session id should still use readReviewChannelState.
+ */
+export function listUnverifiableReviewEpicIds(
+  projectId: string,
+  database: ArijDatabase = defaultDb
+): Set<string> {
+  if (!isMcpToolsEnabled(database)) return new Set();
+
+  const ranked = database
+    .select({
+      epicId: agentSessions.epicId,
+      sessionId: agentSessions.id,
+      provider: agentSessions.provider,
+      reviewVerdict: agentSessions.reviewVerdict,
+      rowNum: sql<number>`ROW_NUMBER() OVER (
+        PARTITION BY ${agentSessions.epicId}
+        ORDER BY COALESCE(
+          ${agentSessions.endedAt},
+          ${agentSessions.completedAt},
+          ${agentSessions.createdAt}
+        ) DESC, ${agentSessions.id} DESC
+      )`.as("review_row_num"),
+    })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.projectId, projectId),
+        sql`${agentSessions.epicId} IS NOT NULL`,
+        sql`${agentSessions.userStoryId} IS NULL`,
+        eq(agentSessions.status, "completed"),
+        eq(agentSessions.outcome, "answered"),
+        sql`${agentSessions.agentType} LIKE 'review%'`
+      )
+    )
+    .as("ranked_reviews");
+
+  const latest = database
+    .select({
+      epicId: ranked.epicId,
+      sessionId: ranked.sessionId,
+      provider: ranked.provider,
+      reviewVerdict: ranked.reviewVerdict,
+    })
+    .from(ranked)
+    .where(eq(ranked.rowNum, 1))
+    .all();
+
+  const candidates = latest.filter(
+    (row) =>
+      row.epicId !== null &&
+      providerSupportsMcp(row.provider ?? "claude-code") &&
+      !isStructuredReviewVerdict(row.reviewVerdict)
+  );
+  if (candidates.length === 0) return new Set();
+
+  // A session with rows of its own proved the channel worked — same escape
+  // hatch readReviewChannelState applies.
+  const filed = new Set(
+    database
+      .select({ agentSessionId: reviewComments.agentSessionId })
+      .from(reviewComments)
+      .where(
+        inArray(
+          reviewComments.agentSessionId,
+          candidates.map((row) => row.sessionId)
+        )
+      )
+      .all()
+      .map((row) => row.agentSessionId)
+      .filter((id): id is string => id !== null)
+  );
+
+  return new Set(
+    candidates
+      .filter((row) => !filed.has(row.sessionId))
+      .map((row) => row.epicId as string)
+  );
 }
 
 /**
