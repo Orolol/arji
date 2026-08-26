@@ -40,8 +40,6 @@ export interface UseBoardMergeOptions {
   onResolveDispatched?: (epicId: string, sessionId: string) => void;
 }
 
-const EMPTY_STATE: BoardMergeState = {};
-
 export function useBoardMerge(
   projectId: string,
   { onMerged, onResolveDispatched }: UseBoardMergeOptions = {}
@@ -119,9 +117,13 @@ export function useBoardMerge(
           const data = await res.json().catch(() => ({}));
 
           if (!res.ok || data.error) {
+            // Same rule as `merge`: only git refusing keeps Resolve merge on
+            // the card. A busy-agent 409 or a refused preflight would fail
+            // identically on the next click, so the card falls back to the
+            // readiness signal for the reason instead.
             patch(epicId, {
               error: data.error || "Failed to resolve the merge",
-              conflict: true,
+              conflict: data.mergeFailed === true,
             });
             return;
           }
@@ -135,24 +137,22 @@ export function useBoardMerge(
             onResolveDispatched?.(epicId, data.data.sessionId);
           }
         } catch {
-          patch(epicId, {
-            error: "Failed to resolve the merge",
-            conflict: true,
-          });
+          patch(epicId, { error: "Failed to resolve the merge" });
         }
       }),
     [projectId, run, patch, onMerged, onResolveDispatched]
   );
 
+  /**
+   * Drop a card's failure line. Wired to the × on the error itself: nothing
+   * else clears this state, so without a control a failure would sit on the
+   * card for the Board's lifetime — including after its cause is gone and the
+   * card has moved back up to "Ready to merge".
+   */
   const dismissError = useCallback(
     (epicId: string) => patch(epicId, {}),
     [patch]
   );
 
-  const stateFor = useCallback(
-    (epicId: string): BoardMergeState => stateByEpic[epicId] ?? EMPTY_STATE,
-    [stateByEpic]
-  );
-
-  return { stateByEpic, stateFor, merge, resolveMerge, dismissError };
+  return { stateByEpic, merge, resolveMerge, dismissError };
 }

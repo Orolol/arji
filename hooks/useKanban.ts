@@ -11,6 +11,7 @@ import {
   type ReleaseGroup,
 } from "@/lib/types/kanban";
 import { sortReviewColumn } from "@/lib/kanban/merge-readiness";
+import { persistedColumnOrder } from "@/lib/kanban/reorder";
 
 interface ReleaseRow {
   id: string;
@@ -145,17 +146,30 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
 
       setTimeout(async () => {
         setBoard((current) => {
+          const touched = new Set<KanbanStatus>([fromColumn, toColumn]);
           const reorderItems: ReorderItem[] = [];
+          const nextPositionById = new Map<string, number>();
+
           for (const col of DRAGGABLE_COLUMNS) {
-            if (col === fromColumn || col === toColumn) {
-              current.columns[col].forEach((epic, idx) => {
-                reorderItems.push({
-                  id: epic.id,
-                  status: col,
-                  position: idx,
-                });
-              });
-            }
+            if (!touched.has(col)) continue;
+
+            // Review is DISPLAYED merge-ready-first, so its display index is
+            // not its position; persisting the index would write that derived
+            // signal into `epics.position` and reorder cards nobody dragged.
+            // Every other column is drawn in position order, where the two
+            // coincide. See lib/kanban/reorder.ts.
+            const persisted =
+              col === "review"
+                ? persistedColumnOrder(
+                    current.columns[col],
+                    col === toColumn ? epicId : null
+                  )
+                : current.columns[col];
+
+            persisted.forEach((epic, idx) => {
+              reorderItems.push({ id: epic.id, status: col, position: idx });
+              nextPositionById.set(epic.id, idx);
+            });
           }
 
           fetch(`/api/projects/${projectId}/epics/reorder`, {
@@ -173,7 +187,22 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
             loadEpics();
           });
 
-          return current;
+          // Mirror what was just persisted onto the local rows, keeping each
+          // column in its DISPLAY order. Without this a second drag before
+          // the next refresh would re-sort Review by stale positions and undo
+          // the first one.
+          const columns = { ...current.columns };
+          for (const col of touched) {
+            if (col === "released") continue;
+            columns[col] = current.columns[col].map((epic) => {
+              const position = nextPositionById.get(epic.id);
+              return position === undefined || position === epic.position
+                ? epic
+                : { ...epic, position };
+            });
+          }
+
+          return { columns, releaseGroups: current.releaseGroups };
         });
       }, 0);
     },

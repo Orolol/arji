@@ -376,6 +376,97 @@ describe("Merge affordances on Review cards", () => {
     );
   });
 
+  it("stands down while a session is merely QUEUED on the ticket", () => {
+    // A queued build raises no agent chip, but merging removes the epic's
+    // worktree — the queued session would start into a directory that is
+    // already gone. The approve route refuses the same case with a 409.
+    const ready = makeEpic({ mergeReadiness: READY });
+    setReviewColumn([ready]);
+    renderBoard({ busyEpicIds: new Set([ready.id]) });
+
+    expect(screen.queryByTestId(`epic-merge-${ready.id}`)).toBeNull();
+  });
+
+  it("withholds Resolve merge from a busy ticket too", () => {
+    const conflict = makeEpic({ mergeReadiness: CONFLICT });
+    setReviewColumn([conflict]);
+    renderBoard({ busyEpicIds: new Set([conflict.id]) });
+
+    expect(screen.queryByTestId(`epic-resolve-merge-${conflict.id}`)).toBeNull();
+    // The reason still shows — it is true, and it is not a click.
+    expect(
+      screen.getByTestId(`epic-merge-blocked-${conflict.id}`)
+    ).toBeInTheDocument();
+  });
+
+  it("lets the user dismiss a merge error", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "Review comments are still open" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ready = makeEpic({ mergeReadiness: READY });
+    setReviewColumn([ready]);
+    renderBoard();
+
+    await userEvent.click(screen.getByTestId(`epic-merge-${ready.id}`));
+    await waitFor(() =>
+      expect(screen.getByTestId(`epic-merge-error-${ready.id}`)).toBeInTheDocument()
+    );
+
+    await userEvent.click(
+      screen.getByTestId(`epic-merge-error-dismiss-${ready.id}`)
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByTestId(`epic-merge-error-${ready.id}`)).toBeNull()
+    );
+    // The card is ready again, so Merge is back and no stale failure sits
+    // next to it.
+    expect(screen.getByTestId(`epic-merge-${ready.id}`)).toBeInTheDocument();
+  });
+
+  it("stops offering Resolve merge when the resolve failed for a non-git reason", async () => {
+    const fetchMock = vi
+      .fn()
+      // 1. The merge itself: git refused, so Resolve merge is offered.
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "Merge failed: CONFLICT", mergeFailed: true }),
+      })
+      // 2. Resolve merge: an agent is busy — clicking again would hit the
+      //    same wall, so the button must not be re-offered.
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({
+          error: "Another agent is already running for this epic.",
+          code: "AGENT_ALREADY_RUNNING",
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ready = makeEpic({ mergeReadiness: READY });
+    setReviewColumn([ready]);
+    renderBoard();
+
+    await userEvent.click(screen.getByTestId(`epic-merge-${ready.id}`));
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`epic-resolve-merge-${ready.id}`)
+      ).toBeInTheDocument()
+    );
+
+    await userEvent.click(screen.getByTestId(`epic-resolve-merge-${ready.id}`));
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`epic-merge-error-${ready.id}`)
+      ).toHaveTextContent("Another agent is already running")
+    );
+    expect(screen.queryByTestId(`epic-resolve-merge-${ready.id}`)).toBeNull();
+  });
+
   it("does not fire a second merge while the first is in flight", async () => {
     // The executor runs synchronously, so `release` is wired before the first
     // click; the initialiser is there to keep it callable for the type checker.

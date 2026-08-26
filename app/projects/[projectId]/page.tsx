@@ -121,6 +121,29 @@ export default function KanbanPage() {
     },
     [activities]
   );
+  /**
+   * Epics an agent still owns — QUEUED included, unlike `runningEpicIds`.
+   *
+   * The board uses this to withhold the Merge button: merging removes the
+   * epic's worktree, so doing it over a queued build drops that build into a
+   * directory that no longer exists. Matches what the approve route refuses
+   * on (`getRunningSessionForTarget`), which is any active session on the
+   * epic regardless of its type.
+   */
+  const busyEpicIds = useMemo(
+    () =>
+      new Set(
+        activities
+          .filter(
+            (session) =>
+              session.epicId &&
+              (session.status === "running" || session.status === "queued")
+          )
+          .map((session) => session.epicId as string)
+      ),
+    [activities]
+  );
+
   const runningEpicIds = useMemo(
     () =>
       new Set(
@@ -763,6 +786,7 @@ export default function KanbanPage() {
                 onMoveError={(error) => addToast("error", error)}
                 failedSessions={failedSessions}
                 onRetryBuild={handleRetryBuild}
+                busyEpicIds={busyEpicIds}
                 hideReleased={panelOpen}
                 onVisibleCountChange={setVisibleCount}
                 onMergeSuccess={handleBoardMergeSuccess}

@@ -11,9 +11,15 @@
  *
  * This module is the one definition. `selectMergeCandidates`
  * (lib/auto-mode/select.ts) evaluates it over its sweep snapshot; the board
- * API evaluates it over its list query. Both call the same function, so a
- * card can never claim "ready to merge" for an epic Full Auto would refuse —
- * which is exactly the drift a second implementation would introduce.
+ * API evaluates it over its list query. Both call the same function, so
+ * neither side can drift into its own idea of "ready" — which is exactly
+ * what a second implementation would introduce.
+ *
+ * The two callers are not identical sets, and both differences are
+ * deliberate: the board also passes `lastMergeFailureAt` (auto-mode carries
+ * that fact in its own registry backoff instead), and auto-mode additionally
+ * applies the runtime exclusions below. What they share is the definition of
+ * ready.
  *
  * Client-safe by convention (lib/kanban/*): pure functions, no database, no
  * server imports.
@@ -25,13 +31,17 @@
  * applies them alongside this predicate (see `selectMergeCandidates`).
  */
 
-/** Why an epic in Review cannot be merged, most actionable first. */
+/**
+ * Why an epic in Review cannot be merged, most actionable first. The order of
+ * this union is the order `evaluateMergeReadiness` checks in, which is also
+ * the order the card reports in.
+ */
 export type MergeBlocker =
   | "not_in_review"
   | "merge_conflict"
   | "open_findings"
-  | "stale_review"
   | "no_review"
+  | "stale_review"
   | "no_branch";
 
 export interface MergeReadinessFacts {
@@ -172,10 +182,10 @@ export function describeMergeBlocker(
       return readiness.openFindings === 1
         ? "1 open finding"
         : `${readiness.openFindings} open findings`;
-    case "stale_review":
-      return "Review outdated — new commit since";
     case "no_review":
       return "Awaiting review";
+    case "stale_review":
+      return "Review outdated — new commit since";
     case "no_branch":
       return "No branch to merge";
     default:

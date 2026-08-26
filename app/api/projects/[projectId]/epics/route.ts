@@ -222,13 +222,22 @@ export async function GET(
     })
     .from(ticketActivityLog)
     .where(
-      or(
-        // Spelled out rather than composed from drizzle's `like()` so the
-        // ESCAPE clause lands on the LIKE itself, whatever grouping the
-        // helper decides to emit around its operands.
-        ...MERGE_FAILURE_REASON_LIKE_PATTERNS.map(
-          (pattern) =>
-            sql`${ticketActivityLog.reason} LIKE ${pattern} ESCAPE '\\'`
+      and(
+        // Scoped FIRST so `ticket_activity_log_project_idx` bounds the scan:
+        // this table takes a row per transition AND per guard refusal across
+        // every project, is never pruned, and the LIKEs below run against an
+        // un-indexed column. The join to `epics` already scopes the result,
+        // so this only narrows what SQLite has to string-match — on an
+        // endpoint the board re-fetches on every `session:*` event.
+        eq(ticketActivityLog.projectId, projectId),
+        or(
+          // Spelled out rather than composed from drizzle's `like()` so the
+          // ESCAPE clause lands on the LIKE itself, whatever grouping the
+          // helper decides to emit around its operands.
+          ...MERGE_FAILURE_REASON_LIKE_PATTERNS.map(
+            (pattern) =>
+              sql`${ticketActivityLog.reason} LIKE ${pattern} ESCAPE '\\'`
+          )
         )
       )
     )

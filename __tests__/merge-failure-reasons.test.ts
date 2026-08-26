@@ -25,9 +25,6 @@ describe("isMergeFailureReason", () => {
     expect(
       isMergeFailureReason(AUTO_MODE_REASONS.dispatchFailed("merge", "boom"))
     ).toBe(true);
-    expect(isMergeFailureReason(AUTO_MODE_REASONS.mergeRolledBack("boom"))).toBe(
-      true
-    );
   });
 
   it("recognises the approve route's blocked-merge reason", () => {
@@ -44,6 +41,17 @@ describe("isMergeFailureReason", () => {
     expect(
       isMergeFailureReason(
         AUTO_MODE_REASONS.mergeRefused("Review comments are still open")
+      )
+    ).toBe(false);
+  });
+
+  it("ignores a rollback: the merge LANDED, a guard refused, git never did", () => {
+    // `mergeRolledBack` is logged when the post-merge `→ done` guard refused
+    // and main was put back. Calling that a conflict would paint the card red
+    // and — since `merge_conflict` is checked first — hide the real blocker.
+    expect(
+      isMergeFailureReason(
+        AUTO_MODE_REASONS.mergeRolledBack("Review comments are still open")
       )
     ).toBe(false);
   });

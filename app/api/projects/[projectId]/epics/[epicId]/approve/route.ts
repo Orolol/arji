@@ -22,6 +22,10 @@ import {
 import { createApproveMergeFailedNotification } from "@/lib/notifications/create";
 import { autoModeRegistry } from "@/lib/auto-mode/registry";
 import { buildApprovalMergeBlockedReason } from "@/lib/workflow/merge-failure";
+import {
+  createAgentAlreadyRunningPayload,
+  getRunningSessionForTarget,
+} from "@/lib/agents/concurrency";
 import { getEpicOr404, isErrorResponse } from "@/lib/api/route-helpers";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
@@ -55,6 +59,29 @@ export async function POST(_request: NextRequest, { params }: Params) {
     return NextResponse.json(
       { error: "Epic must be in review status to approve" },
       { status: 400 }
+    );
+  }
+
+  // ---- Refuse while an agent still owns the epic. ------------------------
+  // A merge removes the epic's worktree (`git worktree remove --force` in
+  // mergeWorktree), so approving over a QUEUED build drops that build into a
+  // directory that no longer exists the moment it starts. `beginMergeWork`
+  // below only serialises merge against merge, and the engine's owning-session
+  // rule does not cover an epic sitting in `review` — so the guard has to be
+  // here. Same check, same shape, as resolve-merge already applies.
+  const activeSession = getRunningSessionForTarget({
+    scope: "epic",
+    projectId,
+    epicId,
+  });
+  if (activeSession) {
+    return NextResponse.json(
+      createAgentAlreadyRunningPayload(
+        { scope: "epic", projectId, epicId },
+        activeSession,
+        "An agent is still working on this epic — wait for it to finish or cancel it before merging."
+      ),
+      { status: 409 }
     );
   }
 

@@ -43,13 +43,21 @@ export function buildApprovalMergeBlockedReason(input: {
 
 /**
  * Every reason head that means "the branch is still on the wrong side of
- * `main`, and git is the reason".
+ * `main`, and GIT is the reason".
  *
- * `AUTO_MODE_REASONS.mergeRefused` is deliberately absent: it records a
- * WORKFLOW guard refusing (no completed review, an open finding), which the
- * readiness predicate already reports precisely. Counting it here would
- * replace "2 open findings" with a vague "merge conflict" on every card the
- * supervisor skipped.
+ * Two auto-mode reasons are deliberately absent, both for the same rule:
+ *
+ *   - `mergeRefused` records a WORKFLOW guard refusing (no completed review,
+ *     an open finding), which the readiness predicate already reports
+ *     precisely. Counting it here would replace "2 open findings" with a
+ *     vague "merge conflict" on every card the supervisor skipped.
+ *   - `mergeRolledBack` is the same category one step later: the merge
+ *     LANDED and the post-merge `→ done` guard refused, so main was put back
+ *     (lib/auto-mode/merge.ts). Nothing conflicted. Because `merge_conflict`
+ *     is evaluated first, admitting it here would let it outrank the accurate
+ *     blocker and offer Resolve merge for a workflow problem.
+ *
+ * The bar is git refusing, not the merge failing to stick.
  */
 export const MERGE_FAILURE_REASON_PREFIXES: readonly string[] = [
   APPROVAL_MERGE_BLOCKED_PREFIX,
@@ -58,7 +66,6 @@ export const MERGE_FAILURE_REASON_PREFIXES: readonly string[] = [
   AUTO_MODE_REASONS.mergeConflictDeferred,
   // Builders: probe for the fixed head.
   reasonPrefix((error) => AUTO_MODE_REASONS.dispatchFailed("merge", error)),
-  reasonPrefix(AUTO_MODE_REASONS.mergeRolledBack),
 ];
 
 /** True when an activity-log reason records a merge that could not land. */

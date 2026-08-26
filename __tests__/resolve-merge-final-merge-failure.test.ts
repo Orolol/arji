@@ -214,6 +214,32 @@ describe("Resolve-merge: final merge fails after the agent", () => {
     expect(mocks.tryExportArjiJson).not.toHaveBeenCalled();
   });
 
+  it("flags the clean-path final merge failure with mergeFailed", async () => {
+    // No conflicts to resolve, so the route merges straight away — and when
+    // THAT refuses, the flag is what tells a caller git was the wall (the
+    // board card keys "offer Resolve merge" off it, same as the approve
+    // route's 409).
+    mocks.startMergeInWorktree.mockResolvedValue({
+      conflicted: false,
+      output: "Already up to date.",
+    });
+    mocks.mergeWorktree.mockResolvedValue({
+      merged: false,
+      error: "CONFLICT (content): lib/foo.ts",
+      reason: "conflict",
+    });
+    seed();
+
+    const res = await callResolveMerge();
+    const json = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(json).toMatchObject({
+      error: "CONFLICT (content): lib/foo.ts",
+      mergeFailed: true,
+    });
+  });
+
   it("still closes the epic when the final merge lands (control)", async () => {
     mocks.mergeWorktree.mockResolvedValue({
       merged: true,

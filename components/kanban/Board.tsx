@@ -55,6 +55,13 @@ interface BoardProps {
   failedSessions?: Record<string, FailedSessionInfo>;
   onRetryBuild?: (epicId: string) => void;
   /**
+   * Epics with a queued OR running session. Broader than `runningEpicIds`,
+   * which is the agent chip's set — merging out from under a queued build
+   * deletes its worktree before it starts, so the Merge button needs the
+   * wider signal (and the approve route refuses the same case with a 409).
+   */
+  busyEpicIds?: Set<string>;
+  /**
    * Hide the Released digest while a side panel owns the right edge: the four
    * working columns and the panel share the width instead (see the board
    * page, which flips this from the chat panel's expanded state).
@@ -106,6 +113,7 @@ export function Board({
   onMoveError,
   failedSessions,
   onRetryBuild,
+  busyEpicIds,
   hideReleased = false,
   onVisibleCountChange,
   onMergeSuccess,
@@ -115,15 +123,32 @@ export function Board({
 
   // Merging from a card reuses the ticket detail's approve route, so the
   // board gains no rules of its own — see hooks/useBoardMerge.ts.
-  const boardMerge = useBoardMerge(projectId, {
-    onMerged: (epicId) => {
+  //
+  // Both handlers are memoised so the hook's own `useCallback`s stay stable;
+  // an inline arrow here would change `merge`/`resolveMerge` on every render
+  // and turn the `epicViews` memo below into a no-op.
+  const handleMerged = useCallback(
+    (epicId: string) => {
       refresh();
       onMergeSuccess?.(epicId);
     },
-    onResolveDispatched: (epicId, sessionId) => {
+    [refresh, onMergeSuccess]
+  );
+  const handleResolveDispatched = useCallback(
+    (epicId: string, sessionId: string) => {
       refresh();
       onMergeAgentDispatched?.(epicId, sessionId);
     },
+    [refresh, onMergeAgentDispatched]
+  );
+  const {
+    stateByEpic: mergeStateByEpic,
+    merge,
+    resolveMerge,
+    dismissError: dismissMergeError,
+  } = useBoardMerge(projectId, {
+    onMerged: handleMerged,
+    onResolveDispatched: handleResolveDispatched,
   });
   // Optimistic overlay on the server-side read cursors: opening a ticket
   // clears its unread dot immediately, before the /api/inbox/read POST from
@@ -265,10 +290,12 @@ export function Board({
           awaitingReply: isAwaitingReply(epic),
           failedSession,
           mergeReadiness: inReview ? epic.mergeReadiness : undefined,
-          mergeState: inReview ? boardMerge.stateByEpic[epic.id] : undefined,
-          onMerge: inReview ? () => boardMerge.merge(epic.id) : undefined,
-          onResolveMerge: inReview
-            ? () => boardMerge.resolveMerge(epic.id)
+          mergeState: inReview ? mergeStateByEpic[epic.id] : undefined,
+          agentBusy: busyEpicIds?.has(epic.id) || false,
+          onMerge: inReview ? () => merge(epic.id) : undefined,
+          onResolveMerge: inReview ? () => resolveMerge(epic.id) : undefined,
+          onDismissMergeError: inReview
+            ? () => dismissMergeError(epic.id)
             : undefined,
           onToggleSelect: onToggleSelect
             ? () => onToggleSelect(epic.id)
@@ -291,7 +318,11 @@ export function Board({
     activeAgentActivities,
     unreadAiByEpicId,
     failedSessions,
-    boardMerge,
+    busyEpicIds,
+    mergeStateByEpic,
+    merge,
+    resolveMerge,
+    dismissMergeError,
     onToggleSelect,
     onLinkedAgentHoverChange,
     onRetryBuild,

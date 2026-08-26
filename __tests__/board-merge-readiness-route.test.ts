@@ -387,6 +387,52 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
     expect(row).not.toHaveProperty("lastMergeFailureAt");
   });
 
+  it("ignores another project's merge-failure rows", async () => {
+    // The subquery is narrowed by projectId so the index bounds the scan
+    // before the LIKEs run. That narrowing must be behaviour-preserving —
+    // and it must not have been load-bearing for correctness either, since
+    // the join to `epics` already scopes the result.
+    seedReadyEpic("mine");
+
+    db.insert(projects)
+      .values({
+        id: "other-project",
+        name: "Other",
+        gitRepoPath: "/tmp/other",
+        createdAt: at(0),
+      })
+      .run();
+    db.insert(epics)
+      .values({
+        id: "theirs",
+        projectId: "other-project",
+        title: "theirs",
+        status: "review",
+        priority: 0,
+        position: 0,
+        branchName: "feature/theirs",
+        createdAt: at(0),
+        updatedAt: at(0),
+      })
+      .run();
+    db.insert(ticketActivityLog)
+      .values({
+        id: nextId("act"),
+        projectId: "other-project",
+        epicId: "theirs",
+        fromStatus: "review",
+        toStatus: "review",
+        actor: "system",
+        reason: AUTO_MODE_REASONS.mergeConflict,
+        createdAt: at(40),
+      })
+      .run();
+
+    expect(await readinessOf("mine")).toMatchObject({ ready: true });
+    const rows = await readBoard();
+    expect(rows.map((row) => row.id)).toEqual(["mine"]);
+  });
+
   it("scopes every fact to its own epic", async () => {
     seedReadyEpic("clean", 0);
     seedReadyEpic("dirty", 1);

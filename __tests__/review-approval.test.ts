@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   tryExportArjiJson: vi.fn(),
   beginMergeWork: vi.fn(),
   endMergeWork: vi.fn(),
+  getRunningSessionForTarget: vi.fn(),
 }));
 
 vi.mock("@/lib/db", async () => {
@@ -68,6 +69,23 @@ vi.mock("@/lib/auto-mode/registry", () => ({
     endMergeWork: mocks.endMergeWork,
   },
 }));
+
+vi.mock("@/lib/agents/concurrency", async () => {
+  const shared = await import("@/lib/agents/concurrency-shared");
+  return {
+    ...shared,
+    getRunningSessionForTarget: mocks.getRunningSessionForTarget,
+    createAgentAlreadyRunningPayload: (
+      target: unknown,
+      activeSession: { id: string },
+      errorMessage: string,
+    ) => ({
+      error: errorMessage,
+      code: shared.AGENT_ALREADY_RUNNING_CODE,
+      data: { activeSessionId: activeSession.id, activeSession, target },
+    }),
+  };
+});
 
 vi.mock("@/lib/utils/nanoid", () => ({
   createId: vi.fn(() => "new-id"),
@@ -132,6 +150,69 @@ describe("Epic review approval", () => {
     mocks.applyTransition.mockReturnValue({ valid: true });
     mocks.applyStoryTransition.mockReturnValue({ valid: true });
     mocks.beginMergeWork.mockReturnValue(true);
+    // Default: nothing else is working on the epic.
+    mocks.getRunningSessionForTarget.mockReturnValue(null);
+  });
+
+  describe("an agent still owns the epic", () => {
+    /**
+     * mergeWorktree runs `git worktree remove --force` before it merges, so
+     * approving over a session that has not finished pulls the checkout out
+     * from under it. A QUEUED session is the dangerous case: it has no
+     * process yet, raises no agent chip, and starts into a directory that is
+     * already gone. beginMergeWork only serialises merge against merge.
+     */
+    const queuedSession = {
+      id: "sess-queued",
+      projectId: "p1",
+      epicId: "epic-1",
+      userStoryId: null,
+      mode: "code",
+      provider: "claude-code",
+      startedAt: null,
+    };
+
+    it("refuses with 409 instead of merging", async () => {
+      seed();
+      mocks.getRunningSessionForTarget.mockReturnValue(queuedSession);
+
+      const res = await callApprove();
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.code).toBe("AGENT_ALREADY_RUNNING");
+      expect(json.data.activeSessionId).toBe("sess-queued");
+    });
+
+    it("writes nothing at all — no merge, no lock, no transition", async () => {
+      seed();
+      mocks.getRunningSessionForTarget.mockReturnValue(queuedSession);
+
+      await callApprove();
+
+      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+      expect(mocks.beginMergeWork).not.toHaveBeenCalled();
+      expect(mocks.applyTransition).not.toHaveBeenCalled();
+      expect(mocks.applyStoryTransition).not.toHaveBeenCalled();
+      expect(mocks.tryExportArjiJson).not.toHaveBeenCalled();
+    });
+
+    it("checks the epic scope, so a story session on the epic counts too", async () => {
+      seed();
+      mocks.getRunningSessionForTarget.mockReturnValue({
+        ...queuedSession,
+        userStoryId: "story-1",
+      });
+
+      const res = await callApprove();
+
+      expect(res.status).toBe(409);
+      expect(mocks.getRunningSessionForTarget).toHaveBeenCalledWith({
+        scope: "epic",
+        projectId: "p1",
+        epicId: "epic-1",
+      });
+    });
   });
 
   describe("merge success", () => {

@@ -27,6 +27,7 @@ import {
   Loader2,
   TriangleAlert,
   RefreshCw,
+  X,
 } from "lucide-react";
 import {
   describeMergeBlocker,
@@ -76,10 +77,20 @@ export interface EpicCardView {
   mergeReadiness?: MergeReadiness | null;
   /** In-flight / failed state of a merge started from this card. */
   mergeState?: BoardMergeState;
+  /**
+   * A queued OR running session owns this epic. Broader than `activity`,
+   * which only covers agents that already started: merging removes the epic's
+   * worktree, so a merge over a QUEUED build drops it into a directory that
+   * no longer exists. The approve route refuses the same case with a 409;
+   * this keeps the board from offering the click at all.
+   */
+  agentBusy?: boolean;
   /** Merge this epic (POST .../approve). Absent when the card is not ready. */
   onMerge?: () => void;
   /** Dispatch the merge-conflict resolution flow. */
   onResolveMerge?: () => void;
+  /** Clear the card's merge failure line. */
+  onDismissMergeError?: () => void;
   onToggleSelect?: () => void;
   onLinkedAgentHoverChange?: (activityId: string | null) => void;
   /** Called when user clicks the retry button on a failed session indicator */
@@ -133,8 +144,10 @@ export function EpicCard({
     failedSession,
     mergeReadiness,
     mergeState,
+    agentBusy = false,
     onMerge,
     onResolveMerge,
+    onDismissMergeError,
     onToggleSelect,
     onLinkedAgentHoverChange,
     onRetryBuild,
@@ -179,11 +192,14 @@ export function EpicCard({
     (epic.status === "done" || epic.status === "released") &&
     remainingStories > 0;
 
-  // Merge affordances. A running agent owns the ticket, so the card defers to
-  // the activity line rather than offering a button that would lose the race.
+  // Merge affordances. Any session that owns the ticket — queued or running —
+  // suppresses them: the card defers to the activity line rather than
+  // offering a click the approve route would refuse (or, worse, one that
+  // would pull the worktree out from under a build about to start).
   const mergePending = mergeState?.pending === true;
+  const mergeBlocked = agentBusy || !!activeAgentActivity;
   const showMergeAction =
-    !!onMerge && mergeReadiness?.ready === true && !activeAgentActivity;
+    !!onMerge && mergeReadiness?.ready === true && !mergeBlocked;
   const mergeBlockerLabel = activeAgentActivity
     ? null
     : describeMergeBlocker(mergeReadiness);
@@ -191,7 +207,7 @@ export function EpicCard({
   // thing to the user, and both offer the same way out.
   const showResolveMerge =
     !!onResolveMerge &&
-    !activeAgentActivity &&
+    !mergeBlocked &&
     (mergeState?.conflict === true ||
       mergeReadiness?.blocker === "merge_conflict");
 
@@ -366,9 +382,27 @@ export function EpicCard({
           data-testid={`epic-merge-error-${epic.id}`}
         >
           <TriangleAlert className="mt-[2px] h-[13px] w-[13px] shrink-0" />
-          <span className="min-w-0 break-words line-clamp-3">
+          <span className="min-w-0 flex-1 break-words line-clamp-3">
             {mergeState.error}
           </span>
+          {onDismissMergeError && (
+            // The only thing that clears this line. A failure outlives its
+            // cause — the findings get resolved, the conflict gets repaired —
+            // and a stale error sitting next to a live Merge button is worse
+            // than no error at all.
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDismissMergeError();
+              }}
+              className="-m-1 shrink-0 rounded-[5px] p-1 text-muted-foreground transition-colors hover:text-foreground motion-reduce:transition-none"
+              aria-label="Dismiss merge error"
+              data-testid={`epic-merge-error-dismiss-${epic.id}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
         </div>
       )}
 

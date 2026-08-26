@@ -120,8 +120,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       defaultBranch: project.defaultBranch,
     });
     if (!finalMerge.merged) {
+      // `mergeFailed` marks the failures where GIT refused, the same flag the
+      // approve route sets. Callers use it to decide whether offering another
+      // Resolve merge is a way out or just the same wall again.
       return NextResponse.json(
-        { error: finalMerge.error || "Final merge failed" },
+        { error: finalMerge.error || "Final merge failed", mergeFailed: true },
         { status: 500 }
       );
     }
