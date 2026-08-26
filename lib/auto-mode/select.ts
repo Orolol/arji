@@ -13,6 +13,15 @@ import {
   loadProjectGraph,
 } from "@/lib/dependencies/validation";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
+import {
+  evaluateMergeReadiness,
+  hasFreshCleanReview,
+  type MergeReadinessFacts,
+} from "@/lib/kanban/merge-readiness";
+import {
+  lastCleanReviewAtSql,
+  lastTerminalCodeAtSql,
+} from "@/lib/workflow/review-freshness";
 import { isDeliveredStatus } from "@/lib/types/kanban";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
 import { listPipelineRunsByProject } from "@/lib/pipeline/registry";
@@ -88,6 +97,10 @@ export const BUILDABLE_STORY_STATUSES: ReadonlySet<string> = new Set([
   "in_progress",
 ]);
 
+// The review/code freshness aggregates moved to lib/workflow/review-freshness.ts
+// so the board list query derives "ready to merge" from the very same SQL —
+// see lib/kanban/merge-readiness.ts for why one definition matters.
+
 /**
  * Epic statuses under which a STORY may still be built. Wider than
  * `BUILDABLE_EPIC_STATUSES` by one value, `review`, and deliberately so.
@@ -111,30 +124,8 @@ export const STORY_PARENT_BUILDABLE_STATUSES: ReadonlySet<string> = new Set([
   "in_progress",
   "review",
 ]);
-/**
- * Agent types that constitute "a review happened". Same family the workflow
- * engine's `hasCompletedReview` recognises (lib/workflow/context.ts:42-51).
- */
-const REVIEW_AGENT_TYPES_SQL =
-  "'review_security','review_code','review_compliance','review_feature'";
 
-/**
- * Agent types that constitute "the code changed". `merge` counts: a
- * merge-fix agent rewrites the branch, so a review that predates it is stale.
- */
-const CODE_AGENT_TYPES_SQL = "'build','ticket_build','team_build','merge'";
-
-const TERMINAL_STATUSES_SQL = "'completed','failed','cancelled'";
-
-/**
- * Session timestamps mix ISO-8601 (`2026-08-16T09:00:00.000Z`, written by
- * routes) and SQLite CURRENT_TIMESTAMP (`2026-08-16 09:00:00`). Normalising
- * the separator makes lexicographic MAX/compare chronologically correct —
- * the same normalisation lib/kanban/awaiting-reply.ts does in JS.
- */
-const SESSION_AT_SQL = sql`REPLACE(COALESCE(${agentSessions.endedAt}, ${agentSessions.completedAt}, ${agentSessions.createdAt}), ' ', 'T')`;
-
-/** JS-side twin of the SQL normalisation above, for comparing timestamps. */
+/** JS-side twin of the SQL timestamp normalisation, for comparing timestamps. */
 export function normalizeAt(value: string): string {
   return value.includes("T") ? value : value.replace(" ", "T");
 }
@@ -369,33 +360,13 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
 
   // 4. Review/code freshness facts per epic (conditional aggregation).
   //
-  // The review branches are EPIC-SCOPED (`user_story_id IS NULL`): reviews
-  // and merges are epic-level by design, so a story review must never
-  // satisfy the epic's merge gate. The code branch deliberately keeps story
-  // sessions — they commit to the same branch.
-  //
-  // A review that answered through submit_findings with `changes_requested`
-  // is NOT clean, findings or no findings: the verdict is the authoritative
-  // channel (lib/pipeline/findings.ts), so an explicit NO must never satisfy
-  // the merge gate. NULL stays clean — that is every MCP-less provider,
-  // whose only verdict signal is the prose scan this gate never read. Any
-  // other stored value (e.g. 'approved') keeps today's behaviour; unknown
-  // values are treated as absent, matching readStructuredReviewVerdict.
+  // Shared with the board list query — see lib/workflow/review-freshness.ts
+  // for what each branch includes and why.
   const factRows = db
     .select({
       epicId: agentSessions.epicId,
-      lastCleanReviewAt: sql<string | null>`MAX(CASE
-        WHEN ${agentSessions.status} = 'completed'
-         AND ${agentSessions.userStoryId} IS NULL
-         AND ${agentSessions.agentType} IN (${sql.raw(REVIEW_AGENT_TYPES_SQL)})
-         AND ${agentSessions.outcome} = 'answered'
-         AND (${agentSessions.reviewVerdict} IS NULL
-              OR ${agentSessions.reviewVerdict} <> 'changes_requested')
-        THEN ${SESSION_AT_SQL} END)`,
-      lastTerminalCodeAt: sql<string | null>`MAX(CASE
-        WHEN ${agentSessions.status} IN (${sql.raw(TERMINAL_STATUSES_SQL)})
-         AND ${agentSessions.agentType} IN (${sql.raw(CODE_AGENT_TYPES_SQL)})
-        THEN ${SESSION_AT_SQL} END)`,
+      lastCleanReviewAt: lastCleanReviewAtSql(),
+      lastTerminalCodeAt: lastTerminalCodeAtSql(),
     })
     .from(agentSessions)
     .where(
@@ -750,19 +721,10 @@ export function needsReview(facts: SessionFacts | undefined): boolean {
 }
 
 /**
- * The merge gate's freshness half: a review that COMPLETED WITH A VERDICT
- * after the last code change.
- *
- * Stricter than the workflow engine's `hasCompletedReview` on both axes —
- * the engine accepts any completed review session ever, including one that
- * merely asked a question or produced nothing. That laxity is exactly what
- * this compensates for; the engine's guard stays the floor, not the ceiling.
+ * The merge gate's freshness half, re-exported from the shared predicate the
+ * board API evaluates too (lib/kanban/merge-readiness.ts).
  */
-export function hasFreshCleanReview(facts: SessionFacts | undefined): boolean {
-  if (!facts?.lastCleanReviewAt) return false;
-  if (!facts.lastTerminalCodeAt) return true;
-  return facts.lastCleanReviewAt > facts.lastTerminalCodeAt;
-}
+export { hasFreshCleanReview };
 
 /* ------------------------------------------------------------------ */
 /* Selectors                                                           */
@@ -876,6 +838,31 @@ export function selectReviewCandidates(
 }
 
 /**
+ * The board facts the shared readiness predicate needs, read off the sweep
+ * snapshot. Same shape the board list query assembles from its own SQL, so
+ * both sides feed `evaluateMergeReadiness` identical input.
+ *
+ * Merge failure timestamps (`lastMergeConflictAt` / `lastConflictMarkersAt`)
+ * are deliberately absent: the supervisor tracks a failed merge in its own
+ * registry backoff (`mergeDeferredEpicIds`, applied below), which is both
+ * fresher and scoped to the run — the activity-log trace the board reads is
+ * for the UI, which has no registry to consult.
+ */
+function mergeReadinessFacts(
+  board: AutoModeBoard,
+  epic: EpicRow
+): MergeReadinessFacts {
+  const facts = board.sessionFactsByEpic.get(epic.id);
+  return {
+    status: epic.status,
+    branchName: epic.branchName,
+    openFindings: board.openReviewCommentsByEpic.get(epic.id) ?? 0,
+    lastCleanReviewAt: facts?.lastCleanReviewAt ?? null,
+    lastTerminalCodeAt: facts?.lastTerminalCodeAt ?? null,
+  };
+}
+
+/**
  * Does this epic still have a story the supervisor is going to build?
  *
  * A story left `todo` or `in_progress` under a reviewed epic — added while an
@@ -893,9 +880,13 @@ export function selectReviewCandidates(
  * queue by the same rule Backlog epics are (see BUILDABLE_EPIC_STATUSES); the
  * approval path reports it as a skipped story instead.
  *
- * A human can still approve or merge such an epic through the normal routes,
- * where the unfinished stories are reported as `skippedStories` and shown on
- * the card. Only the unattended path is refused.
+ * Deliberately NOT part of `evaluateMergeReadiness`, even though it reads like
+ * a readiness fact: a human may still approve or merge such an epic through
+ * the normal routes, where the unfinished stories are reported as
+ * `skippedStories` and shown on the card. Only the UNATTENDED path is refused,
+ * so this belongs with the supervisor's other exclusions rather than in the
+ * shared predicate the board's "Ready to merge" section renders — a card that
+ * a click would happily merge must not be filed under "not ready".
  */
 function hasStoryStillToBuild(board: AutoModeBoard, epic: EpicRow): boolean {
   const stories = board.storiesByEpic.get(epic.id) ?? [];
@@ -909,11 +900,19 @@ function hasStoryStillToBuild(board: AutoModeBoard, epic: EpicRow): boolean {
  * with a branch, reviewed since the last code change, with zero open review
  * comments, and with no story the build selector would still pick up.
  *
- * This is the supervisor's own gate, and it is STRICTER than the workflow
- * engine's `→ done` guards on purpose. The engine still has the last word —
- * `applyTransition` refuses unless `hasCompletedReview` and no open comments
- * — but the engine's freshness is lax, so the temporal check above is what
- * makes "review is OK" mean something without inventing a new boolean.
+ * The readiness half is `evaluateMergeReadiness` — the same call the board
+ * API makes, so a "Ready to merge" card and a supervisor merge candidate agree
+ * on what "reviewed and landable" means by construction. What stays here are
+ * the exclusions that are the SUPERVISOR's alone: the runtime ones (busy,
+ * owned, parked, backed off), which are about whether it may act right now,
+ * and `hasStoryStillToBuild`, which refuses the unattended merge of a
+ * half-built epic a human is still allowed to land by hand.
+ *
+ * This gate is STRICTER than the workflow engine's `→ done` guards on
+ * purpose. The engine still has the last word — `applyTransition` refuses
+ * unless `hasCompletedReview` and no open comments — but the engine's
+ * freshness is lax, so the temporal check is what makes "review is OK" mean
+ * something without inventing a new boolean.
  */
 export function selectMergeCandidates(
   projectId: string,
@@ -921,12 +920,11 @@ export function selectMergeCandidates(
 ): AutoMergeCandidate[] {
   return [...board.epics]
     .sort(compareEpics)
-    .filter((epic) => epic.status === "review")
-    .filter((epic) => !!epic.branchName)
     .filter((epic) => isEpicSelectable(board, epic))
     .filter((epic) => !board.mergeDeferredEpicIds.has(epic.id))
-    .filter((epic) => hasFreshCleanReview(board.sessionFactsByEpic.get(epic.id)))
-    .filter((epic) => (board.openReviewCommentsByEpic.get(epic.id) ?? 0) === 0)
+    .filter(
+      (epic) => evaluateMergeReadiness(mergeReadinessFacts(board, epic)).ready
+    )
     .filter((epic) => !hasStoryStillToBuild(board, epic))
     .map((epic) => ({
       epicId: epic.id,

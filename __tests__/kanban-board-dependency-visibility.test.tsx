@@ -605,12 +605,12 @@ describe("Kanban board dependency visibility", () => {
       dndHandlers.onDragStart?.({ active: { id: "a" } });
     });
     // The drop indicator moved to the bottom of the target column...
-    expect(screen.getByTestId("column-drop-end-done")).toBeInTheDocument();
+    expect(screen.getByTestId("column-drop-target-done")).toBeInTheDocument();
     // ...and only there: it follows the pointer, so the other columns stay
     // clean. An indicator in all five columns indicates nothing.
-    expect(screen.queryByTestId("column-drop-end-todo")).toBeNull();
-    expect(screen.queryByTestId("column-drop-end-backlog")).toBeNull();
-    expect(screen.queryByTestId("column-drop-end-review")).toBeNull();
+    expect(screen.queryByTestId("column-drop-target-todo")).toBeNull();
+    expect(screen.queryByTestId("column-drop-target-backlog")).toBeNull();
+    expect(screen.queryByTestId("column-drop-target-review")).toBeNull();
 
     act(() => {
       dndHandlers.overColumnId = null;
@@ -626,7 +626,7 @@ describe("Kanban board dependency visibility", () => {
     );
 
     // The drag is over: the indicator is gone again
-    expect(screen.queryByTestId("column-drop-end-done")).toBeNull();
+    expect(screen.queryByTestId("column-drop-target-done")).toBeNull();
 
     // A same-column reorder under a filter stays a no-op: the visible
     // index would not match the board order.
@@ -667,7 +667,7 @@ describe("Kanban board dependency visibility", () => {
       dndHandlers.overColumnId = "todo";
       dndHandlers.onDragStart?.({ active: { id: "a" } });
     });
-    expect(screen.queryByTestId("column-drop-end-todo")).toBeNull();
+    expect(screen.queryByTestId("column-drop-target-todo")).toBeNull();
 
     // A column that would accept the drop still shows one.
     act(() => {
@@ -678,7 +678,7 @@ describe("Kanban board dependency visibility", () => {
       dndHandlers.overColumnId = "review";
       dndHandlers.onDragStart?.({ active: { id: "a" } });
     });
-    expect(screen.getByTestId("column-drop-end-review")).toBeInTheDocument();
+    expect(screen.getByTestId("column-drop-target-review")).toBeInTheDocument();
   });
 
   it("warns — without blocking — when a backlog epic with open questions moves to To Do", () => {

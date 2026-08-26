@@ -42,7 +42,10 @@ import {
   type KanbanEpicAgentActivity,
 } from "@/lib/types/kanban";
 import { useKanban } from "@/hooks/useKanban";
+import { useBoardMerge } from "@/hooks/useBoardMerge";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
+import { isMergeReadyEpic } from "@/lib/kanban/merge-readiness";
+import type { ColumnSection } from "./Column";
 import { hasUnreadAiComment, isAiCommentAuthor } from "@/lib/kanban/unread-ai";
 import { BoardSkeleton } from "./BoardSkeleton";
 import type { FailedSessionInfo } from "@/lib/agent-sessions/latest-failure";
@@ -61,6 +64,13 @@ interface BoardProps {
   failedSessions?: Record<string, FailedSessionInfo>;
   onRetryBuild?: (epicId: string) => void;
   /**
+   * Epics with a queued OR running session. Broader than `runningEpicIds`,
+   * which is the agent chip's set — merging out from under a queued build
+   * deletes its worktree before it starts, so the Merge button needs the
+   * wider signal (and the approve route refuses the same case with a 409).
+   */
+  busyEpicIds?: Set<string>;
+  /**
    * Hide the Released digest while a side panel owns the right edge: the four
    * working columns and the panel share the width instead (see the board
    * page, which flips this from the chat panel's expanded state).
@@ -68,6 +78,10 @@ interface BoardProps {
   hideReleased?: boolean;
   /** Reports how many cards survive the active filters (drives the capture bar). */
   onVisibleCountChange?: (count: number) => void;
+  /** A Review card merged straight from the board. */
+  onMergeSuccess?: (epicId: string) => void;
+  /** Resolve Merge dispatched a conflict-resolution agent instead of landing. */
+  onMergeAgentDispatched?: (epicId: string, sessionId: string) => void;
   /** Non-blocking warning for risky moves (e.g. awaiting-reply epic to To Do). */
   onMoveWarning?: (message: string) => void;
 }
@@ -110,8 +124,11 @@ export function Board({
   onMoveError,
   failedSessions,
   onRetryBuild,
+  busyEpicIds,
   hideReleased = false,
   onVisibleCountChange,
+  onMergeSuccess,
+  onMergeAgentDispatched,
   onMoveWarning,
 }: BoardProps) {
   const {
@@ -122,6 +139,49 @@ export function Board({
     refresh,
     dependencies,
   } = useKanban(projectId, { onMoveError });
+
+  // Merging from a card reuses the ticket detail's approve route, so the
+  // board gains no rules of its own — see hooks/useBoardMerge.ts.
+  //
+  // Both handlers are memoised so the hook's own `useCallback`s stay stable;
+  // an inline arrow here would change `merge`/`resolveMerge` on every render
+  // and turn the `epicViews` memo below into a no-op.
+  //
+  // When the parent page supplies `onMergeSuccess` / `onMergeAgentDispatched`,
+  // the page bumps `refreshTrigger`, which drives `refresh()` via the
+  // `useEffect([refreshTrigger, refresh])` below. Calling `refresh()` here too
+  // would double-fetch `/epics` and `/releases` on every merge. The fallback
+  // `refresh()` only fires when no parent callback was passed.
+  const handleMerged = useCallback(
+    (epicId: string) => {
+      if (onMergeSuccess) {
+        onMergeSuccess(epicId);
+      } else {
+        refresh();
+      }
+    },
+    [refresh, onMergeSuccess]
+  );
+  const handleResolveDispatched = useCallback(
+    (epicId: string, sessionId: string) => {
+      if (onMergeAgentDispatched) {
+        onMergeAgentDispatched(epicId, sessionId);
+      } else {
+        refresh();
+      }
+    },
+    [refresh, onMergeAgentDispatched]
+  );
+  const {
+    stateByEpic: mergeStateByEpic,
+    activeEpicId: activeMergeEpicId,
+    merge,
+    resolveMerge,
+    dismissError: dismissMergeError,
+  } = useBoardMerge(projectId, {
+    onMerged: handleMerged,
+    onResolveDispatched: handleResolveDispatched,
+  });
   // Optimistic overlay on the server-side read cursors: opening a ticket
   // clears its unread dot immediately, before the /api/inbox/read POST from
   // EpicDetail lands and the next board refresh returns the moved cursor.
@@ -358,6 +418,20 @@ export function Board({
       for (const epic of board.columns[status]) {
         const failedSession = failedSessions?.[epic.id];
 
+        // Merge affordances belong to the Review column alone: the signal is
+        // only meaningful there, and a Merge button on an In Progress card
+        // would be an invitation the approve route refuses.
+        const inReview = status === "review";
+        const isThisPending = activeMergeEpicId === epic.id;
+        const isLocked = activeMergeEpicId !== null && !isThisPending;
+        const baseMergeState = inReview ? mergeStateByEpic[epic.id] : undefined;
+        const mergeState = baseMergeState || isLocked
+          ? {
+              ...baseMergeState,
+              pending: isThisPending,
+              locked: isLocked,
+            }
+          : undefined;
         // A dependency target can sit in any column, so its label comes
         // from the full-board index.
         const blockedOn = (blockedBy.get(epic.id) ?? []).map((targetId) => {
@@ -373,6 +447,14 @@ export function Board({
           unreadAi: unreadAiByEpicId[epic.id] || false,
           awaitingReply: isAwaitingReply(epic),
           failedSession,
+          mergeReadiness: inReview ? epic.mergeReadiness : undefined,
+          mergeState,
+          agentBusy: busyEpicIds?.has(epic.id) || false,
+          onMerge: inReview ? () => merge(epic.id) : undefined,
+          onResolveMerge: inReview ? () => resolveMerge(epic.id) : undefined,
+          onDismissMergeError: inReview
+            ? () => dismissMergeError(epic.id)
+            : undefined,
           onToggleSelect: onToggleSelect
             ? () => onToggleSelect(epic.id)
             : undefined,
@@ -404,6 +486,12 @@ export function Board({
     activeAgentActivities,
     unreadAiByEpicId,
     failedSessions,
+    busyEpicIds,
+    mergeStateByEpic,
+    activeMergeEpicId,
+    merge,
+    resolveMerge,
+    dismissMergeError,
     onToggleSelect,
     onLinkedAgentHoverChange,
     onRetryBuild,
@@ -442,6 +530,43 @@ export function Board({
     unreadAiByEpicId,
     failedSessions,
   ]);
+
+  /**
+   * The Review column's two derived sections, SLICED out of the rendered
+   * array rather than rebuilt from it.
+   *
+   * This is load-bearing. `handleDragEnd` derives the drop index from
+   * `board.columns.review`, and `moveEpic` splices into (and
+   * `persistedColumnOrder` anchors against) that same array — so the order
+   * drawn on screen has to BE that array, not a re-derived permutation of it.
+   * `useKanban` keeps the column merge-ready-first on load and after every
+   * drag, which makes the two sections a prefix and a suffix.
+   *
+   * Slicing at the first non-ready card, rather than partitioning, is what
+   * enforces the invariant instead of papering over it: if a card ever sits
+   * out of order (an optimistic drop whose readiness has not been recomputed
+   * yet), it is grouped under "In review" for one refresh — the render order
+   * still matches the array exactly, so no drag can be persisted to the wrong
+   * rank.
+   */
+  const reviewSections = useMemo<ColumnSection[]>(() => {
+    const visible = visibleColumns.review;
+    let boundary = 0;
+    while (boundary < visible.length && isMergeReadyEpic(visible[boundary])) {
+      boundary += 1;
+    }
+
+    return [
+      {
+        key: "ready",
+        label: "Ready to merge",
+        epics: visible.slice(0, boundary),
+        accent: true,
+        emptyHint: "Nothing cleared review yet.",
+      },
+      { key: "in-review", label: "In review", epics: visible.slice(boundary) },
+    ];
+  }, [visibleColumns]);
 
   /**
    * Epics with a card on screen right now. The dependency focus is judged
@@ -648,9 +773,9 @@ export function Board({
                 key={status}
                 status={status}
                 epics={visibleColumns[status]}
+                sections={status === "review" ? reviewSections : undefined}
                 onEpicClick={handleEpicClick}
                 epicViews={epicViews}
-                dropAtEnd={filtersActive}
                 dropDisabled={filtersActive && activeColumn === status}
                 filtersActive={filtersActive}
                 focusRoles={focusRoles}

@@ -1,4 +1,5 @@
 import type { GradingStatus } from "@/lib/grading/report";
+import type { MergeReadiness } from "@/lib/kanban/merge-readiness";
 
 export const KANBAN_COLUMNS = [
   "backlog",
@@ -135,6 +136,13 @@ export interface KanbanEpic {
   gradingStatus?: GradingStatus | null;
   gradingSummary?: string | null;
   gradingCreatedAt?: string | null;
+  /**
+   * Derived "can this land on main?" signal, computed by the board API from
+   * the same predicate Full Auto's merge step uses
+   * (lib/kanban/merge-readiness.ts). Derived, never stored: there is no
+   * `to_merge` status, so nothing has to keep this in sync with the board.
+   */
+  mergeReadiness?: MergeReadiness | null;
 }
 
 export type KanbanAgentActionType = "build" | "review" | "merge";

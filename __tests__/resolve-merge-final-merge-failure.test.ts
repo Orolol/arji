@@ -19,12 +19,16 @@ import {
 const mocks = vi.hoisted(() => ({
   mergeWorktree: vi.fn(),
   createWorktree: vi.fn(),
+  attachWorktree: vi.fn(),
   isGitRepo: vi.fn(),
   startMergeInWorktree: vi.fn(),
   waitForProcessCompletion: vi.fn(),
   applyTransition: vi.fn(),
   createMergeRetryFailedNotification: vi.fn(),
   tryExportArjiJson: vi.fn(),
+  getRunningSessionForTarget: vi.fn(),
+  tryLockProjectMerge: vi.fn(),
+  unlockProjectMerge: vi.fn(),
 }));
 
 vi.mock("@/lib/db", async () => {
@@ -38,9 +42,17 @@ vi.mock("@/lib/workflow/transition-service", () => ({
   logWorkflowDecision: vi.fn(),
 }));
 
+vi.mock("@/lib/auto-mode/registry", () => ({
+  autoModeRegistry: {
+    tryLockProjectMerge: mocks.tryLockProjectMerge,
+    unlockProjectMerge: mocks.unlockProjectMerge,
+  },
+}));
+
 vi.mock("@/lib/git/manager", () => ({
   mergeWorktree: mocks.mergeWorktree,
   createWorktree: mocks.createWorktree,
+  attachWorktree: mocks.attachWorktree,
   isGitRepo: mocks.isGitRepo,
   startMergeInWorktree: mocks.startMergeInWorktree,
 }));
@@ -77,8 +89,11 @@ vi.mock("@/lib/sync/export", () => ({
 }));
 
 vi.mock("@/lib/agents/concurrency", () => ({
-  getRunningSessionForTarget: vi.fn(() => null),
-  createAgentAlreadyRunningPayload: vi.fn(() => ({ error: "running" })),
+  getRunningSessionForTarget: mocks.getRunningSessionForTarget,
+  createAgentAlreadyRunningPayload: vi.fn(() => ({
+    error: "running",
+    code: "AGENT_ALREADY_RUNNING",
+  })),
 }));
 
 vi.mock("@/lib/agent-sessions/lifecycle", () => ({
@@ -151,8 +166,10 @@ describe("Resolve-merge: final merge fails after the agent", () => {
     vi.clearAllMocks();
     resetDbMockState();
     mocks.applyTransition.mockReturnValue({ valid: true });
+    mocks.getRunningSessionForTarget.mockReturnValue(null);
+    mocks.tryLockProjectMerge.mockReturnValue(true);
     mocks.isGitRepo.mockResolvedValue(true);
-    mocks.createWorktree.mockResolvedValue({
+    mocks.attachWorktree.mockResolvedValue({
       worktreePath: "/tmp/worktrees/epic-abc",
       branchName: "feature/epic-abc",
     });
@@ -212,6 +229,205 @@ describe("Resolve-merge: final merge fails after the agent", () => {
     expect(closeCall).toBeUndefined();
     expect(dbMockState.updateCalls).toEqual([]);
     expect(mocks.tryExportArjiJson).not.toHaveBeenCalled();
+  });
+
+  it("refuses before touching git when an agent owns the epic", async () => {
+    // The guard used to sit on the conflict branch only, so the CLEAN path
+    // reached `mergeWorktree` — and its `git worktree remove --force` — over
+    // a queued build. Both branches are covered now, which is why this asserts
+    // on the clean setup specifically.
+    mocks.startMergeInWorktree.mockResolvedValue({
+      conflicted: false,
+      output: "Already up to date.",
+    });
+    mocks.getRunningSessionForTarget.mockReturnValue({
+      id: "sess-queued",
+      projectId: "p1",
+      epicId: "epic-1",
+      userStoryId: null,
+      mode: "code",
+      provider: "claude-code",
+      startedAt: null,
+    });
+    seed();
+
+    const res = await callResolveMerge();
+
+    expect(res.status).toBe(409);
+    expect(mocks.createWorktree).not.toHaveBeenCalled();
+    expect(mocks.startMergeInWorktree).not.toHaveBeenCalled();
+    expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("surfaces conflicts against the project's default branch, not literal main", async () => {
+    seed();
+    await callResolveMerge();
+
+    expect(mocks.startMergeInWorktree).toHaveBeenCalledWith(
+      "/tmp/worktrees/epic-abc",
+      "main"
+    );
+
+    // A repo whose default branch is not `main` must be compared against ITS
+    // base — the same one `mergeWorktree` is handed moments later.
+    vi.clearAllMocks();
+    mocks.applyTransition.mockReturnValue({ valid: true });
+    mocks.getRunningSessionForTarget.mockReturnValue(null);
+    mocks.isGitRepo.mockResolvedValue(true);
+    mocks.createWorktree.mockResolvedValue({
+      worktreePath: "/tmp/worktrees/epic-abc",
+      branchName: "feature/epic-abc",
+    });
+    mocks.startMergeInWorktree.mockResolvedValue({
+      conflicted: true,
+      output: "CONFLICT",
+    });
+    mocks.waitForProcessCompletion.mockResolvedValue({
+      status: "completed",
+      result: { success: false },
+    });
+    dbMockState.getQueue.push(
+      { ...mockProject, defaultBranch: "trunk" },
+      mockEpic,
+      null
+    );
+
+    await callResolveMerge();
+
+    expect(mocks.startMergeInWorktree).toHaveBeenCalledWith(
+      "/tmp/worktrees/epic-abc",
+      "trunk"
+    );
+  });
+
+  it("flags the clean-path final merge failure with mergeFailed", async () => {
+    // No conflicts to resolve, so the route merges straight away — and when
+    // THAT refuses, the flag is what tells a caller git was the wall (the
+    // board card keys "offer Resolve merge" off it, same as the approve
+    // route's 409).
+    mocks.startMergeInWorktree.mockResolvedValue({
+      conflicted: false,
+      output: "Already up to date.",
+    });
+    mocks.mergeWorktree.mockResolvedValue({
+      merged: false,
+      error: "CONFLICT (content): lib/foo.ts",
+      reason: "conflict",
+    });
+    seed();
+
+    const res = await callResolveMerge();
+    const json = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(json).toMatchObject({
+      error: "CONFLICT (content): lib/foo.ts",
+      mergeFailed: true,
+    });
+  });
+
+  it("returns mergeFailed: false on clean-path final merge non-conflict errors", async () => {
+    mocks.startMergeInWorktree.mockResolvedValue({
+      conflicted: false,
+      output: "Already up to date.",
+    });
+    mocks.mergeWorktree.mockResolvedValue({
+      merged: false,
+      error: "Git repository corrupted",
+      reason: "error",
+    });
+    seed();
+
+    const res = await callResolveMerge();
+    const json = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(json).toMatchObject({
+      error: "Git repository corrupted",
+      mergeFailed: false,
+    });
+  });
+
+  it("attaches to the exact branch stored on the epic even when the title was edited", async () => {
+    // If the epic title was edited, createWorktree would re-derive the branch
+    // from the new title and cut an empty branch off main. attachWorktree must
+    // receive the epic's persisted branchName verbatim.
+    mocks.attachWorktree.mockResolvedValue({
+      worktreePath: "/tmp/worktrees/original-branch",
+      branchName: "feature/original-branch-name",
+    });
+    mocks.startMergeInWorktree.mockResolvedValue({
+      conflicted: false,
+      output: "Already up to date.",
+    });
+    mocks.mergeWorktree.mockResolvedValue({
+      merged: true,
+      commitHash: "xyz789",
+    });
+    dbMockState.getQueue.push(
+      mockProject,
+      { ...mockEpic, title: "Completely Edited Title", branchName: "feature/original-branch-name" },
+      null
+    );
+
+    await callResolveMerge();
+
+    expect(mocks.attachWorktree).toHaveBeenCalledWith(
+      "/tmp/repo",
+      "feature/original-branch-name"
+    );
+    expect(mocks.mergeWorktree).toHaveBeenCalledWith(
+      "/tmp/repo",
+      "feature/original-branch-name",
+      "/tmp/worktrees/original-branch",
+      expect.anything()
+    );
+  });
+
+  it("returns status 400 when attachWorktree fails because the branch is gone", async () => {
+    mocks.attachWorktree.mockRejectedValue(
+      new Error("Branch feature/epic-abc not found")
+    );
+    seed();
+
+    const res = await callResolveMerge();
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.error).toContain("Branch feature/epic-abc not found");
+  });
+
+  it("returns 409 when clean-path final merge cannot acquire project merge lock", async () => {
+    mocks.startMergeInWorktree.mockResolvedValue({
+      conflicted: false,
+      output: "Already up to date.",
+    });
+    mocks.tryLockProjectMerge.mockReturnValue(false);
+    seed();
+
+    const res = await callResolveMerge();
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.error).toContain("Another merge is in progress");
+    expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("notifies failure when agent completion final merge cannot acquire project merge lock", async () => {
+    mocks.tryLockProjectMerge.mockReturnValue(false);
+    seed();
+
+    await callResolveMerge();
+
+    await vi.waitFor(() => {
+      expect(mocks.createMergeRetryFailedNotification).toHaveBeenCalledWith({
+        projectId: "p1",
+        epicId: "epic-1",
+        sessionId: "session-1",
+        error: expect.stringContaining("another merge is in progress"),
+      });
+    });
+    expect(mocks.mergeWorktree).not.toHaveBeenCalled();
   });
 
   it("still closes the epic when the final merge lands (control)", async () => {

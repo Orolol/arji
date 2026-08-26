@@ -122,6 +122,29 @@ export default function KanbanPage() {
     },
     [activities]
   );
+  /**
+   * Epics an agent still owns — QUEUED included, unlike `runningEpicIds`.
+   *
+   * The board uses this to withhold the Merge button: merging removes the
+   * epic's worktree, so doing it over a queued build drops that build into a
+   * directory that no longer exists. Matches what the approve route refuses
+   * on (`getRunningSessionForTarget`), which is any active session on the
+   * epic regardless of its type.
+   */
+  const busyEpicIds = useMemo(
+    () =>
+      new Set(
+        activities
+          .filter(
+            (session) =>
+              session.epicId &&
+              (session.status === "running" || session.status === "queued")
+          )
+          .map((session) => session.epicId as string)
+      ),
+    [activities]
+  );
+
   const runningEpicIds = useMemo(
     () =>
       new Set(
@@ -214,6 +237,19 @@ export default function KanbanPage() {
       addToast("error", "Failed to retry build");
     }
   }, [projectId, namedAgentId, addToast]);
+
+  // A Review card merged itself through the approve route; the Board already
+  // reloaded the columns, so this only has to move the surrounding surfaces
+  // (agent activity, monitor) and say so.
+  const handleBoardMergeSuccess = useCallback(() => {
+    addToast("success", "Merged into the base branch");
+    setRefreshTrigger((t) => t + 1);
+  }, [addToast]);
+
+  const handleBoardMergeAgentDispatched = useCallback(() => {
+    addToast("success", "Merge conflict — resolution agent dispatched");
+    setRefreshTrigger((t) => t + 1);
+  }, [addToast]);
 
   useEffect(() => {
     const deleted = searchParams.get("deleted");
@@ -775,8 +811,11 @@ export default function KanbanPage() {
                 onMoveWarning={(message) => addToast("warning", message)}
                 failedSessions={failedSessions}
                 onRetryBuild={handleRetryBuild}
+                busyEpicIds={busyEpicIds}
                 hideReleased={panelOpen}
                 onVisibleCountChange={setVisibleCount}
+                onMergeSuccess={handleBoardMergeSuccess}
+                onMergeAgentDispatched={handleBoardMergeAgentDispatched}
               />
             </div>
 

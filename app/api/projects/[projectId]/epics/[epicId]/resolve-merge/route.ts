@@ -14,10 +14,11 @@ import {
 } from "@/lib/api/route-helpers";
 import { createId } from "@/lib/utils/nanoid";
 import {
-  createWorktree,
+  attachWorktree,
   isGitRepo,
   startMergeInWorktree,
   mergeWorktree,
+  type MergeWorktreeResult,
 } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
@@ -33,6 +34,8 @@ import {
   createAgentAlreadyRunningPayload,
   getRunningSessionForTarget,
 } from "@/lib/agents/concurrency";
+import { autoModeRegistry } from "@/lib/auto-mode/registry";
+import { isGitRefusalMergeReason } from "@/lib/workflow/merge-failure";
 import fs from "fs";
 import path from "path";
 import {
@@ -85,18 +88,53 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
-  // Ensure worktree exists
-  const { worktreePath, branchName } = await createWorktree(
-    gitRepoPath,
-    epic.id,
-    epic.title,
-    { defaultBranch: project.defaultBranch }
-  );
+  // Concurrency guard — BEFORE any git work, not just before dispatching the
+  // resolution agent. The clean-merge branch below calls `mergeWorktree`,
+  // which runs `git worktree remove --force`; landing that on top of a queued
+  // build drops it into a directory that no longer exists the moment it
+  // starts. Same check, same placement, as the approve route.
+  const activeSession = getRunningSessionForTarget({
+    scope: "epic",
+    projectId,
+    epicId,
+  });
+  if (activeSession) {
+    return NextResponse.json(
+      createAgentAlreadyRunningPayload(
+        { scope: "epic", projectId, epicId },
+        activeSession,
+        "Another agent is already running for this epic."
+      ),
+      { status: 409 }
+    );
+  }
 
-  // Start merge in worktree to surface conflicts
+  // Ensure worktree exists for the epic's stored branch.
+  // `attachWorktree` attaches the worktree to `epic.branchName` rather than
+  // re-deriving the branch name from `epic.title`: if the epic title was
+  // edited since the branch was cut, `createWorktree` would derive a new name,
+  // cut a fresh branch off the default branch, and land an empty merge commit
+  // while leaving the real branch untouched.
+  let worktreePath: string;
+  let branchName: string;
+  try {
+    const attached = await attachWorktree(gitRepoPath, epic.branchName);
+    worktreePath = attached.worktreePath;
+    branchName = attached.branchName;
+  } catch (error) {
+    return errorResponse(error, "Failed to attach worktree for epic branch", 400);
+  }
+
+  // Start merge in worktree to surface conflicts. The base is the project's
+  // resolved default branch — the same one `mergeWorktree` is handed below;
+  // hardcoding "main" surfaced conflicts against a branch the merge would
+  // never touch on a repo whose default is anything else.
   let mergeResult: { conflicted: boolean; output: string };
   try {
-    mergeResult = await startMergeInWorktree(worktreePath, "main");
+    mergeResult = await startMergeInWorktree(
+      worktreePath,
+      project.defaultBranch || "main"
+    );
   } catch (error) {
     return errorResponse(error, "Failed to start merge");
   }
@@ -116,12 +154,38 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (!preflight.valid) {
       return NextResponse.json({ error: preflight.error }, { status: 400 });
     }
-    const finalMerge = await mergeWorktree(gitRepoPath, branchName, worktreePath, {
-      defaultBranch: project.defaultBranch,
-    });
-    if (!finalMerge.merged) {
+    if (!autoModeRegistry.tryLockProjectMerge(projectId)) {
       return NextResponse.json(
-        { error: finalMerge.error || "Final merge failed" },
+        {
+          error:
+            "Another merge is in progress in this repository — retry in a moment.",
+        },
+        { status: 409 }
+      );
+    }
+    let finalMerge: MergeWorktreeResult;
+    try {
+      finalMerge = await mergeWorktree(gitRepoPath, branchName, worktreePath, {
+        defaultBranch: project.defaultBranch,
+      });
+    } catch (e) {
+      finalMerge = {
+        merged: false,
+        error: e instanceof Error ? e.message : "Final merge failed",
+        reason: "error",
+      };
+    } finally {
+      autoModeRegistry.unlockProjectMerge(projectId);
+    }
+    if (!finalMerge.merged) {
+      // `mergeFailed` marks the failures where GIT refused, the same flag the
+      // approve route sets. Callers use it to decide whether offering another
+      // Resolve merge is a way out or just the same wall again.
+      return NextResponse.json(
+        {
+          error: finalMerge.error || "Final merge failed",
+          mergeFailed: isGitRefusalMergeReason(finalMerge.reason),
+        },
         { status: 500 }
       );
     }
@@ -177,23 +241,6 @@ export async function POST(request: NextRequest, { params }: Params) {
   const logsDir = path.join(process.cwd(), "data", "sessions", sessionId);
   fs.mkdirSync(logsDir, { recursive: true });
   const logsPath = path.join(logsDir, "logs.json");
-
-  // Check concurrency guard
-  const conflict = getRunningSessionForTarget({
-    scope: "epic",
-    projectId,
-    epicId,
-  });
-  if (conflict) {
-    return NextResponse.json(
-      createAgentAlreadyRunningPayload(
-        { scope: "epic", projectId, epicId },
-        conflict,
-        "Another agent is already running for this epic."
-      ),
-      { status: 409 }
-    );
-  }
 
   // Resume support — scope-guarded
   let cliSessionId: string | undefined;
@@ -292,13 +339,33 @@ export async function POST(request: NextRequest, { params }: Params) {
         validateOnly: true,
       });
       if (!preflight.valid) return;
-
-      const finalMerge = await mergeWorktree(
-        gitRepoPath,
-        branchName,
-        worktreePath,
-        { defaultBranch: project.defaultBranch }
-      );
+      if (!autoModeRegistry.tryLockProjectMerge(projectId)) {
+        createMergeRetryFailedNotification({
+          projectId,
+          epicId,
+          sessionId,
+          error:
+            "Final merge blocked: another merge is in progress in this repository.",
+        });
+        return;
+      }
+      let finalMerge: MergeWorktreeResult;
+      try {
+        finalMerge = await mergeWorktree(
+          gitRepoPath,
+          branchName,
+          worktreePath,
+          { defaultBranch: project.defaultBranch }
+        );
+      } catch (e) {
+        finalMerge = {
+          merged: false,
+          error: e instanceof Error ? e.message : "Final merge failed",
+          reason: "error",
+        };
+      } finally {
+        autoModeRegistry.unlockProjectMerge(projectId);
+      }
 
       if (finalMerge.merged) {
         const transition = applyTransition({

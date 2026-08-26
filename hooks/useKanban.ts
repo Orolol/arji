@@ -11,6 +11,8 @@ import {
   type TicketDependencyEdge,
   type ReorderItem,
 } from "@/lib/types/kanban";
+import { sortReviewColumn } from "@/lib/kanban/merge-readiness";
+import { persistedColumnOrder } from "@/lib/kanban/reorder";
 
 interface ReleaseRow {
   id: string;
@@ -124,6 +126,15 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
         columns[col].sort((a, b) => a.position - b.position);
       }
 
+      // Review is the one column whose order is not purely `position`:
+      // merge-ready tickets float to the top so the column's two sections are
+      // contiguous slices of ONE array. Sorting here rather than in the
+      // column component keeps a single order in play — drag indices, the
+      // optimistic splice in `moveEpic` and the persisted positions all agree
+      // with what the user sees, and section membership stays derived (a card
+      // dropped into the other section keeps its new position and snaps back).
+      columns.review = sortReviewColumn(columns.review);
+
       const releaseGroups: ReleaseGroup[] = releaseRows.map((rel) => {
         let epicIds: string[] = [];
         try {
@@ -236,17 +247,56 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       const [epic] = next.columns[fromColumn].splice(epicIndex, 1);
       next.columns[toColumn].splice(newIndex, 0, { ...epic, status: toColumn });
 
+      const touched = new Set<KanbanStatus>([fromColumn, toColumn]);
+      const reorderItems: ReorderItem[] = [];
+      const nextPositionById = new Map<string, number>();
+
+      for (const col of DRAGGABLE_COLUMNS) {
+        if (!touched.has(col)) continue;
+
+        // Review is DISPLAYED merge-ready-first, so its display index is not
+        // its position; persisting the index would write that derived signal
+        // into `epics.position` and reorder cards nobody dragged. Every other
+        // column is drawn in position order, where the two coincide. See
+        // lib/kanban/reorder.ts.
+        const persisted =
+          col === "review"
+            ? persistedColumnOrder(
+                next.columns[col],
+                col === toColumn ? epicId : null
+              )
+            : next.columns[col];
+
+        persisted.forEach((item, idx) => {
+          reorderItems.push({ id: item.id, status: col, position: idx });
+          nextPositionById.set(item.id, idx);
+        });
+      }
+
+      // Mirror what is about to be persisted onto the local rows. Without
+      // this a second drag before the next refresh would re-sort Review by
+      // stale positions and undo the first one.
+      for (const col of touched) {
+        if (col === "released") continue;
+        next.columns[col] = next.columns[col].map((item) => {
+          const position = nextPositionById.get(item.id);
+          return position === undefined || position === item.position
+            ? item
+            : { ...item, position };
+        });
+      }
+
+      // Re-establish Review's ready-first order NOW, with the fresh
+      // positions. The Board renders this exact array and derives drop
+      // indices from it, so leaving it in drop order while the Board re-split
+      // the sections for display would make the next drag anchor against a
+      // different sequence than the user is looking at.
+      if (touched.has("review")) {
+        next.columns.review = sortReviewColumn(next.columns.review);
+      }
+
       boardRef.current = next;
       setBoard(next);
-
-      const reorderItems: ReorderItem[] = [];
-      for (const col of DRAGGABLE_COLUMNS) {
-        if (col === fromColumn || col === toColumn) {
-          next.columns[col].forEach((item, idx) => {
-            reorderItems.push({ id: item.id, status: col, position: idx });
-          });
-        }
-      }
 
       postReorder(reorderItems, "Failed to move epic", {
         onAccepted: onMoveAccepted,
@@ -277,21 +327,31 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       );
       if (sorted.length === 0) return;
 
+      // The positions about to be written, carried on the local rows so the
+      // optimistic board and the request describe the same ranking.
+      const repositioned = sorted.map((epic, idx) =>
+        epic.position === idx ? epic : { ...epic, position: idx }
+      );
+
       // Optimistic half: the reorder route rewrites the same positions.
+      // Review is DISPLAYED merge-ready-first, so the priority ranking lands
+      // in `position` while the column keeps showing its two sections — the
+      // sort reorders within each, which is what the user is looking at.
       setBoard((prev) => {
         const next = {
           columns: { ...prev.columns },
           releaseGroups: prev.releaseGroups,
         };
-        next.columns[column] = sorted;
+        next.columns[column] =
+          column === "review" ? sortReviewColumn(repositioned) : repositioned;
         return next;
       });
 
       postReorder(
-        sorted.map((epic, idx) => ({
+        repositioned.map((epic) => ({
           id: epic.id,
           status: column,
-          position: idx,
+          position: epic.position,
         })),
         "Failed to sort column",
         // Sorting is never a move. Without this, a card the server has since

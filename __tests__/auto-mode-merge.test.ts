@@ -196,6 +196,8 @@ async function drainScheduler(): Promise<void> {
 }
 
 beforeEach(() => {
+  db.delete(verifyReports).run();
+  db.delete(settings).run();
   db.delete(notifications).run();
   db.delete(ticketComments).run();
   db.delete(ticketActivityLog).run();
@@ -738,10 +740,98 @@ describe("tryAutoMerge — merge conflict", () => {
         .some((s) => s.agentType === "merge")
     ).toBe(false);
   });
+
+  it("enforces project exclusivity on tryLockProjectMerge and releases cleanly", () => {
+    expect(autoModeRegistry.tryLockProjectMerge(PROJECT_ID)).toBe(true);
+    // Project-level mutex: second claim on same project fails
+    expect(autoModeRegistry.tryLockProjectMerge(PROJECT_ID)).toBe(false);
+    expect(autoModeRegistry.isProjectMergeInFlight(PROJECT_ID)).toBe(true);
+
+    // Another project can still lock independently
+    expect(autoModeRegistry.tryLockProjectMerge("other-proj")).toBe(true);
+    autoModeRegistry.unlockProjectMerge("other-proj");
+
+    autoModeRegistry.unlockProjectMerge(PROJECT_ID);
+    expect(autoModeRegistry.isProjectMergeInFlight(PROJECT_ID)).toBe(false);
+    expect(autoModeRegistry.tryLockProjectMerge(PROJECT_ID)).toBe(true);
+    autoModeRegistry.unlockProjectMerge(PROJECT_ID);
+  });
+
+  it("permits merge on epic B while epic A is held in conflict repair", async () => {
+    // Epic A holds the long per-epic merge lock while its conflict-fix agent runs
+    autoModeRegistry.beginMergeWork(PROJECT_ID, "epic-A");
+    expect(autoModeRegistry.isMergeInFlight(PROJECT_ID, "epic-A")).toBe(true);
+
+    // Epic B's per-epic lock is independent and can be acquired
+    expect(autoModeRegistry.beginMergeWork(PROJECT_ID, "epic-B")).toBe(true);
+    expect(autoModeRegistry.isMergeInFlight(PROJECT_ID, "epic-B")).toBe(true);
+
+    autoModeRegistry.endMergeWork(PROJECT_ID, "epic-B");
+    autoModeRegistry.endMergeWork(PROJECT_ID, "epic-A");
+  });
+
+  it("skips and does NOT park when project checkout merge lock is held during tryAutoMerge", async () => {
+    seed();
+    autoModeRegistry.tryLockProjectMerge(PROJECT_ID);
+
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    expect(outcome).toMatchObject({
+      status: "skipped",
+      reason: "Another merge is in progress in this repository",
+    });
+    expect(autoModeRegistry.isParked(PROJECT_ID, EPIC_ID)).toBe(false);
+
+    autoModeRegistry.unlockProjectMerge(PROJECT_ID);
+  });
+
+  it("does not park the epic when retryMergeAfterFix encounters project merge lock contention", async () => {
+    const localProjectId = "proj-merge-lock-retry";
+    const localEpicId = "epic-merge-lock-retry";
+    db.insert(projects).values({ id: localProjectId, name: "LockRetry", gitRepoPath: "/repos/merge" }).run();
+    db.insert(epics).values({ id: localEpicId, projectId: localProjectId, title: "Landable", status: "review", branchName: "feature/landable", position: 0, readableId: "E-lock", createdAt: isoAt(0), updatedAt: isoAt(0) }).run();
+    db.insert(agentSessions).values({ id: `build-lock-${seq++}`, projectId: localProjectId, epicId: localEpicId, status: "completed", agentType: "build", worktreePath: "/tmp/worktrees/landable", createdAt: isoAt(1), endedAt: isoAt(2) }).run();
+    db.insert(agentSessions).values({ id: `review-lock-${seq++}`, projectId: localProjectId, epicId: localEpicId, status: "completed", agentType: "review_code", outcome: "answered", worktreePath: "/tmp/worktrees/landable", createdAt: isoAt(3), endedAt: isoAt(4) }).run();
+    let mergeCall = 0;
+    gitMocks.mergeWorktree.mockImplementation(async () => {
+      mergeCall += 1;
+      if (mergeCall === 1) return { merged: false, error: "CONFLICT in lib/x.ts", reason: "conflict" };
+      return { merged: true, commitHash: "abc" };
+    });
+    // First merge conflicts, which schedules the repair + retry path.
+    await tryAutoMerge(localProjectId, localEpicId);
+    // Someone else takes the checkout before the retry gets there.
+    autoModeRegistry.tryLockProjectMerge(localProjectId);
+    // Twice: the repair dispatch and the retry it queues are separate ticks.
+    await drainScheduler();
+    await drainScheduler();
+
+    // Contention is "come back later", not "this epic is unmergeable".
+    // Parking here would need a manual un-park for a branch that is fine.
+    expect(autoModeRegistry.isParked(localProjectId, localEpicId)).toBe(false);
+
+    autoModeRegistry.unlockProjectMerge(localProjectId);
+  });
+
+  it("keeps the project checkout merge lock when Full Auto is switched off mid-merge", () => {
+    // The lock guards a physical `git merge` in the base checkout, and the
+    // board's approve route takes the same one. Switching Full Auto off drops
+    // the supervisor's runtime state wholesale (that is how parked tickets
+    // get another chance) — but a merge already running in the checkout does
+    // not stop, so the lock must not go with it. If it did, an approve
+    // arriving next would be handed a checkout that is mid-merge.
+    expect(autoModeRegistry.tryLockProjectMerge(PROJECT_ID)).toBe(true);
+
+    autoModeRegistry.setEnabled(PROJECT_ID, false);
+
+    expect(autoModeRegistry.isProjectMergeInFlight(PROJECT_ID)).toBe(true);
+    expect(autoModeRegistry.tryLockProjectMerge(PROJECT_ID)).toBe(false);
+
+    autoModeRegistry.unlockProjectMerge(PROJECT_ID);
+    expect(autoModeRegistry.tryLockProjectMerge(PROJECT_ID)).toBe(true);
+    autoModeRegistry.unlockProjectMerge(PROJECT_ID);
+  });
 });
-
-
-/* ------------------------------------------------------------------ */
 /* The deterministic-verification gate                                 */
 /* ------------------------------------------------------------------ */
 describe("tryAutoMerge — the deterministic-verification gate", () => {
