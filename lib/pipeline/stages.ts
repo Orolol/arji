@@ -549,6 +549,35 @@ function readEffortEscalationTarget(
 }
 
 /**
+ * Ceilings for the open-findings blocks below. A finding body is a filed
+ * review comment — normally a few hundred characters; the caps only bite on
+ * degenerate rows and on tickets that accumulated findings across many
+ * cycles, where an unbounded list was one of the feeders of the 4.9 MB
+ * prompt measured on 2026-08-26.
+ */
+const FINDING_BODY_MAX_CHARS = 1_200;
+const FINDINGS_LIST_MAX = 80;
+
+/** The most recent rows within the list cap, original order preserved. */
+function capOpenFindings<T>(openComments: T[]): { kept: T[]; dropped: number } {
+  if (openComments.length <= FINDINGS_LIST_MAX) {
+    return { kept: openComments, dropped: 0 };
+  }
+  return {
+    kept: openComments.slice(-FINDINGS_LIST_MAX),
+    dropped: openComments.length - FINDINGS_LIST_MAX,
+  };
+}
+
+function findingBodyLine(rc: { lineNumber: number; body: string }): string {
+  const body =
+    rc.body.length > FINDING_BODY_MAX_CHARS
+      ? `${rc.body.slice(0, FINDING_BODY_MAX_CHARS)} _[… finding truncated …]_`
+      : rc.body;
+  return `- **Line ${rc.lineNumber}**: ${body}`;
+}
+
+/**
  * Byte-pattern of the epic build route's "Code Review Feedback" block over
  * the currently-open review comments (blocking findings appear verbatim with
  * their [severity] prefixes).
@@ -557,8 +586,9 @@ function buildReviewFeedbackSection(
   openComments: Array<{ filePath: string; lineNumber: number; body: string }>
 ): string {
   if (openComments.length === 0) return "";
+  const { kept, dropped } = capOpenFindings(openComments);
   const byFile = new Map<string, typeof openComments>();
-  for (const rc of openComments) {
+  for (const rc of kept) {
     const existing = byFile.get(rc.filePath) || [];
     existing.push(rc);
     byFile.set(rc.filePath, existing);
@@ -566,10 +596,15 @@ function buildReviewFeedbackSection(
   const parts = [
     "## Code Review Feedback\n\nThe following review comments were left on your previous changes. Address each one:\n",
   ];
+  if (dropped > 0) {
+    parts.push(
+      `_[${dropped} older open finding${dropped > 1 ? "s" : ""} omitted — the ${FINDINGS_LIST_MAX} most recent are listed.]_\n`
+    );
+  }
   for (const [filePath, fileComments] of byFile) {
     parts.push(`### ${filePath}`);
     for (const rc of fileComments) {
-      parts.push(`- **Line ${rc.lineNumber}**: ${rc.body}`);
+      parts.push(findingBodyLine(rc));
     }
     parts.push("");
   }
@@ -599,14 +634,20 @@ function buildPriorFindingsSection(
 ): string {
   if (openComments.length === 0) return "";
 
+  const { kept, dropped } = capOpenFindings(openComments);
   const parts = [
     "## Findings Still Open From Previous Reviews\n",
     `This is review cycle ${cycle} on this ticket. ${openComments.length} finding(s) ` +
       "filed by earlier cycles are still open:\n",
   ];
+  if (dropped > 0) {
+    parts.push(
+      `_[${dropped} older open finding${dropped > 1 ? "s" : ""} omitted — the ${FINDINGS_LIST_MAX} most recent are listed.]_\n`
+    );
+  }
 
   const byFile = new Map<string, typeof openComments>();
-  for (const rc of openComments) {
+  for (const rc of kept) {
     const existing = byFile.get(rc.filePath) || [];
     existing.push(rc);
     byFile.set(rc.filePath, existing);
@@ -614,7 +655,7 @@ function buildPriorFindingsSection(
   for (const [filePath, fileComments] of byFile) {
     parts.push(`### ${filePath}`);
     for (const rc of fileComments) {
-      parts.push(`- **Line ${rc.lineNumber}**: ${rc.body}`);
+      parts.push(findingBodyLine(rc));
     }
     parts.push("");
   }
@@ -1199,6 +1240,9 @@ function finalizeCodeSession(input: {
     }
   }
 
+  // The stored comment stays complete — agents can pull it whole through
+  // get_ticket; only the PROMPT rendering is budgeted
+  // (commentHistorySection). resolveSessionOutput scrubs prompt echoes.
   const output = resolveSessionOutput(result, sessionId);
   db.insert(ticketComments)
     .values({

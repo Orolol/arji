@@ -1260,15 +1260,48 @@ function isReviewComment(comment: PromptComment): boolean {
 }
 
 /**
- * Renders the comment history, keeping only the most recent review pass.
+ * Per-comment ceiling inside a prompt's Comment History. A legitimate build
+ * report or user note fits; a pasted log or a runaway session output gets a
+ * stated head+tail elision instead of riding every later prompt whole.
+ */
+export const PROMPT_COMMENT_MAX_CHARS = 4_000;
+const PROMPT_COMMENT_HEAD_CHARS = 3_200;
+const PROMPT_COMMENT_TAIL_CHARS = 600;
+
+/**
+ * How many non-review agent comments (build reports, progress notes) the
+ * history keeps, newest last. Each cycle of a review⇄fix loop posts at least
+ * one; older ones restate state the newest already carries.
+ */
+export const PROMPT_AGENT_COMMENTS_KEPT = 5;
+
+function capPromptCommentBody(content: string): string {
+  if (content.length <= PROMPT_COMMENT_MAX_CHARS) return content;
+  const omitted =
+    content.length - PROMPT_COMMENT_HEAD_CHARS - PROMPT_COMMENT_TAIL_CHARS;
+  return (
+    `${content.slice(0, PROMPT_COMMENT_HEAD_CHARS)}\n\n` +
+    `_[… ${omitted.toLocaleString("en-US")} characters of this comment omitted …]_\n\n` +
+    `${content.slice(-PROMPT_COMMENT_TAIL_CHARS)}`
+  );
+}
+
+/**
+ * Renders the comment history under a hard budget.
  *
- * A review agent posts its entire review document as a comment — the five
- * passes on the epic that first hit MAX_ARG_STRLEN were 11 to 15 KB each,
- * 52 % of a 137 KB prompt on their own. Each pass restates what is still
- * open (findings are explicitly carried over as "unaddressed"), so the older
- * documents are dead weight in a build or re-review prompt. Everything else —
- * user comments, build reports, questions — is kept verbatim, and the elision
- * is stated in place rather than performed silently.
+ * Three rules, each stated in place rather than performed silently:
+ *
+ * 1. Only the most recent REVIEW pass is kept. A review agent posts its
+ *    entire review document as a comment — the five passes on the epic that
+ *    first hit MAX_ARG_STRLEN were 11 to 15 KB each, 52 % of a 137 KB prompt
+ *    on their own — and each pass restates what is still open.
+ * 2. Only the last PROMPT_AGENT_COMMENTS_KEPT non-review AGENT comments are
+ *    kept. Build/fix reports accumulate one per cycle; on the ticket that
+ *    reached a 4.9 MB prompt (2026-08-26) the history was the whole problem.
+ *    USER comments are never elided this way — they are instructions, not
+ *    state restatements.
+ * 3. Every kept comment is capped at PROMPT_COMMENT_MAX_CHARS with a
+ *    head+tail elision.
  */
 export function commentHistorySection(comments?: PromptComment[]): string {
   if (!comments || comments.length === 0) return "";
@@ -1277,18 +1310,44 @@ export function commentHistorySection(comments?: PromptComment[]): string {
     (last, comment, index) => (isReviewComment(comment) ? index : last),
     -1,
   );
-  const elided = comments.filter(
+  const elidedReviews = comments.filter(
     (comment, index) => isReviewComment(comment) && index !== lastReviewIndex,
   ).length;
 
+  // The most recent agent (non-review) comments, by position.
+  const agentIndexes = comments
+    .map((comment, index) => ({ comment, index }))
+    .filter(
+      ({ comment }) => comment.author !== "user" && !isReviewComment(comment),
+    )
+    .map(({ index }) => index);
+  const keptAgentIndexes = new Set(
+    agentIndexes.slice(-PROMPT_AGENT_COMMENTS_KEPT),
+  );
+  const elidedAgents = agentIndexes.length - keptAgentIndexes.size;
+
   const rendered: string[] = [];
-  let noticeEmitted = false;
+  let reviewNoticeEmitted = false;
+  let agentNoticeEmitted = false;
   comments.forEach((comment, index) => {
     if (isReviewComment(comment) && index !== lastReviewIndex) {
-      if (!noticeEmitted) {
-        noticeEmitted = true;
+      if (!reviewNoticeEmitted) {
+        reviewNoticeEmitted = true;
         rendered.push(
-          `_[${elided} earlier review pass${elided > 1 ? "es" : ""} omitted — superseded by the most recent review below.]_`,
+          `_[${elidedReviews} earlier review pass${elidedReviews > 1 ? "es" : ""} omitted — superseded by the most recent review below.]_`,
+        );
+      }
+      return;
+    }
+    if (
+      comment.author !== "user" &&
+      !isReviewComment(comment) &&
+      !keptAgentIndexes.has(index)
+    ) {
+      if (!agentNoticeEmitted) {
+        agentNoticeEmitted = true;
+        rendered.push(
+          `_[${elidedAgents} earlier agent update${elidedAgents > 1 ? "s" : ""} omitted — the most recent updates below carry the current state.]_`,
         );
       }
       return;
@@ -1296,7 +1355,9 @@ export function commentHistorySection(comments?: PromptComment[]): string {
     const prefix = comment.author === "user" ? "**User:**" : "**Agent:**";
     // Comments are written by users and by other agent sessions; a comment
     // body must not be able to pose as a control turn (lib/claude/untrusted).
-    rendered.push(`${prefix}\n${neutralizeControlMarkup(comment.content.trim())}`);
+    rendered.push(
+      `${prefix}\n${neutralizeControlMarkup(capPromptCommentBody(comment.content.trim()))}`,
+    );
   });
 
   return `## Comment History\n\n${rendered.join("\n\n")}\n`;

@@ -110,3 +110,66 @@ describe("resolveSessionOutput", () => {
     expect(output).not.toBe(NO_TEXTUAL_OUTPUT_FALLBACK);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Prompt-echo scrubbing (the 4.9 MB prompt bug, 2026-08-26)
+// ---------------------------------------------------------------------------
+
+const { PROMPT_ECHO_MARKER } = await import(
+  "@/lib/claude/resolve-session-output"
+);
+
+// Long enough to clear PROMPT_ECHO_MIN_CHARS.
+const FAKE_PROMPT = `# Project: Arij\n\n## Project Specification\n\n${"spec line\n".repeat(80)}`;
+
+function textResult(text: string) {
+  return {
+    success: true,
+    result: JSON.stringify({ type: "result", subtype: "success", result: text }),
+    duration: 100,
+  };
+}
+
+describe("prompt-echo scrubbing", () => {
+  it("treats an output that is only the echoed prompt as no output at all", () => {
+    // Measured shape: a failed omp run echoed its prompt twice to stdout.
+    const result = {
+      ...textResult(`${FAKE_PROMPT}\n\n${FAKE_PROMPT}`),
+      success: false,
+      error: "Oh My Pi is not authenticated.",
+    };
+    dbMockState.getQueue = [
+      { prompt: FAKE_PROMPT }, // getSessionPrompt for the parsed candidate
+      { lastNonEmptyText: null }, // no streamed fallback
+    ];
+    expect(resolveSessionOutput(result, "s-echo-1")).toBe(
+      "Oh My Pi is not authenticated.",
+    );
+  });
+
+  it("removes the echo but keeps the real content around it", () => {
+    const result = textResult(`${FAKE_PROMPT}\n\nActual final report.`);
+    dbMockState.getQueue = [{ prompt: FAKE_PROMPT }];
+    const output = resolveSessionOutput(result, "s-echo-2");
+    expect(output).toContain("Actual final report.");
+    expect(output).toContain(PROMPT_ECHO_MARKER);
+    expect(output).not.toContain("## Project Specification");
+  });
+
+  it("scrubs the streamed lastNonEmptyText fallback too", () => {
+    dbMockState.getQueue = [
+      { lastNonEmptyText: FAKE_PROMPT },
+      { prompt: FAKE_PROMPT },
+    ];
+    expect(resolveSessionOutput(null, "s-echo-3", "Nothing delivered.")).toBe(
+      "Nothing delivered.",
+    );
+  });
+
+  it("leaves output alone when the session has no stored prompt", () => {
+    const result = textResult(FAKE_PROMPT);
+    dbMockState.getQueue = [null];
+    expect(resolveSessionOutput(result, "s-echo-4")).toBe(FAKE_PROMPT);
+  });
+});
+
