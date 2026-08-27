@@ -358,6 +358,18 @@ export const AUTO_MODE_REASONS = {
   mergeAttempted: "Auto mode attempting merge after a clean review",
   merged: "Auto mode: review clean, merged",
   mergeRefused: (error: string) => `Auto mode skipped merge: ${error}`,
+  /**
+   * A merge git itself refused, tagged with `MergeWorktreeResult.reason`.
+   *
+   * Distinct from `dispatchFailed("merge", …)` — which reads as a generic
+   * failure and covers every shape at once — because the board turns this
+   * trace into a card blocker: only `conflict` and `conflict-markers` mean
+   * "there is a conflict to resolve". A missing branch or a broken repo
+   * labelled as a conflict would offer the user a repair that repairs
+   * nothing (see lib/workflow/merge-failure.ts).
+   */
+  mergeFailed: (reason: string, error: string) =>
+    `Auto mode merge failed (${reason}): ${error}`,
   mergeConflict: "Auto mode merge conflict — merge-fix agent dispatched",
   mergeConflictDeferred:
     "Auto mode merge conflict — no build slot for a resolution agent, deferred",

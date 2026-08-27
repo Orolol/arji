@@ -12,6 +12,7 @@ import {
 import { useNamedAgentsList } from "@/hooks/useNamedAgentsList";
 import {
   OPENAI_COMPATIBLE_PROVIDER,
+  PERSISTENT_CHAT_PROVIDER_OPTIONS,
   PROVIDER_LABELS,
   PROVIDER_OPTIONS,
   type AgentProvider,
@@ -35,7 +36,8 @@ interface ChatProviderSelectProps {
 function isSelectableProvider(value: string): boolean {
   return (
     value === OPENAI_COMPATIBLE_PROVIDER ||
-    PROVIDER_OPTIONS.includes(value as AgentProvider)
+    PROVIDER_OPTIONS.includes(value as AgentProvider) ||
+    (PERSISTENT_CHAT_PROVIDER_OPTIONS as readonly string[]).includes(value)
   );
 }
 
@@ -101,6 +103,13 @@ export function ChatProviderSelect({
           namedAgentId: null,
           provider: nextValue as AgentProvider,
         });
+      } else if (
+        (PERSISTENT_CHAT_PROVIDER_OPTIONS as readonly string[]).includes(nextValue)
+      ) {
+        onSelect({
+          namedAgentId: null,
+          provider: nextValue as ChatModeProvider,
+        });
       }
     }
   }
@@ -148,6 +157,20 @@ export function ChatProviderSelect({
             ))}
           </SelectGroup>
         )}
+        <SelectGroup>
+          <SelectLabel className="text-[11px] font-semibold text-muted-foreground px-2 py-1">
+            Persistent CLI
+          </SelectLabel>
+          {PERSISTENT_CHAT_PROVIDER_OPTIONS.map((provider) => (
+            <SelectItem
+              key={provider}
+              value={provider}
+              data-testid={`chat-option-provider-${provider}`}
+            >
+              {PROVIDER_LABELS[provider]}
+            </SelectItem>
+          ))}
+        </SelectGroup>
         <SelectGroup>
           <SelectLabel className="text-[11px] font-semibold text-muted-foreground px-2 py-1">
             CLI Providers

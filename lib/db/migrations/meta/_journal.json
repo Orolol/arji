@@ -286,14 +286,21 @@
       "idx": 40,
       "version": "6",
       "when": 1786713800000,
-      "tag": "0041_agent_session_mcp_channel",
+      "tag": "0041_repair_done_epic_stories",
       "breakpoints": true
     },
     {
       "idx": 41,
       "version": "6",
       "when": 1786713900000,
-      "tag": "0042_review_comment_session_index",
+      "tag": "0042_agent_session_mcp_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1786714000000,
+      "tag": "0043_review_comment_session_index",
       "breakpoints": true
     }
   ]

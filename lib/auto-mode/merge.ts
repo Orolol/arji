@@ -35,6 +35,7 @@ import {
   mergeWorktree,
   rollbackMerge,
   type MergeCheckpoint,
+  type MergeWorktreeResult,
 } from "@/lib/git/manager";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { applyTransition } from "@/lib/workflow/transition-service";
@@ -522,11 +523,23 @@ async function runAutoMerge(
     epic.branchName
   );
 
-  const result = await mergeWorktree(
-    project.gitRepoPath,
-    epic.branchName,
-    worktreePath
-  );
+  if (!autoModeRegistry.tryLockProjectMerge(projectId)) {
+    return {
+      status: "skipped",
+      reason: "Another merge is in progress in this repository",
+      sessionId: null,
+    };
+  }
+  let result: MergeWorktreeResult;
+  try {
+    result = await mergeWorktree(
+      project.gitRepoPath,
+      epic.branchName,
+      worktreePath
+    );
+  } finally {
+    autoModeRegistry.unlockProjectMerge(projectId);
+  }
 
   if (result.merged) {
     const finalized = finalizeMergedEpic({
@@ -577,7 +590,9 @@ async function runAutoMerge(
       fromStatus,
       toStatus: fromStatus,
       actor: "system",
-      reason: AUTO_MODE_REASONS.dispatchFailed("merge", error),
+      // Tagged with the actual git verdict: the board reads this trace and
+      // must not call a missing branch a conflict.
+      reason: AUTO_MODE_REASONS.mergeFailed(result.reason ?? "error", error),
     });
     return { status: "failed", error, sessionId: null };
   }
@@ -628,6 +643,17 @@ async function runAutoMerge(
 
   const conflictWorktreePath = await restoreWorktree();
   if (!conflictWorktreePath) {
+    // A real conflict that no agent will repair. Without a trace of its own
+    // the only record is the engine's generic dispatch-failure line, and the
+    // board would show the epic as merely un-mergeable rather than conflicted.
+    logTransition({
+      projectId,
+      epicId,
+      fromStatus,
+      toStatus: fromStatus,
+      actor: "system",
+      reason: AUTO_MODE_REASONS.mergeFailed("conflict", error),
+    });
     return { status: "failed", error, sessionId: null };
   }
 
@@ -641,7 +667,16 @@ async function runAutoMerge(
 
   if (!sessionId) {
     // Nothing is going to repair this now; the caller releases the merge lock
-    // because the outcome is not "conflict".
+    // because the outcome is not "conflict". Still a conflict as far as the
+    // board is concerned — a human can resolve it.
+    logTransition({
+      projectId,
+      epicId,
+      fromStatus,
+      toStatus: fromStatus,
+      actor: "system",
+      reason: AUTO_MODE_REASONS.mergeFailed("conflict", error),
+    });
     return { status: "failed", error, sessionId: null };
   }
 
@@ -913,7 +948,13 @@ async function retryMergeAfterFix(input: {
     park(`deterministic verification blocked the merge: ${verificationBlock}`);
     return;
   }
-
+  if (!autoModeRegistry.tryLockProjectMerge(input.projectId)) {
+    // Project-wide checkout lock is held by another merge right now.
+    // Return without parking: the per-epic hold is released unconditionally
+    // by the caller's finally block, so the next sweep will re-enter
+    // tryAutoMerge, find the branch already resolved, and merge cleanly.
+    return;
+  }
   let retry: Awaited<ReturnType<typeof mergeWorktree>>;
   try {
     retry = await mergeWorktree(
@@ -924,6 +965,8 @@ async function retryMergeAfterFix(input: {
   } catch (mergeError) {
     park(mergeError instanceof Error ? mergeError.message : "Merge failed");
     return;
+  } finally {
+    autoModeRegistry.unlockProjectMerge(input.projectId);
   }
 
   if (!retry.merged) {

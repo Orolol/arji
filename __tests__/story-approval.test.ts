@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => ({
   tryExportArjiJson: vi.fn(),
   beginMergeWork: vi.fn(),
   endMergeWork: vi.fn(),
+  tryLockProjectMerge: vi.fn(),
+  unlockProjectMerge: vi.fn(),
 }));
 
 vi.mock("@/lib/db", async () => {
@@ -65,6 +67,8 @@ vi.mock("@/lib/auto-mode/registry", () => ({
   autoModeRegistry: {
     beginMergeWork: mocks.beginMergeWork,
     endMergeWork: mocks.endMergeWork,
+    tryLockProjectMerge: mocks.tryLockProjectMerge,
+    unlockProjectMerge: mocks.unlockProjectMerge,
   },
 }));
 
@@ -151,6 +155,7 @@ describe("Story approval", () => {
     mocks.applyTransition.mockReturnValue({ valid: true });
     mocks.applyStoryTransition.mockReturnValue({ valid: true });
     mocks.beginMergeWork.mockReturnValue(true);
+    mocks.tryLockProjectMerge.mockReturnValue(true);
   });
 
   it("rejects approval when the story is not in review status", async () => {

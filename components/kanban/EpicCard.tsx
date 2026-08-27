@@ -21,12 +21,21 @@ import {
 import { formatElapsed } from "@/lib/utils/format-elapsed";
 import {
   GitPullRequest,
+  GitMerge,
   Bot,
+  CircleAlert,
+  Loader2,
   TriangleAlert,
   RefreshCw,
+  X,
   Link2,
   ShieldAlert,
 } from "lucide-react";
+import {
+  describeMergeBlocker,
+  type MergeReadiness,
+} from "@/lib/kanban/merge-readiness";
+import type { BoardMergeState } from "@/hooks/useBoardMerge";
 import type {
   DependencyFocusRole,
   ReadinessScore,
@@ -66,6 +75,28 @@ export interface EpicCardView {
   awaitingReply?: boolean;
   /** Info about the most recent failed agent session for this epic */
   failedSession?: FailedSessionInfo;
+  /**
+   * Derived "can this land on main?" signal from the board API. Supplied only
+   * for Review cards — it is what splits the column and decides whether this
+   * card offers a Merge button or explains what is in the way.
+   */
+  mergeReadiness?: MergeReadiness | null;
+  /** In-flight / failed state of a merge started from this card. */
+  mergeState?: BoardMergeState;
+  /**
+   * A queued OR running session owns this epic. Broader than `activity`,
+   * which only covers agents that already started: merging removes the epic's
+   * worktree, so a merge over a QUEUED build drops it into a directory that
+   * no longer exists. The approve route refuses the same case with a 409;
+   * this keeps the board from offering the click at all.
+   */
+  agentBusy?: boolean;
+  /** Merge this epic (POST .../approve). Absent when the card is not ready. */
+  onMerge?: () => void;
+  /** Dispatch the merge-conflict resolution flow. */
+  onResolveMerge?: () => void;
+  /** Clear the card's merge failure line. */
+  onDismissMergeError?: () => void;
   onToggleSelect?: () => void;
   onLinkedAgentHoverChange?: (activityId: string | null) => void;
   /** Called when user clicks the retry button on a failed session indicator */
@@ -146,6 +177,12 @@ export function EpicCard({
     unreadAi: hasUnreadAiUpdate = false,
     awaitingReply = false,
     failedSession,
+    mergeReadiness,
+    mergeState,
+    agentBusy = false,
+    onMerge,
+    onResolveMerge,
+    onDismissMergeError,
     onToggleSelect,
     onLinkedAgentHoverChange,
     onRetryBuild,
@@ -227,6 +264,35 @@ export function EpicCard({
   // it. Only meaningful while the ticket is actually waiting on a review.
   const showUnverifiableReview =
     epic.status === "review" && !!epic.reviewUnverifiable;
+
+  // Merge affordances. Any session that owns the ticket — queued or running —
+  // suppresses them: the card defers to the activity line rather than
+  // offering a click the approve route would refuse (or, worse, one that
+  // would pull the worktree out from under a build about to start).
+  const mergePending = mergeState?.pending === true;
+  const mergeLocked = mergeState?.locked === true;
+  const mergeDisabled = mergePending || mergeLocked;
+  const mergeBlocked = agentBusy || !!activeAgentActivity;
+  const showMergeAction =
+    !!onMerge && mergeReadiness?.ready === true && !mergeBlocked;
+  // A running build/review/merge already explains itself through the activity
+  // line above. `agentBusy` is wider — a QUEUED session, or a running grading
+  // or QA one — and none of those raise a chip, so without this a ready card
+  // would lose its Merge button with nothing at all in its place.
+  const mergeBlockerLabel = activeAgentActivity
+    ? null
+    : (describeMergeBlocker(mergeReadiness) ??
+      (agentBusy && mergeReadiness
+        ? "An agent is working on this epic"
+        : null));
+  // Both the live 409 and the persisted activity-log trace mean the same
+  // thing to the user, and both offer the same way out.
+  const showResolveMerge =
+    !!onResolveMerge &&
+    !mergeBlocked &&
+    (mergeState?.conflict === true ||
+      mergeReadiness?.blocker === "merge_conflict") &&
+    mergeReadiness?.blocker !== "conflict_markers";
 
   // Elapsed time ticker for active agent
   const [elapsedText, setElapsedText] = useState("");
@@ -332,8 +398,7 @@ export function EpicCard({
                 >
                   <span className="breathing-dot h-[7px] w-[7px] shrink-0" />
                   <span className="truncate">
-                    {activityLabel} {"·"}{" "}
-                    {providerLabel(activeAgentActivity!.provider)}
+                    {activityLabel} {"·"} {activeAgentActivity!.agentName}
                     {elapsedText && ` · ${elapsedText}`}
                   </span>
                 </div>
@@ -367,6 +432,113 @@ export function EpicCard({
           <Bot className="h-[13px] w-[13px] shrink-0" />
           Awaiting your reply
         </div>
+      )}
+
+      {showMergeAction && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onMerge!();
+          }}
+          disabled={mergeDisabled}
+          title={
+            mergeLocked
+              ? "Another merge is in progress in this repository"
+              : undefined
+          }
+          className="inline-flex h-[27px] shrink-0 items-center justify-center gap-[6px] rounded-[7px] bg-primary px-[11px] text-[12.5px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60 motion-reduce:transition-none"
+          aria-label={`Merge ${epic.title}`}
+          data-testid={`epic-merge-${epic.id}`}
+        >
+          {mergePending && mergeState?.action === "merge" ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
+              Merging...
+            </>
+          ) : (
+            <>
+              <GitMerge className="h-3 w-3" />
+              Merge
+            </>
+          )}
+        </button>
+      )}
+
+      {mergeBlockerLabel && (
+        <div
+          className={cn(
+            "flex items-start gap-[7px] text-[12px]",
+            mergeReadiness?.blocker === "merge_conflict"
+              ? "text-destructive"
+              : "text-muted-foreground"
+          )}
+          data-testid={`epic-merge-blocked-${epic.id}`}
+        >
+          <CircleAlert className="mt-[2px] h-[13px] w-[13px] shrink-0" />
+          <span className="min-w-0 break-words">{mergeBlockerLabel}</span>
+        </div>
+      )}
+
+      {mergeState?.error && (
+        <div
+          className="flex items-start gap-[7px] text-[12px] text-destructive"
+          data-testid={`epic-merge-error-${epic.id}`}
+        >
+          <TriangleAlert className="mt-[2px] h-[13px] w-[13px] shrink-0" />
+          <span className="min-w-0 flex-1 break-words line-clamp-3">
+            {mergeState.error}
+          </span>
+          {onDismissMergeError && (
+            // The only thing that clears this line. A failure outlives its
+            // cause — the findings get resolved, the conflict gets repaired —
+            // and a stale error sitting next to a live Merge button is worse
+            // than no error at all.
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDismissMergeError();
+              }}
+              className="-m-1 shrink-0 rounded-[5px] p-1 text-muted-foreground transition-colors hover:text-foreground motion-reduce:transition-none"
+              aria-label="Dismiss merge error"
+              data-testid={`epic-merge-error-dismiss-${epic.id}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {showResolveMerge && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onResolveMerge!();
+          }}
+          disabled={mergeDisabled}
+          title={
+            mergeLocked
+              ? "Another merge is in progress in this repository"
+              : undefined
+          }
+          className="inline-flex h-[27px] shrink-0 items-center justify-center gap-[6px] rounded-[7px] border border-border px-[11px] text-[12.5px] transition-colors hover:bg-band disabled:opacity-60 motion-reduce:transition-none"
+          aria-label={`Resolve the merge conflict on ${epic.title}`}
+          data-testid={`epic-resolve-merge-${epic.id}`}
+        >
+          {mergePending && mergeState?.action === "resolve" ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
+              Resolving...
+            </>
+          ) : (
+            <>
+              <GitMerge className="h-3 w-3" />
+              Resolve merge
+            </>
+          )}
+        </button>
       )}
 
       {showFailure && (

@@ -97,15 +97,13 @@ interface AutoModeProjectState {
   sweeping: boolean;
   /**
    * Epics with merge work outstanding — from the moment `tryAutoMerge` starts
-   * until its git merge (and any conflict-agent retry) has settled. Git is not
-   * transactional and a merge takes seconds, so a second sweep must not start
-   * another one on the same branch. This outlives the merge-fix SESSION: that
-   * session goes terminal before its retry runs, and the terminal hook kicks a
-   * sweep in exactly that window.
+   * until its git merge (and any conflict-agent retry) has settled. A second
+   * sweep must not start another build/review/merge on the same branch.
+   * This outlives the merge-fix SESSION: that session goes terminal before its
+   * retry runs, and the terminal hook kicks a sweep in exactly that window.
    */
   merging: Set<string>;
   /**
-   * epicId → ISO instant before which no merge should be re-attempted. Used
    * when a conflict cannot be repaired right now (no build slot for an agent),
    * so the sweep does not re-run a doomed `git merge` every 15 seconds.
    */
@@ -141,10 +139,23 @@ function emptyState(): AutoModeProjectState {
     secondOpinionSkipReasons: new Map(),
   };
 }
-
 export class AutoModeRegistry {
   private readonly states = new Map<string, AutoModeProjectState>();
-
+  /**
+   * Project IDs currently executing `mergeWorktree` in the shared repository
+   * checkout.
+   *
+   * Deliberately NOT a field on `AutoModeProjectState`. This lock guards a
+   * physical `git merge` in the base checkout, and the board's approve route
+   * takes it too — so it outlives Full Auto's runtime state. `setEnabled(id,
+   * false)` drops that state wholesale to un-park tickets; if the lock lived
+   * there, toggling Full Auto off mid-merge would hand a second merge the
+   * same checkout.
+   *
+   * `reset`/`resetAll` DO clear it: they are teardown, and a leaked lock
+   * would leak across tests.
+   */
+  private readonly gitMergingProjects = new Set<string>();
   private stateFor(projectId: string): AutoModeProjectState {
     let state = this.states.get(projectId);
     if (!state) {
@@ -298,7 +309,11 @@ export class AutoModeRegistry {
   // Merge work in flight
   // ---------------------------------------------------------------------
 
-  /** Claims the merge lock for an epic. False when one is already held. */
+  /**
+   * Claims the per-epic merge lock. False when one is already held on this epic.
+   * Held across the full conflict-repair window in auto-mode so the sweep does
+   * not double-dispatch on the same branch.
+   */
   beginMergeWork(projectId: string, epicId: string): boolean {
     const state = this.stateFor(projectId);
     if (state.merging.has(epicId)) return false;
@@ -317,6 +332,28 @@ export class AutoModeRegistry {
   /** Epics with merge work outstanding — an exclusion set for the selectors. */
   mergingEpicIds(projectId: string): Set<string> {
     return new Set(this.states.get(projectId)?.merging ?? []);
+  }
+
+  // ---------------------------------------------------------------------
+  // Short project-wide base-checkout merge lock
+  // ---------------------------------------------------------------------
+
+  /**
+   * Claims the short project-wide checkout lock for `mergeWorktree`.
+   * False when another git merge is currently executing in the base checkout.
+   */
+  tryLockProjectMerge(projectId: string): boolean {
+    if (this.gitMergingProjects.has(projectId)) return false;
+    this.gitMergingProjects.add(projectId);
+    return true;
+  }
+
+  unlockProjectMerge(projectId: string): void {
+    this.gitMergingProjects.delete(projectId);
+  }
+
+  isProjectMergeInFlight(projectId: string): boolean {
+    return this.gitMergingProjects.has(projectId);
   }
 
   /** Holds an epic's merge back until `until` (an unrepairable conflict). */
@@ -503,11 +540,13 @@ export class AutoModeRegistry {
   /** Drops all state for one project (used by disable and by tests). */
   reset(projectId: string): void {
     this.states.delete(projectId);
+    this.gitMergingProjects.delete(projectId);
   }
 
   /** Drops all state for every project (tests only). */
   resetAll(): void {
     this.states.clear();
+    this.gitMergingProjects.clear();
   }
 }
 
