@@ -25,7 +25,8 @@ export async function POST(request: NextRequest) {
   const validated = await validateBody(createNamedAgentSchema, request);
   if (isValidationError(validated)) return validated;
 
-  const { name, provider, model, escalatesTo } = validated.data;
+  const { name, provider, model, options, personaPrompt, escalatesTo } =
+    validated.data;
 
   try {
     const result = await createNamedAgent({
@@ -33,6 +34,8 @@ export async function POST(request: NextRequest) {
       name,
       provider,
       model,
+      options,
+      personaPrompt,
       escalatesTo,
     });
     if (result.error) {

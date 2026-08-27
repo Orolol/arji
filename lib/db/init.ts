@@ -126,6 +126,19 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
     table: "named_agents",
     column: "escalates_to",
   },
+  // 0041_named_agent_options (single transactional migration: the three
+  // columns are always present or absent together on real databases).
+  { folderMillis: 1786713800000, table: "named_agents", column: "options" },
+  {
+    folderMillis: 1786713800000,
+    table: "named_agents",
+    column: "persona_prompt",
+  },
+  {
+    folderMillis: 1786713800000,
+    table: "agent_sessions",
+    column: "cli_options",
+  },
 ];
 
 /** Default on-disk location of the drizzle migration files. */

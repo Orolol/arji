@@ -281,6 +281,13 @@
       "when": 1786713700000,
       "tag": "0040_verify_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1786713800000,
+      "tag": "0041_named_agent_options",
+      "breakpoints": true
     }
   ]
 }

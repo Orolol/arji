@@ -192,3 +192,21 @@ export function isAgentProvider(value: string): value is AgentProvider {
 export function isChatProvider(value: string): value is ChatModeProvider {
   return value === OPENAI_COMPATIBLE_PROVIDER || isAgentProvider(value);
 }
+
+/**
+ * Persona given to a newly created named agent. Applied at creation only —
+ * migration 0041 leaves existing agents at NULL so that adding the feature
+ * does not rewrite the prompt of every agent already configured.
+ */
+export const DEFAULT_PERSONA_PROMPT = "You're an experienced developer";
+
+/**
+ * Ceiling on a persona, in characters.
+ *
+ * The persona rides at the head of EVERY prompt this agent receives, so it is
+ * one of the few unbounded sections a user can grow without noticing; the
+ * same budgeting rule as the comment history applies (see
+ * PROMPT_COMMENT_MAX_CHARS). Generous enough for a paragraph or two, small
+ * enough that it can never be the reason a prompt outgrows argv.
+ */
+export const PERSONA_PROMPT_MAX_CHARS = 2_000;
