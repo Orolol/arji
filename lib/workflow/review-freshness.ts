@@ -13,8 +13,27 @@
  * builders would couple them.
  */
 
-import { sql } from "drizzle-orm";
+import { sql, type SQLWrapper } from "drizzle-orm";
 import { agentSessions } from "@/lib/db/schema";
+
+/**
+ * The `agent_sessions` columns these fragments read, structurally.
+ *
+ * Typed by the columns rather than by the table so a correlated subquery can
+ * pass an `alias()` handle: an aliased table carries its alias in every
+ * column's type parameters, so it is not assignable to `typeof agentSessions`
+ * however identical the columns are.
+ */
+export type ReviewFreshnessColumns = Record<
+  | "status"
+  | "userStoryId"
+  | "agentType"
+  | "outcome"
+  | "reviewVerdict"
+  | "startedAt"
+  | "createdAt",
+  SQLWrapper
+>;
 
 /**
  * Agent types that constitute "a review happened". Same family the workflow
@@ -42,8 +61,7 @@ function sessionAtSql() {
 }
 
 /**
- * Newest EPIC-SCOPED review session that completed with an actual verdict
- * (`outcome = 'answered'`).
+ * "This session is a clean review", as a reusable WHEN clause.
  *
  * Epic-scoped (`user_story_id IS NULL`) because reviews and merges are
  * epic-level by design, so a story review must never satisfy the epic's merge
@@ -53,17 +71,58 @@ function sessionAtSql() {
  * the gate. NULL stays clean — that is every MCP-less provider, whose only
  * verdict signal is the prose scan this gate never read.
  *
+ * `session` is a parameter so a CORRELATED subquery can pass its own alias
+ * (lib/workflow/blocking-findings.ts) and still test the same conditions.
+ */
+export function isCleanReviewSql(
+  session: ReviewFreshnessColumns = agentSessions
+) {
+  return sql`${session.status} = 'completed'
+     AND ${session.userStoryId} IS NULL
+     AND ${session.agentType} IN (${sql.raw(REVIEW_AGENT_TYPES_SQL)})
+     AND ${session.outcome} = 'answered'
+     AND (${session.reviewVerdict} IS NULL
+          OR ${session.reviewVerdict} <> 'changes_requested')`;
+}
+
+/**
+ * Newest EPIC-SCOPED review session that completed with an actual verdict
+ * (`outcome = 'answered'`) — see `isCleanReviewSql` for the exclusions.
+ *
  * Group by `agent_sessions.epic_id`.
  */
 export function lastCleanReviewAtSql() {
   return sql<string | null>`MAX(CASE
-    WHEN ${agentSessions.status} = 'completed'
-     AND ${agentSessions.userStoryId} IS NULL
-     AND ${agentSessions.agentType} IN (${sql.raw(REVIEW_AGENT_TYPES_SQL)})
-     AND ${agentSessions.outcome} = 'answered'
-     AND (${agentSessions.reviewVerdict} IS NULL
-          OR ${agentSessions.reviewVerdict} <> 'changes_requested')
+    WHEN ${isCleanReviewSql()}
     THEN ${sessionAtSql()} END)`;
+}
+
+/**
+ * When the newest clean review STARTED — the findings window of the round
+ * that last passed judgement, in the same shape
+ * `readSessionFindingsWindow` uses (`started_at`, falling back to the row's
+ * creation).
+ *
+ * Its companion above answers "how fresh is the verdict"; this one answers
+ * "which findings did that verdict weigh". A `[critical]` filed BEFORE this
+ * instant belongs to a round the reviewer has since re-run on fixed code and
+ * not re-reported — stale bookkeeping, not an open problem. One filed at or
+ * after it was filed by (or alongside) the very review that approved, and a
+ * self-contradicting reviewer never clears the gate.
+ *
+ * MAX over the clean rounds' starts, not "the start of the row that produced
+ * the MAX end": reviews on one epic are serialised, so the newest start IS
+ * the newest round, and reading one aggregate is cheaper than correlating two.
+ *
+ * Group by `agent_sessions.epic_id`.
+ */
+export function lastCleanReviewStartedAtSql(
+  session: ReviewFreshnessColumns = agentSessions
+) {
+  return sql<string | null>`MAX(CASE
+    WHEN ${isCleanReviewSql(session)}
+    THEN REPLACE(COALESCE(${session.startedAt}, ${session.createdAt}), ' ', 'T')
+    END)`;
 }
 
 /**

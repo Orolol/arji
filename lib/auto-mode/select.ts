@@ -22,6 +22,7 @@ import {
   lastCleanReviewAtSql,
   lastTerminalCodeAtSql,
 } from "@/lib/workflow/review-freshness";
+import { blocksMergeSql } from "@/lib/workflow/blocking-findings";
 import { isDeliveredStatus } from "@/lib/types/kanban";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
 import { listPipelineRunsByProject } from "@/lib/pipeline/registry";
@@ -527,6 +528,10 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
   }
 
   // 9. Open review comments per epic — the merge gate's blocking findings.
+  //
+  // Same `blocksMergeSql` narrowing the board applies, for the same reason
+  // both sides call `evaluateMergeReadiness`: the supervisor and the card
+  // must not hold different opinions about which rows still stand in the way.
   const openReviewRows = db
     .select({
       epicId: reviewComments.epicId,
@@ -535,7 +540,11 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     .from(reviewComments)
     .innerJoin(epics, eq(reviewComments.epicId, epics.id))
     .where(
-      and(eq(epics.projectId, projectId), eq(reviewComments.status, "open"))
+      and(
+        eq(epics.projectId, projectId),
+        eq(reviewComments.status, "open"),
+        blocksMergeSql()
+      )
     )
     .groupBy(reviewComments.epicId)
     .all();

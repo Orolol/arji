@@ -26,15 +26,27 @@ vi.mock("@/lib/db", () => {
 vi.mock("@/lib/db/schema", () => ({
   epics: { _name: "epics", id: "id", status: "status", updatedAt: "updatedAt" },
   userStories: { _name: "userStories", id: "id", status: "status" },
+  // Columns lib/workflow/blocking-findings.ts reads when it narrows "open"
+  // to "still blocking". The queries never execute against this fake — the
+  // db chain mock returns canned rows — so string placeholders suffice.
   agentSessions: {
     _name: "agentSessions",
     epicId: "epicId",
+    userStoryId: "userStoryId",
     status: "status",
+    agentType: "agentType",
+    outcome: "outcome",
+    reviewVerdict: "reviewVerdict",
+    startedAt: "startedAt",
+    createdAt: "createdAt",
   },
   reviewComments: {
     _name: "reviewComments",
     epicId: "epicId",
     status: "status",
+    author: "author",
+    body: "body",
+    createdAt: "createdAt",
   },
   ticketActivityLog: {
     _name: "ticketActivityLog",
@@ -50,9 +62,22 @@ vi.mock("@/lib/db/schema", () => ({
   },
 }));
 
-vi.mock("drizzle-orm", () => ({
-  eq: vi.fn((...args: unknown[]) => args),
-  and: vi.fn((...args: unknown[]) => args),
+vi.mock("drizzle-orm", () => {
+  const sql = vi.fn((..._args: unknown[]) => ({})) as ReturnType<
+    typeof vi.fn
+  > & { raw: ReturnType<typeof vi.fn> };
+  sql.raw = vi.fn((value: unknown) => value);
+  return {
+    eq: vi.fn((...args: unknown[]) => args),
+    and: vi.fn((...args: unknown[]) => args),
+    sql,
+  };
+});
+
+// `alias()` wants a real drizzle table and this file fakes the schema, so the
+// aliased handle is the fake itself — enough for the SQL fragment to build.
+vi.mock("drizzle-orm/sqlite-core", () => ({
+  alias: vi.fn((table: unknown) => table),
 }));
 
 vi.mock("@/lib/utils/nanoid", () => ({

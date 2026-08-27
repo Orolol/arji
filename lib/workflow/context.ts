@@ -8,6 +8,7 @@ import { eq, and } from "drizzle-orm";
 import { CODE_PRODUCING_AGENT_TYPES } from "@/lib/agent-config/constants";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import type { TransitionContext } from "./engine";
+import { blocksMergeSql } from "./blocking-findings";
 
 export function buildTransitionContext(opts: {
   epicId: string;
@@ -36,14 +37,23 @@ export function buildTransitionContext(opts: {
     requireResolvedComments = true,
   } = opts;
 
-  // Check for open review comments
+  // Open review comments that still stand in the way of `review -> done`.
+  //
+  // "Still" is the whole point: nothing resolves a review_comments row until
+  // a human approves, so counting every open row kept an epic whose newest
+  // review APPROVED it permanently unapprovable — over a [minor] that
+  // reviewer filed itself, or a [major] an earlier round raised and a later
+  // clean review did not re-report. `blocksMergeSql` is the one definition
+  // the board and Full Auto's merge selector read too; a looser gate here
+  // than there would make Full Auto merge and then roll itself back.
   const openComments = db
     .select()
     .from(reviewComments)
     .where(
       and(
         eq(reviewComments.epicId, epicId),
-        eq(reviewComments.status, "open")
+        eq(reviewComments.status, "open"),
+        blocksMergeSql()
       )
     )
     .all();

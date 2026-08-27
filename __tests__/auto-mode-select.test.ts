@@ -153,7 +153,15 @@ function addUserComment(input: {
     .run();
 }
 
-function addOpenReviewComment(epicId: string): void {
+/**
+ * A blocking finding filed BY the epic's newest review round.
+ *
+ * The timestamp is load-bearing: `blocksMergeSql` only counts a
+ * `[critical]`/`[major]` a later clean review has not superseded, so a
+ * finding stamped before the review that cleared the epic would (correctly)
+ * stop blocking. `seedCleanlyReviewedEpic` reviews from :20 to :21.
+ */
+function addOpenReviewComment(epicId: string, createdAt = at(21)): void {
   db.insert(reviewComments)
     .values({
       id: nextId("rc"),
@@ -163,7 +171,7 @@ function addOpenReviewComment(epicId: string): void {
       body: "[critical] fix this",
       author: "agent",
       status: "open",
-      createdAt: at(1),
+      createdAt,
     })
     .run();
 }

@@ -54,7 +54,15 @@ export interface MergeReadinessFacts {
   status?: string | null;
   /** The epic's integration branch; without one there is nothing to land. */
   branchName?: string | null;
-  /** Open `review_comments` on the epic — the blocking findings. */
+  /**
+   * Open `review_comments` on the epic that STILL BLOCK — see
+   * lib/workflow/blocking-findings.ts, which both callers evaluate.
+   *
+   * Not the raw open count. Nothing resolves a finding row until a human
+   * approves the ticket, so counting every open row meant a `[minor]` the
+   * approving reviewer filed itself, or a `[major]` a later clean review
+   * superseded, parked a reviewed epic outside "Ready to merge" forever.
+   */
   openFindings?: number | null;
   /**
    * Newest epic-scoped review session that completed with a verdict that was
@@ -78,7 +86,11 @@ export interface MergeReadiness {
   ready: boolean;
   /** `null` exactly when `ready` is true. */
   blocker: MergeBlocker | null;
-  /** Echoed so the UI can say "2 open findings" without a second lookup. */
+  /**
+   * Blocking open findings, echoed so the UI can say "2 open findings"
+   * without a second lookup. See `MergeReadinessFacts.openFindings` for why
+   * this is narrower than the epic's raw open-row count.
+   */
   openFindings: number;
 }
 

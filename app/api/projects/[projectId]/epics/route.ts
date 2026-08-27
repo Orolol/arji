@@ -53,6 +53,7 @@ import {
   lastCleanReviewAtSql,
   lastTerminalCodeAtSql,
 } from "@/lib/workflow/review-freshness";
+import { blocksMergeSql } from "@/lib/workflow/blocking-findings";
 
 class FrictionConversionConflict extends Error {}
 
@@ -221,6 +222,11 @@ export async function GET(
   // Open review findings per epic — the merge gate's blocking half.
   // Scoped to the project via `epics` so SQLite does not scan review_comments
   // across every project on an un-indexed status column.
+  //
+  // `blocksMergeSql` narrows "open" to "still standing in the way": see
+  // lib/workflow/blocking-findings.ts for why a [minor] the approving review
+  // filed, or a [major] a later clean review superseded, must not park a
+  // reviewed ticket outside "Ready to merge" forever.
   const openFindingCounts = db
     .select({
       epicId: reviewComments.epicId,
@@ -231,7 +237,8 @@ export async function GET(
     .where(
       and(
         eq(epics.projectId, projectId),
-        eq(reviewComments.status, "open")
+        eq(reviewComments.status, "open"),
+        blocksMergeSql()
       )
     )
     .groupBy(reviewComments.epicId)

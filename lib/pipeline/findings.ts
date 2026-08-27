@@ -3,6 +3,10 @@ import { db as defaultDb, type ArijDatabase } from "@/lib/db";
 import { agentSessions, reviewComments } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { parseReviewReport } from "./parse-review-report";
+import {
+  blockingFindingSeverity,
+  type BlockingFindingSeverity,
+} from "@/lib/review/finding-severity";
 
 /**
  * Review-verdict assessment shared by the pipeline's review stage
@@ -58,17 +62,8 @@ export interface BlockingFinding {
   filePath: string;
   lineNumber: number;
   body: string;
-  severity: "critical" | "major";
+  severity: BlockingFindingSeverity;
 }
-
-/** Body prefixes (as written by submit-findings) that block the pipeline. */
-const BLOCKING_PREFIXES: ReadonlyArray<{
-  prefix: string;
-  severity: BlockingFinding["severity"];
-}> = [
-  { prefix: "[critical]", severity: "critical" },
-  { prefix: "[major]", severity: "major" },
-];
 
 function parseTimestamp(value: string | null | undefined): number | null {
   if (!value) return null;
@@ -143,16 +138,14 @@ export function collectBlockingFindings(
   const findings: BlockingFinding[] = [];
   for (const row of listAgentReviewCommentsSince(epicId, sinceIso, database)) {
     if (row.status !== "open") continue;
-    const match = BLOCKING_PREFIXES.find(({ prefix }) =>
-      row.body.startsWith(prefix)
-    );
-    if (!match) continue;
+    const severity = blockingFindingSeverity(row.body);
+    if (!severity) continue;
     findings.push({
       id: row.id,
       filePath: row.filePath,
       lineNumber: row.lineNumber,
       body: row.body,
-      severity: match.severity,
+      severity,
     });
   }
   return findings;
