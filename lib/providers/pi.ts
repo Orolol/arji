@@ -135,15 +135,28 @@ export function collectPiAssistantMessages(stdout: string): PiAssistantMessage[]
  * The final answer of a pi run: the last assistant message, matching what
  * pi's own text mode prints. Falls back to every assistant message and then
  * to the raw output, so an unrecognised stream is never silently dropped.
+ *
+ * Neither fallback applies to a run whose final turn ended in error/abort:
+ * such a run delivered nothing, and its earlier assistant turns are
+ * pre-tool-call narration — joining them manufactures a "result" out of the
+ * model's thinking-out-loud (measured 2026-08-27: a failed omp build posted
+ * its entire session narration as a ticket comment on E-arij-138, which the
+ * comment history then feeds back into every later prompt). The failure
+ * itself reaches callers through findPiRunFailure → result.error.
  */
 export function extractPiResult(stdout: string): string {
   const trimmed = stdout.trim();
   if (!trimmed) return "";
 
   const messages = collectPiAssistantMessages(trimmed);
+  const last = messages[messages.length - 1];
 
-  const last = messages[messages.length - 1]?.text.trim();
-  if (last) return last;
+  const lastText = last?.text.trim();
+  if (lastText) return lastText;
+
+  if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
+    return "";
+  }
 
   const all = messages.map((m) => m.text.trim()).filter(Boolean);
   if (all.length > 0) return all.join("\n\n");
@@ -326,6 +339,13 @@ export abstract class PiProvider extends BaseCliProvider {
    * A zero exit code is not proof of success in `--mode json`: pi only maps a
    * failed run to exit 1 in text mode. Downgrade when the event stream says
    * the last turn errored out.
+   *
+   * The downgrade also re-derives `result.result`: the base success branch
+   * backstops an empty extraction with raw stdout, but for a run the stream
+   * itself declared failed that backstop would hand the whole NDJSON event
+   * log to whoever posts the output (ticket comments included). Re-running
+   * extractResult keeps the final turn's text when it had any and yields
+   * undefined otherwise.
    */
   protected handleExit(
     info: ProviderExitInfo,
@@ -338,6 +358,16 @@ export abstract class PiProvider extends BaseCliProvider {
     const failure = findPiRunFailure(info.stdout, this.cliDisplayName);
     if (!failure) return result;
 
-    return { ...result, success: false, error: failure };
+    const deliverable = this.extractResult(
+      info.stdout,
+      info.stderr,
+      info.spawnContext,
+    );
+    return {
+      ...result,
+      success: false,
+      error: failure,
+      result: deliverable || undefined,
+    };
   }
 }

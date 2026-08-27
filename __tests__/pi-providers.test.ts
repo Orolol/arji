@@ -279,6 +279,52 @@ describe("PiProvider", () => {
       );
     });
 
+    // The E-arij-138 leak (2026-08-27): a run that died on a model error had
+    // its whole inter-tool-call narration joined into a "result" and posted
+    // as a ticket comment.
+    it("returns nothing when the final turn errored — narration is not a result", () => {
+      const stdout = [
+        sessionHeader,
+        assistantMessageEnd("Now let me look at the remaining unknowns.", {
+          stopReason: "toolUse",
+        }),
+        assistantMessageEnd("I have a good picture now.", {
+          stopReason: "toolUse",
+        }),
+        assistantMessageEnd("", {
+          stopReason: "error",
+          errorMessage: "400 Vision is disabled for this server",
+        }),
+      ].join("\n");
+
+      expect(provider.extractResult(stdout, "")).toBe("");
+    });
+
+    it("returns nothing for an aborted run with earlier narration", () => {
+      const stdout = [
+        assistantMessageEnd("Let me start by reading the code.", {
+          stopReason: "toolUse",
+        }),
+        assistantMessageEnd("", { stopReason: "aborted" }),
+      ].join("\n");
+
+      expect(provider.extractResult(stdout, "")).toBe("");
+    });
+
+    it("keeps the final turn's own text when it errored mid-message", () => {
+      const stdout = [
+        sessionHeader,
+        assistantMessageEnd("Partial explanation before dying.", {
+          stopReason: "error",
+          errorMessage: "Context window exceeded",
+        }),
+      ].join("\n");
+
+      expect(provider.extractResult(stdout, "")).toBe(
+        "Partial explanation before dying.",
+      );
+    });
+
     it("returns an empty string for empty output", () => {
       expect(provider.extractResult("   ", "")).toBe("");
     });
@@ -372,6 +418,30 @@ describe("PiProvider", () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe("Context window exceeded");
       expect(result.cliSessionId).toBe(SESSION_ID);
+    });
+
+    it("drops narration and raw stream from a zero-exit run whose final turn errored", async () => {
+      const session = provider.spawn(baseOptions());
+      fakeChild.emitStdout(
+        [
+          sessionHeader,
+          assistantMessageEnd("Now let me explore the codebase.", {
+            stopReason: "toolUse",
+          }),
+          assistantMessageEnd("", {
+            stopReason: "error",
+            errorMessage: "400 Vision is disabled for this server",
+          }),
+        ].join("\n"),
+      );
+      fakeChild.emitClose(0);
+
+      const result = await session.promise;
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("400 Vision is disabled for this server");
+      // Neither the joined narration nor the base class's raw-stdout
+      // backstop may pose as the failed run's deliverable.
+      expect(result.result).toBeUndefined();
     });
 
     it("redacts the prompt from the display command", () => {
