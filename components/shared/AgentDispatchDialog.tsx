@@ -14,7 +14,7 @@ import {
 import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
 import { SessionPicker } from "@/components/shared/SessionPicker";
 import type { DispatchRole } from "@/lib/agent-config/dispatch-reliability-constants";
-
+import { PromptTokenEstimateView } from "@/components/shared/PromptTokenEstimateView";
 interface AgentDispatchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -40,12 +40,16 @@ interface AgentDispatchDialogProps {
     selectedSessionId: string | undefined;
     onSelect: (sessionId: string | undefined) => void;
   };
-  /**
-   * Small muted note under the pickers — e.g. the review-provider
-   * segregation notice ("Review by Gemini CLI (builder was Claude Code)").
-   */
+  /** Target details for automatic prompt token estimation preview. */
+  promptEstimateTarget?: {
+    epicId?: string;
+    userStoryId?: string;
+    dispatchType?: "build" | "review" | "grading";
+    reviewTypes?: string[];
+    comment?: string;
+  };
+  /** Small muted note under the pickers. */
   notice?: ReactNode;
-  /** Extra body content rendered between the pickers and the footer. */
   extraContent?: ReactNode;
   confirmLabel: ReactNode;
   /** Icon shown inside the confirm button when not busy. */
@@ -71,6 +75,7 @@ export function AgentDispatchDialog({
   projectId,
   agentProps,
   sessionPicker,
+  promptEstimateTarget,
   notice,
   extraContent,
   confirmLabel,
@@ -111,6 +116,18 @@ export function AgentDispatchDialog({
           </p>
         )}
         {extraContent}
+        {open && (promptEstimateTarget?.epicId || promptEstimateTarget?.userStoryId || sessionPicker?.epicId || sessionPicker?.userStoryId) && (
+          <PromptTokenEstimateView
+            projectId={projectId}
+            epicId={promptEstimateTarget?.epicId ?? sessionPicker?.epicId}
+            userStoryId={promptEstimateTarget?.userStoryId ?? sessionPicker?.userStoryId}
+            dispatchType={promptEstimateTarget?.dispatchType ?? (agentProps.dispatchRole === "review" ? "review" : "build")}
+            reviewTypes={promptEstimateTarget?.reviewTypes}
+            comment={promptEstimateTarget?.comment}
+            namedAgentId={agentProps.value}
+            enabled={open}
+          />
+        )}
         <DialogFooter>
           <Button
             variant="outline"

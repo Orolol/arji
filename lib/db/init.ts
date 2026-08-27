@@ -126,6 +126,18 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
     table: "named_agents",
     column: "escalates_to",
   },
+  // 0041_agent_session_estimated_tokens (single transactional migration: the two
+  // columns are always present or absent together on real databases)
+  {
+    folderMillis: 1786713800000,
+    table: "agent_sessions",
+    column: "estimated_prompt_tokens",
+  },
+  {
+    folderMillis: 1786713800000,
+    table: "agent_sessions",
+    column: "estimated_prompt_breakdown",
+  },
 ];
 
 /** Default on-disk location of the drizzle migration files. */

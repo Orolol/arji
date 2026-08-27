@@ -1,0 +1,259 @@
+import { describe, expect, it } from "vitest";
+import {
+  estimateTokens,
+  estimatePromptTokens,
+  findLargestContextSection,
+  SECTION_LABELS,
+} from "@/lib/tokens/estimator";
+import {
+  parsePromptTokenBudget,
+  checkPromptTokenBudget,
+  resolvePromptTokenBudget,
+  promptTokenBudgetSettingKey,
+  PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY,
+} from "@/lib/tokens/budget";
+import {
+  buildBuildPrompt,
+  buildReviewPrompt,
+  buildTicketBuildPrompt,
+  buildEpicReviewPrompt,
+  type PromptDocument,
+  type PromptEpic,
+  type PromptProject,
+  type PromptUserStory,
+} from "@/lib/claude/prompt-builder";
+import { db } from "@/lib/db";
+import { agentSessions, epics, projects, settings } from "@/lib/db/schema";
+import { createQueuedSession } from "@/lib/agent-sessions/lifecycle";
+import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+
+describe("Token Estimator", () => {
+  it("estimates character counts with chars/4 heuristic", () => {
+    expect(estimateTokens("")).toBe(0);
+    expect(estimateTokens(null)).toBe(0);
+    expect(estimateTokens(undefined)).toBe(0);
+    expect(estimateTokens("1234")).toBe(1);
+    expect(estimateTokens("12345678")).toBe(2);
+    expect(estimateTokens("12345")).toBe(2);
+  });
+
+  it("breaks down an assembled build prompt into standard context sections", () => {
+    const project: PromptProject = {
+      name: "Arij",
+      description: "Local-first project manager.",
+      spec: "# Full Specification\nThis is a detailed specification document with multiple paragraphs.",
+      memory: "## Pitfalls\n- Avoid using globals.\n- Always migrate database safely.",
+    };
+
+    const documents: PromptDocument[] = [
+      {
+        name: "architecture.md",
+        contentMd: "Architecture overview and component diagrams.",
+      },
+    ];
+
+    const epic: PromptEpic = {
+      title: "Token estimation epic",
+      description: "Estimate token volume sent to agents.",
+      type: "feature",
+    };
+
+    const userStories: PromptUserStory[] = [
+      {
+        title: "Display estimation in modal",
+        description: "Show tokens before confirming dispatch.",
+        acceptanceCriteria: "- Total tokens\n- Breakdown by section",
+      },
+    ];
+
+    const comments = [
+      {
+        author: "user" as const,
+        content: "Please make sure the breakdown is clear and scannable.",
+        createdAt: "2026-08-27T10:00:00Z",
+      },
+    ];
+
+    const prompt = buildBuildPrompt(
+      project,
+      documents,
+      epic,
+      userStories,
+      "You are an expert software engineer.",
+      comments
+    );
+
+    const result = estimatePromptTokens(prompt);
+    expect(result.total).toBeGreaterThan(0);
+    expect(result.total).toBe(Math.ceil(prompt.length / 4));
+
+    expect(result.breakdown.system).toBeGreaterThan(0);
+    expect(result.breakdown.spec).toBeGreaterThan(0);
+    expect(result.breakdown.memory).toBeGreaterThan(0);
+    expect(result.breakdown.documents).toBeGreaterThan(0);
+    expect(result.breakdown.ticket).toBeGreaterThan(0);
+    expect(result.breakdown.comments).toBeGreaterThan(0);
+    expect(result.breakdown.other).toBeGreaterThan(0);
+
+    const largest = findLargestContextSection(result.breakdown, result.total);
+    expect(largest).not.toBeNull();
+    expect(largest?.tokens).toBeGreaterThan(0);
+    expect(SECTION_LABELS[largest!.key]).toBeDefined();
+  });
+
+  it("handles review prompts and identifies findings & checklists", () => {
+    const project: PromptProject = {
+      name: "Arij",
+      spec: "Project specification.",
+    };
+    const epic: PromptEpic = {
+      title: "Epic Title",
+      description: "Epic description.",
+    };
+    const story: PromptUserStory = {
+      title: "Story Title",
+      description: "Story description.",
+      acceptanceCriteria: "Must pass all tests.",
+    };
+
+    const prompt = buildReviewPrompt(
+      project,
+      [],
+      epic,
+      story,
+      "security",
+      "System prompt"
+    );
+
+    const result = estimatePromptTokens(prompt);
+    expect(result.breakdown.findings).toBeGreaterThan(0);
+    expect(result.breakdown.ticket).toBeGreaterThan(0);
+    expect(result.breakdown.spec).toBeGreaterThan(0);
+  });
+
+  it("returns zero counts for empty or missing prompt", () => {
+    const result = estimatePromptTokens("");
+    expect(result.total).toBe(0);
+    expect(result.breakdown.spec).toBe(0);
+    expect(result.breakdown.memory).toBe(0);
+    expect(result.breakdown.ticket).toBe(0);
+    expect(result.breakdown.comments).toBe(0);
+    expect(result.breakdown.findings).toBe(0);
+    expect(result.breakdown.documents).toBe(0);
+    expect(findLargestContextSection(result.breakdown)).toBeNull();
+  });
+});
+
+describe("Token Budget", () => {
+  it("parses numeric values, numeric strings, and suffixes k/m", () => {
+    expect(parsePromptTokenBudget(null)).toBeNull();
+    expect(parsePromptTokenBudget(undefined)).toBeNull();
+    expect(parsePromptTokenBudget("")).toBeNull();
+    expect(parsePromptTokenBudget("invalid")).toBeNull();
+    expect(parsePromptTokenBudget(50000)).toBe(50000);
+    expect(parsePromptTokenBudget("50000")).toBe(50000);
+    expect(parsePromptTokenBudget("50k")).toBe(50000);
+    expect(parsePromptTokenBudget("1.5k")).toBe(1500);
+    expect(parsePromptTokenBudget("1m")).toBe(1000000);
+    expect(parsePromptTokenBudget(JSON.stringify(60000))).toBe(60000);
+  });
+
+  it("checks budget thresholds and highlights the largest section", () => {
+    const breakdown = {
+      spec: 30000,
+      memory: 2000,
+      ticket: 5000,
+      comments: 3000,
+      findings: 1000,
+      documents: 10000,
+      system: 500,
+      other: 500,
+    };
+    const total = 52000;
+
+    const noBudget = checkPromptTokenBudget(total, breakdown, null);
+    expect(noBudget.budgetExceeded).toBe(false);
+    expect(noBudget.largestSection).toBeNull();
+
+    const withinBudget = checkPromptTokenBudget(total, breakdown, 100000);
+    expect(withinBudget.budgetExceeded).toBe(false);
+
+    const exceeded = checkPromptTokenBudget(total, breakdown, 40000);
+    expect(exceeded.budgetExceeded).toBe(true);
+    expect(exceeded.largestSection?.key).toBe("spec");
+    expect(exceeded.largestSection?.tokens).toBe(30000);
+    expect(exceeded.largestSection?.percentage).toBe(58);
+  });
+});
+
+describe("Session Creation Token Persistence", () => {
+  it("automatically estimates and persists prompt tokens in createQueuedSession", () => {
+    const projId = `proj-${nanoid(6)}`;
+    db.insert(projects)
+      .values({ id: projId, name: "Test Proj" })
+      .run();
+
+    const prompt = "# Project: Test Proj\n## Project Specification\nSome long specification details.\n## Instructions\nDo work.";
+    const sessionId = `sess-${nanoid(6)}`;
+
+    createQueuedSession({
+      id: sessionId,
+      projectId: projId,
+      prompt,
+      mode: "code",
+      provider: "claude-code",
+    });
+
+    const session = db
+      .select({
+        id: agentSessions.id,
+        estimatedPromptTokens: agentSessions.estimatedPromptTokens,
+        estimatedPromptBreakdown: agentSessions.estimatedPromptBreakdown,
+      })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, sessionId))
+      .get();
+
+    expect(session).toBeDefined();
+    expect(session?.estimatedPromptTokens).toBe(Math.ceil(prompt.length / 4));
+    expect(session?.estimatedPromptBreakdown).not.toBeNull();
+
+    const breakdown = JSON.parse(session!.estimatedPromptBreakdown!);
+    expect(breakdown.spec).toBeGreaterThan(0);
+  });
+
+  it("resolves project-specific budget before global budget", () => {
+    const projId = `proj-${nanoid(6)}`;
+    db.insert(projects)
+      .values({ id: projId, name: "Test Proj Budget" })
+      .run();
+
+    // Default: null
+    expect(resolvePromptTokenBudget(projId)).toBeNull();
+
+    // Global set
+    db.insert(settings)
+      .values({
+        key: PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY,
+        value: "45k",
+      })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value: "45k" },
+      })
+      .run();
+
+    expect(resolvePromptTokenBudget(projId)).toBe(45000);
+
+    // Project override
+    db.insert(settings)
+      .values({
+        key: promptTokenBudgetSettingKey(projId),
+        value: "25000",
+      })
+      .run();
+
+    expect(resolvePromptTokenBudget(projId)).toBe(25000);
+  });
+});

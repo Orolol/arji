@@ -433,6 +433,12 @@ export function AgentActionsBar({
           selectedSessionId: resumeSessionId,
           onSelect: setResumeSessionId,
         }}
+        promptEstimateTarget={{
+          epicId: sessionEpicId,
+          userStoryId: sessionUserStoryId,
+          dispatchType: "build",
+          comment: devComment,
+        }}
         extraContent={
           <>
             <MentionTextarea
@@ -504,6 +510,12 @@ export function AgentActionsBar({
           selectedSessionId: reviewResumeSessionId,
           onSelect: setReviewResumeSessionId,
         }}
+        promptEstimateTarget={{
+          epicId: sessionEpicId,
+          userStoryId: sessionUserStoryId,
+          dispatchType: "review",
+          reviewTypes: Array.from(reviewTypes),
+        }}
         notice={segregationNotice}
         extraContent={
           <ReviewTypesPicker selected={reviewTypes} onToggle={toggleReviewType} />
@@ -526,6 +538,11 @@ export function AgentActionsBar({
           value: gradingAgentId,
           onChange: setGradingAgentId,
           dispatchRole: "review",
+        }}
+        promptEstimateTarget={{
+          epicId: sessionEpicId,
+          userStoryId: sessionUserStoryId,
+          dispatchType: "grading",
         }}
         confirmLabel="Run Grading"
         confirmIcon={<ClipboardCheck className="h-4 w-4 mr-1" />}
