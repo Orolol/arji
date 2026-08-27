@@ -17,7 +17,10 @@ import {
   MCP_CHANNEL_UNAVAILABLE,
 } from "./mcp-injection";
 import { arijToolsSection, extraMcpServersSection } from "./prompt-sections";
-import { resolveExtraMcpServers } from "@/lib/mcp/servers";
+import {
+  resolveExtraMcpServers,
+  type ResolvedExtraMcpServers,
+} from "@/lib/mcp/servers";
 import { isMcpExemptAgentType } from "@/lib/workflow/dreaming-constants";
 import {
   mintMcpToken,
@@ -277,11 +280,27 @@ class ClaudeProcessManager {
           // lib/mcp/servers.ts; a failure here is caught by the same
           // best-effort try/catch as the rest of injection, so a broken extra
           // can cost the session its tools but never its spawn.
-          const extras = resolveExtraMcpServers({
-            projectId: row.projectId,
-            provider,
-            agentType: row.agentType ?? null,
-          });
+          let extras: ResolvedExtraMcpServers = {
+            servers: [],
+            excludedProjectScoped: [],
+          };
+          try {
+            extras = resolveExtraMcpServers({
+              projectId: row.projectId,
+              provider,
+              agentType: row.agentType ?? null,
+            });
+          } catch (error) {
+            // Its OWN catch, inside the outer one: a user's third-party server
+            // list must never cost the session the arij CONTROL channel. The
+            // outer handler drops `options.mcp` entirely, which would leave the
+            // agent with no board tools and mark the review unverifiable — far
+            // too much to pay for a malformed extra. Degrade to arij-only.
+            console.warn(
+              `[process-manager] extra MCP servers skipped for session ${sessionId}:`,
+              error instanceof Error ? error.message : error,
+            );
+          }
           if (extras.excludedProjectScoped.length > 0) {
             // Not silent: `${provider}` reads a user-global MCP registry that
             // Arij cannot vary per spawn, so these project-scoped servers

@@ -8,6 +8,7 @@
  * project-scoped with agentType "chat" and no epic, dead after release(),
  * release idempotent.
  */
+import { arijChannelSpec } from "@/lib/providers/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dbMockState, resetDbMockState } from "@/__tests__/helpers/db-mock";
 
@@ -45,13 +46,13 @@ describe("createChatCliToolChannel", () => {
       });
 
       expect(channel).not.toBeNull();
-      expect(channel!.mcp.serverName).toBe(ARIJ_MCP_SERVER_NAME);
-      expect(channel!.mcp.env.ARIJ_MCP_TOOLSET).toBe("chat");
+      expect(arijChannelSpec(channel!.mcp).name).toBe(ARIJ_MCP_SERVER_NAME);
+      expect(arijChannelSpec(channel!.mcp).env.ARIJ_MCP_TOOLSET).toBe("chat");
       expect(channel!.mcp.allowedToolNames).toEqual([
         ...ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
       ]);
 
-      const record = resolveMcpToken(channel!.mcp.env.ARIJ_MCP_TOKEN);
+      const record = resolveMcpToken(arijChannelSpec(channel!.mcp).env.ARIJ_MCP_TOKEN);
       expect(record).toMatchObject({
         projectId: "proj1",
         epicId: null,
@@ -78,7 +79,7 @@ describe("createChatCliToolChannel", () => {
       provider: "claude-code",
       conversationType: null,
     })!;
-    const token = channel.mcp.env.ARIJ_MCP_TOKEN;
+    const token = arijChannelSpec(channel.mcp).env.ARIJ_MCP_TOKEN;
 
     expect(resolveMcpToken(token)).not.toBeNull();
     channel.release();
@@ -99,10 +100,10 @@ describe("createChatCliToolChannel", () => {
       conversationType: null,
     })!;
 
-    expect(first.mcp.env.ARIJ_MCP_TOKEN).not.toBe(second.mcp.env.ARIJ_MCP_TOKEN);
+    expect(arijChannelSpec(first.mcp).env.ARIJ_MCP_TOKEN).not.toBe(arijChannelSpec(second.mcp).env.ARIJ_MCP_TOKEN);
     // releasing one turn must not kill the other's token
     first.release();
-    expect(resolveMcpToken(second.mcp.env.ARIJ_MCP_TOKEN)).not.toBeNull();
+    expect(resolveMcpToken(arijChannelSpec(second.mcp).env.ARIJ_MCP_TOKEN)).not.toBeNull();
   });
 
   it("builds an omp chat channel with the single-underscore tool spelling", () => {
@@ -113,7 +114,7 @@ describe("createChatCliToolChannel", () => {
     });
 
     expect(channel).not.toBeNull();
-    expect(channel!.mcp.env.ARIJ_MCP_TOOLSET).toBe("chat");
+    expect(arijChannelSpec(channel!.mcp).env.ARIJ_MCP_TOOLSET).toBe("chat");
     expect(channel!.mcp.allowedToolNames).toContain("mcp__arij_create_ticket");
     expect(channel!.mcp.allowedToolNames).not.toContain(
       "mcp__arij__create_ticket",

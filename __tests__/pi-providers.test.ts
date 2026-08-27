@@ -186,10 +186,14 @@ describe("PiProvider", () => {
 
     it("ignores an MCP config — pi has no MCP support (omp's rides env, not args)", () => {
       const mcp: McpSpawnConfig = {
-        serverName: "arij",
-        command: "/usr/bin/node",
-        args: ["/app/bin/arij-mcp.mjs"],
-        env: { ARIJ_BASE_URL: "http://x", ARIJ_MCP_TOKEN: "t" },
+        servers: [
+          {
+            name: "arij",
+            command: "/usr/bin/node",
+            args: ["/app/bin/arij-mcp.mjs"],
+            env: { ARIJ_BASE_URL: "http://x", ARIJ_MCP_TOKEN: "t" },
+          },
+        ],
         allowedToolNames: ["mcp__arij_get_ticket"],
       };
       const args = provider.buildArgs(baseOptions({ mode: "plan", mcp }));
@@ -467,14 +471,18 @@ describe("OhMyPiProvider", () => {
   });
 
   describe("Arij MCP tool channel", () => {
-    const mcp: McpSpawnConfig = {
-      serverName: "arij",
+    const arijChannel = {
+      name: "arij",
       command: "/usr/bin/node",
       args: ["/app/bin/arij-mcp.mjs"],
       env: {
         ARIJ_BASE_URL: "http://localhost:3000",
         ARIJ_MCP_TOKEN: "omp-test-token",
       },
+    };
+
+    const mcp: McpSpawnConfig = {
+      servers: [arijChannel],
       // omp spelling: single underscore between server and tool
       allowedToolNames: ["mcp__arij_get_ticket", "mcp__arij_post_comment"],
     };
@@ -506,9 +514,14 @@ describe("OhMyPiProvider", () => {
     });
 
     it("passes the chat toolset selector through when the channel sets it", () => {
-      const chatMcp = {
+      const chatMcp: McpSpawnConfig = {
         ...mcp,
-        env: { ...mcp.env, ARIJ_MCP_TOOLSET: "chat" as const },
+        servers: [
+          {
+            ...arijChannel,
+            env: { ...arijChannel.env, ARIJ_MCP_TOOLSET: "chat" as const },
+          },
+        ],
       };
       const env = provider.buildEnv(baseOptions({ mcp: chatMcp }));
       expect(env.ARIJ_MCP_TOOLSET).toBe("chat");
