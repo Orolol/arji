@@ -57,7 +57,7 @@ function renderBar(onSendToDev: SendToDev) {
       isRunning={false}
       onSendToDev={onSendToDev}
       onSendToReview={vi.fn(async () => undefined)}
-      onApprove={vi.fn(async () => undefined)}
+      onComplete={vi.fn(async () => undefined)}
     />
   );
 }

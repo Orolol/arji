@@ -39,23 +39,24 @@ vi.mock("@/hooks/useProvidersAvailable", () => ({
   useProvidersAvailable: (...args: unknown[]) => mockUseProvidersAvailable(...args),
 }));
 
-// Expose the approve pathway directly: the real bar catches onApprove
-// rejections and routes them to onActionError, so the mock does the same.
+// Expose the merge pathway directly: the real bar's completion action is the
+// merge (the merge IS the approval), and it catches onComplete rejections
+// into onActionError.
 vi.mock("@/components/shared/AgentActionsBar", () => ({
   AgentActionsBar: ({
-    onApprove,
+    onComplete,
     onActionError,
   }: {
-    onApprove: () => Promise<unknown>;
+    onComplete: () => Promise<unknown>;
     onActionError?: (error: unknown) => void;
   }) => (
     <button
-      data-testid="mock-approve"
+      data-testid="mock-merge"
       onClick={() => {
-        Promise.resolve(onApprove()).catch((error) => onActionError?.(error));
+        Promise.resolve(onComplete()).catch((error) => onActionError?.(error));
       }}
     >
-      Approve
+      Merge
     </button>
   ),
 }));
@@ -73,19 +74,32 @@ vi.mock("@/components/kanban/epic-detail/WhatTheAgentDid", () => ({
 }));
 
 const MERGE_FAILURE_MESSAGE =
-  "Merge failed: conflict in lib/foo.ts — resolve the conflict (Resolve Merge) and approve again.";
+  "Merge failed: conflict in lib/foo.ts. The ticket stays in to_merge — resolve the conflict (Resolve with Agent) and merge again.";
 
-describe("EpicDetail approve merge failure", () => {
+describe("EpicDetail merge failure", () => {
   const refresh = vi.fn();
-  const approve = vi.fn();
+  /** Per-test script for the POST .../merge endpoint. */
+  let mergeResponses: Array<{ ok: boolean; status: number; body: unknown }>;
 
   beforeEach(() => {
     vi.restoreAllMocks();
     refresh.mockClear();
-    approve.mockReset();
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ data: [] }),
+    mergeResponses = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/merge")) {
+        const scripted = mergeResponses.shift() ?? {
+          ok: true,
+          status: 200,
+          body: { data: { merged: true, commitHash: "abc" } },
+        };
+        return {
+          ok: scripted.ok,
+          status: scripted.status,
+          json: async () => scripted.body,
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
     }) as unknown as typeof fetch;
 
     mockUseEpicDetail.mockReturnValue({
@@ -94,7 +108,8 @@ describe("EpicDetail approve merge failure", () => {
         title: "Payments",
         description: "Epic details",
         priority: 1,
-        status: "review",
+        // The merge is offered from the merge boundary.
+        status: "to_merge",
         branchName: "epic/epic-1",
         prNumber: null,
         prUrl: null,
@@ -123,8 +138,8 @@ describe("EpicDetail approve merge failure", () => {
       isRunning: false,
       sendToDev: vi.fn(),
       sendToReview: vi.fn(),
+      sendToGrading: vi.fn(),
       resolveMerge: vi.fn(),
-      approve,
     });
     mockUseEpicPr.mockReturnValue({
       pr: null,
@@ -163,32 +178,48 @@ describe("EpicDetail approve merge failure", () => {
   }
 
   it("shows the server's merge failure message and still refreshes", async () => {
-    approve.mockRejectedValue(new Error(MERGE_FAILURE_MESSAGE));
+    mergeResponses.push({
+      ok: false,
+      status: 409,
+      body: {
+        error: MERGE_FAILURE_MESSAGE,
+        reason: "conflict",
+        mergeFailed: true,
+      },
+    });
 
     renderSubject();
     const user = userEvent.setup();
-    await user.click(screen.getByTestId("mock-approve"));
+    await user.click(screen.getByTestId("mock-merge"));
 
     await waitFor(() => {
       expect(screen.getByText(MERGE_FAILURE_MESSAGE)).toBeInTheDocument();
     });
-    // The epic stayed in review server-side — the board must reflect reality.
+    // The epic stayed in to_merge server-side — the board must reflect reality.
     expect(refresh).toHaveBeenCalled();
   });
 
-  it("clears a stale merge error when approve succeeds", async () => {
-    approve
-      .mockRejectedValueOnce(new Error(MERGE_FAILURE_MESSAGE))
-      .mockResolvedValueOnce({ approved: true, merged: true, commitHash: "abc" });
+  it("clears a stale merge error when the merge succeeds", async () => {
+    mergeResponses.push({
+      ok: false,
+      status: 409,
+      body: {
+        error: MERGE_FAILURE_MESSAGE,
+        reason: "conflict",
+        mergeFailed: true,
+      },
+    });
 
     renderSubject();
     const user = userEvent.setup();
-    await user.click(screen.getByTestId("mock-approve"));
+    await user.click(screen.getByTestId("mock-merge"));
     await waitFor(() => {
       expect(screen.getByText(MERGE_FAILURE_MESSAGE)).toBeInTheDocument();
     });
 
-    await user.click(screen.getByTestId("mock-approve"));
+    // Next attempt lands (the scripted queue is empty, so the default
+    // success response applies).
+    await user.click(screen.getByTestId("mock-merge"));
     await waitFor(() => {
       expect(screen.queryByText(MERGE_FAILURE_MESSAGE)).not.toBeInTheDocument();
     });

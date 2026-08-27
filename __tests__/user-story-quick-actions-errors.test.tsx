@@ -23,14 +23,12 @@ describe("UserStoryQuickActions error surfacing", () => {
     );
   }
 
-  it("shows the server error when approve fails with a merge conflict", async () => {
+  it("shows the server error when approve is refused", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
-      status: 409,
+      status: 400,
       json: async () => ({
-        error:
-          "Merge failed: conflict in lib/foo.ts — resolve the conflict (Resolve Merge) and approve again.",
-        mergeFailed: true,
+        error: "Story must be in review status to approve",
       }),
     }) as unknown as typeof fetch;
 
@@ -39,22 +37,19 @@ describe("UserStoryQuickActions error surfacing", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("story-quick-action-error")).toHaveTextContent(
-        "Merge failed: conflict in lib/foo.ts — resolve the conflict (Resolve Merge) and approve again.",
+        "Story must be in review status to approve",
       );
     });
   });
 
-  it("warns when a 200 approve response reports a failed epic merge", async () => {
+  it("treats a 200 approve that completed the epic's stories as clean — the epic merges elsewhere", async () => {
+    // Story approval never merges: `merged: false` with `epicComplete: true`
+    // is the normal last-story response, not a failure to warn about.
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({
-        data: {
-          approved: true,
-          epicComplete: true,
-          merged: false,
-          mergeError: "conflict in lib/foo.ts",
-        },
+        data: { approved: true, epicComplete: true, merged: false },
       }),
     }) as unknown as typeof fetch;
 
@@ -62,12 +57,9 @@ describe("UserStoryQuickActions error surfacing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("story-quick-action-error")).toHaveTextContent(
-        "Story approved, but the epic merge failed: conflict in lib/foo.ts",
-      );
+      expect(onRefresh).toHaveBeenCalled();
     });
-    // The story itself was approved — the list must still refresh.
-    expect(onRefresh).toHaveBeenCalled();
+    expect(screen.queryByTestId("story-quick-action-error")).not.toBeInTheDocument();
   });
 
   it("shows no error and refreshes on a clean approve", async () => {
@@ -75,7 +67,7 @@ describe("UserStoryQuickActions error surfacing", () => {
       ok: true,
       status: 200,
       json: async () => ({
-        data: { approved: true, epicComplete: true, merged: true, commitHash: "abc" },
+        data: { approved: true, epicComplete: false, merged: false },
       }),
     }) as unknown as typeof fetch;
 

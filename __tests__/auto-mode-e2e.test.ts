@@ -11,7 +11,7 @@
  *
  *   build ok        → epic (and its stories) → review
  *   review negative → epic → in_progress, no agent on it
- *   review positive → epic stays in review
+ *   review positive → epic → to_merge (the verdict IS the approval)
  *   asked_question  → ticket held where it is
  *
  * The four hazards from the design, plus restart behaviour:
@@ -259,8 +259,13 @@ function completeBuild(sessionId: string): void {
     .run();
 }
 
-/** Review passed: the epic STAYS in review (the pipeline never auto-approves). */
+/** Review passed: the driver promotes the epic to the merge boundary. */
 function completeReviewPass(sessionId: string): void {
+  const session = db
+    .select()
+    .from(agentSessions)
+    .where(eq(agentSessions.id, sessionId))
+    .get()!;
   finishSession(sessionId, "answered");
   // The approving submit_findings call, as the route persists it. Simulated
   // reviewers run on the default provider (claude-code), which HAS that
@@ -269,6 +274,12 @@ function completeReviewPass(sessionId: string): void {
   db.update(agentSessions)
     .set({ reviewVerdict: "approved" })
     .where(eq(agentSessions.id, sessionId))
+    .run();
+  // finalizeReviewSession → transitionReviewPassed: the passing verdict
+  // moves the epic review → to_merge; stories hold until the merge cascade.
+  db.update(epics)
+    .set({ status: "to_merge", updatedAt: tick() })
+    .where(eq(epics.id, session.epicId!))
     .run();
 }
 
@@ -510,8 +521,9 @@ describe("re-review guard", () => {
     expect(s2.reviewsDispatched).toHaveLength(1);
     completeReviewPass(s2.reviewsDispatched[0]);
 
-    // The epic is STILL in review — a naive selector would review it forever.
-    expect(epicStatus("e1")).toBe("review");
+    // The passing verdict moved the epic out of Review on its own — the
+    // status now carries the approval, and only to_merge epics can land.
+    expect(epicStatus("e1")).toBe("to_merge");
 
     const s3 = await sweepProject(PROJECT_ID, deps());
     expect(s3.reviewsDispatched).toEqual([]);
@@ -710,7 +722,7 @@ describe("question guard", () => {
 /* ------------------------------------------------------------------ */
 
 describe("merge gate", () => {
-  it("does not merge an epic with an open review comment, and merges once resolved", async () => {
+  it("merges an epic with an open review comment and resolves it in the same action", async () => {
     arm(1, 1);
     addEpic("e1", "todo");
 
@@ -723,7 +735,7 @@ describe("merge gate", () => {
         epicId: "e1",
         filePath: "lib/a.ts",
         lineNumber: 2,
-        body: "[critical] leaks a handle",
+        body: "[minor] leftover note",
         author: "agent",
         status: "open",
         createdAt: tick(),
@@ -731,21 +743,32 @@ describe("merge gate", () => {
       .run();
     completeReviewPass(s2.reviewsDispatched[0]);
 
-    const blocked = await sweepProject(PROJECT_ID, deps());
-    expect(blocked.merged).toEqual([]);
-    expect(epicStatus("e1")).toBe("review");
-    expect(gitMocks.mergeWorktree).not.toHaveBeenCalled();
-    // A blocked merge is a guard refusal, never a parked ticket.
-    expect(autoModeRegistry.isParked(PROJECT_ID, "e1")).toBe(false);
-
-    db.update(reviewComments)
-      .set({ status: "resolved" })
-      .where(eq(reviewComments.id, "rc-1"))
-      .run();
-
+    // The merge IS the approval: the open finding is informational, not a
+    // gate, and landing the branch resolves it (lib/workflow/merge-approval.ts).
     const merged = await sweepProject(PROJECT_ID, deps());
     expect(merged.merged).toEqual(["e1"]);
     expect(epicStatus("e1")).toBe("done");
+    expect(
+      db.select().from(reviewComments).where(eq(reviewComments.id, "rc-1")).get()!
+        .status
+    ).toBe("resolved");
+    expect(autoModeRegistry.isParked(PROJECT_ID, "e1")).toBe(false);
+  });
+
+  it("never merges an epic the review verdict has not promoted", async () => {
+    arm(1, 0);
+    addEpic("e1", "todo");
+
+    const s1 = await sweepProject(PROJECT_ID, deps());
+    completeBuild(s1.buildsDispatched[0]);
+    expect(epicStatus("e1")).toBe("review");
+
+    // No review ran (budget 0), so nothing promoted the epic: the Review
+    // column is never a merge candidate.
+    const swept = await sweepProject(PROJECT_ID, deps());
+    expect(swept.merged).toEqual([]);
+    expect(gitMocks.mergeWorktree).not.toHaveBeenCalled();
+    expect(epicStatus("e1")).toBe("review");
   });
 
   it("parks the epic when the merge conflict survives the merge-fix agent", async () => {
@@ -1085,13 +1108,17 @@ describe("terminal-hook kick ordering", () => {
       arm(0, 0);
       const sessionId = seedReviewInFlight();
 
-      // A passing review leaves the epic in `review` — the only thing to
-      // apply is the approving verdict submit_findings persisted on the
-      // session, without which the review would not count as clean.
+      // A passing review persists the approving submit_findings verdict and
+      // promotes the epic to the merge boundary (transitionReviewPassed) —
+      // the board effects finalizeReviewSession applies.
       settleReviewLikeTheDriver(sessionId, () => {
         db.update(agentSessions)
           .set({ reviewVerdict: "approved" })
           .where(eq(agentSessions.id, sessionId))
+          .run();
+        db.update(epics)
+          .set({ status: "to_merge" })
+          .where(eq(epics.id, "e1"))
           .run();
       });
 

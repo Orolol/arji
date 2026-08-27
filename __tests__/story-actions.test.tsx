@@ -49,7 +49,7 @@ const baseProps = {
   isRunning: false,
   onSendToDev: vi.fn().mockResolvedValue(undefined),
   onSendToReview: vi.fn().mockResolvedValue(undefined),
-  onApprove: vi.fn().mockResolvedValue(undefined),
+  onComplete: vi.fn().mockResolvedValue(undefined),
 };
 
 function storyTarget(overrides?: Partial<typeof baseStory>) {

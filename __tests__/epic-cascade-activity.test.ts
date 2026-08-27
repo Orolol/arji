@@ -24,8 +24,10 @@ vi.mock("@/lib/db", async () => {
 
 vi.mock("@/lib/events/emit", () => ({ emitTicketMoved: vi.fn() }));
 vi.mock("@/lib/sync/export", () => ({ tryExportArjiJson: vi.fn() }));
-vi.mock("simple-git", () => ({
-  default: vi.fn(() => ({ merge: vi.fn().mockResolvedValue(undefined) })),
+vi.mock("@/lib/git/manager", () => ({
+  mergeWorktree: vi
+    .fn()
+    .mockResolvedValue({ merged: true, commitHash: "cascade-commit" }),
 }));
 
 const { db } = await import("@/lib/db");
@@ -43,8 +45,8 @@ const {
   transitionBuildStarted,
   transitionReviewRejected,
 } = await import("@/lib/workflow/automatic-transitions");
-const { POST: approveEpic } = await import(
-  "@/app/api/projects/[projectId]/epics/[epicId]/approve/route"
+const { POST: mergeEpic } = await import(
+  "@/app/api/projects/[projectId]/epics/[epicId]/merge/route"
 );
 
 let sequence = 0;
@@ -190,21 +192,27 @@ describe("epic-scoped cascade activity", () => {
     ]);
   });
 
-  it("logs the epic and every reviewed story when approval closes them", async () => {
-    db.insert(projects).values({ id: "p-approve", name: "Cascade" }).run();
+  it("logs the epic and every reviewed story when the merge closes them", async () => {
+    db.insert(projects)
+      .values({ id: "p-merge", name: "Cascade", gitRepoPath: "/repos/cascade" })
+      .run();
     db.insert(epics)
       .values({
-        id: "e-approve",
-        projectId: "p-approve",
-        title: "Approved epic",
-        status: "review",
+        id: "e-merge",
+        projectId: "p-merge",
+        title: "Merged epic",
+        // The review verdict already promoted the ticket to the merge
+        // boundary; the merge is the one human decision left, and its
+        // cascade is what closes the reviewed stories.
+        status: "to_merge",
+        branchName: "feature/e-merge",
       })
       .run();
     db.insert(userStories)
       .values(
         ["s-1", "s-2", "s-3"].map((id, index) => ({
           id,
-          epicId: "e-approve",
+          epicId: "e-merge",
           title: `Story ${index + 1}`,
           status: "review",
         }))
@@ -212,32 +220,29 @@ describe("epic-scoped cascade activity", () => {
       .run();
     db.insert(agentSessions)
       .values({
-        id: "epic-review-session",
-        projectId: "p-approve",
-        epicId: "e-approve",
+        id: "epic-build-session",
+        projectId: "p-merge",
+        epicId: "e-merge",
         status: "completed",
-        agentType: "review_code",
-        // A review that delivered its verdict: without one, an
-        // MCP-capable reviewer is unverifiable and review → done is
-        // refused for that reason instead (lib/pipeline/findings.ts).
-        reviewVerdict: "approved",
-        mode: "plan",
+        agentType: "build",
+        worktreePath: "/worktrees/e-merge",
+        mode: "code",
       })
       .run();
 
-    const response = await approveEpic(
-      mockNextRequest({ url: "http://localhost/approve", method: "POST" }),
-      mockRouteContext({ projectId: "p-approve", epicId: "e-approve" })
+    const response = await mergeEpic(
+      mockNextRequest({ url: "http://localhost/merge", method: "POST" }),
+      mockRouteContext({ projectId: "p-merge", epicId: "e-merge" })
     );
 
     expect(response.status).toBe(200);
-    expect(activity("e-approve")).toEqual(
+    expect(activity("e-merge")).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          fromStatus: "review",
+          fromStatus: "to_merge",
           toStatus: "done",
           actor: "user",
-          reason: "Review approved",
+          reason: "Branch merged successfully",
         }),
         ...["s-1", "s-2", "s-3"].map((id) =>
           expect.objectContaining({

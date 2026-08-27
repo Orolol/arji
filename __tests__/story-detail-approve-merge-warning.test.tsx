@@ -41,20 +41,20 @@ vi.mock("@/components/story/CommentThread", () => ({
   CommentThread: () => <div data-testid="comment-thread" />,
 }));
 
-// Mirror the real bar's approve pathway: rejections from onApprove are
+// Mirror the real bar's completion pathway: rejections from onComplete are
 // caught and routed to onActionError.
 vi.mock("@/components/shared/AgentActionsBar", () => ({
   AgentActionsBar: ({
-    onApprove,
+    onComplete,
     onActionError,
   }: {
-    onApprove: () => Promise<unknown>;
+    onComplete: () => Promise<unknown>;
     onActionError?: (error: unknown) => void;
   }) => (
     <button
       data-testid="mock-approve"
       onClick={() => {
-        Promise.resolve(onApprove()).catch((error) => onActionError?.(error));
+        Promise.resolve(onComplete()).catch((error) => onActionError?.(error));
       }}
     >
       Approve
@@ -64,14 +64,14 @@ vi.mock("@/components/shared/AgentActionsBar", () => ({
 
 import StoryDetailPage from "@/app/projects/[projectId]/stories/[storyId]/page";
 
-describe("Story detail approve merge reporting", () => {
-  const approve = vi.fn();
+describe("Story detail approve reporting", () => {
+  const merge = vi.fn();
   const refresh = vi.fn();
 
   beforeEach(() => {
     vi.restoreAllMocks();
     mockPush.mockClear();
-    approve.mockReset();
+    merge.mockReset();
     refresh.mockClear();
     mockUseStoryDetail.mockReturnValue({
       story: {
@@ -107,7 +107,7 @@ describe("Story detail approve merge reporting", () => {
       isRunning: false,
       sendToDev: vi.fn(),
       sendToReview: vi.fn(),
-      approve,
+      merge,
     });
     mockUseProvidersAvailable.mockReturnValue({
       codexAvailable: true,
@@ -115,30 +115,27 @@ describe("Story detail approve merge reporting", () => {
     });
   });
 
-  it("surfaces mergeError from a successful approve response as a warning", async () => {
-    // Story approved, epic complete, but the epic merge failed (HTTP 200).
-    approve.mockResolvedValue({
+  it("refreshes after a clean approve without any merge warning", async () => {
+    // Story approval closes the story only — `merged: false` with
+    // `epicComplete: true` is the normal last-story response (the epic
+    // closes through its own merge), never something to warn about.
+    merge.mockResolvedValue({
       approved: true,
       epicComplete: true,
       merged: false,
-      mergeError: "conflict in lib/foo.ts",
     });
 
     render(<StoryDetailPage />);
     fireEvent.click(screen.getByTestId("mock-approve"));
 
     await waitFor(() => {
-      expect(
-        screen.getByText(
-          "Story approved, but the epic merge failed: conflict in lib/foo.ts",
-        ),
-      ).toBeInTheDocument();
+      expect(refresh).toHaveBeenCalled();
     });
-    expect(refresh).toHaveBeenCalled();
+    expect(screen.queryByText(/merge failed/i)).not.toBeInTheDocument();
   });
 
   it("shows a toast when approve rejects", async () => {
-    approve.mockRejectedValue(new Error("Approve failed: story is not in review"));
+    merge.mockRejectedValue(new Error("Approve failed: story is not in review"));
 
     render(<StoryDetailPage />);
     fireEvent.click(screen.getByTestId("mock-approve"));
@@ -150,20 +147,27 @@ describe("Story detail approve merge reporting", () => {
     });
   });
 
-  it("does not warn when the approve response merged cleanly", async () => {
-    approve.mockResolvedValue({
-      approved: true,
-      epicComplete: true,
-      merged: true,
-      commitHash: "abc123",
-    });
+  it("routes an agent-already-running rejection to a toast with the session link", async () => {
+    const conflict = Object.assign(
+      new Error("Another agent is already running for this story."),
+      {
+        code: "AGENT_ALREADY_RUNNING",
+        activeSessionId: "sess-42",
+      },
+    );
+    merge.mockRejectedValue(conflict);
 
     render(<StoryDetailPage />);
     fireEvent.click(screen.getByTestId("mock-approve"));
 
     await waitFor(() => {
-      expect(refresh).toHaveBeenCalled();
+      expect(
+        screen.getByText("Another agent is already running for this story."),
+      ).toBeInTheDocument();
     });
-    expect(screen.queryByText(/merge failed/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Open session")).toHaveAttribute(
+      "href",
+      "/projects/proj-1/sessions/sess-42",
+    );
   });
 });

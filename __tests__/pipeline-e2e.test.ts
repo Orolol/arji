@@ -9,8 +9,9 @@
  * a user stopping a live session).
  *
  * Scenarios:
- *   (a) build success → review clean → pipeline succeeded, ticket left in
- *       review (never auto-approved),
+ *   (a) build success → review clean → pipeline succeeded, ticket promoted
+ *       to to_merge (the review verdict is the approval; the merge itself
+ *       stays the user's),
  *   (b) build success → review files a [critical] finding → fix RESUMES the
  *       build session → re-review clean (old open finding outside the second
  *       stage window) → succeeded with exactly one fix cycle,
@@ -463,7 +464,7 @@ afterEach(() => {
 /* ------------------------------------------------------------------ */
 
 describe("pipeline e2e — clean pass", () => {
-  it("build → review clean → succeeded, ticket left in review, coherent trace", async () => {
+  it("build → review clean → succeeded, ticket promoted to to_merge, coherent trace", async () => {
     const { projectId, epicId } = seed();
     scriptRun("build", cliOk("Implemented the ticket."));
     scriptReview(
@@ -488,10 +489,11 @@ describe("pipeline e2e — clean pass", () => {
     expect(run.sessionIds).toHaveLength(2);
     expect(run.sessionIds[0]).toBe(buildSessionId);
 
-    // The success end-state is REVIEW: the pipeline never auto-approves.
+    // The success end-state is TO MERGE: the passing verdict IS the
+    // approval, and the merge itself stays with the user.
     expect(
       db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
-    ).toBe("review");
+    ).toBe("to_merge");
 
     // Both sessions completed; review ran as review_code in code mode
     // (the no-edit rule is a prompt contract, not a harness mode).
@@ -523,6 +525,7 @@ describe("pipeline e2e — clean pass", () => {
       PIPELINE_REASONS.started,
       "Build completed successfully",
       PIPELINE_REASONS.reviewStarted,
+      "Review verdict: passed (Code Review) [verdict source: structured]",
       PIPELINE_REASONS.finished,
     ]);
     // Pipeline entries are actor 'system' with from == to; the board moves
@@ -618,12 +621,16 @@ describe("pipeline e2e — blocking findings and fix cycle", () => {
     expect(findingRows).toHaveLength(1);
     expect(findingRows[0].status).toBe("open");
 
-    // Ticket ends in review, and the trace reads as one story:
-    // dispatch → pipeline start → build done → review → fix cycle
-    // (board re-sync + fix trace) → fix done → re-review → finished.
+    // Ticket ends in to_merge, and the trace reads as one story: dispatch →
+    // pipeline start → build done → review — which does NOT promote despite
+    // its non-negative prose, because it filed an open [critical] in its own
+    // window (the promotion gate in finalizeReviewSession mirrors the
+    // runner's findings veto, so the board never shows To Merge with a live
+    // blocker) → fix cycle (board re-sync + fix trace) → fix done →
+    // re-review → promoted → finished.
     expect(
       db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
-    ).toBe("review");
+    ).toBe("to_merge");
     expect(epicReasons(epicId)).toEqual([
       "Build agent started",
       PIPELINE_REASONS.started,
@@ -633,6 +640,7 @@ describe("pipeline e2e — blocking findings and fix cycle", () => {
       PIPELINE_REASONS.fixStarted(1, 2),
       "Build completed successfully",
       PIPELINE_REASONS.reviewStarted,
+      "Review verdict: passed (Code Review) [verdict source: structured]",
       PIPELINE_REASONS.finished,
     ]);
   });
@@ -691,11 +699,11 @@ describe("pipeline e2e — the structured submit_findings verdict decides", () =
       "Review verdict: changes requested (Code Review) [verdict source: structured]"
     );
 
-    // Same end state as the findings-driven cycle: back in review, awaiting
-    // a human.
+    // Same end state as the findings-driven cycle: promoted to to_merge,
+    // awaiting the user's merge.
     expect(
       db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
-    ).toBe("review");
+    ).toBe("to_merge");
     expect(epicReasons(epicId)).toEqual([
       "Build agent started",
       PIPELINE_REASONS.started,
@@ -708,6 +716,7 @@ describe("pipeline e2e — the structured submit_findings verdict decides", () =
       PIPELINE_REASONS.fixStarted(1, 2),
       "Build completed successfully",
       PIPELINE_REASONS.reviewStarted,
+      "Review verdict: passed (Code Review) [verdict source: structured]",
       PIPELINE_REASONS.finished,
     ]);
   });

@@ -27,7 +27,7 @@ describe("manual acceptance grading action", () => {
         onSendToDev={vi.fn(async () => undefined)}
         onSendToReview={vi.fn(async () => undefined)}
         onSendToGrading={onSendToGrading}
-        onApprove={vi.fn(async () => undefined)}
+        onComplete={vi.fn(async () => undefined)}
       />,
     );
 

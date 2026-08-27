@@ -323,8 +323,8 @@ describe("tools/list", () => {
       "todo",
       "in_progress",
       "review",
-      "done",
-    ]); // "released" is system-only and must not be offered
+    ]); // to_merge comes from the review verdict, done from the merge, and
+    // "released" is system-only — none of the three may be offered
     expect(updateStatus.inputSchema.required).toEqual(["status"]);
 
     const submitFindings: any = byName.get("submit_findings");
@@ -332,11 +332,21 @@ describe("tools/list", () => {
       "verdict",
       "summary",
       "findings",
-    ]);
+    ]); // prior_findings stays optional — a first review cycle has none
     expect(submitFindings.inputSchema.properties.findings.maxItems).toBe(50);
     expect(
       submitFindings.inputSchema.properties.findings.items.required
     ).toEqual(["file_path", "line", "body", "severity"]);
+    expect(
+      submitFindings.inputSchema.properties.prior_findings.maxItems
+    ).toBe(100);
+    expect(
+      submitFindings.inputSchema.properties.prior_findings.items.required
+    ).toEqual(["id", "status"]);
+    expect(
+      submitFindings.inputSchema.properties.prior_findings.items.properties
+        .status.enum
+    ).toEqual(["fixed", "still_open"]);
 
     const submitGrading: any = byName.get("submit_grading");
     expect(submitGrading.inputSchema.required).toEqual([
@@ -496,18 +506,19 @@ describe("tools/call → HTTP bridge", () => {
     nextResponse = {
       status: 409,
       body: {
-        error: "Cannot move to Done: manual approval is required.",
+        error:
+          "Cannot move an in-progress ticket while another agent session is queued or running.",
         code: "INVALID_TRANSITION",
       },
     };
 
     const result = await client.callTool("update_ticket_status", {
-      status: "done",
+      status: "review",
     });
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toBe(
-      "Error (INVALID_TRANSITION): Cannot move to Done: manual approval is required."
+      "Error (INVALID_TRANSITION): Cannot move an in-progress ticket while another agent session is queued or running."
     );
   });
 
@@ -619,8 +630,8 @@ describe("chat toolset (ARIJ_MCP_TOOLSET=chat)", () => {
       "todo",
       "in_progress",
       "review",
-      "done",
-    ]); // "released" stays system-only in chat too
+    ]); // to_merge/done stay verdict- and merge-only in chat too;
+    // "released" stays system-only
   });
 
   it("bridges get_agent_status to POST /api/mcp/get-agent-status", async () => {

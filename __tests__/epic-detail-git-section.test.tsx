@@ -77,7 +77,7 @@ const baseEpic = {
   title: "Payments",
   description: "Epic details",
   priority: 1,
-  status: "review",
+  status: "to_merge",
   branchName: "feature/payments",
   prNumber: null,
   prUrl: null,
@@ -184,7 +184,7 @@ describe("EpicDetail git section", () => {
     }) as unknown as typeof fetch;
   });
 
-  it("shows the branch name and merge button for a review epic", () => {
+  it("shows the branch name and merge button for a To Merge epic", () => {
     renderSubject();
     expect(screen.getByText("feature/payments")).toBeInTheDocument();
     expect(
@@ -200,13 +200,25 @@ describe("EpicDetail git section", () => {
     ).toBeNull();
   });
 
-  it("hides the merge button outside review/done status", () => {
-    setupHooks({ status: "in_progress" });
-    renderSubject();
-    expect(screen.getByText("feature/payments")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Merge into main" }),
-    ).toBeNull();
+  it("hides the merge button outside to_merge — Review included", () => {
+    // Review no longer offers the merge: the review agent's verdict is what
+    // promotes a ticket to To Merge, and only there is the merge on offer.
+    for (const status of ["in_progress", "review", "done"]) {
+      setupHooks({ status });
+      const { unmount } = render(
+        <EpicDetail
+          projectId="proj-1"
+          epicId="epic-1"
+          open={true}
+          onClose={vi.fn()}
+        />,
+      );
+      expect(screen.getByText("feature/payments")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Merge into main" }),
+      ).toBeNull();
+      unmount();
+    }
   });
 
   it("renders the latest deterministic verification report in EpicDetail", () => {
@@ -362,7 +374,7 @@ describe("EpicDetail git section", () => {
   });
   it("shows merge conflict error and resolve-with-agent button on initial load when merge conflict is persisted", () => {
     setupHooks({
-      status: "review",
+      status: "to_merge",
       mergeReadiness: {
         ready: false,
         blocker: "merge_conflict",

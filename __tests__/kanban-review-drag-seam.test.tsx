@@ -5,9 +5,9 @@
  * Every other test in this area covers one side alone — the section tests mock
  * `useKanban` out, the reorder tests call `moveEpic` with hand-picked indices.
  * The bug this file pins lived exactly in between: the Board re-derived the
- * Review order for display while `handleDragEnd`, the optimistic splice and
+ * To Merge order for display while `handleDragEnd`, the optimistic splice and
  * `persistedColumnOrder` all indexed the raw state array. They agree at load
- * and diverge after the first Review drag that crosses the ready boundary —
+ * and diverge after the first To Merge drag that crosses the ready boundary —
  * and nothing refetches an idle board, so they stay diverged.
  *
  * Only `fetch` and dnd-kit are stubbed here; the hook and the Board are real.
@@ -73,8 +73,8 @@ vi.mock("@/components/kanban/ReleasedColumn", () => ({
 const READY: MergeReadiness = { ready: true, blocker: null, openFindings: 0 };
 const BLOCKED: MergeReadiness = {
   ready: false,
-  blocker: "open_findings",
-  openFindings: 1,
+  blocker: "merge_conflict",
+  openFindings: 0,
 };
 
 function epic(
@@ -88,7 +88,7 @@ function epic(
     title: id,
     description: "d",
     priority: 0,
-    status: "review",
+    status: "to_merge",
     position,
     branchName: `feature/${id}`,
     prNumber: null,
@@ -120,16 +120,16 @@ function reorderPayloads(): Array<
     .map(([, init]) => JSON.parse((init as RequestInit).body as string).items);
 }
 
-/** Persisted Review order implied by the latest reorder payload. */
-function persistedReviewOrder(): string[] {
+/** Persisted To Merge order implied by the latest reorder payload. */
+function persistedMergeOrder(): string[] {
   const payloads = reorderPayloads();
   return payloads[payloads.length - 1]
-    .filter((item) => item.status === "review")
+    .filter((item) => item.status === "to_merge")
     .sort((a, b) => a.position - b.position)
     .map((item) => item.id);
 }
 
-/** Review card titles in the order they are actually drawn. */
+/** To Merge card titles in the order they are actually drawn. */
 function renderedOrder(): string[] {
   return screen
     .getAllByRole("heading", { level: 4 })
@@ -175,7 +175,7 @@ async function mountBoard() {
   await waitFor(() => expect(renderedOrder()).toEqual(["A", "B", "C"]));
 }
 
-describe("Review drags: rendered order is the order indices mean", () => {
+describe("To Merge drags: rendered order is the order indices mean", () => {
   it("keeps render and state in step across a drag that crosses the ready boundary", async () => {
     await mountBoard();
 
@@ -184,7 +184,7 @@ describe("Review drags: rendered order is the order indices mean", () => {
     await drag("A", "C");
 
     await waitFor(() => expect(reorderPayloads()).toHaveLength(1));
-    expect(persistedReviewOrder()).toEqual(["B", "C", "A"]);
+    expect(persistedMergeOrder()).toEqual(["B", "C", "A"]);
     // Display returns to ready-first; the state array must have followed.
     expect(renderedOrder()).toEqual(["A", "B", "C"]);
   });
@@ -204,7 +204,7 @@ describe("Review drags: rendered order is the order indices mean", () => {
     // The regression: with the arrays diverged, `handleDragEnd` read A's index
     // in the stale state array (2) and C was written to the BOTTOM, so the
     // drag looked like it did nothing.
-    expect(persistedReviewOrder()[0]).toBe("C");
+    expect(persistedMergeOrder()[0]).toBe("C");
     // A stays drawn first because it is the only merge-ready card and the
     // section is pinned — that is the feature, not the bug. What must move is
     // C's rank among its peers, and the column the user sees.
@@ -224,13 +224,13 @@ describe("Review drags: rendered order is the order indices mean", () => {
     await drag("B", first);
     await waitFor(() => expect(reorderPayloads()).toHaveLength(3));
 
-    expect(persistedReviewOrder()[0]).toBe("B");
+    expect(persistedMergeOrder()[0]).toBe("B");
     expect(renderedOrder()).toEqual(["A", "B", "C"]);
     // Every card is still accounted for exactly once.
-    expect([...persistedReviewOrder()].sort()).toEqual(["A", "B", "C"]);
+    expect([...persistedMergeOrder()].sort()).toEqual(["A", "B", "C"]);
   });
 
-  it("never writes a Review position that encodes readiness", async () => {
+  it("never writes a To Merge position that encodes readiness", async () => {
     await mountBoard();
 
     await drag("A", "C");
@@ -238,7 +238,7 @@ describe("Review drags: rendered order is the order indices mean", () => {
 
     // A is the only ready card. If readiness leaked into `position` it would
     // be persisted at 0 (its display index) rather than where it was dropped.
-    const items = reorderPayloads()[0].filter((i) => i.status === "review");
+    const items = reorderPayloads()[0].filter((i) => i.status === "to_merge");
     expect(items.find((i) => i.id === "A")?.position).toBe(2);
   });
 });

@@ -87,7 +87,7 @@ describe("AgentActionsBar — segregation notice in the review dialog", () => {
         isRunning={false}
         onSendToDev={vi.fn(async () => undefined)}
         onSendToReview={vi.fn(async () => undefined)}
-        onApprove={vi.fn(async () => undefined)}
+        onComplete={vi.fn(async () => undefined)}
       />
     );
   }

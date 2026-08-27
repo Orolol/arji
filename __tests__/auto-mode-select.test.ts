@@ -977,8 +977,13 @@ describe("story questions do not hold the parent epic", () => {
 /* ------------------------------------------------------------------ */
 
 describe("selectMergeCandidates", () => {
-  function seedCleanlyReviewedEpic(): void {
-    addEpic({ id: "e1", status: "review", branchName: "feat/e1" });
+  /**
+   * An epic the review verdict already promoted: sitting in `to_merge`, with
+   * the clean review trail that put it there. Only `to_merge` epics are merge
+   * candidates — the status carries the verdict.
+   */
+  function seedMergeReadyEpic(): void {
+    addEpic({ id: "e1", status: "to_merge", branchName: "feat/e1" });
     addSession({
       epicId: "e1",
       status: "completed",
@@ -996,8 +1001,8 @@ describe("selectMergeCandidates", () => {
     });
   }
 
-  it("selects an epic reviewed clean since its last code change", () => {
-    seedCleanlyReviewedEpic();
+  it("selects an epic the review verdict promoted to to_merge", () => {
+    seedMergeReadyEpic();
     expect(selectMergeCandidates(PROJECT_ID)).toEqual([
       expect.objectContaining({ epicId: "e1", branchName: "feat/e1" }),
     ]);
@@ -1009,7 +1014,7 @@ describe("selectMergeCandidates", () => {
    * diff also has to be the whole feature.
    */
   it("never merges an epic that still has an unbuilt story", () => {
-    seedCleanlyReviewedEpic();
+    seedMergeReadyEpic();
     addStory({ id: "s-built", epicId: "e1", status: "review", position: 0 });
     addStory({ id: "s-left", epicId: "e1", status: "todo", position: 1 });
 
@@ -1021,14 +1026,14 @@ describe("selectMergeCandidates", () => {
   });
 
   it("never merges while a story is still in progress", () => {
-    seedCleanlyReviewedEpic();
+    seedMergeReadyEpic();
     addStory({ id: "s-wip", epicId: "e1", status: "in_progress", position: 0 });
 
     expect(selectMergeCandidates(PROJECT_ID)).toEqual([]);
   });
 
   it("is not held by a story parked in backlog", () => {
-    seedCleanlyReviewedEpic();
+    seedMergeReadyEpic();
     addStory({ id: "s-shelved", epicId: "e1", status: "backlog", position: 0 });
 
     // The build selector will never pick a backlog story up, so blocking on
@@ -1041,7 +1046,7 @@ describe("selectMergeCandidates", () => {
   });
 
   it("merges once every story is in review or done", () => {
-    seedCleanlyReviewedEpic();
+    seedMergeReadyEpic();
     addStory({ id: "s-review", epicId: "e1", status: "review", position: 0 });
     addStory({ id: "s-done", epicId: "e1", status: "done", position: 1 });
 
@@ -1050,24 +1055,18 @@ describe("selectMergeCandidates", () => {
     ]);
   });
 
-  it("never merges an epic with an open review comment", () => {
-    seedCleanlyReviewedEpic();
+  it("still selects an epic with an open review comment — the merge resolves findings", () => {
+    seedMergeReadyEpic();
     addOpenReviewComment("e1");
-    expect(selectMergeCandidates(PROJECT_ID)).toEqual([]);
-  });
 
-  it("merges once the open review comment is resolved", () => {
-    seedCleanlyReviewedEpic();
-    addOpenReviewComment("e1");
-    expect(selectMergeCandidates(PROJECT_ID)).toEqual([]);
-
-    db.update(reviewComments).set({ status: "resolved" }).run();
+    // Open findings are informational, not a gate: the merge IS the approval
+    // and bulk-resolves whatever stayed open (lib/workflow/merge-approval.ts).
     expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([
       "e1",
     ]);
   });
 
-  it("never merges an epic with no completed review", () => {
+  it("never merges an epic still in review — only the verdict promotes it", () => {
     addEpic({ id: "e1", status: "review", branchName: "feat/e1" });
     addSession({
       epicId: "e1",
@@ -1076,6 +1075,8 @@ describe("selectMergeCandidates", () => {
       createdAt: at(10),
       endedAt: at(11),
     });
+    // No completed review means no verdict, so nothing moved the epic to
+    // to_merge — and the Review column is never a merge candidate.
     expect(selectMergeCandidates(PROJECT_ID)).toEqual([]);
   });
 
@@ -1099,7 +1100,9 @@ describe("selectMergeCandidates", () => {
   });
 
   it("never merges an epic without a branch", () => {
-    addEpic({ id: "e1", status: "review", branchName: null });
+    // Even in to_merge: without a branch there is nothing to land
+    // (the `no_branch` blocker of evaluateMergeReadiness).
+    addEpic({ id: "e1", status: "to_merge", branchName: null });
     addSession({
       epicId: "e1",
       status: "completed",
@@ -1110,8 +1113,25 @@ describe("selectMergeCandidates", () => {
     expect(selectMergeCandidates(PROJECT_ID)).toEqual([]);
   });
 
-  it("never merges when code landed after the review", () => {
-    seedCleanlyReviewedEpic();
+  it("a review made stale by new code earns a re-review, never a merge", () => {
+    addEpic({ id: "e1", status: "review", branchName: "feat/e1" });
+    addSession({
+      epicId: "e1",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(10),
+      endedAt: at(11),
+    });
+    addSession({
+      epicId: "e1",
+      status: "completed",
+      agentType: "review_code",
+      reviewVerdict: "approved",
+      createdAt: at(20),
+      endedAt: at(21),
+    });
+    // New code after the clean review: the epic stayed in Review (nothing
+    // promoted it), and the freshness rule sends the reviewer back in.
     addSession({
       epicId: "e1",
       status: "completed",
@@ -1120,10 +1140,13 @@ describe("selectMergeCandidates", () => {
       endedAt: at(31),
     });
     expect(selectMergeCandidates(PROJECT_ID)).toEqual([]);
+    expect(selectReviewCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([
+      "e1",
+    ]);
   });
 
   it("is mutually exclusive with the review selector", () => {
-    seedCleanlyReviewedEpic();
+    seedMergeReadyEpic();
     expect(selectReviewCandidates(PROJECT_ID)).toEqual([]);
     expect(selectMergeCandidates(PROJECT_ID)).toHaveLength(1);
   });
@@ -1159,7 +1182,9 @@ describe("selectMergeCandidates", () => {
     for (const verdict of ["approved", "approved_with_minor_issues"]) {
       db.delete(agentSessions).run();
       db.delete(epics).run();
-      addEpic({ id: "e1", status: "review", branchName: "feat/e1" });
+      // Either approving verdict promotes review → to_merge; from there the
+      // epic is a merge candidate.
+      addEpic({ id: "e1", status: "to_merge", branchName: "feat/e1" });
       addSession({
         epicId: "e1",
         status: "completed",
@@ -1192,8 +1217,10 @@ describe("selectMergeCandidates", () => {
       endedAt: at(11),
     });
     // A provider without MCP support can never call submit_findings; its
-    // prose verdict is the only signal, so the row stays NULL and the old
-    // temporal gate applies unchanged.
+    // prose verdict is the only signal, so the row stays NULL and stays
+    // CLEAN: no re-review loop. Promotion to to_merge is the review driver's
+    // job (transitionReviewPassed) — a clean review left in the Review
+    // column earns neither another review nor a merge.
     addSession({
       epicId: "e1",
       status: "completed",
@@ -1203,9 +1230,8 @@ describe("selectMergeCandidates", () => {
       endedAt: at(21),
     });
 
-    expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([
-      "e1",
-    ]);
+    expect(selectReviewCandidates(PROJECT_ID)).toEqual([]);
+    expect(selectMergeCandidates(PROJECT_ID)).toEqual([]);
   });
 });
 

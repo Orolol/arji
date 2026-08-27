@@ -1,17 +1,17 @@
 /**
  * Tests for the user-story approve route.
  *
- * Contract: the story itself ALWAYS goes done — approving one story is a
- * verdict on that story and must never be blocked by git. Only when the last
- * open story is approved does the epic close, and closing the epic requires
- * its branch to land first (mergeWorktree, merge-before-done). A failed epic
- * merge leaves the epic status untouched and reports the partial outcome
- * with 200 + mergeError — the story approval itself DID succeed.
+ * Contract: approving a story is a review verdict on that story ALONE. The
+ * story goes done through the transition service (source "approve", the
+ * explicit human decision that needs no separate review-agent session), and
+ * nothing else moves: no git, no merge, no epic close. The parent epic
+ * reaches Done exclusively through its merge (to_merge → done) — when the
+ * approval closed the last open story, the route records a decision line
+ * saying exactly that instead of merging anything.
  *
- * Every status write (story → done, epic → done) goes through the
- * transition service, so the engine's guards still apply: an epic whose
- * completion the engine refuses stays put and the refusal is reported back
- * to the caller instead of force-closing it.
+ * The mergeWorktree / notification / registry mocks stay in place as
+ * regression tripwires: if the merge ever creeps back into this route, the
+ * not-called assertions below are what catches it.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
@@ -23,16 +23,12 @@ import {
 
 const mocks = vi.hoisted(() => ({
   mergeWorktree: vi.fn(),
-  applyTransition: vi.fn(),
   applyStoryTransition: vi.fn(),
   logWorkflowDecision: vi.fn(),
-  logTransition: vi.fn(),
   createApproveMergeFailedNotification: vi.fn(),
   tryExportArjiJson: vi.fn(),
   beginMergeWork: vi.fn(),
   endMergeWork: vi.fn(),
-  tryLockProjectMerge: vi.fn(),
-  unlockProjectMerge: vi.fn(),
 }));
 
 vi.mock("@/lib/db", async () => {
@@ -45,13 +41,8 @@ vi.mock("@/lib/git/manager", () => ({
 }));
 
 vi.mock("@/lib/workflow/transition-service", () => ({
-  applyTransition: mocks.applyTransition,
   applyStoryTransition: mocks.applyStoryTransition,
   logWorkflowDecision: mocks.logWorkflowDecision,
-}));
-
-vi.mock("@/lib/workflow/log", () => ({
-  logTransition: mocks.logTransition,
 }));
 
 vi.mock("@/lib/notifications/create", () => ({
@@ -67,8 +58,6 @@ vi.mock("@/lib/auto-mode/registry", () => ({
   autoModeRegistry: {
     beginMergeWork: mocks.beginMergeWork,
     endMergeWork: mocks.endMergeWork,
-    tryLockProjectMerge: mocks.tryLockProjectMerge,
-    unlockProjectMerge: mocks.unlockProjectMerge,
   },
 }));
 
@@ -90,35 +79,24 @@ const mockEpic = {
   status: "review",
 };
 
-const mockProject = {
-  id: "p1",
-  gitRepoPath: "/tmp/repo",
-  defaultBranch: "main",
-};
-
 /**
  * Seed the db-mock queues in the route's read order:
  *   get #1 → { story } (getStoryOr404's joined row shape),
- *   get #2 → epic,
- *   all #1 → sibling stories,
- *   get #3 → project (only when the epic is complete),
- *   all #2 → agent sessions (worktree lookup, merge path only).
+ *   get #2 → epic (the epicComplete bookkeeping),
+ *   all #1 → sibling stories.
+ * No project read, no session read: the route never touches git.
  */
 function seed({
   story = mockStory,
   epic = mockEpic,
   siblings = [mockStory],
-  project = mockProject,
-  sessions = [{ worktreePath: "/tmp/worktrees/epic-abc" }],
 }: {
   story?: Record<string, unknown>;
   epic?: Record<string, unknown> | null;
   siblings?: Record<string, unknown>[];
-  project?: Record<string, unknown> | null;
-  sessions?: Record<string, unknown>[];
 } = {}) {
-  dbMockState.getQueue.push({ story }, epic, project);
-  dbMockState.allQueue.push(siblings, sessions);
+  dbMockState.getQueue.push({ story }, epic);
+  dbMockState.allQueue.push(siblings);
 }
 
 async function callApprove(projectId = "p1", storyId = "us-1") {
@@ -132,30 +110,12 @@ async function callApprove(projectId = "p1", storyId = "us-1") {
   return POST(req, mockRouteContext({ projectId, storyId }));
 }
 
-/** Update payloads that touch the epic row (they carry updatedAt). */
-function epicUpdates() {
-  return dbMockState.updateCalls.filter(
-    (c) => "updatedAt" in (c as Record<string, unknown>)
-  ) as Record<string, unknown>[];
-}
-
-/** The service call that closes the epic (absent when the epic is held). */
-function epicCloseCall() {
-  return mocks.applyTransition.mock.calls.find(
-    (c) => (c[0] as Record<string, unknown>).toStatus === "done" &&
-      !("validateOnly" in (c[0] as object))
-  )?.[0] as Record<string, unknown> | undefined;
-}
-
 describe("Story approval", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
     mocks.mergeWorktree.mockResolvedValue({ merged: true, commitHash: "abc123" });
-    mocks.applyTransition.mockReturnValue({ valid: true });
     mocks.applyStoryTransition.mockReturnValue({ valid: true });
-    mocks.beginMergeWork.mockReturnValue(true);
-    mocks.tryLockProjectMerge.mockReturnValue(true);
   });
 
   it("rejects approval when the story is not in review status", async () => {
@@ -182,257 +142,99 @@ describe("Story approval", () => {
       epicComplete: false,
       merged: false,
     });
-    expect(mocks.mergeWorktree).not.toHaveBeenCalled();
-    // The story verdict is the service's write; the epic row is untouched
-    // and the epic transition is never even validated.
+    // The story verdict is the service's write (validated first, then
+    // applied); the epic row is untouched and nothing else runs.
     expect(mocks.applyStoryTransition).toHaveBeenCalledWith(
       expect.objectContaining({
         userStoryId: "us-1",
         fromStatus: "review",
         toStatus: "done",
+        source: "approve",
+        actor: "user",
+        // Explicit human approval IS the review decision for the story.
+        requireCompletedReview: false,
       })
     );
-    expect(mocks.applyTransition).not.toHaveBeenCalled();
+    expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+    expect(mocks.logWorkflowDecision).not.toHaveBeenCalled();
     expect(dbMockState.updateCalls).toEqual([]);
+    expect(mocks.tryExportArjiJson).toHaveBeenCalledWith("p1");
   });
 
-  describe("last story approved — epic merge success", () => {
-    it("merges via mergeWorktree, then closes the epic and clears its branch", async () => {
-      seed();
-      const res = await callApprove();
-
-      expect(res.status).toBe(200);
-      expect(mocks.mergeWorktree).toHaveBeenCalledWith(
-        "/tmp/repo",
-        "feature/epic-abc",
-        "/tmp/worktrees/epic-abc",
-        { defaultBranch: "main" }
-      );
-
-      const json = await res.json();
-      expect(json.data).toEqual({
-        approved: true,
-        epicComplete: true,
-        merged: true,
-        commitHash: "abc123",
-      });
-
-      // The status write is the service's; the route only clears the branch.
-      expect(epicCloseCall()).toMatchObject({
-        fromStatus: "review",
-        toStatus: "done",
-        source: "approve",
-      });
-      const [branchClear] = epicUpdates();
-      expect(branchClear).toMatchObject({ branchName: null });
+  it("reports the engine's refusal of the story close as a 400", async () => {
+    mocks.applyStoryTransition.mockReturnValue({
+      valid: false,
+      error: "Cannot move while a build session is queued or running.",
     });
+    seed();
+    const res = await callApprove();
 
-    it("acquires and releases the per-epic merge lock", async () => {
-      seed();
-      await callApprove();
-
-      expect(mocks.beginMergeWork).toHaveBeenCalledWith("p1", "epic-1");
-      expect(mocks.endMergeWork).toHaveBeenCalledWith("p1", "epic-1");
-      expect(mocks.beginMergeWork.mock.invocationCallOrder[0]).toBeLessThan(
-        mocks.mergeWorktree.mock.invocationCallOrder[0]
-      );
-    });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("queued or running");
+    expect(dbMockState.updateCalls).toEqual([]);
+    expect(mocks.tryExportArjiJson).not.toHaveBeenCalled();
   });
 
-  describe("last story approved — merge already in flight", () => {
-    it("keeps the story done, leaves the epic alone, reports via mergeError", async () => {
-      mocks.beginMergeWork.mockReturnValue(false);
+  describe("last story approved — the epic stays put", () => {
+    it("closes only the story and reports epicComplete without merging", async () => {
       seed();
       const res = await callApprove();
 
       expect(res.status).toBe(200);
       const json = await res.json();
+      // No `mergeError`, no `commitHash`: the response shape itself says the
+      // route has no merge to report on.
       expect(json.data).toEqual({
         approved: true,
         epicComplete: true,
         merged: false,
-        mergeError:
-          "A merge is already in flight for this epic — retry in a moment.",
-      });
-      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
-      // The story verdict stands (service write); the epic row and its
-      // comments are untouched, and no spurious failure trail was written
-      // for a healthy epic.
-      expect(dbMockState.updateCalls).toEqual([]);
-      expect(dbMockState.insertCalls).toEqual([]);
-      expect(mocks.createApproveMergeFailedNotification).not.toHaveBeenCalled();
-      // Never acquired, so never released.
-      expect(mocks.endMergeWork).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("last story approved — engine refuses the epic close", () => {
-    it("holds the epic in place and reports the refusal instead of force-closing", async () => {
-      mocks.applyTransition.mockReturnValue({
-        valid: false,
-        error: "Cannot move to Done: no completed review found.",
-      });
-      seed();
-      const res = await callApprove();
-
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.data).toEqual({
-        approved: true,
-        epicComplete: false,
-        epicHoldReason: "Cannot move to Done: no completed review found.",
-        merged: false,
       });
 
-      // Nothing git-related ran and the epic row was never written.
+      // Nothing git- or epic-related ran: the epic closes through its own
+      // merge route, never through a story approval.
       expect(mocks.mergeWorktree).not.toHaveBeenCalled();
       expect(mocks.beginMergeWork).not.toHaveBeenCalled();
+      expect(mocks.createApproveMergeFailedNotification).not.toHaveBeenCalled();
       expect(dbMockState.updateCalls).toEqual([]);
-      // The hold is named in the activity log, not left implicit.
+      expect(dbMockState.insertCalls).toEqual([]);
+    });
+
+    it("records the decision line pointing at the merge instead of moving the epic", async () => {
+      seed();
+      await callApprove();
+
       expect(mocks.logWorkflowDecision).toHaveBeenCalledWith(
         expect.objectContaining({
+          projectId: "p1",
           epicId: "epic-1",
+          status: "review",
           actor: "user",
-          reason: expect.stringContaining("no completed review"),
-        })
-      );
-    });
-  });
-
-  describe("last story approved — epic merge failure", () => {
-    beforeEach(() => {
-      mocks.mergeWorktree.mockResolvedValue({
-        merged: false,
-        error: "CONFLICTS: lib/foo.ts",
-        reason: "conflict",
-      });
-    });
-
-    it("keeps the story approval but reports the merge error with 200", async () => {
-      seed();
-      const res = await callApprove();
-
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.data).toEqual({
-        approved: true,
-        epicComplete: true,
-        merged: false,
-        mergeError: "CONFLICTS: lib/foo.ts",
-      });
-    });
-
-    it("leaves the epic status unchanged", async () => {
-      seed();
-      await callApprove();
-
-      // The story went done (service write); nothing was written to the epic
-      // row — the branch-clear only happens when the merge lands.
-      expect(epicUpdates()).toEqual([]);
-      expect(dbMockState.updateCalls).toEqual([]);
-    });
-
-    it("posts a ticket comment, notification, and same-status log entry", async () => {
-      seed();
-      await callApprove();
-
-      expect(dbMockState.insertCalls).toHaveLength(1);
-      const comment = dbMockState.insertCalls[0] as Record<string, unknown>;
-      expect(comment.epicId).toBe("epic-1");
-      expect(String(comment.content)).toContain("merge failed");
-
-      expect(mocks.createApproveMergeFailedNotification).toHaveBeenCalledWith({
-        projectId: "p1",
-        epicId: "epic-1",
-        error: "CONFLICTS: lib/foo.ts",
-      });
-
-      expect(mocks.logTransition).toHaveBeenCalledWith(
-        expect.objectContaining({
-          epicId: "epic-1",
-          fromStatus: "review",
-          toStatus: "review",
-          actor: "system",
+          reason: expect.stringContaining("closes through its merge"),
         })
       );
     });
 
-    it("funnels a mergeWorktree THROW into the same failure path", async () => {
-      // getGit can throw before mergeWorktree's try block when the repo
-      // directory is gone — the story is already done at that point, so a
-      // raw 500 with no trail would strand a half-applied approval.
-      mocks.mergeWorktree.mockRejectedValue(
-        new Error("Cannot use simple-git on a directory that does not exist")
-      );
-      seed();
-      const res = await callApprove();
-
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.data).toMatchObject({
-        approved: true,
-        epicComplete: true,
-        merged: false,
-        mergeError: "Cannot use simple-git on a directory that does not exist",
+    it("counts done siblings as closed when deciding epicComplete", async () => {
+      seed({
+        siblings: [mockStory, { id: "us-2", epicId: "epic-1", status: "done" }],
       });
-      expect(epicUpdates()).toEqual([]);
-      expect(mocks.createApproveMergeFailedNotification).toHaveBeenCalledWith({
-        projectId: "p1",
-        epicId: "epic-1",
-        error: "Cannot use simple-git on a directory that does not exist",
-      });
-      expect(mocks.endMergeWork).toHaveBeenCalledWith("p1", "epic-1");
-    });
-
-    it("keeps the 200 contract when writing the failure trail throws", async () => {
-      // SQLITE_BUSY on the trail writes must not turn the contractual 200
-      // into a generic 500 — the trail is best-effort.
-      mocks.createApproveMergeFailedNotification.mockImplementationOnce(() => {
-        throw new Error("SQLITE_BUSY");
-      });
-      const consoleError = vi
-        .spyOn(console, "error")
-        .mockImplementation(() => {});
-      seed();
-      const res = await callApprove();
-
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.data.mergeError).toBe("CONFLICTS: lib/foo.ts");
-      expect(epicUpdates()).toEqual([]);
-      expect(consoleError).toHaveBeenCalled();
-      consoleError.mockRestore();
-    });
-  });
-
-  describe("last story approved — nothing to merge", () => {
-    it("closes the epic without a merge when it has no branch", async () => {
-      seed({ epic: { ...mockEpic, branchName: null } });
-      const res = await callApprove();
-
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.data).toEqual({
-        approved: true,
-        epicComplete: true,
-        merged: false,
-      });
-      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
-
-      // The epic still closes through the service, it just has nothing to
-      // land — and no branch-name cleanup runs.
-      expect(epicCloseCall()).toMatchObject({ toStatus: "done" });
-      expect(dbMockState.updateCalls).toEqual([]);
-    });
-
-    it("closes the epic without a merge when the project has no git repo", async () => {
-      seed({ project: { ...mockProject, gitRepoPath: null } });
       const res = await callApprove();
 
       const json = await res.json();
-      expect(json.data.merged).toBe(false);
       expect(json.data.epicComplete).toBe(true);
-      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
+      expect(mocks.logWorkflowDecision).toHaveBeenCalled();
+    });
+
+    it("keeps the epic's own status in the decision line, whatever column it is in", async () => {
+      // A story approved late, after the epic already reached the merge
+      // boundary: the decision line must name the real column.
+      seed({ epic: { ...mockEpic, status: "to_merge" } });
+      await callApprove();
+
+      expect(mocks.logWorkflowDecision).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "to_merge" })
+      );
     });
   });
 });

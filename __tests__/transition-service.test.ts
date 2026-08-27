@@ -203,7 +203,7 @@ describe("applyTransition", () => {
     expect(mockLogTransition).not.toHaveBeenCalled();
   });
 
-  it("rejects review -> done via drag (guard fires)", async () => {
+  it("rejects review -> done structurally (the merge boundary sits between)", async () => {
     const { applyTransition } = await import(
       "@/lib/workflow/transition-service"
     );
@@ -216,49 +216,31 @@ describe("applyTransition", () => {
       source: "drag",
     });
     expect(result.valid).toBe(false);
-    // Guard fires for no completed review (first guard in chain)
-    expect(result.error).toContain("Done");
+    expect(result.error).toContain("Invalid transition");
   });
 
-  it("treats open comments as resolved when assumeReviewCommentsResolved is set", async () => {
-    // The approve flow's pre-merge check: approval bulk-resolves the open
-    // comments, but only AFTER the merge lands, so its validation must not
-    // trip over comments it is about to resolve — while every OTHER guard
-    // (like "no completed review") must still fire.
+  it("allows to_merge -> done only for the merge source", async () => {
+    // The merge IS the approval: there is no manual approve step, so a drag
+    // (or any other source) onto Done is refused, while the merge routes'
+    // source passes through the same service call.
     const { applyTransition } = await import(
       "@/lib/workflow/transition-service"
     );
-    const { db } = await import("@/lib/db");
-    const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
-    // Context read order: open comments, completed reviews, running sessions.
-    const seedReads = () =>
-      all
-        .mockReturnValueOnce([{ id: "rc1", status: "open" }])
-        .mockReturnValueOnce([
-          { agentType: "code_reviewer", status: "completed" },
-        ])
-        .mockReturnValueOnce([]);
     const opts = {
       projectId: "p1",
       epicId: "e1",
-      fromStatus: "review" as const,
+      fromStatus: "to_merge" as const,
       toStatus: "done" as const,
       actor: "user" as const,
-      source: "approve" as const,
       validateOnly: true,
     };
 
-    seedReads();
-    const refused = applyTransition(opts);
-    expect(refused.valid).toBe(false);
-    expect(refused.error).toContain("unresolved review comments");
+    const dragged = applyTransition({ ...opts, source: "drag" });
+    expect(dragged.valid).toBe(false);
+    expect(dragged.error).toContain("successful merge");
 
-    seedReads();
-    const allowed = applyTransition({
-      ...opts,
-      assumeReviewCommentsResolved: true,
-    });
-    expect(allowed.valid).toBe(true);
+    const merged = applyTransition({ ...opts, source: "merge" });
+    expect(merged.valid).toBe(true);
   });
 });
 
@@ -268,12 +250,12 @@ describe("applyTransition", () => {
 // ---------------------------------------------------------------------------
 
 describe("applyTransition — owning session exemption", () => {
-  // Context read order: open comments, completed reviews, running sessions.
+  // Context read order: completed reviews, running sessions. (The open-comment
+  // read is gone with its guard: findings no longer gate transitions.)
   async function seedRunningSessions(rows: unknown[]) {
     const { db } = await import("@/lib/db");
     const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
     all
-      .mockReturnValueOnce([]) // no open review comments
       .mockReturnValueOnce([]) // no completed review sessions
       .mockReturnValueOnce(rows);
   }
@@ -451,10 +433,9 @@ describe("applyStoryTransition — owning session exemption", () => {
   async function seedStoryReads(rows: unknown[]) {
     const { db } = await import("@/lib/db");
     const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
-    // Context read order: open comments, completed reviews, running sessions
-    // (filtered to the story). The story transition then writes userStories.
+    // Context read order: completed reviews, running sessions (filtered to
+    // the story). The story transition then writes userStories.
     all
-      .mockReturnValueOnce([])
       .mockReturnValueOnce([])
       .mockReturnValueOnce(rows);
   }

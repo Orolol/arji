@@ -1,18 +1,18 @@
 /**
- * Tests for Review Completion & Approval (epic approve route).
+ * Tests for Review Completion & the Merge (epic merge route).
  *
- * The route's contract is merge-first: the epic branch must land on the
- * default branch (via mergeWorktree) BEFORE any ticket state changes. A
- * failed merge must change NOTHING — comments stay open, the epic stays in
- * review — and surface a 409 plus a notification. Only a successful merge
- * (or having nothing to merge) lets the approval resolve comments and close
- * the ticket.
+ * The manual approve route is gone: the merge IS the approval. The route's
+ * contract is guard-first: the workflow pre-flight (to_merge → done, source
+ * "merge") must pass BEFORE any git work, and a failed merge must change
+ * NOTHING — comments stay open, the epic stays in To Merge — while leaving a
+ * failure trail (ticket comment, notification, same-status activity entry).
+ * Only a successful merge resolves the open review comments and closes the
+ * ticket.
  *
  * Closing the ticket itself goes through the transition service: the epic
  * → done write (and the child stories' → done writes) are the service's
- * status writes, and every child transition is pre-flighted before the
- * merge. Stories that never reached review are left unchanged and reported
- * as `skippedStories` instead of invalidating the approval.
+ * status writes. Stories that never reached review are left unchanged and
+ * reported as `skippedStories` instead of invalidating the merge.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
@@ -27,12 +27,11 @@ const mocks = vi.hoisted(() => ({
   applyTransition: vi.fn(),
   logTransition: vi.fn(),
   createApproveMergeFailedNotification: vi.fn(),
+  createMergeRetryFailedNotification: vi.fn(),
   tryExportArjiJson: vi.fn(),
-  beginMergeWork: vi.fn(),
-  endMergeWork: vi.fn(),
-  tryLockProjectMerge: vi.fn(),
-  unlockProjectMerge: vi.fn(),
   getRunningSessionForTarget: vi.fn(),
+  processStart: vi.fn(),
+  schedulerSubmit: vi.fn(),
 }));
 
 vi.mock("@/lib/db", async () => {
@@ -55,37 +54,45 @@ vi.mock("@/lib/workflow/log", () => ({
 vi.mock("@/lib/notifications/create", () => ({
   createApproveMergeFailedNotification:
     mocks.createApproveMergeFailedNotification,
+  createMergeRetryFailedNotification: mocks.createMergeRetryFailedNotification,
 }));
 
 vi.mock("@/lib/sync/export", () => ({
   tryExportArjiJson: mocks.tryExportArjiJson,
 }));
 
-vi.mock("@/lib/auto-mode/registry", () => ({
-  autoModeRegistry: {
-    beginMergeWork: mocks.beginMergeWork,
-    endMergeWork: mocks.endMergeWork,
-    tryLockProjectMerge: mocks.tryLockProjectMerge,
-    unlockProjectMerge: mocks.unlockProjectMerge,
-  },
+vi.mock("@/lib/agents/concurrency", () => ({
+  getRunningSessionForTarget: mocks.getRunningSessionForTarget,
 }));
 
-vi.mock("@/lib/agents/concurrency", async () => {
-  const shared = await import("@/lib/agents/concurrency-shared");
-  return {
-    ...shared,
-    getRunningSessionForTarget: mocks.getRunningSessionForTarget,
-    createAgentAlreadyRunningPayload: (
-      target: unknown,
-      activeSession: { id: string },
-      errorMessage: string,
-    ) => ({
-      error: errorMessage,
-      code: shared.AGENT_ALREADY_RUNNING_CODE,
-      data: { activeSessionId: activeSession.id, activeSession, target },
-    }),
-  };
-});
+vi.mock("@/lib/agents/scheduler", () => ({
+  agentScheduler: { submit: mocks.schedulerSubmit },
+}));
+
+vi.mock("@/lib/claude/process-manager", () => ({
+  processManager: { start: mocks.processStart, getStatus: vi.fn() },
+}));
+
+vi.mock("@/lib/agent-config/prompts", () => ({
+  resolveAgentPrompt: vi.fn(async () => "Merge system prompt"),
+}));
+
+vi.mock("@/lib/agent-sessions/lifecycle", () => ({
+  createQueuedSession: vi.fn(),
+  markSessionRunning: vi.fn(),
+  markSessionTerminal: vi.fn(),
+  isSessionLifecycleConflictError: vi.fn(() => false),
+}));
+
+vi.mock("@/lib/agent-sessions/wait-for-completion", () => ({
+  waitForProcessCompletion: vi.fn(),
+}));
+
+vi.mock("@/lib/claude/resolve-session-output", () => ({
+  classifySessionOutcome: vi.fn(() => "answered"),
+  extractSessionUsage: vi.fn(() => null),
+  resolveSessionOutput: vi.fn(() => "output"),
+}));
 
 vi.mock("@/lib/utils/nanoid", () => ({
   createId: vi.fn(() => "new-id"),
@@ -95,7 +102,7 @@ const mockEpic = {
   id: "epic-1",
   title: "Test Epic",
   branchName: "feature/epic-abc",
-  status: "review",
+  status: "to_merge",
 };
 
 const mockProject = {
@@ -106,9 +113,9 @@ const mockProject = {
 
 /**
  * Seed the db-mock queues in the route's read order:
- *   get #1 → epic (getEpicOr404), get #2 → project,
- *   all #1 → agent sessions (worktree lookup, merge path only).
- * Story synchronization now lives inside the mocked transition service.
+ *   get #1 → project (getProjectOr404), get #2 → epic (getEpicOr404),
+ *   all #1 → agent sessions (worktree lookup).
+ * Story synchronization lives inside the mocked transition service.
  */
 function seed({
   epic = mockEpic,
@@ -119,13 +126,13 @@ function seed({
   project?: Record<string, unknown> | null;
   sessions?: Record<string, unknown>[];
 } = {}) {
-  dbMockState.getQueue.push(epic, project);
+  dbMockState.getQueue.push(project, epic);
   dbMockState.allQueue.push(sessions);
 }
 
-async function callApprove(projectId = "p1", epicId = "epic-1") {
+async function callMerge(projectId = "p1", epicId = "epic-1") {
   const { POST } = await import(
-    "@/app/api/projects/[projectId]/epics/[epicId]/approve/route"
+    "@/app/api/projects/[projectId]/epics/[epicId]/merge/route"
   );
   const req = mockNextRequest({
     url: "http://localhost/api/test",
@@ -140,82 +147,18 @@ function lastEpicCall() {
   return calls[calls.length - 1]?.[0] as Record<string, unknown> | undefined;
 }
 
-describe("Epic review approval", () => {
+describe("Epic merge — the merge is the approval", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
     mocks.mergeWorktree.mockResolvedValue({ merged: true, commitHash: "abc123" });
     mocks.applyTransition.mockReturnValue({ valid: true });
-    mocks.beginMergeWork.mockReturnValue(true);
-    mocks.tryLockProjectMerge.mockReturnValue(true);
-    // Default: nothing else is working on the epic.
-    mocks.getRunningSessionForTarget.mockReturnValue(null);
-  });
-
-  describe("an agent still owns the epic", () => {
-    /**
-     * mergeWorktree runs `git worktree remove --force` before it merges, so
-     * approving over a session that has not finished pulls the checkout out
-     * from under it. A QUEUED session is the dangerous case: it has no
-     * process yet, raises no agent chip, and starts into a directory that is
-     * already gone. beginMergeWork only serialises merge against merge.
-     */
-    const queuedSession = {
-      id: "sess-queued",
-      projectId: "p1",
-      epicId: "epic-1",
-      userStoryId: null,
-      mode: "code",
-      provider: "claude-code",
-      startedAt: null,
-    };
-
-    it("refuses with 409 instead of merging", async () => {
-      seed();
-      mocks.getRunningSessionForTarget.mockReturnValue(queuedSession);
-
-      const res = await callApprove();
-
-      expect(res.status).toBe(409);
-      const json = await res.json();
-      expect(json.code).toBe("AGENT_ALREADY_RUNNING");
-      expect(json.data.activeSessionId).toBe("sess-queued");
-    });
-
-    it("writes nothing at all — no merge, no lock, no transition", async () => {
-      seed();
-      mocks.getRunningSessionForTarget.mockReturnValue(queuedSession);
-
-      await callApprove();
-
-      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
-      expect(mocks.beginMergeWork).not.toHaveBeenCalled();
-      expect(mocks.applyTransition).not.toHaveBeenCalled();
-      expect(mocks.tryExportArjiJson).not.toHaveBeenCalled();
-    });
-
-    it("checks the epic scope, so a story session on the epic counts too", async () => {
-      seed();
-      mocks.getRunningSessionForTarget.mockReturnValue({
-        ...queuedSession,
-        userStoryId: "story-1",
-      });
-
-      const res = await callApprove();
-
-      expect(res.status).toBe(409);
-      expect(mocks.getRunningSessionForTarget).toHaveBeenCalledWith({
-        scope: "epic",
-        projectId: "p1",
-        epicId: "epic-1",
-      });
-    });
   });
 
   describe("merge success", () => {
-    it("merges the branch via mergeWorktree before approving", async () => {
+    it("merges the branch via mergeWorktree in the session's worktree", async () => {
       seed();
-      const res = await callApprove();
+      const res = await callMerge();
 
       expect(res.status).toBe(200);
       expect(mocks.mergeWorktree).toHaveBeenCalledWith(
@@ -226,21 +169,20 @@ describe("Epic review approval", () => {
       );
     });
 
-    it("returns approved, merged and the commit hash", async () => {
+    it("returns merged and the commit hash", async () => {
       seed();
-      const res = await callApprove();
+      const res = await callMerge();
 
       const json = await res.json();
       expect(json.data).toEqual({
-        approved: true,
         merged: true,
         commitHash: "abc123",
       });
     });
 
-    it("resolves all open review comments on approve", async () => {
+    it("resolves all open review comments — the merge accepts what stayed open", async () => {
       seed();
-      await callApprove();
+      await callMerge();
 
       const reviewUpdate = dbMockState.updateCalls.find(
         (c) => (c as Record<string, unknown>).status === "resolved"
@@ -248,28 +190,18 @@ describe("Epic review approval", () => {
       expect(reviewUpdate).toBeDefined();
     });
 
-    it("posts an approval activity comment to ticket comments", async () => {
-      seed();
-      await callApprove();
-
-      const approvalComment = dbMockState.insertCalls.find((c) =>
-        String((c as Record<string, unknown>).content).includes("approved")
-      ) as Record<string, unknown>;
-      expect(approvalComment).toBeDefined();
-      expect(approvalComment.author).toBe("user");
-    });
-
     it("closes the epic through the transition service and clears the merged branch name", async () => {
       seed();
-      await callApprove();
+      await callMerge();
 
-      // The status write is the service's (pre-flight excluded): review →
-      // done, not validate-only.
+      // The status write is the service's (pre-flight excluded): to_merge →
+      // done with source "merge", not validate-only.
       const close = lastEpicCall();
       expect(close).toMatchObject({
-        fromStatus: "review",
+        fromStatus: "to_merge",
         toStatus: "done",
-        source: "approve",
+        source: "merge",
+        actor: "user",
       });
       expect("validateOnly" in (close ?? {})).toBe(false);
 
@@ -279,20 +211,24 @@ describe("Epic review approval", () => {
       ) as Record<string, unknown>;
       expect(branchClear).toBeDefined();
       expect(branchClear.branchName).toBeNull();
+      expect(mocks.tryExportArjiJson).toHaveBeenCalledWith("p1");
     });
 
-    it("delegates the epic and story completion to the shared transition service", async () => {
+    it("reports the stories the completion cascade left untouched", async () => {
       seed();
-      await callApprove();
+      mocks.applyTransition.mockReturnValue({
+        valid: true,
+        skippedStories: [{ id: "story-3", title: "Three", status: "todo" }],
+      });
+      const res = await callMerge();
 
-      expect(mocks.applyTransition).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          fromStatus: "review",
-          toStatus: "done",
-          source: "approve",
-          actor: "user",
-        })
-      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data.skippedStories).toEqual([
+        { id: "story-3", title: "Three", status: "todo" },
+      ]);
+      // Pre-flight validation, then the real close.
+      expect(mocks.applyTransition).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -302,26 +238,28 @@ describe("Epic review approval", () => {
         merged: false,
         error: "CONFLICTS: lib/foo.ts",
         reason: "conflict",
+        conflictFiles: ["lib/foo.ts"],
       });
     });
 
-    it("returns 409 with mergeFailed and keeps the ticket in review", async () => {
+    it("returns 409 with mergeFailed and the conflict files", async () => {
       seed();
-      const res = await callApprove();
+      const res = await callMerge();
 
       expect(res.status).toBe(409);
       const json = await res.json();
       expect(json.error).toContain("Merge failed");
       expect(json.error).toContain("CONFLICTS: lib/foo.ts");
       expect(json.mergeFailed).toBe(true);
+      expect(json.conflictFiles).toEqual(["lib/foo.ts"]);
     });
 
-    it("changes NOTHING about ticket state (no updates at all)", async () => {
+    it("changes NOTHING about ticket state (no comment resolution, no close)", async () => {
       seed();
-      await callApprove();
+      await callMerge();
 
       // No comment resolution, no epic/US status writes, no real transition
-      // — the whole point of merge-first approval. The only applyTransition
+      // — the whole point of guard-first merging. The only applyTransition
       // call is the side-effect-free pre-flight validation.
       expect(dbMockState.updateCalls).toEqual([]);
       expect(mocks.applyTransition).toHaveBeenCalledTimes(1);
@@ -330,11 +268,40 @@ describe("Epic review approval", () => {
       );
     });
 
-    it("re-exports arji.json so the failure comment reaches the file", async () => {
+    it("posts a ticket comment explaining the failed merge", async () => {
       seed();
-      await callApprove();
+      await callMerge();
 
-      expect(mocks.tryExportArjiJson).toHaveBeenCalledWith("p1");
+      expect(dbMockState.insertCalls).toHaveLength(1);
+      const comment = dbMockState.insertCalls[0] as Record<string, unknown>;
+      expect(String(comment.content)).toContain("Merge failed");
+      expect(String(comment.content)).toContain("CONFLICTS: lib/foo.ts");
+    });
+
+    it("creates the merge-failed notification", async () => {
+      seed();
+      await callMerge();
+
+      expect(mocks.createApproveMergeFailedNotification).toHaveBeenCalledWith({
+        projectId: "p1",
+        epicId: "epic-1",
+        error: "CONFLICTS: lib/foo.ts",
+      });
+    });
+
+    it("logs a to_merge → to_merge activity entry as system", async () => {
+      seed();
+      await callMerge();
+
+      expect(mocks.logTransition).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: "p1",
+          epicId: "epic-1",
+          fromStatus: "to_merge",
+          toStatus: "to_merge",
+          actor: "system",
+        })
+      );
     });
 
     it("keeps the 409 contract when writing the failure trail throws", async () => {
@@ -347,75 +314,13 @@ describe("Epic review approval", () => {
         .spyOn(console, "error")
         .mockImplementation(() => {});
       seed();
-      const res = await callApprove();
+      const res = await callMerge();
 
       expect(res.status).toBe(409);
       const json = await res.json();
       expect(json.mergeFailed).toBe(true);
       expect(consoleError).toHaveBeenCalled();
       consoleError.mockRestore();
-    });
-
-    it("releases the merge lock", async () => {
-      seed();
-      await callApprove();
-
-      expect(mocks.beginMergeWork).toHaveBeenCalledWith("p1", "epic-1");
-      expect(mocks.endMergeWork).toHaveBeenCalledWith("p1", "epic-1");
-    });
-
-    it("funnels a mergeWorktree THROW into the same failure path", async () => {
-      // getGit can throw before mergeWorktree's try block when the repo
-      // directory is gone — the route must not surface a raw 500 with no
-      // trail.
-      mocks.mergeWorktree.mockRejectedValue(
-        new Error("Cannot use simple-git on a directory that does not exist")
-      );
-      seed();
-      const res = await callApprove();
-
-      expect(res.status).toBe(409);
-      const json = await res.json();
-      // Throws yield reason: "error", which is not a conflict. The board must
-      // NOT label this a conflict or offer Resolve merge.
-      expect(json.mergeFailed).toBe(false);
-      expect(json.error).toContain("does not exist");
-      expect(dbMockState.updateCalls).toEqual([]);
-      expect(mocks.createApproveMergeFailedNotification).toHaveBeenCalledWith({
-        projectId: "p1",
-        epicId: "epic-1",
-        error: "Cannot use simple-git on a directory that does not exist",
-      });
-      expect(mocks.endMergeWork).toHaveBeenCalledWith("p1", "epic-1");
-    });
-
-    it("does not flag branch-missing as a conflict or log approval merge blocked prefix", async () => {
-      mocks.mergeWorktree.mockResolvedValue({
-        merged: false,
-        error: "Branch not found",
-        reason: "branch-missing",
-      });
-      seed();
-      const res = await callApprove();
-
-      expect(res.status).toBe(409);
-      const json = await res.json();
-      expect(json.mergeFailed).toBe(false);
-      expect(json.error).toContain("Branch not found");
-
-      expect(mocks.logTransition).toHaveBeenCalledWith(
-        expect.objectContaining({
-          projectId: "p1",
-          epicId: "epic-1",
-          fromStatus: "review",
-          toStatus: "review",
-          actor: "system",
-          reason: expect.stringMatching(/merge failed \(branch-missing\)/),
-        })
-      );
-      // Verify it does NOT start with APPROVAL_MERGE_BLOCKED_PREFIX
-      const loggedReason = (mocks.logTransition.mock.calls[0][0] as { reason: string }).reason;
-      expect(loggedReason).not.toContain("Approval blocked: merge of ");
     });
 
     it("returns mergeFailed: false for conflict-markers so it does not loop Resolve merge", async () => {
@@ -425,7 +330,7 @@ describe("Epic review approval", () => {
         reason: "conflict-markers",
       });
       seed();
-      const res = await callApprove();
+      const res = await callMerge();
 
       expect(res.status).toBe(409);
       const json = await res.json();
@@ -433,136 +338,57 @@ describe("Epic review approval", () => {
       expect(json.error).toContain("Unresolved conflict markers");
     });
 
-    it("posts a ticket comment explaining the failed merge", async () => {
-      seed();
-      await callApprove();
-
-      expect(dbMockState.insertCalls).toHaveLength(1);
-      const comment = dbMockState.insertCalls[0] as Record<string, unknown>;
-      expect(String(comment.content)).toContain("merge failed");
-      expect(String(comment.content)).toContain("CONFLICTS: lib/foo.ts");
-    });
-
-    it("creates the approve-merge-failed notification", async () => {
-      seed();
-      await callApprove();
-
-      expect(mocks.createApproveMergeFailedNotification).toHaveBeenCalledWith({
-        projectId: "p1",
-        epicId: "epic-1",
-        error: "CONFLICTS: lib/foo.ts",
+    it("returns 500 with the reason for non-git-refusal failures", async () => {
+      mocks.mergeWorktree.mockResolvedValue({
+        merged: false,
+        error: "Branch not found",
+        reason: "branch-missing",
       });
-    });
-
-    it("logs a review → review activity entry as system", async () => {
       seed();
-      await callApprove();
+      const res = await callMerge();
 
-      expect(mocks.logTransition).toHaveBeenCalledWith(
-        expect.objectContaining({
-          projectId: "p1",
-          epicId: "epic-1",
-          fromStatus: "review",
-          toStatus: "review",
-          actor: "system",
-        })
-      );
-    });
-  });
-
-  describe("story synchronization (epic-scoped approval)", () => {
-    it("promotes every review story, leaves the rest untouched and reports them", async () => {
-      seed();
-      mocks.applyTransition.mockReturnValue({
-        valid: true,
-        skippedStories: [
-          { id: "story-3", title: "Three", status: "todo" },
-        ],
-      });
-      const res = await callApprove();
-
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(500);
       const json = await res.json();
-      expect(json.data.skippedStories).toEqual([
-        { id: "story-3", title: "Three", status: "todo" },
-      ]);
-
-      expect(mocks.applyTransition).toHaveBeenCalledTimes(2);
-    });
-
-    it("validates the child transitions BEFORE the merge and bounces 400 when one refuses", async () => {
-      seed();
-      // The shared completion pre-flight reports that one child guard refused
-      // (e.g. a build session is still running on it).
-      mocks.applyTransition.mockReturnValueOnce({
-        valid: false,
-        error: "Cannot move while a build session is running.",
-      });
-      const res = await callApprove();
-
-      expect(res.status).toBe(400);
-      const json = await res.json();
-      expect(json.error).toContain("build session");
-      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
-      expect(dbMockState.updateCalls).toEqual([]);
-      expect(dbMockState.insertCalls).toEqual([]);
-      expect(mocks.beginMergeWork).not.toHaveBeenCalled();
+      expect(json.error).toContain("Branch not found");
+      expect(json.reason).toBe("branch-missing");
     });
   });
 
   describe("nothing to merge", () => {
-    it("approves without a merge when the epic has no branch", async () => {
+    it("refuses with 400 when the epic has no branch", async () => {
       seed({ epic: { ...mockEpic, branchName: null } });
-      const res = await callApprove();
+      const res = await callMerge();
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(400);
       const json = await res.json();
-      expect(json.data).toEqual({
-        approved: true,
-        merged: false,
-        mergeSkipped: "no-branch",
-      });
+      expect(json.error).toContain("no branch to merge");
       expect(mocks.mergeWorktree).not.toHaveBeenCalled();
-
-      // The epic still closes through the service, it just has nothing to land.
-      const close = lastEpicCall();
-      expect(close).toMatchObject({ toStatus: "done" });
-      expect("validateOnly" in (close ?? {})).toBe(false);
+      expect(mocks.applyTransition).not.toHaveBeenCalled();
     });
 
-    it("approves without a merge when the project has no git repo", async () => {
+    it("refuses with 400 when the project has no git repo", async () => {
       seed({ project: { ...mockProject, gitRepoPath: null } });
-      const res = await callApprove();
+      const res = await callMerge();
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(400);
       const json = await res.json();
-      expect(json.data.mergeSkipped).toBe("no-branch");
+      expect(json.error).toContain("git repository");
       expect(mocks.mergeWorktree).not.toHaveBeenCalled();
     });
-  });
-
-  it("rejects approval when epic is not in review status", async () => {
-    seed({ epic: { ...mockEpic, status: "in_progress" } });
-    const res = await callApprove();
-
-    expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toContain("review");
-    expect(mocks.mergeWorktree).not.toHaveBeenCalled();
   });
 
   describe("pre-flight validation (before the merge)", () => {
-    it("validates the transition BEFORE merging, treating open comments as resolved", async () => {
+    it("validates to_merge → done with the merge source BEFORE any git work", async () => {
       seed();
-      await callApprove();
+      await callMerge();
 
       const [firstCall] = mocks.applyTransition.mock.calls;
       expect(firstCall[0]).toMatchObject({
-        fromStatus: "review",
+        fromStatus: "to_merge",
         toStatus: "done",
-        source: "approve",
+        source: "merge",
+        actor: "user",
         validateOnly: true,
-        assumeReviewCommentsResolved: true,
       });
       // Pre-flight strictly precedes the merge.
       expect(mocks.applyTransition.mock.invocationCallOrder[0]).toBeLessThan(
@@ -571,93 +397,42 @@ describe("Epic review approval", () => {
     });
 
     it("returns 400 without ANY side effects when the pre-flight refuses", async () => {
-      // Deterministic refusal, e.g. the epic was dragged into review with no
-      // completed review session. Merging first would change main, delete
-      // the branch, and resolve the comments — then strand the epic in
-      // review with a stale branchName.
+      // Deterministic refusal, e.g. the epic is not at the merge boundary.
+      // Merging first would change main, delete the branch, and resolve the
+      // comments — then strand the ticket outside Done with a stale branch.
       mocks.applyTransition.mockReturnValue({
         valid: false,
-        error: "Cannot move to Done: no completed review found.",
+        error:
+          'Invalid transition: cannot move from "review" to "done". Allowed targets: in_progress, to_merge.',
       });
-      seed();
-      const res = await callApprove();
+      seed({ epic: { ...mockEpic, status: "review" } });
+      const res = await callMerge();
 
       expect(res.status).toBe(400);
       const json = await res.json();
-      expect(json.error).toContain("no completed review");
+      expect(json.error).toContain("Invalid transition");
       expect(mocks.mergeWorktree).not.toHaveBeenCalled();
       expect(dbMockState.updateCalls).toEqual([]);
       expect(dbMockState.insertCalls).toEqual([]);
-      expect(mocks.beginMergeWork).not.toHaveBeenCalled();
       expect(mocks.tryExportArjiJson).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("merge lock", () => {
-    it("returns 409 without side effects when a merge is already in flight", async () => {
-      mocks.beginMergeWork.mockReturnValue(false);
-      seed();
-      const res = await callApprove();
-
-      expect(res.status).toBe(409);
-      const json = await res.json();
-      expect(json.error).toContain("already in flight");
-      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
-      expect(dbMockState.updateCalls).toEqual([]);
-      expect(dbMockState.insertCalls).toEqual([]);
-      // Never acquired, so never released.
-      expect(mocks.endMergeWork).not.toHaveBeenCalled();
-    });
-
-    it("returns 409 when another merge is in progress in the project repository", async () => {
-      mocks.tryLockProjectMerge.mockReturnValue(false);
-      seed();
-      const res = await callApprove();
-
-      expect(res.status).toBe(409);
-      const json = await res.json();
-      expect(json.error).toContain("Another merge is in progress in this repository");
-      expect(mocks.mergeWorktree).not.toHaveBeenCalled();
-      expect(mocks.unlockProjectMerge).not.toHaveBeenCalled();
-    });
-
-    it("acquires and releases the lock around a successful merge", async () => {
-      seed();
-      await callApprove();
-
-      expect(mocks.beginMergeWork).toHaveBeenCalledWith("p1", "epic-1");
-      expect(mocks.endMergeWork).toHaveBeenCalledWith("p1", "epic-1");
-      expect(mocks.beginMergeWork.mock.invocationCallOrder[0]).toBeLessThan(
-        mocks.mergeWorktree.mock.invocationCallOrder[0]
-      );
-    });
-
-    it("does not take the lock when there is nothing to merge", async () => {
-      seed({ epic: { ...mockEpic, branchName: null } });
-      await callApprove();
-
-      expect(mocks.beginMergeWork).not.toHaveBeenCalled();
-      expect(mocks.endMergeWork).not.toHaveBeenCalled();
     });
   });
 
   it("returns 400 when the transition is refused after a successful merge", async () => {
     // Genuinely rare race now that the guards are pre-flighted: the pre-check
-    // passed, the merge landed, then a guard refused review → done. The merge
-    // route's precedent applies — surface the validation error.
+    // passed, the merge landed, then a guard refused to_merge → done.
+    // Surface the validation error rather than pretending the ticket closed.
     mocks.applyTransition
       .mockReturnValueOnce({ valid: true }) // pre-flight
       .mockReturnValueOnce({
         valid: false,
-        error: "Epic has open review comments",
+        error: "Cannot move while a build session is running.",
       });
     seed();
-    const res = await callApprove();
+    const res = await callMerge();
 
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("Epic has open review comments");
-    // The lock is still released through the finally.
-    expect(mocks.endMergeWork).toHaveBeenCalledWith("p1", "epic-1");
+    expect(json.error).toBe("Cannot move while a build session is running.");
   });
 });
