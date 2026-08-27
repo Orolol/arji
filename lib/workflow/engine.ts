@@ -151,7 +151,7 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
     }
     return null;
   },
-  // A merge must not land a branch the newest verdict rejected.
+  // A merge must not land a branch whose rejection is still unanswered.
   //
   // Scoped to `merge` on purpose. `approve` is a human explicitly making the
   // review decision — the same authority the spec gives explicit human story
@@ -163,7 +163,7 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
       ctx.source === "merge" &&
       ctx.hasNegativeReviewVerdict
     ) {
-      return "Cannot merge to Done: the latest review requested changes. Re-review the ticket, or use Approve to override.";
+      return "Cannot merge to Done: a review requested changes and nothing has been fixed and re-reviewed since. Push a fix and re-review, or use Approve to override.";
     }
     return null;
   },

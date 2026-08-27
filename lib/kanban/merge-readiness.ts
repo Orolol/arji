@@ -61,8 +61,9 @@ export interface MergeReadinessFacts {
    *
    * Not the raw open count. Nothing resolves a finding row until a human
    * approves the ticket, so counting every open row meant a `[minor]` the
-   * approving reviewer filed itself, or a `[major]` a later clean review
-   * superseded, parked a reviewed epic outside "Ready to merge" forever.
+   * approving reviewer filed itself, or a `[major]` raised before a fix that
+   * a later clean verdict has since read, parked a reviewed epic outside
+   * "Ready to merge" forever.
    */
   openFindings?: number | null;
   /**
@@ -75,22 +76,24 @@ export interface MergeReadinessFacts {
    * Newest terminal code-writing session on the epic, story-scoped ones
    * included: a story build commits to the epic's branch, so a review that
    * predates it is stale.
+   *
    */
   lastTerminalCodeAt?: string | null;
   /**
-   * When the newest review that RECORDED a clean verdict started, and when
-   * the newest one that recorded `changes_requested` did.
+   * When the newest review that recorded `changes_requested` started, and the
+   * supersession cutoff (lib/workflow/review-freshness.ts) — the newest code
+   * change a recorded clean verdict has since read.
    *
-   * Together they answer "is a rejection still standing", which nothing else
-   * here can: `lastCleanReviewAt` is a MAX over clean rounds, so a later
+   * Together they answer "is a rejection still unanswered", which nothing
+   * else here can: `lastCleanReviewAt` is a MAX over clean rounds, so a later
    * rejection leaves it untouched at the older approving round and is simply
    * invisible to it. The workflow engine gained that guard first; without
    * these the board would keep offering Full Auto a candidate the engine
    * refuses — and `tryAutoMerge` merges with git before it validates, so the
    * disagreement costs a merge and a rollback on every sweep.
    */
-  lastCleanVerdictReviewAt?: string | null;
   lastNegativeVerdictReviewAt?: string | null;
+  supersessionAt?: string | null;
   /** Newest activity entry recording a git merge conflict. */
   lastMergeConflictAt?: string | null;
   /** Newest activity entry recording committed conflict markers. */
@@ -177,11 +180,19 @@ export function hasCurrentConflictMarkers(
 }
 
 /**
- * Is a `changes_requested` verdict still the epic's latest word?
+ * Is a `changes_requested` verdict still unanswered?
  *
- * Only if no clean verdict has been recorded since. A NULL-verdict review
- * clears nothing — it recorded nothing to clear with, the same asymmetry
- * `lastCleanVerdictReviewStartedAtSql` documents on the other side.
+ * A rejection is answered by a FIX that a reviewer has since read — exactly
+ * what the supersession cutoff means, and exactly what answers a finding. So
+ * the rejection stands unless a code change LANDED AFTER IT and a clean
+ * verdict has since read that code.
+ *
+ * The second half is the one that is easy to lose. Without it another opinion
+ * of the same commit overturns the first: `review_code` rejects,
+ * `review_security` approves an untouched branch, and the rejection quietly
+ * evaporates although nothing it objected to changed. A verdict speaks for
+ * the code it read, and neither reviewer read anything the other did not.
+ * (A NULL-verdict review clears nothing either — it never reaches the cutoff.)
  *
  * Shared by the board, `selectMergeCandidates` and `buildTransitionContext`
  * so all three read one definition; the engine's merge guard is this fact.
@@ -189,14 +200,13 @@ export function hasCurrentConflictMarkers(
 export function hasStandingNegativeVerdict(
   facts: Pick<
     MergeReadinessFacts,
-    "lastCleanVerdictReviewAt" | "lastNegativeVerdictReviewAt"
+    "lastNegativeVerdictReviewAt" | "supersessionAt"
   > | null | undefined
 ): boolean {
   const rejected = normalizeAt(facts?.lastNegativeVerdictReviewAt);
   if (!rejected) return false;
-  const cleared = normalizeAt(facts?.lastCleanVerdictReviewAt);
-  if (!cleared) return true;
-  return rejected > cleared;
+  const answered = normalizeAt(facts?.supersessionAt);
+  return !(answered && rejected < answered);
 }
 
 /**
@@ -267,7 +277,7 @@ export function describeMergeBlocker(
         ? "1 open finding"
         : `${readiness.openFindings} open findings`;
     case "changes_requested":
-      return "Latest review requested changes";
+      return "Changes requested — awaiting a fix";
     case "no_review":
       return "Awaiting review";
     case "stale_review":

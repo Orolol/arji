@@ -417,6 +417,115 @@ describe("merge readiness — which open findings block", () => {
     expect(engineSeesOpenComments("silent-round-two")).toBe(true);
   });
 
+  it("does not let a review of another dimension supersede an unfixed [critical]", async () => {
+    // The gap this pins: the cutoff maxed over every review type and never
+    // asked whether the branch had CHANGED, while its own justification is
+    // both dimension- and change-specific ("a round a later reviewer re-read
+    // on fixed code"). A Security pass never re-read the code-quality
+    // dimension, and on an untouched branch nothing could have fixed it.
+    addEpic("cross-dimension");
+    addSession({
+      epicId: "cross-dimension",
+      agentType: "build",
+      endedAt: at(10),
+    });
+    addSession({
+      epicId: "cross-dimension",
+      agentType: "review_code",
+      reviewVerdict: "changes_requested",
+      startedAt: at(20),
+      endedAt: at(30),
+    });
+    addFinding({
+      epicId: "cross-dimension",
+      body: "[critical] Token leaks into the log",
+      createdAt: at(25),
+    });
+    // Approves, files nothing, and touches no code — the branch is byte-for
+    // byte the one the [critical] was filed against.
+    addSession({
+      epicId: "cross-dimension",
+      agentType: "review_security",
+      reviewVerdict: "approved",
+      startedAt: at(40),
+      endedAt: at(50),
+    });
+
+    expect(await readinessOf("cross-dimension")).toMatchObject({
+      ready: false,
+      blocker: "open_findings",
+      openFindings: 1,
+    });
+    expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([]);
+    expect(engineSeesOpenComments("cross-dimension")).toBe(true);
+  });
+
+  it("does not let a re-review supersede a [major] when the branch never changed", async () => {
+    // Same dimension this time, so only the "on fixed code" half is doing the
+    // work: a reviewer that re-ran on the SAME commit and stayed silent has
+    // adjudicated nothing — the [major] it declined to re-report is still in
+    // the code it just read.
+    addEpic("unchanged-branch");
+    addSession({
+      epicId: "unchanged-branch",
+      agentType: "build",
+      endedAt: at(10),
+    });
+    addSession({
+      epicId: "unchanged-branch",
+      agentType: "review_code",
+      reviewVerdict: "changes_requested",
+      startedAt: at(12),
+      endedAt: at(16),
+    });
+    addFinding({
+      epicId: "unchanged-branch",
+      body: "[major] Race can merge stale code",
+      createdAt: at(15),
+    });
+    addSession({
+      epicId: "unchanged-branch",
+      agentType: "review_code",
+      reviewVerdict: "approved",
+      startedAt: at(20),
+      endedAt: at(25),
+    });
+
+    expect(await readinessOf("unchanged-branch")).toMatchObject({
+      ready: false,
+      blocker: "open_findings",
+      openFindings: 1,
+    });
+    expect(engineSeesOpenComments("unchanged-branch")).toBe(true);
+  });
+
+  it("does not resurrect a settled finding when a later build lands", async () => {
+    // The other side of the same rule, and the reason the cutoff is a WINDOW
+    // (`MAX(code) BEFORE the newest clean verdict`) rather than the cheaper
+    // "the newest code session, if it happens to predate that verdict":
+    // round two read the fix at :18 and declined to re-report the [major], so
+    // it is settled. A build at :30 does not un-settle it — it makes the
+    // REVIEW stale, which is what the board should say.
+    seedSecondRoundApprovedEpic("code-after-review");
+    addFinding({
+      epicId: "code-after-review",
+      body: "[major] Retry reuses the reviewer's agent",
+      createdAt: at(15),
+    });
+    addSession({
+      epicId: "code-after-review",
+      agentType: "build",
+      endedAt: at(30),
+    });
+
+    expect(await readinessOf("code-after-review")).toMatchObject({
+      ready: false,
+      blocker: "stale_review",
+      openFindings: 0,
+    });
+    expect(engineSeesOpenComments("code-after-review")).toBe(false);
+  });
+
   it("does not let a STORY-scoped review move the epic's cutoff", async () => {
     // Stories share the epic's branch and are serialised, so a story review
     // finishing after an epic-level [major] is an ordinary sequence. It must
@@ -428,6 +537,15 @@ describe("merge readiness — which open findings block", () => {
       createdAt: at(22),
     });
     addStory("story-cutoff-1", "story-cutoff");
+    // A story build lands on the epic's branch, THEN the story is reviewed:
+    // without this the epic's own code session would be the newest one either
+    // way and the cutoff could not tell the two reviews apart.
+    addSession({
+      epicId: "story-cutoff",
+      agentType: "ticket_build",
+      userStoryId: "story-cutoff-1",
+      endedAt: at(26),
+    });
     addSession({
       epicId: "story-cutoff",
       agentType: "review_code",
@@ -446,9 +564,10 @@ describe("merge readiness — which open findings block", () => {
 
   it("matches severity prefixes case-sensitively, so [MAJOR] is unclassified", async () => {
     // `=` under BINARY collation, chosen over LIKE precisely for this. Filed
-    // BEFORE the clean review, so a LIKE-based match would read it as a
-    // superseded [major] and stop blocking; an unclassified row always blocks.
-    seedApprovedEpic("shouty");
+    // before the fix that the clean review read, so a LIKE-based match would
+    // read it as a superseded [major] and stop blocking; an unclassified row
+    // always blocks.
+    seedSecondRoundApprovedEpic("shouty");
     addFinding({
       epicId: "shouty",
       body: "[MAJOR] Reviewer shouted the severity",
@@ -534,6 +653,7 @@ describe("review -> done under a standing changes_requested verdict", () => {
 
   it("does not refuse once a newer review recorded a clean verdict", () => {
     seedChangesRequestedEpic("cr-cleared");
+    // The fix, then the review that read it — both halves are required.
     addSession({ epicId: "cr-cleared", agentType: "build", endedAt: at(30) });
     addSession({
       epicId: "cr-cleared",
@@ -543,6 +663,22 @@ describe("review -> done under a standing changes_requested verdict", () => {
       endedAt: at(45),
     });
     expect(refusalFor("cr-cleared", "merge")).toBeNull();
+  });
+
+  it("is not cleared by a clean verdict that read no new code", () => {
+    // Same rule as the supersession cutoff, on the other half of the verdict
+    // pair: a rejection is answered by a FIX a reviewer has since read, not by
+    // another opinion of the same commit. Here a second dimension approves the
+    // very branch the code reviewer rejected, with nothing changed in between.
+    seedChangesRequestedEpic("cr-unfixed");
+    addSession({
+      epicId: "cr-unfixed",
+      agentType: "review_security",
+      reviewVerdict: "approved",
+      startedAt: at(40),
+      endedAt: at(45),
+    });
+    expect(refusalFor("cr-unfixed", "merge")).toMatch(/requested changes/i);
   });
 
   it("ignores a verdict-less review when deciding, so NULL never clears it", () => {
@@ -661,6 +797,25 @@ describe("a standing changes_requested keeps the board and the engine agreed", (
     });
 
     expect(await readinessOf("cr-silent-after")).toMatchObject({
+      blocker: "changes_requested",
+    });
+    expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([]);
+  });
+
+  it("keeps the rejection standing on the board when nothing was fixed", async () => {
+    // The board reads the same rule as the engine — it has to, or Full Auto
+    // lands the branch with git before the guard refuses it.
+    seedLateRejection("cr-no-fix");
+    addSession({
+      epicId: "cr-no-fix",
+      agentType: "review_code",
+      reviewVerdict: "approved",
+      startedAt: at(40),
+      endedAt: at(45),
+    });
+
+    expect(await readinessOf("cr-no-fix")).toMatchObject({
+      ready: false,
       blocker: "changes_requested",
     });
     expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([]);

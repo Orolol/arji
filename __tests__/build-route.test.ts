@@ -37,6 +37,10 @@ vi.mock("@/lib/db", () => {
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
+    // `buildTransitionContext` reads the epic's session facts through a
+    // projected subquery (`.as`) that it then groups.
+    groupBy: vi.fn().mockReturnThis(),
+    as: vi.fn().mockReturnThis(),
     get: vi.fn(() => {
       getCallCount++;
       // Call 1: project lookup → return project

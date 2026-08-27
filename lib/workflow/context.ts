@@ -8,10 +8,8 @@ import { eq, and } from "drizzle-orm";
 import { CODE_PRODUCING_AGENT_TYPES } from "@/lib/agent-config/constants";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import type { TransitionContext } from "./engine";
-import {
-  blocksMergeSql,
-  readReviewVerdictWindow,
-} from "./blocking-findings";
+import { blocksMergeSql } from "./blocking-findings";
+import { readEpicSessionFacts } from "./review-freshness";
 import { hasStandingNegativeVerdict } from "@/lib/kanban/merge-readiness";
 
 export function buildTransitionContext(opts: {
@@ -51,10 +49,10 @@ export function buildTransitionContext(opts: {
   // board and Full Auto's merge selector read too; a looser gate here than
   // there would make Full Auto merge and then roll itself back.
   //
-  // One epic, so the windows are read as scalars rather than joined — the
-  // grouped callers hoist them into a subquery instead (see
-  // lib/workflow/blocking-findings.ts).
-  const verdictWindow = readReviewVerdictWindow(db, epicId);
+  // One epic, so the facts are read as scalars rather than joined — the
+  // grouped callers hoist them into a CTE instead (see
+  // lib/workflow/review-freshness.ts).
+  const sessionFacts = readEpicSessionFacts(db, epicId);
   const openComments = db
     .select()
     .from(reviewComments)
@@ -62,7 +60,7 @@ export function buildTransitionContext(opts: {
       and(
         eq(reviewComments.epicId, epicId),
         eq(reviewComments.status, "open"),
-        blocksMergeSql(verdictWindow.lastCleanVerdictReviewAt ?? "")
+        blocksMergeSql(sessionFacts.supersessionAt ?? "")
       )
     )
     .all();
@@ -133,7 +131,7 @@ export function buildTransitionContext(opts: {
   // Epic-scoped only: a story carries its own review decision, so the
   // parent's verdict must not speak for it.
   const hasNegativeReviewVerdict =
-    userStoryId === undefined && hasStandingNegativeVerdict(verdictWindow);
+    userStoryId === undefined && hasStandingNegativeVerdict(sessionFacts);
 
   return {
     epicId,

@@ -276,9 +276,10 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
   });
 
   it("goes back to plain 'awaiting review' once the rejection is cleared", async () => {
-    // Isolates `lastCleanReviewAtSql` from the rejection blocker: a clean
-    // verdict clears the standing rejection, and what surfaces underneath is
-    // the ordinary freshness rule — the build at :40 outdates the review.
+    // Isolates `lastCleanReviewAtSql` from the rejection blocker: a fix at
+    // :25 and the clean verdict at :30 that read it clear the standing
+    // rejection together, and what surfaces underneath is the ordinary
+    // freshness rule — the build at :40 outdates the review.
     addEpic({ id: "cleared-then-stale" });
     addSession({
       epicId: "cleared-then-stale",
@@ -290,6 +291,11 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
       agentType: "review_code",
       reviewVerdict: "changes_requested",
       endedAt: at(20),
+    });
+    addSession({
+      epicId: "cleared-then-stale",
+      agentType: "build",
+      endedAt: at(25),
     });
     addSession({
       epicId: "cleared-then-stale",

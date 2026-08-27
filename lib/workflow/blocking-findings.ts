@@ -24,8 +24,11 @@
  *   - its severity is below `[critical]`/`[major]` — the reviewer's own
  *     vocabulary for "not blocking", and what `approved_with_minor_issues`
  *     means; or
- *   - it predates the start of the newest review that RECORDED A VERDICT,
- *     which re-read the fixed code and did not re-report it.
+ *   - it predates the supersession cutoff: the newest code change that a
+ *     recorded clean verdict has since read. See `supersessionAt`
+ *     (lib/workflow/review-freshness.ts) for why BOTH halves are required —
+ *     an approval on an untouched branch adjudicates nothing, and used to
+ *     clear findings that were still sitting in the code it had just read.
  *
  * Everything else blocks, and the exclusions are as load-bearing as the rule:
  *   - a HUMAN's open review comment always blocks. It carries no severity
@@ -36,9 +39,9 @@
  *   - a `[critical]` filed BY the approving review still blocks. The reviewer
  *     contradicted itself, and the finding is the more specific, human-
  *     resolvable artifact — the same rule `assessReviewOutcome` applies;
- *   - a review that deposited NO verdict never supersedes anything. See
- *     `lastVerdictBearingReviewStartedAtSql` for why absence of evidence
- *     must not read as evidence of absence.
+ *   - a review that deposited NO verdict never supersedes anything, and
+ *     neither does one that read no new code. Absence of evidence must not
+ *     read as evidence of absence.
  *
  * ## Why the cutoff is a parameter
  *
@@ -51,24 +54,20 @@
  * query on every `session:*` SSE event, so the correlated form was a
  * regression waiting on table growth.
  *
- * Callers therefore aggregate the cutoff once per epic and hand the column in.
- * `reviewVerdictWindowsByEpic` builds that subquery for the two grouped
- * callers; `readReviewVerdictWindow` reads the scalars the one per-epic
- * caller needs. Both derive from the same fragments, so neither can drift
- * into its own idea of "superseded".
+ * Callers therefore aggregate the cutoff once per epic and hand the column
+ * in. The two grouped callers read it off `epicSessionFactsCte`, the single
+ * scan that already produces their other session facts;
+ * `readEpicSessionFacts` reads the scalars the one per-epic caller needs.
+ * Both are built from the same projection, so neither can drift into its own
+ * idea of "superseded".
  */
 
-import { and, eq, sql, type SQL, type SQLWrapper } from "drizzle-orm";
-import { type ArijDatabase } from "@/lib/db";
-import { agentSessions, reviewComments } from "@/lib/db/schema";
+import { sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import { reviewComments } from "@/lib/db/schema";
 import {
   BLOCKING_FINDING_PREFIXES,
   FINDING_SEVERITY_PREFIXES,
 } from "@/lib/review/finding-severity";
-import {
-  lastCleanVerdictReviewStartedAtSql,
-  lastNegativeVerdictReviewStartedAtSql,
-} from "./review-freshness";
 
 /**
  * `SUBSTR(body, 1, n) = '[severity]'` for each prefix, OR-ed — the SQL
@@ -90,91 +89,14 @@ function bodyStartsWithAnySql(
 }
 
 /**
- * Per-epic review-verdict windows for one project, as a joinable subquery.
- *
- * Two columns from one grouped scan, because both gates need both facts:
- *   - `cleanVerdictAt` is the supersession cutoff `blocksMergeSql` compares
- *     findings against;
- *   - `negativeVerdictAt` is what `hasStandingNegativeVerdict`
- *     (lib/kanban/merge-readiness.ts) weighs against it to decide whether a
- *     rejection is still standing.
- *
- * Left-join on `epic_id`. The project scope keeps the aggregate off every
- * other project's sessions; the join to `epics` in the caller already made
- * the result project-local, so this only narrows what SQLite has to read.
- */
-export function reviewVerdictWindowsByEpic(
-  database: ArijDatabase,
-  projectId: string
-) {
-  return database
-    .select({
-      epicId: agentSessions.epicId,
-      cleanVerdictAt: lastCleanVerdictReviewStartedAtSql().as(
-        "clean_verdict_at"
-      ),
-      negativeVerdictAt: lastNegativeVerdictReviewStartedAtSql().as(
-        "negative_verdict_at"
-      ),
-    })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.projectId, projectId),
-        sql`${agentSessions.epicId} IS NOT NULL`
-      )
-    )
-    .groupBy(agentSessions.epicId)
-    .as("review_verdict_windows");
-}
-
-/**
- * Deliberately keyed exactly like the matching half of `MergeReadinessFacts`,
- * so the scalar read drops straight into `hasStandingNegativeVerdict` with no
- * adapter. An adapter is where two names for one fact start disagreeing.
- */
-export interface ReviewVerdictWindow {
-  /** `null` when no clean verdict has ever been recorded on the epic. */
-  lastCleanVerdictReviewAt: string | null;
-  /** `null` when no review has ever recorded `changes_requested`. */
-  lastNegativeVerdictReviewAt: string | null;
-}
-
-/**
- * The same two windows for a single epic.
- *
- * The one per-epic caller (`buildTransitionContext`) reads them as scalars
- * rather than joining — and reads them from HERE rather than sorting session
- * rows in JavaScript, so the engine and the board cannot end up with
- * different ideas of which verdict spoke last.
- */
-export function readReviewVerdictWindow(
-  database: ArijDatabase,
-  epicId: string
-): ReviewVerdictWindow {
-  // Bare aggregates return exactly one row. `.all()` rather than `.get()` to
-  // match how lib/workflow/context.ts reads everything else.
-  const [row] = database
-    .select({
-      lastCleanVerdictReviewAt: lastCleanVerdictReviewStartedAtSql(),
-      lastNegativeVerdictReviewAt: lastNegativeVerdictReviewStartedAtSql(),
-    })
-    .from(agentSessions)
-    .where(eq(agentSessions.epicId, epicId))
-    .all();
-  return {
-    lastCleanVerdictReviewAt: row?.lastCleanVerdictReviewAt ?? null,
-    lastNegativeVerdictReviewAt: row?.lastNegativeVerdictReviewAt ?? null,
-  };
-}
-
-/**
  * The predicate. Combine with `status = 'open'` — this fragment says which
  * open rows count, not which rows are open.
  *
- * `cutoffAt` is the epic's supersession cutoff, normalised and never NULL:
- * pass `supersessionCutoffsByEpic(...).cutoffAt` wrapped in a COALESCE, or the
- * string from `readSupersessionCutoff`.
+ * `cutoffAt` is the epic's supersession cutoff, already normalised: pass
+ * `epicSessionFactsCte(...).supersessionAt` from a grouped caller, or
+ * `readEpicSessionFacts(...).supersessionAt ?? ""` from a per-epic one. A
+ * NULL column is COALESCEd to `''` below, which supersedes nothing — the safe
+ * direction.
  */
 export function blocksMergeSql(cutoffAt: SQLWrapper | string): SQL {
   return sql`(

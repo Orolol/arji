@@ -131,6 +131,8 @@ vi.mock("@/lib/db", () => {
     groupBy: ReturnType<typeof vi.fn>;
     innerJoin: ReturnType<typeof vi.fn>;
     leftJoin: ReturnType<typeof vi.fn>;
+    with: ReturnType<typeof vi.fn>;
+    $with: ReturnType<typeof vi.fn>;
     as: ReturnType<typeof vi.fn>;
     get: ReturnType<typeof vi.fn>;
     all: ReturnType<typeof vi.fn>;
@@ -144,6 +146,8 @@ vi.mock("@/lib/db", () => {
     groupBy: vi.fn(),
     innerJoin: vi.fn(),
     leftJoin: vi.fn(),
+    with: vi.fn(),
+    $with: vi.fn(),
     as: vi.fn(),
     get: vi.fn(),
     all: vi.fn(),
@@ -158,6 +162,11 @@ vi.mock("@/lib/db", () => {
   chain.groupBy.mockReturnValue(chain);
   chain.innerJoin.mockReturnValue(chain);
   chain.leftJoin.mockReturnValue(chain);
+  // `db.$with(name).as(qb)` — the CTE handle behaves like any other subquery
+  // handle here (an opaque object whose columns read as undefined), and
+  // `db.with(cte)` just hands the builder back.
+  chain.with.mockReturnValue(chain);
+  chain.$with.mockReturnValue({ as: vi.fn(() => ({})) });
   chain.as.mockReturnValue({});
   chain.get.mockImplementation(() => mockDbState.getQueue.shift() ?? null);
   chain.all.mockImplementation(() => mockDbState.allQueue.shift() ?? []);
@@ -347,9 +356,10 @@ describe("POST /api/projects/[projectId]/epics", () => {
     // open findings scopes to project via innerJoin on epics
     expect((db as unknown as { innerJoin: typeof vi.fn }).innerJoin).toHaveBeenCalledTimes(1);
     // story counts + session facts + latest user comments + open findings
-    // + merge failures + the supersession cutoff the open-findings subquery
-    // joins against
-    expect((db as unknown as { groupBy: ReturnType<typeof vi.fn> }).groupBy).toHaveBeenCalledTimes(6);
+    // + merge failures. Five, not six: the open-findings subquery joins the
+    // SAME session-facts CTE the epic row reads instead of grouping
+    // `agent_sessions` a second time for the supersession cutoff.
+    expect((db as unknown as { groupBy: ReturnType<typeof vi.fn> }).groupBy).toHaveBeenCalledTimes(5);
 
     const sqlFragments = mockSql.mock.calls.map(([template]) =>
       Array.isArray(template) ? template.join(" ") : String(template),

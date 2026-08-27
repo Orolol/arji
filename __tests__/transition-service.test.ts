@@ -10,6 +10,11 @@ vi.mock("@/lib/db", () => {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
+    groupBy: vi.fn().mockReturnThis(),
+    // `readEpicSessionFacts` projects the session rows in a subquery and
+    // aggregates them in the outer one. Only the outer query runs `.all()`,
+    // so the canned read order below is unchanged.
+    as: vi.fn().mockReturnThis(),
     all: vi.fn(() => []),
     update: vi.fn((table: { _name?: string }) => ({
       set: vi.fn((updates: Record<string, unknown>) => {
@@ -37,7 +42,10 @@ vi.mock("@/lib/db/schema", () => ({
     agentType: "agentType",
     outcome: "outcome",
     reviewVerdict: "reviewVerdict",
+    totalCostUsd: "totalCostUsd",
     startedAt: "startedAt",
+    endedAt: "endedAt",
+    completedAt: "completedAt",
     createdAt: "createdAt",
   },
   reviewComments: {
@@ -63,9 +71,15 @@ vi.mock("@/lib/db/schema", () => ({
 }));
 
 vi.mock("drizzle-orm", () => {
-  const sql = vi.fn((..._args: unknown[]) => ({})) as ReturnType<
-    typeof vi.fn
-  > & { raw: ReturnType<typeof vi.fn> };
+  // Fragments answer `.as(alias)` with themselves: the facts projection in
+  // lib/workflow/review-freshness.ts names every column it selects, and the
+  // queries never execute against this fake anyway.
+  const sql = vi.fn((..._args: unknown[]) => {
+    const fragment: { as: (alias: string) => unknown } = {
+      as: () => fragment,
+    };
+    return fragment;
+  }) as ReturnType<typeof vi.fn> & { raw: ReturnType<typeof vi.fn> };
   sql.raw = vi.fn((value: unknown) => value);
   return {
     eq: vi.fn((...args: unknown[]) => args),
@@ -74,15 +88,21 @@ vi.mock("drizzle-orm", () => {
   };
 });
 
-// `alias()` wants a real drizzle table and this file fakes the schema, so the
-// aliased handle is the fake itself — enough for the SQL fragment to build.
-vi.mock("drizzle-orm/sqlite-core", () => ({
-  alias: vi.fn((table: unknown) => table),
-}));
-
 vi.mock("@/lib/utils/nanoid", () => ({
   createId: vi.fn(() => "test-id"),
 }));
+
+/**
+ * What `readEpicSessionFacts` returns for an epic no reviewer has judged:
+ * no verdict either way, and no supersession cutoff, so every open finding
+ * still blocks. Keyed exactly as that query selects.
+ */
+const EMPTY_VERDICT_WINDOW = {
+  lastCleanReviewAt: null,
+  lastTerminalCodeAt: null,
+  lastNegativeVerdictReviewAt: null,
+  supersessionAt: null,
+};
 
 const mockEmitTicketMoved = vi.fn();
 vi.mock("@/lib/events/emit", () => ({
@@ -249,11 +269,13 @@ describe("applyTransition", () => {
     );
     const { db } = await import("@/lib/db");
     const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
-    // Context read order: supersession cutoff, open comments, completed
-    // reviews, running sessions.
+    // Context read order: the review-verdict window, open comments, completed
+    // reviews, running sessions. The window row is seeded with the keys
+    // `readReviewVerdictWindow` actually selects, so it keeps saying "no
+    // verdict, nothing superseded" even if the `?? null` defaults go away.
     const seedReads = () =>
       all
-        .mockReturnValueOnce([{ cutoffAt: null }])
+        .mockReturnValueOnce([EMPTY_VERDICT_WINDOW])
         .mockReturnValueOnce([{ id: "rc1", status: "open" }])
         .mockReturnValueOnce([
           { agentType: "code_reviewer", status: "completed" },
@@ -289,13 +311,13 @@ describe("applyTransition", () => {
 // ---------------------------------------------------------------------------
 
 describe("applyTransition — owning session exemption", () => {
-  // Context read order: supersession cutoff, open comments, completed
+  // Context read order: the review-verdict window, open comments, completed
   // reviews, running sessions.
   async function seedRunningSessions(rows: unknown[]) {
     const { db } = await import("@/lib/db");
     const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
     all
-      .mockReturnValueOnce([{ cutoffAt: null }]) // no verdict-bearing review
+      .mockReturnValueOnce([EMPTY_VERDICT_WINDOW]) // no verdict-bearing review
       .mockReturnValueOnce([]) // no open review comments
       .mockReturnValueOnce([]) // no completed review sessions
       .mockReturnValueOnce(rows);
@@ -474,11 +496,11 @@ describe("applyStoryTransition — owning session exemption", () => {
   async function seedStoryReads(rows: unknown[]) {
     const { db } = await import("@/lib/db");
     const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
-    // Context read order: supersession cutoff, open comments, completed
+    // Context read order: the review-verdict window, open comments, completed
     // reviews, running sessions (filtered to the story). The story transition
     // then writes userStories.
     all
-      .mockReturnValueOnce([{ cutoffAt: null }])
+      .mockReturnValueOnce([EMPTY_VERDICT_WINDOW])
       .mockReturnValueOnce([])
       .mockReturnValueOnce([])
       .mockReturnValueOnce(rows);
