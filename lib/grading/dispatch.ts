@@ -17,14 +17,13 @@ import {
 } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { createWorktree, isGitRepo } from "@/lib/git/manager";
-import { buildGradingPrompt } from "@/lib/claude/prompt-builder";
+import { assembleGradingPrompt } from "@/lib/tokens";
 import { processManager } from "@/lib/claude/process-manager";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
 import {
   classifySessionOutcome,
   extractSessionUsage,
 } from "@/lib/claude/resolve-session-output";
-import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { resolveAgentForDispatch } from "@/lib/agent-config/agent-resolution";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import {
@@ -235,8 +234,14 @@ export async function dispatchGradingSession(
   }
 
   const rubric = gradableStories(scopedStories);
-  const systemPrompt = await resolveAgentPrompt(GRADING_AGENT_TYPE, input.projectId);
-  const prompt = buildGradingPrompt(project, [], epic, rubric, systemPrompt);
+  const assembled = await assembleGradingPrompt({
+    projectId: input.projectId,
+    epicId: input.epicId,
+    project,
+    epic,
+    stories: rubric,
+  });
+  const prompt = assembled.prompt;
   const resolvedAgent = await resolveAgentForDispatch(
     GRADING_AGENT_TYPE,
     input.projectId,
@@ -270,12 +275,11 @@ export async function dispatchGradingSession(
     projectId: input.projectId,
     epicId: input.epicId,
     userStoryId: input.userStoryId ?? null,
-    // Code mode so the grader can call submit_grading — its sole deliverable
-    // — which plan mode refuses as a mutating MCP tool. The prompt's Role
-    // Boundary forbids modifying the repository.
     mode: "code",
     provider: resolvedAgent.provider,
     prompt,
+    estimatedPromptTokens: assembled.tokens.total,
+    estimatedPromptBreakdown: JSON.stringify(assembled.tokens.breakdown),
     logsPath,
     branchName,
     worktreePath,

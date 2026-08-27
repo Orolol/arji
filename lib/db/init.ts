@@ -151,6 +151,21 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
     table: "agent_sessions",
     column: "cli_options",
   },
+  // 0045_agent_session_estimated_tokens (single transactional migration: the
+  // two columns are always present or absent together on real databases).
+  // Renumbered off 0044's slot, which main's named-agent options migration
+  // had already taken: the `when` IS the migrator's identity, so a database
+  // that ran main's 0044 must still see this one as pending.
+  {
+    folderMillis: 1786714200000,
+    table: "agent_sessions",
+    column: "estimated_prompt_tokens",
+  },
+  {
+    folderMillis: 1786714200000,
+    table: "agent_sessions",
+    column: "estimated_prompt_breakdown",
+  },
 ];
 
 /** Default on-disk location of the drizzle migration files. */

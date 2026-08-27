@@ -186,6 +186,8 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       inputTokens: "input_tokens",
       outputTokens: "output_tokens",
       totalCostUsd: "total_cost_usd",
+      estimatedPromptTokens: "estimated_prompt_tokens",
+      estimatedPromptBreakdown: "estimated_prompt_breakdown",
       batchRunId: "batch_run_id",
       claudeSessionId: "claude_session_id",
       cliSessionId: "cli_session_id",

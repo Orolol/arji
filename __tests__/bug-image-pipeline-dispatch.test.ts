@@ -87,6 +87,7 @@ vi.mock("@/lib/events/emit", () => ({
 }));
 
 vi.mock("@/lib/documents/mentions", () => ({
+  buildMentionContextBlock: vi.fn(() => ""),
   enrichPromptWithDocumentMentions: vi.fn(({ prompt }: { prompt: string }) => ({
     prompt,
     missing: [],

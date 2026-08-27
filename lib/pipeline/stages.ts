@@ -71,9 +71,14 @@ import {
   parseGradingEntries,
 } from "@/lib/grading/report";
 import {
+  buildMentionContextBlock,
   enrichPromptWithDocumentMentions,
   userAuthoredTexts,
 } from "@/lib/documents/mentions";
+import {
+  createPromptSectionCapture,
+  finalizeCapturedPrompt,
+} from "@/lib/tokens/dispatch-prompt";
 import type { ClaudeResult } from "@/lib/claude/spawn";
 import {
   emitSessionCompleted,
@@ -896,6 +901,7 @@ async function dispatchPipelineStage(
     { defaultBranch: project.defaultBranch }
   );
 
+  const promptSections = createPromptSectionCapture();
   let prompt: string;
   if (isReview) {
     const reviewSystemPrompt = await resolveAgentPrompt(
@@ -911,7 +917,8 @@ async function dispatchPipelineStage(
             usList,
             PIPELINE_REVIEW_TYPE,
             reviewSystemPrompt,
-            promptComments
+            promptComments,
+            promptSections.collect,
           )
         : buildReviewPrompt(
             project,
@@ -919,7 +926,8 @@ async function dispatchPipelineStage(
             epic,
             story!,
             PIPELINE_REVIEW_TYPE,
-            reviewSystemPrompt
+            reviewSystemPrompt,
+            promptSections.collect,
           );
 
     // Give the reviewer the run's own history. Same open-findings query the
@@ -942,6 +950,7 @@ async function dispatchPipelineStage(
     );
     if (priorFindings) {
       prompt = prompt + "\n\n" + priorFindings;
+      promptSections.append("findings", priorFindings);
     }
   } else {
     const buildSystemPrompt = await resolveAgentPrompt(
@@ -957,7 +966,10 @@ async function dispatchPipelineStage(
             usList,
             buildSystemPrompt,
             promptComments,
-            { visualProofEnabled: isVisualProofEnabled() }
+            {
+              visualProofEnabled: isVisualProofEnabled(),
+              sectionCollector: promptSections.collect,
+            },
           )
         : buildTicketBuildPrompt(
             project,
@@ -966,7 +978,10 @@ async function dispatchPipelineStage(
             story!,
             promptComments,
             buildSystemPrompt,
-            { visualProofEnabled: isVisualProofEnabled() }
+            {
+              visualProofEnabled: isVisualProofEnabled(),
+              sectionCollector: promptSections.collect,
+            },
           );
 
     // Open review feedback (includes the blocking findings verbatim with
@@ -982,50 +997,53 @@ async function dispatchPipelineStage(
     const reviewContext = buildReviewFeedbackSection(openReviewComments);
     if (reviewContext) {
       prompt = prompt + "\n\n" + reviewContext;
+      promptSections.append("findings", reviewContext);
     }
     if (request.stage === "fix") {
       // A grading-only fix must not be described as a code-review rejection.
       // When open review findings also exist, retain both instruction blocks.
       if (!request.gradingFailure || reviewContext) {
         prompt = prompt + "\n\n" + PIPELINE_FIX_INSTRUCTIONS_SECTION;
+        promptSections.append("other", PIPELINE_FIX_INSTRUCTIONS_SECTION);
       }
       if (request.gradingFailure) {
+        const gradingFixSection = buildGradingFixSection(request.gradingFailure);
         prompt =
           prompt +
           "\n\n" +
-          buildGradingFixSection(request.gradingFailure);
+          gradingFixSection;
+        promptSections.append("findings", gradingFixSection);
       }
       // A regression-gate rejection carries its exact red→green verdict so
       // the agent repairs the real problem instead of guessing.
       if (request.verifyFailure) {
         // Same patterns the gate filtered the diff with, so the prompt states
         // the rule the agent actually has to satisfy.
-        prompt =
-          prompt +
-          "\n\n" +
-          buildRegressionFixSection(
-            request.verifyFailure,
-            readRegressionConfig(projectId).patterns
-          );
+        const regressionFixSection = buildRegressionFixSection(
+          request.verifyFailure,
+          readRegressionConfig(projectId).patterns,
+        );
+        prompt = prompt + "\n\n" + regressionFixSection;
+        promptSections.append("findings", regressionFixSection);
       }
       if (request.verificationFailure) {
-        prompt =
-          prompt +
-          "\n\n" +
+        const verificationFixSection =
           buildDeterministicVerificationFixSection(
-            request.verificationFailure
+            request.verificationFailure,
           );
+        prompt = prompt + "\n\n" + verificationFixSection;
+        promptSections.append("findings", verificationFixSection);
       }
     }
   }
 
   if (isReview && request.verificationReport) {
-    prompt =
-      prompt +
-      "\n\n" +
+    const verificationReviewSection =
       buildDeterministicVerificationReviewSection(
-        request.verificationReport.commands
+        request.verificationReport.commands,
       );
+    prompt = prompt + "\n\n" + verificationReviewSection;
+    promptSections.append("findings", verificationReviewSection);
   }
 
   // Document mentions: user-written comments only. An agent comment naming a
@@ -1037,6 +1055,15 @@ async function dispatchPipelineStage(
     textSources: userAuthoredTexts(promptComments),
   });
   prompt = mentionEnrichment.prompt;
+  promptSections.append(
+    "documents",
+    buildMentionContextBlock(mentionEnrichment.resolvedDocuments),
+  );
+  const estimatedPrompt = finalizeCapturedPrompt(
+    prompt,
+    promptSections,
+    mentionEnrichment.missing,
+  );
   createUnresolvedMentionsNotification({
     projectId,
     missing: mentionEnrichment.missing,
@@ -1082,6 +1109,10 @@ async function dispatchPipelineStage(
     mode: agentMode,
     provider: resolved.provider,
     prompt,
+    estimatedPromptTokens: estimatedPrompt.tokens.total,
+    estimatedPromptBreakdown: JSON.stringify(
+      estimatedPrompt.tokens.breakdown,
+    ),
     logsPath,
     branchName,
     worktreePath,

@@ -227,6 +227,10 @@ export const agentSessions = sqliteTable("agent_sessions", {
   inputTokens: integer("input_tokens"),
   outputTokens: integer("output_tokens"),
   totalCostUsd: real("total_cost_usd"),
+  // Estimated prompt tokens and section breakdown calculated at dispatch time.
+  // NULL for legacy rows and sessions where estimation was not run.
+  estimatedPromptTokens: integer("estimated_prompt_tokens"),
+  estimatedPromptBreakdown: text("estimated_prompt_breakdown"),
   // Batch/night run that dispatched this session (see lib/night); NULL for
   // standalone dispatches.
   batchRunId: text("batch_run_id"),

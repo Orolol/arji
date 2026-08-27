@@ -307,6 +307,42 @@ describe("SessionDetailPage - large payload rendering", () => {
   });
 });
 
+describe("SessionDetailPage - estimated prompt tokens", () => {
+  beforeEach(() => {
+    const estimatedSession = {
+      ...mockSession,
+      inputTokens: 12500,
+      outputTokens: 850,
+      estimatedPromptTokens: 11200,
+      estimatedPromptBreakdown: JSON.stringify({
+        spec: 4000,
+        memory: 1200,
+        ticket: 2500,
+        comments: 1500,
+        findings: 1000,
+        documents: 1000,
+      }),
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ data: estimatedSession }),
+    });
+  });
+
+  it("renders estimated input tokens side-by-side with measured tokens", async () => {
+    render(<SessionDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("session-estimated-tokens")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/12.5k in · 850 out/)).toBeInTheDocument();
+    expect(screen.getByText(/Estimated input: ~11.2k tokens/)).toBeInTheDocument();
+    expect(screen.getByText(/Spec 4.0k/)).toBeInTheDocument();
+    expect(screen.getByText(/Mem 1.2k/)).toBeInTheDocument();
+  });
+});
+
 describe("SessionDetailPage - CLI options in effect", () => {
   it("shows the options the run actually used, labelled", async () => {
     // Read from the session row, not from the named agent: the agent can be

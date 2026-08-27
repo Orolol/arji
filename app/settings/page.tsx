@@ -61,6 +61,10 @@ import {
   parseDreamingAfterNightRunSetting,
 } from "@/lib/workflow/dreaming-constants";
 import {
+  PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY,
+  parsePromptTokenBudget,
+} from "@/lib/tokens/budget-settings";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -153,6 +157,12 @@ export default function SettingsPage() {
   const [usageBudgetMessage, setUsageBudgetMessage] = useState<string | null>(
     null
   );
+  // Optional prompt token budget threshold for dispatch warnings.
+  const [promptTokenBudget, setPromptTokenBudget] = useState("");
+  const [savingPromptTokenBudget, setSavingPromptTokenBudget] = useState(false);
+  const [promptTokenBudgetMessage, setPromptTokenBudgetMessage] = useState<
+    string | null
+  >(null);
   // Clone root. Empty means "use the default", which only the server can
   // compute (process.cwd()); it arrives as `defaults.projects_root`.
   const [projectsRoot, setProjectsRoot] = useState("");
@@ -269,6 +279,10 @@ export default function SettingsPage() {
             ? String(budget)
             : ""
         );
+        const ptb = parsePromptTokenBudget(
+          d.data?.[PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY]
+        );
+        setPromptTokenBudget(ptb != null ? String(ptb) : "");
         // Clone root: absent key means "no override", shown as an empty input
         // with the server-resolved default as placeholder.
         setProjectsRoot(
@@ -532,6 +546,45 @@ export default function SettingsPage() {
       setSavingUsageBudget(false);
     }
   }
+  async function handleSavePromptTokenBudget() {
+    setSavingPromptTokenBudget(true);
+    setPromptTokenBudgetMessage(null);
+
+    const raw = promptTokenBudget.trim();
+    let budget: number | null = null;
+    if (raw !== "") {
+      const parsed = parsePromptTokenBudget(raw);
+      if (parsed === null || parsed <= 0) {
+        setPromptTokenBudgetMessage(
+          "Budget must be a positive integer token count (e.g. 50000 or 50k)."
+        );
+        setSavingPromptTokenBudget(false);
+        return;
+      }
+      budget = parsed;
+    }
+
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          [PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY]: budget,
+        }),
+      });
+      if (!response.ok) {
+        setPromptTokenBudgetMessage("Failed to save the prompt token budget.");
+        return;
+      }
+      setPromptTokenBudget(budget === null ? "" : String(budget));
+      setPromptTokenBudgetMessage("Saved");
+    } catch {
+      setPromptTokenBudgetMessage("Failed to save the prompt token budget.");
+    } finally {
+      setSavingPromptTokenBudget(false);
+    }
+  }
+
 
   async function handleSaveProjectsRoot() {
     setProjectsRootMessage(null);
@@ -1475,6 +1528,56 @@ export default function SettingsPage() {
           </p>
         )}
       </section>
+      <section
+        className="space-y-3 rounded-md border border-border p-4"
+        data-testid="prompt-budget-settings"
+      >
+        <div>
+          <h2 className="text-lg font-semibold">Prompt Token Budget</h2>
+        </div>
+
+        <div className="space-y-1">
+          <label
+            htmlFor="prompt-token-budget-setting"
+            className="block text-sm font-medium"
+          >
+            Max prompt tokens warning threshold
+          </label>
+          <Input
+            id="prompt-token-budget-setting"
+            data-testid="prompt-token-budget-setting"
+            type="text"
+            value={promptTokenBudget}
+            disabled={savingPromptTokenBudget}
+            placeholder="e.g. 50000 or 50k (no threshold by default)"
+            onChange={(e) => setPromptTokenBudget(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Optional absolute token count warning threshold (e.g. 50000 or 50k). When a build or review dispatch estimation exceeds this threshold,
+            a non-blocking warning is shown highlighting the largest context section. Leave empty for no warning.
+          </p>
+        </div>
+
+        <Button
+          type="button"
+          onClick={handleSavePromptTokenBudget}
+          disabled={savingPromptTokenBudget}
+          aria-label="Save prompt token budget"
+          data-testid="prompt-token-budget-save"
+        >
+          {savingPromptTokenBudget ? "Saving..." : "Save"}
+        </Button>
+
+        {promptTokenBudgetMessage && (
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="prompt-token-budget-message"
+          >
+            {promptTokenBudgetMessage}
+          </p>
+        )}
+      </section>
+
 
       <section className="space-y-4 rounded-md border border-border p-4">
         <div>

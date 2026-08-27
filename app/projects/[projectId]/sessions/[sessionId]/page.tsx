@@ -55,6 +55,8 @@ interface SessionDetail {
   inputTokens?: number | null;
   outputTokens?: number | null;
   totalCostUsd?: number | null;
+  estimatedPromptTokens?: number | null;
+  estimatedPromptBreakdown?: string | null;
   arijActions?: ArijActionItem[] | null;
   logs?: {
     success?: boolean;
@@ -390,13 +392,40 @@ export default function SessionDetailPage() {
           </span>
         </DetailRow>
         <DetailRow label="Tokens">
-          <span className="font-mono">
-            {session.inputTokens != null || session.outputTokens != null
-              ? `${formatTokens(session.inputTokens) ?? "—"} in · ${
-                  formatTokens(session.outputTokens) ?? "—"
-                } out`
-              : "—"}
-          </span>
+          <div className="flex flex-col gap-0.5 font-mono">
+            <span>
+              {session.inputTokens != null || session.outputTokens != null
+                ? `${formatTokens(session.inputTokens) ?? "—"} in · ${
+                    formatTokens(session.outputTokens) ?? "—"
+                  } out`
+                : "—"}
+            </span>
+            {session.estimatedPromptTokens != null && (
+              <span
+                className="text-[11.5px] font-normal text-muted-foreground"
+                data-testid="session-estimated-tokens"
+              >
+                Estimated input: ~{formatTokens(session.estimatedPromptTokens)} tokens
+                {session.estimatedPromptBreakdown && (() => {
+                  try {
+                    const b = JSON.parse(session.estimatedPromptBreakdown);
+                    const parts: string[] = [];
+                    if (b.spec) parts.push(`Spec ${formatTokens(b.spec)}`);
+                    if (b.memory) parts.push(`Mem ${formatTokens(b.memory)}`);
+                    if (b.ticket) parts.push(`Ticket ${formatTokens(b.ticket)}`);
+                    if (b.comments) parts.push(`Comments ${formatTokens(b.comments)}`);
+                    if (b.findings) parts.push(`Findings ${formatTokens(b.findings)}`);
+                    if (b.documents) parts.push(`Docs ${formatTokens(b.documents)}`);
+                    if (b.system) parts.push(`System ${formatTokens(b.system)}`);
+                    if (b.other) parts.push(`Other ${formatTokens(b.other)}`);
+                    return parts.length > 0 ? ` (${parts.join(" · ")})` : "";
+                  } catch {
+                    return "";
+                  }
+                })()}
+              </span>
+            )}
+          </div>
         </DetailRow>
         {session.worktreePath && (
           <DetailRow label="Worktree">

@@ -9,10 +9,9 @@ import { createId } from "@/lib/utils/nanoid";
 import { createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
-import {
-  buildReviewPrompt,
-  type ReviewType,
-} from "@/lib/claude/prompt-builder";
+import { loadPromptComments } from "@/lib/claude/prompt-comments";
+import { assembleStoryReviewPrompt } from "@/lib/tokens";
+import { type ReviewType } from "@/lib/claude/prompt-builder";
 import {
   classifySessionOutcome,
   extractSessionUsage,
@@ -27,7 +26,6 @@ import {
 } from "@/lib/api/route-helpers";
 import fs from "fs";
 import path from "path";
-import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { REVIEW_TYPE_TO_AGENT_TYPE } from "@/lib/agent-config/constants";
 import { resolveAgentForDispatch } from "@/lib/agent-config/agent-resolution";
 import {
@@ -41,10 +39,6 @@ import {
   markSessionRunning,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
-import {
-  enrichPromptWithDocumentMentions,
-  userAuthoredTexts,
-} from "@/lib/documents/mentions";
 import {
   buildEpicTargetUrl,
   createUnresolvedMentionsNotification,
@@ -155,12 +149,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   // Load context
-  const comments = db
-    .select()
-    .from(ticketComments)
-    .where(eq(ticketComments.userStoryId, storyId))
-    .orderBy(ticketComments.createdAt)
-    .all();
+  const comments = loadPromptComments({ userStoryId: storyId });
 
   // Ensure worktree exists
   const { worktreePath, branchName } = await createWorktree(
@@ -181,34 +170,23 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   // Dispatch one agent per review type
   for (const [idx, reviewType] of reviewTypes.entries()) {
-    const reviewSystemPrompt = await resolveAgentPrompt(
-      REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
-      projectId
-    );
-    const prompt = buildReviewPrompt(
+    const assembled = await assembleStoryReviewPrompt({
+      projectId,
+      epicId: epic.id,
+      storyId,
       project,
-      [],
       epic,
       story,
       reviewType,
-      reviewSystemPrompt
-    );
-
-    // Only user-written comments can reference an Arij document; an agent
-    // comment mentioning a codebase file must neither resolve nor block review.
-    const mentionEnrichment = enrichPromptWithDocumentMentions({
-      projectId,
-      prompt,
-      textSources: userAuthoredTexts(comments),
+      comments,
     });
-    const enrichedPrompt = mentionEnrichment.prompt;
+    const enrichedPrompt = assembled.prompt;
     createUnresolvedMentionsNotification({
       projectId,
-      missing: mentionEnrichment.missing,
+      missing: assembled.missingDocuments ?? [],
       agentType: REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
       targetUrl: buildEpicTargetUrl(projectId, epic.id),
     });
-
     const resolvedAgent = await resolveAgentForDispatch(
       REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
       projectId,
@@ -256,6 +234,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       mode: agentMode,
       provider: resolvedAgent.provider,
       prompt: enrichedPrompt,
+      estimatedPromptTokens: assembled.tokens.total,
+      estimatedPromptBreakdown: JSON.stringify(assembled.tokens.breakdown),
       logsPath,
       branchName,
       worktreePath,
