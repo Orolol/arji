@@ -304,6 +304,70 @@ describe("processManager.start() — MCP injection gating", () => {
     expect(pmState.spawnedOptions[0].prompt).toBe("PLAIN");
   });
 
+  it("the toggle removes USER-DECLARED servers too, not just the arij channel", () => {
+    // One gate covers everything: off means no MCP at all. A third-party
+    // server surviving the toggle would be a channel the operator believes
+    // they closed.
+    pmState.sessionRow = sessionRow();
+    pmState.settingsRow = { value: JSON.stringify(false) };
+    pmState.mcpServerRows = [
+      {
+        id: "srv-1",
+        projectId: null,
+        name: "godot",
+        enabled: true,
+        transport: "stdio",
+        command: "/usr/bin/godot-mcp",
+        args: "[]",
+        env: "{}",
+        url: null,
+        headers: "{}",
+        agentTypes: null,
+        toolAllowlist: null,
+        usageHint: "scenes and nodes",
+      },
+    ];
+
+    processManager.start("s3b", { mode: "code", prompt: "PLAIN" });
+
+    expect(spawnedMcp()).toBeUndefined();
+    // …and the prompt says nothing about a server the session cannot reach.
+    expect(pmState.spawnedOptions[0].prompt).toBe("PLAIN");
+    expect(pmState.spawnedOptions[0].prompt).not.toContain("godot");
+  });
+
+  it("injects a resolved extra server and names it in the prompt", () => {
+    pmState.sessionRow = sessionRow();
+    pmState.mcpServerRows = [
+      {
+        id: "srv-1",
+        projectId: null,
+        name: "godot",
+        enabled: true,
+        transport: "stdio",
+        command: "/usr/bin/godot-mcp",
+        args: "[]",
+        env: "{}",
+        url: null,
+        headers: "{}",
+        agentTypes: null,
+        toolAllowlist: null,
+        usageHint: "scenes and nodes",
+      },
+    ];
+
+    processManager.start("s3c", { mode: "code", prompt: "PLAIN" });
+
+    const mcp = spawnedMcp();
+    expect(mcp!.servers.map((s) => s.name)).toEqual(["arij", "godot"]);
+    expect(mcp!.allowedToolNames).toContain("mcp__godot");
+
+    const prompt = pmState.spawnedOptions[0].prompt as string;
+    expect(prompt).toContain("## Additional MCP servers");
+    expect(prompt).toContain("**godot**");
+    expect(prompt).toContain("scenes and nodes");
+  });
+
   it("injects when mcp_tools_enabled is explicitly true", () => {
     pmState.sessionRow = sessionRow();
     pmState.settingsRow = { value: JSON.stringify(true) };

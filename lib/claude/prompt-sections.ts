@@ -398,11 +398,21 @@ export function extraMcpServersSection(
     used += line.length;
   }
 
-  if (omitted > 0) {
+  while (omitted > 0) {
     // A truncated list that claims to be complete is worse than a short one
     // that says so: the agent needs to know the surface is larger than shown.
+    // The notice counts against the SAME budget — appending it unconditionally
+    // is how a capped section quietly exceeds its cap.
     const notice = `- (${omitted} more server${omitted === 1 ? "" : "s"} not listed here — prompt budget)\n`;
-    if (lines.length > 0) lines.push(notice);
+    if (used + notice.length <= EXTRA_MCP_SERVERS_SECTION_MAX_CHARS) {
+      lines.push(notice);
+      break;
+    }
+    // Not enough room: give the notice a line's worth of space and re-count.
+    const dropped = lines.pop();
+    if (dropped === undefined) break;
+    used -= dropped.length;
+    omitted += 1;
   }
 
   if (lines.length === 0) return "";

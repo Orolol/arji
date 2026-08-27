@@ -787,12 +787,14 @@ export function resolveExtraMcpServers(opts: {
         row.enabled && agentTypesInclude(row.agentTypes, opts.agentType)
     )
     .sort((a, b) => a.name.localeCompare(b.name));
-  const project = rowsForScope(database, opts.projectId)
-    .filter(
-      (row) =>
-        row.enabled && agentTypesInclude(row.agentTypes, opts.agentType)
-    )
+  // Agent-type eligibility, but NOT `enabled`: a DISABLED project row is how
+  // "turn this inherited global off for this project" is expressed
+  // (disableGlobalForProject), so it has to survive long enough to shadow the
+  // global. Filtering it here would make that feature a no-op.
+  const projectApplicable = rowsForScope(database, opts.projectId)
+    .filter((row) => agentTypesInclude(row.agentTypes, opts.agentType))
     .sort((a, b) => a.name.localeCompare(b.name));
+  const project = projectApplicable.filter((row) => row.enabled);
 
   // A "user-global" provider (omp, agy) has no per-spawn surface to vary, so
   // only the globals reach it; the project's own are reported as excluded so
@@ -803,9 +805,12 @@ export function resolveExtraMcpServers(opts: {
   const excludedProjectScoped = perSpawn ? [] : project.map((row) => row.name);
 
   // A project entry SHADOWS a global of the same name — drop the global, keep
-  // the project row. `shadowed` is empty on a user-global provider, so nothing
-  // there displaces a global.
-  const shadowed = new Set(eligibleProject.map((row) => row.name));
+  // the project row (or nothing at all, when the project row is disabled).
+  // `shadowed` is empty on a user-global provider, where a project row cannot
+  // reach the CLI at all and so must not suppress a global that can.
+  const shadowed = new Set(
+    perSpawn ? projectApplicable.map((row) => row.name) : []
+  );
   const servers: ResolvedExtraMcpServers["servers"] = [];
   for (const row of globals) {
     if (shadowed.has(row.name)) continue;

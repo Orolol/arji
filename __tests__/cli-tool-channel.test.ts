@@ -160,3 +160,104 @@ describe("createChatCliToolChannel", () => {
     ).toBeNull();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Story "Parité du canal chat"                                         */
+/* ------------------------------------------------------------------ */
+
+describe("user-declared MCP servers reach a chat turn too", () => {
+  it("injects the servers resolved for the conversation's project", () => {
+    // Without this the feature would be present in build and review and
+    // silently missing in chat — the chat channel does not go through
+    // processManager.start(), so it needs its own resolution call.
+    dbMockState.allRows = [
+      {
+        id: "srv-1",
+        projectId: null,
+        name: "godot",
+        enabled: true,
+        transport: "stdio",
+        command: "/usr/bin/godot-mcp",
+        args: "[]",
+        env: "{}",
+        url: null,
+        headers: "{}",
+        agentTypes: null,
+        toolAllowlist: null,
+        usageHint: "scenes and nodes",
+        lastCheckedAt: null,
+        lastCheckOk: null,
+        lastCheckError: null,
+        createdAt: "2026-08-27",
+      },
+    ];
+
+    const channel = createChatCliToolChannel({
+      projectId: "proj1",
+      provider: "claude-code",
+      conversationType: null,
+    });
+
+    expect(channel).not.toBeNull();
+    expect(channel!.mcp.servers.map((s) => s.name)).toEqual([
+      ARIJ_MCP_SERVER_NAME,
+      "godot",
+    ]);
+    // The arij toolset is untouched by this story: no agent-only tool appears.
+    expect(channel!.mcp.allowedToolNames).toEqual([
+      ...ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
+      "mcp__godot",
+    ]);
+    expect(channel!.mcp.allowedToolNames).not.toContain("mcp__arij__ask_question");
+    expect(channel!.mcp.allowedToolNames).not.toContain("mcp__arij__submit_findings");
+  });
+
+  it("excludes a server whose agent_types omit chat", () => {
+    dbMockState.allRows = [
+      {
+        id: "srv-1",
+        projectId: null,
+        name: "godot",
+        enabled: true,
+        transport: "stdio",
+        command: "/usr/bin/godot-mcp",
+        args: "[]",
+        env: "{}",
+        url: null,
+        headers: "{}",
+        agentTypes: JSON.stringify(["ticket_build"]),
+        toolAllowlist: null,
+        usageHint: null,
+        lastCheckedAt: null,
+        lastCheckOk: null,
+        lastCheckError: null,
+        createdAt: "2026-08-27",
+      },
+    ];
+
+    const channel = createChatCliToolChannel({
+      projectId: "proj1",
+      provider: "claude-code",
+      conversationType: null,
+    });
+
+    expect(channel!.mcp.servers.map((s) => s.name)).toEqual([
+      ARIJ_MCP_SERVER_NAME,
+    ]);
+  });
+
+  it("keeps the arij channel when extras resolution blows up", () => {
+    // Best-effort, like the rest of this function: a bad extra must cost the
+    // turn that server, never its board tools.
+    dbMockState.allRows = null as unknown as [];
+
+    const channel = createChatCliToolChannel({
+      projectId: "proj1",
+      provider: "claude-code",
+      conversationType: null,
+    });
+
+    expect(channel).not.toBeNull();
+    expect(arijChannelSpec(channel!.mcp).name).toBe(ARIJ_MCP_SERVER_NAME);
+  });
+});
