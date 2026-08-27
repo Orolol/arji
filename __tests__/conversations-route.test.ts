@@ -7,12 +7,14 @@ import {
 const {
   runCutoverMigrationOnce,
   resolveAgent: mockResolveAgent,
+  restartPersistentChatSession,
 } = vi.hoisted(() => ({
   runCutoverMigrationOnce: vi.fn(),
   resolveAgent: vi.fn(() => ({
     provider: "claude-code",
     namedAgentId: null,
   })),
+  restartPersistentChatSession: vi.fn(() => true),
 }));
 
 vi.mock("@/lib/db", async () => {
@@ -30,6 +32,11 @@ vi.mock("@/lib/agent-config/agent-resolution", () => ({
 
 vi.mock("@/lib/chat/unified-cutover-migration", () => ({
   runUnifiedChatCutoverMigrationOnce: runCutoverMigrationOnce,
+}));
+
+vi.mock("@/lib/chat/persistent-runner", () => ({
+  getPersistentChatSessionState: vi.fn(() => "cold"),
+  restartPersistentChatSession,
 }));
 
 describe("conversations route", () => {
@@ -121,6 +128,27 @@ describe("conversations route", () => {
     expect(json.data).toMatchObject({ id: "conv-created" });
   });
 
+  it("POST persists the explicit persistent Claude chat mode", async () => {
+    dbMockState.getQueue.push({ id: "proj-1" });
+    dbMockState.getQueue.push({ id: "conv-created" });
+
+    const { POST } = await import("@/app/api/projects/[projectId]/conversations/route");
+    await POST(
+      {
+        json: async () => ({
+          type: "chat",
+          provider: "claude-code-persistent",
+        }),
+      } as never,
+      { params: Promise.resolve({ projectId: "proj-1" }) },
+    );
+
+    expect(mockResolveAgent).not.toHaveBeenCalled();
+    expect(dbMockState.insertCalls).toContainEqual(
+      expect.objectContaining({ provider: "claude-code-persistent" }),
+    );
+  });
+
   it("POST falls back to the configured default for unknown providers", async () => {
     dbMockState.getQueue.push({ id: "proj-1" });
     dbMockState.getQueue.push({ id: "conv-created" });
@@ -207,6 +235,25 @@ describe("conversations route", () => {
       { params: Promise.resolve({ projectId: "proj-1", conversationId: "conv-1" }) },
     );
 
+    expect(dbMockState.updateCalls).toHaveLength(0);
+  });
+
+  it("restart endpoint terminates the warm process without clearing durable history", async () => {
+    dbMockState.getQueue.push({ id: "conv-1" });
+    const { DELETE } = await import(
+      "@/app/api/projects/[projectId]/conversations/[conversationId]/persistent-session/route"
+    );
+    const response = await DELETE({} as never, {
+      params: Promise.resolve({ projectId: "proj-1", conversationId: "conv-1" }),
+    });
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(restartPersistentChatSession).toHaveBeenCalledWith("conv-1");
+    expect(json.data).toEqual({
+      restarted: true,
+      persistentSessionState: "cold",
+    });
     expect(dbMockState.updateCalls).toHaveLength(0);
   });
 });

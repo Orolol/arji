@@ -98,6 +98,22 @@ export function resolveMcpToken(token: string): McpTokenRecord | null {
 }
 
 /**
+ * Resolve a bearer token to its record REGARDLESS of revocation — the lookup
+ * for callers that have already been refused and only want to know WHO was
+ * refused. Never use it to authenticate: `resolveMcpToken` is the only
+ * function that may gate a write.
+ *
+ * Its one caller is the submit_findings 401 trace
+ * (lib/mcp/review-channel-failure.ts): a reviewer whose token was revoked
+ * mid-call is still a known session, and attributing the rejection to it is
+ * the difference between "a review filed nothing" and "a review was stopped
+ * from filing".
+ */
+export function findMcpTokenRecord(token: string): McpTokenRecord | null {
+  return getStore().get(token) ?? null;
+}
+
+/**
  * Invalidate every live token minted for a session (called when the session
  * process exits or is cancelled). Keeps the records — see module header for
  * why deletion here would lose the askedQuestion flag before classification.

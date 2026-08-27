@@ -91,6 +91,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       createConversation,
       deleteConversation,
       updateConversation,
+      restartPersistentSession,
       refresh: refreshConversations,
     } = useConversations(projectId);
 
@@ -342,6 +343,9 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
               hasMessages={hasMessages}
               isBusy={isCurrentConversationBusy}
               onSelectAgentOrProvider={handleSelectAgentOrProvider}
+              onRestartPersistentSession={() => {
+                if (activeId) void restartPersistentSession(activeId);
+              }}
             />
           }
         />

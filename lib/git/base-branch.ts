@@ -25,6 +25,7 @@ import type { SimpleGit } from "simple-git";
 /** Reads `origin/HEAD` and returns the short branch name, or null. */
 async function remoteDefaultBranch(git: SimpleGit): Promise<string | null> {
   try {
+    // Invariant: Uses hardcoded symbolic-ref subcommands and args with no caller-supplied inputs.
     const ref = (
       await git.raw(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
     ).trim();

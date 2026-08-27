@@ -110,6 +110,13 @@ function addSession(input: {
   outcome?: string | null;
   /** Structured submit_findings verdict persisted on the session row. */
   reviewVerdict?: string | null;
+  /**
+   * Defaults to the schema default, `claude-code` — a provider WITH the
+   * submit_findings channel, so a review row left verdict-less is
+   * unverifiable and deliberately not clean. Pass an MCP-less provider to
+   * exercise the prose-only path.
+   */
+  provider?: string;
   createdAt: string;
   endedAt?: string | null;
 }): string {
@@ -129,6 +136,7 @@ function addSession(input: {
             ? "answered"
             : null,
       reviewVerdict: input.reviewVerdict ?? null,
+      ...(input.provider ? { provider: input.provider } : {}),
       createdAt: input.createdAt,
       endedAt: input.endedAt ?? null,
     })
@@ -636,6 +644,7 @@ describe("selectReviewCandidates", () => {
       epicId: "e1",
       status: "completed",
       agentType: "review_code",
+      reviewVerdict: "approved",
       createdAt: at(20),
       endedAt: at(21),
     });
@@ -687,6 +696,7 @@ describe("selectReviewCandidates", () => {
       epicId: "e1",
       status: "completed",
       agentType: "review_code",
+      reviewVerdict: "approved",
       createdAt: "2026-08-19T09:10:00.000Z",
       endedAt: "2026-08-19T09:15:00.000Z",
     });
@@ -980,6 +990,7 @@ describe("selectMergeCandidates", () => {
       epicId: "e1",
       status: "completed",
       agentType: "review_code",
+      reviewVerdict: "approved",
       createdAt: at(20),
       endedAt: at(21),
     });
@@ -1187,6 +1198,7 @@ describe("selectMergeCandidates", () => {
       epicId: "e1",
       status: "completed",
       agentType: "review_compliance",
+      provider: "gemini-cli",
       createdAt: at(20),
       endedAt: at(21),
     });
@@ -1219,11 +1231,12 @@ describe("query budget", () => {
     try {
       const board = loadAutoModeBoard(PROJECT_ID);
       const queriesForBoard = selectSpy.mock.calls.length;
-      // Eleven board queries (nine + the dependency graph + the
-      // review-rejection scan); the sub-selects of the two window-function
+      // Twelve board queries (nine + the dependency graph + the
+      // review-rejection scan + the one-row mcp_tools_enabled read the
+      // verdict rule needs); the sub-selects of the two window-function
       // CTEs are built through the same `select` entry point, hence the
       // ceiling.
-      expect(queriesForBoard).toBeLessThanOrEqual(13);
+      expect(queriesForBoard).toBeLessThanOrEqual(14);
 
       selectSpy.mockClear();
       selectBuildCandidates(PROJECT_ID, board);

@@ -262,6 +262,14 @@ function completeBuild(sessionId: string): void {
 /** Review passed: the epic STAYS in review (the pipeline never auto-approves). */
 function completeReviewPass(sessionId: string): void {
   finishSession(sessionId, "answered");
+  // The approving submit_findings call, as the route persists it. Simulated
+  // reviewers run on the default provider (claude-code), which HAS that
+  // channel — a pass with nothing on the session row is an unverifiable
+  // review, not a clean one (lib/pipeline/findings.ts).
+  db.update(agentSessions)
+    .set({ reviewVerdict: "approved" })
+    .where(eq(agentSessions.id, sessionId))
+    .run();
 }
 
 /** The reviewer ran but produced no verdict — nothing to approve with. */
@@ -277,6 +285,10 @@ function completeReviewChangesRequested(sessionId: string): void {
     .where(eq(agentSessions.id, sessionId))
     .get()!;
   finishSession(sessionId, "answered");
+  db.update(agentSessions)
+    .set({ reviewVerdict: "changes_requested" })
+    .where(eq(agentSessions.id, sessionId))
+    .run();
   db.update(epics)
     .set({ status: "in_progress", updatedAt: tick() })
     .where(eq(epics.id, session.epicId!))
@@ -1073,8 +1085,15 @@ describe("terminal-hook kick ordering", () => {
       arm(0, 0);
       const sessionId = seedReviewInFlight();
 
-      // A passing review leaves the epic in `review` — nothing to apply.
-      settleReviewLikeTheDriver(sessionId, () => {});
+      // A passing review leaves the epic in `review` — the only thing to
+      // apply is the approving verdict submit_findings persisted on the
+      // session, without which the review would not count as clean.
+      settleReviewLikeTheDriver(sessionId, () => {
+        db.update(agentSessions)
+          .set({ reviewVerdict: "approved" })
+          .where(eq(agentSessions.id, sessionId))
+          .run();
+      });
 
       await vi.advanceTimersByTimeAsync(600);
 
