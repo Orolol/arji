@@ -31,6 +31,13 @@
  *    `${ARIJ_MCP_TOKEN}` indirection is what makes the control channel work.
  * 4. **Never throw.** This runs inside CRUD request handlers; a missing omp
  *    install or an unwritable home directory must not fail a settings save.
+ * 5. **Only ever reconcile from the LIVE application database.** These writes
+ *    leave the repository and the process: they change the user's own CLI
+ *    config and shell out to `agy`. Reconciling from anything else — a test's
+ *    in-memory database, a migration script, a one-off handle — would push
+ *    fixture data onto a real machine. It is not hypothetical: the first run of
+ *    this feature's own test suite wrote two fake servers into
+ *    ~/.omp/agent/mcp.json and `agy mcp add`ed one of them.
  *
  * ## Accepted secret exposure
  *
@@ -390,6 +397,12 @@ function syncAgy(servers: SyncableServer[], previouslyOwned: string[]): string[]
  */
 export function syncUserGlobalMcpServers(database: ArijDatabase = db): void {
   try {
+    // Rule 5. An injected handle means the caller is not the live app, and
+    // nothing but the live app has any business rewriting a user's CLI config.
+    if (database !== db) return;
+    // Belt and braces: even if some future caller passes the real `db` from a
+    // test, a test run must not reach the developer's own home directory.
+    if (process.env.VITEST || process.env.NODE_ENV === "test") return;
     if (!isUserGlobalMcpSyncEnabled(database)) return;
     const servers = syncableGlobalServers(database);
     const manifest = readManifest();

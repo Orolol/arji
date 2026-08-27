@@ -10,3 +10,7 @@ arij.db.audit37-backup*
 # `git status` AND in Tailwind's source scan — a 20 MB SQLite file full of
 # ticket text yields bogus utility candidates that fail the CSS build.
 arij.db.backup-*
+# Ownership manifest for lib/mcp/user-global-sync.ts: the third-party MCP
+# server names Arij last wrote into omp's mcp.json and agy's register. Machine
+# state, not project state — it records what is on THIS box.
+mcp-user-global.json
