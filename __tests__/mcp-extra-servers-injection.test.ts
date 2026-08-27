@@ -388,6 +388,51 @@ describe("codex -c overrides, one set per server", () => {
     expect(display).toContain('mcp_servers.confluence.url="https://example.com/mcp"');
   });
 
+  it("keeps a third-party secret out of the console spawn log too", () => {
+    // Two separate redaction sites read the same mask: buildDisplayCommand
+    // (persisted) and beforeSpawn (stdout). A secret that only leaks to the
+    // console is still a secret in the operator's scrollback and any log
+    // capture around it.
+    createMcpServer(stdio("godot", { env: { GODOT_TOKEN: "s3cret-godot" } }), db, null);
+
+    const provider = new CodexProvider();
+    const args = provider.buildArgs(
+      {
+        sessionId: "s1",
+        prompt: "P",
+        cwd: "/work",
+        mode: "code",
+        mcp: buildMcpSpawnConfig({
+          token: "arij-tok",
+          provider: "codex",
+          extraServers: resolve("codex").servers,
+        }),
+      },
+      { outputFile: "/tmp/codex-out.txt" },
+    );
+
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...parts) => {
+      logged.push(parts.join(" "));
+    });
+    try {
+      // beforeSpawn is protected; the log line is the contract under test.
+      (
+        provider as unknown as {
+          beforeSpawn: (a: string[], cwd: string) => void;
+        }
+      ).beforeSpawn(args, "/work");
+    } finally {
+      spy.mockRestore();
+    }
+
+    const output = logged.join("\n");
+    expect(output).toContain("[spawn] codex");
+    expect(output).not.toContain("s3cret-godot");
+    expect(output).not.toContain("arij-tok");
+    expect(output).toContain("mcp_servers.godot.env=<redacted>");
+  });
+
   it("does not over-mask an args value that happens to contain `.env=`", () => {
     createMcpServer(stdio("godot", { args: ["--flag=.env=x"] }), db, null);
 
