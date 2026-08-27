@@ -4,7 +4,12 @@ import {
   estimatePromptTokens,
   findLargestContextSection,
   SECTION_LABELS,
+  estimatePromptTokensBySections,
 } from "@/lib/tokens/estimator";
+import {
+  assembleEpicBuildPrompt,
+  assembleStoryReviewPrompt,
+} from "@/lib/tokens/dispatch-prompt";
 import {
   parsePromptTokenBudget,
   checkPromptTokenBudget,
@@ -23,7 +28,7 @@ import {
   type PromptUserStory,
 } from "@/lib/claude/prompt-builder";
 import { db } from "@/lib/db";
-import { agentSessions, epics, projects, settings } from "@/lib/db/schema";
+import { agentSessions, epics, projects, settings, userStories } from "@/lib/db/schema";
 import { createQueuedSession } from "@/lib/agent-sessions/lifecycle";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -142,6 +147,75 @@ describe("Token Estimator", () => {
     expect(result.breakdown.findings).toBe(0);
     expect(result.breakdown.documents).toBe(0);
     expect(findLargestContextSection(result.breakdown)).toBeNull();
+  });
+  it("accurately estimates sections by construction without misattribution", () => {
+    const commentWithReviewChecklist =
+      "## Code Review Checklist\n\n- [x] Item 1\n- [x] Item 2\n\n```typescript\nconst a = 1234;\n";
+
+    const sections = {
+      system: "System prompt here.",
+      spec: "Specification content here.",
+      memory: "Learned memory here.",
+      ticket: "Epic and stories here.",
+      comments: commentWithReviewChecklist,
+      findings: "Actual review findings here.",
+      documents: "Documents here.",
+      other: "Instructions here.",
+    };
+
+    const result = estimatePromptTokensBySections(sections);
+    expect(result.breakdown.comments).toBe(Math.ceil(commentWithReviewChecklist.length / 4));
+    expect(result.breakdown.findings).toBe(Math.ceil("Actual review findings here.".length / 4));
+    expect(result.breakdown.spec).toBe(Math.ceil("Specification content here.".length / 4));
+  });
+
+  it("shared assembleEpicBuildPrompt computes correct tokens by construction", async () => {
+    const projId = `proj-${nanoid(6)}`;
+    const epicId = `epic-${nanoid(6)}`;
+
+    db.insert(projects)
+      .values({
+        id: projId,
+        name: "Test Shared Proj",
+        spec: "# Spec\nFull specification here.",
+      })
+      .run();
+
+    db.insert(epics)
+      .values({
+        id: epicId,
+        projectId: projId,
+        title: "Test Shared Epic",
+        description: "Shared Epic description",
+        status: "todo",
+      })
+      .run();
+
+    db.insert(userStories)
+      .values({
+        id: `story-${nanoid(6)}`,
+        epicId,
+        title: "Story Title",
+        description: "Story Description",
+        acceptanceCriteria: "- AC 1",
+        status: "todo",
+      })
+      .run();
+
+    const assembled = await assembleEpicBuildPrompt({
+      projectId: projId,
+      epicId,
+      project: { name: "Test Shared Proj", spec: "# Spec\nFull specification here.", memory: "Memory content here." },
+      epic: { title: "Test Shared Epic", description: "Shared Epic description" },
+      comment: "User comment on dispatch",
+    });
+
+    expect(assembled.prompt).toContain("Test Shared Epic");
+    expect(assembled.tokens.total).toBeGreaterThan(0);
+    expect(assembled.tokens.breakdown.spec).toBeGreaterThan(0);
+    expect(assembled.tokens.breakdown.memory).toBeGreaterThan(0);
+    expect(assembled.tokens.breakdown.ticket).toBeGreaterThan(0);
+    expect(assembled.tokens.breakdown.comments).toBeGreaterThan(0);
   });
 });
 

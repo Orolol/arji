@@ -11,6 +11,12 @@ import type {
 export interface PromptTokenEstimateData {
   total: number;
   breakdown: PromptTokenBreakdown;
+  sessionsCount?: number;
+  perSessionEstimates?: Array<{
+    reviewType: string;
+    tokens: number;
+    breakdown: PromptTokenBreakdown;
+  }>;
   budget: number | null;
   budgetExceeded: boolean;
   largestSection: LargestContextSection | null;
@@ -39,6 +45,9 @@ export function PromptTokenEstimateView({
 }: PromptTokenEstimateViewProps) {
   const [estimate, setEstimate] = useState<PromptTokenEstimateData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reviewTypesKey = reviewTypes ? reviewTypes.join(",") : "";
 
   useEffect(() => {
     if (!enabled || (!epicId && !userStoryId)) {
@@ -48,6 +57,7 @@ export function PromptTokenEstimateView({
     let cancelled = false;
     const timer = setTimeout(() => {
       setLoading(true);
+      setError(null);
       fetch(`/api/projects/${projectId}/prompt-estimate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -55,26 +65,34 @@ export function PromptTokenEstimateView({
           epicId,
           storyId: userStoryId,
           dispatchType,
-          reviewTypes,
+          reviewTypes: reviewTypesKey ? reviewTypesKey.split(",") : undefined,
           comment,
           namedAgentId,
         }),
       })
-        .then((res) => (res.ok ? res.json() : null))
+        .then((res) => {
+          if (!res.ok) {
+            throw new Error(`Estimate failed (${res.status})`);
+          }
+          return res.json();
+        })
         .then((json) => {
           if (!cancelled && json?.data) {
             setEstimate(json.data);
+            setError(null);
           }
         })
-        .catch(() => {
-          // ignore network errors in estimate preview
+        .catch((err) => {
+          if (!cancelled) {
+            setError(err instanceof Error ? err.message : "Estimate unavailable");
+          }
         })
         .finally(() => {
           if (!cancelled) {
             setLoading(false);
           }
         });
-    }, 150);
+    }, 500);
 
     return () => {
       cancelled = true;
@@ -85,7 +103,7 @@ export function PromptTokenEstimateView({
     epicId,
     userStoryId,
     dispatchType,
-    reviewTypes ? reviewTypes.join(",") : "",
+    reviewTypesKey,
     comment,
     namedAgentId,
     enabled,
@@ -106,11 +124,22 @@ export function PromptTokenEstimateView({
     );
   }
 
+  if (error && !estimate) {
+    return (
+      <div
+        className="rounded-[8px] border border-border/50 bg-band/20 px-3 py-1.5 text-xs text-muted-foreground italic"
+        data-testid="prompt-estimate-unavailable"
+      >
+        Prompt estimate unavailable
+      </div>
+    );
+  }
+
   if (!estimate) {
     return null;
   }
 
-  const { total, breakdown, budget, budgetExceeded, largestSection } = estimate;
+  const { total, breakdown, budget, budgetExceeded, largestSection, sessionsCount = 1 } = estimate;
 
   return (
     <div
@@ -127,6 +156,11 @@ export function PromptTokenEstimateView({
             data-testid="prompt-estimate-total"
           >
             ~{formatTokens(total) ?? total} tokens
+            {sessionsCount > 1 && (
+              <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                ({sessionsCount} sessions)
+              </span>
+            )}
           </span>
         </div>
         {budget != null && (
@@ -138,7 +172,7 @@ export function PromptTokenEstimateView({
 
       {/* Breakdown by context section */}
       <div
-        className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-1 text-[11px]"
+        className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1 text-[11px]"
         data-testid="prompt-estimate-breakdown"
       >
         <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
@@ -164,6 +198,14 @@ export function PromptTokenEstimateView({
         <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
           <span className="text-muted-foreground">Documents:</span>
           <span className="font-mono font-medium">{formatTokens(breakdown.documents) ?? 0}</span>
+        </div>
+        <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
+          <span className="text-muted-foreground">System:</span>
+          <span className="font-mono font-medium">{formatTokens(breakdown.system) ?? 0}</span>
+        </div>
+        <div className="flex items-center justify-between rounded-[4px] bg-background/60 px-2 py-1 border border-border/50">
+          <span className="text-muted-foreground">Other / Instr:</span>
+          <span className="font-mono font-medium">{formatTokens(breakdown.other) ?? 0}</span>
         </div>
       </div>
 

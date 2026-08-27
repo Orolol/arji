@@ -1553,7 +1553,7 @@ export default function SettingsPage() {
             onChange={(e) => setPromptTokenBudget(e.target.value)}
           />
           <p className="text-xs text-muted-foreground">
-            Optional. When a build or review dispatch estimation exceeds this threshold,
+            Optional absolute token count warning threshold (e.g. 50000 or 50k). When a build or review dispatch estimation exceeds this threshold,
             a non-blocking warning is shown highlighting the largest context section. Leave empty for no warning.
           </p>
         </div>

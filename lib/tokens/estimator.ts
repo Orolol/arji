@@ -38,6 +38,17 @@ export interface LargestContextSection {
   percentage: number;
 }
 
+export interface PromptSectionTexts {
+  system?: string | null;
+  spec?: string | null;
+  memory?: string | null;
+  ticket?: string | null;
+  comments?: string | null;
+  findings?: string | null;
+  documents?: string | null;
+  other?: string | null;
+}
+
 export const SECTION_LABELS: Record<PromptContextSectionKey, string> = {
   spec: "Project Specification",
   memory: "Learned Memory",
@@ -55,6 +66,42 @@ export const SECTION_LABELS: Record<PromptContextSectionKey, string> = {
 export function estimateTokens(text: string | null | undefined): number {
   if (!text) return 0;
   return Math.ceil(text.length / 4);
+}
+
+/**
+ * Estimates prompt tokens by measuring individual context sections by construction.
+ * This avoids any misattribution from markdown headings or code fences inside user/agent text.
+ */
+export function estimatePromptTokensBySections(
+  sections: PromptSectionTexts,
+  fullPromptText?: string
+): EstimatedPromptTokens {
+  const breakdown: PromptTokenBreakdown = {
+    spec: estimateTokens(sections.spec),
+    memory: estimateTokens(sections.memory),
+    ticket: estimateTokens(sections.ticket),
+    comments: estimateTokens(sections.comments),
+    findings: estimateTokens(sections.findings),
+    documents: estimateTokens(sections.documents),
+    system: estimateTokens(sections.system),
+    other: estimateTokens(sections.other),
+  };
+
+  const total = fullPromptText
+    ? estimateTokens(fullPromptText)
+    : Math.max(
+        0,
+        Math.ceil(
+          Object.values(sections)
+            .filter((s): s is string => Boolean(s))
+            .join("\n").length / 4
+        )
+      );
+
+  return {
+    total,
+    breakdown,
+  };
 }
 
 function matchTopLevelHeading(headingLine: string): PromptContextSectionKey | null {
@@ -96,21 +143,28 @@ function matchTopLevelHeading(headingLine: string): PromptContextSectionKey | nu
     return "comments";
   }
   if (
-    line.includes("checklist") ||
-    line.includes("feedback") ||
-    line.includes("finding") ||
-    line.includes("verification") ||
-    line.includes("rubric") ||
-    line.includes("custom review agent instructions") ||
-    line.includes("bug-fix rule") ||
-    line.includes("ci failure") ||
-    line.includes("forensic")
+    line.startsWith("## security audit checklist") ||
+    line.startsWith("## code review checklist") ||
+    line.startsWith("## compliance & accessibility review checklist") ||
+    line.startsWith("## feature completeness review checklist") ||
+    line.startsWith("## bug fix verification checklist") ||
+    line.startsWith("## custom review agent instructions") ||
+    line.startsWith("## code review feedback") ||
+    line.startsWith("## deterministic verification evidence") ||
+    line.startsWith("## bug-fix rule") ||
+    line.startsWith("## acceptance criteria grading rubric") ||
+    line.startsWith("## acceptance criteria grading evidence") ||
+    line.startsWith("## acceptance-criteria rubric") ||
+    line.startsWith("## review findings") ||
+    line.startsWith("## ci failure evidence") ||
+    line.startsWith("## forensic investigation evidence")
   ) {
     return "findings";
   }
   if (
     line.startsWith("## instructions") ||
-    line.startsWith("## visual proof instructions")
+    line.startsWith("## visual proof instructions") ||
+    line.startsWith("## role boundary")
   ) {
     return "other";
   }
@@ -121,9 +175,11 @@ function matchTopLevelHeading(headingLine: string): PromptContextSectionKey | nu
 /**
  * Parses an assembled markdown prompt into context sections and calculates
  * the total estimated tokens and breakdown per section.
+ * If sections are provided, attributes directly by construction.
  */
 export function estimatePromptTokens(
-  prompt: string | null | undefined
+  prompt: string | null | undefined,
+  sections?: PromptSectionTexts
 ): EstimatedPromptTokens {
   if (!prompt || prompt.length === 0) {
     return {
@@ -141,6 +197,10 @@ export function estimatePromptTokens(
     };
   }
 
+  if (sections) {
+    return estimatePromptTokensBySections(sections, prompt);
+  }
+
   const charCounts: Record<PromptContextSectionKey, number> = {
     spec: 0,
     memory: 0,
@@ -151,6 +211,7 @@ export function estimatePromptTokens(
     system: 0,
     other: 0,
   };
+
   // Split prompt by markdown headings outside of code blocks
   const lines = prompt.split("\n");
   let currentKey: PromptContextSectionKey = "other";

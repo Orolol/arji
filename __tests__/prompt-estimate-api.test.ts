@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/projects/[projectId]/prompt-estimate/route";
 import { db } from "@/lib/db";
-import { epics, projects, settings, userStories } from "@/lib/db/schema";
+import { epics, projects, settings, ticketComments, userStories } from "@/lib/db/schema";
 import { nanoid } from "nanoid";
 import { promptTokenBudgetSettingKey } from "@/lib/tokens/budget";
 
@@ -33,7 +33,6 @@ describe("Prompt Estimate API Route", () => {
       .values({
         id: `story-${nanoid(6)}`,
         epicId,
-        projectId,
         title: "User Story 1",
         description: "Story Description",
         acceptanceCriteria: "- Criterion 1\n- Criterion 2",
@@ -114,7 +113,7 @@ describe("Prompt Estimate API Route", () => {
     expect(json.data.largestSection.tokens).toBeGreaterThan(50);
   });
 
-  it("estimates review prompt for a story", async () => {
+  it("correctly prices multi-type review dispatches across all sessions", async () => {
     const projectId = `proj-${nanoid(6)}`;
     const epicId = `epic-${nanoid(6)}`;
     const storyId = `story-${nanoid(6)}`;
@@ -140,7 +139,6 @@ describe("Prompt Estimate API Route", () => {
       .values({
         id: storyId,
         epicId,
-        projectId,
         title: "Review Story",
         description: "Story to review",
         acceptanceCriteria: "Pass all review checks",
@@ -158,7 +156,165 @@ describe("Prompt Estimate API Route", () => {
 
     expect(res.status).toBe(200);
     const json = await res.json();
+    expect(json.data.sessionsCount).toBe(2);
+    expect(json.data.perSessionEstimates).toHaveLength(2);
+    expect(json.data.perSessionEstimates[0].reviewType).toBe("security");
+    expect(json.data.perSessionEstimates[1].reviewType).toBe("code_review");
+
+    const expectedTotal =
+      json.data.perSessionEstimates[0].tokens +
+      json.data.perSessionEstimates[1].tokens;
+    expect(json.data.total).toBe(expectedTotal);
+  });
+
+  it("estimates story grading without throwing", async () => {
+    const projectId = `proj-${nanoid(6)}`;
+    const epicId = `epic-${nanoid(6)}`;
+    const storyId = `story-${nanoid(6)}`;
+
+    db.insert(projects)
+      .values({
+        id: projectId,
+        name: "Grading Project",
+        spec: "Spec content",
+      })
+      .run();
+
+    db.insert(epics)
+      .values({
+        id: epicId,
+        projectId,
+        title: "Grading Epic",
+        status: "review",
+      })
+      .run();
+
+    db.insert(userStories)
+      .values({
+        id: storyId,
+        epicId,
+        title: "Story to Grade",
+        description: "Story desc",
+        acceptanceCriteria: "- Must satisfy criterion A\n- Must satisfy criterion B",
+        status: "review",
+      })
+      .run();
+
+    const req = new NextRequest(
+      `http://localhost/api/projects/${projectId}/prompt-estimate?epicId=${epicId}&storyId=${storyId}&dispatchType=grading`
+    );
+
+    const res = await GET(req, {
+      params: Promise.resolve({ projectId }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
     expect(json.data.total).toBeGreaterThan(0);
     expect(json.data.breakdown.findings).toBeGreaterThan(0);
+  });
+
+  it("estimates epic grading across all stories", async () => {
+    const projectId = `proj-${nanoid(6)}`;
+    const epicId = `epic-${nanoid(6)}`;
+
+    db.insert(projects)
+      .values({
+        id: projectId,
+        name: "Epic Grading Project",
+        spec: "Spec content",
+      })
+      .run();
+
+    db.insert(epics)
+      .values({
+        id: epicId,
+        projectId,
+        title: "Epic to Grade",
+        status: "review",
+      })
+      .run();
+
+    db.insert(userStories)
+      .values({
+        id: `story-${nanoid(6)}`,
+        epicId,
+        title: "Story 1",
+        acceptanceCriteria: "- AC 1",
+        status: "review",
+      })
+      .run();
+
+    db.insert(userStories)
+      .values({
+        id: `story-${nanoid(6)}`,
+        epicId,
+        title: "Story 2",
+        acceptanceCriteria: "- AC 2",
+        status: "review",
+      })
+      .run();
+
+    const req = new NextRequest(
+      `http://localhost/api/projects/${projectId}/prompt-estimate?epicId=${epicId}&dispatchType=grading`
+    );
+
+    const res = await GET(req, {
+      params: Promise.resolve({ projectId }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.total).toBeGreaterThan(0);
+    expect(json.data.breakdown.findings).toBeGreaterThan(0);
+  });
+
+  it("attributes a comment containing markdown headings to comments and NOT findings", async () => {
+    const projectId = `proj-${nanoid(6)}`;
+    const epicId = `epic-${nanoid(6)}`;
+
+    db.insert(projects)
+      .values({
+        id: projectId,
+        name: "Comment Heading Project",
+        spec: "Spec",
+      })
+      .run();
+
+    db.insert(epics)
+      .values({
+        id: epicId,
+        projectId,
+        title: "Epic with Review Comment",
+        status: "in_progress",
+      })
+      .run();
+
+    const reviewReportBody =
+      "## Code Review Checklist\n\n- [x] Item 1\n- [x] Item 2\n\n```typescript\nconst x = 1;\n```\n";
+
+    db.insert(ticketComments)
+      .values({
+        id: `comm-${nanoid(6)}`,
+        epicId,
+        author: "agent",
+        content: reviewReportBody,
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    const req = new NextRequest(
+      `http://localhost/api/projects/${projectId}/prompt-estimate?epicId=${epicId}&dispatchType=build`
+    );
+
+    const res = await GET(req, {
+      params: Promise.resolve({ projectId }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.breakdown.comments).toBeGreaterThan(0);
+    // Findings should only contain findings from the build prompt (empty if no open reviewComments table findings and not bug)
+    expect(json.data.breakdown.findings).toBe(0);
   });
 });

@@ -241,7 +241,7 @@ function withProjectMemory<T extends PromptProject>(project: T): T {
   return { ...project, memory: getProjectMemoryContent(project.id) };
 }
 
-function userStoriesSection(
+export function userStoriesSection(
   userStories: PromptUserStory[],
   options: { heading?: string; checkmark?: boolean } = {},
 ): string {

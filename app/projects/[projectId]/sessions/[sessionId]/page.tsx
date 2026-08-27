@@ -394,6 +394,8 @@ export default function SessionDetailPage() {
                     if (b.comments) parts.push(`Comments ${formatTokens(b.comments)}`);
                     if (b.findings) parts.push(`Findings ${formatTokens(b.findings)}`);
                     if (b.documents) parts.push(`Docs ${formatTokens(b.documents)}`);
+                    if (b.system) parts.push(`System ${formatTokens(b.system)}`);
+                    if (b.other) parts.push(`Other ${formatTokens(b.other)}`);
                     return parts.length > 0 ? ` (${parts.join(" · ")})` : "";
                   } catch {
                     return "";

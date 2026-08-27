@@ -26,6 +26,7 @@ const mockEstimateData = {
     system: 400,
     other: 600,
   },
+  sessionsCount: 1,
   budget: 50000,
   budgetExceeded: false,
   largestSection: {
@@ -33,6 +34,29 @@ const mockEstimateData = {
     label: "Project Specification",
     tokens: 4500,
     percentage: 31,
+  },
+};
+
+const mockMultiSessionEstimateData = {
+  total: 32000,
+  breakdown: {
+    spec: 9000,
+    memory: 2400,
+    ticket: 5000,
+    comments: 6000,
+    findings: 4600,
+    documents: 3000,
+    system: 800,
+    other: 1200,
+  },
+  sessionsCount: 2,
+  budget: 50000,
+  budgetExceeded: false,
+  largestSection: {
+    key: "spec",
+    label: "Project Specification",
+    tokens: 9000,
+    percentage: 28,
   },
 };
 
@@ -48,6 +72,7 @@ const mockExceededEstimateData = {
     system: 500,
     other: 500,
   },
+  sessionsCount: 1,
   budget: 30000,
   budgetExceeded: true,
   largestSection: {
@@ -61,6 +86,19 @@ const mockExceededEstimateData = {
 beforeEach(() => {
   global.fetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
     const body = opts?.body ? JSON.parse(opts.body as string) : {};
+    if (body.epicId === "epic-error") {
+      return Promise.resolve({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ error: "Internal error" }),
+      });
+    }
+    if (body.epicId === "epic-multi") {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ data: mockMultiSessionEstimateData }),
+      });
+    }
     if (body.epicId === "epic-exceeded") {
       return Promise.resolve({
         ok: true,
@@ -79,7 +117,7 @@ afterEach(() => {
 });
 
 describe("PromptTokenEstimateView", () => {
-  it("renders total tokens and context section breakdown", async () => {
+  it("renders total tokens and context section breakdown with all 8 categories", async () => {
     render(
       <PromptTokenEstimateView
         projectId="proj-1"
@@ -108,6 +146,44 @@ describe("PromptTokenEstimateView", () => {
     expect(breakdown).toHaveTextContent("1.8k");
     expect(breakdown).toHaveTextContent("Documents:");
     expect(breakdown).toHaveTextContent("1.5k");
+    expect(breakdown).toHaveTextContent("System:");
+    expect(breakdown).toHaveTextContent("400");
+    expect(breakdown).toHaveTextContent("Other / Instr:");
+    expect(breakdown).toHaveTextContent("600");
+  });
+
+  it("renders multi-session summary when dispatching multiple review types", async () => {
+    render(
+      <PromptTokenEstimateView
+        projectId="proj-1"
+        epicId="epic-multi"
+        dispatchType="review"
+        reviewTypes={["security", "code_review"]}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("prompt-token-estimate")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("prompt-estimate-total")).toHaveTextContent("~32.0k tokens");
+    expect(screen.getByTestId("prompt-estimate-total")).toHaveTextContent("(2 sessions)");
+  });
+
+  it("renders muted notice when estimate request fails", async () => {
+    render(
+      <PromptTokenEstimateView
+        projectId="proj-1"
+        epicId="epic-error"
+        dispatchType="build"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("prompt-estimate-unavailable")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Prompt estimate unavailable")).toBeInTheDocument();
   });
 
   it("renders non-blocking warning when budget is exceeded and names the heaviest section", async () => {
