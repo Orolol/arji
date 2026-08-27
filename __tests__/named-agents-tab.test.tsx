@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 const agentConfig = vi.hoisted(() => ({
@@ -67,8 +67,15 @@ describe("minimal named-agent form", () => {
     expect(screen.getByLabelText("Name", { selector: "#new-agent-name" })).toBeTruthy();
     expect(screen.getByLabelText("CLI", { selector: "#new-agent-cli" })).toBeTruthy();
     expect(screen.queryByLabelText("Model", { selector: "#new-agent-model" })).toBeNull();
-    expect(screen.queryByText(/persona/i)).toBeNull();
-    expect(screen.queryByText(/CLI parameters/i)).toBeNull();
+
+    // Scoped to the creation card: the row EDITOR below it legitimately
+    // carries a persona field and a CLI-options section, and an unscoped
+    // query would read those as creation fields.
+    const createCard = screen
+      .getByLabelText("Name", { selector: "#new-agent-name" })
+      .closest("div.rounded-lg") as HTMLElement;
+    expect(within(createCard).queryByText(/persona/i)).toBeNull();
+    expect(within(createCard).queryByText(/CLI options/i)).toBeNull();
   });
 
   it("shows whether the selected CLI is usable before an agent is created", () => {

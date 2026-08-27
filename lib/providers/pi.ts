@@ -33,6 +33,7 @@
  */
 
 import { BaseCliProvider } from "./base-provider";
+import { buildProviderOptionArgs } from "./options-registry";
 import type {
   BaseProviderChunkCallbacks,
   ProviderExitInfo,
@@ -237,7 +238,8 @@ export abstract class PiProvider extends BaseCliProvider {
     options: ProviderSpawnOptions,
     spawnContext?: ProviderSpawnContext,
   ): string[] {
-    const { prompt, mode, model, cliSessionId, resumeSession } = options;
+    const { prompt, mode, model, cliSessionId, resumeSession, cliOptions } =
+      options;
     const promptFilePath = (spawnContext as PiSpawnContext | undefined)
       ?.promptFilePath;
 
@@ -264,6 +266,15 @@ export abstract class PiProvider extends BaseCliProvider {
     if (model) {
       args.push("--model", model);
     }
+
+    // Named-agent options. The registry is keyed by provider type, so the
+    // pi-family base picks up whatever the concrete subclass declares — omp
+    // today, and nothing at all for a subclass with no registry entry.
+    args.push(
+      ...buildProviderOptionArgs(this.type, cliOptions, {
+        resume: !!(cliSessionId && resumeSession),
+      }),
+    );
 
     if (promptFilePath) {
       args.push("-p", `@${promptFilePath}`, PI_PROMPT_FILE_FRAMING);

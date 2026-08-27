@@ -302,6 +302,13 @@
       "when": 1786714000000,
       "tag": "0043_review_comment_session_index",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1786714100000,
+      "tag": "0044_named_agent_options",
+      "breakpoints": true
     }
   ]
 }

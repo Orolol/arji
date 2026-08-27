@@ -5,6 +5,8 @@
  * routes, review routes, and the process manager can work with any backend.
  */
 
+import type { NamedAgentCliOptions } from "./options-registry";
+
 /**
  * Every provider here MUST support per-spawn injection of the Arij MCP tool
  * channel (providerSupportsMcp in lib/claude/mcp-injection.ts) — the channel
@@ -93,6 +95,14 @@ export interface ProviderSpawnOptions {
   resumeSession?: boolean;
   /** Arij MCP tool-channel injection (claude-code, codex, oh-my-pi). */
   mcp?: McpSpawnConfig;
+  /**
+   * Per-CLI options resolved from the named agent that owns this session,
+   * already validated against THIS provider's registry entry (see
+   * lib/providers/options-registry.ts). Providers translate them to argv;
+   * absent or empty means every option is at the CLI's default and the argv
+   * is exactly what it was before the registry existed.
+   */
+  cliOptions?: NamedAgentCliOptions;
 }
 
 export interface ProviderResult {

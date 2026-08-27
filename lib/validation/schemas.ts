@@ -198,6 +198,11 @@ export const createNamedAgentSchema = z.object({
     .refine((v) => isAgentProvider(v), "invalid provider"),
   // Optional: an empty/absent model means "use the CLI's default model".
   model: z.string().optional(),
+  // Per-CLI options. Shape only here — which keys and values a given CLI
+  // accepts is the registry's business (lib/providers/options-registry.ts),
+  // and it produces the user-facing message.
+  options: z.record(z.string(), z.unknown()).optional(),
+  personaPrompt: z.string().nullable().optional(),
   escalatesTo: z.string().nullable().optional(),
 });
 
@@ -211,6 +216,8 @@ export const updateNamedAgentSchema = z.object({
     .refine((v) => isAgentProvider(v), "invalid provider")
     .optional(),
   model: z.string().optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
+  personaPrompt: z.string().nullable().optional(),
   escalatesTo: z.string().nullable().optional(),
 });
 

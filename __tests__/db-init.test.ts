@@ -267,6 +267,9 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
+      conn.exec("ALTER TABLE named_agents DROP COLUMN options");
+      conn.exec("ALTER TABLE named_agents DROP COLUMN persona_prompt");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
     });
 
     withDb(file, (conn) => {
@@ -288,6 +291,9 @@ describe("initDb", () => {
       expect(columnNames(conn, "chat_attachments")).toContain("epic_id");
       expect(columnNames(conn, "notifications")).toContain("message");
       expect(columnNames(conn, "agent_sessions")).toContain("review_verdict");
+      expect(columnNames(conn, "named_agents")).toContain("options");
+      expect(columnNames(conn, "named_agents")).toContain("persona_prompt");
+      expect(columnNames(conn, "agent_sessions")).toContain("cli_options");
       expect(appliedMigrationTimestamps(conn)).toHaveLength(TOTAL_MIGRATIONS);
       expectFullSchema(conn);
     });
@@ -356,6 +362,9 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
+      conn.exec("ALTER TABLE named_agents DROP COLUMN options");
+      conn.exec("ALTER TABLE named_agents DROP COLUMN persona_prompt");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
       conn.exec("DROP TABLE ticket_read_cursors");
     });
 
@@ -375,6 +384,9 @@ describe("initDb", () => {
       expect(columnNames(conn, "projects")).toContain("git_remote_url");
       expect(columnNames(conn, "projects")).toContain("default_branch");
       expect(columnNames(conn, "agent_sessions")).toContain("review_verdict");
+      expect(columnNames(conn, "named_agents")).toContain("options");
+      expect(columnNames(conn, "named_agents")).toContain("persona_prompt");
+      expect(columnNames(conn, "agent_sessions")).toContain("cli_options");
       expect(tableNames(conn)).toContain("ticket_read_cursors");
       expect(appliedMigrationTimestamps(conn)).toHaveLength(TOTAL_MIGRATIONS);
       expectFullSchema(conn);
@@ -478,6 +490,9 @@ describe("migration journal", () => {
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
+      conn.exec("ALTER TABLE named_agents DROP COLUMN options");
+      conn.exec("ALTER TABLE named_agents DROP COLUMN persona_prompt");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
 
       expect(() => initDb(conn)).not.toThrow();
 

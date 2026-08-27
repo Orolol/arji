@@ -135,6 +135,22 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
     table: "agent_sessions",
     column: "mcp_channel",
   },
+  // 0044_named_agent_options (single transactional migration: the three
+  // columns are always present or absent together on real databases).
+  // Renumbered off 0041's slot for the same reason as 0042 above: main's
+  // tail (0041..0043) had already claimed every timestamp up to
+  // 1786714000000, so this one moved past all of them.
+  { folderMillis: 1786714100000, table: "named_agents", column: "options" },
+  {
+    folderMillis: 1786714100000,
+    table: "named_agents",
+    column: "persona_prompt",
+  },
+  {
+    folderMillis: 1786714100000,
+    table: "agent_sessions",
+    column: "cli_options",
+  },
 ];
 
 /** Default on-disk location of the drizzle migration files. */

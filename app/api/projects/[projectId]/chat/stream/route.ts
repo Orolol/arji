@@ -961,6 +961,10 @@ export async function POST(
       cliSessionId,
       resumeSession,
       mcp: cliToolChannel?.mcp,
+      // A chat turn has no agent_sessions row, so it never reaches
+      // processManager.start() — the agent's CLI options are carried here,
+      // the same way cliToolChannel carries the MCP channel.
+      cliOptions: resolvedAgent.cliOptions,
     });
 
     activityRegistry.register({
@@ -1084,6 +1088,7 @@ export async function POST(
             cliSessionId: resultSessionId,
             resumeSession: true,
             mcp: cliToolChannel?.mcp,
+            cliOptions: resolvedAgent.cliOptions,
           });
           currentKill = attempt.kill;
           let result = await attempt.promise;
@@ -1098,6 +1103,7 @@ export async function POST(
               logIdentifier: conversationId || `chat-${projectId}`,
               cliSessionId: resultSessionId,
               mcp: cliToolChannel?.mcp,
+              cliOptions: resolvedAgent.cliOptions,
             });
             currentKill = attempt.kill;
             result = await attempt.promise;
@@ -1151,6 +1157,7 @@ export async function POST(
     logIdentifier: conversationId || `chat-${projectId}`,
     cliSessionId,
     mcp: cliToolChannel?.mcp,
+    cliOptions: resolvedAgent.cliOptions,
   });
 
   activityRegistry.register({
