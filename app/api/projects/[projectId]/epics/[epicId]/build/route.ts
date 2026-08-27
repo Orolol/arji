@@ -23,11 +23,7 @@ import {
   resolveWorktreeHead,
 } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
-import {
-  buildBuildPrompt,
-  buildCiFixPrompt,
-} from "@/lib/claude/prompt-builder";
-import { isVisualProofEnabled } from "@/lib/claude/visual-proof";
+import { assembleEpicBuildPrompt } from "@/lib/tokens";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import {
   classifySessionOutcome,
@@ -198,49 +194,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     .orderBy(userStories.position)
     .all();
 
-  // Load epic comments
-  const promptComments = loadPromptComments({ epicId });
-
-  // Load open review comments (code review feedback). A CI autofix is a
-  // narrowly-scoped session — its prompt ends with "fix only the code or
-  // tests responsible for the CI failures" and "make the smallest correct
-  // change", so open findings must not override that as a trailing,
-  // highest-recency "address each one" block.
-  const openReviewComments = ciAutofix
-    ? []
-    : db
-        .select()
-        .from(reviewComments)
-        .where(
-          and(
-            eq(reviewComments.epicId, epicId),
-            eq(reviewComments.status, "open"),
-          ),
-        )
-        .orderBy(reviewComments.createdAt)
-        .all();
-
-  // Format review comments as additional prompt context
-  let reviewContext = "";
-  if (openReviewComments.length > 0) {
-    const byFile = new Map<string, typeof openReviewComments>();
-    for (const rc of openReviewComments) {
-      const existing = byFile.get(rc.filePath) || [];
-      existing.push(rc);
-      byFile.set(rc.filePath, existing);
-    }
-    const parts = [
-      "## Code Review Feedback\n\nThe following review comments were left on your previous changes. Address each one:\n",
-    ];
-    for (const [filePath, fileComments] of byFile) {
-      parts.push(`### ${filePath}`);
-      for (const rc of fileComments) {
-        parts.push(`- **Line ${rc.lineNumber}**: ${rc.body}`);
-      }
-      parts.push("");
-    }
-    reviewContext = parts.join("\n");
-  }
+  // Prepare worktree
 
   const buildSystemPrompt = await resolveAgentPrompt("build", projectId);
 
@@ -253,49 +207,24 @@ export async function POST(request: NextRequest, { params }: Params) {
         defaultBranch: project.defaultBranch,
       });
 
-  // Build prompt — append review context if present
-  let prompt = ciAutofix
-    ? buildCiFixPrompt(project, epic, ciAutofix, buildSystemPrompt)
-    : buildBuildPrompt(
-        project,
-        [],
-        epic,
-        us,
-        buildSystemPrompt,
-        promptComments,
-        { visualProofEnabled: isVisualProofEnabled() },
-      );
+  const worktreeHead = ciAutofix && ciAutofixBranchName
+    ? await resolveWorktreeHead(worktreePath)
+    : null;
 
-  // Arij never auto-pushes, so the local branch is routinely ahead of the
-  // PR head whose CI logs the agent received. Say so explicitly instead of
-  // letting the agent discover — or revert — unseen commits mid-fix.
-  if (ciAutofix && ciAutofixBranchName) {
-    const worktreeHead = await resolveWorktreeHead(worktreePath);
-    if (worktreeHead && worktreeHead !== ciAutofix.headSha) {
-      prompt +=
-        "\n\n## Important: this branch is ahead of the PR head\n\n" +
-        `The worktree tip (${worktreeHead.slice(0, 12)}) differs from the ` +
-        `CI-failing PR head (${ciAutofix.headSha.slice(0, 12)}). The extra ` +
-        "local commits are intentional; fix the CI failure on top of them " +
-        "and do not revert or rewrite them.\n";
-    }
-  }
-
-  if (reviewContext) {
-    prompt = prompt + "\n\n" + reviewContext;
-  }
-
-  // Only user-written text can reference an Arij document; an agent comment
-  // mentioning a codebase file must neither resolve nor block the build.
-  const mentionEnrichment = enrichPromptWithDocumentMentions({
+  const assembled = await assembleEpicBuildPrompt({
     projectId,
-    prompt,
-    textSources: [body.comment, ...userAuthoredTexts(promptComments)],
+    epicId,
+    project,
+    epic,
+    comment: body.comment,
+    ciAutofix,
+    worktreeHead,
   });
-  const enrichedPrompt = mentionEnrichment.prompt;
+  const enrichedPrompt = assembled.prompt;
+
   createUnresolvedMentionsNotification({
     projectId,
-    missing: mentionEnrichment.missing,
+    missing: assembled.missingDocuments ?? [],
     agentType: "build",
     targetUrl: buildEpicTargetUrl(projectId, epicId),
   });
@@ -398,6 +327,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     mode: "code",
     provider: resolvedAgent.provider,
     prompt: enrichedPrompt,
+    estimatedPromptTokens: assembled.tokens.total,
+    estimatedPromptBreakdown: JSON.stringify(assembled.tokens.breakdown),
     logsPath,
     branchName,
     worktreePath,

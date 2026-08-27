@@ -67,7 +67,6 @@ export function PromptTokenEstimateView({
           dispatchType,
           reviewTypes: reviewTypesKey ? reviewTypesKey.split(",") : undefined,
           comment,
-          namedAgentId,
         }),
       })
         .then((res) => {
@@ -105,7 +104,6 @@ export function PromptTokenEstimateView({
     dispatchType,
     reviewTypesKey,
     comment,
-    namedAgentId,
     enabled,
   ]);
 
@@ -139,7 +137,7 @@ export function PromptTokenEstimateView({
     return null;
   }
 
-  const { total, breakdown, budget, budgetExceeded, largestSection, sessionsCount = 1 } = estimate;
+  const { total, breakdown, budget, budgetExceeded, largestSection, sessionsCount = 1, perSessionEstimates } = estimate;
 
   return (
     <div
@@ -169,7 +167,33 @@ export function PromptTokenEstimateView({
           </span>
         )}
       </div>
-
+      {sessionsCount > 1 && perSessionEstimates && perSessionEstimates.length > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px] text-muted-foreground"
+          data-testid="prompt-estimate-per-session"
+        >
+          <span className="font-medium text-foreground">Per session:</span>
+          {perSessionEstimates.map((s) => (
+            <span
+              key={s.reviewType}
+              className="inline-flex items-center gap-1 rounded bg-background/50 px-1.5 py-0.5 border border-border/40 font-mono"
+            >
+              <span>
+                {s.reviewType === "security"
+                  ? "Security"
+                  : s.reviewType === "code_review"
+                    ? "Code Review"
+                    : s.reviewType === "compliance"
+                      ? "Compliance"
+                      : s.reviewType === "feature_review"
+                        ? "Feature Review"
+                        : s.reviewType.replace("_", " ")}:
+              </span>
+              <span>~{formatTokens(s.tokens)}</span>
+            </span>
+          ))}
+        </div>
+      )}
       {/* Breakdown by context section */}
       <div
         className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1 text-[11px]"

@@ -21,8 +21,10 @@ import type {
   PromptEpic,
   PromptMessage,
   PromptProject,
+  PromptUserStory,
+  PromptComment,
+  ReviewType,
 } from "./prompt-builder";
-
 // ---------------------------------------------------------------------------
 // Primitive helpers
 // ---------------------------------------------------------------------------
@@ -305,3 +307,277 @@ export function arijToolsSection(
     base + buildExtra + reviewExtra + gradingExtra + refinementExtra,
   );
 }
+
+export function userStoriesSection(
+  userStories: PromptUserStory[],
+  options: { heading?: string; checkmark?: boolean } = {},
+): string {
+  if (userStories.length === 0) return "";
+
+  const { heading = "User Stories", checkmark = true } = options;
+  const parts: string[] = [];
+
+  parts.push(`### ${heading}\n`);
+
+  const storyLines = userStories.map((us) => {
+    const lines: string[] = [];
+    const prefix = checkmark ? "- [ ] " : "- ";
+    lines.push(`${prefix}**${us.title}**`);
+
+    if (us.description) {
+      lines.push(`  ${us.description.trim()}`);
+    }
+
+    if (us.acceptanceCriteria) {
+      lines.push(`  **Acceptance criteria:**`);
+      const criteria = us.acceptanceCriteria
+        .trim()
+        .split("\n")
+        .map((line) => `  ${line}`)
+        .join("\n");
+      lines.push(criteria);
+    }
+
+    return lines.join("\n");
+  });
+
+  parts.push(storyLines.join("\n\n") + "\n");
+  return parts.join("");
+}
+
+export const PROMPT_COMMENT_MAX_CHARS = 4_000;
+const PROMPT_COMMENT_HEAD_CHARS = 3_200;
+const PROMPT_COMMENT_TAIL_CHARS = 600;
+export const PROMPT_AGENT_COMMENTS_KEPT = 5;
+
+function isReviewComment(comment: PromptComment): boolean {
+  return (
+    comment.author !== "user" &&
+    typeof comment.agentType === "string" &&
+    comment.agentType.startsWith("review_")
+  );
+}
+
+function capPromptCommentBody(content: string): string {
+  if (content.length <= PROMPT_COMMENT_MAX_CHARS) return content;
+  const omitted =
+    content.length - PROMPT_COMMENT_HEAD_CHARS - PROMPT_COMMENT_TAIL_CHARS;
+  return (
+    `${content.slice(0, PROMPT_COMMENT_HEAD_CHARS)}\n\n` +
+    `_[… ${omitted.toLocaleString("en-US")} characters of this comment omitted …]_\n\n` +
+    `${content.slice(-PROMPT_COMMENT_TAIL_CHARS)}`
+  );
+}
+
+export function commentHistorySection(comments?: PromptComment[]): string {
+  if (!comments || comments.length === 0) return "";
+
+  const lastReviewIndex = comments.reduce(
+    (last, comment, index) => (isReviewComment(comment) ? index : last),
+    -1,
+  );
+  const elidedReviews = comments.filter(
+    (comment, index) => isReviewComment(comment) && index !== lastReviewIndex,
+  ).length;
+
+  const agentIndexes = comments
+    .map((comment, index) => ({ comment, index }))
+    .filter(
+      ({ comment }) => comment.author !== "user" && !isReviewComment(comment),
+    )
+    .map(({ index }) => index);
+  const keptAgentIndexes = new Set(
+    agentIndexes.slice(-PROMPT_AGENT_COMMENTS_KEPT),
+  );
+  const elidedAgents = agentIndexes.length - keptAgentIndexes.size;
+
+  const rendered: string[] = [];
+  let reviewNoticeEmitted = false;
+  let agentNoticeEmitted = false;
+  comments.forEach((comment, index) => {
+    if (isReviewComment(comment) && index !== lastReviewIndex) {
+      if (!reviewNoticeEmitted) {
+        reviewNoticeEmitted = true;
+        rendered.push(
+          `_[${elidedReviews} earlier review pass${elidedReviews > 1 ? "es" : ""} omitted — superseded by the most recent review below.]_`,
+        );
+      }
+      return;
+    }
+    if (
+      comment.author !== "user" &&
+      !isReviewComment(comment) &&
+      !keptAgentIndexes.has(index)
+    ) {
+      if (!agentNoticeEmitted) {
+        agentNoticeEmitted = true;
+        rendered.push(
+          `_[${elidedAgents} earlier agent update${elidedAgents > 1 ? "s" : ""} omitted — the most recent updates below carry the current state.]_`,
+        );
+      }
+      return;
+    }
+    const prefix = comment.author === "user" ? "**User:**" : "**Agent:**";
+    rendered.push(
+      `${prefix}\n${neutralizeControlMarkup(capPromptCommentBody(comment.content.trim()))}`,
+    );
+  });
+
+  return `## Comment History\n\n${rendered.join("\n\n")}\n`;
+}
+
+export const BUG_RED_GREEN_SECTION = `## Bug-Fix Rule — mandatory red → green regression test
+
+This ticket is a **bug fix**. The pipeline runs a mechanical regression check on your branch, so follow this exact order:
+
+1. **Write the failing test first.** Add (or modify) a test that reproduces the reported bug and run it — it MUST fail against the unfixed code.
+2. **Then apply the fix.** Make the minimal change that makes the same test pass.
+3. **Commit the test file(s) together with the fix.** The check inspects the files added/modified on the branch and selects them with the project's configured test-file patterns — follow this repository's existing test layout and naming. A diff with no test file fails (\`no_test_in_diff\`), a test that already passes without the fix fails (\`test_passes_on_base\`), and a test still failing on the branch fails (\`test_fails_on_branch\`). Any of these sends the ticket back to a fix cycle.`;
+
+export const VISUAL_PROOF_SECTION = `## Optional visual proof
+
+If this project has a UI, a browser is available, and the \`attach_artifact\` tool is available, run the application, exercise the functionality you implemented, capture 1 to 3 screenshots, and attach each screenshot with \`attach_artifact\` using a clear caption.
+
+Focus on the user flow described in this ticket. Capturing visual proof is non-blocking: proceed with review if UI testing is not feasible.`;
+
+export const REVIEW_CHECKLISTS: Record<ReviewType, string> = {
+  security: `## Security Audit Checklist
+
+Review the code changes for this ticket against the following security criteria:
+
+1. **OWASP Top 10**: Check for injection flaws (SQL, XSS, command injection), broken authentication, sensitive data exposure, XML external entities, broken access control, security misconfiguration, insecure deserialization, using components with known vulnerabilities, insufficient logging.
+2. **Input Validation**: All user inputs are validated and sanitized. No raw user input reaches SQL queries, shell commands, or HTML rendering.
+3. **Authentication & Authorization**: Auth checks are present where required. No privilege escalation paths. Session handling is secure.
+4. **Secrets Exposure**: No hardcoded API keys, passwords, tokens, or credentials in code. Secrets loaded from environment variables or secure config.
+5. **Data Protection**: Sensitive data encrypted at rest and in transit. No PII in logs. Proper error messages that don't leak internal details.
+6. **Dependencies**: No known vulnerable dependencies introduced. Lockfile is consistent.
+
+For each finding, specify:
+- **Severity**: Critical / High / Medium / Low / Info
+- **Location**: File path and line number
+- **Description**: What the issue is
+- **Recommendation**: How to fix it`,
+
+  code_review: `## Code Review Checklist
+
+Review the code changes for this ticket against the following quality criteria:
+
+1. **Readability**: Code is clear, well-structured, and easy to understand. Variable/function names are descriptive. Complex logic is commented.
+2. **DRY Principle**: No significant code duplication. Shared logic is properly abstracted.
+3. **Error Handling**: All error paths are handled gracefully. No unhandled promise rejections. Proper error messages for users.
+4. **Performance**: No obvious performance issues (N+1 queries, unnecessary re-renders, missing indexes, large payloads). Efficient algorithms for the data sizes involved.
+5. **Naming Conventions**: Consistent naming (camelCase for JS/TS, proper component naming for React). File names match conventions.
+6. **Type Safety**: Full TypeScript types, no \`any\` types. Proper interfaces for data structures.
+7. **Testing**: Adequate test coverage. Edge cases considered. Tests are maintainable and descriptive.
+8. **API Design**: Consistent REST conventions. Proper HTTP status codes. Clear request/response shapes.
+
+For each finding, specify:
+- **Severity**: Critical / Major / Minor / Suggestion
+- **Location**: File path and line number
+- **Description**: What the issue is
+- **Recommendation**: How to improve it`,
+
+  compliance: `## Compliance & Accessibility Checklist
+
+Review the code changes for this ticket against the following standards:
+
+1. **WCAG Accessibility (Level AA)**:
+   - Semantic HTML elements used correctly (headings, landmarks, lists)
+   - All interactive elements are keyboard-accessible
+   - Proper ARIA labels and roles where needed
+   - Color contrast meets 4.5:1 ratio for text
+   - Focus indicators visible
+   - Form inputs have associated labels
+   - Images have alt text
+   - Screen reader compatibility
+2. **Internationalization (i18n) Readiness**:
+   - No hardcoded user-facing strings (or flagged for future extraction)
+   - Date/number formatting considers locale
+   - RTL layout support not broken
+   - Text containers can accommodate longer translations
+3. **License Compliance**:
+   - New dependencies use compatible licenses (MIT, Apache 2.0, BSD)
+   - No GPL-licensed packages in a proprietary codebase (unless intended)
+   - Attribution requirements met
+
+For each finding, specify:
+- **Severity**: Critical / Major / Minor / Suggestion
+- **Location**: File path and line number
+- **Description**: What the issue is
+- **Recommendation**: How to fix it`,
+
+  feature_review: `## Feature Completeness Checklist
+
+Verify that the implementation fully satisfies the ticket's acceptance criteria and delivers a complete, working feature. Use ALL available tools — browser, shell commands, test runners, etc. — to validate each point.
+
+1. **Acceptance Criteria Verification**:
+   - Go through each acceptance criterion one by one
+   - For UI features: launch the app and use the browser to verify the feature works as described
+   - For API features: make actual HTTP requests to verify endpoints behave correctly
+   - For CLI/backend features: run the relevant commands and verify output
+   - Document PASS/FAIL for each criterion with evidence (screenshots, command output, etc.)
+
+2. **Functional Completeness**:
+   - All user-facing flows described in the ticket are implemented end-to-end
+   - Edge cases mentioned in the description or acceptance criteria are handled
+   - No placeholder or TODO code left for critical paths
+   - Error states are handled and display meaningful feedback to the user
+
+3. **Integration**:
+   - The feature integrates correctly with existing functionality (no regressions in adjacent features)
+   - Data flows correctly between frontend and backend
+   - Navigation and routing work as expected
+
+4. **Tests**:
+   - Tests exist that cover the acceptance criteria
+   - Run the test suite and verify tests pass
+   - Report any failing tests with details
+
+For each criterion, specify:
+- **Status**: PASS / FAIL / PARTIAL
+- **Evidence**: What you did to verify (command run, URL visited, screenshot taken)
+- **Details**: Description of what works or what's missing`,
+};
+
+export const BUG_REVIEW_CHECKLIST = `## Bug Fix Verification Checklist
+
+Verify that the bug fix correctly addresses the reported issue without introducing regressions. Use ALL available tools — browser, shell commands, test runners, etc. — to validate each point.
+
+1. **Bug Fix Verification**:
+   - Verify the fix directly addresses the root cause reported in the ticket
+   - Actively test the bug scenario using the browser, shell commands, or test runners
+   - Confirm the error or unexpected behavior no longer occurs
+   - Document PASS/FAIL for the bug fix with concrete evidence (command output, screenshots)
+
+2. **Regression Check**:
+   - Verify adjacent features and related workflows still function correctly
+   - Check that no new error states or broken flows were introduced
+   - Run existing test suites to confirm no regressions
+
+3. **Code Quality**:
+   - Minimal, focused change that addresses the bug without unnecessary refactoring
+   - Proper error handling and edge cases considered
+   - No temporary debug code or commented-out blocks left behind
+
+4. **Test Coverage**:
+   - A regression test exists that reproduces the bug and verifies the fix
+   - Run the test and confirm it passes
+
+For each criterion, specify:
+- **Status**: PASS / FAIL / PARTIAL
+- **Evidence**: What you did to verify (command run, URL visited, screenshot taken)
+- **Details**: Description of what works or what's missing`;
+
+export const REVIEW_BOUNDARY_SECTION = `## Review Boundary — No Code Modifications
+
+This session deliberately runs with full tool access — shell, browser, test
+runners, and MCP tools — so nothing blocks your investigation. In exchange,
+the no-modification rule is yours to uphold, not the harness's:
+
+- Do not edit, create, or delete repository files. Do not stage, commit,
+  amend, revert, or push. Leave branches and the git state exactly as found.
+- Running the app, executing tests, and building are all allowed, including
+  when they write caches or generated artifacts; leave any such incidental
+  output uncommitted and set it aside in your report.
+- When you spot a concrete fix, describe it in a finding — never apply it
+  yourself.`;

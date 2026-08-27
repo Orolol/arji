@@ -50,6 +50,36 @@ const mockMultiSessionEstimateData = {
     other: 1200,
   },
   sessionsCount: 2,
+  perSessionEstimates: [
+    {
+      reviewType: "security",
+      tokens: 16000,
+      breakdown: {
+        spec: 4500,
+        memory: 1200,
+        ticket: 2500,
+        comments: 3000,
+        findings: 2300,
+        documents: 1500,
+        system: 400,
+        other: 600,
+      },
+    },
+    {
+      reviewType: "code_review",
+      tokens: 16000,
+      breakdown: {
+        spec: 4500,
+        memory: 1200,
+        ticket: 2500,
+        comments: 3000,
+        findings: 2300,
+        documents: 1500,
+        system: 400,
+        other: 600,
+      },
+    },
+  ],
   budget: 50000,
   budgetExceeded: false,
   largestSection: {
@@ -168,6 +198,10 @@ describe("PromptTokenEstimateView", () => {
 
     expect(screen.getByTestId("prompt-estimate-total")).toHaveTextContent("~32.0k tokens");
     expect(screen.getByTestId("prompt-estimate-total")).toHaveTextContent("(2 sessions)");
+    const perSession = screen.getByTestId("prompt-estimate-per-session");
+    expect(perSession).toHaveTextContent("Per session:");
+    expect(perSession).toHaveTextContent("Security");
+    expect(perSession).toHaveTextContent("Code Review");
   });
 
   it("renders muted notice when estimate request fails", async () => {

@@ -9,6 +9,8 @@ import {
 import {
   assembleEpicBuildPrompt,
   assembleStoryReviewPrompt,
+  assembleEpicReviewPrompt,
+  assembleGradingPrompt,
 } from "@/lib/tokens/dispatch-prompt";
 import {
   parsePromptTokenBudget,
@@ -216,6 +218,85 @@ describe("Token Estimator", () => {
     expect(assembled.tokens.breakdown.memory).toBeGreaterThan(0);
     expect(assembled.tokens.breakdown.ticket).toBeGreaterThan(0);
     expect(assembled.tokens.breakdown.comments).toBeGreaterThan(0);
+
+    // Assert all 8 categories sum to total (within ceiling arithmetic tolerance)
+    const sum = Object.values(assembled.tokens.breakdown).reduce((a, b) => a + b, 0);
+    expect(Math.abs(sum - assembled.tokens.total)).toBeLessThanOrEqual(8);
+  });
+
+  it("shared assembleEpicReviewPrompt reconciles breakdown with total", async () => {
+    const projId = `proj-${nanoid(6)}`;
+    const epicId = `epic-${nanoid(6)}`;
+
+    db.insert(projects)
+      .values({
+        id: projId,
+        name: "Test Review Proj",
+        spec: "Spec",
+      })
+      .run();
+
+    db.insert(epics)
+      .values({
+        id: epicId,
+        projectId: projId,
+        title: "Test Review Epic",
+        status: "review",
+      })
+      .run();
+
+    const assembled = await assembleEpicReviewPrompt({
+      projectId: projId,
+      epicId,
+      project: { name: "Test Review Proj", spec: "Spec" },
+      epic: { title: "Test Review Epic" },
+      reviewType: "code_review",
+    });
+
+    expect(assembled.tokens.breakdown.findings).toBeGreaterThan(200); // 1,306 char checklist ~ 327 tokens
+    const sum = Object.values(assembled.tokens.breakdown).reduce((a, b) => a + b, 0);
+    expect(Math.abs(sum - assembled.tokens.total)).toBeLessThanOrEqual(8);
+  });
+
+  it("shared assembleGradingPrompt reconciles breakdown with total", async () => {
+    const projId = `proj-${nanoid(6)}`;
+    const epicId = `epic-${nanoid(6)}`;
+
+    db.insert(projects)
+      .values({
+        id: projId,
+        name: "Test Grading Proj",
+        spec: "Spec",
+      })
+      .run();
+
+    db.insert(epics)
+      .values({
+        id: epicId,
+        projectId: projId,
+        title: "Test Grading Epic",
+        status: "review",
+      })
+      .run();
+
+    const assembled = await assembleGradingPrompt({
+      projectId: projId,
+      epicId,
+      project: { name: "Test Grading Proj", spec: "Spec" },
+      epic: { title: "Test Grading Epic" },
+      stories: [
+        {
+          id: "s1",
+          title: "Story 1",
+          description: "Desc",
+          acceptanceCriteria: "Criterion 1\nCriterion 2",
+        },
+      ],
+    });
+
+    expect(assembled.tokens.breakdown.findings).toBeGreaterThan(0);
+    const sum = Object.values(assembled.tokens.breakdown).reduce((a, b) => a + b, 0);
+    expect(Math.abs(sum - assembled.tokens.total)).toBeLessThanOrEqual(8);
   });
 });
 

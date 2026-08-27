@@ -9,10 +9,8 @@ import { createId } from "@/lib/utils/nanoid";
 import { createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
-import {
-  buildReviewPrompt,
-  type ReviewType,
-} from "@/lib/claude/prompt-builder";
+import { assembleStoryReviewPrompt } from "@/lib/tokens";
+import { type ReviewType } from "@/lib/claude/prompt-builder";
 import {
   classifySessionOutcome,
   extractSessionUsage,
@@ -178,34 +176,22 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   // Dispatch one agent per review type
   for (const [idx, reviewType] of reviewTypes.entries()) {
-    const reviewSystemPrompt = await resolveAgentPrompt(
-      REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
-      projectId
-    );
-    const prompt = buildReviewPrompt(
+    const assembled = await assembleStoryReviewPrompt({
+      projectId,
+      epicId: epic.id,
+      storyId,
       project,
-      [],
       epic,
       story,
       reviewType,
-      reviewSystemPrompt
-    );
-
-    // Only user-written comments can reference an Arij document; an agent
-    // comment mentioning a codebase file must neither resolve nor block review.
-    const mentionEnrichment = enrichPromptWithDocumentMentions({
-      projectId,
-      prompt,
-      textSources: userAuthoredTexts(comments),
     });
-    const enrichedPrompt = mentionEnrichment.prompt;
+    const enrichedPrompt = assembled.prompt;
     createUnresolvedMentionsNotification({
       projectId,
-      missing: mentionEnrichment.missing,
+      missing: assembled.missingDocuments ?? [],
       agentType: REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
       targetUrl: buildEpicTargetUrl(projectId, epic.id),
     });
-
     const resolvedAgent = await resolveAgentForDispatch(
       REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
       projectId,
@@ -253,6 +239,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       mode: agentMode,
       provider: resolvedAgent.provider,
       prompt: enrichedPrompt,
+      estimatedPromptTokens: assembled.tokens.total,
+      estimatedPromptBreakdown: JSON.stringify(assembled.tokens.breakdown),
       logsPath,
       branchName,
       worktreePath,
