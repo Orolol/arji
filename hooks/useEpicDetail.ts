@@ -9,7 +9,7 @@ import {
 } from "@/lib/verify/verify-constants";
 import type { GradingReportData } from "@/lib/grading/report";
 import type { SessionArtifactSummary } from "@/lib/agent-sessions/artifact-view";
-
+import type { MergeReadiness } from "@/lib/kanban/merge-readiness";
 interface UserStory {
   id: string;
   epicId: string;
@@ -39,6 +39,7 @@ interface EpicDetail {
   updatedAt: string | null;
   /** Sum of this epic's sessions' reported cost; null when never reported. */
   sessionsCostUsd?: number | null;
+  mergeReadiness?: MergeReadiness | null;
 }
 
 export function useEpicDetail(projectId: string, epicId: string | null) {

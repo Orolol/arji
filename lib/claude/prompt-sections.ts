@@ -57,6 +57,27 @@ export function systemSection(systemPrompt: string | null | undefined): string {
   return `# System Instructions\n\n${systemPrompt.trim()}\n\n`;
 }
 
+/** Heading of the named agent's persona block. */
+export const PERSONA_HEADING = "Persona";
+
+/**
+ * The named agent's persona, prepended to the whole prompt by
+ * processManager.start() so that every dispatch path — manual, pipeline,
+ * night run, Full Auto — gets it from one place.
+ *
+ * NOT fenced as untrusted, unlike the spec or a ticket body: a persona is
+ * configuration the operator typed into the agent editor, and its entire
+ * purpose is to instruct the agent. It is also not a secret — it shows up
+ * verbatim in the stored prompt and in the session detail.
+ *
+ * Blank or whitespace-only yields "", which is what keeps an agent without a
+ * persona byte-identical to the pre-persona prompt.
+ */
+export function personaSection(persona: string | null | undefined): string {
+  if (!persona || persona.trim().length === 0) return "";
+  return `## ${PERSONA_HEADING}\n\n${persona.trim()}\n\n`;
+}
+
 /**
  * Formats reference documents separated by `---`.
  *

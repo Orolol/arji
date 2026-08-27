@@ -4,7 +4,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { EpicDetail } from "@/components/kanban/EpicDetail";
 import { EpicGitSection } from "@/components/kanban/epic-detail/EpicGitSection";
 import type { VerificationReport } from "@/lib/verify/verify-constants";
-
+import type { MergeReadiness } from "@/lib/kanban/merge-readiness";
 // Radix tooltips need a provider + hover to reveal their content; render the
 // content inline instead so the freshness tooltip copy is directly assertable.
 vi.mock("@/components/ui/tooltip", () => ({
@@ -86,8 +86,8 @@ const baseEpic = {
   linkedEpicId: null,
   images: null,
   readableId: null,
+  mergeReadiness: null as MergeReadiness | null,
 };
-
 const mockAddUserStory = vi.fn();
 
 function setupHooks(
@@ -268,12 +268,17 @@ describe("EpicDetail git section", () => {
     expect(mergeCalls).toHaveLength(1);
   });
 
-  it("shows the merge error and resolve-with-agent button on failure", async () => {
+  it("shows the merge error, conflicted files, and resolve-with-agent button on conflict", async () => {
     global.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).endsWith("/merge") && init?.method === "POST") {
         return Promise.resolve({
           ok: false,
-          json: async () => ({ error: "Merge conflict in main" }),
+          json: async () => ({
+            error: "Merge conflict in main",
+            reason: "conflict",
+            conflictFiles: ["src/a.ts", "src/b.ts"],
+            mergeFailed: true,
+          }),
         });
       }
       return Promise.resolve({
@@ -291,8 +296,88 @@ describe("EpicDetail git section", () => {
     expect(
       screen.getByRole("button", { name: "Resolve with Agent" }),
     ).toBeInTheDocument();
+    expect(screen.getByText(/Conflicted files:/)).toBeInTheDocument();
+    expect(screen.getByText(/src\/a\.ts, src\/b\.ts/)).toBeInTheDocument();
     expect(onMerged).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("shows the error but does not offer resolve-with-agent on generic 500 failure", async () => {
+    global.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/merge") && init?.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          json: async () => ({
+            error: "Git repository corrupted",
+            reason: "error",
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ data: [] }),
+      });
+    }) as unknown as typeof fetch;
+
+    renderSubject();
+    fireEvent.click(screen.getByRole("button", { name: "Merge into main" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Git repository corrupted")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole("button", { name: "Resolve with Agent" }),
+    ).toBeNull();
+  });
+
+  it("shows the error but does not offer resolve-with-agent on conflict-markers", async () => {
+    global.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/merge") && init?.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          json: async () => ({
+            error: "Unresolved conflict markers in branch",
+            reason: "conflict-markers",
+            mergeFailed: false,
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ data: [] }),
+      });
+    }) as unknown as typeof fetch;
+
+    renderSubject();
+    fireEvent.click(screen.getByRole("button", { name: "Merge into main" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Unresolved conflict markers in branch"),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole("button", { name: "Resolve with Agent" }),
+    ).toBeNull();
+  });
+  it("shows merge conflict error and resolve-with-agent button on initial load when merge conflict is persisted", () => {
+    setupHooks({
+      status: "review",
+      mergeReadiness: {
+        ready: false,
+        blocker: "merge_conflict",
+        openFindings: 0,
+      },
+    });
+
+    renderSubject();
+
+    expect(
+      screen.getByText("Merge conflict — resolve before merging"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Resolve with Agent" }),
+    ).toBeInTheDocument();
   });
 
   it("threads fetch freshness from useGitStatus into the git section", () => {

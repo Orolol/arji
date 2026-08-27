@@ -18,6 +18,8 @@ testSqlite.exec(`
     provider TEXT NOT NULL,
     model TEXT NOT NULL,
     readable_agent_name TEXT,
+    options TEXT NOT NULL DEFAULT '{}',
+    persona_prompt TEXT,
     escalates_to TEXT REFERENCES named_agents(id) ON DELETE SET NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
@@ -579,5 +581,73 @@ describe("resolveAgent", () => {
       model: "gpt-5",
       namedAgentId: explicitAgent!.id,
     });
+  });
+});
+
+describe("resolved agents carry their CLI options", () => {
+  /**
+   * Chat turns spawn without an agent_sessions row, so they never reach
+   * processManager.start() — the resolver is where they pick the options up.
+   */
+  it("populates cliOptions on an explicit choice", async () => {
+    const { resolveAgentByNamedId } = await import(
+      "@/lib/agent-config/agent-resolution"
+    );
+    const { createNamedAgent } = await import("@/lib/agent-config/named-agents");
+
+    const { data: agent } = await createNamedAgent({
+      name: "Deep thinker",
+      provider: "codex",
+      options: { reasoning_effort: "xhigh" },
+    });
+
+    expect(
+      resolveAgentByNamedId("chat", "project-123", agent!.id),
+    ).toMatchObject({
+      provider: "codex",
+      cliOptions: { reasoning_effort: "xhigh" },
+    });
+  });
+
+  it("populates cliOptions on a role assignment", async () => {
+    const { resolveAgent } = await import("@/lib/agent-config/agent-resolution");
+    const { createNamedAgent } = await import("@/lib/agent-config/named-agents");
+
+    const { data: agent } = await createNamedAgent({
+      name: "Assigned",
+      provider: "oh-my-pi",
+      options: { thinking: "max" },
+    });
+    testDb
+      .insert(schema.agentProviderDefaults)
+      .values({
+        id: "chat-global",
+        agentType: "chat",
+        provider: agent!.provider,
+        namedAgentId: agent!.id,
+        scope: "global",
+      })
+      .run();
+
+    expect(resolveAgent("chat")).toMatchObject({
+      provider: "oh-my-pi",
+      cliOptions: { thinking: "max" },
+    });
+  });
+
+  it("leaves cliOptions empty for an agent with none", async () => {
+    const { resolveAgentByNamedId } = await import(
+      "@/lib/agent-config/agent-resolution"
+    );
+    const { createNamedAgent } = await import("@/lib/agent-config/named-agents");
+
+    const { data: agent } = await createNamedAgent({
+      name: "Plain agent",
+      provider: "claude-code",
+    });
+
+    expect(
+      resolveAgentByNamedId("chat", undefined, agent!.id)?.cliOptions,
+    ).toEqual({});
   });
 });

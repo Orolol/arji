@@ -24,6 +24,10 @@ import {
 } from "@/components/shared/ArijActionsList";
 import { formatCostUsd, formatTokens } from "@/lib/utils/format-usage";
 import { cn } from "@/lib/utils";
+import {
+  describeProviderOptions,
+  parseStoredProviderOptions,
+} from "@/lib/providers/options-registry";
 
 interface SessionDetail {
   id: string;
@@ -45,6 +49,8 @@ interface SessionDetail {
   outcome?: string | null;
   namedAgentName?: string | null;
   model?: string | null;
+  /** JSON object of the per-CLI options in effect for this run. */
+  cliOptions?: string | null;
   cliCommand?: string | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
@@ -216,6 +222,10 @@ export default function SessionDetailPage() {
   }
 
   const isRunning = session.status === "running";
+  const sessionCliOptions = describeProviderOptions(
+    session.provider,
+    parseStoredProviderOptions(session.provider, session.cliOptions),
+  );
   const providerLabel =
     session.namedAgentName ||
     (session.provider
@@ -264,6 +274,18 @@ export default function SessionDetailPage() {
             {session.model}
           </span>
         )}
+        {/* Options actually in effect for this run, read from the session row
+            rather than from the named agent — the agent may have been edited
+            or deleted since. */}
+        {sessionCliOptions.map((option) => (
+          <Badge
+            key={option.key}
+            variant="outline"
+            className="rounded-full px-[8px] py-[1px] text-[11px] font-normal text-meta"
+          >
+            {option.label}: {option.value}
+          </Badge>
+        ))}
         {session.cliSessionId && (
           <Badge
             variant="outline"

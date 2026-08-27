@@ -241,6 +241,10 @@ export const agentSessions = sqliteTable("agent_sessions", {
   agentType: text("agent_type"),
   namedAgentName: text("named_agent_name"),
   model: text("model"),
+  // Per-CLI options in effect for this run, resolved from the named agent at
+  // spawn time. JSON object; NULL for legacy rows and for sessions dispatched
+  // without a named agent.
+  cliOptions: text("cli_options"),
   cliCommand: text("cli_command"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
@@ -462,6 +466,14 @@ export const namedAgents = sqliteTable(
     provider: text("provider").notNull(), // see PROVIDER_OPTIONS in lib/agent-config/constants.ts
     model: text("model").notNull(),
     readableAgentName: text("readable_agent_name"), // Ancient Greek name
+    // Per-CLI options, JSON object of NON-DEFAULT values only. Keys and
+    // accepted values are declared in lib/providers/options-registry.ts;
+    // '{}' means "every option at the CLI's own default".
+    options: text("options").notNull().default("{}"),
+    // Free-text persona injected as the first section of the agent's prompt.
+    // NULL/blank injects nothing; new agents are created with the product
+    // default (see createNamedAgent).
+    personaPrompt: text("persona_prompt"),
     escalatesTo: text("escalates_to").references(
       (): AnySQLiteColumn => namedAgents.id,
       { onDelete: "set null" }

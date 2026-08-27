@@ -1,4 +1,4 @@
-/** Migration coverage for agent_sessions estimated prompt tokens (0044). */
+/** Migration coverage for agent_sessions estimated prompt tokens (0045). */
 import Database from "better-sqlite3";
 import fs from "fs";
 import os from "os";
@@ -9,7 +9,7 @@ import { initDb } from "@/lib/db/init";
 import { agentSessions } from "@/lib/db/schema";
 
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "lib", "db", "migrations");
-const MIGRATION_TAG = "0044_agent_session_estimated_tokens";
+const MIGRATION_TAG = "0045_agent_session_estimated_tokens";
 const journal = JSON.parse(
   fs.readFileSync(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf-8")
 ) as { entries: { idx: number; when: number; tag: string }[] };
@@ -33,7 +33,7 @@ function withDb<T>(fn: (conn: Database.Database) => T): T {
   }
 }
 
-describe("0044_agent_session_estimated_tokens", () => {
+describe("0045_agent_session_estimated_tokens", () => {
   it("is a hand-written journal migration with a unique increasing timestamp", () => {
     const sql = fs.readFileSync(
       path.join(MIGRATIONS_FOLDER, `${MIGRATION_TAG}.sql`),
@@ -47,7 +47,7 @@ describe("0044_agent_session_estimated_tokens", () => {
     );
 
     const entry = journal.entries.find((candidate) => candidate.tag === MIGRATION_TAG);
-    expect(entry).toMatchObject({ idx: 43, when: 1786714100000 });
+    expect(entry).toMatchObject({ idx: 44, when: 1786714200000 });
     // Appended, never spliced in: every entry recorded after it must carry a
     // strictly later timestamp, or drizzle would skip one of them.
     const position = journal.entries.findIndex(

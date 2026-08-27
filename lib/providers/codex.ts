@@ -28,6 +28,7 @@ import {
   type ProviderSpawnContext,
 } from "./base-provider";
 import { promptExceedsArgv } from "./prompt-transport";
+import { buildProviderOptionArgs } from "./options-registry";
 import type {
   McpSpawnConfig,
   ProviderResult,
@@ -167,7 +168,8 @@ export class CodexProvider extends BaseCliProvider {
   ): string[] {
     // No `mode` here: unlike the other providers, every codex exec gets the
     // same approval/sandbox posture — see codexApprovalArgs().
-    const { prompt, cwd, model, cliSessionId, resumeSession, mcp } = options;
+    const { prompt, cwd, model, cliSessionId, resumeSession, mcp, cliOptions } =
+      options;
     const effectiveCwd = cwd || process.cwd();
     const isResume = !!(cliSessionId && resumeSession);
     const developerInstructions = this.developerInstructions;
@@ -202,6 +204,13 @@ export class CodexProvider extends BaseCliProvider {
         args.push(...buildCodexMcpOverrideArgs(mcp));
       }
 
+      // `codex exec resume` takes a strict SUBSET of `codex exec`'s flags
+      // (no -C, -o, --color, -p/--profile), and an unknown flag there is a
+      // fatal argv error. The registry marks which options survive a resume.
+      args.push(
+        ...buildProviderOptionArgs("codex", cliOptions, { resume: true }),
+      );
+
       // Prompt as positional argument (after session ID)
       args.push(promptArg);
     } else {
@@ -229,6 +238,8 @@ export class CodexProvider extends BaseCliProvider {
       if (mcp) {
         args.push(...buildCodexMcpOverrideArgs(mcp));
       }
+
+      args.push(...buildProviderOptionArgs("codex", cliOptions));
 
       // Prompt as positional argument
       args.push(promptArg);

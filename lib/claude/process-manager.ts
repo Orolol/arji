@@ -22,6 +22,10 @@ import {
   mintMcpToken,
   revokeMcpTokensForSession,
 } from "@/lib/mcp/token-store";
+import { getNamedAgentRuntimeConfig } from "@/lib/agent-config/named-agents";
+import { acceptsPersonaPrompt } from "@/lib/agent-config/constants";
+import { filterProviderOptionsForAgentType } from "@/lib/providers/options-registry";
+import { personaSection } from "./prompt-sections";
 import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -105,6 +109,117 @@ class ClaudeProcessManager {
       );
     }
 
+    // Work on a COPY. Both blocks below rewrite `prompt`, and a retry ladder
+    // that re-dispatches the same options object would otherwise stack a
+    // second persona and a second tools section onto an already-injected
+    // prompt.
+    options = { ...options };
+
+    // One read of the session row for both blocks below. `agentType` is what
+    // scopes the persona and the agent-type-restricted options; the project
+    // and ticket ids are what the MCP token binds to. Best-effort: a session
+    // must never fail to spawn because its own row could not be read.
+    let sessionRow:
+      | {
+          projectId: string;
+          epicId: string | null;
+          userStoryId: string | null;
+          agentType: string | null;
+          namedAgentId: string | null;
+        }
+      | undefined;
+    try {
+      sessionRow = db
+        .select({
+          projectId: agentSessions.projectId,
+          epicId: agentSessions.epicId,
+          userStoryId: agentSessions.userStoryId,
+          agentType: agentSessions.agentType,
+          namedAgentId: agentSessions.namedAgentId,
+        })
+        .from(agentSessions)
+        .where(eq(agentSessions.id, sessionId))
+        .get();
+    } catch (error) {
+      console.warn(
+        `[process-manager] Session row unreadable for ${sessionId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+
+    // Named-agent configuration — the second thing this wiring point owns,
+    // alongside the MCP channel below. Every dispatch path (manual routes,
+    // pipeline stages, night runs, Full Auto, grading, merge resolution)
+    // reaches the CLI through here, so resolving the agent's per-CLI options
+    // and persona once, HERE, is what keeps automated modes from needing a
+    // parallel plumbing of their own.
+    //
+    // The persona is PREPENDED (the tools section is appended), which puts it
+    // ahead of the role prompt, the specification and the ticket — see
+    // docs/architecture/named-agent-cli-options.md for the full order.
+    //
+    // BOTH halves are scoped by the session's agent TYPE, not by its spawn
+    // mode. Reviews, grading and the second-opinion gate all spawn in mode
+    // "code" on purpose (plan mode refuses the mutating MCP tools they exist
+    // to call), so a mode-based gate would not tell them apart from a build.
+    try {
+      const agentRow = sessionRow;
+
+      const { options: resolvedOptions, personaPrompt } =
+        getNamedAgentRuntimeConfig(agentRow?.namedAgentId, provider);
+
+      // Options the agent type may not carry (claude's permission mode) are
+      // dropped here, where the type is known; the registry declares which.
+      const cliOptions = filterProviderOptionsForAgentType(
+        provider,
+        resolvedOptions,
+        agentRow?.agentType,
+      );
+
+      // Strict document-rewrite and fixed-contract sessions get NO persona.
+      // spec_generation replaces projects.spec with its response verbatim,
+      // the memory writers replace the memory document, release_notes becomes
+      // CHANGELOG.md — free-form persona text ("answer in French, summarise
+      // your reasoning") would be written into the stored artifact and then
+      // feed every later prompt. See PERSONA_AGENT_TYPES.
+      const persona = acceptsPersonaPrompt(agentRow?.agentType)
+        ? personaSection(personaPrompt)
+        : "";
+      const patch: { cliOptions?: string; prompt?: string } = {};
+
+      if (Object.keys(cliOptions).length > 0) {
+        options.cliOptions = cliOptions;
+        // Audit trail: the agent can be edited or deleted after this run, so
+        // the options that were actually in effect belong on the session row.
+        // NULL stays NULL when nothing was configured — legacy rows and
+        // unconfigured agents read the same.
+        patch.cliOptions = JSON.stringify(cliOptions);
+      }
+
+      if (persona) {
+        options.prompt = persona + options.prompt;
+        // The queued row stored the prompt as the dispatch route built it,
+        // before this injection. Re-persist it so the session detail shows
+        // the persona the agent actually received — it is configuration, not
+        // a secret, and a prompt display that omits it is misleading.
+        patch.prompt = options.prompt;
+      }
+
+      if (patch.cliOptions !== undefined || patch.prompt !== undefined) {
+        db.update(agentSessions)
+          .set(patch)
+          .where(eq(agentSessions.id, sessionId))
+          .run();
+      }
+    } catch (error) {
+      // Same posture as MCP injection: a session must never fail to spawn
+      // because its optional configuration could not be read.
+      console.warn(
+        `[process-manager] Named-agent options skipped for session ${sessionId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+
     // Arij MCP tool channel — mint a per-session bearer token, attach the
     // MCP server config for the provider to inject, and append the tools
     // prompt section. This is the single wiring point for AGENT sessions:
@@ -137,16 +252,9 @@ class ClaudeProcessManager {
         mcpChannelIntended = false;
       }
       if (mcpChannelIntended) {
-        const row = db
-          .select({
-            projectId: agentSessions.projectId,
-            epicId: agentSessions.epicId,
-            userStoryId: agentSessions.userStoryId,
-            agentType: agentSessions.agentType,
-          })
-          .from(agentSessions)
-          .where(eq(agentSessions.id, sessionId))
-          .get();
+        // Already read once at the top of this wiring point, for the
+        // named-agent configuration above — the token binds to the same row.
+        const row = sessionRow;
 
         // Strict document-rewrite agents opt out entirely (no token, no
         // config, no section): the section is APPENDED, so for them it would
@@ -203,6 +311,7 @@ class ClaudeProcessManager {
         cliSessionId: options.cliSessionId,
         resumeSession: options.resumeSession,
         mcp: options.mcp,
+        cliOptions: options.cliOptions,
         onChunk: (chunk) => {
           try {
             appendSessionChunk({

@@ -224,6 +224,9 @@ describe("0031_notification_message — applied schema", () => {
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
+      conn.exec("ALTER TABLE named_agents DROP COLUMN options");
+      conn.exec("ALTER TABLE named_agents DROP COLUMN persona_prompt");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_tokens");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_breakdown");
       const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);

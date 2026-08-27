@@ -8,6 +8,10 @@ import {
   type AgentProvider,
   type AgentType,
 } from "./constants";
+import {
+  parseStoredProviderOptions,
+  type NamedAgentCliOptions,
+} from "@/lib/providers/options-registry";
 
 export type ProviderSource = "builtin" | "global" | "project";
 export type AgentResolveSource = ProviderSource | "override";
@@ -246,6 +250,14 @@ export interface ResolvedAgent {
   name?: string;
   namedAgentId?: string | null;
   /**
+   * Per-CLI options of the resolved named agent (see
+   * lib/providers/options-registry.ts). Populated for callers that spawn
+   * WITHOUT an agent_sessions row — CLI chat turns — because those bypass
+   * processManager.start(), which is where every ticketed session picks its
+   * options up from the row instead.
+   */
+  cliOptions?: NamedAgentCliOptions;
+  /**
    * True when review-provider segregation redirected the resolution away
    * from the provider that built the target.
    */
@@ -345,6 +357,10 @@ export function resolveAgent(
       model: defaultAgent.model,
       name: defaultAgent.name,
       namedAgentId: defaultAgent.id,
+      cliOptions: parseStoredProviderOptions(
+        defaultAgent.provider,
+        defaultAgent.options,
+      ),
     };
   }
 
@@ -374,6 +390,7 @@ export function resolveAgentByNamedId(
         model: agent.model,
         name: agent.name,
         namedAgentId: agent.id,
+        cliOptions: parseStoredProviderOptions(agent.provider, agent.options),
       };
     }
   }
@@ -420,6 +437,7 @@ export async function resolveAgentForDispatch(
         model: agent.model,
         name: agent.name,
         namedAgentId: agent.id,
+        cliOptions: parseStoredProviderOptions(agent.provider, agent.options),
       };
     }
   }
@@ -491,6 +509,7 @@ function resolveFromRow(row: {
         model: agent.model,
         name: agent.name,
         namedAgentId: agent.id,
+        cliOptions: parseStoredProviderOptions(agent.provider, agent.options),
       };
     }
   }

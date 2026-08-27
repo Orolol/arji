@@ -108,18 +108,38 @@ describe("mergeWorktree", () => {
     expect(gitApi.merge).not.toHaveBeenCalled();
   });
 
-  it("reports a CONFLICT distinctly and aborts the merge", async () => {
+  it("reports post-preflight merge failure as error and aborts the merge", async () => {
     gitApi.merge.mockImplementation(async (args: string[]) => {
       gitState.calls.push(`merge:${args.join(" ")}`);
       if (args[0] === "--abort") return "";
-      throw new Error("CONFLICT (content): Merge conflict in lib/a.ts");
+      throw new Error("error: Your local changes to the following files would be overwritten by merge");
     });
 
     const result = await mergeWorktree("/repo", "feature/epic-1");
 
-    expect(result).toMatchObject({ merged: false, reason: "conflict" });
-    expect(result.error).toContain("CONFLICT");
+    expect(result).toMatchObject({ merged: false, reason: "error" });
+    expect(result.error).toContain("overwritten by merge");
     expect(gitState.calls).toContain("merge:--abort");
+  });
+  it("detects merge conflict via merge-tree preflight without checking out main or running merge", async () => {
+    gitApi.raw.mockImplementation(async (args: string[]) => {
+      gitState.calls.push(`raw:${args.join(" ")}`);
+      if (args.includes("merge-tree")) {
+        return "5fb6ee3208d15ae0c6bd2258737c801419ebf5ca\nlib/a.ts\nlib/b.ts\n\nAuto-merging lib/a.ts\nCONFLICT (content): Merge conflict in lib/a.ts\n";
+      }
+      return "";
+    });
+
+    const result = await mergeWorktree("/repo", "feature/epic-1");
+
+    expect(result).toMatchObject({
+      merged: false,
+      reason: "conflict",
+      conflictFiles: ["lib/a.ts", "lib/b.ts"],
+    });
+    expect(result.error).toContain("CONFLICT");
+    expect(gitApi.checkout).not.toHaveBeenCalled();
+    expect(gitApi.merge).not.toHaveBeenCalled();
   });
 
   it("reports a pre-merge failure as an error, not a conflict", async () => {
