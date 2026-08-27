@@ -1,0 +1,140 @@
+{
+  "__tests__/kanban-build-toolbar-dag.test.tsx": {
+    "react/display-name": {
+      "count": 1
+    }
+  },
+  "__tests__/kanban-build-toolbar.test.tsx": {
+    "react/display-name": {
+      "count": 1
+    }
+  },
+  "__tests__/kanban-ticket-details-selection.test.tsx": {
+    "react/display-name": {
+      "count": 1
+    }
+  },
+  "__tests__/night-run-page-wiring.test.tsx": {
+    "react/display-name": {
+      "count": 1
+    }
+  },
+  "app/projects/[projectId]/page.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 8
+    }
+  },
+  "app/projects/[projectId]/releases/page.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "app/projects/[projectId]/sessions/chat/[conversationId]/page.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "components/ThemeToggle.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "components/agent-config/RuntimeSettingsTab.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 2
+    }
+  },
+  "components/agent-config/StatsTab.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "components/chat/UnifiedChatPanel.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "components/dependencies/DependencyEditor.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "components/documents/MentionTextarea.tsx": {
+    "react-hooks/immutability": {
+      "count": 1
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "components/kanban/Board.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "components/kanban/Column.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "components/kanban/EpicCard.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 2
+    }
+  },
+  "components/kanban/epic-detail/WhatTheAgentDid.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "components/layout/RepoStatusBar.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "components/shared/SessionPicker.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "hooks/useAgentConfig.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 4
+    }
+  },
+  "hooks/useConversations.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "hooks/useEpicActivity.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "hooks/useNightRuns.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "hooks/usePanelLayout.ts": {
+    "react-hooks/refs": {
+      "count": 1
+    }
+  },
+  "hooks/useProjectEvents.ts": {
+    "react-hooks/immutability": {
+      "count": 1
+    }
+  },
+  "hooks/useStoryDetail.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "hooks/useTicketComments.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  }
+}

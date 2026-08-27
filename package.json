@@ -38,6 +38,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "lint:prune": "eslint --prune-suppressions",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

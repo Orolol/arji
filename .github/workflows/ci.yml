@@ -4,7 +4,17 @@ on:
   push:
   pull_request:
 
+# A new push to the same ref makes the in-flight run obsolete. Cancelling it
+# keeps queue time down without weakening any gate: the superseding run checks
+# out the newer commit and re-runs everything.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Fast feedback: the unit suite alone, unblocked by the slower type/lint/build
+  # gates. Kept as a separate job so a test failure surfaces without waiting for
+  # a production build.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -16,3 +26,48 @@ jobs:
       - run: npm ci
       - run: npm audit --audit-level=high
       - run: npm test
+
+  # The verification gates the project expects but did not previously enforce:
+  # type check, lint, and a production build.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Restored before `npm ci` on purpose: afterwards `node_modules` exists and
+      # a `**/*.ts` hash glob would walk it, costing more than the cache saves.
+      - name: Restore Next.js build cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'components/**', 'hooks/**', 'lib/**', 'middleware.ts', 'next.config.ts', 'tsconfig.json') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            nextjs-${{ runner.os }}-
+
+      - run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      # ESLint runs against eslint-suppressions.json, which records the
+      # violations that already existed when this gate was introduced. Every rule
+      # stays at `error` for new code: a new violation is not in the baseline and
+      # fails here.
+      - name: Lint
+        id: lint
+        run: npm run lint
+
+      - name: Explain a suppressions-related lint failure
+        if: ${{ failure() && steps.lint.outcome == 'failure' }}
+        run: |
+          echo "::notice::If the failure above is 'unused suppressions', a tracked lint violation was fixed. Run 'npm run lint:prune' and commit the updated eslint-suppressions.json."
+
+      # NODE_ENV is deliberately left unset: `next build` sets production itself,
+      # while exporting it here would make `npm ci` skip devDependencies.
+      - name: Production build
+        run: npm run build
