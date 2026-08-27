@@ -306,3 +306,36 @@ describe("SessionDetailPage - large payload rendering", () => {
     expect(scrollContainer?.classList.contains("max-h-[500px]")).toBe(true);
   });
 });
+
+describe("SessionDetailPage - CLI options in effect", () => {
+  it("shows the options the run actually used, labelled", async () => {
+    // Read from the session row, not from the named agent: the agent can be
+    // edited or deleted after the run and the trace has to stay true.
+    global.fetch = vi.fn().mockResolvedValue({
+      json: () =>
+        Promise.resolve({
+          data: {
+            ...mockSession,
+            provider: "oh-my-pi",
+            cliOptions: '{"thinking":"high","advisor":true}',
+          },
+        }),
+    });
+
+    render(<SessionDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Thinking: High")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Advisor: on")).toBeInTheDocument();
+  });
+
+  it("shows nothing extra for a session that used no options", async () => {
+    render(<SessionDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("completed")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Thinking:/)).toBeNull();
+  });
+});
