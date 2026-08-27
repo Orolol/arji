@@ -2,7 +2,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import simpleGit, { CheckRepoActions, type SimpleGit } from "simple-git";
+import simpleGit, { CheckRepoActions, type SimpleGit, type SimpleGitOptions } from "simple-git";
 import { createId } from "@/lib/utils/nanoid";
 import {
   getCurrentGitBranch,
@@ -156,6 +156,9 @@ async function readOriginUrl(repoPath: string): Promise<string | null> {
  * A clone is healthy when git recognises it *and* it has a commit checked out.
  * A directory whose `.git` exists but whose HEAD is unborn is the signature of
  * a clone that died mid-transfer.
+ *
+ * Invariant: rev-parse invocations here use only static constant arguments,
+ * leaving no vector for option injection.
  */
 async function hasCheckedOutHead(repoPath: string): Promise<boolean> {
   try {
@@ -233,6 +236,8 @@ export async function classifyCloneDestination(
 export async function detectDefaultBranch(repoPath: string): Promise<string> {
   // simple-git throws *synchronously* from its factory when the directory does
   // not exist, so the instance is built inside the guard like every call below.
+  // Invariant: readRef is an internal helper called exclusively with hardcoded,
+  // static argument vectors. No caller-supplied values reach argv option position.
   const readRef = async (args: string[]): Promise<string | null> => {
     try {
       return (await simpleGit(repoPath).raw(args)).trim();
@@ -254,6 +259,12 @@ export async function detectDefaultBranch(repoPath: string): Promise<string> {
   return "main";
 }
 
+/**
+ * Clones a repository into a destination directory.
+ *
+ * Invariant: The `--` separator ensures cloneUrl and destination paths cannot
+ * be interpreted as git option flags even if they begin with a leading dash.
+ */
 async function runClone(
   cloneUrl: string,
   destination: string,
@@ -267,9 +278,14 @@ async function runClone(
 
   // Full clone on purpose: worktrees, merge-base and tagging all need the real
   // history, so no `--depth` and no `--single-branch`.
-  await git.raw(withAuth(token, ["clone", cloneUrl, destination]));
+  await git.raw(withAuth(token, ["clone", "--", cloneUrl, destination]));
 }
 
+/**
+ * Fetches from the origin remote with pruning.
+ *
+ * Invariant: Uses static remote and flag arguments wrapped with optional auth config.
+ */
 async function runFetch(
   repoPath: string,
   token: string | null | undefined
@@ -944,12 +960,24 @@ function isCredentialRecoverable(code: CloneErrorCode): boolean {
   return code === "not_found" || code === "auth_failed";
 }
 
+/**
+ * Executes raw git command arguments with non-interactive environment safeguards
+ * and abort signal handling.
+ *
+ * Invariant: All callers must validate user/agent-derived values (rejecting leading
+ * dashes) and/or use `--` separators before positional arguments so that untrusted
+ * strings cannot land in argv option position.
+ */
 function runGit(
   args: string[],
   baseDir: string,
   deadline: Deadline
 ): Promise<string> {
-  return simpleGit({ baseDir, abort: deadline.signal })
+  return simpleGit({
+    baseDir,
+    abort: deadline.signal,
+    unsafe: { allowUnsafeAskPass: true },
+  })
     .env(nonInteractiveEnv())
     .raw(args);
 }
@@ -966,18 +994,64 @@ function authConfigArgs(token?: string | null): string[] {
   return ["-c", `http.extraHeader=Authorization: Basic ${basic}`];
 }
 
+const BLOCKED_ENV_KEYS: Record<string, true> = {
+  editor: true,
+  git_editor: true,
+  git_sequence_editor: true,
+  git_pager: true,
+  git_ssh: true,
+  git_ssh_command: true,
+  git_config: true,
+  git_config_global: true,
+  git_config_system: true,
+  git_config_count: true,
+  git_exec_path: true,
+  git_external_diff: true,
+  git_proxy_command: true,
+  git_template_dir: true,
+  pager: true,
+  prefix: true,
+};
+
 /**
  * Git must never block on a credential prompt: without a terminal it would
  * hang until the timeout instead of failing with a usable message.
  */
-function nonInteractiveEnv(): Record<string, string> {
-  return {
-    ...(process.env as Record<string, string>),
+export function nonInteractiveEnv(): Record<string, string> {
+  const env: Record<string, string> = {
     GIT_TERMINAL_PROMPT: "0",
     GIT_ASKPASS: "",
     SSH_ASKPASS: "",
     GCM_INTERACTIVE: "never",
   };
+
+  // Inherit environment variables from process.env, filtering out dangerous
+  // editor/pager/ssh/config keys case-insensitively so lowercase ambient variables
+  // (e.g. `editor`, `pager`, `prefix`) do not trigger simple-git's safety plugin.
+  // GIT_ASKPASS and SSH_ASKPASS are retained as empty strings above (with
+  // allowUnsafeAskPass enabled on simpleGit) so git prompts are short-circuited.
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    const normalized = key.toLowerCase().trim();
+    if (
+      BLOCKED_ENV_KEYS[normalized] ||
+      normalized.startsWith("git_config_key_") ||
+      normalized.startsWith("git_config_value_")
+    ) {
+      continue;
+    }
+    if (
+      normalized === "git_terminal_prompt" ||
+      normalized === "git_askpass" ||
+      normalized === "ssh_askpass" ||
+      normalized === "gcm_interactive"
+    ) {
+      continue;
+    }
+    env[key] = value;
+  }
+
+  return env;
 }
 
 function getGit(repoPath: string): SimpleGit {
