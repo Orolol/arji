@@ -35,6 +35,7 @@ import { RefinementButton } from "@/components/kanban/RefinementButton";
 import { QuickCapture } from "@/components/kanban/QuickCapture";
 import type { KanbanEpicAgentActivity } from "@/lib/types/kanban";
 import { getActiveDetailTicketId, selectOnlyTicket } from "@/lib/kanban/selection";
+import { buildRetryDispatch } from "@/lib/agent-sessions/retry-dispatch";
 import { useProjectEvents } from "@/hooks/useProjectEvents";
 
 interface Toast {
@@ -214,16 +215,27 @@ export default function KanbanPage() {
     addToast("success", "Board refinement finished — see the notification for the summary");
   }, [addToast]);
 
+  /**
+   * A retry is a second attempt at the same work by the same agent: it reuses
+   * the failed session's named agent and resumes that session rather than
+   * restarting cold on whatever the default chain resolves to. The card can
+   * be badged by a review or a story build as well as by an epic build, so
+   * which of those two things it is safe to carry over is decided in
+   * lib/agent-sessions/retry-dispatch.ts.
+   */
   const handleRetryBuild = useCallback(async (epicId: string) => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/build`, {
+      const { url, body } = buildRetryDispatch(
+        projectId,
+        epicId,
+        failedSessions[epicId],
+        namedAgentId
+      );
+
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          epicIds: [epicId],
-          mode: "parallel",
-          namedAgentId,
-        }),
+        body: JSON.stringify(body),
       });
 
       const data = await res.json();
@@ -236,7 +248,7 @@ export default function KanbanPage() {
     } catch {
       addToast("error", "Failed to retry build");
     }
-  }, [projectId, namedAgentId, addToast]);
+  }, [projectId, namedAgentId, failedSessions, addToast]);
 
   // A Review card merged itself through the approve route; the Board already
   // reloaded the columns, so this only has to move the surrounding surfaces
