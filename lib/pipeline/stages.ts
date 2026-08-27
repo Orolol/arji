@@ -98,6 +98,8 @@ import {
   assessReviewOutcome,
   resolveReviewVerdict,
   resolvePriorFindingsFromProse,
+  collectBlockingFindings,
+  readSessionFindingsWindow,
 } from "./findings";
 import type {
   PipelineDeterministicVerificationOutcome,
@@ -1370,9 +1372,24 @@ function finalizeReviewSession(input: {
     // A verdict that PASSED promotes the ticket to the merge boundary. An
     // unverifiable review proves nothing and a failed session delivered
     // nothing: both leave the ticket in review to earn another review.
+    //
+    // The blocking-findings check closes the prose gap: a review with no
+    // structured verdict that still filed an open [critical]/[major] row in
+    // its window is judged by prose here (resolveReviewVerdict ignores
+    // findings on that path for bit-compatibility), while the runner's
+    // assessReviewOutcome counts the finding and dispatches a fix. Promoting
+    // in that state would show To Merge with an open critical for the length
+    // of the fix cycle — and invite a manual merge that resolves it. A
+    // structured non-negative verdict implies zero blocking findings, so the
+    // check only ever bites on the prose path.
+    const findingsWindow = readSessionFindingsWindow(sessionId);
+    const blockingInWindow = findingsWindow
+      ? collectBlockingFindings(epicId, findingsWindow)
+      : [];
     if (
       decision &&
       !decision.unverifiable &&
+      blockingInWindow.length === 0 &&
       result?.success &&
       scope === "epic"
     ) {

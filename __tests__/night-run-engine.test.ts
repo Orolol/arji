@@ -400,7 +400,7 @@ describe("startNightRun — composition", () => {
     const summaryRows = nightNotifications(projectId);
     expect(summaryRows).toHaveLength(1);
     expect(summaryRows[0]).toMatchObject({
-      title: "Night run finished: 2 in review",
+      title: "Night run finished: 2 to merge",
       status: "completed",
       sessionId: null,
       agentType: "build",
@@ -410,7 +410,7 @@ describe("startNightRun — composition", () => {
     expect(webhookMock.send).toHaveBeenCalledTimes(1);
     expect(webhookMock.send).toHaveBeenCalledWith(projectId, {
       event: "night_run.completed",
-      summary: "Night run finished: 2 in review",
+      summary: "Night run finished: 2 to merge",
       durationMs: expect.any(Number),
       error: null,
       path: `/projects/${projectId}?nightRun=${runId}`,
@@ -674,7 +674,7 @@ describe("startNightRun — composition", () => {
     expect(summaryRows).toHaveLength(1);
     // One session reported no cost → the total is a lower bound.
     expect(summaryRows[0].title).toBe(
-      "Night run finished: 1 in review, 1 skipped — ≥$7.00 — cost cap reached"
+      "Night run finished: 1 to merge, 1 skipped — ≥$7.00 — cost cap reached"
     );
   });
 
@@ -771,7 +771,7 @@ describe("startNightRun — user stop", () => {
     const summaryRows = nightNotifications(projectId);
     expect(summaryRows).toHaveLength(1);
     expect(summaryRows[0].title).toBe(
-      "Night run finished: 1 in review, 2 skipped — stopped by you"
+      "Night run finished: 1 to merge, 2 skipped — stopped by you"
     );
     expect(nightRunAbortKind(NIGHT_STOPPED_ABORT_REASON)).toBe("stopped");
 

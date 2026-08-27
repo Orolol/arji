@@ -10,12 +10,13 @@ import { NIGHT_STOPPED_ABORT_REASON } from "@/lib/night/constants";
 import { formatElapsed } from "@/lib/utils/format-elapsed";
 
 /**
- * Per-status wording. `done` reads "in review" and `asked` reads "paused"
- * because a night run never approves anything: a green epic lands in Review
- * awaiting the morning sign-off, and a question parks the run.
+ * Per-status wording. `done` reads "to merge" and `asked` reads "paused"
+ * because a night run never merges anything: a green epic's passing review
+ * lands it in To Merge awaiting the morning merge, and a question parks the
+ * run.
  */
 export const NIGHT_RUN_STATUS_LABELS: Record<TicketExecutionStatus, string> = {
-  done: "in review",
+  done: "to merge",
   asked: "paused",
   failed: "failed",
   skipped: "skipped",

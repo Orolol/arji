@@ -58,6 +58,8 @@ import {
 import {
   resolveReviewVerdict,
   resolvePriorFindingsFromProse,
+  collectBlockingFindings,
+  readSessionFindingsWindow,
 } from "@/lib/pipeline/findings";
 import { handleAskedQuestionOutcome } from "@/lib/workflow/agent-question";
 import {
@@ -390,24 +392,34 @@ export async function POST(request: NextRequest, { params }: Params) {
             });
           }
         } else if (decision && !decision.unverifiable && result?.success) {
-          // Review passed: promote to the merge boundary. transitionReviewPassed
-          // itself no-ops (with a decision line) when the ticket already left
-          // review — e.g. a concurrent move while the reviewer ran.
-          try {
-            transitionReviewPassed({
-              projectId,
-              epicId,
-              scope: "epic",
-              reason: `Review verdict: passed (${lbl})`,
-              sessionId: sid,
-              verdictSource:
-                decision.source === "structured" ? "structured" : "prose",
-            });
-          } catch (err) {
-            console.warn(
-              "[review] review passed but to_merge promotion was refused:",
-              (err as Error).message
-            );
+          // Review passed: promote to the merge boundary — unless the session
+          // filed an open blocking finding in its window while its verdict
+          // came from prose (resolveReviewVerdict ignores findings on that
+          // path); promoting then would show To Merge with an open critical.
+          const findingsWindow = readSessionFindingsWindow(sid);
+          const blockingInWindow = findingsWindow
+            ? collectBlockingFindings(epicId, findingsWindow)
+            : [];
+          if (blockingInWindow.length === 0) {
+            // transitionReviewPassed itself no-ops (with a decision line)
+            // when the ticket already left review — e.g. a concurrent move
+            // while the reviewer ran.
+            try {
+              transitionReviewPassed({
+                projectId,
+                epicId,
+                scope: "epic",
+                reason: `Review verdict: passed (${lbl})`,
+                sessionId: sid,
+                verdictSource:
+                  decision.source === "structured" ? "structured" : "prose",
+              });
+            } catch (err) {
+              console.warn(
+                "[review] review passed but to_merge promotion was refused:",
+                (err as Error).message
+              );
+            }
           }
         }
       });

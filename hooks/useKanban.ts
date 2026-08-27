@@ -257,13 +257,13 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       for (const col of DRAGGABLE_COLUMNS) {
         if (!touched.has(col)) continue;
 
-        // Review is DISPLAYED merge-ready-first, so its display index is not
-        // its position; persisting the index would write that derived signal
-        // into `epics.position` and reorder cards nobody dragged. Every other
-        // column is drawn in position order, where the two coincide. See
-        // lib/kanban/reorder.ts.
+        // To Merge is DISPLAYED merge-ready-first, so its display index is
+        // not its position; persisting the index would write that derived
+        // signal into `epics.position` and reorder cards nobody dragged.
+        // Every other column is drawn in position order, where the two
+        // coincide. See lib/kanban/reorder.ts.
         const persisted =
-          col === "review"
+          col === "to_merge"
             ? persistedColumnOrder(
                 next.columns[col],
                 col === toColumn ? epicId : null
