@@ -7,6 +7,7 @@ import {
   formatArijActionTime,
   type ArijActionItem,
 } from "@/components/shared/ArijActionsList";
+import { fetchUnifiedSessions } from "@/lib/agent-sessions/session-list";
 
 interface WhatTheAgentDidProps {
   projectId: string;
@@ -50,11 +51,8 @@ export function WhatTheAgentDid({
 
     async function load(currentEpicId: string) {
       try {
-        const listRes = await fetch(`/api/projects/${projectId}/sessions`);
-        if (!listRes.ok) return;
-        const listJson = await listRes.json();
-        const rows = (listJson?.data ?? []) as UnifiedSessionRow[];
-        // The route already sorts newest-first.
+        const rows = await fetchUnifiedSessions<UnifiedSessionRow>(projectId);
+        // The route already sorts newest-first, across pages.
         const latest = rows.find(
           (row) => row.kind === "agent_session" && row.epicId === currentEpicId,
         );

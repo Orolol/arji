@@ -37,6 +37,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { parseStoredTimestamp } from "@/lib/agent-sessions/last-activity";
+import { fetchUnifiedSessions } from "@/lib/agent-sessions/session-list";
 
 // --- Discriminated union types ---
 
@@ -178,11 +179,25 @@ export default function SessionsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  /**
+   * The route serves keyset pages; this follows them to the end so the list,
+   * the synthesis band and both sort orders still cover every session. Each
+   * page is painted as it lands, so the newest sessions show immediately
+   * instead of waiting on the tail.
+   */
   async function loadSessions() {
-    const res = await fetch(`/api/projects/${projectId}/sessions`);
-    const data = await res.json();
-    setItems(data.data || []);
-    setLoading(false);
+    try {
+      await fetchUnifiedSessions<UnifiedSession>(projectId, {
+        onPage: (rowsSoFar) => {
+          setItems([...rowsSoFar]);
+          setLoading(false);
+        },
+      });
+    } catch {
+      // Keep whatever is already on screen rather than blanking the list.
+    } finally {
+      setLoading(false);
+    }
   }
 
   function getDuration(session: AgentSession): string {
