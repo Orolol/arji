@@ -299,8 +299,11 @@ describe("processManager.start() — MCP injection gating", () => {
     const options = pmState.providerSpawnedOptions[0];
     expect(options.mcp).toBeUndefined();
     expect(options.prompt).toBe("PLAIN");
-    // provider gate short-circuits before any settings/session read
-    expect(pmState.selectGets.length).toBe(0);
+    // The provider gate short-circuits before the settings read: it is a pure
+    // function of the provider name. (start() still reads the session row for
+    // the named agent's persona and CLI options — a separate concern that
+    // applies to every provider, MCP surface or not.)
+    expect(pmState.selectGets).not.toContain(tables.settings);
   });
 
   it("forwards the config to the codex provider spawn options", () => {
