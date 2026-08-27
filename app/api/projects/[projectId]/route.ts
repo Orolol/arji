@@ -82,7 +82,16 @@ export async function PATCH(
   if (body.status !== undefined) updates.status = body.status;
   if (body.gitRepoPath !== undefined) updates.gitRepoPath = body.gitRepoPath;
   if (body.githubOwnerRepo !== undefined) updates.githubOwnerRepo = body.githubOwnerRepo;
-  if (body.defaultBranch !== undefined) updates.defaultBranch = body.defaultBranch;
+  if (body.defaultBranch !== undefined) {
+    const cleanDefault = body.defaultBranch?.trim();
+    if (cleanDefault && cleanDefault.startsWith("-")) {
+      return NextResponse.json(
+        { error: `Invalid default branch: ${cleanDefault}` },
+        { status: 400 }
+      );
+    }
+    updates.defaultBranch = cleanDefault || null;
+  }
   if (body.spec !== undefined) updates.spec = body.spec;
 
   db.update(projects).set(updates).where(eq(projects.id, projectId)).run();

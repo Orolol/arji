@@ -80,8 +80,23 @@ function getGit(repoPath: string): SimpleGit {
   return simpleGit(repoPath);
 }
 
+function assertNotFlagLike(value: string, label: string): string {
+  const clean = value.trim();
+  if (!clean) {
+    throw new Error(`${label} is required.`);
+  }
+  if (clean.startsWith("-")) {
+    throw new Error(`Invalid ${label}: ${clean}`);
+  }
+  return clean;
+}
+
 function defaultRemote(remote?: string): string {
-  return remote?.trim() || "origin";
+  const clean = remote?.trim() || "origin";
+  if (clean.startsWith("-")) {
+    throw new Error(`Invalid remote name: ${clean}`);
+  }
+  return clean;
 }
 
 export async function detectGitHubRemote(
@@ -116,8 +131,9 @@ export async function fetchGitRemote(
   repoPath: string,
   remote = "origin"
 ) {
+  const cleanRemote = defaultRemote(remote);
   const git = getGit(repoPath);
-  return git.fetch(defaultRemote(remote));
+  return git.fetch(cleanRemote);
 }
 
 export async function pullGitBranchWithConflictSupport(
@@ -125,16 +141,11 @@ export async function pullGitBranchWithConflictSupport(
   branch: string,
   remote = "origin"
 ): Promise<PullWithConflictResult> {
-  const cleanBranch = branch.trim();
-  if (!cleanBranch) {
-    throw new Error("Branch is required for pull.");
-  }
-  if (cleanBranch.startsWith("-") || remote.startsWith("-")) {
-    throw new Error(`Invalid branch or remote name: ${cleanBranch}`);
-  }
+  const cleanBranch = assertNotFlagLike(branch, "branch name");
+  const cleanRemote = defaultRemote(remote);
   const git = getGit(repoPath);
   try {
-    const pullResult = await git.pull(defaultRemote(remote), cleanBranch);
+    const pullResult = await git.pull(cleanRemote, cleanBranch);
     return {
       conflicted: false,
       summary: pullResult.summary
@@ -161,18 +172,12 @@ export async function pushGitBranch(
   remote = "origin",
   setUpstream = true
 ) {
-  const cleanBranch = branch.trim();
-  if (!cleanBranch) {
-    throw new Error("Branch is required for push.");
-  }
-  if (cleanBranch.startsWith("-") || remote.startsWith("-")) {
-    throw new Error(`Invalid branch or remote name: ${cleanBranch}`);
-  }
+  const cleanBranch = assertNotFlagLike(branch, "branch name");
+  const cleanRemote = defaultRemote(remote);
   const git = getGit(repoPath);
   const options = setUpstream ? ["--set-upstream"] : [];
-  return git.push(defaultRemote(remote), cleanBranch, options);
+  return git.push(cleanRemote, cleanBranch, options);
 }
-
 export async function validatePushPreconditions(
   repoPath: string,
   branch: string,
@@ -235,13 +240,7 @@ export async function getBranchSyncStatus(
   branch: string,
   remote = "origin"
 ): Promise<BranchSyncStatus> {
-  const cleanBranch = branch.trim();
-  if (!cleanBranch) {
-    throw new Error("Branch is required for status.");
-  }
-  if (cleanBranch.startsWith("-") || remote.startsWith("-")) {
-    throw new Error(`Invalid branch or remote name: ${cleanBranch}`);
-  }
+  const cleanBranch = assertNotFlagLike(branch, "branch name");
   const cleanRemote = defaultRemote(remote);
   const remoteBranch = `${cleanRemote}/${cleanBranch}`;
   const git = getGit(repoPath);
@@ -263,13 +262,13 @@ export async function getBranchSyncStatus(
     };
   }
 
+  // Invariant: cleanBranch and remoteBranch are validated to reject leading dashes.
   const raw = await git.raw([
     "rev-list",
     "--left-right",
     "--count",
     `${cleanBranch}...${remoteBranch}`,
   ]);
-
   const [aheadRaw, behindRaw] = raw.trim().split(/\s+/);
   return {
     branch: cleanBranch,

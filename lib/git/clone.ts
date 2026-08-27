@@ -2,7 +2,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import simpleGit, { CheckRepoActions, type SimpleGit } from "simple-git";
+import simpleGit, { CheckRepoActions, type SimpleGit, type SimpleGitOptions } from "simple-git";
 import { createId } from "@/lib/utils/nanoid";
 import {
   getCurrentGitBranch,
@@ -292,7 +292,6 @@ async function runFetch(
 ): Promise<void> {
   await simpleGit(repoPath).raw(withAuth(token, ["fetch", "origin", "--prune"]));
 }
-
 
 /** Best-effort removal of a directory this module created. */
 async function discard(directory: string): Promise<void> {
@@ -974,10 +973,19 @@ function runGit(
   baseDir: string,
   deadline: Deadline
 ): Promise<string> {
-  return simpleGit({ baseDir, abort: deadline.signal })
+  return simpleGit({
+    baseDir,
+    abort: deadline.signal,
+    unsafe: { allowUnsafeAskPass: true } as unknown as Partial<SimpleGitOptions["unsafe"]>,
+  })
     .env(nonInteractiveEnv())
     .raw(args);
 }
+
+/**
+ * `-c` scopes the header to this one invocation: it never reaches
+ * `.git/config`, so `origin` stays clean and the clone carries no secret.
+ */
 function authConfigArgs(token?: string | null): string[] {
   const clean = token?.trim();
   if (!clean) return [];
@@ -990,19 +998,21 @@ function authConfigArgs(token?: string | null): string[] {
  * Git must never block on a credential prompt: without a terminal it would
  * hang until the timeout instead of failing with a usable message.
  */
-function nonInteractiveEnv(): Record<string, string> {
+export function nonInteractiveEnv(): Record<string, string> {
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "",
+    SSH_ASKPASS: "",
     GCM_INTERACTIVE: "never",
   };
-  // Remove ambient editor/pager/askpass/config environment variables that
+  // Remove ambient editor/pager/ssh/config environment variables that
   // simple-git's safety plugin rejects when passed explicitly via .env().
+  // GIT_ASKPASS and SSH_ASKPASS are retained as empty strings above (with
+  // allowUnsafeAskPass enabled on simpleGit) so git prompts are short-circuited.
   delete env.GIT_EDITOR;
   delete env.GIT_SEQUENCE_EDITOR;
   delete env.GIT_PAGER;
-  delete env.GIT_ASKPASS;
-  delete env.SSH_ASKPASS;
   delete env.GIT_SSH;
   delete env.GIT_SSH_COMMAND;
   delete env.GIT_CONFIG;

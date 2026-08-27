@@ -13,6 +13,7 @@ const gitMock = vi.hoisted(() => {
   git.revparse = vi.fn().mockResolvedValue("HEAD");
   git.pull = vi.fn().mockResolvedValue({ summary: {} });
   git.push = vi.fn().mockResolvedValue({});
+  git.fetch = vi.fn().mockResolvedValue({});
   git.status = vi.fn().mockResolvedValue({ files: [], staged: [], not_added: [], conflicted: [], modified: [] });
   return git;
 });
@@ -22,14 +23,16 @@ vi.mock("simple-git", () => ({
   CheckRepoActions: { IS_REPO_ROOT: "root" },
 }));
 
-import { cloneRepository, CloneError } from "@/lib/git/clone";
+import { cloneRepository, CloneError, nonInteractiveEnv } from "@/lib/git/clone";
 import {
   createWorktree,
   attachWorktree,
   mergeWorktree,
+  captureMergeCheckpoint,
 } from "@/lib/git/manager";
 import { getWorktreeDiff } from "@/lib/git/diff";
 import {
+  fetchGitRemote,
   pullGitBranchWithConflictSupport,
   pushGitBranch,
   getBranchSyncStatus,
@@ -38,6 +41,58 @@ import {
 describe("git option-injection defense", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe("nonInteractiveEnv", () => {
+    it("disables interactive credential prompts while stripping all 18 dangerous environment variables", () => {
+      const dangerousKeys = [
+        "GIT_EDITOR",
+        "GIT_SEQUENCE_EDITOR",
+        "GIT_PAGER",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_CONFIG",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_CONFIG_COUNT",
+        "GIT_EXEC_PATH",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_PROXY_COMMAND",
+        "GIT_TEMPLATE_DIR",
+        "EDITOR",
+        "PAGER",
+        "PREFIX",
+      ];
+
+      // Temporarily populate process.env with dangerous keys
+      const originalEnv = { ...process.env };
+      for (const key of dangerousKeys) {
+        process.env[key] = "malicious-value";
+      }
+
+      try {
+        const env = nonInteractiveEnv();
+
+        // Must retain prompt short-circuiting keys
+        expect(env.GIT_TERMINAL_PROMPT).toBe("0");
+        expect(env.GIT_ASKPASS).toBe("");
+        expect(env.SSH_ASKPASS).toBe("");
+        expect(env.GCM_INTERACTIVE).toBe("never");
+
+        // Must strip all 18 dangerous keys
+        for (const key of dangerousKeys) {
+          expect(env[key]).toBeUndefined();
+        }
+      } finally {
+        for (const key of dangerousKeys) {
+          if (originalEnv[key] === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = originalEnv[key];
+          }
+        }
+      }
+    });
   });
 
   describe("cloneRepository", () => {
@@ -102,6 +157,12 @@ describe("git option-injection defense", () => {
       expect(gitMock.raw).not.toHaveBeenCalled();
     });
 
+    it("rejects flag-like branch names in captureMergeCheckpoint", async () => {
+      expect(await captureMergeCheckpoint("/fake/repo", "--evil")).toBeNull();
+      expect(await captureMergeCheckpoint("/fake/repo", "  -b")).toBeNull();
+      expect(gitMock.revparse).not.toHaveBeenCalled();
+    });
+
     it("creates worktrees safely without letting branch name land in option position", async () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "arij-test-repo-"));
       try {
@@ -131,18 +192,34 @@ describe("git option-injection defense", () => {
       expect(gitMock.raw).not.toHaveBeenCalled();
     });
 
+    it("rejects remote names beginning with -- or leading space in fetchGitRemote", async () => {
+      await expect(
+        fetchGitRemote("/fake/repo", "--upload-pack=evil")
+      ).rejects.toThrow("Invalid remote name");
+
+      await expect(
+        fetchGitRemote("/fake/repo", "   --upload-pack=evil")
+      ).rejects.toThrow("Invalid remote name");
+
+      expect(gitMock.fetch).not.toHaveBeenCalled();
+    });
+
     it("rejects branch names beginning with -- in pullGitBranchWithConflictSupport", async () => {
       await expect(
         pullGitBranchWithConflictSupport("/fake/repo", "--upload-pack=evil")
-      ).rejects.toThrow("Invalid branch or remote name");
+      ).rejects.toThrow("Invalid branch name");
 
       expect(gitMock.pull).not.toHaveBeenCalled();
     });
 
-    it("rejects remote names beginning with -- in pullGitBranchWithConflictSupport", async () => {
+    it("rejects remote names beginning with -- or leading space in pullGitBranchWithConflictSupport", async () => {
       await expect(
         pullGitBranchWithConflictSupport("/fake/repo", "main", "--upload-pack=evil")
-      ).rejects.toThrow("Invalid branch or remote name");
+      ).rejects.toThrow("Invalid remote name");
+
+      await expect(
+        pullGitBranchWithConflictSupport("/fake/repo", "main", "   --upload-pack=evil")
+      ).rejects.toThrow("Invalid remote name");
 
       expect(gitMock.pull).not.toHaveBeenCalled();
     });
@@ -150,7 +227,15 @@ describe("git option-injection defense", () => {
     it("rejects branch names beginning with -- in pushGitBranch", async () => {
       await expect(
         pushGitBranch("/fake/repo", "--receive-pack=evil")
-      ).rejects.toThrow("Invalid branch or remote name");
+      ).rejects.toThrow("Invalid branch name");
+
+      expect(gitMock.push).not.toHaveBeenCalled();
+    });
+
+    it("rejects remote names beginning with -- or leading space in pushGitBranch", async () => {
+      await expect(
+        pushGitBranch("/fake/repo", "main", "   --receive-pack=evil")
+      ).rejects.toThrow("Invalid remote name");
 
       expect(gitMock.push).not.toHaveBeenCalled();
     });
@@ -158,7 +243,15 @@ describe("git option-injection defense", () => {
     it("rejects branch names beginning with -- in getBranchSyncStatus", async () => {
       await expect(
         getBranchSyncStatus("/fake/repo", "--output=/tmp/pwn")
-      ).rejects.toThrow("Invalid branch or remote name");
+      ).rejects.toThrow("Invalid branch name");
+
+      expect(gitMock.raw).not.toHaveBeenCalled();
+    });
+
+    it("rejects remote names beginning with -- or leading space in getBranchSyncStatus", async () => {
+      await expect(
+        getBranchSyncStatus("/fake/repo", "main", "  -o")
+      ).rejects.toThrow("Invalid remote name");
 
       expect(gitMock.raw).not.toHaveBeenCalled();
     });

@@ -65,10 +65,12 @@ export async function getWorktreeDiff(
   } catch {
     // merge-base fails for unrelated histories or missing branches
   }
+
   // Compute ahead/behind counts
   let ahead = 0;
   let behind = 0;
   try {
+    // Invariant: baseBranch is validated above against leading dashes.
     const revList = (
       await git.raw([
         "rev-list",

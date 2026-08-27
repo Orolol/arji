@@ -64,10 +64,11 @@ export async function createWorktree(
 ): Promise<{ worktreePath: string; branchName: string }> {
   const git = getGit(repoPath);
   const branchName = epicBranchName(epicId, epicTitle);
+  // Defense-in-depth: epicBranchName produces `feature/epic-...`, so it will not
+  // start with `-`, but we validate explicitly before passing to git.
   if (branchName.startsWith("-")) {
     throw new Error(`Invalid branch name: ${branchName}`);
   }
-
   // Determine worktree directory next to the repo
   const worktreeBase = path.join(repoPath, "..", ".arij-worktrees");
   if (!fs.existsSync(worktreeBase)) {
@@ -233,6 +234,8 @@ async function grepFilesInRef(
     const batch = files.slice(i, i + GREP_PATHSPEC_BATCH);
     let out: string;
     try {
+      // Invariant: `--` separator ensures file paths in batch are treated as
+      // pathspecs, not options. `pattern` and `ref` are positioned as subcommand operands.
       out = await git.raw([
         // Raw paths in the output: quotepath would octal-escape non-ASCII
         // filenames ("caf\303\251.ts"), which then match nothing when the
@@ -276,6 +279,8 @@ async function findConflictMarkerFiles(
   mainBranch: string,
   branchName: string,
 ): Promise<string[]> {
+  // Invariant: diff `--name-only` compares revision range `${mainBranch}...${branchName}`
+  // using resolved and validated branch names.
   const diff = await git.raw([
     // Raw paths — see the quotepath note in grepFilesInRef.
     "-c",
@@ -311,12 +316,16 @@ export async function captureMergeCheckpoint(
   repoPath: string,
   branchName: string,
 ): Promise<MergeCheckpoint | null> {
+  const cleanBranch = branchName?.trim();
+  if (!cleanBranch || cleanBranch.startsWith("-")) {
+    return null;
+  }
   try {
     const git = getGit(repoPath);
     const mainBranch = await resolveMainBranch(git);
     const mainHead = (await git.revparse([mainBranch])).trim();
-    const branchHead = (await git.revparse([branchName])).trim();
-    return { mainBranch, mainHead, branchName, branchHead };
+    const branchHead = (await git.revparse([cleanBranch])).trim();
+    return { mainBranch, mainHead, branchName: cleanBranch, branchHead };
   } catch {
     return null;
   }
@@ -427,11 +436,11 @@ export async function mergeWorktree(
 
     // Remove the worktree first (git can't merge while worktree is active)
     if (worktreePath && fs.existsSync(worktreePath)) {
-      // Invariant: `--` separator ensures worktreePath is not parsed as an option.
+      // Invariant: `--` separator ensures worktreePath is not parsed as an option;
+      // worktree prune takes only static subcommand arguments.
       await git.raw(["worktree", "remove", "--force", "--", worktreePath]);
       await git.raw(["worktree", "prune"]);
     }
-
     await git.checkout(mainBranch);
   } catch (e) {
     return {
