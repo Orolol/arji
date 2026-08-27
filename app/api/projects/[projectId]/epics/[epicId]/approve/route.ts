@@ -3,7 +3,6 @@ import { db } from "@/lib/db";
 import {
   projects,
   epics,
-  userStories,
   ticketComments,
   agentSessions,
 } from "@/lib/db/schema";
@@ -13,10 +12,7 @@ import { tryExportArjiJson } from "@/lib/sync/export";
 import { mergeWorktree, type MergeWorktreeResult } from "@/lib/git/manager";
 import { logTransition } from "@/lib/workflow/log";
 import {
-  applyStoryTransition,
   applyTransition,
-  logWorkflowDecision,
-  type StoryStatus,
 } from "@/lib/workflow/transition-service";
 import { createApproveMergeFailedNotification } from "@/lib/notifications/create";
 import { closeOpenFindings } from "@/lib/workflow/close-findings";
@@ -109,39 +105,6 @@ export async function POST(_request: NextRequest, { params }: Params) {
   });
   if (!preflight.valid) {
     return NextResponse.json({ error: preflight.error }, { status: 400 });
-  }
-
-  const stories = db
-    .select()
-    .from(userStories)
-    .where(eq(userStories.epicId, epicId))
-    .all();
-
-  // Only stories that reached review are part of this approval. Stories added
-  // later (or otherwise still todo/in_progress) retain their status and are
-  // named in the activity log instead of invalidating the parent approval.
-  const reviewedStories = stories.filter((story) => story.status === "review");
-  const skippedStories = stories.filter((story) => story.status !== "review");
-
-  // Validate every eligible child before applying any write; epic approval
-  // supplies the review context for its synchronized story transitions.
-  for (const story of reviewedStories) {
-    const validation = applyStoryTransition({
-      projectId,
-      epicId,
-      userStoryId: story.id,
-      fromStatus: (story.status ?? "review") as StoryStatus,
-      toStatus: "done",
-      actor: "user",
-      source: "approve",
-      reason: "Parent epic review approved",
-      reviewScope: "epic",
-      validateOnly: true,
-      assumeReviewCommentsResolved: true,
-    });
-    if (!validation.valid) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
-    }
   }
 
   const project = db
@@ -340,33 +303,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
       })
       .run();
 
-    // Child stories → done through the same service. The approval logged its
-    // own review → done entry above; the children close as part of it, so
-    // they add no per-story line of their own (one movement, one line).
-    for (const story of reviewedStories) {
-      applyStoryTransition({
-        projectId,
-        epicId,
-        userStoryId: story.id,
-        fromStatus: (story.status ?? "review") as StoryStatus,
-        toStatus: "done",
-        actor: "user",
-        source: "approve",
-        reason: "Parent epic review approved",
-        reviewScope: "epic",
-        assumeReviewCommentsResolved: true,
-        logActivity: false,
-      });
-    }
-    if (skippedStories.length > 0) {
-      logWorkflowDecision({
-        projectId,
-        epicId,
-        status: "done",
-        actor: "user",
-        reason: `Epic approved; ${skippedStories.length} non-review ${skippedStories.length === 1 ? "story was" : "stories were"} left unchanged (${skippedStories.map((story) => `${story.id}:${story.status ?? "todo"}`).join(", ")})`,
-      });
-    }
+    const skippedStories = validation.skippedStories ?? [];
 
     // The branch name is cleared only when a merge actually happened
     // (mergeWorktree deleted the branch on success, so keeping the name
@@ -389,11 +326,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
         ...(merged ? {} : { mergeSkipped: "no-branch" }),
         ...(skippedStories.length > 0
           ? {
-              skippedStories: skippedStories.map((story) => ({
-                id: story.id,
-                title: story.title,
-                status: story.status ?? "todo",
-              })),
+              skippedStories,
             }
           : {}),
       },

@@ -127,6 +127,9 @@ export async function POST(
       data: {
         merged: true,
         commitHash: result.commitHash,
+        ...(validation.skippedStories?.length
+          ? { skippedStories: validation.skippedStories }
+          : {}),
       },
     });
   }
