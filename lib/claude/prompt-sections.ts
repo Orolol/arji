@@ -101,12 +101,20 @@ export function existingEpicsSection(existingEpics: PromptEpic[]): string {
   return `## Existing Epics\n\n${list}\n`;
 }
 
-/** Formats a conversation history block with role prefixes. */
+/**
+ * Formats a conversation history block with role prefixes.
+ *
+ * Not fenced — a replayed conversation reads better inline, and fencing it
+ * would change every existing chat prompt — but control markup is still
+ * neutralised, exactly like `descriptionSection` and the comment history.
+ * Message bodies are stored, user- and agent-writable text replayed into
+ * later prompts, so they are the same class of channel as the spec.
+ */
 export function chatHistorySection(messages: PromptMessage[]): string {
   if (messages.length === 0) return "";
   const formatted = messages.map((msg) => {
     const prefix = msg.role === "user" ? "**User:**" : "**Assistant:**";
-    return `${prefix}\n${msg.content.trim()}`;
+    return `${prefix}\n${neutralizeControlMarkup(msg.content.trim())}`;
   });
   return `## Conversation History\n\n${formatted.join("\n\n")}\n`;
 }
