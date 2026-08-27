@@ -165,9 +165,11 @@ export const OPENAI_COMPATIBLE_PROVIDER = "openai-compatible" as const;
  */
 export const CLAUDE_CODE_PERSISTENT_PROVIDER =
   "claude-code-persistent" as const;
+export const OH_MY_PI_PERSISTENT_PROVIDER = "oh-my-pi-persistent" as const;
 
 export const PERSISTENT_CHAT_PROVIDER_OPTIONS = [
   CLAUDE_CODE_PERSISTENT_PROVIDER,
+  OH_MY_PI_PERSISTENT_PROVIDER,
 ] as const;
 
 export type PersistentChatProvider =
@@ -201,6 +203,7 @@ export const PROVIDER_LABELS: Record<ChatModeProvider, string> = {
   agy: "Antigravity",
   "openai-compatible": "OpenAI-compatible",
   "claude-code-persistent": "Claude Code — persistent",
+  "oh-my-pi-persistent": "Oh My Pi — persistent",
 };
 
 export function isAgentProvider(value: string): value is AgentProvider {
@@ -227,7 +230,9 @@ export function isPersistentChatProvider(
 
 /** Provider process used underneath a chat-only persistent mode. */
 export function persistentChatBaseProvider(
-  _provider: PersistentChatProvider,
-): Extract<AgentProvider, "claude-code"> {
-  return "claude-code";
+  provider: PersistentChatProvider,
+): Extract<AgentProvider, "claude-code" | "oh-my-pi"> {
+  return provider === CLAUDE_CODE_PERSISTENT_PROVIDER
+    ? "claude-code"
+    : "oh-my-pi";
 }

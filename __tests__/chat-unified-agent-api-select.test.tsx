@@ -38,7 +38,7 @@ vi.mock("@/components/ui/select", () => ({
   }) => <option value={value}>{children}</option>,
 }));
 
-let mockNamedAgents = [
+const mockNamedAgents = [
   { id: "agent-1", name: "Claude Code (Sonnet)", provider: "claude-code", model: "claude-3-7-sonnet" },
   { id: "agent-2", name: "Codex (GPT-5)", provider: "codex", model: "gpt-5.3" },
   { id: "agent-3", name: "Oh My Pi (default)", provider: "oh-my-pi", model: "pi-large" },
@@ -115,6 +115,7 @@ describe("Unified Chat Agent & Provider Selection (Epic 0OQJfqU5gZ6S)", () => {
     );
     expect(cliOptions.map((opt) => opt.value)).toEqual([
       "claude-code-persistent",
+      "oh-my-pi-persistent",
       "claude-code",
       "codex",
       "oh-my-pi",
@@ -122,6 +123,7 @@ describe("Unified Chat Agent & Provider Selection (Epic 0OQJfqU5gZ6S)", () => {
     ]);
     expect(cliOptions.map((opt) => opt.textContent)).toEqual([
       "Claude Code — persistent",
+      "Oh My Pi — persistent",
       "Claude Code (CLI)",
       "Codex (CLI)",
       "Oh My Pi (CLI)",

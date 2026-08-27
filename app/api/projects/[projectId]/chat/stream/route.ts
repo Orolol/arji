@@ -814,10 +814,10 @@ export async function POST(
           encoder.encode(
             `data: ${JSON.stringify({
               status: turn.wasWarm
-                ? "Claude Code session is warm"
+                ? `${PROVIDER_LABELS[persistentProvider]} session is warm`
                 : resumeSession
-                  ? "Restarting and resuming Claude Code session..."
-                  : "Starting persistent Claude Code session...",
+                  ? `Restarting and resuming ${PROVIDER_LABELS[persistentProvider]} session...`
+                  : `Starting ${PROVIDER_LABELS[persistentProvider]} session...`,
             })}\n\n`,
           ),
         );

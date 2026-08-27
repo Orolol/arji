@@ -154,6 +154,14 @@ describe("ChatProviderSelect", () => {
       namedAgentId: null,
       provider: "claude-code-persistent",
     });
+
+    fireEvent.change(screen.getByTestId("provider-select-native"), {
+      target: { value: "oh-my-pi-persistent" },
+    });
+    expect(onSelect).toHaveBeenCalledWith({
+      namedAgentId: null,
+      provider: "oh-my-pi-persistent",
+    });
   });
 });
 

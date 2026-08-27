@@ -432,6 +432,40 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
     });
   });
 
+  it("routes an opted-in Oh My Pi conversation through the RPC adapter", async () => {
+    dbMockState.getQueue = [
+      { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
+      {
+        id: "conv-omp-persistent",
+        type: "chat",
+        provider: "oh-my-pi-persistent",
+        label: "Warm OMP chat",
+        cliSessionId: "omp-session-existing",
+      },
+    ];
+    dbMockState.allQueue = [[]];
+
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockJsonRequest({ content: "Continue", conversationId: "conv-omp-persistent" }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+    await readSseEvents(response);
+
+    expect(mockPersistentTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: "conv-omp-persistent",
+        provider: "oh-my-pi-persistent",
+        prompt: "Continue",
+        cliSessionId: "omp-session-existing",
+        resumeSession: true,
+      }),
+    );
+    expect(mockDynamicProviderSpawn).not.toHaveBeenCalled();
+    expect(mockSpawnHelpers.spawnClaude).not.toHaveBeenCalled();
+    expect(mockSpawnHelpers.spawnClaudeStream).not.toHaveBeenCalled();
+  });
+
   it("falls back to a fresh Oh My Pi run when the named agent's resume session is expired", async () => {
     mockResolveAgentByNamedId.mockReturnValue({
       provider: "oh-my-pi",

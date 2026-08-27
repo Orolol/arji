@@ -300,3 +300,215 @@ describe("persistent chat runner — Claude Code", () => {
     expect(getPersistentChatSessionState("conversation-error")).toBe("cold");
   });
 });
+
+describe("persistent chat runner — Oh My Pi RPC", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.createChannel.mockReturnValue({
+      mcp: {
+        serverName: "arij",
+        command: process.execPath,
+        args: ["bin/arij-mcp.mjs"],
+        env: {
+          ARIJ_BASE_URL: "http://localhost:3000",
+          ARIJ_MCP_TOKEN: "omp-secret",
+          ARIJ_MCP_TOOLSET: "chat",
+        },
+        allowedToolNames: ["mcp__arij_get_ticket"],
+      },
+      release: mocks.release,
+    });
+    mocks.spawn.mockImplementation(() => new FakeChild());
+  });
+
+  afterEach(() => {
+    resetPersistentChatRunnerForTests();
+    vi.useRealTimers();
+  });
+
+  async function startOmp(child: FakeChild, maxFrameBytes = 1_048_576) {
+    child.started();
+    child.event({
+      type: "ready",
+      protocolVersion: 1,
+      supportedProtocolVersions: [1, 2],
+      maxFrameBytes,
+      maxReassembledFrameBytes: 67_108_864,
+    });
+    await vi.waitFor(() => expect(child.writes.length).toBeGreaterThanOrEqual(2));
+  }
+
+  function finishOmpTurn(child: FakeChild, text: string): void {
+    const promptFrame = child.writes
+      .map((value) => JSON.parse(value) as { type?: string; id?: string })
+      .findLast((value) => value.type === "prompt")!;
+    child.event({
+      id: promptFrame.id,
+      type: "response",
+      command: "prompt",
+      success: true,
+    });
+    child.event({
+      type: "message_update",
+      assistantMessageEvent: {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: text,
+      },
+    });
+    child.event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text }],
+        stopReason: "stop",
+      },
+    });
+    child.event({ type: "agent_settled" });
+  }
+
+  it("maps RPC prompt/delta/settled frames and reuses one process end to end", async () => {
+    const firstChunks = vi.fn();
+    const onSessionId = vi.fn();
+    const first = runPersistentChatTurn({
+      ...options("omp-conversation", firstChunks),
+      provider: "oh-my-pi-persistent",
+      onCliSessionId: onSessionId,
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+    child.event({
+      id: "arij-state-omp-conversation",
+      type: "response",
+      command: "get_state",
+      success: true,
+      data: { sessionId: "omp-session-1" },
+    });
+    finishOmpTurn(child, "Bonjour");
+    await first.promise;
+
+    const secondChunks = vi.fn();
+    const second = runPersistentChatTurn({
+      ...options("omp-conversation", secondChunks),
+      provider: "oh-my-pi-persistent",
+      prompt: "second prompt",
+    });
+    expect(second.wasWarm).toBe(true);
+    await vi.waitFor(() =>
+      expect(
+        child.writes.filter((value) => JSON.parse(value).type === "prompt"),
+      ).toHaveLength(2),
+    );
+    finishOmpTurn(child, " encore");
+    await second.promise;
+
+    expect(mocks.spawn).toHaveBeenCalledTimes(1);
+    const [binary, args, spawnOptions] = mocks.spawn.mock.calls[0] as [
+      string,
+      string[],
+      { env: NodeJS.ProcessEnv },
+    ];
+    expect(binary).toBe("omp");
+    expect(args).toEqual(
+      expect.arrayContaining([
+        "--mode",
+        "rpc",
+        "--tools",
+        "read,grep,glob",
+        "--config",
+      ]),
+    );
+    expect(spawnOptions.env).toMatchObject({
+      ARIJ_MCP_TOKEN: "omp-secret",
+      ARIJ_MCP_TOOLSET: "chat",
+    });
+    expect(firstChunks).toHaveBeenCalledWith({ type: "text", text: "Bonjour" });
+    expect(secondChunks).toHaveBeenCalledWith({ type: "text", text: " encore" });
+    expect(onSessionId).toHaveBeenCalledWith("omp-session-1");
+    expect(mocks.createChannel).toHaveBeenCalledTimes(1);
+    expect(mocks.writeMcpConfigFile).not.toHaveBeenCalled();
+    expect(getPersistentChatSessionState("omp-conversation")).toBe("hot");
+  });
+
+  it("falls back to the final assistant message when no deltas were emitted", async () => {
+    const chunks = vi.fn();
+    const turn = runPersistentChatTurn({
+      ...options("omp-fallback", chunks),
+      provider: "oh-my-pi-persistent",
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+    child.event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "complete response" }],
+        stopReason: "stop",
+      },
+    });
+    child.event({ type: "agent_settled" });
+    await turn.promise;
+    expect(chunks).toHaveBeenCalledWith({
+      type: "text",
+      text: "complete response",
+    });
+  });
+
+  it("resumes the durable OMP session after its warm process is restarted", async () => {
+    const turn = runPersistentChatTurn({
+      ...options("omp-resume"),
+      provider: "oh-my-pi-persistent",
+      cliSessionId: "omp-session-1",
+      resumeSession: true,
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+    finishOmpTurn(child, "continued");
+    await turn.promise;
+
+    expect(mocks.spawn.mock.calls[0][1]).toEqual(
+      expect.arrayContaining(["--resume", "omp-session-1"]),
+    );
+    restartPersistentChatSession("omp-resume");
+    expect(mocks.release).not.toHaveBeenCalled();
+    child.closed();
+    expect(mocks.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a prompt larger than the negotiated RPC frame", async () => {
+    const turn = runPersistentChatTurn({
+      ...options("omp-frame-limit"),
+      provider: "oh-my-pi-persistent",
+      prompt: "x".repeat(256),
+    });
+    const child = await waitForSpawn();
+    child.started();
+    child.event({
+      type: "ready",
+      protocolVersion: 1,
+      supportedProtocolVersions: [1, 2],
+      maxFrameBytes: 100,
+    });
+    await expect(turn.promise).rejects.toThrow("100-byte frame limit");
+  });
+
+  it("surfaces RPC prompt failures", async () => {
+    const turn = runPersistentChatTurn({
+      ...options("omp-error"),
+      provider: "oh-my-pi-persistent",
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+    const prompt = child.writes
+      .map((value) => JSON.parse(value))
+      .findLast((value) => value.type === "prompt");
+    child.event({
+      id: prompt.id,
+      type: "response",
+      command: "prompt",
+      success: false,
+      error: "model unavailable",
+    });
+    await expect(turn.promise).rejects.toThrow("model unavailable");
+  });
+});
