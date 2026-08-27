@@ -169,7 +169,13 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
     ];
 
     dbMockState.getQueue = [
-      { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
+      {
+        id: "proj1",
+        name: "Arij",
+        description: "desc",
+        spec: "spec",
+        gitRepoPath: null,
+      },
       { id: "conv1", type: "brainstorm", provider: "claude-code", label: "Brainstorm" },
       { id: "conv1", type: "brainstorm", provider: "claude-code", label: "Brainstorm" },
     ];
@@ -464,6 +470,47 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
     expect(mockDynamicProviderSpawn).not.toHaveBeenCalled();
     expect(mockSpawnHelpers.spawnClaude).not.toHaveBeenCalled();
     expect(mockSpawnHelpers.spawnClaudeStream).not.toHaveBeenCalled();
+  });
+
+  it("persists a persistent-runner spawn error and streams it into the thread", async () => {
+    dbMockState.getQueue = [
+      { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
+      {
+        id: "conv-persistent-error",
+        type: "chat",
+        provider: "claude-code-persistent",
+        label: "Broken warm chat",
+        cliSessionId: null,
+      },
+    ];
+    dbMockState.allQueue = [[]];
+    mockPersistentTurn.mockReturnValueOnce({
+      wasWarm: false,
+      kill: vi.fn(),
+      promise: Promise.reject(new Error("Claude CLI not found")),
+    });
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/chat/stream/route"
+    );
+    const response = await POST(
+      mockJsonRequest({
+        content: "Hello",
+        conversationId: "conv-persistent-error",
+      }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+    const events = await readSseEvents(response);
+
+    expect(events).toContainEqual({ delta: "Error: Claude CLI not found" });
+    expect(events.at(-1)).toMatchObject({ done: true });
+    expect(dbMockState.insertCalls).toContainEqual(
+      expect.objectContaining({
+        role: "assistant",
+        content: "Error: Claude CLI not found",
+      }),
+    );
+    expect(dbMockState.updateCalls).toContainEqual({ status: "error" });
   });
 
   it("falls back to a fresh Oh My Pi run when the named agent's resume session is expired", async () => {

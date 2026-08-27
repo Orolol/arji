@@ -511,4 +511,34 @@ describe("persistent chat runner — Oh My Pi RPC", () => {
     });
     await expect(turn.promise).rejects.toThrow("model unavailable");
   });
+
+  it("waits for agent_settled, then surfaces an exhausted automatic retry", async () => {
+    const turn = runPersistentChatTurn({
+      ...options("omp-retry-error"),
+      provider: "oh-my-pi-persistent",
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+    child.event({
+      type: "auto_retry_end",
+      success: false,
+      attempt: 3,
+      finalError: "529 overloaded_error: Overloaded",
+    });
+
+    let settled = false;
+    void turn.promise.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    child.event({ type: "agent_settled" });
+    await expect(turn.promise).rejects.toThrow("529 overloaded_error");
+  });
 });

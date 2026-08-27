@@ -516,6 +516,24 @@ function processOmpEvent(process: PersistentProcess, raw: string): void {
     return;
   }
 
+  if (event.type === "auto_retry_end" && event.success === false) {
+    turn.errorMessage =
+      typeof event.finalError === "string"
+        ? event.finalError
+        : "Oh My Pi exhausted its automatic retries.";
+    return;
+  }
+
+  if (
+    event.type === "compaction_end" &&
+    event.result === null &&
+    event.aborted === false &&
+    typeof event.errorMessage === "string"
+  ) {
+    turn.errorMessage = event.errorMessage;
+    return;
+  }
+
   if (event.type === "message_end" && isRecord(event.message)) {
     const message = event.message;
     if (message.role !== "assistant") return;
@@ -778,7 +796,10 @@ function getOrSpawn(options: PersistentChatTurnOptions): PersistentProcess {
 export function runPersistentChatTurn(
   options: PersistentChatTurnOptions,
 ): PersistentChatTurnHandle {
-  const wasWarm = isPersistentChatSessionWarm(options.conversationId);
+  const existing = globalState().processes.get(options.conversationId);
+  const wasWarm = Boolean(
+    existing && existing.provider === options.provider && !existing.closing,
+  );
   let process: PersistentProcess | null = null;
   let cancelled = false;
   const promise = Promise.resolve().then(async () => {

@@ -1,9 +1,9 @@
 /**
  * Arij MCP tool channel for CLI chat conversations.
  *
- * CLI chat spawns (claude-code, codex) have no agent_sessions row, so they
- * bypass the processManager.start() wiring point on purpose — this module is
- * their dedicated wiring: the chat stream route calls
+ * CLI chat spawns (claude-code, codex, oh-my-pi) have no agent_sessions row,
+ * so they bypass the processManager.start() wiring point on purpose — this
+ * module is their dedicated wiring: the chat stream route calls
  * `createChatCliToolChannel` once per one-shot turn, passes `channel.mcp` to
  * the spawn, and calls `channel.release()` on every completion path. The
  * persistent runner instead creates one channel when the conversation
