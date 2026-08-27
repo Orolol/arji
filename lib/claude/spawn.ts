@@ -9,6 +9,11 @@ import {
 import { extractCliSessionIdFromOutput, hasAskUserQuestion } from "./json-parser";
 import { cleanupMcpConfigFile, writeMcpConfigFile } from "./mcp-injection";
 import { promptExceedsArgv } from "@/lib/providers/prompt-transport";
+import {
+  buildProviderOptionArgs,
+  resolveClaudePermissionMode,
+  type NamedAgentCliOptions,
+} from "@/lib/providers/options-registry";
 import type { McpSpawnConfig } from "@/lib/providers/types";
 
 export interface ClaudeOptions {
@@ -38,6 +43,12 @@ export interface ClaudeOptions {
    * never pass it.
    */
   mcp?: McpSpawnConfig;
+  /**
+   * Per-CLI options of the named agent that owns this session, validated
+   * against claude-code's registry entry by processManager.start(). Absent or
+   * empty leaves the argv exactly as it was before the option registry.
+   */
+  cliOptions?: NamedAgentCliOptions;
 }
 
 export interface ClaudeResult {
@@ -100,15 +111,23 @@ export function buildClaudeArgs(
   outputFormat: "json" | "stream-json",
   mcpConfigPath?: string | null,
 ): string[] {
-  const { mode, prompt, allowedTools, model, cliSessionId, resumeSession } =
-    options;
+  const {
+    mode,
+    prompt,
+    allowedTools,
+    model,
+    cliSessionId,
+    resumeSession,
+    cliOptions,
+  } = options;
   const mcp = mcpConfigPath ? options.mcp : undefined;
 
   // --permission-mode: "plan" for read-only research, "default" for chat
   // (headless: allowlisted tools run, everything else is denied),
-  // "bypassPermissions" for code/analyze.
-  const permissionMode =
-    mode === "plan" ? "plan" : mode === "chat" ? "default" : "bypassPermissions";
+  // "bypassPermissions" for code/analyze. A named agent may override this on
+  // code-producing spawns only — resolveClaudePermissionMode refuses to let
+  // configuration loosen a read-only posture.
+  const permissionMode = resolveClaudePermissionMode(mode, cliOptions);
 
   // "analyze" mode restricts tools to read + write (no Bash/Edit); "chat"
   // mode keeps the repo strictly read-only (no Bash, no Write) — board
@@ -174,6 +193,14 @@ export function buildClaudeArgs(
   if (mergedAllowedTools && mergedAllowedTools.length > 0) {
     args.push("--allowedTools", ...mergedAllowedTools);
   }
+
+  // Named-agent options last, so they read as a suffix in the display command.
+  // Emits nothing when every option sits at its default.
+  args.push(
+    ...buildProviderOptionArgs("claude-code", cliOptions, {
+      resume: !!(cliSessionId && resumeSession),
+    }),
+  );
 
   return args;
 }

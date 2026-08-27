@@ -50,6 +50,7 @@
  */
 
 import { BaseCliProvider } from "./base-provider";
+import { buildProviderOptionArgs } from "./options-registry";
 import type {
   BaseProviderChunkCallbacks,
   ProviderExitInfo,
@@ -104,7 +105,8 @@ export class AgyProvider extends BaseCliProvider {
   }
 
   buildArgs(options: ProviderSpawnOptions): string[] {
-    const { prompt, mode, model, cwd, cliSessionId, resumeSession } = options;
+    const { prompt, mode, model, cwd, cliSessionId, resumeSession, cliOptions } =
+      options;
 
     const args: string[] = [
       "--output-format",
@@ -134,6 +136,12 @@ export class AgyProvider extends BaseCliProvider {
     if (model) {
       args.push("--model", model);
     }
+
+    args.push(
+      ...buildProviderOptionArgs("agy", cliOptions, {
+        resume: !!(cliSessionId && resumeSession),
+      }),
+    );
 
     args.push("-p", prompt);
     return args;
