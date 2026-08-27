@@ -301,9 +301,10 @@ async function findConflictMarkerFiles(
 }
 
 /**
- * Pre-flight conflict check using `git merge-tree` plumbing.
+ * Pre-flight conflict check using `git merge-tree` plumbing (requires git >= 2.38).
  * Checks whether branchName can merge cleanly into mainBranch without touching
- * the index, the working tree, or requiring worktree removal.
+ * the index, the working tree, or removing active worktrees (note: git creates
+ * unreferenced tree/blob objects in .git/objects during write-tree mode until gc).
  */
 async function checkMergeTree(
   git: SimpleGit,
@@ -315,18 +316,19 @@ async function checkMergeTree(
   conflictFiles?: string[];
   errorMessage?: string;
 }> {
-  try {
-    const rawOut = await git.raw([
-      "merge-tree",
-      "--write-tree",
-      "--name-only",
-      mainBranch,
-      branchName,
-    ]);
-    const trimmed = rawOut.trim();
-    if (!trimmed) {
-      return { clean: true };
-    }
+  const rawOut = await git.raw([
+    "-c",
+    "core.quotepath=false",
+    "merge-tree",
+    "--write-tree",
+    "--name-only",
+    mainBranch,
+    branchName,
+  ]);
+  const trimmed = rawOut.trim();
+  if (!trimmed) {
+    return { clean: true };
+  }
     const lines = trimmed.split("\n").map((l) => l.trim()).filter(Boolean);
     if (lines.length <= 1) {
       return { clean: true, treeOid: lines[0] };
@@ -362,26 +364,13 @@ async function checkMergeTree(
         ? `CONFLICT (content): Merge conflict in ${conflictFiles.join(", ")}`
         : "Merge conflict";
 
-    return {
-      clean: false,
-      conflictFiles: Array.from(new Set(conflictFiles)),
-      errorMessage: error,
-    };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("CONFLICT")) {
-      const conflictMatches = Array.from(
-        msg.matchAll(/CONFLICT \([^)]+\): Merge conflict in (.+)/g)
-      ).map((m) => m[1].trim());
-      return {
-        clean: false,
-        conflictFiles: conflictMatches.length > 0 ? conflictMatches : undefined,
-        errorMessage: msg,
-      };
-    }
-    throw e;
-  }
+  return {
+    clean: false,
+    conflictFiles: Array.from(new Set(conflictFiles)),
+    errorMessage: error,
+  };
 }
+
 /**
  * Records where `main` and the epic branch point right now, so a merge that
  * turns out to have been unwanted can be undone. Returns null when the state
@@ -527,7 +516,8 @@ export async function mergeWorktree(
     };
   }
 
-  // ---- The merge itself: the only step that can conflict. ----------------
+  // ---- The merge execution: preflight already verified tree is conflict-free.
+  // Any failure here is a working-tree, index-lock, hook, or system error.
   try {
     await git.merge([branchName, "--no-ff", "-m", `Merge ${branchName}`]);
   } catch (e) {
@@ -539,7 +529,7 @@ export async function mergeWorktree(
     return {
       merged: false,
       error: e instanceof Error ? e.message : "Merge failed",
-      reason: "conflict",
+      reason: "error",
     };
   }
 

@@ -94,8 +94,9 @@ vi.mock("@/lib/db/schema", () => ({
   },
 }));
 
+const mockLogTransition = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/workflow/log", () => ({
-  logTransition: vi.fn(),
+  logTransition: mockLogTransition,
 }));
 
 const mockCreateMergeRetryFailedNotification = vi.hoisted(() => vi.fn());
@@ -285,6 +286,44 @@ describe("POST /api/projects/[projectId]/epics/[epicId]/merge", () => {
     expect(json.reason).toBe("conflict");
     expect(json.conflictFiles).toEqual(["lib/a.ts"]);
     expect(json.mergeFailed).toBe(true);
+    expect(mockStart).not.toHaveBeenCalled();
+
+    // Assert the persisted audit trail
+    expect(mockLogTransition).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "proj1",
+        epicId: "epic1",
+        fromStatus: "review",
+        toStatus: "review",
+        actor: "system",
+        reason: expect.stringContaining("Merge blocked: merge of feature/epic1 failed"),
+      })
+    );
+    expect(mockCreateApproveMergeFailedNotification).toHaveBeenCalledWith({
+      projectId: "proj1",
+      epicId: "epic1",
+      error: "CONFLICT (content): Merge conflict in lib/a.ts",
+    });
+  });
+
+  it("returns 500 when merge fails because branch is missing (non-regression)", async () => {
+    mockMergeWorktree.mockResolvedValue({
+      merged: false,
+      error: "Branch feature/epic1 not found",
+      reason: "branch-missing",
+    });
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/epics/[epicId]/merge/route"
+    );
+    const res = await POST(
+      mockRequest({ autoAgent: false }),
+      { params: Promise.resolve({ projectId: "proj1", epicId: "epic1" }) }
+    );
+
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(json.reason).toBe("branch-missing");
     expect(mockStart).not.toHaveBeenCalled();
   });
 

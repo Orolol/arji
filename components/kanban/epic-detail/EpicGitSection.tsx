@@ -51,6 +51,8 @@ interface EpicGitSectionProps {
   onSyncPr: () => void;
   merging: boolean;
   mergeError: string | null;
+  mergeConflict?: boolean;
+  conflictFiles?: string[];
   onMerge: () => void;
   resolvingMerge: boolean;
   onOpenResolveMerge: () => void;
@@ -88,13 +90,15 @@ export function EpicGitSection({
   onSyncPr,
   merging,
   mergeError,
+  mergeConflict,
+  conflictFiles,
   onMerge,
   resolvingMerge,
   onOpenResolveMerge,
   mergeReadiness,
 }: EpicGitSectionProps) {
   const hasPersistedConflict = mergeReadiness?.blocker === "merge_conflict";
-
+  const isConflict = mergeError ? Boolean(mergeConflict) : hasPersistedConflict;
   const effectiveMergeError =
     mergeError ||
     (hasPersistedConflict
@@ -264,24 +268,34 @@ export function EpicGitSection({
       )}
 
       {effectiveMergeError && (
-        <div className="flex items-center gap-2 pt-[8px]">
-          <p className="flex-1 text-[12px] text-destructive">
-            {effectiveMergeError}
-          </p>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onOpenResolveMerge}
-            disabled={resolvingMerge || isRunning}
-            className="h-[27px] shrink-0 rounded-[8px] text-[12.5px]"
-          >
-            {resolvingMerge ? (
-              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-            ) : (
-              <Wrench className="mr-1 h-3 w-3" />
+        <div className="flex flex-col gap-2 pt-[8px]">
+          <div className="flex items-center gap-2">
+            <p className="flex-1 text-[12px] text-destructive">
+              {effectiveMergeError}
+            </p>
+            {isConflict && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onOpenResolveMerge}
+                disabled={resolvingMerge || isRunning}
+                className="h-[27px] shrink-0 rounded-[8px] text-[12.5px]"
+              >
+                {resolvingMerge ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                ) : (
+                  <Wrench className="mr-1 h-3 w-3" />
+                )}
+                Resolve with Agent
+              </Button>
             )}
-            Resolve with Agent
-          </Button>
+          </div>
+          {isConflict && conflictFiles && conflictFiles.length > 0 && (
+            <div className="rounded-[6px] bg-destructive/10 px-2 py-1.5 font-mono text-[11px] text-destructive">
+              <span className="font-sans font-medium">Conflicted files: </span>
+              {conflictFiles.join(", ")}
+            </div>
+          )}
         </div>
       )}
     </>

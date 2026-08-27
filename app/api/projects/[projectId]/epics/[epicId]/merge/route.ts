@@ -31,8 +31,8 @@ import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completi
 import { applyTransition } from "@/lib/workflow/transition-service";
 import { logTransition } from "@/lib/workflow/log";
 import {
-  buildApprovalMergeBlockedReason,
-  buildApprovalConflictMarkersBlockedReason,
+  buildMergeBlockedReason,
+  buildMergeConflictMarkersBlockedReason,
 } from "@/lib/workflow/merge-failure";
 import {
   createApproveMergeFailedNotification,
@@ -353,12 +353,12 @@ export async function POST(
       toStatus: (epic.status ?? "review") as KanbanStatus,
       actor: "system",
       reason: isConflict
-        ? buildApprovalMergeBlockedReason({
+        ? buildMergeBlockedReason({
             branchName: epic.branchName,
             error: mergeError,
           })
         : isConflictMarkers
-        ? buildApprovalConflictMarkersBlockedReason({
+        ? buildMergeConflictMarkersBlockedReason({
             branchName: epic.branchName,
             error: mergeError,
           })
@@ -370,8 +370,6 @@ export async function POST(
       trailError
     );
   }
-
-  tryExportArjiJson(projectId);
 
   if (isConflict) {
     return NextResponse.json(
@@ -401,6 +399,6 @@ export async function POST(
       error: result.error || "Merge failed",
       reason: result.reason ?? "error",
     },
-    { status: result.reason === "branch-missing" ? 400 : 500 }
+    { status: 500 }
   );
 }

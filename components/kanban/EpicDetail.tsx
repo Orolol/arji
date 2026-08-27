@@ -206,6 +206,8 @@ export function EpicDetail({
   const {
     merging,
     mergeError,
+    mergeConflict,
+    conflictFiles: mergeConflictFiles,
     setMergeError,
     merge,
     deletingEpic,
@@ -726,6 +728,8 @@ export function EpicDetail({
                     onSyncPr={syncPr}
                     merging={merging}
                     mergeError={mergeError}
+                    mergeConflict={mergeConflict}
+                    conflictFiles={mergeConflictFiles}
                     onMerge={merge}
                     resolvingMerge={resolvingMerge}
                     onOpenResolveMerge={() => setResolveMergeOpen(true)}

@@ -69,6 +69,29 @@ export function buildApprovalConflictMarkersBlockedReason(input: {
   return `${APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX}${input.branchName} — ${input.error}`;
 }
 
+/** Head of the reason `POST .../merge` logs when a direct merge hits conflicts. */
+export const MERGE_BLOCKED_PREFIX = "Merge blocked: merge of ";
+
+/** The merge route's merge-conflict reason. */
+export function buildMergeBlockedReason(input: {
+  branchName: string;
+  error: string;
+}): string {
+  return `${MERGE_BLOCKED_PREFIX}${input.branchName} failed — ${input.error}`;
+}
+
+/** Head of the reason `POST .../merge` logs when a branch has committed conflict markers. */
+export const MERGE_CONFLICT_MARKERS_BLOCKED_PREFIX =
+  "Merge blocked: conflict markers on ";
+
+/** The merge route's conflict-markers reason. */
+export function buildMergeConflictMarkersBlockedReason(input: {
+  branchName: string;
+  error: string;
+}): string {
+  return `${MERGE_CONFLICT_MARKERS_BLOCKED_PREFIX}${input.branchName} — ${input.error}`;
+}
+
 
 /**
  * `MergeWorktreeResult.reason` values that mean the branch has a conflict that
@@ -117,6 +140,7 @@ export function isGitRefusalMergeReason(
  */
 export const MERGE_CONFLICT_REASON_PREFIXES: readonly string[] = [
   APPROVAL_MERGE_BLOCKED_PREFIX,
+  MERGE_BLOCKED_PREFIX,
   AUTO_MODE_REASONS.mergeConflict,
   AUTO_MODE_REASONS.mergeConflictDeferred,
   reasonPrefix((error) => AUTO_MODE_REASONS.mergeFailed("conflict", error)),
@@ -127,11 +151,11 @@ export const MERGE_CONFLICT_REASON_PREFIXES: readonly string[] = [
  */
 export const CONFLICT_MARKERS_REASON_PREFIXES: readonly string[] = [
   APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX,
+  MERGE_CONFLICT_MARKERS_BLOCKED_PREFIX,
   reasonPrefix((error) =>
     AUTO_MODE_REASONS.mergeFailed("conflict-markers", error)
   ),
 ];
-
 export const MERGE_FAILURE_REASON_PREFIXES: readonly string[] = [
   ...MERGE_CONFLICT_REASON_PREFIXES,
   ...CONFLICT_MARKERS_REASON_PREFIXES,
