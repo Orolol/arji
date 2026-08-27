@@ -93,6 +93,7 @@ describe("ChatProviderSelect", () => {
     expect(values).toContain("openai-compatible");
     expect(values).toContain("agent-1");
     expect(values).toContain("agent-2");
+    expect(values).toContain("claude-code-persistent");
   });
 
   it("labels the fast mode OpenAI-compatible", () => {
@@ -144,6 +145,14 @@ describe("ChatProviderSelect", () => {
     expect(onSelect).toHaveBeenCalledWith({
       namedAgentId: "agent-2",
       provider: "codex",
+    });
+
+    fireEvent.change(screen.getByTestId("provider-select-native"), {
+      target: { value: "claude-code-persistent" },
+    });
+    expect(onSelect).toHaveBeenCalledWith({
+      namedAgentId: null,
+      provider: "claude-code-persistent",
     });
   });
 });
@@ -198,5 +207,44 @@ describe("ChatWorkspaceHeader provider select gating", () => {
     renderHeader();
     const selects = screen.getAllByTestId("provider-select-native");
     expect(selects).toHaveLength(1);
+  });
+
+  it("shows warm/cold state and exposes a restart action", () => {
+    const onRestart = vi.fn();
+    const { rerender } = renderHeader({
+      activeConversation: conversation({
+        provider: "claude-code-persistent",
+        persistentSessionState: "cold",
+      }),
+      activeProvider: "claude-code-persistent",
+      onRestartPersistentSession: onRestart,
+    });
+
+    expect(screen.getByTestId("persistent-session-state")).toHaveTextContent(
+      "session cold",
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Restart persistent chat session",
+      }),
+    );
+    expect(onRestart).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ChatWorkspaceHeader
+        activeConversation={conversation({
+          provider: "claude-code-persistent",
+          persistentSessionState: "hot",
+        })}
+        activeProvider="claude-code-persistent"
+        hasMessages
+        isBusy={false}
+        onSelectAgentOrProvider={noop}
+        onRestartPersistentSession={onRestart}
+      />,
+    );
+    expect(screen.getByTestId("persistent-session-state")).toHaveTextContent(
+      "session warm",
+    );
   });
 });

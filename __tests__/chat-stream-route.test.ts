@@ -22,6 +22,7 @@ const mockResolveAgentPrompt = vi.hoisted(() => vi.fn());
 const mockDynamicProviderSpawn = vi.hoisted(() => vi.fn());
 const mockGetProvider = vi.hoisted(() => vi.fn());
 const mockResolveAgentByNamedId = vi.hoisted(() => vi.fn());
+const mockPersistentTurn = vi.hoisted(() => vi.fn());
 
 // Real drizzle-orm + real @/lib/db/schema: both are side-effect-free pure
 // builders, and the chain mock ignores their output. No fake column maps.
@@ -68,6 +69,12 @@ vi.mock("@/lib/agent-config/agent-resolution", () => ({
 // byte-identical. Its wiring is covered by chat-stream-route-mcp.test.ts.
 vi.mock("@/lib/chat/cli-tool-channel", () => ({
   createChatCliToolChannel: vi.fn(() => null),
+}));
+
+vi.mock("@/lib/chat/persistent-runner", () => ({
+  DEFAULT_MAX_WARM_CHAT_CONVERSATIONS: 3,
+  DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS: 900_000,
+  runPersistentChatTurn: mockPersistentTurn,
 }));
 
 async function readSseEvents(response: Response): Promise<Array<Record<string, unknown>>> {
@@ -131,6 +138,14 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
       }),
       kill: vi.fn(),
     });
+    mockPersistentTurn.mockImplementation((options) => ({
+      wasWarm: false,
+      kill: vi.fn(),
+      promise: Promise.resolve().then(() => {
+        options.onCliSessionId("persistent-cli-session");
+        options.onChunk({ type: "text", text: "Persistent response" });
+      }),
+    }));
   });
 
   it("enriches Claude prompt with mentioned text and image document context", async () => {
@@ -375,6 +390,46 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
     expect(mockSpawnHelpers.spawnClaudeStream).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: "CHAT_PROMPT" }),
     );
+  });
+
+  it("routes an opted-in Claude conversation through the persistent runner", async () => {
+    dbMockState.getQueue = [
+      { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
+      {
+        id: "conv-persistent",
+        type: "chat",
+        provider: "claude-code-persistent",
+        label: "Warm chat",
+        cliSessionId: null,
+      },
+    ];
+    dbMockState.allQueue = [[]];
+
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockJsonRequest({ content: "Hello", conversationId: "conv-persistent" }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+    const events = await readSseEvents(response);
+
+    expect(response.status).toBe(200);
+    expect(mockPersistentTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: "conv-persistent",
+        provider: "claude-code-persistent",
+        prompt: "CHAT_PROMPT",
+        mode: "chat",
+        idleTimeoutMs: 900_000,
+        maxWarmConversations: 3,
+      }),
+    );
+    expect(mockSpawnHelpers.spawnClaude).not.toHaveBeenCalled();
+    expect(mockSpawnHelpers.spawnClaudeStream).not.toHaveBeenCalled();
+    expect(events).toContainEqual({ delta: "Persistent response" });
+    expect(events.at(-1)).toMatchObject({ done: true });
+    expect(dbMockState.updateCalls).toContainEqual({
+      cliSessionId: "persistent-cli-session",
+    });
   });
 
   it("falls back to a fresh Oh My Pi run when the named agent's resume session is expired", async () => {

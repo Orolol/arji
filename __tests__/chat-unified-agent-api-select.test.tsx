@@ -114,12 +114,14 @@ describe("Unified Chat Agent & Provider Selection (Epic 0OQJfqU5gZ6S)", () => {
       (opt) => opt.value !== "openai-compatible" && !namedAgentIds.has(opt.value),
     );
     expect(cliOptions.map((opt) => opt.value)).toEqual([
+      "claude-code-persistent",
       "claude-code",
       "codex",
       "oh-my-pi",
       "agy",
     ]);
     expect(cliOptions.map((opt) => opt.textContent)).toEqual([
+      "Claude Code — persistent",
       "Claude Code (CLI)",
       "Codex (CLI)",
       "Oh My Pi (CLI)",

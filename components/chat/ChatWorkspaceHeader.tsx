@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +9,7 @@ import {
 } from "@/components/chat/ChatProviderSelect";
 import type { Conversation } from "@/hooks/useConversations";
 import { resolveLegacyConversationLabel } from "@/lib/chat/parity-contract";
+import { isPersistentChatProvider } from "@/lib/agent-config/constants";
 
 interface ChatWorkspaceHeaderProps {
   activeConversation: Conversation | null;
@@ -16,6 +17,7 @@ interface ChatWorkspaceHeaderProps {
   hasMessages: boolean;
   isBusy: boolean;
   onSelectAgentOrProvider: (selection: ChatAgentSelection) => void;
+  onRestartPersistentSession?: () => void;
 }
 
 /**
@@ -28,19 +30,41 @@ export function ChatWorkspaceHeader({
   hasMessages,
   isBusy,
   onSelectAgentOrProvider,
+  onRestartPersistentSession = () => {},
 }: ChatWorkspaceHeaderProps) {
+  const isPersistent = isPersistentChatProvider(activeConversation?.provider);
+  const isHot = activeConversation?.persistentSessionState === "hot";
   return (
     <div className="flex items-center gap-2">
       <span data-testid="provider-select" className="sr-only">
         {activeProvider}
       </span>
-      {activeConversation?.cliSessionId && (
+      {isPersistent && (
         <Badge
           variant="outline"
-          className="border-agent-border text-[10px] text-agent"
+          className={
+            isHot
+              ? "border-agent-border text-[10px] text-agent"
+              : "text-[10px] text-muted-foreground"
+          }
+          data-testid="persistent-session-state"
         >
-          session linked
+          {isHot ? "session warm" : "session cold"}
         </Badge>
+      )}
+      {isPersistent && (
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          title="Restart session"
+          aria-label="Restart persistent chat session"
+          onClick={onRestartPersistentSession}
+          disabled={isBusy}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </Button>
       )}
       <ChatProviderSelect
         activeConversation={activeConversation}

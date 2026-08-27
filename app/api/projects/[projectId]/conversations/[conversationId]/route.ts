@@ -3,10 +3,17 @@ import { db } from "@/lib/db";
 import { chatConversations, namedAgents } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { resolveAgent } from "@/lib/agent-config/agent-resolution";
-import { isChatProvider } from "@/lib/agent-config/constants";
+import {
+  isChatProvider,
+  isPersistentChatProvider,
+} from "@/lib/agent-config/constants";
 import { resolveCliSessionId } from "@/lib/db/resolve-cli-session-id";
 import { validateBody, isValidationError } from "@/lib/validation/validate";
 import { updateConversationSchema } from "@/lib/validation/chat-schemas";
+import {
+  getPersistentChatSessionState,
+  restartPersistentChatSession,
+} from "@/lib/chat/persistent-runner";
 
 export async function GET(
   _request: NextRequest,
@@ -24,6 +31,7 @@ export async function GET(
       epicId: chatConversations.epicId,
       provider: chatConversations.provider,
       namedAgentId: chatConversations.namedAgentId,
+      cliSessionId: chatConversations.cliSessionId,
       createdAt: chatConversations.createdAt,
       namedAgentName: namedAgents.readableAgentName,
     })
@@ -41,7 +49,14 @@ export async function GET(
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ data: result });
+  return NextResponse.json({
+    data: {
+      ...result,
+      persistentSessionState: isPersistentChatProvider(result.provider)
+        ? getPersistentChatSessionState(result.id)
+        : null,
+    },
+  });
 }
 
 export async function DELETE(
@@ -65,6 +80,8 @@ export async function DELETE(
   if (!conversation) {
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
+
+  restartPersistentChatSession(conversationId);
 
   // Delete conversation (messages cascade via FK)
   db.delete(chatConversations)
@@ -100,6 +117,9 @@ export async function PATCH(
   }
 
   const updates: Record<string, string | null> = {};
+  const changesExecutionMode =
+    Object.prototype.hasOwnProperty.call(body, "namedAgentId") ||
+    Object.prototype.hasOwnProperty.call(body, "provider");
 
   if (Object.prototype.hasOwnProperty.call(body, "namedAgentId")) {
     const namedAgentIdInput =
@@ -157,6 +177,7 @@ export async function PATCH(
   }
 
   if (Object.keys(updates).length > 0) {
+    if (changesExecutionMode) restartPersistentChatSession(conversationId);
     db.update(chatConversations)
       .set(updates)
       .where(eq(chatConversations.id, conversationId))
@@ -175,6 +196,9 @@ export async function PATCH(
           ...updated,
           // Legacy-row fallback handled inside resolveCliSessionId().
           cliSessionId: resolveCliSessionId(updated),
+          persistentSessionState: isPersistentChatProvider(updated.provider)
+            ? getPersistentChatSessionState(updated.id)
+            : null,
         }
       : updated,
   });

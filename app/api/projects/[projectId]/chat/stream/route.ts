@@ -4,7 +4,11 @@ import { chatMessages, chatAttachments, chatConversations, settings, epics } fro
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { resolveCliSessionId } from "@/lib/db/resolve-cli-session-id";
-import { spawnClaudeStream, spawnClaude } from "@/lib/claude/spawn";
+import {
+  spawnClaudeStream,
+  spawnClaude,
+  type StreamChunk,
+} from "@/lib/claude/spawn";
 import { buildChatPrompt, buildEpicRefinementPrompt, buildEpicFinalizationPrompt } from "@/lib/claude/prompt-builder";
 import { getProvider, type ProviderType } from "@/lib/providers";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
@@ -37,8 +41,10 @@ import {
   validateMentionsExist,
 } from "@/lib/documents/mentions";
 import {
+  isPersistentChatProvider,
   isChatProvider,
   OPENAI_COMPATIBLE_PROVIDER,
+  persistentChatBaseProvider,
   PROVIDER_LABELS,
   type ChatModeProvider,
 } from "@/lib/agent-config/constants";
@@ -50,6 +56,11 @@ import { getProjectOr404, isErrorResponse } from "@/lib/api/route-helpers";
 import { validateBody, isValidationError } from "@/lib/validation/validate";
 import { chatMessageSchema } from "@/lib/validation/chat-schemas";
 import { generateConversationTitle } from "@/lib/chat/title-generation";
+import {
+  DEFAULT_MAX_WARM_CHAT_CONVERSATIONS,
+  DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS,
+  runPersistentChatTurn,
+} from "@/lib/chat/persistent-runner";
 
 /**
  * The stored conversation provider, honoured for any provider the app
@@ -84,6 +95,17 @@ const MAX_TOOL_ROUNDS = 8;
  * an error payload instead of an execution.
  */
 const MAX_TOOL_CALLS_PER_ROUND = 8;
+
+function positiveNumberSetting(key: string, fallback: number): number {
+  const row = db.select().from(settings).where(eq(settings.key, key)).get();
+  if (!row) return fallback;
+  try {
+    const value = Number(JSON.parse(row.value));
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 /**
  * Whether a first-round upstream failure looks like the endpoint rejecting
@@ -162,19 +184,25 @@ export async function POST(
     conversation?.namedAgentId ?? null
   );
   const conversationProvider = normalizeProvider(conversation?.provider);
+  const persistentProvider = isPersistentChatProvider(conversationProvider)
+    ? conversationProvider
+    : null;
+  const conversationExecutionProvider = persistentProvider
+    ? persistentChatBaseProvider(persistentProvider)
+    : conversationProvider;
   const overridesProvider =
     Boolean(conversationProvider) && !conversation?.namedAgentId;
   const resolvedAgent =
-    overridesProvider && conversationProvider
+    overridesProvider && conversationExecutionProvider
       ? {
           ...resolvedByNamedAgent,
-          provider: conversationProvider,
+          provider: conversationExecutionProvider,
           // A raw provider choice carries no model. Keeping the resolved
           // agent's model would hand e.g. `claude-opus-*` to `codex -m`,
           // which rejects it — drop it and let the CLI pick its default
           // unless both sides agree on the provider.
           model:
-            conversationProvider === resolvedByNamedAgent.provider
+            conversationExecutionProvider === resolvedByNamedAgent.provider
               ? resolvedByNamedAgent.model
               : undefined,
         }
@@ -707,6 +735,122 @@ export async function POST(
     conversation?.label ? `Chat: ${conversation.label}` : "Chat";
   const activityId = `chat-${createId()}`;
 
+  // Claude chat turns run in "chat" mode (permission mode "default" with a
+  // read-only repo allowlist). Prompt-contract conversations remain in plan.
+  const claudeChatMode = isEpicCreationConversationAgentType(conversationType)
+    ? ("plan" as const)
+    : ("chat" as const);
+
+  if (persistentProvider && conversationId) {
+    let currentKill = () => {};
+    let fullContent = "";
+    let persistentChunkSink: ((chunk: StreamChunk) => void) | null = null;
+
+    const turn = runPersistentChatTurn({
+      conversationId,
+      projectId,
+      provider: persistentProvider,
+      prompt: effectivePrompt,
+      cwd: project.gitRepoPath || process.cwd(),
+      mode: claudeChatMode,
+      model: resolvedAgent.model,
+      cliSessionId,
+      resumeSession,
+      conversationType,
+      idleTimeoutMs: positiveNumberSetting(
+        "chat_persistent_idle_timeout_ms",
+        DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS,
+      ),
+      maxWarmConversations: positiveNumberSetting(
+        "chat_persistent_max_conversations",
+        DEFAULT_MAX_WARM_CHAT_CONVERSATIONS,
+      ),
+      onChunk(chunk) {
+        // Assigned by the stream start below before the process can emit a
+        // model event (runPersistentChatTurn begins on the next microtask).
+        persistentChunkSink?.(chunk);
+      },
+      onCliSessionId(nextCliSessionId) {
+        cliSessionId = nextCliSessionId;
+        persistConversationSessionId(nextCliSessionId);
+      },
+    });
+    currentKill = turn.kill;
+
+    activityRegistry.register({
+      id: activityId,
+      projectId,
+      type: "chat",
+      label: activityLabel,
+      provider: resolvedAgent.provider,
+      namedAgentName: resolvedAgent.name ?? null,
+      startedAt: new Date().toISOString(),
+      kill: () => currentKill(),
+    });
+
+    const sseStream = new ReadableStream({
+      async start(controller) {
+        persistentChunkSink = (chunk) => {
+          if (chunk.type === "text") {
+            fullContent += chunk.text;
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ delta: chunk.text })}\n\n`),
+            );
+          } else if (chunk.type === "questions") {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ questions: chunk.questions })}\n\n`,
+              ),
+            );
+          } else {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ status: chunk.status })}\n\n`,
+              ),
+            );
+          }
+        };
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              status: turn.wasWarm
+                ? "Claude Code session is warm"
+                : resumeSession
+                  ? "Restarting and resuming Claude Code session..."
+                  : "Starting persistent Claude Code session...",
+            })}\n\n`,
+          ),
+        );
+
+        try {
+          await turn.promise;
+          activityRegistry.unregister(activityId);
+          saveAssistantAndTitle(controller, fullContent, "active");
+        } catch (error) {
+          const failureMessage =
+            error instanceof Error ? `Error: ${error.message}` : "Error: Provider request failed";
+          const delta = fullContent ? `\n\n${failureMessage}` : failureMessage;
+          fullContent += delta;
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ delta })}\n\n`),
+          );
+          activityRegistry.unregister(activityId);
+          saveAssistantAndTitle(controller, fullContent, "error");
+        } finally {
+          persistentChunkSink = null;
+        }
+      },
+      cancel() {
+        persistentChunkSink = null;
+        activityRegistry.unregister(activityId);
+        currentKill();
+        setConversationStatus("active");
+      },
+    });
+
+    return sseResponse(sseStream);
+  }
+
   // Per-turn Arij MCP tool channel for CLI chat providers (claude-code,
   // codex, oh-my-pi): the spawned CLI gets the chat toolset of arij board
   // tools, spelled per provider (mcp__arij__* on claude/codex, mcp__arij_*
@@ -719,15 +863,6 @@ export async function POST(
     provider: resolvedAgent.provider,
     conversationType,
   });
-
-  // Claude chat turns run in "chat" mode (permission mode "default" with a
-  // read-only repo allowlist): plan mode refuses allowlisted mutating MCP
-  // tools AND nudges the model into presenting plans it cannot exit from in
-  // a headless spawn. Epic-creation flows keep plan mode — they are prompt
-  // contracts with no tool channel.
-  const claudeChatMode = isEpicCreationConversationAgentType(conversationType)
-    ? ("plan" as const)
-    : ("chat" as const);
 
   // Every non-Claude provider: non-streaming, spawned through its own provider
   if (resolvedAgent.provider !== "claude-code") {
