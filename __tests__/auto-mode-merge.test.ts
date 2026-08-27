@@ -356,6 +356,69 @@ describe("tryAutoMerge — the workflow guards ARE the review gate", () => {
     expect(outcome.status).toBe("merged");
   });
 
+  it("closes the non-blocking findings it merged over", async () => {
+    // A [minor] does not block the merge — but leaving it `open` on a Done
+    // epic is not harmless. `buildReviewFeedbackSection` and the epic build
+    // route both load EVERY open row for the epic, unfiltered, under
+    // "address each one", so a later build on this epic would re-litigate a
+    // finding the reviewer already accepted. Approve has always bulk-resolved
+    // at this point; the merge paths must too.
+    seed();
+    db.insert(reviewComments)
+      .values({
+        id: "rc-minor",
+        epicId: EPIC_ID,
+        filePath: "lib/x.ts",
+        lineNumber: 3,
+        body: "[minor] tidy later",
+        author: "agent",
+        status: "open",
+      })
+      .run();
+    gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
+
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    expect(outcome.status).toBe("merged");
+    expect(
+      db
+        .select()
+        .from(reviewComments)
+        .where(eq(reviewComments.epicId, EPIC_ID))
+        .all()
+        .map((row) => row.status)
+    ).toEqual(["resolved"]);
+  });
+
+  it("leaves findings open when the post-merge guard refuses", async () => {
+    // The caller rolls the merge back on a refusal, so nothing may have been
+    // closed on the way — the findings are exactly what the next sweep reads.
+    seed();
+    db.insert(reviewComments)
+      .values({
+        id: "rc-blocking",
+        epicId: EPIC_ID,
+        filePath: "lib/x.ts",
+        lineNumber: 3,
+        body: "[critical] nope",
+        author: "agent",
+        status: "open",
+      })
+      .run();
+    gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
+
+    await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    expect(
+      db
+        .select()
+        .from(reviewComments)
+        .where(eq(reviewComments.epicId, EPIC_ID))
+        .all()
+        .map((row) => row.status)
+    ).toEqual(["open"]);
+  });
+
   it("never merges an epic with no completed review", async () => {
     seed({ withCompletedReview: false });
     gitMocks.mergeWorktree.mockResolvedValue({ merged: true });

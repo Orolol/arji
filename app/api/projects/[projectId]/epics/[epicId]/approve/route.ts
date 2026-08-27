@@ -4,7 +4,6 @@ import {
   projects,
   epics,
   userStories,
-  reviewComments,
   ticketComments,
   agentSessions,
 } from "@/lib/db/schema";
@@ -20,6 +19,7 @@ import {
   type StoryStatus,
 } from "@/lib/workflow/transition-service";
 import { createApproveMergeFailedNotification } from "@/lib/notifications/create";
+import { closeOpenFindings } from "@/lib/workflow/close-findings";
 import { autoModeRegistry } from "@/lib/auto-mode/registry";
 import {
   buildApprovalMergeBlockedReason,
@@ -302,16 +302,12 @@ export async function POST(_request: NextRequest, { params }: Params) {
     // ---- Main has the work (or there was none to land) — now approve. ----
     const now = new Date().toISOString();
 
-    // Bulk-resolve all open review comments (before validation so context sees them resolved)
-    db.update(reviewComments)
-      .set({ status: "resolved", updatedAt: now })
-      .where(
-        and(
-          eq(reviewComments.epicId, epicId),
-          eq(reviewComments.status, "open")
-        )
-      )
-      .run();
+    // Bulk-resolve all open review comments (before validation so context sees
+    // them resolved). Approve is the one path that closes findings BEFORE its
+    // transition — that ordering is how a human overrides the findings guard
+    // on their own authority; the merge paths do it after. See
+    // lib/workflow/close-findings.ts.
+    closeOpenFindings(epicId);
 
     // Validate + apply the epic transition (status write, event and log all
     // come from the service — the pre-flight above already proved it valid).

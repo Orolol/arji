@@ -39,6 +39,7 @@ import {
 } from "@/lib/git/manager";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { applyTransition } from "@/lib/workflow/transition-service";
+import { closeOpenFindings } from "@/lib/workflow/close-findings";
 import { resolveVerifyConfigForProject } from "@/lib/verify/config";
 import { logTransition } from "@/lib/workflow/log";
 import {
@@ -204,6 +205,11 @@ function finalizeMergedEpic(input: {
     })
     .where(eq(epics.id, input.epicId))
     .run();
+
+  // Strictly after the guard passed: a refusal above returns early and the
+  // caller rolls the merge back, so the findings the next sweep reads are
+  // untouched. See lib/workflow/close-findings.ts.
+  closeOpenFindings(input.epicId);
 
   tryExportArjiJson(input.projectId);
   return { ok: true };

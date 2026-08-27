@@ -38,6 +38,18 @@ export interface TransitionContext {
   hasOpenReviewComments: boolean;
   /** Whether the epic has a completed review (at least one review session completed) */
   hasCompletedReview: boolean;
+  /**
+   * True when the newest EPIC-SCOPED review that recorded a structured
+   * verdict recorded `changes_requested`, and nothing with a verdict has
+   * spoken since.
+   *
+   * `hasCompletedReview` is satisfied by any completed review session ever,
+   * so it cannot tell a standing rejection from a stale one; this can. It
+   * exists because the merge paths land a branch on the base branch and must
+   * not be where a rejected review is discovered. A NULL verdict never
+   * clears it — a reviewer that deposited nothing overruled nothing.
+   */
+  hasNegativeReviewVerdict?: boolean;
   /** Story approval is itself an explicit human review decision. */
   requireCompletedReview?: boolean;
   /** Story approval cannot resolve epic-scoped findings on its own. */
@@ -136,6 +148,22 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
       ctx.hasOpenReviewComments
     ) {
       return "Cannot move to Done: there are unresolved review comments. Resolve all review comments first.";
+    }
+    return null;
+  },
+  // A merge must not land a branch the newest verdict rejected.
+  //
+  // Scoped to `merge` on purpose. `approve` is a human explicitly making the
+  // review decision — the same authority the spec gives explicit human story
+  // approval — and refusing it would leave a rejected epic with no way out
+  // but a fresh review. A merge has no such author.
+  (ctx) => {
+    if (
+      ctx.toStatus === "done" &&
+      ctx.source === "merge" &&
+      ctx.hasNegativeReviewVerdict
+    ) {
+      return "Cannot merge to Done: the latest review requested changes. Re-review the ticket, or use Approve to override.";
     }
     return null;
   },

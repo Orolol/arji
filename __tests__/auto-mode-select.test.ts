@@ -1228,10 +1228,12 @@ describe("query budget", () => {
       const board = loadAutoModeBoard(PROJECT_ID);
       const queriesForBoard = selectSpy.mock.calls.length;
       // Eleven board queries (nine + the dependency graph + the
-      // review-rejection scan); the sub-selects of the two window-function
-      // CTEs are built through the same `select` entry point, hence the
-      // ceiling.
-      expect(queriesForBoard).toBeLessThanOrEqual(13);
+      // review-rejection scan), plus the supersession-cutoff subquery the
+      // blocking-findings count joins against; the sub-selects of the two
+      // window-function CTEs are built through the same `select` entry point,
+      // hence the ceiling. Every one of them is constant in ticket count,
+      // which is what this test is really guarding.
+      expect(queriesForBoard).toBeLessThanOrEqual(14);
 
       selectSpy.mockClear();
       selectBuildCandidates(PROJECT_ID, board);

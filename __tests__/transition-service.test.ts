@@ -249,9 +249,11 @@ describe("applyTransition", () => {
     );
     const { db } = await import("@/lib/db");
     const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
-    // Context read order: open comments, completed reviews, running sessions.
+    // Context read order: supersession cutoff, open comments, completed
+    // reviews, running sessions.
     const seedReads = () =>
       all
+        .mockReturnValueOnce([{ cutoffAt: null }])
         .mockReturnValueOnce([{ id: "rc1", status: "open" }])
         .mockReturnValueOnce([
           { agentType: "code_reviewer", status: "completed" },
@@ -287,11 +289,13 @@ describe("applyTransition", () => {
 // ---------------------------------------------------------------------------
 
 describe("applyTransition — owning session exemption", () => {
-  // Context read order: open comments, completed reviews, running sessions.
+  // Context read order: supersession cutoff, open comments, completed
+  // reviews, running sessions.
   async function seedRunningSessions(rows: unknown[]) {
     const { db } = await import("@/lib/db");
     const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
     all
+      .mockReturnValueOnce([{ cutoffAt: null }]) // no verdict-bearing review
       .mockReturnValueOnce([]) // no open review comments
       .mockReturnValueOnce([]) // no completed review sessions
       .mockReturnValueOnce(rows);
@@ -470,9 +474,11 @@ describe("applyStoryTransition — owning session exemption", () => {
   async function seedStoryReads(rows: unknown[]) {
     const { db } = await import("@/lib/db");
     const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
-    // Context read order: open comments, completed reviews, running sessions
-    // (filtered to the story). The story transition then writes userStories.
+    // Context read order: supersession cutoff, open comments, completed
+    // reviews, running sessions (filtered to the story). The story transition
+    // then writes userStories.
     all
+      .mockReturnValueOnce([{ cutoffAt: null }])
       .mockReturnValueOnce([])
       .mockReturnValueOnce([])
       .mockReturnValueOnce(rows);

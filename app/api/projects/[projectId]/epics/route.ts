@@ -53,7 +53,10 @@ import {
   lastCleanReviewAtSql,
   lastTerminalCodeAtSql,
 } from "@/lib/workflow/review-freshness";
-import { blocksMergeSql } from "@/lib/workflow/blocking-findings";
+import {
+  blocksMergeSql,
+  supersessionCutoffsByEpic,
+} from "@/lib/workflow/blocking-findings";
 
 class FrictionConversionConflict extends Error {}
 
@@ -225,8 +228,16 @@ export async function GET(
   //
   // `blocksMergeSql` narrows "open" to "still standing in the way": see
   // lib/workflow/blocking-findings.ts for why a [minor] the approving review
-  // filed, or a [major] a later clean review superseded, must not park a
-  // reviewed ticket outside "Ready to merge" forever.
+  // filed, or a [major] a later verdict superseded, must not park a reviewed
+  // ticket outside "Ready to merge" forever.
+  //
+  // The cutoff is joined, not correlated. As a per-row scalar subquery it
+  // re-scanned the unindexed `agent_sessions` once per candidate finding and
+  // took this query from 0.16 ms to 102 ms on a 120-epic board; hoisted it
+  // costs 1.67 ms for identical results, which matters because the client
+  // refetches this route on every `session:*` SSE event.
+  const supersessionCutoffs = supersessionCutoffsByEpic(db, projectId);
+
   const openFindingCounts = db
     .select({
       epicId: reviewComments.epicId,
@@ -234,11 +245,15 @@ export async function GET(
     })
     .from(reviewComments)
     .innerJoin(epics, eq(reviewComments.epicId, epics.id))
+    .leftJoin(
+      supersessionCutoffs,
+      eq(supersessionCutoffs.epicId, reviewComments.epicId)
+    )
     .where(
       and(
         eq(epics.projectId, projectId),
         eq(reviewComments.status, "open"),
-        blocksMergeSql()
+        blocksMergeSql(supersessionCutoffs.cutoffAt)
       )
     )
     .groupBy(reviewComments.epicId)

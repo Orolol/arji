@@ -29,6 +29,7 @@ import {
 import { agentScheduler } from "@/lib/agents/scheduler";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
 import { applyTransition } from "@/lib/workflow/transition-service";
+import { closeOpenFindings } from "@/lib/workflow/close-findings";
 import { createMergeRetryFailedNotification } from "@/lib/notifications/create";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import fs from "fs";
@@ -115,6 +116,10 @@ export async function POST(
       .set({ branchName: null, updatedAt: new Date().toISOString() })
       .where(eq(epics.id, epicId))
       .run();
+
+    // Only now that the epic is Done — see lib/workflow/close-findings.ts for
+    // why the merge paths close findings after their transition, not before.
+    closeOpenFindings(epicId);
 
     tryExportArjiJson(projectId);
 

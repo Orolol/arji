@@ -51,6 +51,7 @@ import {
   providerAcceptsAssignedSessionId,
 } from "@/lib/agent-sessions/resume-capability";
 import { applyTransition } from "@/lib/workflow/transition-service";
+import { closeOpenFindings } from "@/lib/workflow/close-findings";
 import type { KanbanStatus } from "@/lib/types/kanban";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
@@ -206,6 +207,9 @@ export async function POST(request: NextRequest, { params }: Params) {
       .set({ branchName: null, updatedAt: new Date().toISOString() })
       .where(eq(epics.id, epicId))
       .run();
+
+    // After the transition, never before — see lib/workflow/close-findings.ts.
+    closeOpenFindings(epicId);
 
     tryExportArjiJson(projectId);
 

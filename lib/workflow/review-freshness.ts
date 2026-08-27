@@ -98,29 +98,39 @@ export function lastCleanReviewAtSql() {
 }
 
 /**
- * When the newest clean review STARTED — the findings window of the round
- * that last passed judgement, in the same shape
+ * When the newest review that RECORDED A VERDICT started — the findings
+ * window of the round that last passed judgement, in the same shape
  * `readSessionFindingsWindow` uses (`started_at`, falling back to the row's
  * creation).
  *
- * Its companion above answers "how fresh is the verdict"; this one answers
- * "which findings did that verdict weigh". A `[critical]` filed BEFORE this
- * instant belongs to a round the reviewer has since re-run on fixed code and
- * not re-reported — stale bookkeeping, not an open problem. One filed at or
- * after it was filed by (or alongside) the very review that approved, and a
- * self-contradicting reviewer never clears the gate.
+ * `lastCleanReviewAtSql` answers "how fresh is the verdict"; this answers the
+ * different question "which findings did a reviewer actually weigh". A
+ * `[critical]` filed BEFORE this instant belongs to a round a later reviewer
+ * re-read on fixed code and chose not to re-report — stale bookkeeping, not
+ * an open problem. One filed at or after it was raised by (or alongside) that
+ * very review, and a self-contradicting reviewer never clears the gate.
  *
- * MAX over the clean rounds' starts, not "the start of the row that produced
- * the MAX end": reviews on one epic are serialised, so the newest start IS
- * the newest round, and reading one aggregate is cheaper than correlating two.
+ * `review_verdict IS NOT NULL` is the load-bearing difference from
+ * `isCleanReviewSql`, which treats NULL as clean on purpose. NULL is the
+ * absence of evidence: an MCP-less provider, a token that 401'd mid-review, a
+ * reviewer whose prose no parser could read. Absence of evidence answers
+ * "how fresh" (nothing better exists) but must never answer "was this finding
+ * re-examined" — a review that deposited nothing re-examined nothing, and
+ * letting it advance the cutoff would clear every earlier `[critical]` on the
+ * strength of a session that said nothing at all.
+ *
+ * MAX over those rounds' starts, not "the start of the row that produced the
+ * MAX end": reviews on one epic are serialised, so the newest start IS the
+ * newest round, and reading one aggregate is cheaper than correlating two.
  *
  * Group by `agent_sessions.epic_id`.
  */
-export function lastCleanReviewStartedAtSql(
+export function lastVerdictBearingReviewStartedAtSql(
   session: ReviewFreshnessColumns = agentSessions
 ) {
   return sql<string | null>`MAX(CASE
     WHEN ${isCleanReviewSql(session)}
+     AND ${session.reviewVerdict} IS NOT NULL
     THEN REPLACE(COALESCE(${session.startedAt}, ${session.createdAt}), ' ', 'T')
     END)`;
 }

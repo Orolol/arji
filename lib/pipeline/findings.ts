@@ -7,6 +7,11 @@ import {
   blockingFindingSeverity,
   type BlockingFindingSeverity,
 } from "@/lib/review/finding-severity";
+import {
+  isStructuredReviewVerdict,
+  NEGATIVE_STRUCTURED_VERDICT,
+  type StructuredReviewVerdict,
+} from "@/lib/review/verdict";
 
 /**
  * Review-verdict assessment shared by the pipeline's review stage
@@ -156,33 +161,19 @@ export function collectBlockingFindings(
 /* ------------------------------------------------------------------ */
 
 /**
- * The `verdict` vocabulary of the submit_findings tool, verbatim (the enum
- * lives in app/api/mcp/submit-findings/route.ts and bin/arij-mcp.mjs).
+ * The verdict vocabulary now lives in lib/review/verdict.ts, so the workflow
+ * engine can read it without importing the pipeline. Re-exported here because
+ * this module has been its published home since the structured verdict
+ * landed.
  */
-export const STRUCTURED_REVIEW_VERDICTS = [
-  "approved",
-  "approved_with_minor_issues",
-  "changes_requested",
-] as const;
-
-export type StructuredReviewVerdict =
-  (typeof STRUCTURED_REVIEW_VERDICTS)[number];
-
-/** The only verdict that blocks on its own. */
-export const NEGATIVE_STRUCTURED_VERDICT: StructuredReviewVerdict =
-  "changes_requested";
+export {
+  STRUCTURED_REVIEW_VERDICTS,
+  NEGATIVE_STRUCTURED_VERDICT,
+  type StructuredReviewVerdict,
+} from "@/lib/review/verdict";
 
 /** Which channel produced a verdict, for the activity-log trail. */
 export type ReviewVerdictSource = "structured" | "prose";
-
-function isStructuredReviewVerdict(
-  value: string | null | undefined
-): value is StructuredReviewVerdict {
-  return (
-    typeof value === "string" &&
-    (STRUCTURED_REVIEW_VERDICTS as readonly string[]).includes(value)
-  );
-}
 
 /**
  * The verdict a review session submitted through `submit_findings`, or null

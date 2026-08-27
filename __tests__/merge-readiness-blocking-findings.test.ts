@@ -33,12 +33,13 @@ vi.mock("@/lib/db", async () => {
 });
 
 const { db } = await import("@/lib/db");
-const { projects, epics, agentSessions, reviewComments } = await import(
-  "@/lib/db/schema"
-);
+const { projects, epics, userStories, agentSessions, reviewComments } =
+  await import("@/lib/db/schema");
 const { GET } = await import("@/app/api/projects/[projectId]/epics/route");
 const { selectMergeCandidates } = await import("@/lib/auto-mode/select");
 const { buildTransitionContext } = await import("@/lib/workflow/context");
+const { validateTransition } = await import("@/lib/workflow/engine");
+type TransitionContext = import("@/lib/workflow/engine").TransitionContext;
 const { autoModeRegistry } = await import("@/lib/auto-mode/registry");
 
 const PROJECT_ID = "proj-blocking";
@@ -77,6 +78,7 @@ function addSession(input: {
   status?: string;
   outcome?: string | null;
   reviewVerdict?: string | null;
+  userStoryId?: string | null;
   startedAt?: string;
   endedAt: string;
 }): void {
@@ -85,7 +87,7 @@ function addSession(input: {
       id: nextId("sess"),
       projectId: PROJECT_ID,
       epicId: input.epicId,
-      userStoryId: null,
+      userStoryId: input.userStoryId ?? null,
       status: input.status ?? "completed",
       agentType: input.agentType,
       outcome: input.outcome === undefined ? "answered" : input.outcome,
@@ -157,6 +159,19 @@ function seedSecondRoundApprovedEpic(id: string, position = 0): void {
   });
 }
 
+function addStory(id: string, epicId: string): void {
+  db.insert(userStories)
+    .values({
+      id,
+      epicId,
+      title: id,
+      status: "review",
+      position: 0,
+      createdAt: at(0),
+    })
+    .run();
+}
+
 async function readinessOf(epicId: string) {
   const response = await GET(
     {} as never,
@@ -185,7 +200,13 @@ function engineSeesOpenComments(epicId: string): boolean {
 }
 
 beforeEach(() => {
-  for (const table of [reviewComments, agentSessions, epics, projects]) {
+  for (const table of [
+    reviewComments,
+    agentSessions,
+    userStories,
+    epics,
+    projects,
+  ]) {
     db.delete(table).run();
   }
   autoModeRegistry.resetAll();
@@ -352,6 +373,93 @@ describe("merge readiness — which open findings block", () => {
     });
   });
 
+  it("does not let a review that recorded NO verdict supersede a [major]", async () => {
+    // The gap this pins: `isCleanReviewSql` accepts a NULL verdict on purpose
+    // (that is every MCP-less provider, and it answers "how fresh is the
+    // verdict"). The supersession cutoff asks a different question — "did a
+    // reviewer re-read this finding and decline to re-report it" — and a
+    // session that filed nothing answers it with no evidence at all.
+    // Reachable via an MCP 401 mid-review, a provider with no MCP tools, or
+    // prose a parser could not read.
+    addEpic("silent-round-two");
+    addSession({
+      epicId: "silent-round-two",
+      agentType: "build",
+      endedAt: at(10),
+    });
+    addSession({
+      epicId: "silent-round-two",
+      agentType: "review_code",
+      reviewVerdict: "changes_requested",
+      startedAt: at(12),
+      endedAt: at(16),
+    });
+    addFinding({
+      epicId: "silent-round-two",
+      body: "[critical] Token leaks into the log",
+      createdAt: at(15),
+    });
+    addSession({ epicId: "silent-round-two", agentType: "build", endedAt: at(18) });
+    // Round two: completed and answered, but deposited no verdict at all.
+    addSession({
+      epicId: "silent-round-two",
+      agentType: "review_code",
+      reviewVerdict: null,
+      startedAt: at(20),
+      endedAt: at(25),
+    });
+
+    expect(await readinessOf("silent-round-two")).toMatchObject({
+      ready: false,
+      blocker: "open_findings",
+      openFindings: 1,
+    });
+    expect(engineSeesOpenComments("silent-round-two")).toBe(true);
+  });
+
+  it("does not let a STORY-scoped review move the epic's cutoff", async () => {
+    // Stories share the epic's branch and are serialised, so a story review
+    // finishing after an epic-level [major] is an ordinary sequence. It must
+    // not clear that finding: reviews and merges are epic-level by design.
+    seedApprovedEpic("story-cutoff");
+    addFinding({
+      epicId: "story-cutoff",
+      body: "[major] Filed by the epic review at :22",
+      createdAt: at(22),
+    });
+    addStory("story-cutoff-1", "story-cutoff");
+    addSession({
+      epicId: "story-cutoff",
+      agentType: "review_code",
+      reviewVerdict: "approved",
+      userStoryId: "story-cutoff-1",
+      startedAt: at(30),
+      endedAt: at(35),
+    });
+
+    expect(await readinessOf("story-cutoff")).toMatchObject({
+      blocker: "open_findings",
+      openFindings: 1,
+    });
+    expect(engineSeesOpenComments("story-cutoff")).toBe(true);
+  });
+
+  it("matches severity prefixes case-sensitively, so [MAJOR] is unclassified", async () => {
+    // `=` under BINARY collation, chosen over LIKE precisely for this. Filed
+    // BEFORE the clean review, so a LIKE-based match would read it as a
+    // superseded [major] and stop blocking; an unclassified row always blocks.
+    seedApprovedEpic("shouty");
+    addFinding({
+      epicId: "shouty",
+      body: "[MAJOR] Reviewer shouted the severity",
+      createdAt: at(15),
+    });
+    expect(await readinessOf("shouty")).toMatchObject({
+      blocker: "open_findings",
+      openFindings: 1,
+    });
+  });
+
   it("scopes the supersession window to the finding's own epic", async () => {
     // A clean review on a NEIGHBOUR must not clear this epic's [major].
     seedApprovedEpic("neighbour", 0);
@@ -367,6 +475,106 @@ describe("merge readiness — which open findings block", () => {
       blocker: "open_findings",
       openFindings: 1,
     });
+  });
+});
+
+/**
+ * Narrowing "open" to "blocking" removed an accidental backstop: an epic
+ * whose newest review said `changes_requested` used to be refused
+ * `review -> done` because that review's rows were open. Only `[critical]`/
+ * `[major]` count now, so a changes-requested review carrying nothing worse
+ * than `[minor]` no longer refuses on findings alone — and the engine's only
+ * other review input, `hasCompletedReview`, is satisfied by ANY completed
+ * review session ever.
+ *
+ * The merge paths land a branch on the base branch, so they must not be the
+ * ones to discover that. An explicit human `approve` still may: the spec
+ * makes human approval itself the review decision.
+ */
+describe("review -> done under a standing changes_requested verdict", () => {
+  function seedChangesRequestedEpic(id: string): void {
+    addEpic(id);
+    addSession({ epicId: id, agentType: "build", endedAt: at(10) });
+    addSession({
+      epicId: id,
+      agentType: "review_code",
+      reviewVerdict: "changes_requested",
+      startedAt: at(20),
+      endedAt: at(25),
+    });
+    // Only non-blocking severities, so the findings half cannot be what
+    // refuses the transition.
+    addFinding({ epicId: id, body: "[minor] Tidy this up", createdAt: at(22) });
+  }
+
+  function refusalFor(
+    epicId: string,
+    source: NonNullable<TransitionContext["source"]>
+  ): string | null {
+    const ctx = buildTransitionContext({
+      epicId,
+      fromStatus: "review",
+      toStatus: "done",
+      actor: "user",
+    });
+    ctx.source = source;
+    return validateTransition(ctx).error ?? null;
+  }
+
+  it("refuses a merge that would land the branch anyway", () => {
+    seedChangesRequestedEpic("cr-merge");
+    expect(engineSeesOpenComments("cr-merge")).toBe(false);
+    expect(refusalFor("cr-merge", "merge")).toMatch(/requested changes/i);
+  });
+
+  it("still lets an explicit human approval through", () => {
+    seedChangesRequestedEpic("cr-approve");
+    expect(refusalFor("cr-approve", "approve")).toBeNull();
+  });
+
+  it("does not refuse once a newer review recorded a clean verdict", () => {
+    seedChangesRequestedEpic("cr-cleared");
+    addSession({ epicId: "cr-cleared", agentType: "build", endedAt: at(30) });
+    addSession({
+      epicId: "cr-cleared",
+      agentType: "review_code",
+      reviewVerdict: "approved",
+      startedAt: at(40),
+      endedAt: at(45),
+    });
+    expect(refusalFor("cr-cleared", "merge")).toBeNull();
+  });
+
+  it("ignores a verdict-less review when deciding, so NULL never clears it", () => {
+    seedChangesRequestedEpic("cr-silent");
+    addSession({ epicId: "cr-silent", agentType: "build", endedAt: at(30) });
+    addSession({
+      epicId: "cr-silent",
+      agentType: "review_code",
+      reviewVerdict: null,
+      startedAt: at(40),
+      endedAt: at(45),
+    });
+    expect(refusalFor("cr-silent", "merge")).toMatch(/requested changes/i);
+  });
+
+  it("leaves story-scoped transitions alone", () => {
+    // A story carries its own review decision; the epic's verdict is not it.
+    // The story still refuses here — on the pre-existing "no completed
+    // review" guard, because the epic-scoped review is not the story's — and
+    // that is the point: the new guard must not be what speaks.
+    seedChangesRequestedEpic("cr-story");
+    addStory("cr-story-1", "cr-story");
+    const ctx = buildTransitionContext({
+      epicId: "cr-story",
+      userStoryId: "cr-story-1",
+      fromStatus: "review",
+      toStatus: "done",
+      actor: "user",
+    });
+    ctx.source = "merge";
+    expect(ctx.hasNegativeReviewVerdict).toBe(false);
+    expect(validateTransition(ctx).error).not.toMatch(/requested changes/i);
   });
 });
 

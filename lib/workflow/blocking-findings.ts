@@ -13,7 +13,7 @@
  * deliberately never auto-resolves). An epic whose newest review came back
  * APPROVED still reported "N open findings" and never reached "Ready to
  * merge", for rows the reviewer itself had classified as non-blocking, or for
- * rows a later clean review had already superseded. The ticket that could be
+ * rows a later verdict had already superseded. The ticket that could be
  * approved was the one the board refused to show as approvable.
  *
  * So the definition lives here once and every gate reads it:
@@ -24,40 +24,48 @@
  *   - its severity is below `[critical]`/`[major]` — the reviewer's own
  *     vocabulary for "not blocking", and what `approved_with_minor_issues`
  *     means; or
- *   - it predates the start of the newest clean review, which re-read the
- *     fixed code and did not re-report it.
+ *   - it predates the start of the newest review that RECORDED A VERDICT,
+ *     which re-read the fixed code and did not re-report it.
  *
  * Everything else blocks, and the exclusions are as load-bearing as the rule:
  *   - a HUMAN's open review comment always blocks. It carries no severity
  *     vocabulary and it is a deliberate hold, not an agent's triage;
  *   - an agent row with no recognised prefix blocks. An unclassified concern
- *     is not a cleared one;
+ *     is not a cleared one — and since the prefix match is case-sensitive,
+ *     `[MAJOR]` lands here rather than passing as a superseded `[major]`;
  *   - a `[critical]` filed BY the approving review still blocks. The reviewer
  *     contradicted itself, and the finding is the more specific, human-
- *     resolvable artifact — the same rule `assessReviewOutcome` applies.
+ *     resolvable artifact — the same rule `assessReviewOutcome` applies;
+ *   - a review that deposited NO verdict never supersedes anything. See
+ *     `lastVerdictBearingReviewStartedAtSql` for why absence of evidence
+ *     must not read as evidence of absence.
  *
- * Every consumer joins on `review_comments`, so the fragment is written
- * against that table and correlates to `agent_sessions` itself. That keeps it
- * usable both inside a grouped subquery (board, auto-mode) and in a plain
- * per-epic WHERE (the transition context).
+ * ## Why the cutoff is a parameter
+ *
+ * It was briefly a correlated scalar subquery, which reads beautifully and
+ * costs a full scan of an unindexed `agent_sessions` PER CANDIDATE ROW.
+ * Measured on 120 epics / 4800 sessions / 720 open findings, 30-run average:
+ * 0.16 ms for the pre-change count, 102.7 ms correlated, 1.67 ms hoisted —
+ * identical results, and `EXPLAIN QUERY PLAN` confirms the difference is
+ * `CORRELATED SCALAR SUBQUERY` versus one `MATERIALIZE`. The board polls its
+ * query on every `session:*` SSE event, so the correlated form was a
+ * regression waiting on table growth.
+ *
+ * Callers therefore aggregate the cutoff once per epic and hand the column in.
+ * `supersessionCutoffsByEpic` builds that subquery for the two grouped
+ * callers; `readSupersessionCutoff` reads the single scalar the one
+ * per-epic caller needs. Both derive from the same fragment, so neither can
+ * drift into its own idea of "superseded".
  */
 
-import { sql, type SQL } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
+import { and, eq, sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import { type ArijDatabase } from "@/lib/db";
 import { agentSessions, reviewComments } from "@/lib/db/schema";
 import {
   BLOCKING_FINDING_PREFIXES,
   FINDING_SEVERITY_PREFIXES,
 } from "@/lib/review/finding-severity";
-import { lastCleanReviewStartedAtSql } from "./review-freshness";
-
-/**
- * Aliased so the correlated subquery can name its own `agent_sessions`
- * without colliding with an `agent_sessions` already in the outer query.
- * A fixed internal identifier, never user input — hence `sql.raw` below.
- */
-const CLEAN_REVIEW_ALIAS = "clean_review_sessions";
-const cleanReviewSessions = alias(agentSessions, CLEAN_REVIEW_ALIAS);
+import { lastVerdictBearingReviewStartedAtSql } from "./review-freshness";
 
 /**
  * `SUBSTR(body, 1, n) = '[severity]'` for each prefix, OR-ed — the SQL
@@ -79,24 +87,65 @@ function bodyStartsWithAnySql(
 }
 
 /**
- * When the finding's own epic was last cleanly reviewed, as a correlated
- * scalar. `''` when it never was: every `[critical]`/`[major]` then sorts at
- * or after the cutoff and blocks, which is the honest reading of "no verdict
- * has weighed this yet".
+ * Per-epic supersession cutoff for one project, as a joinable subquery.
+ *
+ * Left-join it on `epic_id` and pass its `cutoffAt` to `blocksMergeSql`. The
+ * project scope is what keeps the aggregate off every other project's
+ * sessions; the join to `epics` in the caller already made the result
+ * project-local, so this only narrows what SQLite has to read.
  */
-function supersessionCutoffSql(): SQL {
-  return sql`COALESCE((
-    SELECT ${lastCleanReviewStartedAtSql(cleanReviewSessions)}
-    FROM ${agentSessions} AS ${sql.raw(CLEAN_REVIEW_ALIAS)}
-    WHERE ${cleanReviewSessions.epicId} = ${reviewComments.epicId}
-  ), '')`;
+export function supersessionCutoffsByEpic(
+  database: ArijDatabase,
+  projectId: string
+) {
+  return database
+    .select({
+      epicId: agentSessions.epicId,
+      cutoffAt: lastVerdictBearingReviewStartedAtSql().as(
+        "supersession_cutoff_at"
+      ),
+    })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.projectId, projectId),
+        sql`${agentSessions.epicId} IS NOT NULL`
+      )
+    )
+    .groupBy(agentSessions.epicId)
+    .as("supersession_cutoffs");
+}
+
+/**
+ * The same cutoff for a single epic, as a plain string.
+ *
+ * `''` when no verdict-bearing review has ever run, which is the value
+ * `blocksMergeSql` needs for "nothing has weighed this yet": every
+ * `[critical]`/`[major]` then sorts at or after the cutoff and blocks.
+ */
+export function readSupersessionCutoff(
+  database: ArijDatabase,
+  epicId: string
+): string {
+  // A bare aggregate returns exactly one row. `.all()` rather than `.get()`
+  // to match how lib/workflow/context.ts reads everything else.
+  const [row] = database
+    .select({ cutoffAt: lastVerdictBearingReviewStartedAtSql() })
+    .from(agentSessions)
+    .where(eq(agentSessions.epicId, epicId))
+    .all();
+  return row?.cutoffAt ?? "";
 }
 
 /**
  * The predicate. Combine with `status = 'open'` — this fragment says which
  * open rows count, not which rows are open.
+ *
+ * `cutoffAt` is the epic's supersession cutoff, normalised and never NULL:
+ * pass `supersessionCutoffsByEpic(...).cutoffAt` wrapped in a COALESCE, or the
+ * string from `readSupersessionCutoff`.
  */
-export function blocksMergeSql(): SQL {
+export function blocksMergeSql(cutoffAt: SQLWrapper | string): SQL {
   return sql`(
     ${reviewComments.author} <> 'agent'
     OR ${reviewComments.author} IS NULL
@@ -104,7 +153,7 @@ export function blocksMergeSql(): SQL {
     OR (
       (${bodyStartsWithAnySql(BLOCKING_FINDING_PREFIXES)})
       AND REPLACE(COALESCE(${reviewComments.createdAt}, ''), ' ', 'T')
-          >= ${supersessionCutoffSql()}
+          >= COALESCE(${cutoffAt}, '')
     )
   )`;
 }

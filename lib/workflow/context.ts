@@ -8,7 +8,27 @@ import { eq, and } from "drizzle-orm";
 import { CODE_PRODUCING_AGENT_TYPES } from "@/lib/agent-config/constants";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import type { TransitionContext } from "./engine";
-import { blocksMergeSql } from "./blocking-findings";
+import {
+  blocksMergeSql,
+  readSupersessionCutoff,
+} from "./blocking-findings";
+import {
+  isStructuredReviewVerdict,
+  NEGATIVE_STRUCTURED_VERDICT,
+} from "@/lib/review/verdict";
+
+/**
+ * Newest-first sort key for review sessions, matching the window
+ * `readSessionFindingsWindow` reads: when the session STARTED, falling back
+ * to the row's creation. Separator-normalised so ISO-8601 rows (written by
+ * routes) and SQLite CURRENT_TIMESTAMP rows compare correctly.
+ */
+function reviewOrderKey(session: {
+  startedAt: string | null;
+  createdAt: string | null;
+}): string {
+  return (session.startedAt ?? session.createdAt ?? "").replace(" ", "T");
+}
 
 export function buildTransitionContext(opts: {
   epicId: string;
@@ -43,9 +63,14 @@ export function buildTransitionContext(opts: {
   // a human approves, so counting every open row kept an epic whose newest
   // review APPROVED it permanently unapprovable — over a [minor] that
   // reviewer filed itself, or a [major] an earlier round raised and a later
-  // clean review did not re-report. `blocksMergeSql` is the one definition
-  // the board and Full Auto's merge selector read too; a looser gate here
-  // than there would make Full Auto merge and then roll itself back.
+  // verdict did not re-report. `blocksMergeSql` is the one definition the
+  // board and Full Auto's merge selector read too; a looser gate here than
+  // there would make Full Auto merge and then roll itself back.
+  //
+  // One epic, so the cutoff is read as a scalar rather than joined — the
+  // grouped callers hoist it into a subquery instead (see
+  // lib/workflow/blocking-findings.ts).
+  const supersessionCutoff = readSupersessionCutoff(db, epicId);
   const openComments = db
     .select()
     .from(reviewComments)
@@ -53,7 +78,7 @@ export function buildTransitionContext(opts: {
       and(
         eq(reviewComments.epicId, epicId),
         eq(reviewComments.status, "open"),
-        blocksMergeSql()
+        blocksMergeSql(supersessionCutoff)
       )
     )
     .all();
@@ -112,12 +137,34 @@ export function buildTransitionContext(opts: {
     runningSessions.length === 1 &&
     runningSessions[0].id === sessionId;
 
+  // The newest EPIC-SCOPED review that actually recorded a verdict, and
+  // whether it was a rejection.
+  //
+  // Epic-scoped because reviews and merges are epic-level by design; a story
+  // carries its own review decision, so the parent's verdict must not speak
+  // for it. Verdict-bearing only, for the reason
+  // `lastVerdictBearingReviewStartedAtSql` spells out: a session that
+  // deposited nothing overruled nothing, so a NULL row must neither impose a
+  // rejection nor clear one.
+  const hasNegativeReviewVerdict =
+    userStoryId === undefined &&
+    completedReviewSessions
+      .filter(
+        (session) =>
+          session.userStoryId === null &&
+          isStructuredReviewVerdict(session.reviewVerdict)
+      )
+      .sort((a, b) =>
+        reviewOrderKey(a) < reviewOrderKey(b) ? 1 : -1
+      )[0]?.reviewVerdict === NEGATIVE_STRUCTURED_VERDICT;
+
   return {
     epicId,
     fromStatus,
     toStatus,
     hasOpenReviewComments: openComments.length > 0,
     hasCompletedReview: completedReviewSessions.length > 0,
+    hasNegativeReviewVerdict,
     requireCompletedReview,
     requireResolvedComments,
     hasRunningSession: runningSessions.length > 0,

@@ -340,13 +340,16 @@ describe("POST /api/projects/[projectId]/epics", () => {
     });
     // story counts + latest comments + latest sessions + latest user comments
     // + session facts (cost AND review freshness, one scan) + latest grading
-    // + ticket read cursors + open findings + merge failures
-    expect((db as unknown as { leftJoin: typeof vi.fn }).leftJoin).toHaveBeenCalledTimes(9);
+    // + ticket read cursors + open findings + merge failures, and inside the
+    // open-findings subquery the supersession cutoff it joins rather than
+    // correlates (lib/workflow/blocking-findings.ts).
+    expect((db as unknown as { leftJoin: typeof vi.fn }).leftJoin).toHaveBeenCalledTimes(10);
     // open findings scopes to project via innerJoin on epics
     expect((db as unknown as { innerJoin: typeof vi.fn }).innerJoin).toHaveBeenCalledTimes(1);
     // story counts + session facts + latest user comments + open findings
-    // + merge failures
-    expect((db as unknown as { groupBy: ReturnType<typeof vi.fn> }).groupBy).toHaveBeenCalledTimes(5);
+    // + merge failures + the supersession cutoff the open-findings subquery
+    // joins against
+    expect((db as unknown as { groupBy: ReturnType<typeof vi.fn> }).groupBy).toHaveBeenCalledTimes(6);
 
     const sqlFragments = mockSql.mock.calls.map(([template]) =>
       Array.isArray(template) ? template.join(" ") : String(template),

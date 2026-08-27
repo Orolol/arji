@@ -22,7 +22,10 @@ import {
   lastCleanReviewAtSql,
   lastTerminalCodeAtSql,
 } from "@/lib/workflow/review-freshness";
-import { blocksMergeSql } from "@/lib/workflow/blocking-findings";
+import {
+  blocksMergeSql,
+  supersessionCutoffsByEpic,
+} from "@/lib/workflow/blocking-findings";
 import { isDeliveredStatus } from "@/lib/types/kanban";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
 import { listPipelineRunsByProject } from "@/lib/pipeline/registry";
@@ -532,6 +535,10 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
   // Same `blocksMergeSql` narrowing the board applies, for the same reason
   // both sides call `evaluateMergeReadiness`: the supervisor and the card
   // must not hold different opinions about which rows still stand in the way.
+  // The cutoff is joined rather than correlated for the reason the board
+  // route spells out — a per-row scalar re-scans an unindexed table.
+  const supersessionCutoffs = supersessionCutoffsByEpic(db, projectId);
+
   const openReviewRows = db
     .select({
       epicId: reviewComments.epicId,
@@ -539,11 +546,15 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     })
     .from(reviewComments)
     .innerJoin(epics, eq(reviewComments.epicId, epics.id))
+    .leftJoin(
+      supersessionCutoffs,
+      eq(supersessionCutoffs.epicId, reviewComments.epicId)
+    )
     .where(
       and(
         eq(epics.projectId, projectId),
         eq(reviewComments.status, "open"),
-        blocksMergeSql()
+        blocksMergeSql(supersessionCutoffs.cutoffAt)
       )
     )
     .groupBy(reviewComments.epicId)
