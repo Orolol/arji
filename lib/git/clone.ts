@@ -156,6 +156,9 @@ async function readOriginUrl(repoPath: string): Promise<string | null> {
  * A clone is healthy when git recognises it *and* it has a commit checked out.
  * A directory whose `.git` exists but whose HEAD is unborn is the signature of
  * a clone that died mid-transfer.
+ *
+ * Invariant: rev-parse invocations here use only static constant arguments,
+ * leaving no vector for option injection.
  */
 async function hasCheckedOutHead(repoPath: string): Promise<boolean> {
   try {
@@ -233,6 +236,8 @@ export async function classifyCloneDestination(
 export async function detectDefaultBranch(repoPath: string): Promise<string> {
   // simple-git throws *synchronously* from its factory when the directory does
   // not exist, so the instance is built inside the guard like every call below.
+  // Invariant: readRef is an internal helper called exclusively with hardcoded,
+  // static argument vectors. No caller-supplied values reach argv option position.
   const readRef = async (args: string[]): Promise<string | null> => {
     try {
       return (await simpleGit(repoPath).raw(args)).trim();
@@ -254,6 +259,12 @@ export async function detectDefaultBranch(repoPath: string): Promise<string> {
   return "main";
 }
 
+/**
+ * Clones a repository into a destination directory.
+ *
+ * Invariant: The `--` separator ensures cloneUrl and destination paths cannot
+ * be interpreted as git option flags even if they begin with a leading dash.
+ */
 async function runClone(
   cloneUrl: string,
   destination: string,
@@ -267,15 +278,21 @@ async function runClone(
 
   // Full clone on purpose: worktrees, merge-base and tagging all need the real
   // history, so no `--depth` and no `--single-branch`.
-  await git.raw(withAuth(token, ["clone", cloneUrl, destination]));
+  await git.raw(withAuth(token, ["clone", "--", cloneUrl, destination]));
 }
 
+/**
+ * Fetches from the origin remote with pruning.
+ *
+ * Invariant: Uses static remote and flag arguments wrapped with optional auth config.
+ */
 async function runFetch(
   repoPath: string,
   token: string | null | undefined
 ): Promise<void> {
   await simpleGit(repoPath).raw(withAuth(token, ["fetch", "origin", "--prune"]));
 }
+
 
 /** Best-effort removal of a directory this module created. */
 async function discard(directory: string): Promise<void> {
@@ -944,6 +961,14 @@ function isCredentialRecoverable(code: CloneErrorCode): boolean {
   return code === "not_found" || code === "auth_failed";
 }
 
+/**
+ * Executes raw git command arguments with non-interactive environment safeguards
+ * and abort signal handling.
+ *
+ * Invariant: All callers must validate user/agent-derived values (rejecting leading
+ * dashes) and/or use `--` separators before positional arguments so that untrusted
+ * strings cannot land in argv option position.
+ */
 function runGit(
   args: string[],
   baseDir: string,
@@ -953,11 +978,6 @@ function runGit(
     .env(nonInteractiveEnv())
     .raw(args);
 }
-
-/**
- * `-c` scopes the header to this one invocation: it never reaches
- * `.git/config`, so `origin` stays clean and the clone carries no secret.
- */
 function authConfigArgs(token?: string | null): string[] {
   const clean = token?.trim();
   if (!clean) return [];
@@ -971,13 +991,32 @@ function authConfigArgs(token?: string | null): string[] {
  * hang until the timeout instead of failing with a usable message.
  */
 function nonInteractiveEnv(): Record<string, string> {
-  return {
+  const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     GIT_TERMINAL_PROMPT: "0",
-    GIT_ASKPASS: "",
-    SSH_ASKPASS: "",
     GCM_INTERACTIVE: "never",
   };
+  // Remove ambient editor/pager/askpass/config environment variables that
+  // simple-git's safety plugin rejects when passed explicitly via .env().
+  delete env.GIT_EDITOR;
+  delete env.GIT_SEQUENCE_EDITOR;
+  delete env.GIT_PAGER;
+  delete env.GIT_ASKPASS;
+  delete env.SSH_ASKPASS;
+  delete env.GIT_SSH;
+  delete env.GIT_SSH_COMMAND;
+  delete env.GIT_CONFIG;
+  delete env.GIT_CONFIG_GLOBAL;
+  delete env.GIT_CONFIG_SYSTEM;
+  delete env.GIT_CONFIG_COUNT;
+  delete env.GIT_EXEC_PATH;
+  delete env.GIT_EXTERNAL_DIFF;
+  delete env.GIT_PROXY_COMMAND;
+  delete env.GIT_TEMPLATE_DIR;
+  delete env.EDITOR;
+  delete env.PAGER;
+  delete env.PREFIX;
+  return env;
 }
 
 function getGit(repoPath: string): SimpleGit {
