@@ -25,8 +25,6 @@ import {
 const mocks = vi.hoisted(() => ({
   mergeWorktree: vi.fn(),
   applyTransition: vi.fn(),
-  applyStoryTransition: vi.fn(),
-  logWorkflowDecision: vi.fn(),
   logTransition: vi.fn(),
   createApproveMergeFailedNotification: vi.fn(),
   tryExportArjiJson: vi.fn(),
@@ -48,8 +46,6 @@ vi.mock("@/lib/git/manager", () => ({
 
 vi.mock("@/lib/workflow/transition-service", () => ({
   applyTransition: mocks.applyTransition,
-  applyStoryTransition: mocks.applyStoryTransition,
-  logWorkflowDecision: mocks.logWorkflowDecision,
 }));
 
 vi.mock("@/lib/workflow/log", () => ({
@@ -111,22 +107,20 @@ const mockProject = {
 /**
  * Seed the db-mock queues in the route's read order:
  *   get #1 → epic (getEpicOr404), get #2 → project,
- *   all #1 → the epic's stories (review/skip split),
- *   all #2 → agent sessions (worktree lookup, merge path only).
+ *   all #1 → agent sessions (worktree lookup, merge path only).
+ * Story synchronization now lives inside the mocked transition service.
  */
 function seed({
   epic = mockEpic,
   project = mockProject,
-  stories = [{ id: "story-1", epicId: "epic-1", status: "review", title: "One" }],
   sessions = [{ worktreePath: "/tmp/worktrees/epic-abc" }],
 }: {
   epic?: Record<string, unknown> | null;
   project?: Record<string, unknown> | null;
-  stories?: Record<string, unknown>[];
   sessions?: Record<string, unknown>[];
 } = {}) {
   dbMockState.getQueue.push(epic, project);
-  dbMockState.allQueue.push(stories, sessions);
+  dbMockState.allQueue.push(sessions);
 }
 
 async function callApprove(projectId = "p1", epicId = "epic-1") {
@@ -152,7 +146,6 @@ describe("Epic review approval", () => {
     resetDbMockState();
     mocks.mergeWorktree.mockResolvedValue({ merged: true, commitHash: "abc123" });
     mocks.applyTransition.mockReturnValue({ valid: true });
-    mocks.applyStoryTransition.mockReturnValue({ valid: true });
     mocks.beginMergeWork.mockReturnValue(true);
     mocks.tryLockProjectMerge.mockReturnValue(true);
     // Default: nothing else is working on the epic.
@@ -198,7 +191,6 @@ describe("Epic review approval", () => {
       expect(mocks.mergeWorktree).not.toHaveBeenCalled();
       expect(mocks.beginMergeWork).not.toHaveBeenCalled();
       expect(mocks.applyTransition).not.toHaveBeenCalled();
-      expect(mocks.applyStoryTransition).not.toHaveBeenCalled();
       expect(mocks.tryExportArjiJson).not.toHaveBeenCalled();
     });
 
@@ -289,16 +281,16 @@ describe("Epic review approval", () => {
       expect(branchClear.branchName).toBeNull();
     });
 
-    it("moves the epic's review stories to done through the transition service", async () => {
+    it("delegates the epic and story completion to the shared transition service", async () => {
       seed();
       await callApprove();
 
-      expect(mocks.applyStoryTransition).toHaveBeenCalledWith(
+      expect(mocks.applyTransition).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          userStoryId: "story-1",
           fromStatus: "review",
           toStatus: "done",
-          reviewScope: "epic",
+          source: "approve",
+          actor: "user",
         })
       );
     });
@@ -480,11 +472,11 @@ describe("Epic review approval", () => {
 
   describe("story synchronization (epic-scoped approval)", () => {
     it("promotes every review story, leaves the rest untouched and reports them", async () => {
-      seed({
-        stories: [
-          { id: "story-1", epicId: "epic-1", status: "review", title: "One" },
-          { id: "story-2", epicId: "epic-1", status: "review", title: "Two" },
-          { id: "story-3", epicId: "epic-1", status: "todo", title: "Three" },
+      seed();
+      mocks.applyTransition.mockReturnValue({
+        valid: true,
+        skippedStories: [
+          { id: "story-3", title: "Three", status: "todo" },
         ],
       });
       const res = await callApprove();
@@ -495,43 +487,17 @@ describe("Epic review approval", () => {
         { id: "story-3", title: "Three", status: "todo" },
       ]);
 
-      // Both review stories are promoted; the todo one is never touched.
-      expect(mocks.applyStoryTransition).toHaveBeenCalledWith(
-        expect.objectContaining({ userStoryId: "story-1", toStatus: "done" })
-      );
-      expect(mocks.applyStoryTransition).toHaveBeenCalledWith(
-        expect.objectContaining({ userStoryId: "story-2", toStatus: "done" })
-      );
-      const touchedIds = mocks.applyStoryTransition.mock.calls.map(
-        (c) => (c[0] as { userStoryId: string }).userStoryId
-      );
-      expect(touchedIds).not.toContain("story-3");
-
-      // The hold is named in the activity log, not left implicit.
-      expect(mocks.logWorkflowDecision).toHaveBeenCalledWith(
-        expect.objectContaining({
-          epicId: "epic-1",
-          actor: "user",
-          reason: expect.stringContaining("story-3:todo"),
-        })
-      );
+      expect(mocks.applyTransition).toHaveBeenCalledTimes(2);
     });
 
     it("validates the child transitions BEFORE the merge and bounces 400 when one refuses", async () => {
-      seed({
-        stories: [
-          { id: "story-1", epicId: "epic-1", status: "review", title: "One" },
-          { id: "story-2", epicId: "epic-1", status: "review", title: "Two" },
-        ],
+      seed();
+      // The shared completion pre-flight reports that one child guard refused
+      // (e.g. a build session is still running on it).
+      mocks.applyTransition.mockReturnValueOnce({
+        valid: false,
+        error: "Cannot move while a build session is running.",
       });
-      // The second child's guards refuse (e.g. a build session still running
-      // on it). The refusal must land before anything is merged or written.
-      mocks.applyStoryTransition
-        .mockReturnValueOnce({ valid: true })
-        .mockReturnValueOnce({
-          valid: false,
-          error: "Cannot move while a build session is running.",
-        });
       const res = await callApprove();
 
       expect(res.status).toBe(400);
