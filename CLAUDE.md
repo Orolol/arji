@@ -32,7 +32,9 @@ Arij is a local, AI-first project orchestrator. It provides a web interface for 
 
 ## Commands
 - `npm run dev` — Start dev server with Turbopack
-- `npm test` — Vitest suite; `npm run test:e2e` — Playwright
+- `npm test` — Vitest suite (workers capped at 4 — several sessions share this machine)
+- `npm run test:changed` — only the tests affected by the diff vs `main`; prefer this while iterating, keep the full suite for final verification
+- `npm run test:e2e` — Playwright
 - `npx drizzle-kit push` — Push schema to DB
 
 ## Migrations

@@ -552,7 +552,7 @@ Verify that the bug fix correctly addresses the reported issue without introduci
 
 4. **Tests**:
    - Tests exist that cover the bug scenario
-   - Run the test suite and verify tests pass
+   - Run the tests covering the code this branch touches and verify they pass — prefer the project's targeted script (e.g. \`npm run test:changed\`) or your runner's changed-files filter over the full suite; other agent sessions share this machine and the merge gate re-runs the regression check
    - Report any failing tests with details
 
 For each criterion, specify:
@@ -778,7 +778,7 @@ Verify that the implementation fully satisfies the ticket's acceptance criteria 
 
 4. **Tests**:
    - Tests exist that cover the acceptance criteria
-   - Run the test suite and verify tests pass
+   - Run the tests covering the code this branch touches and verify they pass — prefer the project's targeted script (e.g. \`npm run test:changed\`) or your runner's changed-files filter over the full suite; other agent sessions share this machine and the merge gate re-runs the regression check
    - Report any failing tests with details
 
 For each criterion, specify:
@@ -1091,7 +1091,7 @@ Verify that the implementation fully satisfies the ticket's acceptance criteria 
 
 4. **Tests**:
    - Tests exist that cover the acceptance criteria
-   - Run the test suite and verify tests pass
+   - Run the tests covering the code this branch touches and verify they pass — prefer the project's targeted script (e.g. \`npm run test:changed\`) or your runner's changed-files filter over the full suite; other agent sessions share this machine and the merge gate re-runs the regression check
    - Report any failing tests with details
 
 For each criterion, specify:
