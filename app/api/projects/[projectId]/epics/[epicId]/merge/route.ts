@@ -7,7 +7,7 @@ import {
   getProjectOr404,
   isErrorResponse,
 } from "@/lib/api/route-helpers";
-import { mergeWorktree } from "@/lib/git/manager";
+import { mergeWorktree, type MergeWorktreeResult } from "@/lib/git/manager";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { createId } from "@/lib/utils/nanoid";
 import { processManager } from "@/lib/claude/process-manager";
@@ -24,13 +24,23 @@ import {
   isSessionLifecycleConflictError,
 } from "@/lib/agent-sessions/lifecycle";
 import {
+  createAgentAlreadyRunningPayload,
   getRunningSessionForTarget,
 } from "@/lib/agents/concurrency";
+import { autoModeRegistry } from "@/lib/auto-mode/registry";
 import { agentScheduler } from "@/lib/agents/scheduler";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
 import { applyTransition } from "@/lib/workflow/transition-service";
-import { closeOpenFindings } from "@/lib/workflow/close-findings";
-import { createMergeRetryFailedNotification } from "@/lib/notifications/create";
+import { resolveOpenReviewComments } from "@/lib/workflow/merge-approval";
+import { logTransition } from "@/lib/workflow/log";
+import {
+  buildMergeBlockedReason,
+  buildMergeConflictMarkersBlockedReason,
+} from "@/lib/workflow/merge-failure";
+import {
+  createApproveMergeFailedNotification,
+  createMergeRetryFailedNotification,
+} from "@/lib/notifications/create";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import fs from "fs";
 import path from "path";
@@ -61,11 +71,12 @@ export async function POST(
     return NextResponse.json({ error: "Epic has no branch to merge" }, { status: 400 });
   }
 
-  // Workflow guards run before git, so a dirty review can never be merged.
+  // Workflow guards run before git, so only a ticket at the merge boundary
+  // (to_merge) can land on main.
   const preflight = applyTransition({
     projectId,
     epicId,
-    fromStatus: (epic.status ?? "review") as KanbanStatus,
+    fromStatus: (epic.status ?? "to_merge") as KanbanStatus,
     toStatus: "done",
     actor: "user",
     source: "merge",
@@ -74,6 +85,27 @@ export async function POST(
   });
   if (!preflight.valid) {
     return NextResponse.json({ error: preflight.error }, { status: 400 });
+  }
+
+  // Concurrency guard BEFORE any git work — this is now the ONLY merge entry
+  // for the board and the ticket detail, so it carries the guards the retired
+  // approve route had: `mergeWorktree` runs `git worktree remove --force`,
+  // and landing that on top of a queued session drops it into a directory
+  // that no longer exists the moment it starts.
+  const activeSession = getRunningSessionForTarget({
+    scope: "epic",
+    projectId,
+    epicId,
+  });
+  if (activeSession) {
+    return NextResponse.json(
+      createAgentAlreadyRunningPayload(
+        { scope: "epic", projectId, epicId },
+        activeSession,
+        "Another agent is already running for this epic."
+      ),
+      { status: 409 }
+    );
   }
 
   // Find the worktree path from the most recent session for this epic
@@ -87,15 +119,51 @@ export async function POST(
 
   const worktreePath = session?.worktreePath || undefined;
 
-  const result = await mergeWorktree(
-    project.gitRepoPath,
-    epic.branchName,
-    worktreePath,
-    { defaultBranch: project.defaultBranch }
-  );
+  // Per-epic and per-project merge serialization, same as resolve-merge and
+  // Full Auto: git is not transactional and two merges on one repository
+  // race on index.lock and on each other's rollback checkpoints.
+  if (!autoModeRegistry.beginMergeWork(projectId, epicId)) {
+    return NextResponse.json(
+      { error: "A merge is already in flight for this epic — retry in a moment." },
+      { status: 409 }
+    );
+  }
+  let result: MergeWorktreeResult;
+  try {
+    if (!autoModeRegistry.tryLockProjectMerge(projectId)) {
+      return NextResponse.json(
+        {
+          error:
+            "Another merge is in progress in this repository — retry in a moment.",
+        },
+        { status: 409 }
+      );
+    }
+    try {
+      result = await mergeWorktree(
+        project.gitRepoPath,
+        epic.branchName,
+        worktreePath,
+        { defaultBranch: project.defaultBranch }
+      );
+    } catch (e) {
+      // A throw (repository gone, git binary failure) must flow into the
+      // ordinary failure path below — with its ticket trail — not out of the
+      // handler as a bare 500.
+      result = {
+        merged: false,
+        error: e instanceof Error ? e.message : "Merge failed",
+        reason: "error",
+      };
+    } finally {
+      autoModeRegistry.unlockProjectMerge(projectId);
+    }
+  } finally {
+    autoModeRegistry.endMergeWork(projectId, epicId);
+  }
 
   if (result.merged) {
-    const prevStatus = (epic.status ?? "review") as KanbanStatus;
+    const prevStatus = (epic.status ?? "to_merge") as KanbanStatus;
 
     // Re-check and apply after git: guards may have changed during the merge.
     const validation = applyTransition({
@@ -117,9 +185,11 @@ export async function POST(
       .where(eq(epics.id, epicId))
       .run();
 
-    // Only now that the epic is Done — see lib/workflow/close-findings.ts for
-    // why the merge paths close findings after their transition, not before.
-    closeOpenFindings(epicId);
+    // Only now that the epic is Done: the merge is the approval, so whatever
+    // review comments stayed open — minor findings, notes from earlier cycles
+    // — are accepted with it. AFTER the transition, never before; see
+    // lib/workflow/merge-approval.ts.
+    resolveOpenReviewComments(epicId);
 
     tryExportArjiJson(projectId);
 
@@ -243,7 +313,7 @@ export async function POST(
             .select({ status: epics.status })
             .from(epics)
             .where(eq(epics.id, epicId))
-            .get()?.status ?? "review") as KanbanStatus;
+            .get()?.status ?? "to_merge") as KanbanStatus;
           const transition = applyTransition({
             projectId,
             epicId,
@@ -255,6 +325,8 @@ export async function POST(
             sessionId,
           });
           if (transition.valid) {
+            // After the transition, never before (lib/workflow/merge-approval.ts).
+            resolveOpenReviewComments(epicId);
             db.update(epics)
               .set({ branchName: null, updatedAt: new Date().toISOString() })
               .where(eq(epics.id, epicId))
@@ -320,8 +392,85 @@ export async function POST(
     });
   }
 
+  const mergeError = result.error || "Merge failed";
+  const isConflict = result.reason === "conflict";
+  const isConflictMarkers = result.reason === "conflict-markers";
+  const now = new Date().toISOString();
+
+  try {
+    db.insert(ticketComments)
+      .values({
+        id: createId(),
+        epicId,
+        author: "agent",
+        content: isConflict
+          ? `**Merge failed.** ${mergeError}\n\nThe ticket stays in ${epic.status}. Use Resolve with Agent, then merge again.`
+          : isConflictMarkers
+          ? `**Merge failed — unresolved conflict markers.** ${mergeError}\n\nThe ticket stays in ${epic.status}. Clean the conflict markers in the branch, then merge again.`
+          : `**Merge failed.** ${mergeError}\n\nThe ticket stays in ${epic.status}.`,
+        createdAt: now,
+      })
+      .run();
+
+    createApproveMergeFailedNotification({
+      projectId,
+      epicId,
+      error: mergeError,
+    });
+
+    logTransition({
+      projectId,
+      epicId,
+      fromStatus: (epic.status ?? "review") as KanbanStatus,
+      toStatus: (epic.status ?? "review") as KanbanStatus,
+      actor: "system",
+      reason: isConflict
+        ? buildMergeBlockedReason({
+            branchName: epic.branchName,
+            error: mergeError,
+          })
+        : isConflictMarkers
+        ? buildMergeConflictMarkersBlockedReason({
+            branchName: epic.branchName,
+            error: mergeError,
+          })
+        : `Merge blocked: merge failed (${result.reason ?? "unknown"}) on ${epic.branchName} — ${mergeError}`,
+    });
+  } catch (trailError) {
+    console.error(
+      "[merge] Failed to record the merge-failure trail:",
+      trailError
+    );
+  }
+
+  if (isConflict) {
+    return NextResponse.json(
+      {
+        error: `Merge failed: ${mergeError}. The ticket stays in ${epic.status} — resolve the conflict (Resolve with Agent) and merge again.`,
+        reason: "conflict",
+        conflictFiles: result.conflictFiles,
+        mergeFailed: true,
+      },
+      { status: 409 }
+    );
+  }
+
+  if (isConflictMarkers) {
+    return NextResponse.json(
+      {
+        error: `Merge failed: ${mergeError}. Unresolved conflict markers in branch — clean the markers and merge again.`,
+        reason: "conflict-markers",
+        mergeFailed: false,
+      },
+      { status: 409 }
+    );
+  }
+
   return NextResponse.json(
-    { error: result.error || "Merge failed" },
+    {
+      error: result.error || "Merge failed",
+      reason: result.reason ?? "error",
+    },
     { status: 500 }
   );
 }

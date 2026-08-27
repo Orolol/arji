@@ -123,6 +123,7 @@ export const STORY_PARENT_BUILDABLE_STATUSES: ReadonlySet<string> = new Set([
   "todo",
   "in_progress",
   "review",
+  "to_merge",
 ]);
 
 // normalizeAt lives in lib/agent-sessions/session-time.ts alongside the SQL
@@ -744,15 +745,18 @@ function compareEpics(a: EpicRow, b: EpicRow): number {
 /**
  * The infinite-re-review guard.
  *
- * A review that PASSES leaves the epic in `review` (the pipeline never
- * auto-approves), so a naive "everything in review" selector would review the
- * same epic forever. The gate is temporal at its core — "has a review been
- * attempted since the last terminal code change?" is a fact, not a guess —
- * plus the verdict rule: for a reviewer that HAD the submit_findings channel,
- * only an explicitly positive verdict is clean — `changes_requested` and
- * silence alike earn a fresh review (see lastCleanReviewAt). The prose
- * fallback for MCP-less providers is deliberately NOT parsed here; their rows
- * stay NULL and stay clean.
+ * A review that PASSES now promotes the epic to `to_merge` (the verdict IS
+ * the approval), so the common case leaves the Review column on its own. The
+ * guard still matters for the cases that do NOT move the ticket — a review
+ * whose promotion was refused, or an epic dragged back into Review with its
+ * clean review intact — where a naive "everything in review" selector would
+ * review the same epic forever. The gate is temporal at its core — "has a
+ * review been attempted since the last terminal code change?" is a fact, not
+ * a guess — plus the verdict rule: for a reviewer that HAD the
+ * submit_findings channel, only an explicitly positive verdict is clean —
+ * `changes_requested` and silence alike earn a fresh review (see
+ * lastCleanReviewAt). The prose fallback for MCP-less providers is
+ * deliberately NOT parsed here; their rows stay NULL and stay clean.
  *
  * "A review" means a completed, epic-scoped review that delivered a verdict —
  * see SessionFacts.lastCleanReviewAt for what is deliberately excluded and
@@ -940,23 +944,17 @@ function hasStoryStillToBuild(board: AutoModeBoard, epic: EpicRow): boolean {
 }
 
 /**
- * Epics whose review came back clean and whose branch can land: in `review`,
- * with a branch, reviewed since the last code change, with zero open review
- * comments, and with no story the build selector would still pick up.
+ * Epics whose branch can land: in `to_merge` (the review verdict already
+ * promoted them there), with a branch, and with no story the build selector
+ * would still pick up.
  *
  * The readiness half is `evaluateMergeReadiness` — the same call the board
- * API makes, so a "Ready to merge" card and a supervisor merge candidate agree
- * on what "reviewed and landable" means by construction. What stays here are
- * the exclusions that are the SUPERVISOR's alone: the runtime ones (busy,
- * owned, parked, backed off), which are about whether it may act right now,
- * and `hasStoryStillToBuild`, which refuses the unattended merge of a
- * half-built epic a human is still allowed to land by hand.
- *
- * This gate is STRICTER than the workflow engine's `→ done` guards on
- * purpose. The engine still has the last word — `applyTransition` refuses
- * unless `hasCompletedReview` and no open comments — but the engine's
- * freshness is lax, so the temporal check is what makes "review is OK" mean
- * something without inventing a new boolean.
+ * API makes, so a To Merge card and a supervisor merge candidate agree on
+ * what "landable" means by construction. What stays here are the exclusions
+ * that are the SUPERVISOR's alone: the runtime ones (busy, owned, parked,
+ * backed off), which are about whether it may act right now, and
+ * `hasStoryStillToBuild`, which refuses the unattended merge of a half-built
+ * epic a human is still allowed to land by hand.
  */
 export function selectMergeCandidates(
   projectId: string,

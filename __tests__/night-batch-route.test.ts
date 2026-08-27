@@ -323,6 +323,15 @@ describe("batch_run_id tagging", () => {
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row.batchRunId).toBe(json.data.batchId);
+      expect(row.estimatedPromptTokens).toBeGreaterThan(0);
+      expect(row.estimatedPromptBreakdown).not.toBeNull();
+      const breakdown = JSON.parse(row.estimatedPromptBreakdown!);
+      expect(breakdown.ticket).toBeGreaterThan(0);
+      const sum = Object.values(breakdown as Record<string, number>).reduce(
+        (total, tokens) => total + tokens,
+        0,
+      );
+      expect(Math.abs(sum - row.estimatedPromptTokens!)).toBeLessThanOrEqual(8);
     }
     expect(json.data.batchId).not.toMatch(/^night_/);
   });

@@ -24,6 +24,7 @@
  * exactly the shape these cases stand in for.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { createTestDb } from "@/lib/db/test-utils";
 import { mockNextRequest } from "@/__tests__/helpers/db-mock";
@@ -63,6 +64,10 @@ import {
 } from "@/lib/pipeline/findings";
 import { buildTransitionContext } from "@/lib/workflow/context";
 import { validateTransition } from "@/lib/workflow/engine";
+import {
+  transitionReviewPassed,
+  WorkflowTransitionError,
+} from "@/lib/workflow/automatic-transitions";
 import { loadAutoModeBoard, selectMergeCandidates } from "@/lib/auto-mode/select";
 import {
   _resetMcpTokenStoreForTests,
@@ -268,13 +273,15 @@ describe("assessReviewOutcome — the vacuous clean review", () => {
   });
 
   /**
-   * The input shape the runner has to handle: a broken channel does NOT mean
-   * no evidence. assessReviewOutcome runs ingestProseFindings before it
-   * collects, and those rows carry agent_session_id NULL — so they never
-   * prove the channel worked, and the assessment reports `unverifiable` and
-   * a non-empty findings list at the same time.
+   * A broken channel does NOT mean no evidence. assessReviewOutcome runs
+   * ingestProseFindings before it judges, and those rows now carry the
+   * review's agent_session_id — so a review whose findings were recovered
+   * from its prose PROVES its channel the same way a submit_findings call
+   * would, and is judged by the prose fallback instead of being refused as
+   * unverifiable. The recovered findings ride along as the next builder's
+   * context either way.
    */
-  it("recovers anchored findings from the prose while staying unverifiable", () => {
+  it("recovers anchored findings from the prose and verifies the review with them", () => {
     const sessionId = insertReviewSession({ provider: "claude-code" });
     const report = [
       "## Findings",
@@ -295,13 +302,23 @@ describe("assessReviewOutcome — the vacuous clean review", () => {
     });
 
     expect(assessment).toMatchObject({
-      blocking: true,
-      unverifiable: true,
-      verdictSource: "unverifiable",
+      // Ingestion deliberately does not move the verdict: with the channel
+      // silent, the reviewer's own prose verdict line stays authoritative,
+      // and this report carries none.
+      blocking: false,
+      unverifiable: false,
+      verdictSource: "prose",
       proseIngestedCount: 1,
     });
-    expect(assessment.blockingFindings).toHaveLength(1);
-    expect(assessment.blockingFindings[0].severity).toBe("major");
+    // The ingested row is anchored AND attributed — the attribution is what
+    // proved the channel.
+    const rows = db().select().from(reviewComments).all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].agentSessionId).toBe(sessionId);
+    expect(rows[0].filePath).toBe("lib/auth/session.ts");
+    expect(readReviewChannelState(sessionId, db())).toMatchObject({
+      unverifiable: false,
+    });
   });
 
   it("does not fire when the caller has no review session to judge", () => {
@@ -376,16 +393,16 @@ describe("resolveReviewVerdict — the revert drivers", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* The review -> done guard                                            */
+/* The review -> to_merge guard                                        */
 /* ------------------------------------------------------------------ */
 
-describe("review -> done guard", () => {
+describe("review -> to_merge guard", () => {
   it("does not accept an unverifiable review as a completed review", () => {
     insertReviewSession({ provider: "claude-code" });
     const ctx = buildTransitionContext({
       epicId: EPIC_ID,
       fromStatus: "review",
-      toStatus: "done",
+      toStatus: "to_merge",
       actor: "user",
     });
     expect(ctx.hasCompletedReview).toBe(false);
@@ -400,7 +417,7 @@ describe("review -> done guard", () => {
     const ctx = buildTransitionContext({
       epicId: EPIC_ID,
       fromStatus: "review",
-      toStatus: "done",
+      toStatus: "to_merge",
       actor: "user",
     });
     expect(ctx.hasCompletedReview).toBe(true);
@@ -412,7 +429,7 @@ describe("review -> done guard", () => {
     const ctx = buildTransitionContext({
       epicId: EPIC_ID,
       fromStatus: "review",
-      toStatus: "done",
+      toStatus: "to_merge",
       actor: "user",
     });
     expect(ctx.hasCompletedReview).toBe(true);
@@ -423,13 +440,12 @@ describe("review -> done guard", () => {
     const result = validateTransition({
       epicId: EPIC_ID,
       fromStatus: "review",
-      toStatus: "done",
-      hasOpenReviewComments: false,
+      toStatus: "to_merge",
       hasCompletedReview: false,
       hasUnverifiableReview: true,
       hasRunningSession: false,
       actor: "user",
-      source: "approve",
+      source: "drag",
     });
     expect(result.valid).toBe(false);
     expect(result.error).toMatch(/submit_findings/);
@@ -441,17 +457,40 @@ describe("review -> done guard", () => {
 /* ------------------------------------------------------------------ */
 
 describe("selectMergeCandidates", () => {
-  it("refuses to merge an epic whose only review filed no verdict", () => {
-    insertReviewSession({ provider: "claude-code" });
+  // Only `to_merge` epics are merge candidates, and the only automatic way
+  // there is transitionReviewPassed — whose guard is exactly the completed-
+  // verifiable-review rule these cases pin down. Driving the promotion (not
+  // just poking the status) keeps the whole chain under test: verdict →
+  // to_merge → merge queue.
+  function promote(sessionId: string) {
+    transitionReviewPassed({
+      projectId: PROJECT_ID,
+      epicId: EPIC_ID,
+      scope: "epic",
+      sessionId,
+      reason: "Review verdict: passed",
+    });
+  }
+
+  function epicStatus() {
+    return db().select().from(epics).where(eq(epics.id, EPIC_ID)).get()?.status;
+  }
+
+  it("never reaches the merge queue when the only review filed no verdict", () => {
+    const sessionId = insertReviewSession({ provider: "claude-code" });
+    expect(() => promote(sessionId)).toThrow(WorkflowTransitionError);
+    expect(epicStatus()).toBe("review");
     const board = loadAutoModeBoard(PROJECT_ID);
     expect(selectMergeCandidates(PROJECT_ID, board)).toHaveLength(0);
   });
 
   it("merges once the review delivers an approving verdict", () => {
-    insertReviewSession({
+    const sessionId = insertReviewSession({
       provider: "claude-code",
       reviewVerdict: "approved",
     });
+    promote(sessionId);
+    expect(epicStatus()).toBe("to_merge");
     const board = loadAutoModeBoard(PROJECT_ID);
     expect(selectMergeCandidates(PROJECT_ID, board).map((c) => c.epicId)).toEqual([
       EPIC_ID,
@@ -459,7 +498,9 @@ describe("selectMergeCandidates", () => {
   });
 
   it("still merges on an MCP-less reviewer, which has no verdict to give", () => {
-    insertReviewSession({ provider: "gemini-cli" });
+    const sessionId = insertReviewSession({ provider: "gemini-cli" });
+    promote(sessionId);
+    expect(epicStatus()).toBe("to_merge");
     const board = loadAutoModeBoard(PROJECT_ID);
     expect(selectMergeCandidates(PROJECT_ID, board).map((c) => c.epicId)).toEqual([
       EPIC_ID,

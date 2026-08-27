@@ -55,6 +55,7 @@ const mockKanban = vi.hoisted(() => ({
       ],
       in_progress: [],
       review: [],
+      to_merge: [],
       done: [],
       released: [],
     },

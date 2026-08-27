@@ -46,27 +46,40 @@ function reasonPrefix(build: (argument: string) => string): string {
   return prefix;
 }
 
-/** Head of the reason `POST .../approve` logs when a merge hits conflicts. */
+/**
+ * Head of the reason the RETIRED `POST .../approve` route logged when a merge
+ * hit conflicts. The route is gone (the merge is the approval now), but the
+ * rows it wrote are permanent activity history: the prefix stays in the
+ * recognized lists below so a conflict recorded before the workflow change
+ * still reads as one.
+ */
 export const APPROVAL_MERGE_BLOCKED_PREFIX = "Approval blocked: merge of ";
 
-/** The approve route's merge-conflict reason. */
-export function buildApprovalMergeBlockedReason(input: {
-  branchName: string;
-  error: string;
-}): string {
-  return `${APPROVAL_MERGE_BLOCKED_PREFIX}${input.branchName} failed — ${input.error}`;
-}
-
-/** Head of the reason `POST .../approve` logs when a branch has committed conflict markers. */
+/** Retired approve route's conflict-markers reason head — same rationale. */
 export const APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX =
   "Approval blocked: conflict markers on ";
 
-/** The approve route's conflict-markers reason. */
-export function buildApprovalConflictMarkersBlockedReason(input: {
+/** Head of the reason `POST .../merge` logs when a direct merge hits conflicts. */
+export const MERGE_BLOCKED_PREFIX = "Merge blocked: merge of ";
+
+/** The merge route's merge-conflict reason. */
+export function buildMergeBlockedReason(input: {
   branchName: string;
   error: string;
 }): string {
-  return `${APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX}${input.branchName} — ${input.error}`;
+  return `${MERGE_BLOCKED_PREFIX}${input.branchName} failed — ${input.error}`;
+}
+
+/** Head of the reason `POST .../merge` logs when a branch has committed conflict markers. */
+export const MERGE_CONFLICT_MARKERS_BLOCKED_PREFIX =
+  "Merge blocked: conflict markers on ";
+
+/** The merge route's conflict-markers reason. */
+export function buildMergeConflictMarkersBlockedReason(input: {
+  branchName: string;
+  error: string;
+}): string {
+  return `${MERGE_CONFLICT_MARKERS_BLOCKED_PREFIX}${input.branchName} — ${input.error}`;
 }
 
 
@@ -117,6 +130,7 @@ export function isGitRefusalMergeReason(
  */
 export const MERGE_CONFLICT_REASON_PREFIXES: readonly string[] = [
   APPROVAL_MERGE_BLOCKED_PREFIX,
+  MERGE_BLOCKED_PREFIX,
   AUTO_MODE_REASONS.mergeConflict,
   AUTO_MODE_REASONS.mergeConflictDeferred,
   reasonPrefix((error) => AUTO_MODE_REASONS.mergeFailed("conflict", error)),
@@ -127,11 +141,11 @@ export const MERGE_CONFLICT_REASON_PREFIXES: readonly string[] = [
  */
 export const CONFLICT_MARKERS_REASON_PREFIXES: readonly string[] = [
   APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX,
+  MERGE_CONFLICT_MARKERS_BLOCKED_PREFIX,
   reasonPrefix((error) =>
     AUTO_MODE_REASONS.mergeFailed("conflict-markers", error)
   ),
 ];
-
 export const MERGE_FAILURE_REASON_PREFIXES: readonly string[] = [
   ...MERGE_CONFLICT_REASON_PREFIXES,
   ...CONFLICT_MARKERS_REASON_PREFIXES,

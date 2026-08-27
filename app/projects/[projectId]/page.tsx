@@ -613,7 +613,7 @@ export default function KanbanPage() {
               />
               <span className="ml-auto truncate text-[12.5px] text-muted-foreground">
                 {visibleCount} ticket{visibleCount === 1 ? "" : "s"} visible
-                {panelOpen && " · Released returns when the panel closes"}
+                {panelOpen && " · Done & Released return when the panel closes"}
               </span>
             </div>
 
@@ -825,6 +825,7 @@ export default function KanbanPage() {
                 onRetryBuild={handleRetryBuild}
                 busyEpicIds={busyEpicIds}
                 hideReleased={panelOpen}
+                hideDone={panelOpen}
                 onVisibleCountChange={setVisibleCount}
                 onMergeSuccess={handleBoardMergeSuccess}
                 onMergeAgentDispatched={handleBoardMergeAgentDispatched}

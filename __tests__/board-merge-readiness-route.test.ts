@@ -3,7 +3,7 @@
  * (GET /api/projects/[projectId]/epics).
  *
  * Everything runs against the real migrated schema, so this is also the only
- * place the three new subqueries are actually EXECUTED — the sibling
+ * place the readiness subqueries are actually EXECUTED — the sibling
  * epics-route.test.ts mocks drizzle, which can prove a join was requested but
  * never that the SQL parses.
  *
@@ -33,8 +33,10 @@ const { GET } = await import("@/app/api/projects/[projectId]/epics/route");
 const { selectMergeCandidates } = await import("@/lib/auto-mode/select");
 const { AUTO_MODE_REASONS } = await import("@/lib/auto-mode/constants");
 const {
-  buildApprovalMergeBlockedReason,
-  buildApprovalConflictMarkersBlockedReason,
+  APPROVAL_MERGE_BLOCKED_PREFIX,
+  APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX,
+  buildMergeBlockedReason,
+  buildMergeConflictMarkersBlockedReason,
 } = await import("@/lib/workflow/merge-failure");
 const { autoModeRegistry } = await import("@/lib/auto-mode/registry");
 
@@ -73,7 +75,7 @@ function addEpic(input: {
       id: input.id,
       projectId: PROJECT_ID,
       title: input.id,
-      status: input.status ?? "review",
+      status: input.status ?? "to_merge",
       priority: 0,
       position: input.position ?? 0,
       branchName:
@@ -151,8 +153,8 @@ function addActivity(input: {
       id: nextId("act"),
       projectId: PROJECT_ID,
       epicId: input.epicId,
-      fromStatus: "review",
-      toStatus: "review",
+      fromStatus: "to_merge",
+      toStatus: "to_merge",
       actor: "system",
       reason: input.reason,
       createdAt: input.createdAt,
@@ -161,14 +163,11 @@ function addActivity(input: {
 }
 
 /**
- * A clean, freshly reviewed epic: build at :10, review at :20.
- *
- * The review carries an approving structured verdict because that is what
- * "cleanly reviewed" MEANS (lib/pipeline/findings.ts): a review that answered
- * without filing anything through a `submit_findings` channel it actually had
- * is unverifiable — silence, not approval — and the gate refuses it. A
- * verdict-less fixture here would be asserting readiness on a review Arij
- * never heard from.
+ * A To Merge epic with the history that puts one there: build at :10, review
+ * with an approving verdict at :20, then the review-driven promotion. The
+ * sessions no longer gate readiness — the `to_merge` STATUS is the review's
+ * verdict — but seeding them keeps the fixture the shape production data has,
+ * which is what the Full Auto parity test at the bottom leans on.
  */
 function seedReadyEpic(id: string, position = 0): void {
   addEpic({ id, position });
@@ -221,7 +220,7 @@ beforeEach(() => {
 });
 
 describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
-  it("marks a freshly reviewed epic with no findings as ready", async () => {
+  it("marks a To Merge epic with a branch and no conflict as ready", async () => {
     seedReadyEpic("ready");
     expect(await readinessOf("ready")).toEqual({
       ready: true,
@@ -230,194 +229,145 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
     });
   });
 
-  it("blocks on open findings and reports the count", async () => {
+  it("echoes open findings as information without blocking the merge", async () => {
+    // The merge IS the approval: whatever stays open is resolved by the merge
+    // itself, so the count rides along for the card but gates nothing.
     seedReadyEpic("findings");
     addOpenFinding("findings");
     addOpenFinding("findings");
     expect(await readinessOf("findings")).toEqual({
-      ready: false,
-      blocker: "open_findings",
+      ready: true,
+      blocker: null,
       openFindings: 2,
     });
   });
 
-  it("ignores findings that were resolved", async () => {
+  it("does not count findings that were resolved", async () => {
     seedReadyEpic("resolved");
     addOpenFinding("resolved");
     db.update(reviewComments).set({ status: "resolved" }).run();
-    expect(await readinessOf("resolved")).toMatchObject({ ready: true });
-  });
-
-  it("goes stale when a build lands after the review", async () => {
-    seedReadyEpic("stale");
-    addSession({ epicId: "stale", agentType: "build", endedAt: at(30) });
-    expect(await readinessOf("stale")).toMatchObject({
-      ready: false,
-      blocker: "stale_review",
+    expect(await readinessOf("resolved")).toMatchObject({
+      ready: true,
+      openFindings: 0,
     });
   });
 
-  it("goes stale when a STORY build commits to the epic's branch", async () => {
-    seedReadyEpic("story-stale");
-    addStory({ id: "story-stale-1", epicId: "story-stale" });
+  it("stays ready when a build lands after the promotion", async () => {
+    // Review freshness is no longer a readiness input: the `to_merge` status
+    // carries the verdict, and a later code session earns a re-review through
+    // the workflow, not a blocked card.
+    seedReadyEpic("rebuilt");
+    addSession({ epicId: "rebuilt", agentType: "build", endedAt: at(30) });
+    expect(await readinessOf("rebuilt")).toMatchObject({
+      ready: true,
+      blocker: null,
+    });
+  });
+
+  it("stays ready when a STORY build commits to the epic's branch", async () => {
+    seedReadyEpic("story-rebuilt");
+    addStory({ id: "story-rebuilt-1", epicId: "story-rebuilt" });
     addSession({
-      epicId: "story-stale",
+      epicId: "story-rebuilt",
       agentType: "build",
-      userStoryId: "story-stale-1",
+      userStoryId: "story-rebuilt-1",
       endedAt: at(30),
     });
-    expect(await readinessOf("story-stale")).toMatchObject({
-      blocker: "stale_review",
-    });
+    expect(await readinessOf("story-rebuilt")).toMatchObject({ ready: true });
   });
 
-  it("does not count a changes_requested verdict as a review", async () => {
-    addEpic({ id: "rejected" });
-    addSession({ epicId: "rejected", agentType: "build", endedAt: at(10) });
+  it("reads the status as the verdict, except for a standing rejection", async () => {
+    // A missing review round is not the card's business: an epic that reaches
+    // `to_merge` without one (drag, import) is the transition service's
+    // problem, and the board must not second-guess the status.
+    addEpic({ id: "no-review-history" });
+    expect(await readinessOf("no-review-history")).toMatchObject({
+      ready: true,
+    });
+
+    addEpic({ id: "rejected-history", position: 1 });
     addSession({
-      epicId: "rejected",
+      epicId: "rejected-history",
       agentType: "review_code",
       reviewVerdict: "changes_requested",
       endedAt: at(20),
     });
-    // The blocker is `changes_requested` rather than `no_review` since the
-    // board learned to see a standing rejection: with no clean round at all
-    // "awaiting review" was a lie — a review ran, and it said no. The
-    // property this case guards is unchanged, and it is the one that matters:
-    // a rejecting verdict never makes an epic mergeable.
-    expect(await readinessOf("rejected")).toMatchObject({
+    // The one review fact the status cannot carry, and the only one the card
+    // still reads: a `changes_requested` verdict with no fix a reviewer has
+    // since read. The workflow engine refuses THAT merge
+    // (lib/workflow/engine.ts), so the board must refuse it too — offering
+    // Full Auto a candidate the engine then rejects costs a real merge and a
+    // rollback on every sweep.
+    expect(await readinessOf("rejected-history")).toMatchObject({
       ready: false,
       blocker: "changes_requested",
     });
   });
 
-  it("goes back to plain 'awaiting review' once the rejection is cleared", async () => {
-    // Isolates `lastCleanReviewAtSql` from the rejection blocker: a fix at
-    // :25 and the clean verdict at :30 that read it clear the standing
-    // rejection together, and what surfaces underneath is the ordinary
-    // freshness rule — the build at :40 outdates the review.
-    addEpic({ id: "cleared-then-stale" });
+  it("is ready again once a fix and a clean verdict answer the rejection", async () => {
+    // A rejection is answered by a fix a reviewer has since READ: the build
+    // at :25 and the clean verdict at :30 that read it clear it together.
+    // The build at :40 does not put the card back — review freshness stopped
+    // being a readiness input when `to_merge` became the verdict.
+    addEpic({ id: "cleared-then-rebuilt" });
     addSession({
-      epicId: "cleared-then-stale",
+      epicId: "cleared-then-rebuilt",
       agentType: "build",
       endedAt: at(10),
     });
     addSession({
-      epicId: "cleared-then-stale",
+      epicId: "cleared-then-rebuilt",
       agentType: "review_code",
       reviewVerdict: "changes_requested",
       endedAt: at(20),
     });
     addSession({
-      epicId: "cleared-then-stale",
+      epicId: "cleared-then-rebuilt",
       agentType: "build",
       endedAt: at(25),
     });
     addSession({
-      epicId: "cleared-then-stale",
+      epicId: "cleared-then-rebuilt",
       agentType: "review_code",
       reviewVerdict: "approved",
       endedAt: at(30),
     });
     addSession({
-      epicId: "cleared-then-stale",
+      epicId: "cleared-then-rebuilt",
       agentType: "build",
       endedAt: at(40),
     });
-    expect(await readinessOf("cleared-then-stale")).toMatchObject({
-      blocker: "stale_review",
+    expect(await readinessOf("cleared-then-rebuilt")).toMatchObject({
+      ready: true,
+      blocker: null,
     });
   });
 
-  it("does not count a review that filed nothing on a channel it had", async () => {
-    // The epic this branch exists for: `submit_findings` was wired and the
-    // review answered anyway with no verdict and no findings. An empty
-    // findings list is not evidence of a clean branch when the deposit never
-    // happened, so the board must not offer the merge either.
-    addEpic({ id: "unverifiable" });
-    addSession({ epicId: "unverifiable", agentType: "build", endedAt: at(10) });
-    addSession({
-      epicId: "unverifiable",
-      agentType: "review_code",
-      mcpChannel: "injected",
-      endedAt: at(20),
-    });
-    expect(await readinessOf("unverifiable")).toMatchObject({
-      ready: false,
-      blocker: "no_review",
-    });
-  });
-
-  it("still counts a review whose channel Arij could not wire", async () => {
-    // The mirror case: injection failed, so the reviewer never had the tool.
-    // Blaming it for a channel it never had is what would dispatch a reviewer
-    // forever on an epic that can never satisfy the gate.
-    addEpic({ id: "channel-less" });
-    addSession({ epicId: "channel-less", agentType: "build", endedAt: at(10) });
-    addSession({
-      epicId: "channel-less",
-      agentType: "review_code",
-      mcpChannel: "unavailable",
-      endedAt: at(20),
-    });
-    expect(await readinessOf("channel-less")).toMatchObject({ ready: true });
-  });
-
-  it("does not count a review that only asked a question", async () => {
-    addEpic({ id: "asked" });
-    addSession({ epicId: "asked", agentType: "build", endedAt: at(10) });
-    addSession({
-      epicId: "asked",
-      agentType: "review_code",
-      outcome: "asked_question",
-      endedAt: at(20),
-    });
-    expect(await readinessOf("asked")).toMatchObject({ blocker: "no_review" });
-  });
-
-  it("does not let a STORY-scoped review satisfy the epic's gate", async () => {
-    addEpic({ id: "story-review" });
-    addSession({ epicId: "story-review", agentType: "build", endedAt: at(10) });
-    addStory({ id: "story-review-1", epicId: "story-review" });
-    addSession({
-      epicId: "story-review",
-      agentType: "review_code",
-      userStoryId: "story-review-1",
-      endedAt: at(20),
-    });
-    expect(await readinessOf("story-review")).toMatchObject({
-      blocker: "no_review",
-    });
-  });
-
-  it("reports an epic in review with no branch as having nothing to land", async () => {
+  it("reports a To Merge epic with no branch as having nothing to land", async () => {
     addEpic({ id: "branchless", branchName: null });
-    addSession({
-      epicId: "branchless",
-      agentType: "review_code",
-      reviewVerdict: "approved",
-      endedAt: at(20),
-    });
     expect(await readinessOf("branchless")).toMatchObject({
       blocker: "no_branch",
     });
   });
 
-  it("never marks a ticket outside Review as ready", async () => {
-    addEpic({ id: "building", status: "in_progress" });
-    addSession({ epicId: "building", agentType: "review_code", endedAt: at(20) });
-    expect(await readinessOf("building")).toMatchObject({
-      ready: false,
-      blocker: "not_in_review",
-    });
+  it("never marks a ticket outside To Merge as ready", async () => {
+    for (const status of ["backlog", "todo", "in_progress", "review", "done"]) {
+      addEpic({ id: `outside-${status}`, status });
+    }
+    for (const status of ["backlog", "todo", "in_progress", "review", "done"]) {
+      expect(await readinessOf(`outside-${status}`)).toMatchObject({
+        ready: false,
+        blocker: "not_to_merge",
+      });
+    }
   });
 
-  it("surfaces a failed approve-merge as a conflict, outranking the findings", async () => {
+  it("surfaces the merge route's failed merge as a conflict, echoing the findings", async () => {
     seedReadyEpic("conflict");
     addOpenFinding("conflict");
     addActivity({
       epicId: "conflict",
-      reason: buildApprovalMergeBlockedReason({
+      reason: buildMergeBlockedReason({
         branchName: "feature/conflict",
         error: "CONFLICT (content)",
       }),
@@ -430,11 +380,11 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
     });
   });
 
-  it("surfaces a failed approve-merge with conflict markers as conflict_markers blocker", async () => {
+  it("surfaces the merge route's conflict-markers refusal as conflict_markers", async () => {
     seedReadyEpic("markers");
     addActivity({
       epicId: "markers",
-      reason: buildApprovalConflictMarkersBlockedReason({
+      reason: buildMergeConflictMarkersBlockedReason({
         branchName: "feature/markers",
         error: "Unresolved conflict markers in lib/foo.ts",
       }),
@@ -442,6 +392,30 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
     });
     expect(await readinessOf("markers")).toMatchObject({
       ready: false,
+      blocker: "conflict_markers",
+    });
+  });
+
+  it("still reads the RETIRED approve route's historical conflict rows", async () => {
+    // The approve route is gone, but the rows it wrote are permanent activity
+    // history — reconstructed inline from the surviving prefixes.
+    seedReadyEpic("legacy-conflict");
+    addActivity({
+      epicId: "legacy-conflict",
+      reason: `${APPROVAL_MERGE_BLOCKED_PREFIX}feature/legacy-conflict failed — CONFLICT (content)`,
+      createdAt: at(40),
+    });
+    expect(await readinessOf("legacy-conflict")).toMatchObject({
+      blocker: "merge_conflict",
+    });
+
+    seedReadyEpic("legacy-markers", 1);
+    addActivity({
+      epicId: "legacy-markers",
+      reason: `${APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX}feature/legacy-markers — Unresolved conflict markers in lib/foo.ts`,
+      createdAt: at(40),
+    });
+    expect(await readinessOf("legacy-markers")).toMatchObject({
       blocker: "conflict_markers",
     });
   });
@@ -477,7 +451,7 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
     seedReadyEpic("refused");
     addActivity({
       epicId: "refused",
-      reason: AUTO_MODE_REASONS.mergeRefused("Review comments are still open"),
+      reason: AUTO_MODE_REASONS.mergeRefused("A story is still to build"),
       createdAt: at(40),
     });
     expect(await readinessOf("refused")).toMatchObject({ ready: true });
@@ -491,9 +465,11 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
       createdAt: at(40),
     });
     addSession({ epicId: "repaired", agentType: "merge", endedAt: at(50) });
-    // The repair invalidated the review, which is the honest next blocker.
+    // The conflict is no longer the branch's current state, so the epic is
+    // simply ready again — nothing else stands between it and main.
     expect(await readinessOf("repaired")).toMatchObject({
-      blocker: "stale_review",
+      ready: true,
+      blocker: null,
     });
   });
 
@@ -539,7 +515,7 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
         id: "theirs",
         projectId: "other-project",
         title: "theirs",
-        status: "review",
+        status: "to_merge",
         priority: 0,
         position: 0,
         branchName: "feature/theirs",
@@ -552,8 +528,8 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
         id: nextId("act"),
         projectId: "other-project",
         epicId: "theirs",
-        fromStatus: "review",
-        toStatus: "review",
+        fromStatus: "to_merge",
+        toStatus: "to_merge",
         actor: "system",
         reason: AUTO_MODE_REASONS.mergeConflict,
         createdAt: at(40),
@@ -581,7 +557,7 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
         id: "theirs-findings",
         projectId: "other-project-findings",
         title: "theirs",
-        status: "review",
+        status: "to_merge",
         priority: 0,
         position: 0,
         branchName: "feature/theirs-findings",
@@ -612,6 +588,7 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
     });
     expect(await readinessOf("dirty")).toMatchObject({
       blocker: "merge_conflict",
+      openFindings: 1,
     });
   });
 });
@@ -620,11 +597,11 @@ describe("board / Full Auto parity", () => {
   it("agrees with selectMergeCandidates on the same board", async () => {
     seedReadyEpic("ready-a", 0);
     seedReadyEpic("ready-b", 1);
-    seedReadyEpic("has-findings", 2);
-    addOpenFinding("has-findings");
-    seedReadyEpic("went-stale", 3);
-    addSession({ epicId: "went-stale", agentType: "build", endedAt: at(40) });
-    addEpic({ id: "never-reviewed", position: 4 });
+    // Open findings block neither side any more — the merge resolves them.
+    seedReadyEpic("with-findings", 2);
+    addOpenFinding("with-findings");
+    addEpic({ id: "branchless", branchName: null, position: 3 });
+    addEpic({ id: "still-in-review", status: "review", position: 4 });
 
     const boardReady = (await readBoard())
       .filter(
@@ -637,7 +614,7 @@ describe("board / Full Auto parity", () => {
       .map((candidate) => candidate.epicId)
       .sort();
 
-    expect(boardReady).toEqual(["ready-a", "ready-b"]);
+    expect(boardReady).toEqual(["ready-a", "ready-b", "with-findings"]);
     expect(autoReady).toEqual(boardReady);
   });
 });

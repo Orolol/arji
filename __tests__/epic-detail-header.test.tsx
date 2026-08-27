@@ -6,15 +6,16 @@
  *   click away from the header;
  * - the agent action bar is present in the header;
  * - the status control mirrors the workflow engine: only allowed
- *   transitions are enabled, review → done stays approval-gated, a running
- *   session locks the status, and server rejections surface inline;
+ *   transitions are enabled, to_merge → done stays merge-gated (the merge
+ *   IS the approval), a running session locks the status, and server
+ *   rejections surface inline;
  * - secondary metadata (dates, raw ids) is demoted to the Details tab.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { EpicDetail } from "@/components/kanban/EpicDetail";
 import {
-  REASON_APPROVAL_REQUIRED,
+  REASON_MERGE_REQUIRED,
   REASON_RELEASED_SYSTEM_ONLY,
   REASON_SESSION_RUNNING,
 } from "@/lib/kanban/status-transitions";
@@ -56,7 +57,7 @@ vi.mock("@/hooks/useEpicActivity", () => ({
 
 vi.mock("@/components/shared/AgentActionsBar", () => ({
   AgentActionsBar: () => (
-    <button data-testid="mock-approve">Approve</button>
+    <button data-testid="mock-merge">Merge</button>
   ),
 }));
 vi.mock("@/components/epic/UserStoryQuickActions", () => ({
@@ -123,7 +124,6 @@ function setupHooks(
     sendToReview: vi.fn(),
     sendToGrading: vi.fn(),
     resolveMerge: vi.fn(),
-    approve: vi.fn(),
   });
   mockUseEpicPr.mockReturnValue({
     pr: null,
@@ -257,7 +257,7 @@ describe("EpicDetail sticky header — frequent actions", () => {
     renderSubject();
 
     const header = screen.getByTestId("epic-detail-header");
-    expect(within(header).getByTestId("mock-approve")).toBeInTheDocument();
+    expect(within(header).getByTestId("mock-merge")).toBeInTheDocument();
   });
 });
 
@@ -279,16 +279,21 @@ describe("EpicDetail sticky header — workflow-aware status control", () => {
     expect(option(/Review/)).toHaveTextContent("(current)");
   });
 
-  it("only enables the transitions the workflow engine allows from review, with Done approval-gated", () => {
+  it("only enables the transitions the workflow engine allows from review, with Done behind the merge boundary", () => {
     setupHooks(baseEpic({ status: "review" }));
     renderSubject();
     openStatusSelect();
 
-    // The only structurally allowed move is back to In Progress…
+    // Structurally allowed: back to In Progress, forward to To Merge…
     expect(option(/In Progress/)).not.toHaveAttribute("data-disabled");
-    // …and Done is shown but explicitly gated on the human approval.
+    expect(option(/To Merge/)).not.toHaveAttribute("data-disabled");
+    // …and Done is no longer reachable straight from review — the merge
+    // boundary (To Merge) sits between.
     expect(option(/Done/)).toHaveAttribute("data-disabled");
-    expect(option(/Done/)).toHaveAttribute("title", REASON_APPROVAL_REQUIRED);
+    expect(option(/Done/)).toHaveAttribute(
+      "title",
+      "No direct transition from Review"
+    );
     // Released is system-only from anywhere.
     expect(option(/Released/)).toHaveAttribute("data-disabled");
     expect(option(/Released/)).toHaveAttribute(
@@ -301,6 +306,22 @@ describe("EpicDetail sticky header — workflow-aware status control", () => {
     // The current status is marked and not selectable.
     expect(option(/Review/)).toHaveTextContent("(current)");
     expect(option(/Review/)).toHaveAttribute("data-disabled");
+  });
+
+  it("gates Done on the merge from the To Merge column", () => {
+    setupHooks(baseEpic({ status: "to_merge" }));
+    renderSubject();
+    openStatusSelect();
+
+    // Done is shown but explicitly gated on the Merge action — the engine's
+    // merge-source rule, mirrored so the dropdown never offers a dead move.
+    expect(option(/Done/)).toHaveAttribute("data-disabled");
+    expect(option(/Done/)).toHaveAttribute("title", REASON_MERGE_REQUIRED);
+    // Send-back edges stay selectable.
+    expect(option(/Review/)).not.toHaveAttribute("data-disabled");
+    expect(option(/In Progress/)).not.toHaveAttribute("data-disabled");
+    expect(option(/To Merge/)).toHaveTextContent("(current)");
+    expect(option(/To Merge/)).toHaveAttribute("data-disabled");
   });
 
   it("enables exactly the backlog transitions from the backlog status", () => {
@@ -334,21 +355,23 @@ describe("EpicDetail sticky header — workflow-aware status control", () => {
   });
 
   it("surfaces the engine's rejection inline on the status control and does not apply the change", async () => {
+    // A guard the client cannot evaluate on its own (completed review) —
+    // exactly the case where the server's refusal must surface inline.
     const engineMessage =
-      "Cannot move to In Progress: a review comment is still open.";
+      "Cannot move to To Merge: no completed review found. A review must be completed before the ticket can be merged.";
     mockUpdateEpic.mockResolvedValue({ ok: false, error: engineMessage });
     setupHooks(baseEpic({ status: "review" }));
     renderSubject();
     openStatusSelect();
 
-    fireEvent.click(option(/In Progress/));
+    fireEvent.click(option(/To Merge/));
 
     await waitFor(() => {
       expect(screen.getByTestId("epic-status-error")).toHaveTextContent(
         engineMessage
       );
     });
-    expect(mockUpdateEpic).toHaveBeenCalledWith({ status: "in_progress" });
+    expect(mockUpdateEpic).toHaveBeenCalledWith({ status: "to_merge" });
     // Optimistic state was not applied: the control still shows exactly
     // the Review label (exact match: a ported "(current)" marker or any
     // suffix would fail this assertion).

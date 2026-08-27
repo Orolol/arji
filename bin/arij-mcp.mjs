@@ -102,13 +102,13 @@ const AGENT_TOOLS = [
   {
     name: "update_ticket_status",
     description:
-      "Move the ticket on the Arij board (backlog, todo, in_progress, review, done). Targets whatever this session was launched for: a story-scoped session moves ITS OWN story, and the parent epic follows to review by itself once every sibling story is in review or done — do not try to move the epic yourself. Transitions are validated by Arij's workflow engine; done needs human approval and will be rejected — finish, report, and let the user approve. Call this instead of announcing a status change in prose.",
+      "Move the ticket on the Arij board (backlog, todo, in_progress, review). Targets whatever this session was launched for: a story-scoped session moves ITS OWN story, and the parent epic follows to review by itself once every sibling story is in review or done — do not try to move the epic yourself. Transitions are validated by Arij's workflow engine. To Merge and Done are not reachable from here: a passing review verdict promotes the ticket to To Merge, and merging the branch marks it Done — finish, report, and let the review/merge flow do the rest. Call this instead of announcing a status change in prose.",
     inputSchema: {
       type: "object",
       properties: {
         status: {
           type: "string",
-          enum: ["backlog", "todo", "in_progress", "review", "done"],
+          enum: ["backlog", "todo", "in_progress", "review"],
           description: "Target board column.",
         },
         reason: {
@@ -260,7 +260,7 @@ const AGENT_TOOLS = [
   {
     name: "submit_findings",
     description:
-      "(Review sessions) Submit your review: the verdict here is what Arij acts on — it decides whether the ticket goes back for changes. Each finding anchors to file_path+line and becomes an open review comment that blocks approval until resolved, so an 'approved' verdict alongside an open critical/major finding still blocks. Call this once, at the end, then still end your final message with the required '**Overall Verdict: …**' line (the fallback Arij reads only when no verdict was submitted).",
+      "(Review sessions) Submit your review: the verdict here is what Arij acts on — a passing verdict moves the ticket to To Merge (ready for the user to merge), 'changes_requested' sends it back to In Progress. Each finding anchors to file_path+line and becomes an open review comment. When your prompt lists PRIOR findings with ids, report each one you verified in prior_findings — 'fixed' resolves it in Arij, 'still_open' keeps it open; a finding you do not mention stays open. Call this once, at the end, then still end your final message with the required '**Overall Verdict: …**' line (the fallback Arij reads only when no verdict was submitted).",
     inputSchema: {
       type: "object",
       properties: {
@@ -269,6 +269,28 @@ const AGENT_TOOLS = [
           enum: ["approved", "approved_with_minor_issues", "changes_requested"],
           description:
             "Overall review verdict. Persisted on this session and read as the authoritative signal for the ticket's next transition.",
+        },
+        prior_findings: {
+          type: "array",
+          maxItems: 100,
+          description:
+            "Verification results for the PRIOR findings your prompt listed (by their [RC:id] tokens). 'fixed' marks the finding resolved in Arij.",
+          items: {
+            type: "object",
+            properties: {
+              id: {
+                type: "string",
+                minLength: 1,
+                description: "The finding id from the [RC:id] token in your prompt.",
+              },
+              status: {
+                type: "string",
+                enum: ["fixed", "still_open"],
+              },
+            },
+            required: ["id", "status"],
+            additionalProperties: false,
+          },
         },
         summary: {
           type: "string",
@@ -641,14 +663,14 @@ const CHAT_TOOLS = [
   {
     name: "update_ticket_status",
     description:
-      "Move an Arij ticket to another board column. Transitions are validated by the workflow engine (e.g. review→done needs an approved review), so an invalid move returns an explanatory error.",
+      "Move an Arij ticket to another board column. Transitions are validated by the workflow engine (To Merge is reached through a passing review verdict, Done through a successful merge), so an invalid move returns an explanatory error.",
     inputSchema: {
       type: "object",
       properties: {
         ...CHAT_TICKET_ID_PROPERTY,
         status: {
           type: "string",
-          enum: ["backlog", "todo", "in_progress", "review", "done"],
+          enum: ["backlog", "todo", "in_progress", "review"],
           description: "Target board column.",
         },
         reason: {

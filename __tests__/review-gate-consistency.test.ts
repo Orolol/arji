@@ -55,7 +55,7 @@ import {
   isReviewSessionUnverifiable,
   readReviewChannelState,
 } from "@/lib/pipeline/findings";
-import { loadAutoModeBoard, selectMergeCandidates } from "@/lib/auto-mode/select";
+import { hasFreshCleanReview, loadAutoModeBoard } from "@/lib/auto-mode/select";
 import { buildTransitionContext } from "@/lib/workflow/context";
 
 const PROJECT_ID = "proj-consistency";
@@ -145,12 +145,18 @@ function insertReview(shape: ReviewShape): string {
   return id;
 }
 
-/** True when the Full Auto merge gate considers the epic landable. */
+/**
+ * True when the SQL side of the rule (`cleanReviewVerdictSql`, aggregated
+ * into the sweep snapshot's `lastCleanReviewAt`) counts the review as clean.
+ *
+ * Merge candidacy itself is status-driven now (`to_merge` carries the
+ * verdict), so the SQL predicate's observable is the anti-loop gate it
+ * feeds: a clean review is FRESH (newer than the build above) and stops
+ * `needsReview` from dispatching another identical review every sweep.
+ */
 function mergeGateSaysClean(): boolean {
   const board = loadAutoModeBoard(PROJECT_ID);
-  return selectMergeCandidates(PROJECT_ID, board).some(
-    (candidate) => candidate.epicId === EPIC_ID
-  );
+  return hasFreshCleanReview(board.sessionFactsByEpic.get(EPIC_ID));
 }
 
 /* ------------------------------------------------------------------ */

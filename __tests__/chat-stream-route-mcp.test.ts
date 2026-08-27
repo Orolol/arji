@@ -239,6 +239,42 @@ describe("chat stream route — CLI MCP tool channel wiring", () => {
     expect(channel.release).toHaveBeenCalled();
   });
 
+  it("carries the resolved agent's CLI options into every chat spawn", async () => {
+    // A chat turn has no agent_sessions row, so it never passes through
+    // processManager.start(): the options have to ride the resolved agent.
+    mockResolveAgentByNamedId.mockReturnValue({
+      provider: "claude-code",
+      model: undefined,
+      namedAgentId: "na-1",
+      cliOptions: { effort: "high" },
+    });
+    seedFreshChat();
+    mockCreateChatCliToolChannel.mockReturnValue(fakeChannel());
+
+    await drain(await post({ content: "Hello" }));
+
+    expect(mockSpawnHelpers.spawnClaudeStream).toHaveBeenCalledWith(
+      expect.objectContaining({ cliOptions: { effort: "high" } }),
+    );
+  });
+
+  it("carries them into a dynamic provider spawn too", async () => {
+    mockResolveAgentByNamedId.mockReturnValue({
+      provider: "codex",
+      model: undefined,
+      namedAgentId: "na-2",
+      cliOptions: { reasoning_effort: "xhigh" },
+    });
+    seedResumeConversation("codex");
+    mockCreateChatCliToolChannel.mockReturnValue(fakeChannel());
+
+    await drain(await post({ content: "Hello", conversationId: "conv1" }));
+
+    expect(mockDynamicProviderSpawn.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ cliOptions: { reasoning_effort: "xhigh" } }),
+    );
+  });
+
   it("spawns plain (no mcp) when the channel is unavailable", async () => {
     seedFreshChat();
     mockCreateChatCliToolChannel.mockReturnValue(null);

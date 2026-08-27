@@ -48,6 +48,26 @@ describe("AgentDispatchDialog — notice slot", () => {
     render(<AgentDispatchDialog {...baseDialogProps} />);
     expect(screen.queryByTestId("dispatch-notice")).not.toBeInTheDocument();
   });
+
+  it("does not infer a build estimate from a merge session picker", () => {
+    render(
+      <AgentDispatchDialog
+        {...baseDialogProps}
+        agentProps={{
+          value: null,
+          onChange: vi.fn(),
+          dispatchRole: "merge",
+        }}
+        sessionPicker={{
+          epicId: "epic-merge",
+          selectedSessionId: undefined,
+          onSelect: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.queryByTestId("prompt-token-estimate")).not.toBeInTheDocument();
+  });
 });
 
 describe("AgentActionsBar — segregation notice in the review dialog", () => {
@@ -87,7 +107,7 @@ describe("AgentActionsBar — segregation notice in the review dialog", () => {
         isRunning={false}
         onSendToDev={vi.fn(async () => undefined)}
         onSendToReview={vi.fn(async () => undefined)}
-        onApprove={vi.fn(async () => undefined)}
+        onComplete={vi.fn(async () => undefined)}
       />
     );
   }

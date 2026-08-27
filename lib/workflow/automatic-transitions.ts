@@ -556,6 +556,72 @@ export function transitionReviewRejected(opts: {
 }
 
 /**
+ * Promote a passing review to the merge boundary: epic review → to_merge.
+ *
+ * The review agent's verdict is the approval step of the workflow — a ticket
+ * in To Merge awaits nothing but the merge itself (which a human triggers,
+ * with an optional conflict-resolution agent). Stories never enter to_merge:
+ * a story-scoped passing review leaves the story in review, and the parent
+ * epic's own review promotes the whole ticket. The epic's merge cascade
+ * closes the stories (completeReviewedStories).
+ */
+export function transitionReviewPassed(opts: {
+  projectId: string;
+  epicId: string;
+  scope: BuildScope;
+  userStoryId?: string | null;
+  sessionId: string;
+  reason: string;
+  verdictSource?: "structured" | "prose";
+}): void {
+  const reason = opts.verdictSource
+    ? `${opts.reason} [verdict source: ${opts.verdictSource}]`
+    : opts.reason;
+
+  if (opts.scope === "story") {
+    // The story holds its column; the ticket-level promotion belongs to the
+    // epic-scoped review. One decision line keeps the verdict visible.
+    logWorkflowDecision({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      status: readEpicStatus(opts.epicId),
+      actor: "agent",
+      reason: `${reason} — story review passed; story held in review until the epic merges`,
+      sessionId: opts.sessionId,
+    });
+    return;
+  }
+
+  const epicStatus = readEpicStatus(opts.epicId);
+  if (epicStatus !== "review") {
+    // A review that finishes after the board moved on (manual drag, another
+    // driver) must not yank the ticket around; record the verdict and stop.
+    logWorkflowDecision({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      status: epicStatus,
+      actor: "agent",
+      reason: `${reason} — ticket no longer in review (${epicStatus}); status left unchanged`,
+      sessionId: opts.sessionId,
+    });
+    return;
+  }
+
+  requireValid(
+    applyTransition({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      fromStatus: "review",
+      toStatus: "to_merge",
+      actor: "agent",
+      source: "review",
+      reason,
+      sessionId: opts.sessionId,
+    })
+  );
+}
+
+/**
  * Pull a ticket back out of Review after a non-delivering terminal outcome.
  *
  * The owning-session exemption lets a live build promote its own ticket to

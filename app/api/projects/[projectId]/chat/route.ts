@@ -168,6 +168,11 @@ export async function POST(
         cwd: project.gitRepoPath || process.cwd(),
         mode: "plan",
         model: resolvedAgent.model,
+        // A chat turn has no agent_sessions row, so it never reaches
+        // processManager.start() — the agent's CLI options have to be carried
+        // explicitly here. See lib/chat/cli-tool-channel.ts for the same
+        // reasoning applied to the MCP channel.
+        cliOptions: resolvedAgent.cliOptions,
       });
       result = await session.promise;
     } else {
@@ -177,6 +182,7 @@ export async function POST(
         prompt: enrichedPrompt,
         model: resolvedAgent.model,
         cwd: project.gitRepoPath || undefined,
+        cliOptions: resolvedAgent.cliOptions,
       });
       result = await promise;
     }

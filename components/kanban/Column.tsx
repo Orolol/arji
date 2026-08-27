@@ -87,6 +87,7 @@ const COLUMN_FLEX: Record<Exclude<KanbanStatus, "released">, string> = {
   todo: "flex-[1_1_226px]",
   in_progress: "flex-[1_1_246px]",
   review: "flex-[1_1_226px]",
+  to_merge: "flex-[1_1_226px]",
   done: "flex-[1_1_226px]",
 };
 

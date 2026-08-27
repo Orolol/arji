@@ -3,13 +3,12 @@
  */
 
 import { db } from "@/lib/db";
-import { agentSessions, reviewComments } from "@/lib/db/schema";
+import { agentSessions } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { CODE_PRODUCING_AGENT_TYPES } from "@/lib/agent-config/constants";
 import { selectUnverifiableReviewSessionIds } from "@/lib/pipeline/findings";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import type { TransitionContext } from "./engine";
-import { blocksMergeSql } from "./blocking-findings";
 import { readEpicSessionFacts } from "./review-freshness";
 import { hasStandingNegativeVerdict } from "@/lib/kanban/merge-readiness";
 
@@ -19,6 +18,8 @@ export function buildTransitionContext(opts: {
   fromStatus: KanbanStatus;
   toStatus: KanbanStatus;
   actor: "user" | "agent" | "system";
+  /** Which state machine this transition runs on (default "epic"). */
+  targetKind?: "epic" | "story";
   /**
    * The ACTING session — the one performing this transition. Besides
    * activity-log provenance it is the engine's owning-session exemption
@@ -27,7 +28,6 @@ export function buildTransitionContext(opts: {
    */
   sessionId?: string;
   requireCompletedReview?: boolean;
-  requireResolvedComments?: boolean;
 }): TransitionContext {
   const {
     epicId,
@@ -35,47 +35,35 @@ export function buildTransitionContext(opts: {
     fromStatus,
     toStatus,
     actor,
+    targetKind = "epic",
     sessionId,
     requireCompletedReview = true,
-    requireResolvedComments = true,
   } = opts;
 
-  // Open review comments that still stand in the way of `review -> done`.
+  // Session-level review facts for this epic, read once.
   //
-  // "Still" is the whole point: nothing resolves a review_comments row until
-  // a human approves, so counting every open row kept an epic whose newest
-  // review APPROVED it permanently unapprovable — over a [minor] that
-  // reviewer filed itself, or a [major] an earlier round raised and a later
-  // verdict did not re-report. `blocksMergeSql` is the one definition the
-  // board and Full Auto's merge selector read too; a looser gate here than
+  // The old "open review comments" gate lived here and is gone on purpose:
+  // a merge IS the approval and bulk-resolves whatever is still open
+  // (lib/workflow/merge-approval.ts), so counting open rows here only
+  // produced epics that could never leave `review`. What survives from that
+  // work is the standing-verdict fact below, which the board and Full Auto's
+  // merge selector read through the same helpers — a looser gate here than
   // there would make Full Auto merge and then roll itself back.
   //
   // One epic, so the facts are read as scalars rather than joined — the
   // grouped callers hoist them into a CTE instead (see
   // lib/workflow/review-freshness.ts).
   const sessionFacts = readEpicSessionFacts(db, epicId);
-  const openComments = db
-    .select()
-    .from(reviewComments)
-    .where(
-      and(
-        eq(reviewComments.epicId, epicId),
-        eq(reviewComments.status, "open"),
-        blocksMergeSql(sessionFacts.supersessionAt ?? "")
-      )
-    )
-    .all();
 
   // Check for completed review sessions.
   //
   // "Completed" is necessary but not sufficient: a review whose provider had
   // the structured channel and filed no verdict on it delivered no evidence
   // (lib/pipeline/findings.ts). Counting it here is what let a broken
-  // findings channel unlock review → done — the reviewer's 401'd findings
-  // never became review_comments rows, so the "no open comments" half of the
-  // gate was vacuously satisfied too. Such a session is tracked separately
-  // as `hasUnverifiableReview` so the engine can say WHY it refuses instead
-  // of claiming no review ever ran.
+  // findings channel unlock the merge boundary (review → to_merge) — the
+  // reviewer's 401'd findings never became review_comments rows. Such a
+  // session is tracked separately as `hasUnverifiableReview` so the engine
+  // can say WHY it refuses instead of claiming no review ever ran.
   const completedReviewSessions = db
     .select()
     .from(agentSessions)
@@ -157,14 +145,13 @@ export function buildTransitionContext(opts: {
     epicId,
     fromStatus,
     toStatus,
-    hasOpenReviewComments: openComments.length > 0,
+    targetKind,
     hasCompletedReview: verifiableReviewSessions.length > 0,
     hasUnverifiableReview:
       verifiableReviewSessions.length === 0 &&
       completedReviewSessions.length > 0,
     hasNegativeReviewVerdict,
     requireCompletedReview,
-    requireResolvedComments,
     hasRunningSession: runningSessions.length > 0,
     storyOwnershipBoundary:
       soleActingSession &&

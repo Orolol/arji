@@ -10,10 +10,8 @@ import { eq } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
-import {
-  buildEpicReviewPrompt,
-  type ReviewType,
-} from "@/lib/claude/prompt-builder";
+import { assembleEpicReviewPrompt } from "@/lib/tokens";
+import { type ReviewType } from "@/lib/claude/prompt-builder";
 import {
   classifySessionOutcome,
   extractSessionUsage,
@@ -26,7 +24,6 @@ import {
 } from "@/lib/api/route-helpers";
 import fs from "fs";
 import path from "path";
-import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { REVIEW_TYPE_TO_AGENT_TYPE } from "@/lib/agent-config/constants";
 import { resolveAgentForDispatch } from "@/lib/agent-config/agent-resolution";
 import {
@@ -41,18 +38,22 @@ import {
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
 import {
-  enrichPromptWithDocumentMentions,
-  userAuthoredTexts,
-} from "@/lib/documents/mentions";
-import {
   buildEpicTargetUrl,
   createUnresolvedMentionsNotification,
 } from "@/lib/notifications/create";
 import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
-import { transitionReviewRejected } from "@/lib/workflow/automatic-transitions";
-import { resolveReviewVerdict } from "@/lib/pipeline/findings";
+import {
+  transitionReviewRejected,
+  transitionReviewPassed,
+} from "@/lib/workflow/automatic-transitions";
+import {
+  resolveReviewVerdict,
+  resolvePriorFindingsFromProse,
+  collectBlockingFindings,
+  readSessionFindingsWindow,
+} from "@/lib/pipeline/findings";
 import { handleAskedQuestionOutcome } from "@/lib/workflow/agent-question";
 import {
   emitSessionStarted,
@@ -107,9 +108,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   const foundEpic = getEpicOr404(projectId, epicId);
   if (isErrorResponse(foundEpic)) return foundEpic;
   const { epic } = foundEpic;
-  if (epic.status !== "review" && epic.status !== "done") {
+  if (
+    epic.status !== "review" &&
+    epic.status !== "to_merge" &&
+    epic.status !== "done"
+  ) {
     return NextResponse.json(
-      { error: "Epic must be in review or done status for agent review" },
+      { error: "Epic must be in review, to merge or done status for agent review" },
       { status: 400 }
     );
   }
@@ -174,35 +179,22 @@ export async function POST(request: NextRequest, { params }: Params) {
   }> = [];
 
   for (const [idx, reviewType] of reviewTypes.entries()) {
-    const reviewSystemPrompt = await resolveAgentPrompt(
-      REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
-      projectId
-    );
-    const prompt = buildEpicReviewPrompt(
-      project,
-      [],
-      epic,
-      us,
-      reviewType,
-      reviewSystemPrompt,
-      promptComments
-    );
-
-    // Only user-written comments can reference an Arij document; an agent
-    // comment mentioning a codebase file must neither resolve nor block review.
-    const mentionEnrichment = enrichPromptWithDocumentMentions({
+    const assembled = await assembleEpicReviewPrompt({
       projectId,
-      prompt,
-      textSources: userAuthoredTexts(promptComments),
+      epicId,
+      project,
+      epic,
+      reviewType,
+      stories: us,
+      comments: promptComments,
     });
-    const enrichedPrompt = mentionEnrichment.prompt;
+    const enrichedPrompt = assembled.prompt;
     createUnresolvedMentionsNotification({
       projectId,
-      missing: mentionEnrichment.missing,
+      missing: assembled.missingDocuments ?? [],
       agentType: REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
       targetUrl: buildEpicTargetUrl(projectId, epicId),
     });
-
     const resolvedAgent = await resolveAgentForDispatch(
       REVIEW_TYPE_TO_AGENT_TYPE[reviewType],
       projectId,
@@ -248,6 +240,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       mode: agentMode,
       provider: resolvedAgent.provider,
       prompt: enrichedPrompt,
+      estimatedPromptTokens: assembled.tokens.total,
+      estimatedPromptBreakdown: JSON.stringify(assembled.tokens.breakdown),
       logsPath,
       branchName,
       worktreePath,
@@ -337,6 +331,12 @@ export async function POST(request: NextRequest, { params }: Params) {
         // reviewer's persisted submit_findings verdict, else the prose scan of
         // its final message (lib/pipeline/findings.ts owns the priority; a
         // reviewer on a provider without MCP only ever produces the prose one).
+        // Prose fallback of submit_findings.prior_findings: [RC:id] FIXED
+        // lines in the report resolve the prior findings they name.
+        if (!askedQuestion) {
+          resolvePriorFindingsFromProse({ epicId, sessionOutput: output });
+        }
+
         const decision = askedQuestion
           ? null
           : resolveReviewVerdict({
@@ -358,7 +358,12 @@ export async function POST(request: NextRequest, { params }: Params) {
             .where(eq(epics.id, epicId))
             .get();
 
-          if (currentEpic && (currentEpic.status === "done" || currentEpic.status === "review")) {
+          if (
+            currentEpic &&
+            (currentEpic.status === "done" ||
+              currentEpic.status === "review" ||
+              currentEpic.status === "to_merge")
+          ) {
             transitionReviewRejected({
               projectId,
               epicId,
@@ -367,6 +372,36 @@ export async function POST(request: NextRequest, { params }: Params) {
               sessionId: sid,
               verdictSource: decision.source,
             });
+          }
+        } else if (decision && !decision.unverifiable && result?.success) {
+          // Review passed: promote to the merge boundary — unless the session
+          // filed an open blocking finding in its window while its verdict
+          // came from prose (resolveReviewVerdict ignores findings on that
+          // path); promoting then would show To Merge with an open critical.
+          const findingsWindow = readSessionFindingsWindow(sid);
+          const blockingInWindow = findingsWindow
+            ? collectBlockingFindings(epicId, findingsWindow)
+            : [];
+          if (blockingInWindow.length === 0) {
+            // transitionReviewPassed itself no-ops (with a decision line)
+            // when the ticket already left review — e.g. a concurrent move
+            // while the reviewer ran.
+            try {
+              transitionReviewPassed({
+                projectId,
+                epicId,
+                scope: "epic",
+                reason: `Review verdict: passed (${lbl})`,
+                sessionId: sid,
+                verdictSource:
+                  decision.source === "structured" ? "structured" : "prose",
+              });
+            } catch (err) {
+              console.warn(
+                "[review] review passed but to_merge promotion was refused:",
+                (err as Error).message
+              );
+            }
           }
         }
       });

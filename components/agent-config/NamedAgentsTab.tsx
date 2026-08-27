@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useNamedAgents, type NamedAgent } from "@/hooks/useAgentConfig";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -19,6 +20,15 @@ import {
   type AgentProvider,
 } from "@/lib/agent-config/constants";
 import { Field } from "@/components/agent-config/Field";
+import {
+  CliOptionsFields,
+  resetOptionsForProvider,
+} from "@/components/agent-config/CliOptionsFields";
+import {
+  DEFAULT_PERSONA_PROMPT,
+  PERSONA_PROMPT_MAX_CHARS,
+} from "@/lib/agent-config/constants";
+import type { NamedAgentCliOptions } from "@/lib/providers/options-registry";
 import {
   useProvidersAvailable,
   type ProvidersAvailability,
@@ -96,6 +106,8 @@ function NamedAgentRow({
       name?: string;
       provider?: AgentProvider;
       model?: string;
+      options?: NamedAgentCliOptions;
+      personaPrompt?: string | null;
       escalatesTo?: string | null;
     }
   ) => Promise<{ ok: boolean; error?: string }>;
@@ -104,6 +116,12 @@ function NamedAgentRow({
   const [name, setName] = useState(agent.name);
   const [provider, setProvider] = useState<AgentProvider>(agent.provider);
   const [model, setModel] = useState(agent.model);
+  const [options, setOptions] = useState<NamedAgentCliOptions>(
+    agent.options ?? {}
+  );
+  const [personaPrompt, setPersonaPrompt] = useState(
+    agent.personaPrompt ?? ""
+  );
   const [escalatesTo, setEscalatesTo] = useState(agent.escalatesTo);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -113,6 +131,8 @@ function NamedAgentRow({
     name !== agent.name ||
     provider !== agent.provider ||
     model !== agent.model ||
+    JSON.stringify(options) !== JSON.stringify(agent.options ?? {}) ||
+    personaPrompt !== (agent.personaPrompt ?? "") ||
     escalatesTo !== agent.escalatesTo;
 
   async function handleSave() {
@@ -126,6 +146,8 @@ function NamedAgentRow({
         name: nextName,
         provider,
         model: nextModel,
+        options,
+        personaPrompt,
         escalatesTo,
       });
       if (result.ok) {
@@ -192,6 +214,12 @@ function NamedAgentRow({
             value={provider}
             onChange={(nextProvider) => {
               setProvider(nextProvider);
+              // Options are per-CLI: anything the new CLI does not declare
+              // goes back to its default rather than lingering as a ghost
+              // value the editor can no longer show.
+              setOptions((current) =>
+                resetOptionsForProvider(nextProvider, current)
+              );
               if (
                 escalatesTo &&
                 agents.find((candidate) => candidate.id === escalatesTo)
@@ -255,7 +283,36 @@ function NamedAgentRow({
             </Select>
           </Field>
         </div>
+        <div className="md:col-span-2">
+          <Field
+            id={`named-agent-persona-${agent.id}`}
+            label="Persona"
+            hint={`Injected as the first section of every prompt this agent receives. Leave empty to inject nothing. New agents start with "${DEFAULT_PERSONA_PROMPT}".`}
+          >
+            <Textarea
+              id={`named-agent-persona-${agent.id}`}
+              value={personaPrompt}
+              onChange={(e) => setPersonaPrompt(e.target.value)}
+              placeholder={DEFAULT_PERSONA_PROMPT}
+              // The server rejects anything longer rather than truncating, so
+              // the field has to stop the user at the same limit instead of
+              // letting them paste text that can only fail to save.
+              maxLength={PERSONA_PROMPT_MAX_CHARS}
+              rows={2}
+              className="text-sm"
+              disabled={saving || deleting}
+            />
+          </Field>
+        </div>
       </div>
+
+      <CliOptionsFields
+        idPrefix={`named-agent-${agent.id}`}
+        provider={provider}
+        options={options}
+        onChange={setOptions}
+        disabled={saving || deleting}
+      />
 
       {error && (
         <p role="alert" className="text-xs text-destructive">

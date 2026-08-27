@@ -10,8 +10,10 @@
 import { describe, it, expect } from "vitest";
 import { AUTO_MODE_REASONS } from "@/lib/auto-mode/constants";
 import {
-  buildApprovalMergeBlockedReason,
-  buildApprovalConflictMarkersBlockedReason,
+  APPROVAL_MERGE_BLOCKED_PREFIX,
+  APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX,
+  buildMergeBlockedReason,
+  buildMergeConflictMarkersBlockedReason,
   GIT_REFUSAL_MERGE_REASONS,
   isGitRefusalMergeReason,
   isMergeConflictReason,
@@ -60,18 +62,39 @@ describe("isMergeFailureReason", () => {
     ).toBe(false);
   });
 
-  it("recognises the approve route's blocked-merge reason", () => {
-    const reason = buildApprovalMergeBlockedReason({
+  it("still recognises the RETIRED approve route's blocked-merge rows", () => {
+    // The route is gone (the merge is the approval now), but the rows it wrote
+    // are permanent activity history — built inline from the surviving prefix.
+    const reason =
+      `${APPROVAL_MERGE_BLOCKED_PREFIX}feature/epic-1 failed — ` +
+      "CONFLICT (content): Merge conflict in lib/db/schema.ts";
+    expect(isMergeFailureReason(reason)).toBe(true);
+    expect(isMergeConflictReason(reason)).toBe(true);
+    expect(isConflictMarkersReason(reason)).toBe(false);
+  });
+
+  it("still recognises the RETIRED approve route's conflict-markers rows", () => {
+    const reason =
+      `${APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX}feature/epic-1 — ` +
+      "Unresolved conflict markers in lib/db/schema.ts";
+    expect(isMergeFailureReason(reason)).toBe(true);
+    expect(isConflictMarkersReason(reason)).toBe(true);
+    expect(isMergeConflictReason(reason)).toBe(false);
+  });
+  it("recognises the direct merge route's blocked-merge reason", () => {
+    const reason = buildMergeBlockedReason({
       branchName: "feature/epic-1",
       error: "CONFLICT (content): Merge conflict in lib/db/schema.ts",
     });
     expect(isMergeFailureReason(reason)).toBe(true);
+    expect(isMergeConflictReason(reason)).toBe(true);
+    expect(isConflictMarkersReason(reason)).toBe(false);
     expect(reason).toContain("feature/epic-1");
     expect(reason).toContain("Merge conflict in lib/db/schema.ts");
   });
 
-  it("recognises the approve route's conflict-markers reason", () => {
-    const reason = buildApprovalConflictMarkersBlockedReason({
+  it("recognises the direct merge route's conflict-markers reason", () => {
+    const reason = buildMergeConflictMarkersBlockedReason({
       branchName: "feature/epic-1",
       error: "Unresolved conflict markers in lib/db/schema.ts",
     });

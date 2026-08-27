@@ -119,7 +119,7 @@ describe("AgentActionsBar pipeline chip", () => {
         activeSessionId="s1"
         onSendToDev={vi.fn(async () => undefined)}
         onSendToReview={vi.fn(async () => undefined)}
-        onApprove={vi.fn(async () => undefined)}
+        onComplete={vi.fn(async () => undefined)}
       />
     );
 
@@ -142,7 +142,7 @@ describe("AgentActionsBar pipeline chip", () => {
         activeSessionId="s1"
         onSendToDev={vi.fn(async () => undefined)}
         onSendToReview={vi.fn(async () => undefined)}
-        onApprove={vi.fn(async () => undefined)}
+        onComplete={vi.fn(async () => undefined)}
       />
     );
 

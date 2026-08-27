@@ -1,12 +1,15 @@
 /**
- * Which OPEN review findings actually keep a reviewed epic out of "Ready to
- * merge" — and out of `review -> done`.
+ * Which OPEN review findings a To Merge card still reports — and the one
+ * review fact that keeps an epic out of "Ready to merge".
  *
- * The bug this pins: a ticket whose newest review came back APPROVED sat in
- * the Review column's lower section forever, reporting "N open findings",
- * because `review_comments` rows are never resolved by the pipeline (see the
- * "no auto-resolve" note in lib/pipeline/findings.ts) and the merge gate
- * counted every last one of them:
+ * Since merge-as-approval, an open finding does NOT block: the merge itself
+ * resolves whatever is left (lib/workflow/merge-approval.ts), and a review
+ * that found something blocking files `changes_requested` and sends the epic
+ * back to `in_progress` rather than promoting it. What the count still does
+ * is ride along on the card, so it has to be HONEST — `review_comments` rows
+ * are never resolved by the pipeline (see the "no auto-resolve" note in
+ * lib/pipeline/findings.ts), and counting every last one of them reported
+ * "N open findings" on epics that had nothing left to fix:
  *
  *   - a `[minor]`/`[info]` finding filed BY the approving review — the
  *     reviewer's own vocabulary for "not blocking", and exactly what an
@@ -16,12 +19,14 @@
  *
  * `lib/pipeline/findings.ts` has always defined blocking narrowly — open,
  * agent-authored, `[critical]`/`[major]`, and inside the CURRENT review
- * stage's window. The board, Full Auto's merge selector and the workflow
- * engine each counted "any open row" instead. This file is the parity
- * harness for the one shared definition.
+ * stage's window. The board and Full Auto's merge selector counted "any open
+ * row" instead. This file is the parity harness for the one shared
+ * definition (lib/workflow/blocking-findings.ts), and for the standing
+ * `changes_requested` verdict that the board, the selector and the engine
+ * must all read the same way.
  *
- * Everything runs against the real migrated schema, so the correlated
- * subquery behind the predicate is actually EXECUTED here.
+ * Everything runs against the real migrated schema, so the SQL behind the
+ * predicate is actually EXECUTED here.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mockRouteContext } from "@/__tests__/helpers/db-mock";
@@ -61,7 +66,9 @@ function addEpic(id: string, position = 0): void {
       id,
       projectId: PROJECT_ID,
       title: id,
-      status: "review",
+      // The merge column: `evaluateMergeReadiness` and `selectMergeCandidates`
+      // only ever consider `to_merge`, which IS the passing review verdict.
+      status: "to_merge",
       priority: 0,
       position,
       branchName: `feature/${id}`,
@@ -190,15 +197,6 @@ async function readinessOf(epicId: string) {
   };
 }
 
-function engineSeesOpenComments(epicId: string): boolean {
-  return buildTransitionContext({
-    epicId,
-    fromStatus: "review",
-    toStatus: "done",
-    actor: "user",
-  }).hasOpenReviewComments;
-}
-
 beforeEach(() => {
   for (const table of [
     reviewComments,
@@ -221,8 +219,12 @@ beforeEach(() => {
     .run();
 });
 
-describe("merge readiness — which open findings block", () => {
-  it("keeps blocking on a [critical] filed by the approving review", async () => {
+describe("the finding count a To Merge card reports", () => {
+  // Findings do not gate any more, so every case here asserts `ready: true`
+  // and pins the COUNT. The rules deciding which rows are counted are
+  // unchanged — they are the same `blocksMergeSql` the engine's promotion
+  // gate reads, which is why the narrowing still has to be exact.
+  it("counts a [critical] filed by the approving review", async () => {
     seedApprovedEpic("critical-now");
     addFinding({
       epicId: "critical-now",
@@ -230,14 +232,13 @@ describe("merge readiness — which open findings block", () => {
       createdAt: at(22),
     });
     expect(await readinessOf("critical-now")).toEqual({
-      ready: false,
-      blocker: "open_findings",
+      ready: true,
+      blocker: null,
       openFindings: 1,
     });
-    expect(engineSeesOpenComments("critical-now")).toBe(true);
   });
 
-  it("keeps blocking on a [major] filed by the approving review", async () => {
+  it("counts a [major] filed by the approving review", async () => {
     seedApprovedEpic("major-now");
     addFinding({
       epicId: "major-now",
@@ -245,14 +246,13 @@ describe("merge readiness — which open findings block", () => {
       createdAt: at(22),
     });
     expect(await readinessOf("major-now")).toMatchObject({
-      ready: false,
-      blocker: "open_findings",
+      ready: true,
+      blocker: null,
       openFindings: 1,
     });
-    expect(engineSeesOpenComments("major-now")).toBe(true);
   });
 
-  it("does not block on a [minor] the approving review itself filed", async () => {
+  it("does not count a [minor] the approving review itself filed", async () => {
     seedApprovedEpic("minor-now");
     addFinding({
       epicId: "minor-now",
@@ -264,10 +264,9 @@ describe("merge readiness — which open findings block", () => {
       blocker: null,
       openFindings: 0,
     });
-    expect(engineSeesOpenComments("minor-now")).toBe(false);
   });
 
-  it("does not block on an [info] note", async () => {
+  it("does not count an [info] note", async () => {
     seedApprovedEpic("info-now");
     addFinding({
       epicId: "info-now",
@@ -275,10 +274,9 @@ describe("merge readiness — which open findings block", () => {
       createdAt: at(22),
     });
     expect(await readinessOf("info-now")).toMatchObject({ ready: true });
-    expect(engineSeesOpenComments("info-now")).toBe(false);
   });
 
-  it("stops blocking on a [major] a later clean review superseded", async () => {
+  it("stops counting a [major] a later clean review superseded", async () => {
     seedSecondRoundApprovedEpic("superseded");
     addFinding({
       epicId: "superseded",
@@ -290,10 +288,9 @@ describe("merge readiness — which open findings block", () => {
       blocker: null,
       openFindings: 0,
     });
-    expect(engineSeesOpenComments("superseded")).toBe(false);
   });
 
-  it("keeps blocking on a [critical] no clean review has superseded yet", async () => {
+  it("keeps counting a [critical] no clean review has superseded yet", async () => {
     addEpic("unreviewed-critical");
     addSession({ epicId: "unreviewed-critical", agentType: "build", endedAt: at(10) });
     addFinding({
@@ -302,13 +299,12 @@ describe("merge readiness — which open findings block", () => {
       createdAt: at(12),
     });
     expect(await readinessOf("unreviewed-critical")).toMatchObject({
-      blocker: "open_findings",
+      ready: true,
       openFindings: 1,
     });
-    expect(engineSeesOpenComments("unreviewed-critical")).toBe(true);
   });
 
-  it("always blocks on a human's own open review comment", async () => {
+  it("always counts a human's own open review comment", async () => {
     seedApprovedEpic("human-hold");
     addFinding({
       epicId: "human-hold",
@@ -317,14 +313,12 @@ describe("merge readiness — which open findings block", () => {
       createdAt: at(15),
     });
     expect(await readinessOf("human-hold")).toMatchObject({
-      ready: false,
-      blocker: "open_findings",
+      ready: true,
       openFindings: 1,
     });
-    expect(engineSeesOpenComments("human-hold")).toBe(true);
   });
 
-  it("blocks on an agent finding with no severity prefix", async () => {
+  it("counts an agent finding with no severity prefix", async () => {
     seedApprovedEpic("unprefixed");
     addFinding({
       epicId: "unprefixed",
@@ -332,7 +326,6 @@ describe("merge readiness — which open findings block", () => {
       createdAt: at(22),
     });
     expect(await readinessOf("unprefixed")).toMatchObject({
-      blocker: "open_findings",
       openFindings: 1,
     });
   });
@@ -346,7 +339,6 @@ describe("merge readiness — which open findings block", () => {
       createdAt: at(22),
     });
     expect(await readinessOf("resolved")).toMatchObject({ ready: true });
-    expect(engineSeesOpenComments("resolved")).toBe(false);
   });
 
   it("counts only the blocking rows when several kinds are open", async () => {
@@ -367,8 +359,7 @@ describe("merge readiness — which open findings block", () => {
       createdAt: at(22),
     });
     expect(await readinessOf("mixed")).toMatchObject({
-      ready: false,
-      blocker: "open_findings",
+      ready: true,
       openFindings: 1,
     });
   });
@@ -410,11 +401,8 @@ describe("merge readiness — which open findings block", () => {
     });
 
     expect(await readinessOf("silent-round-two")).toMatchObject({
-      ready: false,
-      blocker: "open_findings",
       openFindings: 1,
     });
-    expect(engineSeesOpenComments("silent-round-two")).toBe(true);
   });
 
   it("does not let a review of another dimension supersede an unfixed [critical]", async () => {
@@ -452,12 +440,12 @@ describe("merge readiness — which open findings block", () => {
     });
 
     expect(await readinessOf("cross-dimension")).toMatchObject({
+      // The rejection, not the finding, is what keeps it off the merge list.
       ready: false,
-      blocker: "open_findings",
+      blocker: "changes_requested",
       openFindings: 1,
     });
     expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([]);
-    expect(engineSeesOpenComments("cross-dimension")).toBe(true);
   });
 
   it("does not let a re-review supersede a [major] when the branch never changed", async () => {
@@ -492,11 +480,8 @@ describe("merge readiness — which open findings block", () => {
     });
 
     expect(await readinessOf("unchanged-branch")).toMatchObject({
-      ready: false,
-      blocker: "open_findings",
       openFindings: 1,
     });
-    expect(engineSeesOpenComments("unchanged-branch")).toBe(true);
   });
 
   it("does not resurrect a settled finding when a later build lands", async () => {
@@ -504,8 +489,9 @@ describe("merge readiness — which open findings block", () => {
     // (`MAX(code) BEFORE the newest clean verdict`) rather than the cheaper
     // "the newest code session, if it happens to predate that verdict":
     // round two read the fix at :18 and declined to re-report the [major], so
-    // it is settled. A build at :30 does not un-settle it — it makes the
-    // REVIEW stale, which is what the board should say.
+    // it is settled. A build at :30 does not un-settle it — review freshness
+    // is no longer a readiness input, so the card stays ready with nothing
+    // left to report.
     seedSecondRoundApprovedEpic("code-after-review");
     addFinding({
       epicId: "code-after-review",
@@ -519,11 +505,10 @@ describe("merge readiness — which open findings block", () => {
     });
 
     expect(await readinessOf("code-after-review")).toMatchObject({
-      ready: false,
-      blocker: "stale_review",
+      ready: true,
+      blocker: null,
       openFindings: 0,
     });
-    expect(engineSeesOpenComments("code-after-review")).toBe(false);
   });
 
   it("does not let a STORY-scoped review move the epic's cutoff", async () => {
@@ -556,10 +541,8 @@ describe("merge readiness — which open findings block", () => {
     });
 
     expect(await readinessOf("story-cutoff")).toMatchObject({
-      blocker: "open_findings",
       openFindings: 1,
     });
-    expect(engineSeesOpenComments("story-cutoff")).toBe(true);
   });
 
   it("matches severity prefixes case-sensitively, so [MAJOR] is unclassified", async () => {
@@ -574,7 +557,6 @@ describe("merge readiness — which open findings block", () => {
       createdAt: at(15),
     });
     expect(await readinessOf("shouty")).toMatchObject({
-      blocker: "open_findings",
       openFindings: 1,
     });
   });
@@ -589,28 +571,28 @@ describe("merge readiness — which open findings block", () => {
       body: "[major] Still open here",
       createdAt: at(12),
     });
-    expect(await readinessOf("neighbour")).toMatchObject({ ready: true });
+    expect(await readinessOf("neighbour")).toMatchObject({
+      ready: true,
+      openFindings: 0,
+    });
     expect(await readinessOf("laggard")).toMatchObject({
-      blocker: "open_findings",
       openFindings: 1,
     });
   });
 });
 
 /**
- * Narrowing "open" to "blocking" removed an accidental backstop: an epic
- * whose newest review said `changes_requested` used to be refused
- * `review -> done` because that review's rows were open. Only `[critical]`/
- * `[major]` count now, so a changes-requested review carrying nothing worse
- * than `[minor]` no longer refuses on findings alone — and the engine's only
- * other review input, `hasCompletedReview`, is satisfied by ANY completed
- * review session ever.
+ * Merge-as-approval removed every accidental backstop around findings: open
+ * rows do not refuse a transition, and the engine's only other review input,
+ * `hasCompletedReview`, is satisfied by ANY completed review session ever.
+ * So an epic sitting in `to_merge` whose newest verdict says
+ * `changes_requested` — a second reviewer landing after the promotion, a
+ * refused rejection transition, a human drag — has exactly one guard left.
  *
  * The merge paths land a branch on the base branch, so they must not be the
- * ones to discover that. An explicit human `approve` still may: the spec
- * makes human approval itself the review decision.
+ * ones to discover that.
  */
-describe("review -> done under a standing changes_requested verdict", () => {
+describe("to_merge -> done under a standing changes_requested verdict", () => {
   function seedChangesRequestedEpic(id: string): void {
     addEpic(id);
     addSession({ epicId: id, agentType: "build", endedAt: at(10) });
@@ -632,7 +614,7 @@ describe("review -> done under a standing changes_requested verdict", () => {
   ): string | null {
     const ctx = buildTransitionContext({
       epicId,
-      fromStatus: "review",
+      fromStatus: "to_merge",
       toStatus: "done",
       actor: "user",
     });
@@ -642,13 +624,14 @@ describe("review -> done under a standing changes_requested verdict", () => {
 
   it("refuses a merge that would land the branch anyway", () => {
     seedChangesRequestedEpic("cr-merge");
-    expect(engineSeesOpenComments("cr-merge")).toBe(false);
     expect(refusalFor("cr-merge", "merge")).toMatch(/requested changes/i);
   });
 
-  it("still lets an explicit human approval through", () => {
+  it("has no approve escape hatch — the merge IS the approval", () => {
+    // The epic approve route is gone, and with it the human override this
+    // guard used to leave open. The way out is a fix and a fresh review.
     seedChangesRequestedEpic("cr-approve");
-    expect(refusalFor("cr-approve", "approve")).toBeNull();
+    expect(refusalFor("cr-approve", "approve")).toMatch(/successful merge/i);
   });
 
   it("does not refuse once a newer review recorded a clean verdict", () => {
@@ -696,21 +679,22 @@ describe("review -> done under a standing changes_requested verdict", () => {
 
   it("leaves story-scoped transitions alone", () => {
     // A story carries its own review decision; the epic's verdict is not it.
-    // The story still refuses here — on the pre-existing "no completed
-    // review" guard, because the epic-scoped review is not the story's — and
-    // that is the point: the new guard must not be what speaks.
+    // The epic here has a standing rejection, and the story's own cascade to
+    // Done still goes through — the fact is never computed on a story-scoped
+    // context, so the guard has nothing to speak with.
     seedChangesRequestedEpic("cr-story");
     addStory("cr-story-1", "cr-story");
     const ctx = buildTransitionContext({
       epicId: "cr-story",
       userStoryId: "cr-story-1",
+      targetKind: "story",
       fromStatus: "review",
       toStatus: "done",
       actor: "user",
     });
     ctx.source = "merge";
     expect(ctx.hasNegativeReviewVerdict).toBe(false);
-    expect(validateTransition(ctx).error).not.toMatch(/requested changes/i);
+    expect(validateTransition(ctx)).toEqual({ valid: true });
   });
 });
 
@@ -756,7 +740,7 @@ describe("a standing changes_requested keeps the board and the engine agreed", (
 
     const ctx = buildTransitionContext({
       epicId: "cr-late",
-      fromStatus: "review",
+      fromStatus: "to_merge",
       toStatus: "done",
       actor: "user",
     });
@@ -821,10 +805,10 @@ describe("a standing changes_requested keeps the board and the engine agreed", (
     expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([]);
   });
 
-  it("reports the rejection ahead of the vaguer 'no review' when it is the only one", async () => {
-    // With no clean round at all `lastCleanReviewAt` is NULL, so the honest
-    // blocker is the rejection rather than "awaiting review" — a review DID
-    // run, and it said no.
+  it("reports the rejection when it is the epic's only review round", async () => {
+    // With no clean round at all `lastCleanReviewAt` is NULL, which the card
+    // no longer reads — the `to_merge` status is the verdict. The rejection
+    // is the one review fact that still speaks.
     addEpic("cr-only");
     addSession({ epicId: "cr-only", agentType: "build", endedAt: at(10) });
     addSession({
@@ -840,7 +824,9 @@ describe("a standing changes_requested keeps the board and the engine agreed", (
     });
   });
 
-  it("still reports a blocking finding first — it is the more actionable one", async () => {
+  it("echoes a still-standing finding alongside the rejection", async () => {
+    // Both facts reach the card, but only the rejection blocks: the count is
+    // information the merge would resolve on its way through.
     seedLateRejection("cr-with-finding");
     addFinding({
       epicId: "cr-with-finding",
@@ -848,14 +834,15 @@ describe("a standing changes_requested keeps the board and the engine agreed", (
       createdAt: at(32),
     });
     expect(await readinessOf("cr-with-finding")).toMatchObject({
-      blocker: "open_findings",
+      ready: false,
+      blocker: "changes_requested",
       openFindings: 1,
     });
   });
 });
 
-describe("board / Full Auto parity on blocking findings", () => {
-  it("agrees with selectMergeCandidates once the definition narrows", async () => {
+describe("board / Full Auto parity on the finding count", () => {
+  it("agrees with selectMergeCandidates on readiness and on the count", async () => {
     seedApprovedEpic("p-minor", 0);
     addFinding({
       epicId: "p-minor",
@@ -892,7 +879,18 @@ describe("board / Full Auto parity on blocking findings", () => {
       .map((candidate) => candidate.epicId)
       .sort();
 
-    expect(boardReady).toEqual(["p-minor", "p-superseded"]);
+    // All three are mergeable — none carries a standing rejection, and a
+    // finding is not a gate. What the narrowing still decides is the count
+    // each card reports, and both sides derive it from the same SQL.
+    expect(boardReady).toEqual(["p-critical", "p-minor", "p-superseded"]);
     expect(autoReady).toEqual(boardReady);
+    expect(
+      Object.fromEntries(
+        json.data.map((row: { id: string; mergeReadiness: { openFindings: number } }) => [
+          row.id,
+          row.mergeReadiness.openFindings,
+        ])
+      )
+    ).toEqual({ "p-minor": 0, "p-superseded": 0, "p-critical": 1 });
   });
 });

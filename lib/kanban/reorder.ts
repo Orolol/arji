@@ -2,15 +2,15 @@
  * Translating a column's DISPLAY order back into persisted `position` order.
  *
  * Most columns are drawn in `position` order, so a card's display index IS
- * its position and a drag can persist the indices as-is. Review is the
- * exception: it is drawn merge-ready-first (see `sortReviewColumn`), so its
+ * its position and a drag can persist the indices as-is. To Merge is the
+ * exception: it is drawn merge-ready-first (see `sortMergeColumn`), so its
  * display index encodes a DERIVED, changing signal.
  *
  * Persisting display indices for such a column would write that signal into
  * `epics.position` — the ordering contract the board, `compareEpics` and the
  * planned unified execution order all read — and would silently reorder cards
- * the user never touched: two Review tickets swap in the database as soon as
- * anything is dragged into the column, then visibly swap later when one of
+ * the user never touched: two To Merge tickets swap in the database as soon
+ * as anything is dragged into the column, then visibly swap later when one of
  * them stops being ready.
  *
  * So the rule this module enforces is: **a drag reorders the card that was

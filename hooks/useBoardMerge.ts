@@ -3,18 +3,19 @@
 import { useCallback, useRef, useState } from "react";
 
 /**
- * Merging a Review card straight from the board.
+ * Merging a To Merge card straight from the board.
  *
  * No new endpoint and no new rules: this posts to the SAME
- * `POST /api/projects/:p/epics/:e/approve` route the ticket detail uses, so
- * the card inherits its whole contract — merge into the default branch
- * FIRST, bulk-resolve the findings, then `review → done` through the
- * transition service. A merge that fails changes nothing and answers 409
- * with `mergeFailed`, which is exactly the state this hook parks on the card
- * so the user can reach for Resolve Merge instead of retrying blindly.
- * Merges operate on the project repository's shared base checkout, so only one
- * merge or resolve request can run at a time per project. Other cards on the
- * board are locked while a merge is in flight to prevent index.lock collisions.
+ * `POST /api/projects/:p/epics/:e/merge` route the ticket detail uses, so
+ * the card inherits its whole contract — merge into the default branch,
+ * resolve the remaining findings (the merge IS the approval), then
+ * `to_merge → done` through the transition service. A merge that fails
+ * changes nothing and answers 409 with `mergeFailed`, which is exactly the
+ * state this hook parks on the card so the user can reach for Resolve Merge
+ * instead of retrying blindly. Merges operate on the project repository's
+ * shared base checkout, so only one merge or resolve request can run at a
+ * time per project. Other cards on the board are locked while a merge is in
+ * flight to prevent index.lock collisions.
  */
 
 export interface BoardMergeState {
@@ -82,7 +83,7 @@ export function useBoardMerge(
       run(epicId, "merge", async () => {
         try {
           const res = await fetch(
-            `/api/projects/${projectId}/epics/${epicId}/approve`,
+            `/api/projects/${projectId}/epics/${epicId}/merge`,
             { method: "POST" }
           );
           const data = await res.json().catch(() => ({}));

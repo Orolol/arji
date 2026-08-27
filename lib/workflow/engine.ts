@@ -19,9 +19,25 @@ const EPIC_TRANSITIONS: Record<KanbanStatus, readonly KanbanStatus[]> = {
   backlog: ["todo", "in_progress"],
   todo: ["backlog", "in_progress"],
   in_progress: ["todo", "review", "backlog"],
-  review: ["in_progress", "done"],
+  review: ["in_progress", "to_merge"],
+  to_merge: ["review", "in_progress", "done"],
   done: ["review", "in_progress", "released"],
   released: [], // Terminal state - no outbound transitions
+};
+
+/**
+ * Allowed status transitions for user stories. Stories never merge on their
+ * own — the epic's branch is the unit of merge — so their machine has no
+ * `to_merge`: a reviewed story sits in `review` until a human approves it or
+ * the parent epic's merge cascades it to `done`.
+ */
+const STORY_TRANSITIONS: Partial<
+  Record<KanbanStatus, readonly KanbanStatus[]>
+> = {
+  todo: ["in_progress"],
+  in_progress: ["todo", "review"],
+  review: ["in_progress", "done"],
+  done: ["review", "in_progress"],
 };
 
 /**
@@ -34,8 +50,12 @@ export interface TransitionContext {
   epicId: string;
   fromStatus: KanbanStatus;
   toStatus: KanbanStatus;
-  /** Whether all open review comments have been resolved */
-  hasOpenReviewComments: boolean;
+  /**
+   * Which state machine this transition runs on. Epics carry the merge
+   * boundary (`to_merge`); stories close through approval or their epic's
+   * merge cascade. Defaults to "epic".
+   */
+  targetKind?: "epic" | "story";
   /**
    * Whether the epic has a completed review that actually delivered evidence
    * — at least one completed review session that is not `unverifiable`
@@ -64,8 +84,6 @@ export interface TransitionContext {
   hasUnverifiableReview?: boolean;
   /** Story approval is itself an explicit human review decision. */
   requireCompletedReview?: boolean;
-  /** Story approval cannot resolve epic-scoped findings on its own. */
-  requireResolvedComments?: boolean;
   /** Whether there is a queued/running code-producing session on this ticket */
   hasRunningSession: boolean;
   /**
@@ -111,7 +129,7 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
     const planning = (status: KanbanStatus) =>
       status === "backlog" || status === "todo";
     if (!planning(ctx.fromStatus) || !planning(ctx.toStatus)) {
-      return "Refinement may only move tickets between Backlog and To do; In Progress, Review, Done and Released are out of its scope.";
+      return "Refinement may only move tickets between Backlog and To do; In Progress, Review, To Merge, Done and Released are out of its scope.";
     }
     return null;
   },
@@ -147,7 +165,7 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
   // and the fix is another review rather than another look at the board.
   (ctx) => {
     if (
-      ctx.toStatus === "done" &&
+      ctx.toStatus === "to_merge" &&
       ctx.requireCompletedReview !== false &&
       !ctx.hasCompletedReview &&
       ctx.hasUnverifiableReview
@@ -156,57 +174,65 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
       // `no verifiable review AND at least one completed one`
       // (lib/workflow/context.ts), so an epic with one good review and one
       // broken one never reaches this branch.
-      return "Cannot move to Done: every completed review filed no verdict through submit_findings, so nothing they found is recorded. Run a review that completes before marking as Done.";
+      return "Cannot move to To Merge: every completed review filed no verdict through submit_findings, so nothing they found is recorded. Run a review that completes before the ticket can be merged.";
     }
     return null;
   },
-  // Cannot move to Done without completed review
+  // Cannot move to To Merge without completed review
   (ctx) => {
     if (
-      ctx.toStatus === "done" &&
+      ctx.toStatus === "to_merge" &&
       ctx.requireCompletedReview !== false &&
       !ctx.hasCompletedReview
     ) {
-      return "Cannot move to Done: no completed review found. A review must be completed before marking as Done.";
+      return "Cannot move to To Merge: no completed review found. A review must be completed before the ticket can be merged.";
     }
     return null;
   },
-  // Cannot move to Done with open review comments
+  // Agents reach To Merge only through a review verdict (the review drivers
+  // use source "review"). An agent poking update_ticket_status (source "api")
+  // must not be able to skip the review boundary; humans stay free to drag.
   (ctx) => {
     if (
-      ctx.toStatus === "done" &&
-      ctx.requireResolvedComments !== false &&
-      ctx.hasOpenReviewComments
+      ctx.toStatus === "to_merge" &&
+      ctx.actor === "agent" &&
+      ctx.source !== "review"
     ) {
-      return "Cannot move to Done: there are unresolved review comments. Resolve all review comments first.";
+      return "Cannot move to To Merge: only a passing review verdict promotes a ticket to To Merge.";
     }
     return null;
   },
   // A merge must not land a branch whose rejection is still unanswered.
   //
-  // Scoped to `merge` on purpose. `approve` is a human explicitly making the
-  // review decision — the same authority the spec gives explicit human story
-  // approval — and refusing it would leave a rejected epic with no way out
-  // but a fresh review. A merge has no such author.
+  // Scoped to `merge` on purpose, and it survives the merge-as-approval
+  // rework: with no approve route left for epics, a merge is the only way
+  // into Done, so this is the only place a standing `changes_requested`
+  // verdict can still be caught. The way out is a fix and a fresh review —
+  // the same verdict that promotes the epic to To Merge.
   (ctx) => {
     if (
       ctx.toStatus === "done" &&
       ctx.source === "merge" &&
       ctx.hasNegativeReviewVerdict
     ) {
-      return "Cannot merge to Done: a review requested changes and nothing has been fixed and re-reviewed since. Push a fix and re-review, or use Approve to override.";
+      return "Cannot merge to Done: a review requested changes and nothing has been fixed and re-reviewed since. Push a fix and re-review before merging.";
     }
     return null;
   },
-  // review → done requires explicit approval (approve route) or merge
+  // Done is reached exclusively through a successful merge — the merge IS the
+  // approval. There is no manual approve step for epics. Stories are the one
+  // exception: they have no branch of their own, so an explicit human story
+  // approval or the parent epic's merge cascade closes them.
   (ctx) => {
-    if (
-      ctx.fromStatus === "review" &&
-      ctx.toStatus === "done" &&
-      ctx.source !== "approve" &&
-      ctx.source !== "merge"
-    ) {
-      return "Cannot move to Done: manual approval is required. Use the Approve action to move from Review to Done.";
+    if (ctx.toStatus !== "done") return null;
+    if (ctx.targetKind === "story") {
+      if (ctx.source !== "approve" && ctx.source !== "merge") {
+        return "Cannot move story to Done: a story is completed by approving it or by merging its parent epic.";
+      }
+      return null;
+    }
+    if (ctx.source !== "merge") {
+      return "Cannot move to Done: a ticket reaches Done through a successful merge. Use the Merge action.";
     }
     return null;
   },
@@ -248,10 +274,12 @@ export interface TransitionValidationResult {
  */
 export function isAllowedTransition(
   from: KanbanStatus,
-  to: KanbanStatus
+  to: KanbanStatus,
+  targetKind: "epic" | "story" = "epic"
 ): boolean {
   if (from === to) return true; // same-column reorder is always valid
-  const allowed = EPIC_TRANSITIONS[from];
+  const graph = targetKind === "story" ? STORY_TRANSITIONS : EPIC_TRANSITIONS;
+  const allowed = graph[from];
   return allowed ? allowed.includes(to) : false;
 }
 
@@ -266,11 +294,15 @@ export function validateTransition(
     return { valid: true };
   }
 
+  const targetKind = ctx.targetKind ?? "epic";
+
   // Check structural validity
-  if (!isAllowedTransition(ctx.fromStatus, ctx.toStatus)) {
+  if (!isAllowedTransition(ctx.fromStatus, ctx.toStatus, targetKind)) {
+    const graph =
+      targetKind === "story" ? STORY_TRANSITIONS : EPIC_TRANSITIONS;
     return {
       valid: false,
-      error: `Invalid transition: cannot move from "${ctx.fromStatus}" to "${ctx.toStatus}". Allowed targets: ${EPIC_TRANSITIONS[ctx.fromStatus]?.join(", ") || "none"}.`,
+      error: `Invalid transition: cannot move from "${ctx.fromStatus}" to "${ctx.toStatus}". Allowed targets: ${graph[ctx.fromStatus]?.join(", ") || "none"}.`,
     };
   }
 

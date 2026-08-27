@@ -1,28 +1,23 @@
 /**
  * "Ready to merge" — the single derived signal behind Full Auto's merge step
- * AND the Review column's upper section.
+ * AND the To Merge column's ordering.
  *
- * There is deliberately no `to_merge` status: readiness is a FUNCTION of
- * facts the board already stores (the epic's status and branch, its open
- * review findings, when it was last cleanly reviewed, when its branch last
- * changed, when a merge last failed). A status would have to be written by
- * someone, and every writer is a chance for the board to disagree with the
- * supervisor about what "ready" means.
+ * The `to_merge` STATUS says a review passed: the review agent's verdict is
+ * the approval step of the workflow, and only the transition service writes
+ * that status (review → to_merge, source "review"). What this module adds are
+ * the GIT-side facts a status cannot carry: is there a branch to land, and is
+ * a recorded merge failure still current? Ready means "a merge click will
+ * plausibly land on main right now".
  *
  * This module is the one definition. `selectMergeCandidates`
  * (lib/auto-mode/select.ts) evaluates it over its sweep snapshot; the board
  * API evaluates it over its list query. Both call the same function, so
- * neither side can drift into its own idea of "ready" — which is exactly
- * what a second implementation would introduce.
+ * neither side can drift into its own idea of "ready".
  *
- * The two callers are not identical sets, and every difference is
- * deliberate: the board also passes merge failure timestamps
- * (`lastMergeConflictAt` / `lastConflictMarkersAt`; auto-mode carries
- * that fact in its own registry backoff instead), and auto-mode additionally
- * applies the runtime exclusions below plus `hasStoryStillToBuild` — an epic
- * with an unbuilt story is refused to the UNATTENDED path only, because a
- * human may still land it by hand (the approval route reports the unfinished
- * stories as `skippedStories`). What they share is the definition of ready.
+ * Open findings do NOT block a merge any more: the merge IS the approval, and
+ * whatever stayed open is resolved by the merge itself
+ * (lib/workflow/merge-approval.ts). The count is still echoed so cards can
+ * show it as information.
  *
  * Client-safe by convention (lib/kanban/*): pure functions, no database, no
  * server imports.
@@ -37,39 +32,38 @@
  */
 
 /**
- * Why an epic in Review cannot be merged, most actionable first. The order of
- * this union is the order `evaluateMergeReadiness` checks in, which is also
- * the order the card reports in.
+ * Why an epic in To Merge cannot be merged, most actionable first. The order
+ * of this union is the order `evaluateMergeReadiness` checks in, which is
+ * also the order the card reports in.
  */
 export type MergeBlocker =
-  | "not_in_review"
+  | "not_to_merge"
   | "merge_conflict"
   | "conflict_markers"
-  | "open_findings"
   | "changes_requested"
-  | "no_review"
-  | "stale_review"
   | "no_branch";
 export interface MergeReadinessFacts {
-  /** Board status of the epic. Only `review` can ever be merge-ready. */
+  /** Board status of the epic. Only `to_merge` can ever be merge-ready. */
   status?: string | null;
   /** The epic's integration branch; without one there is nothing to land. */
   branchName?: string | null;
   /**
-   * Open `review_comments` on the epic that STILL BLOCK — see
-   * lib/workflow/blocking-findings.ts, which both callers evaluate.
+   * Open `review_comments` on the epic that still stand — echoed as
+   * information, not a gate.
    *
-   * Not the raw open count. Nothing resolves a finding row until a human
-   * approves the ticket, so counting every open row meant a `[minor]` the
-   * approving reviewer filed itself, or a `[major]` raised before a fix that
-   * a later clean verdict has since read, parked a reviewed epic outside
-   * "Ready to merge" forever.
+   * A merge IS the approval and resolves whatever is left
+   * (lib/workflow/merge-approval.ts), so this count never refuses a merge.
+   * It is still narrowed rather than raw (see
+   * lib/workflow/blocking-findings.ts, which both callers evaluate): a
+   * `[minor]` the approving reviewer filed itself, or a `[major]` a later
+   * clean verdict has since read, is not a finding to put on the card.
    */
   openFindings?: number | null;
   /**
    * Newest epic-scoped review session that completed with a verdict that was
-   * not `changes_requested`. See SessionFacts in lib/auto-mode/select.ts for
-   * what each exclusion buys.
+   * not `changes_requested`. Feeds `hasFreshCleanReview`, which the Full Auto
+   * selector's `needsReview` uses as its anti-loop; readiness itself no
+   * longer reads it — the `to_merge` status is the review's verdict.
    */
   lastCleanReviewAt?: string | null;
   /**
@@ -124,13 +118,12 @@ function normalizeAt(value: string | null | undefined): string | null {
 }
 
 /**
- * The merge gate's freshness half: a review that COMPLETED WITH A VERDICT
- * after the last code change.
+ * A review that COMPLETED WITH A VERDICT after the last code change.
  *
- * Stricter than the workflow engine's `hasCompletedReview` on both axes —
- * the engine accepts any completed review session ever, including one that
- * merely asked a question or produced nothing. That laxity is exactly what
- * this compensates for; the engine's guard stays the floor, not the ceiling.
+ * Not part of merge readiness any more — the `to_merge` status already
+ * carries the verdict — but still the Full Auto selector's `needsReview`
+ * anti-loop: a Review-column epic with a fresh clean review earns a promotion
+ * or a park, never another identical review.
  */
 export function hasFreshCleanReview(
   facts: Pick<
@@ -150,8 +143,7 @@ export function hasFreshCleanReview(
  *
  * Only if nothing has touched the branch since. A merge-fix session counts as
  * a code session (`merge` is in the code agent types), so once one runs the
- * conflict flag clears on its own — and the review it invalidated becomes
- * stale, which is the honest next blocker.
+ * conflict flag clears on its own.
  */
 export function hasCurrentMergeConflict(
   facts: Pick<
@@ -212,9 +204,8 @@ export function hasStandingNegativeVerdict(
 /**
  * The predicate. Order of the checks IS the display order: the first thing
  * standing between this epic and `main` is what the card reports, so a
- * conflict (git cannot land it at all) outranks findings (the code needs
- * work), which outrank a standing rejection (specific beats general), which
- * outranks a stale or missing review (a reviewer needs to run).
+ * conflict (git cannot land it at all) outranks a standing rejection (the
+ * code needs work), which outranks a missing branch.
  */
 export function evaluateMergeReadiness(
   facts: MergeReadinessFacts | null | undefined
@@ -226,7 +217,7 @@ export function evaluateMergeReadiness(
     openFindings,
   });
 
-  if (facts?.status !== "review") return blocked("not_in_review");
+  if (facts?.status !== "to_merge") return blocked("not_to_merge");
 
   const hasConflict = hasCurrentMergeConflict(facts);
   const hasMarkers = hasCurrentConflictMarkers(facts);
@@ -239,13 +230,16 @@ export function evaluateMergeReadiness(
   }
   if (hasConflict) return blocked("merge_conflict");
   if (hasMarkers) return blocked("conflict_markers");
-  if (openFindings > 0) return blocked("open_findings");
-  // Ahead of `no_review` deliberately: when the rejection is the ONLY round,
-  // `lastCleanReviewAt` is null and "awaiting review" would be a lie — a
-  // review ran, and it said no.
+  // Open findings are NOT a blocker: the merge resolves them
+  // (lib/workflow/merge-approval.ts), and gating on them is what produced
+  // epics that could never leave the column. Neither is review freshness —
+  // the `to_merge` status IS the passing verdict. What survives is the one
+  // review fact the status cannot express: a `changes_requested` verdict
+  // recorded since, with no fix a reviewer has read. The workflow engine
+  // refuses that merge (lib/workflow/engine.ts), so the board must not offer
+  // it — `tryAutoMerge` merges with git before it validates, and the
+  // disagreement would cost a merge and a rollback on every sweep.
   if (hasStandingNegativeVerdict(facts)) return blocked("changes_requested");
-  if (!facts.lastCleanReviewAt) return blocked("no_review");
-  if (!hasFreshCleanReview(facts)) return blocked("stale_review");
   if (!facts.branchName) return blocked("no_branch");
 
   return { ready: true, blocker: null, openFindings };
@@ -259,10 +253,10 @@ export function isMergeReady(
 }
 
 /**
- * One short, actionable line for a Review card that is not ready.
+ * One short, actionable line for a To Merge card that is not ready.
  *
- * Returns `null` for a ready epic and for `not_in_review` — a card outside
- * the Review column has no business explaining why it cannot be merged.
+ * Returns `null` for a ready epic and for `not_to_merge` — a card outside
+ * the To Merge column has no business explaining why it cannot be merged.
  */
 export function describeMergeBlocker(
   readiness: MergeReadiness | null | undefined
@@ -272,16 +266,8 @@ export function describeMergeBlocker(
       return "Merge conflict — resolve before merging";
     case "conflict_markers":
       return "Branch contains unresolved conflict markers";
-    case "open_findings":
-      return readiness.openFindings === 1
-        ? "1 open finding"
-        : `${readiness.openFindings} open findings`;
     case "changes_requested":
       return "Changes requested — awaiting a fix";
-    case "no_review":
-      return "Awaiting review";
-    case "stale_review":
-      return "Review outdated — new commit since";
     case "no_branch":
       return "No branch to merge";
     default:
@@ -300,8 +286,8 @@ export function isMergeReadyEpic(epic: MergeReadinessCarrier): boolean {
 }
 
 /**
- * Review-column order: ready-to-merge first, then board position within each
- * group.
+ * To Merge column order: ready-to-merge first (conflicted branches sink),
+ * then board position within each group.
  *
  * Sorting HERE rather than in the column component is what keeps membership
  * derived and non-draggable. The board hands one array down in this exact
@@ -309,7 +295,7 @@ export function isMergeReadyEpic(epic: MergeReadinessCarrier): boolean {
  * all agree with what the user sees; a card dropped into the "wrong" section
  * keeps its new position but snaps back to the section its signal dictates.
  */
-export function sortReviewColumn<
+export function sortMergeColumn<
   T extends MergeReadinessCarrier & { position: number },
 >(epics: readonly T[]): T[] {
   return [...epics].sort((a, b) => {

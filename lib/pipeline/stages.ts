@@ -71,9 +71,14 @@ import {
   parseGradingEntries,
 } from "@/lib/grading/report";
 import {
+  buildMentionContextBlock,
   enrichPromptWithDocumentMentions,
   userAuthoredTexts,
 } from "@/lib/documents/mentions";
+import {
+  createPromptSectionCapture,
+  finalizeCapturedPrompt,
+} from "@/lib/tokens/dispatch-prompt";
 import type { ClaudeResult } from "@/lib/claude/spawn";
 import {
   emitSessionCompleted,
@@ -86,6 +91,7 @@ import {
   resolveBuildSessionResult,
   transitionBuildStarted,
   transitionReviewRejected,
+  transitionReviewPassed,
   type BuildTerminalOutcome,
 } from "@/lib/workflow/automatic-transitions";
 import {
@@ -93,7 +99,13 @@ import {
   createUnresolvedMentionsNotification,
 } from "@/lib/notifications/create";
 import { PIPELINE_REVIEW_TYPE } from "./constants";
-import { assessReviewOutcome, resolveReviewVerdict } from "./findings";
+import {
+  assessReviewOutcome,
+  resolveReviewVerdict,
+  resolvePriorFindingsFromProse,
+  collectBlockingFindings,
+  readSessionFindingsWindow,
+} from "./findings";
 import type {
   PipelineDeterministicVerificationOutcome,
   PipelineGuardCheck,
@@ -630,7 +642,12 @@ function buildReviewFeedbackSection(
  * reason to block cycle 4.
  */
 function buildPriorFindingsSection(
-  openComments: Array<{ filePath: string; lineNumber: number; body: string }>,
+  openComments: Array<{
+    id: string;
+    filePath: string;
+    lineNumber: number;
+    body: string;
+  }>,
   cycle: number
 ): string {
   if (openComments.length === 0) return "";
@@ -639,7 +656,8 @@ function buildPriorFindingsSection(
   const parts = [
     "## Findings Still Open From Previous Reviews\n",
     `This is review cycle ${cycle} on this ticket. ${openComments.length} finding(s) ` +
-      "filed by earlier cycles are still open:\n",
+      "filed by earlier cycles are still open. Each carries its Arij id as an " +
+      "`[RC:id]` token:\n",
   ];
   if (dropped > 0) {
     parts.push(
@@ -656,15 +674,21 @@ function buildPriorFindingsSection(
   for (const [filePath, fileComments] of byFile) {
     parts.push(`### ${filePath}`);
     for (const rc of fileComments) {
-      parts.push(findingBodyLine(rc));
+      parts.push(`- \`[RC:${rc.id}]\` ${findingBodyLine(rc).slice(2)}`);
     }
     parts.push("");
   }
 
   parts.push(
     `**Work through that list before looking for anything new.** For each open
-finding, state plainly whether it is FIXED or STILL OPEN at the current HEAD,
-and name the evidence you checked. A finding you do not mention is treated as
+finding, verify at the current HEAD whether it is fixed, then REPORT the
+verdict through the structured channel: include it in \`submit_findings\`'s
+\`prior_findings\` array as \`{id, status: "fixed" | "still_open"}\` using the
+id from its \`[RC:id]\` token — "fixed" is what resolves the finding in Arij,
+prose alone changes nothing. Also echo one line per finding in your report,
+in the exact form \`[RC:id] FIXED\` or \`[RC:id] STILL OPEN\`, naming the
+evidence you checked — that line is the fallback Arij parses when the
+structured channel is unavailable. A finding you do not mention is treated as
 unverified, not as resolved.
 
 **Then bound new findings to what this branch changed** — the diff against the
@@ -877,6 +901,7 @@ async function dispatchPipelineStage(
     { defaultBranch: project.defaultBranch }
   );
 
+  const promptSections = createPromptSectionCapture();
   let prompt: string;
   if (isReview) {
     const reviewSystemPrompt = await resolveAgentPrompt(
@@ -892,7 +917,8 @@ async function dispatchPipelineStage(
             usList,
             PIPELINE_REVIEW_TYPE,
             reviewSystemPrompt,
-            promptComments
+            promptComments,
+            promptSections.collect,
           )
         : buildReviewPrompt(
             project,
@@ -900,7 +926,8 @@ async function dispatchPipelineStage(
             epic,
             story!,
             PIPELINE_REVIEW_TYPE,
-            reviewSystemPrompt
+            reviewSystemPrompt,
+            promptSections.collect,
           );
 
     // Give the reviewer the run's own history. Same open-findings query the
@@ -923,6 +950,7 @@ async function dispatchPipelineStage(
     );
     if (priorFindings) {
       prompt = prompt + "\n\n" + priorFindings;
+      promptSections.append("findings", priorFindings);
     }
   } else {
     const buildSystemPrompt = await resolveAgentPrompt(
@@ -938,7 +966,10 @@ async function dispatchPipelineStage(
             usList,
             buildSystemPrompt,
             promptComments,
-            { visualProofEnabled: isVisualProofEnabled() }
+            {
+              visualProofEnabled: isVisualProofEnabled(),
+              sectionCollector: promptSections.collect,
+            },
           )
         : buildTicketBuildPrompt(
             project,
@@ -947,7 +978,10 @@ async function dispatchPipelineStage(
             story!,
             promptComments,
             buildSystemPrompt,
-            { visualProofEnabled: isVisualProofEnabled() }
+            {
+              visualProofEnabled: isVisualProofEnabled(),
+              sectionCollector: promptSections.collect,
+            },
           );
 
     // Open review feedback (includes the blocking findings verbatim with
@@ -963,50 +997,53 @@ async function dispatchPipelineStage(
     const reviewContext = buildReviewFeedbackSection(openReviewComments);
     if (reviewContext) {
       prompt = prompt + "\n\n" + reviewContext;
+      promptSections.append("findings", reviewContext);
     }
     if (request.stage === "fix") {
       // A grading-only fix must not be described as a code-review rejection.
       // When open review findings also exist, retain both instruction blocks.
       if (!request.gradingFailure || reviewContext) {
         prompt = prompt + "\n\n" + PIPELINE_FIX_INSTRUCTIONS_SECTION;
+        promptSections.append("other", PIPELINE_FIX_INSTRUCTIONS_SECTION);
       }
       if (request.gradingFailure) {
+        const gradingFixSection = buildGradingFixSection(request.gradingFailure);
         prompt =
           prompt +
           "\n\n" +
-          buildGradingFixSection(request.gradingFailure);
+          gradingFixSection;
+        promptSections.append("findings", gradingFixSection);
       }
       // A regression-gate rejection carries its exact red→green verdict so
       // the agent repairs the real problem instead of guessing.
       if (request.verifyFailure) {
         // Same patterns the gate filtered the diff with, so the prompt states
         // the rule the agent actually has to satisfy.
-        prompt =
-          prompt +
-          "\n\n" +
-          buildRegressionFixSection(
-            request.verifyFailure,
-            readRegressionConfig(projectId).patterns
-          );
+        const regressionFixSection = buildRegressionFixSection(
+          request.verifyFailure,
+          readRegressionConfig(projectId).patterns,
+        );
+        prompt = prompt + "\n\n" + regressionFixSection;
+        promptSections.append("findings", regressionFixSection);
       }
       if (request.verificationFailure) {
-        prompt =
-          prompt +
-          "\n\n" +
+        const verificationFixSection =
           buildDeterministicVerificationFixSection(
-            request.verificationFailure
+            request.verificationFailure,
           );
+        prompt = prompt + "\n\n" + verificationFixSection;
+        promptSections.append("findings", verificationFixSection);
       }
     }
   }
 
   if (isReview && request.verificationReport) {
-    prompt =
-      prompt +
-      "\n\n" +
+    const verificationReviewSection =
       buildDeterministicVerificationReviewSection(
-        request.verificationReport.commands
+        request.verificationReport.commands,
       );
+    prompt = prompt + "\n\n" + verificationReviewSection;
+    promptSections.append("findings", verificationReviewSection);
   }
 
   // Document mentions: user-written comments only. An agent comment naming a
@@ -1018,6 +1055,15 @@ async function dispatchPipelineStage(
     textSources: userAuthoredTexts(promptComments),
   });
   prompt = mentionEnrichment.prompt;
+  promptSections.append(
+    "documents",
+    buildMentionContextBlock(mentionEnrichment.resolvedDocuments),
+  );
+  const estimatedPrompt = finalizeCapturedPrompt(
+    prompt,
+    promptSections,
+    mentionEnrichment.missing,
+  );
   createUnresolvedMentionsNotification({
     projectId,
     missing: mentionEnrichment.missing,
@@ -1063,6 +1109,10 @@ async function dispatchPipelineStage(
     mode: agentMode,
     provider: resolved.provider,
     prompt,
+    estimatedPromptTokens: estimatedPrompt.tokens.total,
+    estimatedPromptBreakdown: JSON.stringify(
+      estimatedPrompt.tokens.breakdown,
+    ),
     logsPath,
     branchName,
     worktreePath,
@@ -1315,6 +1365,14 @@ function finalizeReviewSession(input: {
     });
   }
 
+  // Prose fallback of submit_findings.prior_findings: [RC:id] FIXED lines in
+  // the report resolve the prior findings they name. Idempotent — rows the
+  // structured channel (or the runner's assessReview) already resolved are
+  // skipped by the status filter.
+  if (!askedQuestion) {
+    resolvePriorFindingsFromProse({ epicId, sessionOutput: output });
+  }
+
   // Verdict channels, in priority order: the reviewer's persisted
   // submit_findings verdict, else the prose scan of its final message (see
   // lib/pipeline/findings.ts). A reviewer that asked a question delivered no
@@ -1341,7 +1399,52 @@ function finalizeReviewSession(input: {
     }
   }
 
-  if (!isNegativeVerdict) return;
+  if (!isNegativeVerdict) {
+    // A verdict that PASSED promotes the ticket to the merge boundary. An
+    // unverifiable review proves nothing and a failed session delivered
+    // nothing: both leave the ticket in review to earn another review.
+    //
+    // The blocking-findings check closes the prose gap: a review with no
+    // structured verdict that still filed an open [critical]/[major] row in
+    // its window is judged by prose here (resolveReviewVerdict ignores
+    // findings on that path for bit-compatibility), while the runner's
+    // assessReviewOutcome counts the finding and dispatches a fix. Promoting
+    // in that state would show To Merge with an open critical for the length
+    // of the fix cycle — and invite a manual merge that resolves it. A
+    // structured non-negative verdict implies zero blocking findings, so the
+    // check only ever bites on the prose path.
+    const findingsWindow = readSessionFindingsWindow(sessionId);
+    const blockingInWindow = findingsWindow
+      ? collectBlockingFindings(epicId, findingsWindow)
+      : [];
+    if (
+      decision &&
+      !decision.unverifiable &&
+      blockingInWindow.length === 0 &&
+      result?.success &&
+      scope === "epic"
+    ) {
+      try {
+        transitionReviewPassed({
+          projectId,
+          epicId,
+          scope: "epic",
+          reason: `Review verdict: passed (${PIPELINE_REVIEW_LABEL})`,
+          sessionId,
+          verdictSource:
+            decision.source === "structured" ? "structured" : "prose",
+        });
+      } catch (err) {
+        // A refused promotion (e.g. a concurrent move) holds the ticket in
+        // review; the refusal is already in the activity log.
+        console.warn(
+          "[pipeline] review passed but to_merge promotion was refused:",
+          (err as Error).message
+        );
+      }
+    }
+    return;
+  }
 
   if (scope === "epic") {
     const currentEpic = db
@@ -1351,7 +1454,9 @@ function finalizeReviewSession(input: {
       .get();
     if (
       currentEpic &&
-      (currentEpic.status === "done" || currentEpic.status === "review")
+      (currentEpic.status === "done" ||
+        currentEpic.status === "review" ||
+        currentEpic.status === "to_merge")
     ) {
       transitionReviewRejected({
         projectId,

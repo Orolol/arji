@@ -21,6 +21,7 @@ const mockKanbanState = vi.hoisted(() => ({
       todo: [] as KanbanEpic[],
       in_progress: [] as KanbanEpic[],
       review: [] as KanbanEpic[],
+      to_merge: [] as KanbanEpic[],
       done: [] as KanbanEpic[],
       released: [] as KanbanEpic[],
     },
@@ -116,6 +117,7 @@ describe("Sort by priority button", () => {
         ],
         in_progress: [boardEpic({ id: "p1", status: "in_progress" })],
         review: [boardEpic({ id: "r1", status: "review" })],
+        to_merge: [boardEpic({ id: "m1", status: "to_merge" })],
         done: [boardEpic({ id: "d1", status: "done" })],
         released: [],
       },
@@ -128,7 +130,7 @@ describe("Sort by priority button", () => {
 
     expect(screen.getByTestId("column-sort-priority-backlog")).toBeInTheDocument();
     expect(screen.getByTestId("column-sort-priority-todo")).toBeInTheDocument();
-    for (const status of ["in_progress", "review", "done"]) {
+    for (const status of ["in_progress", "review", "to_merge", "done"]) {
       expect(
         screen.queryByTestId(`column-sort-priority-${status}`)
       ).not.toBeInTheDocument();

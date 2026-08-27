@@ -485,11 +485,11 @@ describe("SessionsPage — night-run history", () => {
     ]);
 
     const row = await screen.findByTestId("night-run-row-night_a41c");
-    expect(row).toHaveTextContent("3 in review, 1 paused, 2 failed");
+    expect(row).toHaveTextContent("3 to merge, 1 paused, 2 failed");
     expect(row).toHaveTextContent("night_a41c");
     expect(
       await screen.findByTestId("night-run-row-night_b72d")
-    ).toHaveTextContent("1 in review");
+    ).toHaveTextContent("1 to merge");
   });
 
   it("opens the summary dialog for the clicked run", async () => {

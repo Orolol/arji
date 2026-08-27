@@ -1,5 +1,5 @@
 /**
- * The divided Review column: a "Ready to merge" section over an "In review"
+ * The divided To Merge column: a "Ready to merge" section over a "Blocked"
  * one, a Merge button on the ready cards, and the blocking reason on the
  * others.
  *
@@ -13,7 +13,7 @@ import type { ReactNode } from "react";
 import { Board } from "@/components/kanban/Board";
 import type { KanbanEpic } from "@/lib/types/kanban";
 import {
-  sortReviewColumn,
+  sortMergeColumn,
   type MergeReadiness,
 } from "@/lib/kanban/merge-readiness";
 
@@ -24,6 +24,7 @@ const mockKanbanState = vi.hoisted(() => ({
       todo: [] as KanbanEpic[],
       in_progress: [] as KanbanEpic[],
       review: [] as KanbanEpic[],
+      to_merge: [] as KanbanEpic[],
       done: [] as KanbanEpic[],
       released: [] as KanbanEpic[],
     },
@@ -80,14 +81,9 @@ vi.mock("@/components/kanban/ReleasedColumn", () => ({
 }));
 
 const READY: MergeReadiness = { ready: true, blocker: null, openFindings: 0 };
-const FINDINGS: MergeReadiness = {
+const NO_BRANCH: MergeReadiness = {
   ready: false,
-  blocker: "open_findings",
-  openFindings: 2,
-};
-const STALE: MergeReadiness = {
-  ready: false,
-  blocker: "stale_review",
+  blocker: "no_branch",
   openFindings: 0,
 };
 const CONFLICT: MergeReadiness = {
@@ -110,7 +106,7 @@ function makeEpic(overrides?: Partial<KanbanEpic>): KanbanEpic {
     title: `Epic ${epicSeq}`,
     description: "Has a description",
     priority: 1,
-    status: "review",
+    status: "to_merge",
     position: epicSeq,
     branchName: `feature/epic-${epicSeq}`,
     prNumber: null,
@@ -135,18 +131,18 @@ function makeEpic(overrides?: Partial<KanbanEpic>): KanbanEpic {
 }
 
 /**
- * Seed the Review column the way `useKanban` always hands it over: sorted
+ * Seed the To Merge column the way `useKanban` always hands it over: sorted
  * merge-ready-first. The Board slices its sections out of that array rather
  * than re-permuting it, so feeding it an unsorted column here would test a
- * state the hook cannot produce. `setRawReviewColumn` exists for the one case
+ * state the hook cannot produce. `setRawMergeColumn` exists for the one case
  * that deliberately does.
  */
-function setReviewColumn(review: KanbanEpic[], rest?: Partial<Record<string, KanbanEpic[]>>) {
-  setRawReviewColumn(sortReviewColumn(review), rest);
+function setMergeColumn(toMerge: KanbanEpic[], rest?: Partial<Record<string, KanbanEpic[]>>) {
+  setRawMergeColumn(sortMergeColumn(toMerge), rest);
 }
 
-function setRawReviewColumn(
-  review: KanbanEpic[],
+function setRawMergeColumn(
+  toMerge: KanbanEpic[],
   rest?: Partial<Record<string, KanbanEpic[]>>
 ) {
   mockKanbanState.board = {
@@ -154,7 +150,8 @@ function setRawReviewColumn(
       backlog: [],
       todo: [],
       in_progress: [],
-      review,
+      review: [],
+      to_merge: toMerge,
       done: [],
       released: [],
       ...rest,
@@ -169,52 +166,52 @@ function renderBoard(props?: Partial<Parameters<typeof Board>[0]>) {
   );
 }
 
-const readySection = () => screen.getByTestId("column-section-review-ready");
-const inReviewSection = () =>
-  screen.getByTestId("column-section-review-in-review");
+const readySection = () => screen.getByTestId("column-section-to_merge-ready");
+const blockedSection = () =>
+  screen.getByTestId("column-section-to_merge-blocked");
 
 beforeEach(() => {
   localStorage.clear();
   epicSeq = 0;
   vi.clearAllMocks();
-  setReviewColumn([]);
+  setMergeColumn([]);
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Review column sections", () => {
+describe("To Merge column sections", () => {
   it("splits ready tickets from the rest, with counts on each header", () => {
     const ready = makeEpic({ title: "Ready one", mergeReadiness: READY });
-    const waiting = makeEpic({ title: "Still cooking", mergeReadiness: FINDINGS });
-    setReviewColumn([waiting, ready]);
+    const waiting = makeEpic({ title: "Still stuck", mergeReadiness: CONFLICT });
+    setMergeColumn([waiting, ready]);
 
     renderBoard();
 
     expect(within(readySection()).getByText("Ready one")).toBeInTheDocument();
     expect(
-      within(inReviewSection()).getByText("Still cooking")
+      within(blockedSection()).getByText("Still stuck")
     ).toBeInTheDocument();
     expect(
-      within(screen.getByTestId("column-section-header-review-ready")).getByText("1")
+      within(screen.getByTestId("column-section-header-to_merge-ready")).getByText("1")
     ).toBeInTheDocument();
     expect(
       within(
-        screen.getByTestId("column-section-header-review-in-review")
+        screen.getByTestId("column-section-header-to_merge-blocked")
       ).getByText("1")
     ).toBeInTheDocument();
   });
 
   it("labels the two sections", () => {
-    setReviewColumn([makeEpic({ mergeReadiness: READY })]);
+    setMergeColumn([makeEpic({ mergeReadiness: READY })]);
     renderBoard();
     expect(screen.getByText("Ready to merge")).toBeInTheDocument();
-    expect(screen.getByText("In review")).toBeInTheDocument();
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
   });
 
   it("says so when nothing has cleared review yet", () => {
-    setReviewColumn([makeEpic({ mergeReadiness: FINDINGS })]);
+    setMergeColumn([makeEpic({ mergeReadiness: CONFLICT })]);
     renderBoard();
     expect(
       within(readySection()).getByText("Nothing cleared review yet.")
@@ -222,18 +219,18 @@ describe("Review column sections", () => {
   });
 
   it("moves a ticket between sections when its signal changes, not by dragging", () => {
-    const epic = makeEpic({ title: "Shifting", mergeReadiness: FINDINGS });
-    setReviewColumn([epic]);
+    const epic = makeEpic({ title: "Shifting", mergeReadiness: CONFLICT });
+    setMergeColumn([epic]);
     const { rerender } = renderBoard();
 
-    expect(within(inReviewSection()).getByText("Shifting")).toBeInTheDocument();
+    expect(within(blockedSection()).getByText("Shifting")).toBeInTheDocument();
 
     // The next poll returns the same ticket, now cleared.
-    setReviewColumn([{ ...epic, mergeReadiness: READY }]);
+    setMergeColumn([{ ...epic, mergeReadiness: READY }]);
     rerender(<Board projectId="proj-1" onEpicClick={vi.fn()} />);
 
     expect(within(readySection()).getByText("Shifting")).toBeInTheDocument();
-    expect(within(inReviewSection()).queryByText("Shifting")).toBeNull();
+    expect(within(blockedSection()).queryByText("Shifting")).toBeNull();
   });
 
   it("renders the array it was given, even if a card is out of order", () => {
@@ -242,9 +239,9 @@ describe("Review column sections", () => {
     // the render order must still equal the array order, because that array
     // is what drag indices are computed against. Mis-grouping for a beat is
     // the acceptable cost; a drag persisted to the wrong rank is not.
-    const blocked = makeEpic({ title: "Out of order", mergeReadiness: FINDINGS });
+    const blocked = makeEpic({ title: "Out of order", mergeReadiness: CONFLICT });
     const ready = makeEpic({ title: "Cleared", mergeReadiness: READY });
-    setRawReviewColumn([blocked, ready]);
+    setRawMergeColumn([blocked, ready]);
 
     renderBoard();
 
@@ -254,23 +251,26 @@ describe("Review column sections", () => {
     expect(cards).toEqual(["Out of order", "Cleared"]);
     // Grouping degrades gracefully: the ready card is filed below until the
     // next refresh re-sorts the column.
-    expect(within(inReviewSection()).getByText("Cleared")).toBeInTheDocument();
+    expect(within(blockedSection()).getByText("Cleared")).toBeInTheDocument();
   });
 
   it("leaves the other columns undivided", () => {
-    setReviewColumn([makeEpic({ mergeReadiness: READY })], {
+    setMergeColumn([makeEpic({ mergeReadiness: READY })], {
       todo: [makeEpic({ status: "todo", mergeReadiness: undefined })],
+      review: [makeEpic({ status: "review", mergeReadiness: undefined })],
     });
     renderBoard();
     expect(screen.queryByTestId("column-section-todo-ready")).toBeNull();
+    // Review is an ordinary column again — no sections there either.
+    expect(screen.queryByTestId("column-section-review-ready")).toBeNull();
   });
 });
 
-describe("Merge affordances on Review cards", () => {
+describe("Merge affordances on To Merge cards", () => {
   it("offers Merge on a ready card only", () => {
     const ready = makeEpic({ mergeReadiness: READY });
-    const waiting = makeEpic({ mergeReadiness: FINDINGS });
-    setReviewColumn([ready, waiting]);
+    const waiting = makeEpic({ mergeReadiness: NO_BRANCH });
+    setMergeColumn([ready, waiting]);
 
     renderBoard();
 
@@ -278,16 +278,16 @@ describe("Merge affordances on Review cards", () => {
     expect(screen.queryByTestId(`epic-merge-${waiting.id}`)).toBeNull();
   });
 
-  it("does not offer Merge on a ticket outside Review", () => {
-    const todo = makeEpic({ status: "todo", mergeReadiness: READY });
-    setReviewColumn([], { todo: [todo] });
+  it("does not offer Merge on a ticket outside To Merge", () => {
+    const review = makeEpic({ status: "review", mergeReadiness: READY });
+    setMergeColumn([], { review: [review] });
     renderBoard();
-    expect(screen.queryByTestId(`epic-merge-${todo.id}`)).toBeNull();
+    expect(screen.queryByTestId(`epic-merge-${review.id}`)).toBeNull();
   });
 
   it("stands down while an agent is running on the ticket", () => {
     const ready = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready]);
+    setMergeColumn([ready]);
     renderBoard({
       activeAgentActivities: {
         [ready.id]: {
@@ -302,27 +302,27 @@ describe("Merge affordances on Review cards", () => {
   });
 
   it("names the blocking reason on the cards that are not ready", () => {
-    const findings = makeEpic({ mergeReadiness: FINDINGS });
-    const stale = makeEpic({ mergeReadiness: STALE });
+    const branchless = makeEpic({ mergeReadiness: NO_BRANCH });
     const conflict = makeEpic({ mergeReadiness: CONFLICT });
-    setReviewColumn([findings, stale, conflict]);
+    const markers = makeEpic({ mergeReadiness: CONFLICT_MARKERS });
+    setMergeColumn([branchless, conflict, markers]);
 
     renderBoard();
 
     expect(
-      screen.getByTestId(`epic-merge-blocked-${findings.id}`)
-    ).toHaveTextContent("2 open findings");
-    expect(
-      screen.getByTestId(`epic-merge-blocked-${stale.id}`)
-    ).toHaveTextContent("Review outdated — new commit since");
+      screen.getByTestId(`epic-merge-blocked-${branchless.id}`)
+    ).toHaveTextContent("No branch to merge");
     expect(
       screen.getByTestId(`epic-merge-blocked-${conflict.id}`)
     ).toHaveTextContent("Merge conflict — resolve before merging");
+    expect(
+      screen.getByTestId(`epic-merge-blocked-${markers.id}`)
+    ).toHaveTextContent("Branch contains unresolved conflict markers");
   });
 
   it("offers Resolve merge on a card the activity log says conflicted", () => {
     const conflict = makeEpic({ mergeReadiness: CONFLICT });
-    setReviewColumn([conflict]);
+    setMergeColumn([conflict]);
     renderBoard();
     expect(
       screen.getByTestId(`epic-resolve-merge-${conflict.id}`)
@@ -331,7 +331,7 @@ describe("Merge affordances on Review cards", () => {
 
   it("does not offer Resolve merge on a card with unresolved conflict markers", () => {
     const markers = makeEpic({ mergeReadiness: CONFLICT_MARKERS });
-    setReviewColumn([markers]);
+    setMergeColumn([markers]);
     renderBoard();
     expect(
       screen.queryByTestId(`epic-resolve-merge-${markers.id}`)
@@ -342,16 +342,16 @@ describe("Merge affordances on Review cards", () => {
   });
 
   it("disables other Merge buttons on the board while one merge is in flight", async () => {
-    let resolveApprove: (val: unknown) => void = () => {};
-    const approvePromise = new Promise((resolve) => {
-      resolveApprove = resolve;
+    let resolveMergeRequest: (val: unknown) => void = () => {};
+    const mergePromise = new Promise((resolve) => {
+      resolveMergeRequest = resolve;
     });
-    const fetchMock = vi.fn().mockImplementation(() => approvePromise);
+    const fetchMock = vi.fn().mockImplementation(() => mergePromise);
     vi.stubGlobal("fetch", fetchMock);
 
     const ready1 = makeEpic({ mergeReadiness: READY });
     const ready2 = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready1, ready2]);
+    setMergeColumn([ready1, ready2]);
     renderBoard();
 
     const button1 = screen.getByTestId(`epic-merge-${ready1.id}`);
@@ -366,18 +366,18 @@ describe("Merge affordances on Review cards", () => {
     expect(button1).toHaveTextContent("Merging...");
     expect(button2).toBeDisabled();
 
-    resolveApprove({ ok: true, json: async () => ({ data: { approved: true } }) });
+    resolveMergeRequest({ ok: true, json: async () => ({ data: { merged: true } }) });
   });
 
-  it("merges through the existing approve route and notifies onMergeSuccess", async () => {
+  it("merges through the merge route and notifies onMergeSuccess", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { approved: true, merged: true } }),
+      json: async () => ({ data: { merged: true } }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const ready = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready]);
+    setMergeColumn([ready]);
     const onMergeSuccess = vi.fn();
     renderBoard({ onMergeSuccess });
 
@@ -385,7 +385,7 @@ describe("Merge affordances on Review cards", () => {
 
     await waitFor(() => expect(onMergeSuccess).toHaveBeenCalledWith(ready.id));
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/projects/proj-1/epics/${ready.id}/approve`,
+      `/api/projects/proj-1/epics/${ready.id}/merge`,
       { method: "POST" }
     );
     // When onMergeSuccess is passed, the parent page owns the refresh via
@@ -396,19 +396,19 @@ describe("Merge affordances on Review cards", () => {
   it("refreshes directly on merge success when onMergeSuccess is omitted", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { approved: true, merged: true } }),
+      json: async () => ({ data: { merged: true } }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const ready = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready]);
+    setMergeColumn([ready]);
     renderBoard();
 
     await userEvent.click(screen.getByTestId(`epic-merge-${ready.id}`));
 
     await waitFor(() => expect(mockKanbanState.refresh).toHaveBeenCalled());
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/projects/proj-1/epics/${ready.id}/approve`,
+      `/api/projects/proj-1/epics/${ready.id}/merge`,
       { method: "POST" }
     );
   });
@@ -423,7 +423,7 @@ describe("Merge affordances on Review cards", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const ready = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready]);
+    setMergeColumn([ready]);
     const onMergeSuccess = vi.fn();
     renderBoard({ onMergeSuccess });
 
@@ -443,12 +443,12 @@ describe("Merge affordances on Review cards", () => {
   it("does not offer Resolve merge when a workflow guard refused, not git", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
-      json: async () => ({ error: "Review comments are still open" }),
+      json: async () => ({ error: "A build session is queued on this epic" }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const ready = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready]);
+    setMergeColumn([ready]);
     renderBoard();
 
     await userEvent.click(screen.getByTestId(`epic-merge-${ready.id}`));
@@ -456,7 +456,7 @@ describe("Merge affordances on Review cards", () => {
     await waitFor(() =>
       expect(
         screen.getByTestId(`epic-merge-error-${ready.id}`)
-      ).toHaveTextContent("Review comments are still open")
+      ).toHaveTextContent("A build session is queued on this epic")
     );
     expect(screen.queryByTestId(`epic-resolve-merge-${ready.id}`)).toBeNull();
   });
@@ -469,7 +469,7 @@ describe("Merge affordances on Review cards", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const conflict = makeEpic({ mergeReadiness: CONFLICT });
-    setReviewColumn([conflict]);
+    setMergeColumn([conflict]);
     const onMergeAgentDispatched = vi.fn();
     renderBoard({ onMergeAgentDispatched });
 
@@ -487,9 +487,9 @@ describe("Merge affordances on Review cards", () => {
   it("stands down while a session is merely QUEUED on the ticket", () => {
     // A queued build raises no agent chip, but merging removes the epic's
     // worktree — the queued session would start into a directory that is
-    // already gone. The approve route refuses the same case with a 409.
+    // already gone. The merge route refuses the same case with a 409.
     const ready = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready]);
+    setMergeColumn([ready]);
     renderBoard({ busyEpicIds: new Set([ready.id]) });
 
     expect(screen.queryByTestId(`epic-merge-${ready.id}`)).toBeNull();
@@ -502,7 +502,7 @@ describe("Merge affordances on Review cards", () => {
     // the accented "Ready to merge" section with no button, no chip and no
     // blocker line, and the user would have nothing to read.
     const ready = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready]);
+    setMergeColumn([ready]);
     renderBoard({ busyEpicIds: new Set([ready.id]) });
 
     expect(screen.queryByTestId(`epic-merge-${ready.id}`)).toBeNull();
@@ -512,18 +512,18 @@ describe("Merge affordances on Review cards", () => {
   });
 
   it("keeps the real blocker when a busy ticket also has one", () => {
-    const findings = makeEpic({ mergeReadiness: FINDINGS });
-    setReviewColumn([findings]);
-    renderBoard({ busyEpicIds: new Set([findings.id]) });
+    const branchless = makeEpic({ mergeReadiness: NO_BRANCH });
+    setMergeColumn([branchless]);
+    renderBoard({ busyEpicIds: new Set([branchless.id]) });
 
     expect(
-      screen.getByTestId(`epic-merge-blocked-${findings.id}`)
-    ).toHaveTextContent("2 open findings");
+      screen.getByTestId(`epic-merge-blocked-${branchless.id}`)
+    ).toHaveTextContent("No branch to merge");
   });
 
   it("defers to the agent line when one is actually running", () => {
     const ready = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready]);
+    setMergeColumn([ready]);
     renderBoard({
       busyEpicIds: new Set([ready.id]),
       activeAgentActivities: {
@@ -544,7 +544,7 @@ describe("Merge affordances on Review cards", () => {
 
   it("withholds Resolve merge from a busy ticket too", () => {
     const conflict = makeEpic({ mergeReadiness: CONFLICT });
-    setReviewColumn([conflict]);
+    setMergeColumn([conflict]);
     renderBoard({ busyEpicIds: new Set([conflict.id]) });
 
     expect(screen.queryByTestId(`epic-resolve-merge-${conflict.id}`)).toBeNull();
@@ -557,12 +557,12 @@ describe("Merge affordances on Review cards", () => {
   it("lets the user dismiss a merge error", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
-      json: async () => ({ error: "Review comments are still open" }),
+      json: async () => ({ error: "A build session is queued on this epic" }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const ready = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready]);
+    setMergeColumn([ready]);
     renderBoard();
 
     await userEvent.click(screen.getByTestId(`epic-merge-${ready.id}`));
@@ -602,7 +602,7 @@ describe("Merge affordances on Review cards", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const ready = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready]);
+    setMergeColumn([ready]);
     renderBoard();
 
     await userEvent.click(screen.getByTestId(`epic-merge-${ready.id}`));
@@ -630,14 +630,14 @@ describe("Merge affordances on Review cards", () => {
       release = () =>
         resolve({
           ok: true,
-          json: async () => ({ data: { approved: true, merged: true } }),
+          json: async () => ({ data: { merged: true } }),
         });
     });
     const fetchMock = vi.fn(() => pending);
     vi.stubGlobal("fetch", fetchMock);
 
     const ready = makeEpic({ mergeReadiness: READY });
-    setReviewColumn([ready]);
+    setMergeColumn([ready]);
     renderBoard();
 
     const button = screen.getByTestId(`epic-merge-${ready.id}`);

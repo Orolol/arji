@@ -39,7 +39,7 @@ import {
 } from "@/lib/git/manager";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { applyTransition } from "@/lib/workflow/transition-service";
-import { closeOpenFindings } from "@/lib/workflow/close-findings";
+import { resolveOpenReviewComments } from "@/lib/workflow/merge-approval";
 import { resolveVerifyConfigForProject } from "@/lib/verify/config";
 import { logTransition } from "@/lib/workflow/log";
 import {
@@ -62,16 +62,18 @@ import { autoModeRegistry } from "./registry";
 /**
  * Full Auto Mode's merge step — the one place the mode touches `main`.
  *
- * The critical design constraint: "the review is OK" exists nowhere as a
- * boolean, and this module does NOT invent one. The workflow engine's
- * `review → done` guards ARE the gate: `applyTransition` refuses unless a
- * review session completed and no review comment is still open
- * (lib/workflow/engine.ts:51-63). The supervisor simply attempts the
- * transition and treats a refusal as "not ready — skip, try again later".
+ * "The review is OK" is the `to_merge` STATUS: the review verdict promoted
+ * the epic there (review → to_merge, lib/workflow/engine.ts), and only such
+ * epics are merge candidates. The engine still has the last word — the
+ * `to_merge → done` transition requires source "merge" and is re-validated
+ * after git runs — and a refusal is treated as "not ready — skip, try again
+ * later".
  *
- * `POST .../approve` is deliberately NOT reused: it bulk-resolves every open
- * review comment before transitioning (approve/route.ts:30-38), which would
- * steamroll exactly the blocking findings that must stop an auto-merge.
+ * The merge IS the approval: on success the epic's remaining open review
+ * comments are resolved in the same action (lib/workflow/merge-approval.ts),
+ * exactly like the manual merge route. Blocking findings never reach this
+ * point — a review with blocking findings files a `changes_requested` verdict
+ * and the ticket goes back to in_progress instead of to_merge.
  *
  * A clean merge is pure git — no agent session, no scheduler slot. Only a
  * CONFLICT costs an agent (a `merge` session dispatched through the same
@@ -178,7 +180,7 @@ function finalizeMergedEpic(input: {
     .from(epics)
     .where(eq(epics.id, input.epicId))
     .get();
-  const fromStatus = (current?.status ?? "review") as KanbanStatus;
+  const fromStatus = (current?.status ?? "to_merge") as KanbanStatus;
 
   const validation = applyTransition({
     projectId: input.projectId,
@@ -198,6 +200,11 @@ function finalizeMergedEpic(input: {
     return { ok: false, error: validation.error ?? "Transition refused" };
   }
 
+  // The merge is the approval: open review comments are accepted with it.
+  // AFTER the guarded transition — a refusal above rolls the merge back, and
+  // the findings must survive that.
+  resolveOpenReviewComments(input.epicId);
+
   db.update(epics)
     .set({
       branchName: null,
@@ -205,11 +212,6 @@ function finalizeMergedEpic(input: {
     })
     .where(eq(epics.id, input.epicId))
     .run();
-
-  // Strictly after the guard passed: a refusal above returns early and the
-  // caller rolls the merge back, so the findings the next sweep reads are
-  // untouched. See lib/workflow/close-findings.ts.
-  closeOpenFindings(input.epicId);
 
   tryExportArjiJson(input.projectId);
   return { ok: true };
@@ -459,7 +461,7 @@ async function runAutoMerge(
     };
   }
 
-  const fromStatus = (epic.status ?? "review") as KanbanStatus;
+  const fromStatus = (epic.status ?? "to_merge") as KanbanStatus;
 
   // Mechanical-evidence gate. With verify_commands configured, the mode
   // that merges to the default branch unattended must not do so on agent

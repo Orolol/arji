@@ -24,6 +24,10 @@ import {
 } from "@/components/shared/ArijActionsList";
 import { formatCostUsd, formatTokens } from "@/lib/utils/format-usage";
 import { cn } from "@/lib/utils";
+import {
+  describeProviderOptions,
+  parseStoredProviderOptions,
+} from "@/lib/providers/options-registry";
 
 interface SessionDetail {
   id: string;
@@ -45,10 +49,14 @@ interface SessionDetail {
   outcome?: string | null;
   namedAgentName?: string | null;
   model?: string | null;
+  /** JSON object of the per-CLI options in effect for this run. */
+  cliOptions?: string | null;
   cliCommand?: string | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
   totalCostUsd?: number | null;
+  estimatedPromptTokens?: number | null;
+  estimatedPromptBreakdown?: string | null;
   arijActions?: ArijActionItem[] | null;
   logs?: {
     success?: boolean;
@@ -214,6 +222,10 @@ export default function SessionDetailPage() {
   }
 
   const isRunning = session.status === "running";
+  const sessionCliOptions = describeProviderOptions(
+    session.provider,
+    parseStoredProviderOptions(session.provider, session.cliOptions),
+  );
   const providerLabel =
     session.namedAgentName ||
     (session.provider
@@ -262,6 +274,18 @@ export default function SessionDetailPage() {
             {session.model}
           </span>
         )}
+        {/* Options actually in effect for this run, read from the session row
+            rather than from the named agent — the agent may have been edited
+            or deleted since. */}
+        {sessionCliOptions.map((option) => (
+          <Badge
+            key={option.key}
+            variant="outline"
+            className="rounded-full px-[8px] py-[1px] text-[11px] font-normal text-meta"
+          >
+            {option.label}: {option.value}
+          </Badge>
+        ))}
         {session.cliSessionId && (
           <Badge
             variant="outline"
@@ -368,13 +392,40 @@ export default function SessionDetailPage() {
           </span>
         </DetailRow>
         <DetailRow label="Tokens">
-          <span className="font-mono">
-            {session.inputTokens != null || session.outputTokens != null
-              ? `${formatTokens(session.inputTokens) ?? "—"} in · ${
-                  formatTokens(session.outputTokens) ?? "—"
-                } out`
-              : "—"}
-          </span>
+          <div className="flex flex-col gap-0.5 font-mono">
+            <span>
+              {session.inputTokens != null || session.outputTokens != null
+                ? `${formatTokens(session.inputTokens) ?? "—"} in · ${
+                    formatTokens(session.outputTokens) ?? "—"
+                  } out`
+                : "—"}
+            </span>
+            {session.estimatedPromptTokens != null && (
+              <span
+                className="text-[11.5px] font-normal text-muted-foreground"
+                data-testid="session-estimated-tokens"
+              >
+                Estimated input: ~{formatTokens(session.estimatedPromptTokens)} tokens
+                {session.estimatedPromptBreakdown && (() => {
+                  try {
+                    const b = JSON.parse(session.estimatedPromptBreakdown);
+                    const parts: string[] = [];
+                    if (b.spec) parts.push(`Spec ${formatTokens(b.spec)}`);
+                    if (b.memory) parts.push(`Mem ${formatTokens(b.memory)}`);
+                    if (b.ticket) parts.push(`Ticket ${formatTokens(b.ticket)}`);
+                    if (b.comments) parts.push(`Comments ${formatTokens(b.comments)}`);
+                    if (b.findings) parts.push(`Findings ${formatTokens(b.findings)}`);
+                    if (b.documents) parts.push(`Docs ${formatTokens(b.documents)}`);
+                    if (b.system) parts.push(`System ${formatTokens(b.system)}`);
+                    if (b.other) parts.push(`Other ${formatTokens(b.other)}`);
+                    return parts.length > 0 ? ` (${parts.join(" · ")})` : "";
+                  } catch {
+                    return "";
+                  }
+                })()}
+              </span>
+            )}
+          </div>
         </DetailRow>
         {session.worktreePath && (
           <DetailRow label="Worktree">

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { AgentType, AgentProvider } from "@/lib/agent-config/constants";
+import type { NamedAgentCliOptions } from "@/lib/providers/options-registry";
 
 type PromptSource = "builtin" | "global" | "project";
 type AssignmentSource = "builtin" | "global" | "project";
@@ -240,6 +241,10 @@ export interface NamedAgent {
   name: string;
   provider: AgentProvider;
   model: string;
+  /** Non-default per-CLI options only; `{}` means "all CLI defaults". */
+  options: NamedAgentCliOptions;
+  /** Persona injected at the head of the prompt; null injects nothing. */
+  personaPrompt: string | null;
   escalatesTo: string | null;
   createdAt: string | null;
 }
@@ -269,6 +274,8 @@ export function useNamedAgents() {
       name: string;
       provider: AgentProvider;
       model?: string;
+      options?: NamedAgentCliOptions;
+      personaPrompt?: string | null;
       escalatesTo?: string | null;
     }) => {
       const res = await fetch("/api/agent-config/named-agents", {
@@ -290,6 +297,8 @@ export function useNamedAgents() {
         name?: string;
         provider?: AgentProvider;
         model?: string;
+        options?: NamedAgentCliOptions;
+        personaPrompt?: string | null;
         escalatesTo?: string | null;
       },
     ) => {
