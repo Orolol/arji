@@ -1,15 +1,16 @@
 /**
- * Regression contract for B-arij: one activity line per ticket movement.
+ * Regression contracts for epic-cascade activity.
  *
  * Moving an epic cascades the same status change onto its stories. Every
  * child write appended its own `ticket_activity_log` row, so a five-story
  * epic produced six identical "Agent moved In Progress → Review" lines in
  * the ticket feed — the movement, then one echo per story.
  *
- * The contract these tests pin: an epic-scoped cascade records exactly ONE
- * entry, the epic's own; a genuinely story-scoped move still records its
- * own line; and a cascade never leaves the trail empty, not even when the
- * epic's status write is a no-op.
+ * Intermediate epic-scoped cascades record exactly one entry, the epic's own;
+ * a genuinely story-scoped move records its own line; and a cascade never
+ * leaves the trail empty when the epic write is a no-op. Completion is the
+ * deliberate exception: every review → done story is an auditable approval
+ * or merge result and therefore keeps its own activity row.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
@@ -84,7 +85,7 @@ beforeEach(() => {
   db.delete(projects).run();
 });
 
-describe("an epic movement writes one activity line, not one per story", () => {
+describe("epic-scoped cascade activity", () => {
   it("logs a single entry when a build starts on a five-story epic", () => {
     const { projectId, epicId } = seedEpic("todo", [
       "todo",
@@ -189,7 +190,7 @@ describe("an epic movement writes one activity line, not one per story", () => {
     ]);
   });
 
-  it("logs a single entry when an epic approval closes its stories", async () => {
+  it("logs the epic and every reviewed story when approval closes them", async () => {
     db.insert(projects).values({ id: "p-approve", name: "Cascade" }).run();
     db.insert(epics)
       .values({
@@ -216,6 +217,10 @@ describe("an epic movement writes one activity line, not one per story", () => {
         epicId: "e-approve",
         status: "completed",
         agentType: "review_code",
+        // A review that delivered its verdict: without one, an
+        // MCP-capable reviewer is unverifiable and review → done is
+        // refused for that reason instead (lib/pipeline/findings.ts).
+        reviewVerdict: "approved",
         mode: "plan",
       })
       .run();
@@ -226,13 +231,24 @@ describe("an epic movement writes one activity line, not one per story", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(activity("e-approve")).toEqual([
-      expect.objectContaining({
-        fromStatus: "review",
-        toStatus: "done",
-        actor: "user",
-      }),
-    ]);
+    expect(activity("e-approve")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fromStatus: "review",
+          toStatus: "done",
+          actor: "user",
+          reason: "Review approved",
+        }),
+        ...["s-1", "s-2", "s-3"].map((id) =>
+          expect.objectContaining({
+            fromStatus: "review",
+            toStatus: "done",
+            actor: "user",
+            reason: expect.stringContaining(`Story ${id}`),
+          })
+        ),
+      ])
+    );
   });
 });
 

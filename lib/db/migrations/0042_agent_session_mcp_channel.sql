@@ -1,0 +1,18 @@
+-- What Arij actually wired for this session's MCP tool channel.
+--
+-- The unverifiable-review rule (lib/pipeline/findings.ts) refuses a review
+-- that had the `submit_findings` tool and filed nothing on it. Reconstructing
+-- "had the tool" from the provider list answers a different question: whether
+-- that PROVIDER supports injection, not whether THIS spawn got it. Injection
+-- degrades silently in two places — process-manager catches every injection
+-- error and spawns without tools, and the claude spawn drops --mcp-config when
+-- the temp file cannot be written — and in both the child never calls the
+-- HTTP route, so no 401 fires either. Without this column such a review is
+-- blamed for a channel it never had.
+--
+-- 'injected'    — a token was minted and the config handed to the provider.
+-- 'unavailable' — injection was intended for this session and did not happen.
+-- NULL          — legacy rows, and sessions injection never applies to
+--                 (MCP-exempt agent types, spawns with no session row). Those
+--                 fall back to the provider-based reconstruction.
+ALTER TABLE agent_sessions ADD COLUMN mcp_channel text;

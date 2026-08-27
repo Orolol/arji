@@ -112,6 +112,7 @@ const {
   ticketActivityLog,
   notifications,
   settings,
+  userStories,
   verifyReports,
 } = await import("@/lib/db/schema");
 const { tryAutoMerge } = await import("@/lib/auto-mode/merge");
@@ -171,6 +172,11 @@ function seed(options: { withCompletedReview?: boolean } = {}): void {
         status: "completed",
         agentType: "review_code",
         outcome: "answered",
+        // A review that actually delivered: the merge gate only counts a
+        // reviewer's verdict when it reached the database (see
+        // lib/pipeline/findings.ts). A verdict-less claude-code row would be
+        // unverifiable, which is a different test's subject.
+        reviewVerdict: "approved",
         worktreePath: "/tmp/worktrees/landable",
         createdAt: isoAt(3),
         endedAt: isoAt(4),
@@ -203,6 +209,7 @@ beforeEach(() => {
   db.delete(ticketActivityLog).run();
   db.delete(reviewComments).run();
   db.delete(agentSessions).run();
+  db.delete(userStories).run();
   db.delete(epics).run();
   db.delete(projects).run();
   autoModeRegistry.resetAll();
@@ -294,6 +301,75 @@ describe("tryAutoMerge — clean merge", () => {
       toStatus: "done",
       actor: "agent",
     });
+  });
+
+  it("closes each reviewed story, logs it, and reports non-review stories without changing them", async () => {
+    seed();
+    db.insert(userStories)
+      .values([
+        {
+          id: "auto-story-review-1",
+          epicId: EPIC_ID,
+          title: "Reviewed one",
+          status: "review",
+        },
+        {
+          id: "auto-story-review-2",
+          epicId: EPIC_ID,
+          title: "Reviewed two",
+          status: "review",
+        },
+        {
+          id: "auto-story-progress",
+          epicId: EPIC_ID,
+          title: "Still running",
+          status: "in_progress",
+        },
+      ])
+      .run();
+    gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
+
+    await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    expect(
+      db
+        .select({ id: userStories.id, status: userStories.status })
+        .from(userStories)
+        .where(eq(userStories.epicId, EPIC_ID))
+        .all()
+    ).toEqual([
+      { id: "auto-story-review-1", status: "done" },
+      { id: "auto-story-review-2", status: "done" },
+      { id: "auto-story-progress", status: "in_progress" },
+    ]);
+
+    const activity = db
+      .select()
+      .from(ticketActivityLog)
+      .where(eq(ticketActivityLog.epicId, EPIC_ID))
+      .all();
+    expect(activity).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actor: "agent",
+          fromStatus: "review",
+          toStatus: "done",
+          reason: expect.stringContaining("Story auto-story-review-1"),
+        }),
+        expect.objectContaining({
+          actor: "agent",
+          fromStatus: "review",
+          toStatus: "done",
+          reason: expect.stringContaining("Story auto-story-review-2"),
+        }),
+        expect.objectContaining({
+          actor: "agent",
+          fromStatus: "done",
+          toStatus: "done",
+          reason: expect.stringContaining("auto-story-progress:in_progress"),
+        }),
+      ])
+    );
   });
 });
 

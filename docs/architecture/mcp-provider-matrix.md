@@ -15,6 +15,37 @@ deepseek, kimi, zai, pi). Antigravity (`agy`) was added after live probing
 showed a working per-spawn seam. The sections about removed providers are kept
 below as the record of why they went.
 
+**2026-08-26 — silence on the channel is now a refusal.** Because every
+registered provider has the channel, a review session that files neither a
+`submit_findings` verdict nor a finding row is not "a review that found
+nothing" — it is a review whose channel did not work. Such a review is
+*unverifiable*: it does not satisfy `review → done`, does not satisfy the Full
+Auto merge gate, and shows as a blocking reason on the board
+(`lib/pipeline/findings.ts`). A 401 on `submit_findings` is also traced onto
+the ticket (`lib/mcp/review-channel-failure.ts`), because that rejection is
+otherwise invisible — the session still ends `answered`.
+
+The prose fallback in `lib/pipeline/findings.ts` survives for two populations:
+**legacy rows naming a removed provider** (gemini-cli and the rest of the list
+above), and **sessions whose channel Arij could not wire**. Neither could call
+the tool, so `NULL` there means "no channel", not "nothing got through".
+
+The second population is why `agent_sessions.mcp_channel` exists (migration
+0041). Injection is best-effort by design — a session must never fail to spawn
+because the channel could not be built — so `processManager.start()` catches
+every injection error and `prepareClaudeSpawn` drops `--mcp-config` when its
+temp file cannot be written. In both the child runs with no tools and never
+reaches an `/api/mcp` route, so the 401 trace does not fire either. The column
+records `injected` / `unavailable` at spawn time and the review gate reads it
+BEFORE the provider list, so a review Arij knows it could not equip is judged
+by prose rather than refused.
+
+Known gap: for `oh-my-pi` and `agy` the server entry lives in a user-global
+config file Arij does not own, so `injected` means "Arij handed over the
+environment", not "the CLI loaded it" — and `agy` reports a missing entry as a
+quietly failed server. That case still looks injected; the 401 trace and the
+Review-column badge are what surface it.
+
 ## The gate
 
 `providerSupportsMcp()` in `lib/claude/mcp-injection.ts` decides who gets a

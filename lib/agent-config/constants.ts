@@ -159,10 +159,30 @@ export const FALLBACK_PROVIDER: AgentProvider = "claude-code";
 export const OPENAI_COMPATIBLE_PROVIDER = "openai-compatible" as const;
 
 /**
+ * Chat-only modes backed by a long-lived CLI process. They are deliberately
+ * separate from AgentProvider: build/review dispatch remains one process per
+ * session, while chat conversations can explicitly opt into a warm process.
+ */
+export const CLAUDE_CODE_PERSISTENT_PROVIDER =
+  "claude-code-persistent" as const;
+export const OH_MY_PI_PERSISTENT_PROVIDER = "oh-my-pi-persistent" as const;
+
+export const PERSISTENT_CHAT_PROVIDER_OPTIONS = [
+  CLAUDE_CODE_PERSISTENT_PROVIDER,
+  OH_MY_PI_PERSISTENT_PROVIDER,
+] as const;
+
+export type PersistentChatProvider =
+  (typeof PERSISTENT_CHAT_PROVIDER_OPTIONS)[number];
+
+/**
  * A provider a chat conversation can run on: any CLI agent provider, or
  * the OpenAI-compatible direct-API fast mode.
  */
-export type ChatModeProvider = AgentProvider | typeof OPENAI_COMPATIBLE_PROVIDER;
+export type ChatModeProvider =
+  | AgentProvider
+  | PersistentChatProvider
+  | typeof OPENAI_COMPATIBLE_PROVIDER;
 
 /**
  * Stable order — `pickAlternativeReviewProvider()` walks this list to choose
@@ -182,6 +202,8 @@ export const PROVIDER_LABELS: Record<ChatModeProvider, string> = {
   "oh-my-pi": "Oh My Pi",
   agy: "Antigravity",
   "openai-compatible": "OpenAI-compatible",
+  "claude-code-persistent": "Claude Code — persistent",
+  "oh-my-pi-persistent": "Oh My Pi — persistent",
 };
 
 export function isAgentProvider(value: string): value is AgentProvider {
@@ -190,5 +212,27 @@ export function isAgentProvider(value: string): value is AgentProvider {
 
 /** True for anything a chat conversation can run on (see ChatModeProvider). */
 export function isChatProvider(value: string): value is ChatModeProvider {
-  return value === OPENAI_COMPATIBLE_PROVIDER || isAgentProvider(value);
+  return (
+    value === OPENAI_COMPATIBLE_PROVIDER ||
+    isAgentProvider(value) ||
+    isPersistentChatProvider(value)
+  );
+}
+
+export function isPersistentChatProvider(
+  value: string | null | undefined,
+): value is PersistentChatProvider {
+  return Boolean(
+    value &&
+      (PERSISTENT_CHAT_PROVIDER_OPTIONS as readonly string[]).includes(value),
+  );
+}
+
+/** Provider process used underneath a chat-only persistent mode. */
+export function persistentChatBaseProvider(
+  provider: PersistentChatProvider,
+): Extract<AgentProvider, "claude-code" | "oh-my-pi"> {
+  return provider === CLAUDE_CODE_PERSISTENT_PROVIDER
+    ? "claude-code"
+    : "oh-my-pi";
 }

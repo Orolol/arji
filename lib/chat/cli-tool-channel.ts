@@ -1,12 +1,13 @@
 /**
- * Per-turn Arij MCP tool channel for CLI chat conversations.
+ * Arij MCP tool channel for CLI chat conversations.
  *
- * CLI chat spawns (claude-code, codex) have no agent_sessions row, so they
- * bypass the processManager.start() wiring point on purpose — this module is
- * their dedicated wiring: the chat stream route calls
- * `createChatCliToolChannel` once per turn, passes `channel.mcp` to the
- * spawn, and calls `channel.release()` on every completion path (success,
- * error, client cancel).
+ * CLI chat spawns (claude-code, codex, oh-my-pi) have no agent_sessions row,
+ * so they bypass the processManager.start() wiring point on purpose — this
+ * module is their dedicated wiring: the chat stream route calls
+ * `createChatCliToolChannel` once per one-shot turn, passes `channel.mcp` to
+ * the spawn, and calls `channel.release()` on every completion path. The
+ * persistent runner instead creates one channel when the conversation
+ * process starts and releases it only when that process exits/reaps.
  *
  * Gate parity with the other surfaces:
  *   - same global toggle and provider support as agent injection
@@ -38,9 +39,9 @@ import { mintMcpToken, revokeMcpTokensForSession } from "@/lib/mcp/token-store";
 import type { McpSpawnConfig } from "@/lib/providers/types";
 
 export interface ChatCliToolChannel {
-  /** Spawn config to pass as `options.mcp` (chat toolset, per-turn token). */
+  /** Spawn config to pass as `options.mcp` (scoped chat toolset token). */
   mcp: McpSpawnConfig;
-  /** Revokes the turn's bearer token. Idempotent — call on every exit path. */
+  /** Revokes the bearer token. Idempotent — call on every process exit path. */
   release: () => void;
 }
 

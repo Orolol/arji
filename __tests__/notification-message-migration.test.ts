@@ -217,9 +217,13 @@ describe("0031_notification_message — applied schema", () => {
       // Un-stamping from 0031 replays every LATER migration too, and an ADD
       // COLUMN is not a no-op the second time — so later migration columns
       // have to go back as well.
+      // 0042 indexes this column, and SQLite refuses to drop a column an
+      // index still references. The replay re-creates the index.
+      conn.exec("DROP INDEX IF EXISTS review_comments_session_idx");
       conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_tokens");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_breakdown");
       const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);

@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { agentSessions, reviewComments } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { CODE_PRODUCING_AGENT_TYPES } from "@/lib/agent-config/constants";
+import { selectUnverifiableReviewSessionIds } from "@/lib/pipeline/findings";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import type { TransitionContext } from "./engine";
 
@@ -48,7 +49,16 @@ export function buildTransitionContext(opts: {
     )
     .all();
 
-  // Check for completed review sessions
+  // Check for completed review sessions.
+  //
+  // "Completed" is necessary but not sufficient: a review whose provider had
+  // the structured channel and filed no verdict on it delivered no evidence
+  // (lib/pipeline/findings.ts). Counting it here is what let a broken
+  // findings channel unlock review → done — the reviewer's 401'd findings
+  // never became review_comments rows, so the "no open comments" half of the
+  // gate was vacuously satisfied too. Such a session is tracked separately
+  // as `hasUnverifiableReview` so the engine can say WHY it refuses instead
+  // of claiming no review ever ran.
   const completedReviewSessions = db
     .select()
     .from(agentSessions)
@@ -70,6 +80,16 @@ export function buildTransitionContext(opts: {
         agentType === "feature_reviewer"
       );
     });
+
+  // Batched on purpose: the per-session helper costs three queries each, and
+  // four review types over a few rounds turns one guarded transition into
+  // dozens of unindexed reads. The rows are already in hand above.
+  const unverifiableReviewIds = selectUnverifiableReviewSessionIds(
+    completedReviewSessions
+  );
+  const verifiableReviewSessions = completedReviewSessions.filter(
+    (session) => !unverifiableReviewIds.has(session.id)
+  );
 
   // Only code-producing sessions own the in_progress column. Review, chat,
   // merge and other auxiliary sessions legitimately run in other columns.
@@ -107,7 +127,10 @@ export function buildTransitionContext(opts: {
     fromStatus,
     toStatus,
     hasOpenReviewComments: openComments.length > 0,
-    hasCompletedReview: completedReviewSessions.length > 0,
+    hasCompletedReview: verifiableReviewSessions.length > 0,
+    hasUnverifiableReview:
+      verifiableReviewSessions.length === 0 &&
+      completedReviewSessions.length > 0,
     requireCompletedReview,
     requireResolvedComments,
     hasRunningSession: runningSessions.length > 0,

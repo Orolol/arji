@@ -126,15 +126,28 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
     table: "named_agents",
     column: "escalates_to",
   },
-  // 0041_agent_session_estimated_tokens (single transactional migration: the two
-  // columns are always present or absent together on real databases)
+  // 0042_agent_session_mcp_channel (single column ALTER). Renumbered off
+  // 0041's slot, which main's done-epic story repair had already taken: the
+  // `when` IS the migrator's identity, so a database that ran main's 0041
+  // would have skipped this one forever.
   {
-    folderMillis: 1786713800000,
+    folderMillis: 1786713900000,
+    table: "agent_sessions",
+    column: "mcp_channel",
+  },
+  // 0044_agent_session_estimated_tokens (single transactional migration: the
+  // two columns are always present or absent together on real databases).
+  // Renumbered off 0041's slot, which main's done-epic story repair had
+  // already taken: the `when` IS the migrator's identity, so it moved past
+  // main's whole tail (0043_review_comment_session_index) rather than
+  // colliding with any migration a database may already have applied.
+  {
+    folderMillis: 1786714100000,
     table: "agent_sessions",
     column: "estimated_prompt_tokens",
   },
   {
-    folderMillis: 1786713800000,
+    folderMillis: 1786714100000,
     table: "agent_sessions",
     column: "estimated_prompt_breakdown",
   },

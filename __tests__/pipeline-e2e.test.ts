@@ -257,6 +257,33 @@ function scriptRun(
 }
 
 /**
+ * Queues a scripted REVIEW run that also files its structured verdict, the
+ * way a real MCP-capable reviewer does: `submit_findings` persists
+ * `agent_sessions.review_verdict` on the calling session
+ * (app/api/mcp/submit-findings/route.ts).
+ *
+ * Reviews here run on claude-code, which HAS that channel — a review that
+ * ends with nothing on it is unverifiable and blocks, whatever its markdown
+ * says (lib/pipeline/findings.ts). Prose-only reviews still exist in this
+ * file, but only where the case is deliberately about the fallback.
+ */
+function scriptReview(
+  label: string,
+  text: string,
+  verdict: string | null = "approved"
+): ScriptedCliRun {
+  return scriptRun(label, cliOk(text), {
+    onStart: (sessionId) => {
+      if (!verdict) return;
+      db.update(agentSessions)
+        .set({ reviewVerdict: verdict })
+        .where(eq(agentSessions.id, sessionId))
+        .run();
+    },
+  });
+}
+
+/**
  * Advances the fake clock (flushing microtasks along the way) until the
  * given promise settles, then returns/throws its outcome. The step is
  * coarse; ordering stays exact because sinon executes timers in due-time
@@ -439,9 +466,9 @@ describe("pipeline e2e — clean pass", () => {
   it("build → review clean → succeeded, ticket left in review, coherent trace", async () => {
     const { projectId, epicId } = seed();
     scriptRun("build", cliOk("Implemented the ticket."));
-    scriptRun(
+    scriptReview(
       "review",
-      cliOk("**Overall Verdict: Complete** — implementation matches the spec.")
+      "**Overall Verdict: Complete** — implementation matches the spec."
     );
 
     const { runId, buildSessionId } = await dispatchPipelineBuild(
@@ -524,7 +551,7 @@ describe("pipeline e2e — blocking findings and fix cycle", () => {
       "review-1",
       cliOk("I filed one blocking finding via submit_findings."),
       {
-        onStart: () => {
+        onStart: (sessionId) => {
           db.insert(reviewComments)
             .values({
               id: `rc-e2e-${counter}`,
@@ -534,6 +561,10 @@ describe("pipeline e2e — blocking findings and fix cycle", () => {
               body: "[critical] Token never expires",
               author: "agent",
               status: "open",
+              // The real tool stamps the calling session on every row; here
+              // it is also the proof the channel worked, which is what keeps
+              // this verdict-less review out of the unverifiable branch.
+              agentSessionId: sessionId,
               createdAt: new Date().toISOString(),
             })
             .run();
@@ -541,9 +572,9 @@ describe("pipeline e2e — blocking findings and fix cycle", () => {
       }
     );
     scriptRun("fix", cliOk("Fixed the token expiry."));
-    scriptRun(
+    scriptReview(
       "review-2",
-      cliOk("**Overall Verdict: Complete** — the fix addresses the finding.")
+      "**Overall Verdict: Complete** — the fix addresses the finding."
     );
 
     const { runId, buildSessionId } = await dispatchPipelineBuild(
@@ -632,12 +663,8 @@ describe("pipeline e2e — the structured submit_findings verdict decides", () =
       }
     );
     scriptRun("fix", cliOk("Addressed the reviewer's request."));
-    // Second review: no tool call at all → the prose fallback decides, and it
-    // is clean.
-    scriptRun(
-      "review-2",
-      cliOk("**Overall Verdict: Complete** — the fix holds.")
-    );
+    // Second review: an approving tool call this time, so the run can finish.
+    scriptReview("review-2", "**Overall Verdict: Complete** — the fix holds.");
 
     const { runId } = await dispatchPipelineBuild(projectId, epicId);
     const run = await waitForTerminalRun(runId);
@@ -651,7 +678,7 @@ describe("pipeline e2e — the structured submit_findings verdict decides", () =
     );
     expect(reviewSessions).toHaveLength(2);
     expect(reviewSessions.map((session) => session.reviewVerdict).sort()).toEqual(
-      ["changes_requested", null]
+      ["approved", "changes_requested"]
     );
 
     // Zero findings rows were filed: the verdict alone blocked the stage.

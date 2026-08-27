@@ -99,6 +99,7 @@ export function parseWorktreeList(
 export async function listWorktrees(
   repoPath: string
 ): Promise<GitWorktreeInfo[]> {
+  // Invariant: Uses hardcoded subcommand and porcelain flag with no caller-supplied args.
   const out = await simpleGit(repoPath).raw([
     "worktree",
     "list",
@@ -118,6 +119,7 @@ export async function pruneOrphanWorktrees(
   repoPath: string
 ): Promise<{ pruned: number; remaining: GitWorktreeInfo[] }> {
   const before = await listWorktrees(repoPath);
+  // Invariant: Uses hardcoded subcommand arguments with no caller-supplied options.
   await simpleGit(repoPath).raw(["worktree", "prune"]);
   const remaining = await listWorktrees(repoPath);
 

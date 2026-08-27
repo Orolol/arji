@@ -15,6 +15,12 @@
  *   approved           | none              | negative | no  (structured wins)
  *   approved           | [critical] open   | clean  | YES  (findings veto)
  *   none               | none              | negative | YES (prose fallback)
+ *
+ * The prose rows only describe a reviewer that COULD NOT have filed a
+ * verdict, so every fixture below that exercises the fallback names an
+ * MCP-less provider explicitly. A verdict-less reviewer on a provider that
+ * HAS the tool is unverifiable and blocks whatever its markdown says — that
+ * rule and its own matrix live in __tests__/review-unverifiable-gate.test.ts.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 
@@ -92,6 +98,12 @@ function insertFinding(input: {
 function insertReviewSession(input: {
   reviewVerdict?: string | null;
   startedAt?: string;
+  /**
+   * Defaults to the schema default, `claude-code`. Pass an MCP-less provider
+   * for the prose-fallback cases: on a provider that HAS submit_findings, a
+   * missing verdict is an unverifiable review, not a silent approval.
+   */
+  provider?: string;
 } = {}): string {
   rowCounter += 1;
   const id = `sess-${counter}-${rowCounter}`;
@@ -105,6 +117,7 @@ function insertReviewSession(input: {
       agentType: "review_code",
       outcome: "answered",
       reviewVerdict: input.reviewVerdict ?? null,
+      ...(input.provider ? { provider: input.provider } : {}),
       startedAt: input.startedAt ?? WINDOW_START,
       createdAt: input.startedAt ?? WINDOW_START,
     })
@@ -397,7 +410,7 @@ describe("assessReviewOutcome — channel priority matrix", () => {
   it("(4) no structured verdict → the prose fallback decides, bit-for-bit", () => {
     // The gemini-cli case: the provider has no MCP channel, so the only
     // signal is the reviewer's markdown.
-    const sessionId = insertReviewSession();
+    const sessionId = insertReviewSession({ provider: "gemini-cli" });
     const negative = assessReviewOutcome({
       epicId,
       sinceIso: WINDOW_START,
@@ -447,8 +460,11 @@ describe("assessReviewOutcome — channel priority matrix", () => {
     // Findings rows are epic-keyed and window-filtered, but the verdict is
     // read from the stage's own session row — a previous cycle's approval
     // cannot green-light this one.
-    insertReviewSession({ reviewVerdict: "approved" });
-    const thisStage = insertReviewSession();
+    insertReviewSession({
+      provider: "gemini-cli",
+      reviewVerdict: "approved",
+    });
+    const thisStage = insertReviewSession({ provider: "gemini-cli" });
     const assessment = assessReviewOutcome({
       epicId,
       sinceIso: WINDOW_START,
@@ -534,7 +550,7 @@ describe("resolveReviewVerdict (revert drivers)", () => {
     // a row-filing reviewer from before the verdict column behaves exactly
     // as it did.
     insertFinding({ body: "[critical] Legacy row, no verdict recorded" });
-    const sessionId = insertReviewSession();
+    const sessionId = insertReviewSession({ provider: "gemini-cli" });
     expect(
       resolveReviewVerdict({
         epicId,
