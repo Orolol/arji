@@ -71,11 +71,19 @@ interface BoardProps {
    */
   busyEpicIds?: Set<string>;
   /**
-   * Hide the Released digest while a side panel owns the right edge: the four
+   * Hide the Released digest while a side panel owns the right edge: the
    * working columns and the panel share the width instead (see the board
    * page, which flips this from the chat panel's expanded state).
    */
   hideReleased?: boolean;
+  /**
+   * Hide the Done column while a side panel owns the right edge — same
+   * rationale as `hideReleased`: a delivered ticket needs no attention, and
+   * dropping the column keeps the working columns readable next to the
+   * panel. Takes precedence over focus mode's collapsed chip: with the panel
+   * open even 34px is width the live columns want back.
+   */
+  hideDone?: boolean;
   /** Reports how many cards survive the active filters (drives the capture bar). */
   onVisibleCountChange?: (count: number) => void;
   /** A Review card merged straight from the board. */
@@ -126,6 +134,7 @@ export function Board({
   onRetryBuild,
   busyEpicIds,
   hideReleased = false,
+  hideDone = false,
   onVisibleCountChange,
   onMergeSuccess,
   onMergeAgentDispatched,
@@ -578,11 +587,11 @@ export function Board({
   const renderedEpicIds = useMemo(() => {
     const ids = new Set<string>();
     for (const status of DRAGGABLE_COLUMNS) {
-      if (focusMode && status === "done") continue;
+      if ((focusMode || hideDone) && status === "done") continue;
       for (const epic of visibleColumns[status]) ids.add(epic.id);
     }
     return ids;
-  }, [visibleColumns, focusMode]);
+  }, [visibleColumns, focusMode, hideDone]);
 
   const hoverFocus = useMemo(() => {
     if (!hoverFocusEpicId) return null;
@@ -761,7 +770,8 @@ export function Board({
         />
         <div className="flex flex-1 min-h-0 gap-[16px] overflow-x-auto p-[22px] transition-[width,opacity] duration-200 motion-reduce:transition-none">
           {DRAGGABLE_COLUMNS.map((status) =>
-            focusMode && status === "done" ? (
+            hideDone && status === "done" ? null : focusMode &&
+              status === "done" ? (
               <CollapsedColumn
                 key={status}
                 label={COLUMN_LABELS[status]}
