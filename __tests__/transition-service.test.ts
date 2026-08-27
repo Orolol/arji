@@ -35,7 +35,13 @@ vi.mock("@/lib/db/schema", () => ({
     _name: "reviewComments",
     epicId: "epicId",
     status: "status",
+    // Read by the batched unverifiable-review check: a review session with
+    // findings rows of its own proved its channel worked.
+    agentSessionId: "agentSessionId",
   },
+  // Same check reads the mcp_tools_enabled toggle when a session row carries
+  // no recorded channel state (every legacy row).
+  settings: { _name: "settings", key: "key", value: "value" },
   ticketActivityLog: {
     _name: "ticketActivityLog",
     id: "id",

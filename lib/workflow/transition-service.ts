@@ -46,6 +46,14 @@ export interface ApplyTransitionOpts {
 export interface ApplyTransitionResult {
   valid: boolean;
   error?: string;
+  /** Stories deliberately left unchanged while their parent reached Done. */
+  skippedStories?: SkippedStory[];
+}
+
+export interface SkippedStory {
+  id: string;
+  title: string;
+  status: string;
 }
 
 export type StoryStatus = "todo" | "in_progress" | "review" | "done";
@@ -89,6 +97,17 @@ export interface ApplyStoryTransitionOpts {
    * movement keeps its line even when the epic's own status write is a no-op.
    */
   logActivity?: boolean;
+}
+
+export interface CompleteReviewedStoriesOpts {
+  projectId: string;
+  epicId: string;
+  actor: TransitionContext["actor"];
+  source: NonNullable<TransitionContext["source"]>;
+  reason: string;
+  sessionId?: string;
+  validateOnly?: boolean;
+  assumeReviewCommentsResolved?: boolean;
 }
 
 function logRefusedTransition(opts: {
@@ -177,9 +196,37 @@ export function applyTransition(opts: ApplyTransitionOpts): ApplyTransitionResul
     return { valid: false, error: result.error };
   }
 
+  // An epic cannot reach Done while reviewed child work remains stranded in
+  // Review. Keeping this in the shared transition service is the safety net
+  // for every completion path: approval, manual merge, Full Auto merge,
+  // Resolve Merge and both merge-fix retries. The helper validates every
+  // eligible child before writing any of them, and runs before the parent
+  // write so a refused story transition can never leave a Done epic behind.
+  const storyCompletion =
+    toStatus === "done"
+      ? completeReviewedStories({
+          projectId,
+          epicId,
+          actor,
+          source,
+          reason: reason ?? "Parent epic completed",
+          ...(sessionId ? { sessionId } : {}),
+          validateOnly,
+          assumeReviewCommentsResolved,
+        })
+      : { valid: true as const };
+  if (!storyCompletion.valid) {
+    return storyCompletion;
+  }
+
   // In validate-only mode, stop after validation
   if (validateOnly) {
-    return { valid: true };
+    return {
+      valid: true,
+      ...(storyCompletion.skippedStories
+        ? { skippedStories: storyCompletion.skippedStories }
+        : {}),
+    };
   }
 
   // 2. DB update
@@ -204,7 +251,12 @@ export function applyTransition(opts: ApplyTransitionOpts): ApplyTransitionResul
     sessionId,
   });
 
-  return { valid: true };
+  return {
+    valid: true,
+    ...(storyCompletion.skippedStories
+      ? { skippedStories: storyCompletion.skippedStories }
+      : {}),
+  };
 }
 
 /**
@@ -284,6 +336,102 @@ export function applyStoryTransition(
   }
 
   return { valid: true };
+}
+
+/**
+ * Close the reviewed stories that belong to an epic completion.
+ *
+ * Non-review stories are intentionally not coerced: work added late or still
+ * being built keeps its status and is reported in one same-state activity
+ * entry. Reviewed stories each receive their own transition-service activity
+ * row so the detail view can account for every child that actually closed.
+ */
+export function completeReviewedStories(
+  opts: CompleteReviewedStoriesOpts
+): ApplyTransitionResult {
+  const stories = db
+    .select()
+    .from(userStories)
+    .where(eq(userStories.epicId, opts.epicId))
+    .all();
+  const reviewedStories = stories.filter((story) => story.status === "review");
+  const skippedStories: SkippedStory[] = stories
+    .filter((story) => story.status !== "review")
+    .map((story) => ({
+      id: story.id,
+      title: story.title,
+      status: story.status ?? "todo",
+    }));
+
+  // Validate the complete set before changing one child. Epic-scoped review
+  // evidence authorizes the synchronized review → done moves.
+  for (const story of reviewedStories) {
+    const validation = applyStoryTransition({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      userStoryId: story.id,
+      fromStatus: "review",
+      toStatus: "done",
+      actor: opts.actor,
+      source: opts.source,
+      reason: opts.reason,
+      ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+      reviewScope: "epic",
+      validateOnly: true,
+      assumeReviewCommentsResolved: opts.assumeReviewCommentsResolved,
+    });
+    if (!validation.valid) {
+      return {
+        ...validation,
+        ...(skippedStories.length > 0 ? { skippedStories } : {}),
+      };
+    }
+  }
+
+  if (opts.validateOnly) {
+    return {
+      valid: true,
+      ...(skippedStories.length > 0 ? { skippedStories } : {}),
+    };
+  }
+
+  for (const story of reviewedStories) {
+    const transition = applyStoryTransition({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      userStoryId: story.id,
+      fromStatus: "review",
+      toStatus: "done",
+      actor: opts.actor,
+      source: opts.source,
+      reason: opts.reason,
+      ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+      reviewScope: "epic",
+      assumeReviewCommentsResolved: opts.assumeReviewCommentsResolved,
+    });
+    if (!transition.valid) {
+      return {
+        ...transition,
+        ...(skippedStories.length > 0 ? { skippedStories } : {}),
+      };
+    }
+  }
+
+  if (skippedStories.length > 0) {
+    logWorkflowDecision({
+      projectId: opts.projectId,
+      epicId: opts.epicId,
+      status: "done",
+      actor: opts.actor,
+      reason: `Epic completed; ${skippedStories.length} non-review ${skippedStories.length === 1 ? "story was" : "stories were"} left unchanged (${skippedStories.map((story) => `${story.id}:${story.status}`).join(", ")})`,
+      ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+    });
+  }
+
+  return {
+    valid: true,
+    ...(skippedStories.length > 0 ? { skippedStories } : {}),
+  };
 }
 
 /**

@@ -197,6 +197,7 @@ describe("0034_agent_session_review_verdict — applied schema", () => {
       // Rewinding the ledger re-runs the whole tail, and an ADD COLUMN is not
       // a no-op the second time — 0039's and 0041's columns have to go back as well.
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
       conn.exec("ALTER TABLE named_agents DROP COLUMN options");
       conn.exec("ALTER TABLE named_agents DROP COLUMN persona_prompt");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
@@ -267,6 +268,7 @@ describe("0034_agent_session_review_verdict — applied schema", () => {
       // The repair stamps 0034 and hands the tail back to drizzle, so every
       // later ADD COLUMN runs again: 0039's and 0041's columns have to go back too.
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
       conn.exec("ALTER TABLE named_agents DROP COLUMN options");
       conn.exec("ALTER TABLE named_agents DROP COLUMN persona_prompt");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");

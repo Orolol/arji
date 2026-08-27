@@ -152,7 +152,7 @@ the derived posture rather than reaching argv.
 
 ## 4. Persistence
 
-Migration `0041_named_agent_options` adds three columns:
+Migration `0044_named_agent_options` adds three columns:
 
 - `named_agents.options` — JSON object, `NOT NULL DEFAULT '{}'`. Holds only
   **non-default** values, so `{}` and "nothing configured" are the same state

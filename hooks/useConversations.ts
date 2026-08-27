@@ -13,6 +13,7 @@ export interface Conversation {
   provider: string;
   namedAgentId?: string | null;
   cliSessionId?: string | null;
+  persistentSessionState?: "hot" | "cold" | null;
   createdAt: string;
 }
 
@@ -137,6 +138,29 @@ export function useConversations(projectId: string) {
     [projectId]
   );
 
+  const restartPersistentSession = useCallback(
+    async (conversationId: string) => {
+      try {
+        const res = await fetch(
+          `/api/projects/${projectId}/conversations/${conversationId}/persistent-session`,
+          { method: "DELETE" },
+        );
+        if (!res.ok) return false;
+        setConversations((previous) =>
+          previous.map((conversation) =>
+            conversation.id === conversationId
+              ? { ...conversation, persistentSessionState: "cold" }
+              : conversation,
+          ),
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [projectId],
+  );
+
   return {
     conversations,
     activeId,
@@ -145,6 +169,7 @@ export function useConversations(projectId: string) {
     createConversation,
     updateConversation,
     deleteConversation,
+    restartPersistentSession,
     refresh,
   };
 }

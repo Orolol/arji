@@ -126,16 +126,28 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
     table: "named_agents",
     column: "escalates_to",
   },
-  // 0041_named_agent_options (single transactional migration: the three
-  // columns are always present or absent together on real databases).
-  { folderMillis: 1786713800000, table: "named_agents", column: "options" },
+  // 0042_agent_session_mcp_channel (single column ALTER). Renumbered off
+  // 0041's slot, which main's done-epic story repair had already taken: the
+  // `when` IS the migrator's identity, so a database that ran main's 0041
+  // would have skipped this one forever.
   {
-    folderMillis: 1786713800000,
+    folderMillis: 1786713900000,
+    table: "agent_sessions",
+    column: "mcp_channel",
+  },
+  // 0044_named_agent_options (single transactional migration: the three
+  // columns are always present or absent together on real databases).
+  // Renumbered off 0041's slot for the same reason as 0042 above: main's
+  // tail (0041..0043) had already claimed every timestamp up to
+  // 1786714000000, so this one moved past all of them.
+  { folderMillis: 1786714100000, table: "named_agents", column: "options" },
+  {
+    folderMillis: 1786714100000,
     table: "named_agents",
     column: "persona_prompt",
   },
   {
-    folderMillis: 1786713800000,
+    folderMillis: 1786714100000,
     table: "agent_sessions",
     column: "cli_options",
   },

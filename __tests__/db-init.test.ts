@@ -260,9 +260,13 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      // 0042 indexes this column, and SQLite refuses to drop a column an
+      // index still references. The replay re-creates the index.
+      conn.exec("DROP INDEX IF EXISTS review_comments_session_idx");
       conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
       conn.exec("ALTER TABLE named_agents DROP COLUMN options");
       conn.exec("ALTER TABLE named_agents DROP COLUMN persona_prompt");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
@@ -351,9 +355,13 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      // 0042 indexes this column, and SQLite refuses to drop a column an
+      // index still references. The replay re-creates the index.
+      conn.exec("DROP INDEX IF EXISTS review_comments_session_idx");
       conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
       conn.exec("ALTER TABLE named_agents DROP COLUMN options");
       conn.exec("ALTER TABLE named_agents DROP COLUMN persona_prompt");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
@@ -475,9 +483,13 @@ describe("migration journal", () => {
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN project_id");
       conn.exec("ALTER TABLE chat_attachments DROP COLUMN epic_id");
       conn.exec("ALTER TABLE notifications DROP COLUMN message");
+      // 0042 indexes this column, and SQLite refuses to drop a column an
+      // index still references. The replay re-creates the index.
+      conn.exec("DROP INDEX IF EXISTS review_comments_session_idx");
       conn.exec("ALTER TABLE review_comments DROP COLUMN agent_session_id");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN review_verdict");
       conn.exec("ALTER TABLE named_agents DROP COLUMN escalates_to");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN mcp_channel");
       conn.exec("ALTER TABLE named_agents DROP COLUMN options");
       conn.exec("ALTER TABLE named_agents DROP COLUMN persona_prompt");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");

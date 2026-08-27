@@ -52,6 +52,7 @@ import {
   type SecondOpinionDispatchResult,
   type SecondOpinionState,
 } from "./second-opinion";
+import { isReviewSessionUnverifiable } from "@/lib/pipeline/findings";
 
 /**
  * Full Auto Mode — the standing build / review / merge supervisor.
@@ -178,6 +179,14 @@ export interface AutoModeEngineDeps {
   readSessionStatus(sessionId: string): string | null;
   /** Delivery verdict of a terminal session ("answered" | "silent" | …). */
   readSessionOutcome(sessionId: string): string | null;
+  /**
+   * True when a finished review had the structured `submit_findings` channel
+   * and nothing came through it (lib/pipeline/findings.ts). Such a review
+   * `answered`, so no outcome marks it as useless — but the selectors treat
+   * it as "no review happened", and it has to be charged or the mode
+   * re-dispatches a reviewer for it every sweep, forever.
+   */
+  readReviewUnverifiable(sessionId: string): boolean;
   readEpicStatus(epicId: string): string | null;
   /**
    * Runs Arij's own `verify_commands` in the epic worktree the given code
@@ -361,6 +370,7 @@ export const defaultAutoModeDeps: AutoModeEngineDeps = {
       .from(agentSessions)
       .where(eq(agentSessions.id, sessionId))
       .get()?.status ?? null,
+  readReviewUnverifiable: (sessionId) => isReviewSessionUnverifiable(sessionId),
   readSessionOutcome: (sessionId) =>
     db
       .select({ outcome: agentSessions.outcome })
@@ -507,15 +517,24 @@ async function reconcileInFlight(
     const status = deps.readSessionStatus(sessionId);
     if (status !== null && !TERMINAL_SESSION_STATUSES.has(status)) continue;
 
-    // A review that completed without producing a verdict delivered nothing.
-    // The selectors treat it as "no review happened" so the epic stays
-    // reviewable; charging it here is what bounds those retries — three
-    // silent reviews park the epic instead of looping.
+    // A review that completed without producing a usable verdict delivered
+    // nothing. The selectors treat it as "no review happened" so the epic
+    // stays reviewable; charging it here is what bounds those retries — three
+    // of them park the epic instead of looping.
+    //
+    // Two shapes, one consequence. `silent` said nothing at all. An
+    // UNVERIFIABLE review said something in prose but got nothing through the
+    // structured channel it was given, which is indistinguishable from "found
+    // nothing" and must not be read as approval. Neither is a code failure,
+    // so neither bounces the ticket to a builder — they buy another REVIEW,
+    // and this is the budget that stops that at three.
     const sessionOutcome = deps.readSessionOutcome(sessionId);
-    const silentReview =
+    const unusableReview =
       status === "completed" &&
       entry.kind === "review" &&
-      sessionOutcome === "silent";
+      (sessionOutcome === "silent" ||
+        (sessionOutcome !== "asked_question" &&
+          deps.readReviewUnverifiable(sessionId)));
     const transitionRefused =
       status === "completed" &&
       sessionOutcome === SESSION_TRANSITION_REFUSED_OUTCOME;
@@ -611,7 +630,7 @@ async function reconcileInFlight(
       }
     }
 
-    if (status === "completed" && !silentReview && !transitionRefused) {
+    if (status === "completed" && !unusableReview && !transitionRefused) {
       // Delivered code: run Arij's own checks BEFORE crediting the session,
       // because a red branch is not a success. Clearing the streak first
       // would erase the very failure the check is about to record, and
@@ -630,7 +649,7 @@ async function reconcileInFlight(
       autoModeRegistry.clearFailures(projectId, entry.ticketId);
       continue;
     }
-    if (status !== "failed" && !silentReview && !transitionRefused) continue;
+    if (status !== "failed" && !unusableReview && !transitionRefused) continue;
 
     const failures = autoModeRegistry.recordFailure(
       projectId,
@@ -638,8 +657,8 @@ async function reconcileInFlight(
       entry.epicId,
       transitionRefused
         ? "build completed but its workflow transition was refused"
-        : silentReview
-        ? "review completed with no verdict"
+        : unusableReview
+        ? "review completed with no usable verdict"
         : `${entry.kind} session failed`
     );
     if (failures >= AUTO_MODE_MAX_CONSECUTIVE_FAILURES) {

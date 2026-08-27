@@ -1,5 +1,5 @@
 /**
- * Migration coverage for 0041_named_agent_options: `named_agents.options`,
+ * Migration coverage for 0044_named_agent_options: `named_agents.options`,
  * `named_agents.persona_prompt` and `agent_sessions.cli_options`.
  *
  * The property that matters beyond "the columns exist" is that an agent that
@@ -16,8 +16,8 @@ import { initDb } from "@/lib/db/init";
 import { agentSessions, namedAgents } from "@/lib/db/schema";
 
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "lib", "db", "migrations");
-const MIGRATION_TAG = "0041_named_agent_options";
-const MIGRATION_WHEN = 1786713800000;
+const MIGRATION_TAG = "0044_named_agent_options";
+const MIGRATION_WHEN = 1786714100000;
 
 const journal = JSON.parse(
   fs.readFileSync(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf-8"),
@@ -54,7 +54,7 @@ function columnNames(conn: Database.Database, table: string): string[] {
   ).map((row) => row.name);
 }
 
-describe("0041_named_agent_options — migration file", () => {
+describe("0044_named_agent_options — migration file", () => {
   it("is hand-written, with a journal entry whose timestamp only increases", () => {
     const sql = fs.readFileSync(
       path.join(MIGRATIONS_FOLDER, `${MIGRATION_TAG}.sql`),
@@ -116,7 +116,7 @@ describe("0041_named_agent_options — migration file", () => {
   });
 });
 
-describe("0041_named_agent_options — applied", () => {
+describe("0044_named_agent_options — applied", () => {
   it("adds the columns on a virgin database", () => {
     withDb(tempDbFile(), (conn) => {
       initDb(conn);

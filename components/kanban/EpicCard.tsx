@@ -29,6 +29,7 @@ import {
   RefreshCw,
   X,
   Link2,
+  ShieldAlert,
 } from "lucide-react";
 import {
   describeMergeBlocker,
@@ -258,6 +259,11 @@ export function EpicCard({
   const showDeliveredWithRemainingStories =
     (epic.status === "done" || epic.status === "released") &&
     remainingStories > 0;
+  // The Review column's blocking reason: the last review ran but nothing it
+  // found reached Arij, so neither the merge nor review → done will accept
+  // it. Only meaningful while the ticket is actually waiting on a review.
+  const showUnverifiableReview =
+    epic.status === "review" && !!epic.reviewUnverifiable;
 
   // Merge affordances. Any session that owns the ticket — queued or running —
   // suppresses them: the card defers to the activity line rather than
@@ -659,6 +665,16 @@ export function EpicCard({
           >
             <TriangleAlert className="h-3 w-3" aria-hidden="true" />
             {remainingStories} {remainingStories === 1 ? "story" : "stories"} left
+          </span>
+        )}
+        {showUnverifiableReview && (
+          <span
+            className="inline-flex items-center gap-1 rounded-[4px] border border-destructive/40 px-[5px] text-[10px] text-destructive"
+            title="The last review filed no verdict through submit_findings, so nothing it found was recorded. It does not count as a clean review: Full Auto will not merge this epic, and it will be reviewed again rather than rebuilt."
+            data-testid={`epic-review-unverifiable-${epic.id}`}
+          >
+            <ShieldAlert className="h-3 w-3" aria-hidden="true" />
+            Review unverifiable
           </span>
         )}
         {hasUnreadAiUpdate && (

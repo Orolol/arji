@@ -4,7 +4,11 @@ import { chatMessages, chatAttachments, chatConversations, settings, epics } fro
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { resolveCliSessionId } from "@/lib/db/resolve-cli-session-id";
-import { spawnClaudeStream, spawnClaude } from "@/lib/claude/spawn";
+import {
+  spawnClaudeStream,
+  spawnClaude,
+  type StreamChunk,
+} from "@/lib/claude/spawn";
 import { buildChatPrompt, buildEpicRefinementPrompt, buildEpicFinalizationPrompt } from "@/lib/claude/prompt-builder";
 import { getProvider, type ProviderType } from "@/lib/providers";
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
@@ -37,8 +41,10 @@ import {
   validateMentionsExist,
 } from "@/lib/documents/mentions";
 import {
+  isPersistentChatProvider,
   isChatProvider,
   OPENAI_COMPATIBLE_PROVIDER,
+  persistentChatBaseProvider,
   PROVIDER_LABELS,
   type ChatModeProvider,
 } from "@/lib/agent-config/constants";
@@ -50,6 +56,21 @@ import { getProjectOr404, isErrorResponse } from "@/lib/api/route-helpers";
 import { validateBody, isValidationError } from "@/lib/validation/validate";
 import { chatMessageSchema } from "@/lib/validation/chat-schemas";
 import { generateConversationTitle } from "@/lib/chat/title-generation";
+import {
+  DEFAULT_MAX_WARM_CHAT_CONVERSATIONS,
+  DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS,
+  DEFAULT_PERSISTENT_CHAT_TURN_STALL_MS,
+  runPersistentChatTurn,
+  restartPersistentChatSession,
+} from "@/lib/chat/persistent-runner";
+import {
+  parsePersistentChatCapSetting,
+  parsePersistentChatDurationSetting,
+  PERSISTENT_CHAT_IDLE_TIMEOUT_SETTING,
+  PERSISTENT_CHAT_MAX_CONVERSATIONS_SETTING,
+  PERSISTENT_CHAT_TURN_STALL_SETTING,
+} from "@/lib/chat/persistent-chat-constants";
+import { isResumeSessionExpiredError } from "@/lib/chat/resume-expiry";
 
 /**
  * The stored conversation provider, honoured for any provider the app
@@ -64,12 +85,6 @@ function normalizeProvider(value: string | null | undefined): ChatModeProvider |
   return value && isChatProvider(value) ? value : null;
 }
 
-function isResumeSessionExpiredError(error: string | null | undefined): boolean {
-  if (!error) return false;
-  return /(session|resume).*(expired|not found|invalid|unknown|does not exist)|invalid.*(session|resume)/i.test(
-    error
-  );
-}
 
 /**
  * Upper bound on fast-mode tool rounds per turn (each round is one upstream
@@ -84,6 +99,10 @@ const MAX_TOOL_ROUNDS = 8;
  * an error payload instead of an execution.
  */
 const MAX_TOOL_CALLS_PER_ROUND = 8;
+
+function settingValue(key: string): unknown {
+  return db.select().from(settings).where(eq(settings.key, key)).get()?.value;
+}
 
 /**
  * Whether a first-round upstream failure looks like the endpoint rejecting
@@ -162,19 +181,25 @@ export async function POST(
     conversation?.namedAgentId ?? null
   );
   const conversationProvider = normalizeProvider(conversation?.provider);
+  const persistentProvider = isPersistentChatProvider(conversationProvider)
+    ? conversationProvider
+    : null;
+  const conversationExecutionProvider = persistentProvider
+    ? persistentChatBaseProvider(persistentProvider)
+    : conversationProvider;
   const overridesProvider =
     Boolean(conversationProvider) && !conversation?.namedAgentId;
   const resolvedAgent =
-    overridesProvider && conversationProvider
+    overridesProvider && conversationExecutionProvider
       ? {
           ...resolvedByNamedAgent,
-          provider: conversationProvider,
+          provider: conversationExecutionProvider,
           // A raw provider choice carries no model. Keeping the resolved
           // agent's model would hand e.g. `claude-opus-*` to `codex -m`,
           // which rejects it — drop it and let the CLI pick its default
           // unless both sides agree on the provider.
           model:
-            conversationProvider === resolvedByNamedAgent.provider
+            conversationExecutionProvider === resolvedByNamedAgent.provider
               ? resolvedByNamedAgent.model
               : undefined,
         }
@@ -254,6 +279,35 @@ export async function POST(
   /**
    * Helper: save assistant message and generate title after stream completes.
    */
+  /**
+   * Enqueue that tolerates an already-closed controller.
+   *
+   * When the browser aborts the SSE fetch, the stream's `cancel()` runs and
+   * closes the controller before the in-flight turn settles. A raw
+   * `enqueue()` then throws `TypeError: Invalid state`, which on the
+   * persistent path aborted the handler before it could persist whatever the
+   * CLI had already streamed. Losing the frame is expected once the client is
+   * gone; losing the durable write is not.
+   */
+  function enqueueIfOpen(
+    controller: ReadableStreamDefaultController,
+    payload: string,
+  ) {
+    try {
+      controller.enqueue(encoder.encode(payload));
+    } catch {
+      // Client disconnected; nothing left to deliver this frame to.
+    }
+  }
+
+  function closeIfOpen(controller: ReadableStreamDefaultController) {
+    try {
+      controller.close();
+    } catch {
+      // Already closed by the client's cancel().
+    }
+  }
+
   function saveAssistantAndTitle(
     controller: ReadableStreamDefaultController,
     fullContent: string,
@@ -306,12 +360,11 @@ export async function POST(
 
     setConversationStatus(finalStatus);
 
-    controller.enqueue(
-      encoder.encode(
-        `data: ${JSON.stringify({ done: true, messageId: assistantMsgId })}\n\n`
-      )
+    enqueueIfOpen(
+      controller,
+      `data: ${JSON.stringify({ done: true, messageId: assistantMsgId })}\n\n`,
     );
-    controller.close();
+    closeIfOpen(controller);
   }
 
   // Full history including the user message just saved above, required by
@@ -700,12 +753,186 @@ export async function POST(
       .run();
   }
 
+  /**
+   * Forgets a CLI session the provider no longer has. Without this the next
+   * turn re-reads the same dead id and resumes into the same failure.
+   */
+  function clearConversationSessionId() {
+    if (!conversationId) return;
+    db.update(chatConversations)
+      .set({ cliSessionId: null })
+      .where(eq(chatConversations.id, conversationId))
+      .run();
+  }
+
   setConversationStatus("generating");
 
   // Determine conversation label for activity registry
   const activityLabel =
     conversation?.label ? `Chat: ${conversation.label}` : "Chat";
   const activityId = `chat-${createId()}`;
+
+  // Claude chat turns run in "chat" mode (permission mode "default" with a
+  // read-only repo allowlist). Prompt-contract conversations remain in plan.
+  const claudeChatMode = isEpicCreationConversationAgentType(conversationType)
+    ? ("plan" as const)
+    : ("chat" as const);
+
+  if (persistentProvider && conversationId) {
+    let currentKill = () => {};
+    let fullContent = "";
+    let persistentChunkSink: ((chunk: StreamChunk) => void) | null = null;
+
+    const launchPersistentTurn = (
+      turnPrompt: string,
+      turnCliSessionId: string | undefined,
+      turnResumeSession: boolean,
+    ) =>
+      runPersistentChatTurn({
+      conversationId,
+      projectId,
+      provider: persistentProvider,
+      prompt: turnPrompt,
+      cwd: project.gitRepoPath || process.cwd(),
+      mode: claudeChatMode,
+      model: resolvedAgent.model,
+      cliSessionId: turnCliSessionId,
+      resumeSession: turnResumeSession,
+      conversationType,
+      idleTimeoutMs: parsePersistentChatDurationSetting(
+        settingValue(PERSISTENT_CHAT_IDLE_TIMEOUT_SETTING),
+        DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS,
+      ),
+      maxWarmConversations: parsePersistentChatCapSetting(
+        settingValue(PERSISTENT_CHAT_MAX_CONVERSATIONS_SETTING),
+        DEFAULT_MAX_WARM_CHAT_CONVERSATIONS,
+      ),
+      turnStallTimeoutMs: parsePersistentChatDurationSetting(
+        settingValue(PERSISTENT_CHAT_TURN_STALL_SETTING),
+        DEFAULT_PERSISTENT_CHAT_TURN_STALL_MS,
+      ),
+      onChunk(chunk) {
+        // Assigned by the stream start below before the process can emit a
+        // model event (runPersistentChatTurn begins on the next microtask).
+        persistentChunkSink?.(chunk);
+      },
+      onCliSessionId(nextCliSessionId) {
+        cliSessionId = nextCliSessionId;
+        persistConversationSessionId(nextCliSessionId);
+      },
+    });
+
+    const turn = launchPersistentTurn(effectivePrompt, cliSessionId, resumeSession);
+    currentKill = turn.kill;
+
+    activityRegistry.register({
+      id: activityId,
+      projectId,
+      type: "chat",
+      label: activityLabel,
+      provider: resolvedAgent.provider,
+      namedAgentName: resolvedAgent.name ?? null,
+      startedAt: new Date().toISOString(),
+      kill: () => currentKill(),
+    });
+
+    const sseStream = new ReadableStream({
+      async start(controller) {
+        persistentChunkSink = (chunk) => {
+          if (chunk.type === "text") {
+            fullContent += chunk.text;
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ delta: chunk.text })}\n\n`),
+            );
+          } else if (chunk.type === "questions") {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ questions: chunk.questions })}\n\n`,
+              ),
+            );
+          } else {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ status: chunk.status })}\n\n`,
+              ),
+            );
+          }
+        };
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({
+              status: turn.wasWarm
+                ? `${PROVIDER_LABELS[persistentProvider]} session is warm`
+                : resumeSession
+                  ? `Restarting and resuming ${PROVIDER_LABELS[persistentProvider]} session...`
+                  : `Starting ${PROVIDER_LABELS[persistentProvider]} session...`,
+            })}\n\n`,
+          ),
+        );
+
+        try {
+          await turn.promise;
+          activityRegistry.unregister(activityId);
+          saveAssistantAndTitle(controller, fullContent, "active");
+        } catch (error) {
+          // Resume-first, same as the one-shot paths below: the CLI prunes its
+          // own session files (Claude Code after `cleanupPeriodDays`), and a
+          // stored id that has gone away would otherwise fail every future
+          // turn in this conversation with no in-app way out — "Restart
+          // session" only kills the process, it does not forget the dead id.
+          // Guarded on empty output so a mid-answer failure cannot splice two
+          // replies together.
+          const resumeExpired =
+            resumeSession &&
+            !fullContent &&
+            error instanceof Error &&
+            isResumeSessionExpiredError(error.message);
+          if (resumeExpired) {
+            restartPersistentChatSession(conversationId);
+            clearConversationSessionId();
+            // A fresh session has no history, so it needs the full prompt
+            // rather than the resume path's bare user message.
+            cliSessionId = providerAcceptsAssignedSessionId(resolvedAgent.provider)
+              ? crypto.randomUUID()
+              : undefined;
+            enqueueIfOpen(
+              controller,
+              `data: ${JSON.stringify({
+                status: `Stored ${PROVIDER_LABELS[persistentProvider]} session expired; starting a fresh one...`,
+              })}\n\n`,
+            );
+            const retry = launchPersistentTurn(prompt, cliSessionId, false);
+            currentKill = retry.kill;
+            try {
+              await retry.promise;
+              activityRegistry.unregister(activityId);
+              saveAssistantAndTitle(controller, fullContent, "active");
+              return;
+            } catch (retryError) {
+              error = retryError;
+            }
+          }
+          const failureMessage =
+            error instanceof Error ? `Error: ${error.message}` : "Error: Provider request failed";
+          const delta = fullContent ? `\n\n${failureMessage}` : failureMessage;
+          fullContent += delta;
+          enqueueIfOpen(controller, `data: ${JSON.stringify({ delta })}\n\n`);
+          activityRegistry.unregister(activityId);
+          saveAssistantAndTitle(controller, fullContent, "error");
+        } finally {
+          persistentChunkSink = null;
+        }
+      },
+      cancel() {
+        persistentChunkSink = null;
+        activityRegistry.unregister(activityId);
+        currentKill();
+        setConversationStatus("active");
+      },
+    });
+
+    return sseResponse(sseStream);
+  }
 
   // Per-turn Arij MCP tool channel for CLI chat providers (claude-code,
   // codex, oh-my-pi): the spawned CLI gets the chat toolset of arij board
@@ -719,15 +946,6 @@ export async function POST(
     provider: resolvedAgent.provider,
     conversationType,
   });
-
-  // Claude chat turns run in "chat" mode (permission mode "default" with a
-  // read-only repo allowlist): plan mode refuses allowlisted mutating MCP
-  // tools AND nudges the model into presenting plans it cannot exit from in
-  // a headless spawn. Epic-creation flows keep plan mode — they are prompt
-  // contracts with no tool channel.
-  const claudeChatMode = isEpicCreationConversationAgentType(conversationType)
-    ? ("plan" as const)
-    : ("chat" as const);
 
   // Every non-Claude provider: non-streaming, spawned through its own provider
   if (resolvedAgent.provider !== "claude-code") {
