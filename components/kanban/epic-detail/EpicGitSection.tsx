@@ -18,6 +18,10 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  describeMergeBlocker,
+  type MergeReadiness,
+} from "@/lib/kanban/merge-readiness";
 
 interface EpicGitSectionProps {
   projectId: string;
@@ -50,6 +54,7 @@ interface EpicGitSectionProps {
   onMerge: () => void;
   resolvingMerge: boolean;
   onOpenResolveMerge: () => void;
+  mergeReadiness?: MergeReadiness | null;
 }
 
 const ROW_CLASS =
@@ -86,7 +91,16 @@ export function EpicGitSection({
   onMerge,
   resolvingMerge,
   onOpenResolveMerge,
+  mergeReadiness,
 }: EpicGitSectionProps) {
+  const hasPersistedConflict = mergeReadiness?.blocker === "merge_conflict";
+
+  const effectiveMergeError =
+    mergeError ||
+    (hasPersistedConflict
+      ? describeMergeBlocker(mergeReadiness) || "Merge conflict with main"
+      : null);
+
   return (
     <>
       <div className={ROW_CLASS}>
@@ -249,9 +263,11 @@ export function EpicGitSection({
         </div>
       )}
 
-      {mergeError && (
+      {effectiveMergeError && (
         <div className="flex items-center gap-2 pt-[8px]">
-          <p className="flex-1 text-[12px] text-destructive">{mergeError}</p>
+          <p className="flex-1 text-[12px] text-destructive">
+            {effectiveMergeError}
+          </p>
           <Button
             size="sm"
             variant="outline"

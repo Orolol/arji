@@ -178,6 +178,8 @@ export interface MergeWorktreeResult {
   error?: string;
   /** Present only when `merged` is false. */
   reason?: MergeFailureReason;
+  /** When reason is "conflict", list of conflicted file paths if available. */
+  conflictFiles?: string[];
 }
 
 /**
@@ -299,6 +301,88 @@ async function findConflictMarkerFiles(
 }
 
 /**
+ * Pre-flight conflict check using `git merge-tree` plumbing.
+ * Checks whether branchName can merge cleanly into mainBranch without touching
+ * the index, the working tree, or requiring worktree removal.
+ */
+async function checkMergeTree(
+  git: SimpleGit,
+  mainBranch: string,
+  branchName: string
+): Promise<{
+  clean: boolean;
+  treeOid?: string;
+  conflictFiles?: string[];
+  errorMessage?: string;
+}> {
+  try {
+    const rawOut = await git.raw([
+      "merge-tree",
+      "--write-tree",
+      "--name-only",
+      mainBranch,
+      branchName,
+    ]);
+    const trimmed = rawOut.trim();
+    if (!trimmed) {
+      return { clean: true };
+    }
+    const lines = trimmed.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length <= 1) {
+      return { clean: true, treeOid: lines[0] };
+    }
+
+    const allLines = rawOut.split("\n").map((l) => l.trim());
+    let parsingFiles = true;
+    const conflictFiles: string[] = [];
+    const conflictMessages: string[] = [];
+
+    for (let i = 1; i < allLines.length; i++) {
+      const line = allLines[i];
+      if (line === "") {
+        parsingFiles = false;
+        continue;
+      }
+      if (parsingFiles) {
+        if (line.startsWith("Auto-merging") || line.startsWith("CONFLICT")) {
+          parsingFiles = false;
+          conflictMessages.push(line);
+        } else {
+          conflictFiles.push(line);
+        }
+      } else {
+        if (line) conflictMessages.push(line);
+      }
+    }
+
+    const error =
+      conflictMessages.length > 0
+        ? conflictMessages.join("\n")
+        : conflictFiles.length > 0
+        ? `CONFLICT (content): Merge conflict in ${conflictFiles.join(", ")}`
+        : "Merge conflict";
+
+    return {
+      clean: false,
+      conflictFiles: Array.from(new Set(conflictFiles)),
+      errorMessage: error,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("CONFLICT")) {
+      const conflictMatches = Array.from(
+        msg.matchAll(/CONFLICT \([^)]+\): Merge conflict in (.+)/g)
+      ).map((m) => m[1].trim());
+      return {
+        clean: false,
+        conflictFiles: conflictMatches.length > 0 ? conflictMatches : undefined,
+        errorMessage: msg,
+      };
+    }
+    throw e;
+  }
+}
+/**
  * Records where `main` and the epic branch point right now, so a merge that
  * turns out to have been unwanted can be undone. Returns null when the state
  * cannot be captured — the caller then simply has no rollback available.
@@ -412,6 +496,21 @@ export async function mergeWorktree(
         reason: "conflict-markers",
       };
     }
+    // Pre-flight merge check with `git merge-tree`: detects conflicts without
+    // touching the working directory, the index, or removing active worktrees.
+    // In self-hosted environments (Arij developing Arij), this prevents
+    // dirtying and reverting files in the live checkout, which avoids triggering
+    // HMR / Fast Refresh full page reloads.
+    const preflight = await checkMergeTree(git, mainBranch, branchName);
+    if (!preflight.clean) {
+      return {
+        merged: false,
+        error: preflight.errorMessage || "Merge conflict",
+        reason: "conflict",
+        conflictFiles: preflight.conflictFiles,
+      };
+    }
+
 
     // Remove the worktree first (git can't merge while worktree is active)
     if (worktreePath && fs.existsSync(worktreePath)) {

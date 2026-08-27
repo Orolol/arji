@@ -99,8 +99,10 @@ vi.mock("@/lib/workflow/log", () => ({
 }));
 
 const mockCreateMergeRetryFailedNotification = vi.hoisted(() => vi.fn());
+const mockCreateApproveMergeFailedNotification = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/notifications/create", () => ({
   createMergeRetryFailedNotification: mockCreateMergeRetryFailedNotification,
+  createApproveMergeFailedNotification: mockCreateApproveMergeFailedNotification,
 }));
 
 vi.mock("@/lib/events/emit", () => ({
@@ -262,8 +264,36 @@ describe("POST /api/projects/[projectId]/epics/[epicId]/merge", () => {
     expect(epicUpdates).toEqual([]);
   });
 
-  it("does not launch agent when autoAgent is false and merge fails", async () => {
-    mockMergeWorktree.mockResolvedValue({ merged: false, error: "Conflict" });
+  it("returns 409 with conflict details and leaves a trail when autoAgent is false and merge conflicts", async () => {
+    mockMergeWorktree.mockResolvedValue({
+      merged: false,
+      error: "CONFLICT (content): Merge conflict in lib/a.ts",
+      reason: "conflict",
+      conflictFiles: ["lib/a.ts"],
+    });
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/epics/[epicId]/merge/route"
+    );
+    const res = await POST(
+      mockRequest({ autoAgent: false }),
+      { params: Promise.resolve({ projectId: "proj1", epicId: "epic1" }) }
+    );
+
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.reason).toBe("conflict");
+    expect(json.conflictFiles).toEqual(["lib/a.ts"]);
+    expect(json.mergeFailed).toBe(true);
+    expect(mockStart).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when merge fails with unexpected system error", async () => {
+    mockMergeWorktree.mockResolvedValue({
+      merged: false,
+      error: "Git repository corrupted",
+      reason: "error",
+    });
 
     const { POST } = await import(
       "@/app/api/projects/[projectId]/epics/[epicId]/merge/route"

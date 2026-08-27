@@ -29,7 +29,15 @@ import {
 import { agentScheduler } from "@/lib/agents/scheduler";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
 import { applyTransition } from "@/lib/workflow/transition-service";
-import { createMergeRetryFailedNotification } from "@/lib/notifications/create";
+import { logTransition } from "@/lib/workflow/log";
+import {
+  buildApprovalMergeBlockedReason,
+  buildApprovalConflictMarkersBlockedReason,
+} from "@/lib/workflow/merge-failure";
+import {
+  createApproveMergeFailedNotification,
+  createMergeRetryFailedNotification,
+} from "@/lib/notifications/create";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import fs from "fs";
 import path from "path";
@@ -312,8 +320,87 @@ export async function POST(
     });
   }
 
+  const mergeError = result.error || "Merge failed";
+  const isConflict = result.reason === "conflict";
+  const isConflictMarkers = result.reason === "conflict-markers";
+  const now = new Date().toISOString();
+
+  try {
+    db.insert(ticketComments)
+      .values({
+        id: createId(),
+        epicId,
+        author: "agent",
+        content: isConflict
+          ? `**Merge failed.** ${mergeError}\n\nThe ticket stays in ${epic.status}. Use Resolve with Agent, then merge again.`
+          : isConflictMarkers
+          ? `**Merge failed — unresolved conflict markers.** ${mergeError}\n\nThe ticket stays in ${epic.status}. Clean the conflict markers in the branch, then merge again.`
+          : `**Merge failed.** ${mergeError}\n\nThe ticket stays in ${epic.status}.`,
+        createdAt: now,
+      })
+      .run();
+
+    createApproveMergeFailedNotification({
+      projectId,
+      epicId,
+      error: mergeError,
+    });
+
+    logTransition({
+      projectId,
+      epicId,
+      fromStatus: (epic.status ?? "review") as KanbanStatus,
+      toStatus: (epic.status ?? "review") as KanbanStatus,
+      actor: "system",
+      reason: isConflict
+        ? buildApprovalMergeBlockedReason({
+            branchName: epic.branchName,
+            error: mergeError,
+          })
+        : isConflictMarkers
+        ? buildApprovalConflictMarkersBlockedReason({
+            branchName: epic.branchName,
+            error: mergeError,
+          })
+        : `Merge blocked: merge failed (${result.reason ?? "unknown"}) on ${epic.branchName} — ${mergeError}`,
+    });
+  } catch (trailError) {
+    console.error(
+      "[merge] Failed to record the merge-failure trail:",
+      trailError
+    );
+  }
+
+  tryExportArjiJson(projectId);
+
+  if (isConflict) {
+    return NextResponse.json(
+      {
+        error: `Merge failed: ${mergeError}. The ticket stays in ${epic.status} — resolve the conflict (Resolve with Agent) and merge again.`,
+        reason: "conflict",
+        conflictFiles: result.conflictFiles,
+        mergeFailed: true,
+      },
+      { status: 409 }
+    );
+  }
+
+  if (isConflictMarkers) {
+    return NextResponse.json(
+      {
+        error: `Merge failed: ${mergeError}. Unresolved conflict markers in branch — clean the markers and merge again.`,
+        reason: "conflict-markers",
+        mergeFailed: false,
+      },
+      { status: 409 }
+    );
+  }
+
   return NextResponse.json(
-    { error: result.error || "Merge failed" },
-    { status: 500 }
+    {
+      error: result.error || "Merge failed",
+      reason: result.reason ?? "error",
+    },
+    { status: result.reason === "branch-missing" ? 400 : 500 }
   );
 }

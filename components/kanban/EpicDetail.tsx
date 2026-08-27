@@ -729,6 +729,7 @@ export function EpicDetail({
                     onMerge={merge}
                     resolvingMerge={resolvingMerge}
                     onOpenResolveMerge={() => setResolveMergeOpen(true)}
+                    mergeReadiness={epic.mergeReadiness}
                   />
                 )}
               </div>
