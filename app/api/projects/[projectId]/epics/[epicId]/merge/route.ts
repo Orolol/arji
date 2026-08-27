@@ -165,10 +165,6 @@ export async function POST(
   if (result.merged) {
     const prevStatus = (epic.status ?? "to_merge") as KanbanStatus;
 
-    // The merge is the approval: whatever review comments stayed open —
-    // minor findings, notes from earlier cycles — are accepted with it.
-    resolveOpenReviewComments(epicId);
-
     // Re-check and apply after git: guards may have changed during the merge.
     const validation = applyTransition({
       projectId,
@@ -188,6 +184,12 @@ export async function POST(
       .set({ branchName: null, updatedAt: new Date().toISOString() })
       .where(eq(epics.id, epicId))
       .run();
+
+    // Only now that the epic is Done: the merge is the approval, so whatever
+    // review comments stayed open — minor findings, notes from earlier cycles
+    // — are accepted with it. AFTER the transition, never before; see
+    // lib/workflow/merge-approval.ts.
+    resolveOpenReviewComments(epicId);
 
     tryExportArjiJson(projectId);
 
@@ -307,7 +309,6 @@ export async function POST(
           { defaultBranch: project.defaultBranch }
         );
         if (retryResult.merged) {
-          resolveOpenReviewComments(epicId);
           const currentStatus = (db
             .select({ status: epics.status })
             .from(epics)
@@ -324,6 +325,8 @@ export async function POST(
             sessionId,
           });
           if (transition.valid) {
+            // After the transition, never before (lib/workflow/merge-approval.ts).
+            resolveOpenReviewComments(epicId);
             db.update(epics)
               .set({ branchName: null, updatedAt: new Date().toISOString() })
               .where(eq(epics.id, epicId))

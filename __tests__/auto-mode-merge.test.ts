@@ -433,6 +433,47 @@ describe("tryAutoMerge — the to_merge status IS the review gate", () => {
     expect(outcome.status).toBe("merged");
   });
 
+  it("leaves findings open when the POST-merge guard refuses", async () => {
+    // The ordering pin. `resolveOpenReviewComments` runs AFTER the guarded
+    // transition, and this is the case that proves it has to: the epic
+    // bounced mid-merge — the settling-review race `rollbackRefusedMerge`
+    // exists for — so the caller rolls main back. A resolve hoisted above
+    // `applyTransition` would have closed a finding the next sweep still
+    // needs to read. See lib/workflow/merge-approval.ts.
+    seed();
+    db.insert(reviewComments)
+      .values({
+        id: "rc-minor-raced",
+        epicId: EPIC_ID,
+        filePath: "lib/x.ts",
+        lineNumber: 3,
+        body: "[minor] tidy later",
+        author: "agent",
+        status: "open",
+      })
+      .run();
+    gitMocks.mergeWorktree.mockImplementation(async () => {
+      db.update(epics).set({ status: "in_progress" }).run();
+      return { merged: true, commitHash: "raced" };
+    });
+
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    // Proof the pre-flight passed and the refusal came from the POST-merge
+    // guard: git ran, and the merge was rolled back.
+    expect(gitMocks.mergeWorktree).toHaveBeenCalled();
+    expect(gitMocks.rollbackMerge).toHaveBeenCalled();
+    expect(outcome.status).toBe("skipped");
+    expect(
+      db
+        .select()
+        .from(reviewComments)
+        .where(eq(reviewComments.epicId, EPIC_ID))
+        .all()
+        .map((row) => row.status)
+    ).toEqual(["open"]);
+  });
+
   it("never merges an epic the review verdict has not promoted", async () => {
     seed({ withCompletedReview: false });
     // No review ever ran, so nothing promoted the epic out of Review.

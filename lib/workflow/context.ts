@@ -9,6 +9,8 @@ import { CODE_PRODUCING_AGENT_TYPES } from "@/lib/agent-config/constants";
 import { selectUnverifiableReviewSessionIds } from "@/lib/pipeline/findings";
 import type { KanbanStatus } from "@/lib/types/kanban";
 import type { TransitionContext } from "./engine";
+import { readEpicSessionFacts } from "./review-freshness";
+import { hasStandingNegativeVerdict } from "@/lib/kanban/merge-readiness";
 
 export function buildTransitionContext(opts: {
   epicId: string;
@@ -37,6 +39,21 @@ export function buildTransitionContext(opts: {
     sessionId,
     requireCompletedReview = true,
   } = opts;
+
+  // Session-level review facts for this epic, read once.
+  //
+  // The old "open review comments" gate lived here and is gone on purpose:
+  // a merge IS the approval and bulk-resolves whatever is still open
+  // (lib/workflow/merge-approval.ts), so counting open rows here only
+  // produced epics that could never leave `review`. What survives from that
+  // work is the standing-verdict fact below, which the board and Full Auto's
+  // merge selector read through the same helpers — a looser gate here than
+  // there would make Full Auto merge and then roll itself back.
+  //
+  // One epic, so the facts are read as scalars rather than joined — the
+  // grouped callers hoist them into a CTE instead (see
+  // lib/workflow/review-freshness.ts).
+  const sessionFacts = readEpicSessionFacts(db, epicId);
 
   // Check for completed review sessions.
   //
@@ -110,6 +127,20 @@ export function buildTransitionContext(opts: {
     runningSessions.length === 1 &&
     runningSessions[0].id === sessionId;
 
+  // Is a `changes_requested` verdict still the epic's latest word?
+  //
+  // Read from the SAME two aggregates the board and `selectMergeCandidates`
+  // read, and compared by the SAME function — an earlier cut of this sorted
+  // session rows in JavaScript instead, which is a second implementation of
+  // the fact that decides whether a merge lands. The board offering Full Auto
+  // a candidate the engine then refuses costs a real merge and a rollback per
+  // sweep, so the two must be one definition.
+  //
+  // Epic-scoped only: a story carries its own review decision, so the
+  // parent's verdict must not speak for it.
+  const hasNegativeReviewVerdict =
+    userStoryId === undefined && hasStandingNegativeVerdict(sessionFacts);
+
   return {
     epicId,
     fromStatus,
@@ -119,6 +150,7 @@ export function buildTransitionContext(opts: {
     hasUnverifiableReview:
       verifiableReviewSessions.length === 0 &&
       completedReviewSessions.length > 0,
+    hasNegativeReviewVerdict,
     requireCompletedReview,
     hasRunningSession: runningSessions.length > 0,
     storyOwnershipBoundary:

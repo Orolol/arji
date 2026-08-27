@@ -7,6 +7,18 @@
  *
  * Every merge path shares this helper: the manual merge route, its merge-fix
  * agent retry, Resolve Merge (clean and post-agent), and Full Auto's merge.
+ *
+ * ORDER MATTERS: call this AFTER the guarded transition succeeds, never
+ * before. A merge the post-merge guard refuses is rolled back, and the rows
+ * this would have closed are exactly what the next sweep needs to read.
+ *
+ * Leaving them behind once the epic IS Done is not cosmetic either. Two
+ * prompt builders load EVERY open row for an epic, unfiltered by severity or
+ * window, and present them under "address each one" —
+ * `buildReviewFeedbackSection` (lib/pipeline/stages.ts) and the epic build
+ * route's review-comment context. A later build on a merged epic would
+ * re-litigate findings a reviewer already accepted, and the older they are
+ * the more confidently wrong they are about the current code.
  */
 
 import { db } from "@/lib/db";

@@ -276,11 +276,10 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
     expect(await readinessOf("story-rebuilt")).toMatchObject({ ready: true });
   });
 
-  it("ignores review-session history entirely — the status is the verdict", async () => {
-    // No review session at all, and one whose verdict was negative: both are
-    // states the transition service would never leave in `to_merge`, but if
-    // they get there (drag, import) the board must not second-guess the
-    // status — that is the transition service's job, not the card's.
+  it("reads the status as the verdict, except for a standing rejection", async () => {
+    // A missing review round is not the card's business: an epic that reaches
+    // `to_merge` without one (drag, import) is the transition service's
+    // problem, and the board must not second-guess the status.
     addEpic({ id: "no-review-history" });
     expect(await readinessOf("no-review-history")).toMatchObject({
       ready: true,
@@ -293,8 +292,54 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
       reviewVerdict: "changes_requested",
       endedAt: at(20),
     });
+    // The one review fact the status cannot carry, and the only one the card
+    // still reads: a `changes_requested` verdict with no fix a reviewer has
+    // since read. The workflow engine refuses THAT merge
+    // (lib/workflow/engine.ts), so the board must refuse it too — offering
+    // Full Auto a candidate the engine then rejects costs a real merge and a
+    // rollback on every sweep.
     expect(await readinessOf("rejected-history")).toMatchObject({
+      ready: false,
+      blocker: "changes_requested",
+    });
+  });
+
+  it("is ready again once a fix and a clean verdict answer the rejection", async () => {
+    // A rejection is answered by a fix a reviewer has since READ: the build
+    // at :25 and the clean verdict at :30 that read it clear it together.
+    // The build at :40 does not put the card back — review freshness stopped
+    // being a readiness input when `to_merge` became the verdict.
+    addEpic({ id: "cleared-then-rebuilt" });
+    addSession({
+      epicId: "cleared-then-rebuilt",
+      agentType: "build",
+      endedAt: at(10),
+    });
+    addSession({
+      epicId: "cleared-then-rebuilt",
+      agentType: "review_code",
+      reviewVerdict: "changes_requested",
+      endedAt: at(20),
+    });
+    addSession({
+      epicId: "cleared-then-rebuilt",
+      agentType: "build",
+      endedAt: at(25),
+    });
+    addSession({
+      epicId: "cleared-then-rebuilt",
+      agentType: "review_code",
+      reviewVerdict: "approved",
+      endedAt: at(30),
+    });
+    addSession({
+      epicId: "cleared-then-rebuilt",
+      agentType: "build",
+      endedAt: at(40),
+    });
+    expect(await readinessOf("cleared-then-rebuilt")).toMatchObject({
       ready: true,
+      blocker: null,
     });
   });
 

@@ -10,7 +10,18 @@ vi.mock("@/lib/db", () => {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
+    groupBy: vi.fn().mockReturnThis(),
+    // `readEpicSessionFacts` projects the session rows in a subquery and
+    // aggregates them in the outer one. Only the outer query runs `.all()`,
+    // so the canned read order below is unchanged.
+    as: vi.fn().mockReturnThis(),
     all: vi.fn(() => []),
+    // `cleanReviewVerdictSql` reads the mcp_tools_enabled toggle while it
+    // BUILDS the facts query, so unlike the JS-side channel check this fires
+    // on every buildTransitionContext rather than only when a candidate row
+    // needs the fallback. Undefined is the "no row" case, which the reader
+    // resolves to the production default (enabled).
+    get: vi.fn(() => undefined),
     update: vi.fn((table: { _name?: string }) => ({
       set: vi.fn((updates: Record<string, unknown>) => {
         updateCalls.push({ table: table?._name ?? "unknown", updates });
@@ -26,15 +37,30 @@ vi.mock("@/lib/db", () => {
 vi.mock("@/lib/db/schema", () => ({
   epics: { _name: "epics", id: "id", status: "status", updatedAt: "updatedAt" },
   userStories: { _name: "userStories", id: "id", status: "status" },
+  // Columns lib/workflow/blocking-findings.ts reads when it narrows "open"
+  // to "still blocking". The queries never execute against this fake — the
+  // db chain mock returns canned rows — so string placeholders suffice.
   agentSessions: {
     _name: "agentSessions",
     epicId: "epicId",
+    userStoryId: "userStoryId",
     status: "status",
+    agentType: "agentType",
+    outcome: "outcome",
+    reviewVerdict: "reviewVerdict",
+    totalCostUsd: "totalCostUsd",
+    startedAt: "startedAt",
+    endedAt: "endedAt",
+    completedAt: "completedAt",
+    createdAt: "createdAt",
   },
   reviewComments: {
     _name: "reviewComments",
     epicId: "epicId",
     status: "status",
+    author: "author",
+    body: "body",
+    createdAt: "createdAt",
     // Read by the batched unverifiable-review check: a review session with
     // findings rows of its own proved its channel worked.
     agentSessionId: "agentSessionId",
@@ -56,14 +82,39 @@ vi.mock("@/lib/db/schema", () => ({
   },
 }));
 
-vi.mock("drizzle-orm", () => ({
-  eq: vi.fn((...args: unknown[]) => args),
-  and: vi.fn((...args: unknown[]) => args),
-}));
+vi.mock("drizzle-orm", () => {
+  // Fragments answer `.as(alias)` with themselves: the facts projection in
+  // lib/workflow/review-freshness.ts names every column it selects, and the
+  // queries never execute against this fake anyway.
+  const sql = vi.fn((..._args: unknown[]) => {
+    const fragment: { as: (alias: string) => unknown } = {
+      as: () => fragment,
+    };
+    return fragment;
+  }) as ReturnType<typeof vi.fn> & { raw: ReturnType<typeof vi.fn> };
+  sql.raw = vi.fn((value: unknown) => value);
+  return {
+    eq: vi.fn((...args: unknown[]) => args),
+    and: vi.fn((...args: unknown[]) => args),
+    sql,
+  };
+});
 
 vi.mock("@/lib/utils/nanoid", () => ({
   createId: vi.fn(() => "test-id"),
 }));
+
+/**
+ * What `readEpicSessionFacts` returns for an epic no reviewer has judged:
+ * no verdict either way, and no supersession cutoff, so every open finding
+ * still blocks. Keyed exactly as that query selects.
+ */
+const EMPTY_VERDICT_WINDOW = {
+  lastCleanReviewAt: null,
+  lastTerminalCodeAt: null,
+  lastNegativeVerdictReviewAt: null,
+  supersessionAt: null,
+};
 
 const mockEmitTicketMoved = vi.fn();
 vi.mock("@/lib/events/emit", () => ({
@@ -250,12 +301,14 @@ describe("applyTransition", () => {
 // ---------------------------------------------------------------------------
 
 describe("applyTransition — owning session exemption", () => {
-  // Context read order: completed reviews, running sessions. (The open-comment
-  // read is gone with its guard: findings no longer gate transitions.)
+  // Context read order: the review-verdict window, completed reviews,
+  // running sessions. (The open-comment read is gone with its guard:
+  // findings no longer gate transitions.)
   async function seedRunningSessions(rows: unknown[]) {
     const { db } = await import("@/lib/db");
     const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
     all
+      .mockReturnValueOnce([EMPTY_VERDICT_WINDOW]) // no verdict-bearing review
       .mockReturnValueOnce([]) // no completed review sessions
       .mockReturnValueOnce(rows);
   }
@@ -433,9 +486,11 @@ describe("applyStoryTransition — owning session exemption", () => {
   async function seedStoryReads(rows: unknown[]) {
     const { db } = await import("@/lib/db");
     const all = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).all;
-    // Context read order: completed reviews, running sessions (filtered to
-    // the story). The story transition then writes userStories.
+    // Context read order: the review-verdict window, completed reviews,
+    // running sessions (filtered to the story). The story transition then
+    // writes userStories.
     all
+      .mockReturnValueOnce([EMPTY_VERDICT_WINDOW])
       .mockReturnValueOnce([])
       .mockReturnValueOnce(rows);
   }

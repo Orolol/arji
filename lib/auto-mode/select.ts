@@ -18,10 +18,8 @@ import {
   hasFreshCleanReview,
   type MergeReadinessFacts,
 } from "@/lib/kanban/merge-readiness";
-import {
-  lastCleanReviewAtSql,
-  lastTerminalCodeAtSql,
-} from "@/lib/workflow/review-freshness";
+import { epicSessionFactsCte } from "@/lib/workflow/review-freshness";
+import { blocksMergeSql } from "@/lib/workflow/blocking-findings";
 import { isDeliveredStatus } from "@/lib/types/kanban";
 import { normalizeAt } from "@/lib/agent-sessions/session-time";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
@@ -41,9 +39,10 @@ import { AUTO_MODE_MAX_REVIEW_REJECTIONS } from "./constants";
  * what that split is for.
  *
  * Every selector shares one board snapshot built from a FIXED number of
- * queries (ten), never one lookup per ticket: the sweep runs every 15s on a
- * board that can hold hundreds of tickets, so an N+1 here would be a
- * per-sweep table scan storm.
+ * queries (nine — the session facts and the blocking-findings count share
+ * one), never one lookup per ticket: the sweep runs every 15s on a board that
+ * can hold hundreds of tickets, so an N+1 here would be a per-sweep table
+ * scan storm.
  *
  * The exclusions, in the order they matter:
  *
@@ -219,6 +218,13 @@ interface SessionFacts {
    * build commits to the epic's branch, so a review that predates it is stale.
    */
   lastTerminalCodeAt: string | null;
+  /**
+   * The two facts behind `hasStandingNegativeVerdict`. The engine refuses a
+   * merge while a rejection stands unanswered, so the selector must not offer
+   * one — `tryAutoMerge` runs git before it validates.
+   */
+  lastNegativeVerdictReviewAt: string | null;
+  supersessionAt: string | null;
 }
 
 interface AwaitingFacts {
@@ -370,36 +376,76 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     if (row.userStoryId) busyStoryIds.add(row.userStoryId);
   }
 
-  // 4. Review/code freshness facts per epic (conditional aggregation).
+  // 4 + 9. Review/code freshness facts per epic, and the blocking open
+  // findings that go with them.
+  //
+  // One statement, because the two read the SAME per-epic aggregate over
+  // `agent_sessions`: the facts land on the epic row, and the findings count
+  // joins the supersession cutoff per candidate row. Split across two
+  // statements the sweep scanned that unindexed table twice for one set of
+  // numbers — every 15 seconds, forever. The CTE is referenced twice inside
+  // one statement, so SQLite materialises it once (`MATERIALIZE
+  // epic_session_facts`).
   //
   // Shared with the board list query — see lib/workflow/review-freshness.ts
-  // for what each branch includes, and lib/pipeline/findings.ts
-  // (`cleanReviewVerdictSql`) for the per-row verdict rule it defers to: a
-  // review whose deposit channel Arij could not wire is NOT clean, so the
-  // supervisor and the card judge it the same way.
-  const factRows = db
+  // for what each branch includes and why, lib/pipeline/findings.ts
+  // (`cleanReviewVerdictSql`) for the per-row verdict rule it defers to (a
+  // review whose deposit channel Arij could not wire is NOT clean), and
+  // lib/workflow/blocking-findings.ts for which open rows still count. The
+  // supervisor and the card must not hold different opinions about any of it.
+  //
+  // Driven from `epics` rather than the aggregate so an epic with review
+  // comments but no session at all still gets a row.
+  const epicSessionFacts = epicSessionFactsCte(db, projectId);
+
+  const openFindingCounts = db
     .select({
-      epicId: agentSessions.epicId,
-      lastCleanReviewAt: lastCleanReviewAtSql(),
-      lastTerminalCodeAt: lastTerminalCodeAtSql(),
+      epicId: reviewComments.epicId,
+      openFindings: sql<number>`COUNT(*)`.as("open_findings"),
     })
-    .from(agentSessions)
+    .from(reviewComments)
+    .innerJoin(epics, eq(reviewComments.epicId, epics.id))
+    .leftJoin(
+      epicSessionFacts,
+      eq(epicSessionFacts.epicId, reviewComments.epicId)
+    )
     .where(
       and(
-        eq(agentSessions.projectId, projectId),
-        sql`${agentSessions.epicId} IS NOT NULL`
+        eq(epics.projectId, projectId),
+        eq(reviewComments.status, "open"),
+        blocksMergeSql(epicSessionFacts.supersessionAt)
       )
     )
-    .groupBy(agentSessions.epicId)
+    .groupBy(reviewComments.epicId)
+    .as("open_finding_counts");
+
+  const factRows = db
+    .with(epicSessionFacts)
+    .select({
+      epicId: epics.id,
+      lastCleanReviewAt: epicSessionFacts.lastCleanReviewAt,
+      lastTerminalCodeAt: epicSessionFacts.lastTerminalCodeAt,
+      lastNegativeVerdictReviewAt: epicSessionFacts.lastNegativeVerdictReviewAt,
+      supersessionAt: epicSessionFacts.supersessionAt,
+      openFindings: openFindingCounts.openFindings,
+    })
+    .from(epics)
+    .leftJoin(epicSessionFacts, eq(epics.id, epicSessionFacts.epicId))
+    .leftJoin(openFindingCounts, eq(epics.id, openFindingCounts.epicId))
+    .where(eq(epics.projectId, projectId))
     .all();
 
   const sessionFactsByEpic = new Map<string, SessionFacts>();
+  const openReviewCommentsByEpic = new Map<string, number>();
   for (const row of factRows) {
     if (!row.epicId) continue;
     sessionFactsByEpic.set(row.epicId, {
       lastCleanReviewAt: row.lastCleanReviewAt ?? null,
       lastTerminalCodeAt: row.lastTerminalCodeAt ?? null,
+      lastNegativeVerdictReviewAt: row.lastNegativeVerdictReviewAt ?? null,
+      supersessionAt: row.supersessionAt ?? null,
     });
+    openReviewCommentsByEpic.set(row.epicId, Number(row.openFindings ?? 0));
   }
 
   // 5 + 6. Latest session per epic / per story (the awaiting-reply verdict).
@@ -539,25 +585,6 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
           ? replies.reduce((a, b) => (normalizeAt(a) >= normalizeAt(b) ? a : b))
           : null,
     });
-  }
-
-  // 9. Open review comments per epic — the merge gate's blocking findings.
-  const openReviewRows = db
-    .select({
-      epicId: reviewComments.epicId,
-      openCount: sql<number>`COUNT(*)`,
-    })
-    .from(reviewComments)
-    .innerJoin(epics, eq(reviewComments.epicId, epics.id))
-    .where(
-      and(eq(epics.projectId, projectId), eq(reviewComments.status, "open"))
-    )
-    .groupBy(reviewComments.epicId)
-    .all();
-
-  const openReviewCommentsByEpic = new Map<string, number>();
-  for (const row of openReviewRows) {
-    openReviewCommentsByEpic.set(row.epicId, Number(row.openCount ?? 0));
   }
 
   // 10. The dependency graph, for the build selector's prerequisite gate:
@@ -878,6 +905,8 @@ function mergeReadinessFacts(
     openFindings: board.openReviewCommentsByEpic.get(epic.id) ?? 0,
     lastCleanReviewAt: facts?.lastCleanReviewAt ?? null,
     lastTerminalCodeAt: facts?.lastTerminalCodeAt ?? null,
+    lastNegativeVerdictReviewAt: facts?.lastNegativeVerdictReviewAt ?? null,
+    supersessionAt: facts?.supersessionAt ?? null,
   };
 }
 

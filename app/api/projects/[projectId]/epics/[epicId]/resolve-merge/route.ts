@@ -191,9 +191,6 @@ export async function POST(request: NextRequest, { params }: Params) {
       );
     }
 
-    // The merge is the approval: open review comments are accepted with it.
-    resolveOpenReviewComments(epicId);
-
     const transition = applyTransition({
       projectId,
       epicId,
@@ -210,6 +207,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       .set({ branchName: null, updatedAt: new Date().toISOString() })
       .where(eq(epics.id, epicId))
       .run();
+
+    // The merge is the approval: open review comments are accepted with it.
+    // After the transition, never before — see lib/workflow/merge-approval.ts.
+    resolveOpenReviewComments(epicId);
 
     tryExportArjiJson(projectId);
 
@@ -400,7 +401,6 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
 
       if (finalMerge.merged) {
-        resolveOpenReviewComments(epicId);
         const transition = applyTransition({
           projectId,
           epicId,
@@ -433,6 +433,9 @@ export async function POST(request: NextRequest, { params }: Params) {
           }
           return;
         }
+        // After the transition, never before (lib/workflow/merge-approval.ts).
+        resolveOpenReviewComments(epicId);
+
         db.update(epics)
           .set({ branchName: null, updatedAt: completedAt })
           .where(eq(epics.id, epicId))

@@ -12,6 +12,16 @@ import {
   providerSupportsMcp,
 } from "@/lib/claude/mcp-injection";
 import { parseReviewReport } from "./parse-review-report";
+import {
+  blockingFindingSeverity,
+  type BlockingFindingSeverity,
+} from "@/lib/review/finding-severity";
+import {
+  isStructuredReviewVerdict,
+  NEGATIVE_STRUCTURED_VERDICT,
+  STRUCTURED_REVIEW_VERDICTS,
+  type StructuredReviewVerdict,
+} from "@/lib/review/verdict";
 
 /**
  * Review-verdict assessment shared by the pipeline's review stage
@@ -90,17 +100,8 @@ export interface BlockingFinding {
   filePath: string;
   lineNumber: number;
   body: string;
-  severity: "critical" | "major";
+  severity: BlockingFindingSeverity;
 }
-
-/** Body prefixes (as written by submit-findings) that block the pipeline. */
-const BLOCKING_PREFIXES: ReadonlyArray<{
-  prefix: string;
-  severity: BlockingFinding["severity"];
-}> = [
-  { prefix: "[critical]", severity: "critical" },
-  { prefix: "[major]", severity: "major" },
-];
 
 function parseTimestamp(value: string | null | undefined): number | null {
   if (!value) return null;
@@ -175,16 +176,14 @@ export function collectBlockingFindings(
   const findings: BlockingFinding[] = [];
   for (const row of listAgentReviewCommentsSince(epicId, sinceIso, database)) {
     if (row.status !== "open") continue;
-    const match = BLOCKING_PREFIXES.find(({ prefix }) =>
-      row.body.startsWith(prefix)
-    );
-    if (!match) continue;
+    const severity = blockingFindingSeverity(row.body);
+    if (!severity) continue;
     findings.push({
       id: row.id,
       filePath: row.filePath,
       lineNumber: row.lineNumber,
       body: row.body,
-      severity: match.severity,
+      severity,
     });
   }
   return findings;
@@ -195,21 +194,16 @@ export function collectBlockingFindings(
 /* ------------------------------------------------------------------ */
 
 /**
- * The `verdict` vocabulary of the submit_findings tool, verbatim (the enum
- * lives in app/api/mcp/submit-findings/route.ts and bin/arij-mcp.mjs).
+ * The verdict vocabulary now lives in lib/review/verdict.ts, so the workflow
+ * engine can read it without importing the pipeline. Re-exported here because
+ * this module has been its published home since the structured verdict
+ * landed.
  */
-export const STRUCTURED_REVIEW_VERDICTS = [
-  "approved",
-  "approved_with_minor_issues",
-  "changes_requested",
-] as const;
-
-export type StructuredReviewVerdict =
-  (typeof STRUCTURED_REVIEW_VERDICTS)[number];
-
-/** The only verdict that blocks on its own. */
-export const NEGATIVE_STRUCTURED_VERDICT: StructuredReviewVerdict =
-  "changes_requested";
+export {
+  STRUCTURED_REVIEW_VERDICTS,
+  NEGATIVE_STRUCTURED_VERDICT,
+  type StructuredReviewVerdict,
+} from "@/lib/review/verdict";
 
 /**
  * Which channel produced a verdict, for the activity-log trail.
@@ -218,15 +212,6 @@ export const NEGATIVE_STRUCTURED_VERDICT: StructuredReviewVerdict =
  * the structured one on a provider that had it.
  */
 export type ReviewVerdictSource = "structured" | "prose" | "unverifiable";
-
-function isStructuredReviewVerdict(
-  value: string | null | undefined
-): value is StructuredReviewVerdict {
-  return (
-    typeof value === "string" &&
-    (STRUCTURED_REVIEW_VERDICTS as readonly string[]).includes(value)
-  );
-}
 
 /**
  * The verdict a review session submitted through `submit_findings`, or null

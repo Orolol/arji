@@ -177,6 +177,10 @@ export function createDrizzleChainMock(
     "limit",
     "offset",
     "groupBy",
+    // `.as(alias)` — a subquery handle. Passthrough is enough here: the fake
+    // has no columns, so what matters is that the chain keeps flowing and the
+    // terminal `.all()` still consumes exactly one queued result.
+    "as",
     "leftJoin",
     "innerJoin",
     "insert",

@@ -161,7 +161,15 @@ function addUserComment(input: {
     .run();
 }
 
-function addOpenReviewComment(epicId: string): void {
+/**
+ * A blocking finding filed BY the epic's newest review round.
+ *
+ * The timestamp is load-bearing: `blocksMergeSql` only counts a
+ * `[critical]`/`[major]` a later clean review has not superseded, so a
+ * finding stamped before the review that cleared the epic would (correctly)
+ * stop blocking. `seedCleanlyReviewedEpic` reviews from :20 to :21.
+ */
+function addOpenReviewComment(epicId: string, createdAt = at(21)): void {
   db.insert(reviewComments)
     .values({
       id: nextId("rc"),
@@ -171,7 +179,7 @@ function addOpenReviewComment(epicId: string): void {
       body: "[critical] fix this",
       author: "agent",
       status: "open",
-      createdAt: at(1),
+      createdAt,
     })
     .run();
 }
@@ -1257,12 +1265,13 @@ describe("query budget", () => {
     try {
       const board = loadAutoModeBoard(PROJECT_ID);
       const queriesForBoard = selectSpy.mock.calls.length;
-      // Twelve board queries (nine + the dependency graph + the
-      // review-rejection scan + the one-row mcp_tools_enabled read the
-      // verdict rule needs); the sub-selects of the two window-function
-      // CTEs are built through the same `select` entry point, hence the
-      // ceiling.
-      expect(queriesForBoard).toBeLessThanOrEqual(14);
+      // The board queries plus the dependency graph, the review-rejection
+      // scan and the one-row mcp_tools_enabled read the verdict rule needs;
+      // the sub-selects of the window-function subqueries and of the
+      // session-facts CTE are built through the same `select` entry point,
+      // hence the ceiling rather than an exact count. Every one of them is
+      // constant in ticket count, which is what this test is really guarding.
+      expect(queriesForBoard).toBeLessThanOrEqual(15);
 
       selectSpy.mockClear();
       selectBuildCandidates(PROJECT_ID, board);

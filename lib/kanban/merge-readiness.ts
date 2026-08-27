@@ -40,13 +40,24 @@ export type MergeBlocker =
   | "not_to_merge"
   | "merge_conflict"
   | "conflict_markers"
+  | "changes_requested"
   | "no_branch";
 export interface MergeReadinessFacts {
   /** Board status of the epic. Only `to_merge` can ever be merge-ready. */
   status?: string | null;
   /** The epic's integration branch; without one there is nothing to land. */
   branchName?: string | null;
-  /** Open `review_comments` on the epic — echoed as information, not a gate. */
+  /**
+   * Open `review_comments` on the epic that still stand — echoed as
+   * information, not a gate.
+   *
+   * A merge IS the approval and resolves whatever is left
+   * (lib/workflow/merge-approval.ts), so this count never refuses a merge.
+   * It is still narrowed rather than raw (see
+   * lib/workflow/blocking-findings.ts, which both callers evaluate): a
+   * `[minor]` the approving reviewer filed itself, or a `[major]` a later
+   * clean verdict has since read, is not a finding to put on the card.
+   */
   openFindings?: number | null;
   /**
    * Newest epic-scoped review session that completed with a verdict that was
@@ -59,8 +70,24 @@ export interface MergeReadinessFacts {
    * Newest terminal code-writing session on the epic, story-scoped ones
    * included: a story build commits to the epic's branch, so a review that
    * predates it is stale.
+   *
    */
   lastTerminalCodeAt?: string | null;
+  /**
+   * When the newest review that recorded `changes_requested` started, and the
+   * supersession cutoff (lib/workflow/review-freshness.ts) — the newest code
+   * change a recorded clean verdict has since read.
+   *
+   * Together they answer "is a rejection still unanswered", which nothing
+   * else here can: `lastCleanReviewAt` is a MAX over clean rounds, so a later
+   * rejection leaves it untouched at the older approving round and is simply
+   * invisible to it. The workflow engine gained that guard first; without
+   * these the board would keep offering Full Auto a candidate the engine
+   * refuses — and `tryAutoMerge` merges with git before it validates, so the
+   * disagreement costs a merge and a rollback on every sweep.
+   */
+  lastNegativeVerdictReviewAt?: string | null;
+  supersessionAt?: string | null;
   /** Newest activity entry recording a git merge conflict. */
   lastMergeConflictAt?: string | null;
   /** Newest activity entry recording committed conflict markers. */
@@ -71,7 +98,11 @@ export interface MergeReadiness {
   ready: boolean;
   /** `null` exactly when `ready` is true. */
   blocker: MergeBlocker | null;
-  /** Echoed so the UI can say "2 open findings" without a second lookup. */
+  /**
+   * Blocking open findings, echoed so the UI can say "2 open findings"
+   * without a second lookup. See `MergeReadinessFacts.openFindings` for why
+   * this is narrower than the epic's raw open-row count.
+   */
   openFindings: number;
 }
 
@@ -141,9 +172,40 @@ export function hasCurrentConflictMarkers(
 }
 
 /**
+ * Is a `changes_requested` verdict still unanswered?
+ *
+ * A rejection is answered by a FIX that a reviewer has since read — exactly
+ * what the supersession cutoff means, and exactly what answers a finding. So
+ * the rejection stands unless a code change LANDED AFTER IT and a clean
+ * verdict has since read that code.
+ *
+ * The second half is the one that is easy to lose. Without it another opinion
+ * of the same commit overturns the first: `review_code` rejects,
+ * `review_security` approves an untouched branch, and the rejection quietly
+ * evaporates although nothing it objected to changed. A verdict speaks for
+ * the code it read, and neither reviewer read anything the other did not.
+ * (A NULL-verdict review clears nothing either — it never reaches the cutoff.)
+ *
+ * Shared by the board, `selectMergeCandidates` and `buildTransitionContext`
+ * so all three read one definition; the engine's merge guard is this fact.
+ */
+export function hasStandingNegativeVerdict(
+  facts: Pick<
+    MergeReadinessFacts,
+    "lastNegativeVerdictReviewAt" | "supersessionAt"
+  > | null | undefined
+): boolean {
+  const rejected = normalizeAt(facts?.lastNegativeVerdictReviewAt);
+  if (!rejected) return false;
+  const answered = normalizeAt(facts?.supersessionAt);
+  return !(answered && rejected < answered);
+}
+
+/**
  * The predicate. Order of the checks IS the display order: the first thing
  * standing between this epic and `main` is what the card reports, so a
- * conflict (git cannot land it at all) outranks a missing branch.
+ * conflict (git cannot land it at all) outranks a standing rejection (the
+ * code needs work), which outranks a missing branch.
  */
 export function evaluateMergeReadiness(
   facts: MergeReadinessFacts | null | undefined
@@ -168,6 +230,16 @@ export function evaluateMergeReadiness(
   }
   if (hasConflict) return blocked("merge_conflict");
   if (hasMarkers) return blocked("conflict_markers");
+  // Open findings are NOT a blocker: the merge resolves them
+  // (lib/workflow/merge-approval.ts), and gating on them is what produced
+  // epics that could never leave the column. Neither is review freshness —
+  // the `to_merge` status IS the passing verdict. What survives is the one
+  // review fact the status cannot express: a `changes_requested` verdict
+  // recorded since, with no fix a reviewer has read. The workflow engine
+  // refuses that merge (lib/workflow/engine.ts), so the board must not offer
+  // it — `tryAutoMerge` merges with git before it validates, and the
+  // disagreement would cost a merge and a rollback on every sweep.
+  if (hasStandingNegativeVerdict(facts)) return blocked("changes_requested");
   if (!facts.branchName) return blocked("no_branch");
 
   return { ready: true, blocker: null, openFindings };
@@ -194,6 +266,8 @@ export function describeMergeBlocker(
       return "Merge conflict — resolve before merging";
     case "conflict_markers":
       return "Branch contains unresolved conflict markers";
+    case "changes_requested":
+      return "Changes requested — awaiting a fix";
     case "no_branch":
       return "No branch to merge";
     default:

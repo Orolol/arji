@@ -34,7 +34,7 @@ There is no manual approve step: `POST .../approve` (epic) was removed, and
 | current | current | failed build, unanswered question, successful story with siblings remaining, or refused terminal promotion; no status write, explicit activity reason, terminal handlers continue posting agent output. A refusal persists `transition_refused`, settles pipeline/wave work as failed, emits failure feedback, and counts toward Full Auto parking | terminal outcome helper / question handler |
 | `review`, `to_merge` or `done` | `in_progress` | negative review / requested changes; the review session is already terminal | `automatic-transitions.ts` via review routes and pipeline (`transitionReviewRejected`) |
 | `review` | `to_merge` | PASSING review verdict (structured `submit_findings` verdict, or the prose scan for MCP-less providers). Requires a completed review that delivered evidence; a review on an MCP-capable provider that filed neither a verdict nor a finding row is *unverifiable*, leaves the ticket in `review`, and earns another review. A human may also drag/select this edge — the same completed-review guard applies | `automatic-transitions.ts` via `transitionReviewPassed` (pipeline `finalizeReviewSession`, epic review route); drag/API for humans |
-| `to_merge` | `done` | successful merge ONLY (`source: "merge"`). The merge bulk-resolves the epic's remaining open review comments — the merge IS the approval. Conflicts dispatch a merge-fix agent whose retry finalizes the same way | merge / resolve-merge routes, Full Auto merge |
+| `to_merge` | `done` | successful merge ONLY (`source: "merge"`), and refused while a `changes_requested` verdict still stands (see below). The merge bulk-resolves the epic's remaining open review comments — the merge IS the approval. Conflicts dispatch a merge-fix agent whose retry finalizes the same way | merge / resolve-merge routes, Full Auto merge |
 | story `review` | story `done` | explicit human story approval (`source: "approve"`, no separate review-agent session required) or the parent epic's merge cascade (`completeReviewedStories`). Story approval never merges or closes the epic | story approve route; merge cascade |
 | `done` | `released` | release creation, system actor only | releases route |
 | any structurally allowed edge | target | manual drag/API/MCP or guarded `arji.json` reconciliation | epic/story PATCH, reorder, MCP, sync import |
@@ -67,6 +67,30 @@ resolves everything still open (`resolveOpenReviewComments`). Blocking
 severity (`[critical]`/`[major]`) still vetoes a review verdict within its
 stage window — that is what sends a ticket back to `in_progress` instead of
 `to_merge` — but open findings no longer block the merge itself.
+
+### The standing `changes_requested` guard
+
+One review fact outlives the promotion and is the only one the merge boundary
+still reads: a `changes_requested` verdict that nothing has answered. A
+rejection is answered by a FIX a reviewer has since read — the supersession
+cutoff in `lib/workflow/review-freshness.ts` — so another opinion of the same
+untouched commit does not clear it, and neither does a review that recorded no
+verdict at all.
+
+Normally the rejection also moves the epic out of `to_merge`, so the guard is a
+backstop for the cases where it did not: a second reviewer landing after the
+promotion, a refused rejection transition, a human drag. `to_merge → done` with
+`source: "merge"` is refused while it stands, and with the epic approve route
+gone there is no override — the way out is a fix and a fresh review.
+
+`hasStandingNegativeVerdict` (`lib/kanban/merge-readiness.ts`) is the ONE
+definition. The workflow engine reads it through `buildTransitionContext`, and
+the board and `selectMergeCandidates` read it as the `changes_requested` merge
+blocker. They must not drift: `tryAutoMerge` merges with git BEFORE it
+validates, so a board that offers Full Auto a candidate the engine then refuses
+costs a real merge and a rollback on every sweep. The guard is epic-scoped —
+a story carries its own review decision, so the parent's verdict never speaks
+for it.
 
 ## Exhaustive workflow-service call sites
 

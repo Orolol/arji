@@ -63,6 +63,18 @@ export interface TransitionContext {
    */
   hasCompletedReview: boolean;
   /**
+   * True when the newest EPIC-SCOPED review that recorded a structured
+   * verdict recorded `changes_requested`, and nothing with a verdict has
+   * spoken since.
+   *
+   * `hasCompletedReview` is satisfied by any completed review session ever,
+   * so it cannot tell a standing rejection from a stale one; this can. It
+   * exists because the merge paths land a branch on the base branch and must
+   * not be where a rejected review is discovered. A NULL verdict never
+   * clears it — a reviewer that deposited nothing overruled nothing.
+   */
+  hasNegativeReviewVerdict?: boolean;
+  /**
    * Whether every completed review on the epic is unverifiable: it ran on a
    * provider with the structured `submit_findings` channel and filed no
    * verdict on it. Purely a REASON refinement — `hasCompletedReview` is
@@ -187,6 +199,23 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
       ctx.source !== "review"
     ) {
       return "Cannot move to To Merge: only a passing review verdict promotes a ticket to To Merge.";
+    }
+    return null;
+  },
+  // A merge must not land a branch whose rejection is still unanswered.
+  //
+  // Scoped to `merge` on purpose, and it survives the merge-as-approval
+  // rework: with no approve route left for epics, a merge is the only way
+  // into Done, so this is the only place a standing `changes_requested`
+  // verdict can still be caught. The way out is a fix and a fresh review —
+  // the same verdict that promotes the epic to To Merge.
+  (ctx) => {
+    if (
+      ctx.toStatus === "done" &&
+      ctx.source === "merge" &&
+      ctx.hasNegativeReviewVerdict
+    ) {
+      return "Cannot merge to Done: a review requested changes and nothing has been fixed and re-reviewed since. Push a fix and re-review before merging.";
     }
     return null;
   },
