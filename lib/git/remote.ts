@@ -129,7 +129,9 @@ export async function pullGitBranchWithConflictSupport(
   if (!cleanBranch) {
     throw new Error("Branch is required for pull.");
   }
-
+  if (cleanBranch.startsWith("-") || remote.startsWith("-")) {
+    throw new Error(`Invalid branch or remote name: ${cleanBranch}`);
+  }
   const git = getGit(repoPath);
   try {
     const pullResult = await git.pull(defaultRemote(remote), cleanBranch);
@@ -163,7 +165,9 @@ export async function pushGitBranch(
   if (!cleanBranch) {
     throw new Error("Branch is required for push.");
   }
-
+  if (cleanBranch.startsWith("-") || remote.startsWith("-")) {
+    throw new Error(`Invalid branch or remote name: ${cleanBranch}`);
+  }
   const git = getGit(repoPath);
   const options = setUpstream ? ["--set-upstream"] : [];
   return git.push(defaultRemote(remote), cleanBranch, options);
@@ -203,6 +207,7 @@ export async function getConflictFileDiffs(
   const git = getGit(repoPath);
   const diffs: Array<{ filePath: string; diff: string }> = [];
   for (const file of files) {
+    // Invariant: `--` separator ensures file path is treated as pathspec, not flag.
     const diff = await git.raw(["diff", "--", file]);
     diffs.push({ filePath: file, diff });
   }
@@ -216,6 +221,7 @@ export async function getCurrentGitBranch(repoPath: string): Promise<string> {
 }
 
 async function hasBranch(git: SimpleGit, branchName: string): Promise<boolean> {
+  if (branchName.startsWith("-")) return false;
   try {
     await git.revparse([branchName]);
     return true;
@@ -233,7 +239,9 @@ export async function getBranchSyncStatus(
   if (!cleanBranch) {
     throw new Error("Branch is required for status.");
   }
-
+  if (cleanBranch.startsWith("-") || remote.startsWith("-")) {
+    throw new Error(`Invalid branch or remote name: ${cleanBranch}`);
+  }
   const cleanRemote = defaultRemote(remote);
   const remoteBranch = `${cleanRemote}/${cleanBranch}`;
   const git = getGit(repoPath);

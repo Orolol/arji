@@ -64,6 +64,9 @@ export async function createWorktree(
 ): Promise<{ worktreePath: string; branchName: string }> {
   const git = getGit(repoPath);
   const branchName = epicBranchName(epicId, epicTitle);
+  if (branchName.startsWith("-")) {
+    throw new Error(`Invalid branch name: ${branchName}`);
+  }
 
   // Determine worktree directory next to the repo
   const worktreeBase = path.join(repoPath, "..", ".arij-worktrees");
@@ -81,16 +84,15 @@ export async function createWorktree(
   const branches = await git.branchLocal();
   const branchExists = branches.all.includes(branchName);
 
-  // Determine the branch to base new branches from
-  const mainBranch = await resolveBaseBranch(git, branches.all, {
-    preferred: options.defaultBranch,
-  });
-
   if (branchExists) {
-    // Create worktree from existing branch
+    // Invariant: branchName is pre-validated above to reject leading dashes.
     await git.raw(["worktree", "add", worktreePath, branchName]);
   } else {
-    // Create new branch + worktree, explicitly based from main
+    // Determine the branch to base new branches from
+    const mainBranch = await resolveBaseBranch(git, branches.all, {
+      preferred: options.defaultBranch,
+    });
+    // Invariant: branchName is pre-validated above to reject leading dashes.
     await git.raw([
       "worktree",
       "add",
@@ -100,7 +102,6 @@ export async function createWorktree(
       mainBranch,
     ]);
   }
-
   return { worktreePath, branchName };
 }
 
@@ -117,6 +118,9 @@ export async function attachWorktree(
   repoPath: string,
   branchName: string,
 ): Promise<{ worktreePath: string; branchName: string }> {
+  if (branchName.startsWith("-")) {
+    throw new Error(`Invalid branch name: ${branchName}`);
+  }
   const git = getGit(repoPath);
 
   const worktreeBase = path.join(repoPath, "..", ".arij-worktrees");
@@ -134,10 +138,10 @@ export async function attachWorktree(
     throw new Error(`Branch ${branchName} not found`);
   }
 
+  // Invariant: branchName is validated above to reject leading dashes.
   await git.raw(["worktree", "add", worktreePath, branchName]);
   return { worktreePath, branchName };
 }
-
 /**
  * Resolves the commit a worktree currently sits on, or null when it cannot
  * be determined. CI autofix compares this against the PR head SHA so the
@@ -335,6 +339,7 @@ export async function rollbackMerge(
 
     const branches = await git.branchLocal();
     if (!branches.all.includes(checkpoint.branchName)) {
+      // Invariant: branchName is validated to reject leading dashes.
       await git.raw(["branch", checkpoint.branchName, checkpoint.branchHead]);
     }
     return { restored: true };
@@ -378,6 +383,14 @@ export async function mergeWorktree(
     };
   }
 
+  if (branchName.startsWith("-")) {
+    return {
+      merged: false,
+      error: `Invalid branch name: ${branchName}`,
+      reason: "error",
+    };
+  }
+
   // ---- Pre-merge: nothing here can have modified main. -------------------
   try {
     // Get the branch to merge into
@@ -393,7 +406,6 @@ export async function mergeWorktree(
         reason: "branch-missing",
       };
     }
-
     // Refuse to merge a branch whose COMMITTED tree still carries conflict
     // markers — the merge itself would be clean, so nothing downstream would
     // ever notice them. Checked before the worktree removal and the checkout
@@ -415,7 +427,8 @@ export async function mergeWorktree(
 
     // Remove the worktree first (git can't merge while worktree is active)
     if (worktreePath && fs.existsSync(worktreePath)) {
-      await git.raw(["worktree", "remove", worktreePath, "--force"]);
+      // Invariant: `--` separator ensures worktreePath is not parsed as an option.
+      await git.raw(["worktree", "remove", "--force", "--", worktreePath]);
       await git.raw(["worktree", "prune"]);
     }
 

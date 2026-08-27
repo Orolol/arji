@@ -49,6 +49,9 @@ export async function getWorktreeDiff(
   worktreePath: string,
   baseBranch = "main"
 ): Promise<DiffResult> {
+  if (baseBranch.startsWith("-")) {
+    throw new Error(`Invalid base branch: ${baseBranch}`);
+  }
   const git = simpleGit(worktreePath);
 
   // Get current branch name
@@ -57,11 +60,11 @@ export async function getWorktreeDiff(
   // Find the merge base so we only see the epic's changes
   let mergeBase: string | null = null;
   try {
-    mergeBase = (await git.raw(["merge-base", baseBranch, "HEAD"])).trim();
+    // Invariant: `--` separator ensures baseBranch cannot be parsed as an option.
+    mergeBase = (await git.raw(["merge-base", "--", baseBranch, "HEAD"])).trim();
   } catch {
     // merge-base fails for unrelated histories or missing branches
   }
-
   // Compute ahead/behind counts
   let ahead = 0;
   let behind = 0;
