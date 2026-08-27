@@ -104,6 +104,7 @@ function addSession(input: {
   status?: string;
   outcome?: string | null;
   reviewVerdict?: string | null;
+  mcpChannel?: string | null;
   userStoryId?: string | null;
   endedAt: string;
 }): void {
@@ -117,6 +118,7 @@ function addSession(input: {
       agentType: input.agentType,
       outcome: input.outcome === undefined ? "answered" : input.outcome,
       reviewVerdict: input.reviewVerdict ?? null,
+      mcpChannel: input.mcpChannel ?? null,
       endedAt: input.endedAt,
       createdAt: input.endedAt,
     })
@@ -158,11 +160,25 @@ function addActivity(input: {
     .run();
 }
 
-/** A clean, freshly reviewed epic: build at :10, review at :20. */
+/**
+ * A clean, freshly reviewed epic: build at :10, review at :20.
+ *
+ * The review carries an approving structured verdict because that is what
+ * "cleanly reviewed" MEANS (lib/pipeline/findings.ts): a review that answered
+ * without filing anything through a `submit_findings` channel it actually had
+ * is unverifiable — silence, not approval — and the gate refuses it. A
+ * verdict-less fixture here would be asserting readiness on a review Arij
+ * never heard from.
+ */
 function seedReadyEpic(id: string, position = 0): void {
   addEpic({ id, position });
   addSession({ epicId: id, agentType: "build", endedAt: at(10) });
-  addSession({ epicId: id, agentType: "review_code", endedAt: at(20) });
+  addSession({
+    epicId: id,
+    agentType: "review_code",
+    reviewVerdict: "approved",
+    endedAt: at(20),
+  });
 }
 
 async function readBoard(): Promise<
@@ -313,6 +329,40 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
     });
   });
 
+  it("does not count a review that filed nothing on a channel it had", async () => {
+    // The epic this branch exists for: `submit_findings` was wired and the
+    // review answered anyway with no verdict and no findings. An empty
+    // findings list is not evidence of a clean branch when the deposit never
+    // happened, so the board must not offer the merge either.
+    addEpic({ id: "unverifiable" });
+    addSession({ epicId: "unverifiable", agentType: "build", endedAt: at(10) });
+    addSession({
+      epicId: "unverifiable",
+      agentType: "review_code",
+      mcpChannel: "injected",
+      endedAt: at(20),
+    });
+    expect(await readinessOf("unverifiable")).toMatchObject({
+      ready: false,
+      blocker: "no_review",
+    });
+  });
+
+  it("still counts a review whose channel Arij could not wire", async () => {
+    // The mirror case: injection failed, so the reviewer never had the tool.
+    // Blaming it for a channel it never had is what would dispatch a reviewer
+    // forever on an epic that can never satisfy the gate.
+    addEpic({ id: "channel-less" });
+    addSession({ epicId: "channel-less", agentType: "build", endedAt: at(10) });
+    addSession({
+      epicId: "channel-less",
+      agentType: "review_code",
+      mcpChannel: "unavailable",
+      endedAt: at(20),
+    });
+    expect(await readinessOf("channel-less")).toMatchObject({ ready: true });
+  });
+
   it("does not count a review that only asked a question", async () => {
     addEpic({ id: "asked" });
     addSession({ epicId: "asked", agentType: "build", endedAt: at(10) });
@@ -342,7 +392,12 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
 
   it("reports an epic in review with no branch as having nothing to land", async () => {
     addEpic({ id: "branchless", branchName: null });
-    addSession({ epicId: "branchless", agentType: "review_code", endedAt: at(20) });
+    addSession({
+      epicId: "branchless",
+      agentType: "review_code",
+      reviewVerdict: "approved",
+      endedAt: at(20),
+    });
     expect(await readinessOf("branchless")).toMatchObject({
       blocker: "no_branch",
     });

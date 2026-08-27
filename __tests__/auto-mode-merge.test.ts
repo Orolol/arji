@@ -172,6 +172,11 @@ function seed(options: { withCompletedReview?: boolean } = {}): void {
         status: "completed",
         agentType: "review_code",
         outcome: "answered",
+        // A review that actually delivered: the merge gate only counts a
+        // reviewer's verdict when it reached the database (see
+        // lib/pipeline/findings.ts). A verdict-less claude-code row would be
+        // unverifiable, which is a different test's subject.
+        reviewVerdict: "approved",
         worktreePath: "/tmp/worktrees/landable",
         createdAt: isoAt(3),
         endedAt: isoAt(4),

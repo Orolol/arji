@@ -113,6 +113,14 @@ export async function POST(request: NextRequest) {
     defaultBranch,
   } = validated.data;
 
+  const cleanDefaultBranch = defaultBranch?.trim();
+  if (cleanDefaultBranch && cleanDefaultBranch.startsWith("-")) {
+    return NextResponse.json(
+      { error: `Invalid default branch: ${cleanDefaultBranch}` },
+      { status: 400 }
+    );
+  }
+
   // Validate gitRepoPath if provided
   if (gitRepoPath) {
     const pathResult = await validatePath(gitRepoPath);
@@ -142,7 +150,7 @@ export async function POST(request: NextRequest) {
         githubOwnerRepo || provenance.githubOwnerRepo || null,
       cloneSource: provenance.cloneSource,
       gitRemoteUrl: provenance.gitRemoteUrl || gitRemoteUrl || null,
-      defaultBranch: defaultBranch || null,
+      defaultBranch: cleanDefaultBranch || null,
       status: "ideation",
       createdAt: now,
       updatedAt: now,

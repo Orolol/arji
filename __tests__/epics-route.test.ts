@@ -80,6 +80,7 @@ const mockSchema = vi.hoisted(() => ({
     id: "id",
     epicId: "epicId",
     status: "status",
+    agentSessionId: "agentSessionId",
   },
   ticketActivityLog: {
     __name: "ticketActivityLog",
@@ -102,6 +103,14 @@ const mockSchema = vi.hoisted(() => ({
     lastReadAt: "lastReadAt",
     updatedAt: "updatedAt",
   },
+  // Read by the route's unverifiable-review pass
+  // (listUnverifiableReviewEpicIds): the mcp_tools_enabled toggle, then the
+  // latest delivered review per epic and the rows it filed.
+  settings: {
+    __name: "settings",
+    key: "key",
+    value: "value",
+  },
 }));
 
 const mockDbState = vi.hoisted(() => ({
@@ -117,6 +126,9 @@ const mockTryExportArjiJson = vi.hoisted(() => vi.fn());
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn(() => ({})),
   and: vi.fn(() => ({})),
+  // The route's unverifiable-review pass narrows to the four ordinary review
+  // agent types, and probes review_comments by session id.
+  inArray: vi.fn(() => ({})),
   or: vi.fn(() => ({})),
   sql: mockSql,
   count: mockCount,
@@ -209,6 +221,7 @@ vi.mock("@/lib/db/schema", () => ({
   gradingReports: mockSchema.gradingReports,
   reviewComments: mockSchema.reviewComments,
   ticketReadCursors: mockSchema.ticketReadCursors,
+  settings: mockSchema.settings,
 }));
 
 vi.mock("@/lib/utils/nanoid", () => ({
@@ -346,6 +359,9 @@ describe("POST /api/projects/[projectId]/epics", () => {
       lastReadAt: "2026-02-14T11:00:00.000Z",
       gradingStatus: "missed",
       gradingSummary: "One gap remains.",
+      // The Review column's blocking flag ships with every row; this board
+      // has no unverifiable review, so it reads false rather than absent.
+      reviewUnverifiable: false,
     });
     // story counts + latest comments + latest sessions + latest user comments
     // + session facts (cost AND review freshness, one scan) + latest grading

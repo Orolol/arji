@@ -171,13 +171,20 @@ describe("merge-gate query shape", () => {
       expect(response.status).toBe(200);
     });
 
-    // Two, one per distinct question: the `epic_session_facts` CTE —
+    // Three, one per distinct question: the `epic_session_facts` CTE —
     // materialised ONCE although both the epic row and the blocking-findings
-    // count reference it — and the latest-session-per-epic ranking, which asks
-    // something else entirely. It was three while the findings count grouped
-    // `agent_sessions` a second time for a cutoff the facts scan had already
-    // computed, on a route the client refetches on every `session:*` event.
-    expect(scans).toBe(2);
+    // count reference it — the latest-session-per-epic ranking, which asks
+    // something else entirely, and `listUnverifiableReviewEpicIds`, which
+    // ranks the newest DELIVERED review per epic for the Review column's
+    // broken-channel badge. The first two share one statement.
+    //
+    // It was four while the findings count grouped `agent_sessions` a second
+    // time for a cutoff the facts scan had already computed, on a route the
+    // client refetches on every `session:*` event. The badge scan is the one
+    // added here rather than removed: it is a single window-function pass,
+    // constant in board size like the other two, which is the property this
+    // budget guards.
+    expect(scans).toBe(3);
   });
 
   it("reads agent_sessions four times per Full Auto sweep, not five", () => {

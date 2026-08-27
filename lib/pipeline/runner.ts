@@ -1,5 +1,6 @@
 import type { PipelineStage, PipelineState } from "./constants";
 import { PIPELINE_REASONS } from "./constants";
+import type { ReviewVerdictSource } from "./findings";
 import type { VerifyGate, VerifyGateOutcome } from "./verify";
 import type { RegressionReportPayload } from "@/lib/verify/regression-report";
 import type { VerificationResult } from "@/lib/verify/runner";
@@ -136,11 +137,19 @@ export interface PipelineReviewAssessment {
   usedProseFallback: boolean;
   /**
    * Which channel decided: `structured` when the reviewer's persisted
-   * submit_findings verdict did, `prose` for the fallback path.
+   * submit_findings verdict did, `prose` for the fallback path,
+   * `unverifiable` when the reviewer had the structured channel and filed
+   * nothing on it (blocking on missing evidence, not on a finding).
    */
-  verdictSource?: "structured" | "prose";
+  verdictSource?: ReviewVerdictSource;
   /** The persisted submit_findings verdict, when the reviewer filed one. */
   structuredVerdict?: string | null;
+  /**
+   * The reviewer had the structured channel and nothing came through it.
+   * Blocking, but with no finding to fix — so the runner re-REVIEWS through
+   * the stage ladder instead of dispatching a fix agent.
+   */
+  unverifiable?: boolean;
 }
 
 export interface PipelineGradingAssessment {
@@ -968,6 +977,33 @@ export async function runPipeline(
       // the workflow engine.
       callbacks.onTrace?.(PIPELINE_REASONS.finished, handle.sessionId);
       return finish("succeeded", null);
+    }
+
+    if (assessment.unverifiable && assessment.blockingCount === 0) {
+      // The review delivered nothing Arij can read, and NOTHING was recovered
+      // from its prose either — so there is nothing for a fix agent to do.
+      // Dispatching one anyway hands it "fix every [critical] and [major]
+      // item" with an empty list, and it no-ops or invents changes to a
+      // branch nothing faulted. This is a FAILED REVIEW ATTEMPT: the ladder
+      // re-runs the review (a fresh session usually gets a working channel),
+      // and exhausting it fails the run with a forensic, exactly like a
+      // reviewer that crashed.
+      //
+      // The `blockingCount` half is not a detail. A broken channel does not
+      // mean no evidence: assessReviewOutcome runs ingestProseFindings first,
+      // and Arij parsed that report itself, independent of MCP. Those rows
+      // carry agent_session_id NULL, so they never prove the channel worked —
+      // the review stays unverifiable WITH a non-empty findings list. Sending
+      // that to the ladder would discard real, anchored findings and re-ingest
+      // the same report on every fresh review window, leaving duplicate open
+      // rows nothing ever fixes. When there is something to fix, fix it: the
+      // rows are open, so review → done still refuses, and the session still
+      // has no verdict and no rows of its own, so the merge gate still calls
+      // it not clean. Nothing becomes mergeable — the fix cycle just gets the
+      // findings it was denied.
+      const summary = await handleStageFailure();
+      if (summary) return summary;
+      continue;
     }
 
     if (fixCycles >= options.maxFixCycles) {

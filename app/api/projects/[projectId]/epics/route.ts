@@ -43,6 +43,7 @@ import {
   parseGradingEntries,
 } from "@/lib/grading/report";
 import { OPEN_FRICTION_STATUSES } from "@/lib/frictions/constants";
+import { listUnverifiableReviewEpicIds } from "@/lib/pipeline/findings";
 import { evaluateMergeReadiness } from "@/lib/kanban/merge-readiness";
 import {
   MERGE_CONFLICT_REASON_LIKE_PATTERNS,
@@ -371,6 +372,13 @@ export async function GET(
     queryMs: Date.now() - queryStartedAt,
   });
 
+  // Two queries for the whole board, not one per epic — see
+  // listUnverifiableReviewEpicIds. The badge is the precise reason; the
+  // readiness signal below already refuses such an epic, because
+  // `lastCleanReviewAt` never counted the unverifiable review in the first
+  // place (lib/workflow/review-freshness.ts).
+  const unverifiableReviewEpicIds = listUnverifiableReviewEpicIds(projectId);
+
   // The readiness facts are inputs, not board data: they are folded into the
   // one derived signal the client consumes and dropped from the payload, so
   // no component can start re-deriving "ready" from a subset of them.
@@ -390,6 +398,7 @@ export async function GET(
       gradingStatus: aggregateGradingStatus(
         parseGradingEntries(latestGradingEntries),
       ),
+      reviewUnverifiable: unverifiableReviewEpicIds.has(epic.id),
       mergeReadiness: evaluateMergeReadiness({
         status: epic.status,
         branchName: epic.branchName,

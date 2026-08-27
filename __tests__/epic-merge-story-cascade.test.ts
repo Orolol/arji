@@ -97,12 +97,18 @@ describe("manual epic merge story cascade", () => {
           worktreePath: "/worktrees/manual",
         },
         {
+          // Approving structured verdict, not just `answered`: a review that
+          // filed nothing through a `submit_findings` channel it had is
+          // unverifiable and the merge guard refuses it
+          // (lib/pipeline/findings.ts). The cascade under test needs a review
+          // that actually delivered.
           id: "review-manual",
           projectId: "project-manual",
           epicId: "epic-manual",
           status: "completed",
           agentType: "review_code",
           outcome: "answered",
+          reviewVerdict: "approved",
           worktreePath: "/worktrees/manual",
         },
       ])

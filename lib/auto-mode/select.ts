@@ -21,6 +21,7 @@ import {
 import { epicSessionFactsCte } from "@/lib/workflow/review-freshness";
 import { blocksMergeSql } from "@/lib/workflow/blocking-findings";
 import { isDeliveredStatus } from "@/lib/types/kanban";
+import { normalizeAt } from "@/lib/agent-sessions/session-time";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
 import { listPipelineRunsByProject } from "@/lib/pipeline/registry";
 import { dagBatchRegistry } from "@/lib/agents/dag-batch-registry";
@@ -124,10 +125,11 @@ export const STORY_PARENT_BUILDABLE_STATUSES: ReadonlySet<string> = new Set([
   "review",
 ]);
 
-/** JS-side twin of the SQL timestamp normalisation, for comparing timestamps. */
-export function normalizeAt(value: string): string {
-  return value.includes("T") ? value : value.replace(" ", "T");
-}
+// normalizeAt lives in lib/agent-sessions/session-time.ts alongside the SQL
+// expression it mirrors — see that module for why the REPLACE is not
+// optional. Re-exported because this file's callers have always imported it
+// from here.
+export { normalizeAt };
 
 /* ------------------------------------------------------------------ */
 /* Public shapes                                                       */
@@ -199,6 +201,15 @@ interface SessionFacts {
    *   - NULL — a legacy row from before outcomes were classified. Treating it
    *     as clean would auto-merge on a verdict nobody ever recorded, so it
    *     earns exactly one fresh, properly classified review.
+   *   - answered by a reviewer that HAD the submit_findings channel and filed
+   *     no structured verdict — the review ran and delivered nothing Arij can
+   *     read. Excluding it makes the epic reviewable again rather than
+   *     mergeable, which is the self-healing half: a broken findings channel
+   *     buys a re-REVIEW, not a merge and not a rebuild. The ticket is
+   *     deliberately NOT bounced to in_progress (see resolveReviewVerdict —
+   *     nothing faulted the code), so the bound is the parking ladder:
+   *     reconcileInFlight charges each unusable review, and three park the
+   *     epic.
    */
   lastCleanReviewAt: string | null;
   /**
@@ -376,9 +387,11 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
   // epic_session_facts`).
   //
   // Shared with the board list query — see lib/workflow/review-freshness.ts
-  // for what each branch includes and why, and
+  // for what each branch includes and why, lib/pipeline/findings.ts
+  // (`cleanReviewVerdictSql`) for the per-row verdict rule it defers to (a
+  // review whose deposit channel Arij could not wire is NOT clean), and
   // lib/workflow/blocking-findings.ts for which open rows still count. The
-  // supervisor and the card must not hold different opinions about that.
+  // supervisor and the card must not hold different opinions about any of it.
   //
   // Driven from `epics` rather than the aggregate so an epic with review
   // comments but no session at all still gets a row.
@@ -735,10 +748,11 @@ function compareEpics(a: EpicRow, b: EpicRow): number {
  * auto-approves), so a naive "everything in review" selector would review the
  * same epic forever. The gate is temporal at its core — "has a review been
  * attempted since the last terminal code change?" is a fact, not a guess —
- * plus one verdict rule: since agent_sessions.review_verdict exists, a review
- * that answered `changes_requested` through submit_findings is not clean and
- * earns a fresh one (see lastCleanReviewAt). The prose fallback for MCP-less
- * providers is deliberately NOT parsed here; their rows stay NULL.
+ * plus the verdict rule: for a reviewer that HAD the submit_findings channel,
+ * only an explicitly positive verdict is clean — `changes_requested` and
+ * silence alike earn a fresh review (see lastCleanReviewAt). The prose
+ * fallback for MCP-less providers is deliberately NOT parsed here; their rows
+ * stay NULL and stay clean.
  *
  * "A review" means a completed, epic-scoped review that delivered a verdict —
  * see SessionFacts.lastCleanReviewAt for what is deliberately excluded and

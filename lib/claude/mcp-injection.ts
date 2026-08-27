@@ -34,7 +34,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db, type ArijDatabase } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { getAppBaseUrl } from "@/lib/webhooks/send";
 import type { McpSpawnConfig } from "@/lib/providers/types";
@@ -189,9 +189,17 @@ export function parseMcpToolsEnabledSetting(value: unknown): boolean {
   return true;
 }
 
-/** Reads the global toggle from the settings table. Absent row = enabled. */
-export function isMcpToolsEnabled(): boolean {
-  const row = db
+/**
+ * Reads the global toggle from the settings table. Absent row = enabled.
+ *
+ * `database` exists for the readers OUTSIDE the spawn path — the review
+ * reliability rules in lib/pipeline/findings.ts run against an injected
+ * handle in tests, and they must read the toggle from the same database they
+ * read the session rows from, or a test would judge sessions in one database
+ * against a setting in another.
+ */
+export function isMcpToolsEnabled(database: ArijDatabase = db): boolean {
+  const row = database
     .select({ value: settings.value })
     .from(settings)
     .where(eq(settings.key, MCP_TOOLS_ENABLED_SETTING_KEY))
@@ -199,6 +207,51 @@ export function isMcpToolsEnabled(): boolean {
 
   if (!row) return true;
   return parseMcpToolsEnabledSetting(row.value);
+}
+
+/* ------------------------------------------------------------------ */
+/* What actually got wired, per session                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `agent_sessions.mcp_channel` (migration 0041) — the RECORDED outcome of
+ * injection for one session, as opposed to the provider's static capability.
+ *
+ * The two are not the same question, and the gap is not theoretical:
+ * `processManager.start()` wraps the whole injection block in a try/catch and
+ * spawns without tools on any error, and `prepareClaudeSpawn` drops
+ * `--mcp-config` when the temp file cannot be written. In both the child
+ * never reaches the HTTP route, so the 401 trace never fires either — the
+ * session simply has no tools and nothing says so.
+ *
+ * Recording it makes the unverifiable-review rule read history instead of
+ * re-deriving it: a review Arij KNOWS it could not equip is judged by prose,
+ * not blamed for a tool call it was never able to make.
+ *
+ * Known gap: for oh-my-pi and agy the server entry lives in a user-global
+ * config file that Arij does not own, so `injected` means "Arij handed over
+ * the environment", not "the CLI loaded it". A CLI that quietly reports the
+ * server as failed still looks injected. That case is what the 401 trace and
+ * the operator-facing badge exist for.
+ */
+export const MCP_CHANNEL_INJECTED = "injected";
+export const MCP_CHANNEL_UNAVAILABLE = "unavailable";
+
+export type McpChannelRecord =
+  | typeof MCP_CHANNEL_INJECTED
+  | typeof MCP_CHANNEL_UNAVAILABLE;
+
+/**
+ * Reads the recorded value, or null when the row predates the column or
+ * belongs to a spawn injection never applied to. Null means "no record —
+ * fall back to the provider reconstruction", never "no channel".
+ */
+export function parseMcpChannelRecord(
+  value: string | null | undefined
+): McpChannelRecord | null {
+  return value === MCP_CHANNEL_INJECTED || value === MCP_CHANNEL_UNAVAILABLE
+    ? value
+    : null;
 }
 
 /**
@@ -212,14 +265,22 @@ export function isMcpToolsEnabled(): boolean {
  * see AgyProvider.buildEnv). Since the 2026-08 cleanup every REGISTERED
  * provider qualifies; the gate still matters for legacy DB rows naming a
  * removed provider.
+ *
+ * The list is exported because it is also a SQL predicate: the Full Auto
+ * merge gate (lib/auto-mode/select.ts) has to decide, per session ROW,
+ * whether a missing structured verdict is "this provider had no channel" or
+ * "this provider had a channel and stayed silent" — and that decision must
+ * not drift from the one this function makes.
  */
+export const MCP_CAPABLE_PROVIDERS = [
+  "claude-code",
+  "codex",
+  "oh-my-pi",
+  "agy",
+] as const;
+
 export function providerSupportsMcp(provider: string): boolean {
-  return (
-    provider === "claude-code" ||
-    provider === "codex" ||
-    provider === "oh-my-pi" ||
-    provider === "agy"
-  );
+  return (MCP_CAPABLE_PROVIDERS as readonly string[]).includes(provider);
 }
 
 /**

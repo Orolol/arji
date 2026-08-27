@@ -612,6 +612,58 @@ function createAutoModeMergeNotification(
 }
 
 /**
+ * Alarm raised when a review session's `submit_findings` call is rejected.
+ *
+ * This is the one failure the rest of the system cannot see: the reviewer
+ * runs, finishes, and reports "answered", but the findings it tried to file
+ * never became rows. Without this notification the only symptom is an epic
+ * that looks reviewed and clean — which is precisely how a broken channel
+ * used to unlock a merge. Deep-links to the epic, where the Review column
+ * now shows the same refusal.
+ */
+export function createReviewChannelFailureNotification(input: {
+  projectId: string;
+  epicId: string;
+  sessionId: string;
+  reason: string;
+}): void {
+  const project = db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .get();
+  if (!project) return;
+
+  const epic = db
+    .select({ title: epics.title, readableId: epics.readableId })
+    .from(epics)
+    .where(eq(epics.id, input.epicId))
+    .get();
+
+  const label = epic?.readableId
+    ? epic.title
+      ? `${epic.readableId}: ${epic.title}`
+      : epic.readableId
+    : (epic?.title ?? input.epicId);
+
+  db.insert(notifications)
+    .values({
+      id: createId(),
+      projectId: input.projectId,
+      projectName: project.name,
+      sessionId: input.sessionId,
+      agentType: "review",
+      status: "failed",
+      title: `Review findings could not be filed on ${label} — the review does not count`,
+      message: input.reason,
+      targetUrl: buildEpicTargetUrl(input.projectId, input.epicId),
+    })
+    .run();
+
+  pruneNotifications();
+}
+
+/**
  * Alarm raised when Full Auto's independent pre-merge reviewer vetoes the
  * branch or repeatedly fails to return usable evidence. The session is the
  * evidence, so unlike a git-conflict park this notification deep-links

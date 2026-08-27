@@ -16,6 +16,12 @@ vi.mock("@/lib/db", () => {
     // so the canned read order below is unchanged.
     as: vi.fn().mockReturnThis(),
     all: vi.fn(() => []),
+    // `cleanReviewVerdictSql` reads the mcp_tools_enabled toggle while it
+    // BUILDS the facts query, so unlike the JS-side channel check this fires
+    // on every buildTransitionContext rather than only when a candidate row
+    // needs the fallback. Undefined is the "no row" case, which the reader
+    // resolves to the production default (enabled).
+    get: vi.fn(() => undefined),
     update: vi.fn((table: { _name?: string }) => ({
       set: vi.fn((updates: Record<string, unknown>) => {
         updateCalls.push({ table: table?._name ?? "unknown", updates });
@@ -55,7 +61,13 @@ vi.mock("@/lib/db/schema", () => ({
     author: "author",
     body: "body",
     createdAt: "createdAt",
+    // Read by the batched unverifiable-review check: a review session with
+    // findings rows of its own proved its channel worked.
+    agentSessionId: "agentSessionId",
   },
+  // Same check reads the mcp_tools_enabled toggle when a session row carries
+  // no recorded channel state (every legacy row).
+  settings: { _name: "settings", key: "key", value: "value" },
   ticketActivityLog: {
     _name: "ticketActivityLog",
     id: "id",

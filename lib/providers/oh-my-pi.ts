@@ -54,7 +54,11 @@ import { writeFileSync } from "fs";
 import os from "os";
 import path from "path";
 import { PiProvider } from "./pi";
-import type { ProviderSpawnOptions, ProviderType } from "./types";
+import type {
+  McpSpawnConfig,
+  ProviderSpawnOptions,
+  ProviderType,
+} from "./types";
 
 /** omp built-ins that cannot modify the working tree. */
 export const OMP_READONLY_TOOLS = ["read", "grep", "glob"];
@@ -70,7 +74,7 @@ let readonlyOverlayPath: string | null = null;
  * the content is a constant with no secrets, so unlike claude's mcp-config
  * temp file it needs no per-spawn identity or cleanup.
  */
-function ompReadonlyOverlayPath(): string {
+export function ompReadonlyOverlayPath(): string {
   if (!readonlyOverlayPath) {
     const filePath = path.join(
       os.tmpdir(),
@@ -80,6 +84,23 @@ function ompReadonlyOverlayPath(): string {
     readonlyOverlayPath = filePath;
   }
   return readonlyOverlayPath;
+}
+
+/**
+ * Build the process environment used by both one-shot and persistent OMP
+ * spawns. In particular, an absent channel must override any inherited token
+ * with an empty value because OMP otherwise keeps ${ARIJ_MCP_TOKEN} literal.
+ */
+export function buildOmpSpawnEnv(
+  baseEnv: NodeJS.ProcessEnv,
+  mcp?: McpSpawnConfig,
+): NodeJS.ProcessEnv {
+  if (!mcp) return { ...baseEnv, ARIJ_MCP_TOKEN: "" };
+  const merged = { ...baseEnv, ...mcp.env };
+  if (!("ARIJ_MCP_TOOLSET" in mcp.env)) {
+    delete merged.ARIJ_MCP_TOOLSET;
+  }
+  return merged;
 }
 
 export class OhMyPiProvider extends PiProvider {
@@ -128,19 +149,7 @@ export class OhMyPiProvider extends PiProvider {
     // and every spawn with no agent_sessions row (title generation, spec
     // generation, import analysis) — and it doubles as the guard against a
     // stale ARIJ_MCP_TOKEN inherited from the Arij server's own environment.
-    if (!options.mcp) return { ...env, ARIJ_MCP_TOKEN: "" };
-    const merged = { ...env, ...options.mcp.env };
-    // The shim selects its toolset by key PRESENCE (agent configs emit no
-    // ARIJ_MCP_TOOLSET at all), and the mcp.json entry's
-    // `${ARIJ_MCP_TOOLSET:-agent}` default only applies when the key is
-    // ABSENT from this env. A value inherited from the Arij server's own
-    // environment would therefore silently flip every agent session's shim
-    // to the chat toolset — board-wide create/update/start_build on an
-    // agent token, fail-open. Only the channel's own value may pass.
-    if (!("ARIJ_MCP_TOOLSET" in options.mcp.env)) {
-      delete merged.ARIJ_MCP_TOOLSET;
-    }
-    return merged;
+    return buildOmpSpawnEnv(env, options.mcp);
   }
 
   protected resumeArgs(cliSessionId: string): string[] {

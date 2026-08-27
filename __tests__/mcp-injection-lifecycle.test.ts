@@ -29,6 +29,10 @@ const pmState = vi.hoisted(() => ({
   settingsRow: null as null | { value: string },
   /** When true, any db.select() call throws — injection must degrade. */
   throwOnSelect: false,
+  /** Every payload handed to db.update(...).set(...) during start(). */
+  updates: [] as Array<Record<string, unknown>>,
+  /** When true, spawnClaude reports no mcpConfigPath (temp-file failure). */
+  dropMcpConfigFile: false,
   /** Tables whose select chain reached `.get()` — counts start()'s db reads. */
   selectGets: [] as unknown[],
   spawnedOptions: [] as Array<Record<string, unknown>>,
@@ -75,9 +79,10 @@ vi.mock("@/lib/db", () => ({
       };
     }),
     update: vi.fn(() => ({
-      set: vi.fn(() => ({
-        where: vi.fn(() => ({ run: vi.fn() })),
-      })),
+      set: vi.fn((payload: Record<string, unknown>) => {
+        pmState.updates.push(payload);
+        return { where: vi.fn(() => ({ run: vi.fn() })) };
+      }),
     })),
   },
 }));
@@ -96,6 +101,10 @@ vi.mock("@/lib/claude/spawn", () => ({
       }),
       kill: vi.fn(),
       command: "claude <prompt>",
+      // prepareClaudeSpawn returns a null path when the config file could not
+      // be written and the spawn degraded to no tool channel.
+      mcpConfigPath:
+        options.mcp && !pmState.dropMcpConfigFile ? "/tmp/mcp.json" : undefined,
     };
   }),
 }));
@@ -155,6 +164,8 @@ async function resetAll() {
   pmState.settingsRow = null;
   pmState.throwOnSelect = false;
   pmState.selectGets = [];
+  pmState.updates = [];
+  pmState.dropMcpConfigFile = false;
   pmState.spawnedOptions = [];
   pmState.providerSpawnedOptions = [];
   pmState.resolveSpawn = null;
@@ -348,6 +359,90 @@ describe("processManager.start() — MCP injection gating", () => {
 
     expect(spawnedMcp()).toBeUndefined();
     expect(pmState.spawnedOptions[0].prompt).toBe("PLAIN");
+  });
+});
+
+/**
+ * Injection is best-effort: a session must never fail to spawn because the
+ * channel could not be built. That makes the failure invisible — the child
+ * never calls an /api/mcp route, so not even a 401 is traced — and a review
+ * that ran without tools is indistinguishable from one that chose not to use
+ * them. The unverifiable-review gate refuses the second and must not refuse
+ * the first, so the outcome is recorded on the session row.
+ */
+describe("processManager.start() — recording what got wired", () => {
+  beforeEach(resetAll);
+
+  function channelUpdates(): unknown[] {
+    return pmState.updates
+      .filter((payload) => "mcpChannel" in payload)
+      .map((payload) => payload.mcpChannel);
+  }
+
+  it("records an injected channel on the happy path", () => {
+    pmState.sessionRow = sessionRow();
+    processManager.start("w1", { mode: "code", prompt: "P" });
+
+    expect(spawnedMcp()).toBeDefined();
+    expect(channelUpdates()).toEqual(["injected"]);
+  });
+
+  it("records an unavailable channel when injection throws", () => {
+    pmState.sessionRow = sessionRow();
+    pmState.throwOnSelect = true;
+
+    processManager.start("w2", { mode: "code", prompt: "P" });
+
+    // This is the case the column exists for: the child ran with no tools and
+    // will never call an /api/mcp route, so nothing else can ever notice.
+    expect(spawnedMcp()).toBeUndefined();
+    expect(channelUpdates()).toEqual(["unavailable"]);
+  });
+
+  it("records nothing when the channel is switched off globally", () => {
+    pmState.sessionRow = sessionRow();
+    pmState.settingsRow = { value: "false" };
+
+    processManager.start("w2b", { mode: "code", prompt: "P" });
+
+    // Not a failure — the judgement-time fallback reads the same toggle, so
+    // an explicit record would only freeze today's setting into the row.
+    expect(spawnedMcp()).toBeUndefined();
+    expect(channelUpdates()).toEqual([]);
+  });
+
+  it("records an unavailable channel when the config file cannot be written", () => {
+    pmState.sessionRow = sessionRow();
+    pmState.dropMcpConfigFile = true;
+
+    processManager.start("w3", { mode: "code", prompt: "P" });
+
+    // The config was built and handed over, but the spawn dropped it: the
+    // child ran with no --mcp-config and therefore no tools.
+    expect(spawnedMcp()).toBeDefined();
+    expect(channelUpdates()).toEqual(["unavailable"]);
+  });
+
+  it("records nothing for a session injection never applied to", () => {
+    // MCP-exempt agent type: no token, no config, and no claim either way.
+    pmState.sessionRow = sessionRow({ agentType: "memory_distill" });
+    processManager.start("w4", { mode: "plan", prompt: "P" });
+
+    expect(spawnedMcp()).toBeUndefined();
+    expect(channelUpdates()).toEqual([]);
+  });
+
+  it("records an injected channel for a non-claude provider", () => {
+    // Providers other than claude-code get the config through their own
+    // surface, so there is no config-file step to drop.
+    pmState.sessionRow = sessionRow();
+    processManager.start(
+      "w5",
+      { mode: "code", prompt: "P" },
+      "oh-my-pi" as never,
+    );
+
+    expect(channelUpdates()).toEqual(["injected"]);
   });
 });
 

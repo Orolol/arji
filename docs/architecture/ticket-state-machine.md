@@ -19,7 +19,7 @@ not state transitions.
 | `in_progress` | `review` | successful build (`answered` and legacy successful outcomes); epic scope advances only stories already `in_progress` (a story added mid-build stays `todo`), story scope only promotes the parent after every story is `review`/`done` | `automatic-transitions.ts` |
 | current | current | failed build, unanswered question, successful story with siblings remaining, or refused terminal promotion; no status write, explicit activity reason, terminal handlers continue posting agent output. A refusal persists `transition_refused`, settles pipeline/wave work as failed, emits failure feedback, and counts toward Full Auto parking | terminal outcome helper / question handler |
 | `review` or `done` | `in_progress` | negative review / requested changes; the review session is already terminal | `automatic-transitions.ts` via review routes and pipeline |
-| `review` | `done` | explicit approval or merge; requires a completed review and zero open comments | approve/merge routes, Full Auto merge |
+| `review` | `done` | explicit approval or merge; requires a completed review that delivered evidence and zero open comments. A review on an MCP-capable provider that filed neither a `submit_findings` verdict nor a finding row is *unverifiable* and does not satisfy the guard — the refusal names the broken channel | approve/merge routes, Full Auto merge |
 | story `review` | story `done` | explicit human story approval does not require a separate story review-agent session and never mutates epic-scoped findings; parent completion is attempted separately under the strict epic guards | story approve route |
 | `done` | `released` | release creation, system actor only | releases route |
 | any structurally allowed edge | target | manual drag/API/MCP or guarded `arji.json` reconciliation | epic/story PATCH, reorder, MCP, sync import |
@@ -96,6 +96,12 @@ requests.
 | refused import statuses preserve content, are returned in `statusesSkipped`, and transaction rollback emits no phantom move | `arji-json-sync-roundtrip.test.ts` — guarded reconciliation regressions |
 | error and `asked_question` terminal branches | `automatic-transition-invariants.test.ts` terminal tests; `epic-build-asked-question.test.ts` route regression |
 | `review → done` needs completed review and no open comments | `workflow-engine.test.ts`; `auto-mode-merge.test.ts` |
+| a review that filed nothing through `submit_findings` counts as neither clean nor completed, and a 401 on that call is traced onto the ticket | `review-unverifiable-gate.test.ts` |
+| an unverifiable review with nothing to act on earns a re-review, never a rebuild, and three of them park the epic | `pipeline-runner.test.ts`; `auto-mode-engine.test.ts` |
+| an unverifiable review whose prose yielded findings dispatches a fix instead of discarding them | `pipeline-runner.test.ts`; `review-unverifiable-gate.test.ts` |
+| a session whose MCP channel Arij could not wire is judged by prose, not refused | `review-channel-wiring.test.ts`; `mcp-injection-lifecycle.test.ts` |
+| the JS rule and the merge gate's SQL give the same verdict for every review row shape | `review-gate-consistency.test.ts` |
+| a second opinion that approved through its prose fail-safe is never charged as a failure | `review-gate-consistency.test.ts`; `auto-mode-engine.test.ts` |
 | negative review returns to `in_progress` | `automatic-transition-invariants.test.ts`; `pipeline-stages-dispatch.test.ts` |
 | occupied/awaiting tickets are excluded and consecutive sweeps do not double-dispatch | `auto-mode-select.test.ts`; `auto-mode-engine.test.ts` budget/idempotence tests |
 | review freshness prevents infinite re-review | `auto-mode-select.test.ts`; `auto-mode-e2e.test.ts` |

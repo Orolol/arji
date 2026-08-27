@@ -38,13 +38,24 @@
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { type ArijDatabase } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
+import { sessionAtSql } from "@/lib/agent-sessions/session-time";
+import {
+  cleanReviewVerdictSql,
+  ORDINARY_REVIEW_AGENT_TYPES,
+} from "@/lib/pipeline/findings";
 
 /**
- * Agent types that constitute "a review happened". Same family the workflow
- * engine's `hasCompletedReview` recognises (lib/workflow/context.ts).
+ * Agent types that constitute "a review happened", as a SQL literal list.
+ * Derived from the single definition in lib/pipeline/findings.ts so the merge
+ * gate, the board badge and the reviewer dispatcher cannot drift apart.
+ *
+ * Narrower than the workflow engine's `hasCompletedReview`, which matches any
+ * type containing "review" (lib/workflow/context.ts): that is the lax floor,
+ * this is the gate.
  */
-const REVIEW_AGENT_TYPES_SQL =
-  "'review_security','review_code','review_compliance','review_feature'";
+const REVIEW_AGENT_TYPES_SQL = ORDINARY_REVIEW_AGENT_TYPES.map(
+  (type) => `'${type}'`
+).join(",");
 
 /**
  * Agent types that constitute "the code changed". `merge` counts: a
@@ -55,17 +66,15 @@ const CODE_AGENT_TYPES_SQL = "'build','ticket_build','team_build','merge'";
 const TERMINAL_STATUSES_SQL = "'completed','failed','cancelled'";
 
 /**
- * Session timestamps mix ISO-8601 (`2026-08-16T09:00:00.000Z`, written by
- * routes) and SQLite CURRENT_TIMESTAMP (`2026-08-16 09:00:00`). Normalising
- * the separator makes lexicographic MAX/compare chronologically correct —
- * the same normalisation lib/kanban/merge-readiness.ts does in JS.
+ * When a review STARTED, normalised for lexicographic comparison — the
+ * anchor the verdict windows key on, as opposed to `sessionAtSql`
+ * (lib/agent-sessions/session-time.ts), which answers when a session ENDED.
+ * Same ' ' → 'T' normalisation and for the same reason: routes write
+ * ISO-8601 while a defaulted column stores SQLite CURRENT_TIMESTAMP, ' '
+ * sorts before 'T', and an unnormalised MAX/compare then ranks them wrongly.
  */
 function reviewStartedAtSql() {
   return sql`REPLACE(COALESCE(${agentSessions.startedAt}, ${agentSessions.createdAt}), ' ', 'T')`;
-}
-
-function sessionAtSql() {
-  return sql`REPLACE(COALESCE(${agentSessions.endedAt}, ${agentSessions.completedAt}, ${agentSessions.createdAt}), ' ', 'T')`;
 }
 
 /**
@@ -99,19 +108,32 @@ function isVerdictBearingReviewSql(): SQL {
  *
  * Epic-scoped (`user_story_id IS NULL`) because reviews and merges are
  * epic-level by design, so a story review must never satisfy the epic's merge
- * gate. A review that answered `changes_requested` through submit_findings is
- * NOT clean, findings or no findings: the verdict is the authoritative
- * channel (lib/pipeline/findings.ts), so an explicit NO must never satisfy
- * the gate. NULL stays clean — that is every MCP-less provider, whose only
- * verdict signal is the prose scan this gate never read.
+ * gate.
+ *
+ * The per-row verdict rule is NOT written here. `submit_findings` is the
+ * authoritative channel, and the module that owns that rule owns this
+ * expression too (lib/pipeline/findings.ts `cleanReviewVerdictSql`): a review
+ * that answered `changes_requested` is not clean, and neither is one whose
+ * deposit channel Arij could not wire — an empty findings list from a review
+ * that could not file anything is silence, not approval.
+ *
+ * The duplication this replaces was not cosmetic. While only findings.ts read
+ * `agent_sessions.mcp_channel`, a review whose channel Arij could not wire was
+ * judged by prose there and "not clean" here — so nothing charged it
+ * (reconcileInFlight only charges an unverifiable review) and `needsReview`
+ * stayed true every sweep: a reviewer dispatched forever on an epic that
+ * never parked.
+ *
+ * A NULL verdict on a provider Arij never wired a channel for still reads as
+ * clean: its only verdict signal is the prose scan this gate never read,
+ * which is why the rule turns on the CHANNEL and not on the empty verdict.
  */
-function isCleanReviewSql(): SQL {
+function isCleanReviewSql(database: ArijDatabase): SQL {
   return sql`${agentSessions.status} = 'completed'
      AND ${agentSessions.userStoryId} IS NULL
      AND ${agentSessions.agentType} IN (${sql.raw(REVIEW_AGENT_TYPES_SQL)})
      AND ${agentSessions.outcome} = 'answered'
-     AND (${agentSessions.reviewVerdict} IS NULL
-          OR ${agentSessions.reviewVerdict} <> 'changes_requested')`;
+     AND ${cleanReviewVerdictSql(database)}`;
 }
 
 /** A verdict-bearing review that did NOT ask for changes. */
@@ -149,7 +171,7 @@ function epicSessionRows(database: ArijDatabase, scope: SQL) {
       epicId: agentSessions.epicId,
       costUsd: agentSessions.totalCostUsd,
       cleanReviewAt: sql<string | null>`CASE
-        WHEN ${isCleanReviewSql()} THEN ${sessionAtSql()} END`.as(
+        WHEN ${isCleanReviewSql(database)} THEN ${sessionAtSql()} END`.as(
         "clean_review_at"
       ),
       cleanVerdictAt: sql<string | null>`CASE

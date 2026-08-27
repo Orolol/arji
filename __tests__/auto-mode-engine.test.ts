@@ -43,6 +43,9 @@ const {
   kickAutoMode,
   cancelPendingKicks,
 } = await import("@/lib/auto-mode/engine");
+const { isReviewSessionUnverifiable } = await import(
+  "@/lib/pipeline/findings"
+);
 const { autoModeRegistry } = await import("@/lib/auto-mode/registry");
 const { loadAutoModeBoard } = await import("@/lib/auto-mode/select");
 const {
@@ -115,6 +118,17 @@ function addSession(input: {
   agentType: string;
   /** Defaults to "answered" for completed sessions — what a real run stores. */
   outcome?: string | null;
+  /**
+   * Structured submit_findings verdict. Review rows need one: the provider
+   * defaults to claude-code, which HAS the tool, so silence on it is an
+   * unverifiable review rather than a clean one.
+   */
+  reviewVerdict?: string | null;
+  /**
+   * What Arij recorded about the MCP channel at spawn (migration 0041).
+   * NULL — the default — is a legacy row, judged from the provider instead.
+   */
+  mcpChannel?: string | null;
   createdAt: string;
   endedAt?: string | null;
 }): string {
@@ -134,6 +148,8 @@ function addSession(input: {
           : input.status === "completed"
             ? "answered"
             : null,
+      reviewVerdict: input.reviewVerdict ?? null,
+      mcpChannel: input.mcpChannel ?? null,
       createdAt: input.createdAt,
       endedAt: input.endedAt ?? null,
     })
@@ -300,6 +316,10 @@ function makeFakes(): Fakes {
         .where(eq(agentSessions.id, sessionId))
         .get()?.outcome ??
       null,
+    // The real rule against the real (test) database — `settle` writes the
+    // row, so a scripted review is judged exactly as production judges it.
+    readReviewUnverifiable: (sessionId) =>
+      isReviewSessionUnverifiable(sessionId),
     readEpicStatus: (epicId) =>
       db.select({ status: epics.status }).from(epics).where(eq(epics.id, epicId)).get()
         ?.status ?? null,
@@ -904,6 +924,10 @@ describe("merge step", () => {
       epicId: id,
       status: "completed",
       agentType: "review_code",
+      // The merge gate only counts a review whose verdict reached the
+      // database; a verdict-less claude-code row is unverifiable and would
+      // never be a merge candidate (lib/pipeline/findings.ts).
+      reviewVerdict: "approved",
       createdAt: at(3),
       endedAt: at(4),
     });
@@ -1072,6 +1096,40 @@ describe("merge step", () => {
         reason.includes("the second-opinion session was cancelled")
       )
     ).toHaveLength(1);
+  });
+
+  /**
+   * The second opinion is allowed to answer through a prose `Overall Verdict:`
+   * fail-safe (readSecondOpinionState accepts it), so an APPROVING gate
+   * routinely leaves no review_verdict and no findings rows — the exact shape
+   * the unverifiable rule refuses. Charging it here would park the epic the
+   * gate had just cleared, three approvals in.
+   */
+  it("does not charge a second opinion that approved through its prose fail-safe", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ secondOpinion: true, reviewConcurrency: 1 });
+    seedMergeable();
+    fakes.mergeOutcome({ status: "merged", commitHash: "c1", sessionId: null });
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    const sessionId = first.secondOpinionsDispatched[0];
+    expect(sessionId).toBeTruthy();
+
+    // Completed and answered, with nothing on the structured channel — the
+    // gate read its verdict out of the markdown.
+    settle(fakes, sessionId, "completed", "answered");
+    fakes.setSecondOpinionState("m1", { status: "approved", sessionId });
+
+    const second = await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(second.merged).toEqual(["m1"]);
+    expect(autoModeRegistry.isParked(PROJECT_ID, "m1")).toBe(false);
+    // A single charge is invisible in the activity log (only the third one
+    // traces), so probe the streak directly: recordFailure returns the new
+    // count, and 1 means nothing had been charged before it.
+    expect(
+      autoModeRegistry.recordFailure(PROJECT_ID, "m1", "m1", "probe")
+    ).toBe(1);
   });
 
   it("merges only after a fresh structured second opinion approves", async () => {
@@ -1785,6 +1843,7 @@ describe("mid-sweep disable", () => {
         epicId,
         status: "completed",
         agentType: "review_code",
+        reviewVerdict: "approved",
         createdAt: at(3),
         endedAt: at(4),
       });
@@ -1827,6 +1886,97 @@ describe("silent reviews", () => {
     expect(autoReasons("r1")).toContain(
       "Auto mode parked this ticket after 3 consecutive failures"
     );
+  });
+
+  /**
+   * The unverifiable review is the `silent` review's twin: it completed and
+   * `answered`, so nothing in the outcome marks it as useless, but its
+   * structured channel produced nothing and the selectors treat it as "no
+   * review happened". Without charging it, needsReview would re-dispatch a
+   * reviewer every sweep forever.
+   */
+  it("retries an unverifiable review and parks the epic after three of them", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 0, reviewConcurrency: 1 });
+    addEpic({ id: "r1", status: "review" });
+    addSession({
+      epicId: "r1",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(1),
+      endedAt: at(2),
+    });
+
+    for (let i = 0; i < 3; i += 1) {
+      const result = await sweepProject(PROJECT_ID, fakes.deps);
+      expect(result.reviewsDispatched).toHaveLength(1);
+      // Answered, on an MCP-capable provider, with no verdict and no rows.
+      settle(fakes, result.reviewsDispatched[0], "completed", "answered");
+    }
+
+    const final = await sweepProject(PROJECT_ID, fakes.deps);
+    expect(final.parked).toEqual(["r1"]);
+    expect(final.reviewsDispatched).toEqual([]);
+    expect(autoReasons("r1")).toContain(
+      "Auto mode parked this ticket after 3 consecutive failures"
+    );
+  });
+
+  /**
+   * The divergence trap: findings.ts judges a review whose channel Arij could
+   * not wire by prose (so nothing charges it), and the merge gate must reach
+   * the same conclusion. If it does not, `needsReview` stays true forever and
+   * the epic is re-reviewed every sweep with no budget to stop it.
+   */
+  it("does not loop on a review whose channel was never wired", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 0, reviewConcurrency: 1 });
+    fakes.mergeOutcome({ status: "merged", commitHash: "c1", sessionId: null });
+    addEpic({ id: "r1", status: "review", branchName: "feat/r1" });
+    addSession({
+      epicId: "r1",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(1),
+      endedAt: at(2),
+    });
+    addSession({
+      epicId: "r1",
+      status: "completed",
+      agentType: "review_code",
+      mcpChannel: "unavailable",
+      createdAt: at(3),
+      endedAt: at(4),
+    });
+
+    const result = await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(result.reviewsDispatched).toEqual([]);
+    expect(result.merged).toEqual(["r1"]);
+  });
+
+  it("does not charge a review that delivered its verdict", async () => {
+    const fakes = makeFakes();
+    fakes.setConfig({ buildConcurrency: 0, reviewConcurrency: 1 });
+    addEpic({ id: "r1", status: "review" });
+    addSession({
+      epicId: "r1",
+      status: "completed",
+      agentType: "build",
+      createdAt: at(1),
+      endedAt: at(2),
+    });
+
+    const first = await sweepProject(PROJECT_ID, fakes.deps);
+    const reviewSessionId = first.reviewsDispatched[0];
+    db.update(agentSessions)
+      .set({ reviewVerdict: "approved" })
+      .where(eq(agentSessions.id, reviewSessionId))
+      .run();
+    settle(fakes, reviewSessionId, "completed", "answered");
+    await sweepProject(PROJECT_ID, fakes.deps);
+
+    expect(autoModeRegistry.listParked(PROJECT_ID)).toEqual([]);
   });
 
   it("does not charge an asked_question review as a failure", async () => {
