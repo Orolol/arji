@@ -39,35 +39,38 @@ import {
   extraMcpScopeForProvider,
 } from "@/lib/providers/extra-mcp-scope";
 import { createId } from "@/lib/utils/nanoid";
+import {
+  MCP_SERVER_ARGS_MAX_ITEMS,
+  MCP_SERVER_ARGS_MAX_TOTAL_LENGTH,
+  MCP_SERVER_ARG_MAX_LENGTH,
+  MCP_SERVER_AGENT_TYPES_MAX_ITEMS,
+  MCP_SERVER_AGENT_TYPE_MAX_LENGTH,
+  MCP_SERVER_COMMAND_MAX_LENGTH,
+  MCP_SERVER_ENV_KEY_MAX_LENGTH,
+  MCP_SERVER_ENV_MAX_KEYS,
+  MCP_SERVER_ENV_VALUE_MAX_LENGTH,
+  MCP_SERVER_HEADERS_KEY_MAX_LENGTH,
+  MCP_SERVER_HEADERS_MAX_KEYS,
+  MCP_SERVER_HEADERS_VALUE_MAX_LENGTH,
+  MCP_SERVER_NAME_MAX_LENGTH,
+  MCP_SERVER_SECRET_MASK,
+  MCP_SERVER_TOOL_ALLOWLIST_MAX_ITEMS,
+  MCP_SERVER_TOOL_NAME_MAX_LENGTH,
+  MCP_SERVER_URL_MAX_LENGTH,
+  MCP_SERVER_USAGE_HINT_MAX_LENGTH,
+  type McpServerTransport,
+  type McpServerView,
+} from "./server-limits";
 import { syncUserGlobalMcpServers } from "./user-global-sync";
 
 // ---------------------------------------------------------------------------
-// Caps — mirrored by the UI (maxLength) and enforced here with explicit
-// rejection rather than truncation.
+// Caps and the read-side view type live in ./server-limits so CLIENT code can
+// import them without dragging @/lib/db and child_process into the bundle.
+// Re-exported here so server-side callers keep one import site.
 // ---------------------------------------------------------------------------
 
-export const MCP_SERVER_NAME_MAX_LENGTH = 64;
-export const MCP_SERVER_COMMAND_MAX_LENGTH = 512;
-export const MCP_SERVER_URL_MAX_LENGTH = 2048;
-export const MCP_SERVER_USAGE_HINT_MAX_LENGTH = 200;
-export const MCP_SERVER_ARG_MAX_LENGTH = 512;
-export const MCP_SERVER_ARGS_MAX_ITEMS = 32;
-export const MCP_SERVER_ARGS_MAX_TOTAL_LENGTH = 4096;
-export const MCP_SERVER_ENV_MAX_KEYS = 16;
-export const MCP_SERVER_ENV_KEY_MAX_LENGTH = 128;
-export const MCP_SERVER_ENV_VALUE_MAX_LENGTH = 4096;
-export const MCP_SERVER_HEADERS_MAX_KEYS = 16;
-export const MCP_SERVER_HEADERS_KEY_MAX_LENGTH = 128;
-export const MCP_SERVER_HEADERS_VALUE_MAX_LENGTH = 4096;
-export const MCP_SERVER_AGENT_TYPES_MAX_ITEMS = 32;
-export const MCP_SERVER_AGENT_TYPE_MAX_LENGTH = 128;
-export const MCP_SERVER_TOOL_ALLOWLIST_MAX_ITEMS = 32;
-export const MCP_SERVER_TOOL_NAME_MAX_LENGTH = 128;
+export * from "./server-limits";
 
-/** Value the API returns instead of a stored secret. */
-export const MCP_SERVER_SECRET_MASK = "***";
-
-export type McpServerTransport = "stdio" | "http";
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -290,31 +293,6 @@ function parseSecretMap(blob: string): Record<string, string> {
   }
 }
 
-export interface McpServerView {
-  id: string;
-  /** NULL (null in JSON) = global server. */
-  projectId: string | null;
-  name: string;
-  enabled: boolean;
-  transport: McpServerTransport;
-  command: string | null;
-  args: string[];
-  /** WRITE-ONLY: every value is MCP_SERVER_SECRET_MASK. */
-  env: Record<string, string>;
-  url: string | null;
-  /** WRITE-ONLY: every value is MCP_SERVER_SECRET_MASK. */
-  headers: Record<string, string>;
-  /** NULL = applies to every agent type and chat turns. */
-  agentTypes: string[] | null;
-  /** NULL = every tool the server exposes. */
-  toolAllowlist: string[] | null;
-  usageHint: string | null;
-  lastCheckedAt: string | null;
-  /** NULL = never checked. */
-  lastCheckOk: boolean | null;
-  lastCheckError: string | null;
-  createdAt: string;
-}
 
 function parseJsonArray(blob: string | null): string[] | null {
   if (blob === null) return null;

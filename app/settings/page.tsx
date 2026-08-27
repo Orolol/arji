@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { McpServersSection } from "@/components/settings/McpServersSection";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -1102,6 +1103,8 @@ export default function SettingsPage() {
           <p className="text-xs text-muted-foreground">{mcpToolsMessage}</p>
         )}
       </section>
+
+      <McpServersSection projectId={null} />
 
       <section
         className="space-y-3 rounded-md border border-border p-4"
