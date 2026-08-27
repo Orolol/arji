@@ -46,6 +46,7 @@ export type MergeBlocker =
   | "merge_conflict"
   | "conflict_markers"
   | "open_findings"
+  | "changes_requested"
   | "no_review"
   | "stale_review"
   | "no_branch";
@@ -76,6 +77,20 @@ export interface MergeReadinessFacts {
    * predates it is stale.
    */
   lastTerminalCodeAt?: string | null;
+  /**
+   * When the newest review that RECORDED a clean verdict started, and when
+   * the newest one that recorded `changes_requested` did.
+   *
+   * Together they answer "is a rejection still standing", which nothing else
+   * here can: `lastCleanReviewAt` is a MAX over clean rounds, so a later
+   * rejection leaves it untouched at the older approving round and is simply
+   * invisible to it. The workflow engine gained that guard first; without
+   * these the board would keep offering Full Auto a candidate the engine
+   * refuses — and `tryAutoMerge` merges with git before it validates, so the
+   * disagreement costs a merge and a rollback on every sweep.
+   */
+  lastCleanVerdictReviewAt?: string | null;
+  lastNegativeVerdictReviewAt?: string | null;
   /** Newest activity entry recording a git merge conflict. */
   lastMergeConflictAt?: string | null;
   /** Newest activity entry recording committed conflict markers. */
@@ -162,10 +177,34 @@ export function hasCurrentConflictMarkers(
 }
 
 /**
+ * Is a `changes_requested` verdict still the epic's latest word?
+ *
+ * Only if no clean verdict has been recorded since. A NULL-verdict review
+ * clears nothing — it recorded nothing to clear with, the same asymmetry
+ * `lastCleanVerdictReviewStartedAtSql` documents on the other side.
+ *
+ * Shared by the board, `selectMergeCandidates` and `buildTransitionContext`
+ * so all three read one definition; the engine's merge guard is this fact.
+ */
+export function hasStandingNegativeVerdict(
+  facts: Pick<
+    MergeReadinessFacts,
+    "lastCleanVerdictReviewAt" | "lastNegativeVerdictReviewAt"
+  > | null | undefined
+): boolean {
+  const rejected = normalizeAt(facts?.lastNegativeVerdictReviewAt);
+  if (!rejected) return false;
+  const cleared = normalizeAt(facts?.lastCleanVerdictReviewAt);
+  if (!cleared) return true;
+  return rejected > cleared;
+}
+
+/**
  * The predicate. Order of the checks IS the display order: the first thing
  * standing between this epic and `main` is what the card reports, so a
  * conflict (git cannot land it at all) outranks findings (the code needs
- * work), which outrank a stale review (a reviewer needs to run).
+ * work), which outrank a standing rejection (specific beats general), which
+ * outranks a stale or missing review (a reviewer needs to run).
  */
 export function evaluateMergeReadiness(
   facts: MergeReadinessFacts | null | undefined
@@ -191,6 +230,10 @@ export function evaluateMergeReadiness(
   if (hasConflict) return blocked("merge_conflict");
   if (hasMarkers) return blocked("conflict_markers");
   if (openFindings > 0) return blocked("open_findings");
+  // Ahead of `no_review` deliberately: when the rejection is the ONLY round,
+  // `lastCleanReviewAt` is null and "awaiting review" would be a lie — a
+  // review ran, and it said no.
+  if (hasStandingNegativeVerdict(facts)) return blocked("changes_requested");
   if (!facts.lastCleanReviewAt) return blocked("no_review");
   if (!hasFreshCleanReview(facts)) return blocked("stale_review");
   if (!facts.branchName) return blocked("no_branch");
@@ -223,6 +266,8 @@ export function describeMergeBlocker(
       return readiness.openFindings === 1
         ? "1 open finding"
         : `${readiness.openFindings} open findings`;
+    case "changes_requested":
+      return "Latest review requested changes";
     case "no_review":
       return "Awaiting review";
     case "stale_review":

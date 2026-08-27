@@ -51,11 +51,13 @@ import {
 } from "@/lib/workflow/merge-failure";
 import {
   lastCleanReviewAtSql,
+  lastCleanVerdictReviewStartedAtSql,
+  lastNegativeVerdictReviewStartedAtSql,
   lastTerminalCodeAtSql,
 } from "@/lib/workflow/review-freshness";
 import {
   blocksMergeSql,
-  supersessionCutoffsByEpic,
+  reviewVerdictWindowsByEpic,
 } from "@/lib/workflow/blocking-findings";
 
 class FrictionConversionConflict extends Error {}
@@ -180,6 +182,12 @@ export async function GET(
       ),
       lastCleanReviewAt: lastCleanReviewAtSql().as("last_clean_review_at"),
       lastTerminalCodeAt: lastTerminalCodeAtSql().as("last_terminal_code_at"),
+      lastCleanVerdictReviewAt: lastCleanVerdictReviewStartedAtSql().as(
+        "last_clean_verdict_review_at"
+      ),
+      lastNegativeVerdictReviewAt: lastNegativeVerdictReviewStartedAtSql().as(
+        "last_negative_verdict_review_at"
+      ),
     })
     .from(agentSessions)
     .where(
@@ -236,7 +244,7 @@ export async function GET(
   // took this query from 0.16 ms to 102 ms on a 120-epic board; hoisted it
   // costs 1.67 ms for identical results, which matters because the client
   // refetches this route on every `session:*` SSE event.
-  const supersessionCutoffs = supersessionCutoffsByEpic(db, projectId);
+  const verdictWindows = reviewVerdictWindowsByEpic(db, projectId);
 
   const openFindingCounts = db
     .select({
@@ -246,14 +254,14 @@ export async function GET(
     .from(reviewComments)
     .innerJoin(epics, eq(reviewComments.epicId, epics.id))
     .leftJoin(
-      supersessionCutoffs,
-      eq(supersessionCutoffs.epicId, reviewComments.epicId)
+      verdictWindows,
+      eq(verdictWindows.epicId, reviewComments.epicId)
     )
     .where(
       and(
         eq(epics.projectId, projectId),
         eq(reviewComments.status, "open"),
-        blocksMergeSql(supersessionCutoffs.cutoffAt)
+        blocksMergeSql(verdictWindows.cleanVerdictAt)
       )
     )
     .groupBy(reviewComments.epicId)
@@ -368,6 +376,8 @@ export async function GET(
       openFindings: openFindingCounts.openFindings,
       lastCleanReviewAt: epicSessionFacts.lastCleanReviewAt,
       lastTerminalCodeAt: epicSessionFacts.lastTerminalCodeAt,
+      lastCleanVerdictReviewAt: epicSessionFacts.lastCleanVerdictReviewAt,
+      lastNegativeVerdictReviewAt: epicSessionFacts.lastNegativeVerdictReviewAt,
       lastMergeConflictAt: latestMergeFailures.lastMergeConflictAt,
       lastConflictMarkersAt: latestMergeFailures.lastConflictMarkersAt,
     })
@@ -400,6 +410,8 @@ export async function GET(
       openFindings,
       lastCleanReviewAt,
       lastTerminalCodeAt,
+      lastCleanVerdictReviewAt,
+      lastNegativeVerdictReviewAt,
       lastMergeConflictAt,
       lastConflictMarkersAt,
       ...epic
@@ -414,6 +426,8 @@ export async function GET(
         openFindings,
         lastCleanReviewAt,
         lastTerminalCodeAt,
+        lastCleanVerdictReviewAt,
+        lastNegativeVerdictReviewAt,
         lastMergeConflictAt,
         lastConflictMarkersAt,
       }),

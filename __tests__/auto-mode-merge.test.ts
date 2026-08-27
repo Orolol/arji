@@ -390,9 +390,54 @@ describe("tryAutoMerge — the workflow guards ARE the review gate", () => {
     ).toEqual(["resolved"]);
   });
 
-  it("leaves findings open when the post-merge guard refuses", async () => {
-    // The caller rolls the merge back on a refusal, so nothing may have been
-    // closed on the way — the findings are exactly what the next sweep reads.
+  it("leaves findings open when the POST-merge guard refuses", async () => {
+    // This has to reach `finalizeMergedEpic`'s refusal branch, which a
+    // blocking finding would not: that stops the PRE-flight and git never
+    // runs, so the assertion would hold for a reason unrelated to ordering.
+    //
+    // So: a NON-blocking [minor] (passes both guards on its own), and the
+    // epic bounced mid-merge — the settling-review race `rollbackRefusedMerge`
+    // exists for. The caller rolls main back, so a `closeOpenFindings` hoisted
+    // above `applyTransition` would have closed a finding the next sweep still
+    // needs. That is the ordering lib/workflow/close-findings.ts calls
+    // "the opposite of what it looks like", and this is what pins it.
+    seed();
+    db.insert(reviewComments)
+      .values({
+        id: "rc-minor-raced",
+        epicId: EPIC_ID,
+        filePath: "lib/x.ts",
+        lineNumber: 3,
+        body: "[minor] tidy later",
+        author: "agent",
+        status: "open",
+      })
+      .run();
+    gitMocks.mergeWorktree.mockImplementation(async () => {
+      db.update(epics).set({ status: "in_progress" }).run();
+      return { merged: true, commitHash: "raced" };
+    });
+
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    // Proof the pre-flight passed and the refusal came from the POST-merge
+    // guard: git ran, and the merge was rolled back.
+    expect(gitMocks.mergeWorktree).toHaveBeenCalled();
+    expect(gitMocks.rollbackMerge).toHaveBeenCalled();
+    expect(outcome.status).toBe("skipped");
+    expect(
+      db
+        .select()
+        .from(reviewComments)
+        .where(eq(reviewComments.epicId, EPIC_ID))
+        .all()
+        .map((row) => row.status)
+    ).toEqual(["open"]);
+  });
+
+  it("still refuses before git when a finding actually blocks", async () => {
+    // The sibling case the rewrite above gave up: a blocking finding stops
+    // the PRE-flight, so nothing is merged and nothing is rolled back.
     seed();
     db.insert(reviewComments)
       .values({
@@ -407,8 +452,10 @@ describe("tryAutoMerge — the workflow guards ARE the review gate", () => {
       .run();
     gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
 
-    await tryAutoMerge(PROJECT_ID, EPIC_ID);
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
 
+    expect(outcome.status).toBe("skipped");
+    expect(gitMocks.mergeWorktree).not.toHaveBeenCalled();
     expect(
       db
         .select()

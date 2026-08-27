@@ -13,27 +13,8 @@
  * builders would couple them.
  */
 
-import { sql, type SQLWrapper } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { agentSessions } from "@/lib/db/schema";
-
-/**
- * The `agent_sessions` columns these fragments read, structurally.
- *
- * Typed by the columns rather than by the table so a correlated subquery can
- * pass an `alias()` handle: an aliased table carries its alias in every
- * column's type parameters, so it is not assignable to `typeof agentSessions`
- * however identical the columns are.
- */
-export type ReviewFreshnessColumns = Record<
-  | "status"
-  | "userStoryId"
-  | "agentType"
-  | "outcome"
-  | "reviewVerdict"
-  | "startedAt"
-  | "createdAt",
-  SQLWrapper
->;
 
 /**
  * Agent types that constitute "a review happened". Same family the workflow
@@ -56,8 +37,32 @@ const TERMINAL_STATUSES_SQL = "'completed','failed','cancelled'";
  * the separator makes lexicographic MAX/compare chronologically correct —
  * the same normalisation lib/kanban/merge-readiness.ts does in JS.
  */
+function reviewStartedAtSql() {
+  return sql`REPLACE(COALESCE(${agentSessions.startedAt}, ${agentSessions.createdAt}), ' ', 'T')`;
+}
+
 function sessionAtSql() {
   return sql`REPLACE(COALESCE(${agentSessions.endedAt}, ${agentSessions.completedAt}, ${agentSessions.createdAt}), ' ', 'T')`;
+}
+
+/**
+ * "This session recorded a verdict", as a reusable WHEN clause — the common
+ * half of the two windows below.
+ *
+ * Epic-scoped (`user_story_id IS NULL`) because reviews and merges are
+ * epic-level by design, so a story review must never speak for the epic.
+ * `review_verdict IS NOT NULL` is what makes this "recorded": a session that
+ * completed, answered and deposited nothing weighed nothing, so it must
+ * neither supersede a finding nor impose a rejection. That is every MCP-less
+ * provider, every token that 401'd mid-review, and every reviewer whose prose
+ * no parser could read.
+ */
+function isVerdictBearingReviewSql() {
+  return sql`${agentSessions.status} = 'completed'
+     AND ${agentSessions.userStoryId} IS NULL
+     AND ${agentSessions.agentType} IN (${sql.raw(REVIEW_AGENT_TYPES_SQL)})
+     AND ${agentSessions.outcome} = 'answered'
+     AND ${agentSessions.reviewVerdict} IS NOT NULL`;
 }
 
 /**
@@ -74,15 +79,13 @@ function sessionAtSql() {
  * `session` is a parameter so a CORRELATED subquery can pass its own alias
  * (lib/workflow/blocking-findings.ts) and still test the same conditions.
  */
-export function isCleanReviewSql(
-  session: ReviewFreshnessColumns = agentSessions
-) {
-  return sql`${session.status} = 'completed'
-     AND ${session.userStoryId} IS NULL
-     AND ${session.agentType} IN (${sql.raw(REVIEW_AGENT_TYPES_SQL)})
-     AND ${session.outcome} = 'answered'
-     AND (${session.reviewVerdict} IS NULL
-          OR ${session.reviewVerdict} <> 'changes_requested')`;
+export function isCleanReviewSql() {
+  return sql`${agentSessions.status} = 'completed'
+     AND ${agentSessions.userStoryId} IS NULL
+     AND ${agentSessions.agentType} IN (${sql.raw(REVIEW_AGENT_TYPES_SQL)})
+     AND ${agentSessions.outcome} = 'answered'
+     AND (${agentSessions.reviewVerdict} IS NULL
+          OR ${agentSessions.reviewVerdict} <> 'changes_requested')`;
 }
 
 /**
@@ -125,14 +128,32 @@ export function lastCleanReviewAtSql() {
  *
  * Group by `agent_sessions.epic_id`.
  */
-export function lastVerdictBearingReviewStartedAtSql(
-  session: ReviewFreshnessColumns = agentSessions
-) {
+export function lastCleanVerdictReviewStartedAtSql() {
   return sql<string | null>`MAX(CASE
-    WHEN ${isCleanReviewSql(session)}
-     AND ${session.reviewVerdict} IS NOT NULL
-    THEN REPLACE(COALESCE(${session.startedAt}, ${session.createdAt}), ' ', 'T')
-    END)`;
+    WHEN ${isVerdictBearingReviewSql()}
+     AND ${agentSessions.reviewVerdict} <> 'changes_requested'
+    THEN ${reviewStartedAtSql()} END)`;
+}
+
+/**
+ * When the newest review that recorded `changes_requested` started.
+ *
+ * Its counterpart above is the newest CLEAN verdict. Compare the two and you
+ * have "is a rejection still standing" — the fact
+ * `lib/kanban/merge-readiness.ts` turns into a blocker and the workflow
+ * engine turns into a merge refusal.
+ *
+ * It cannot be derived from `lastCleanReviewAtSql`, which is a MAX over clean
+ * rounds: a later rejection leaves that value untouched at the older
+ * approving round, so a rejection is simply invisible to it.
+ *
+ * Group by `agent_sessions.epic_id`.
+ */
+export function lastNegativeVerdictReviewStartedAtSql() {
+  return sql<string | null>`MAX(CASE
+    WHEN ${isVerdictBearingReviewSql()}
+     AND ${agentSessions.reviewVerdict} = 'changes_requested'
+    THEN ${reviewStartedAtSql()} END)`;
 }
 
 /**

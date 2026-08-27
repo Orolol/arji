@@ -20,11 +20,13 @@ import {
 } from "@/lib/kanban/merge-readiness";
 import {
   lastCleanReviewAtSql,
+  lastCleanVerdictReviewStartedAtSql,
+  lastNegativeVerdictReviewStartedAtSql,
   lastTerminalCodeAtSql,
 } from "@/lib/workflow/review-freshness";
 import {
   blocksMergeSql,
-  supersessionCutoffsByEpic,
+  reviewVerdictWindowsByEpic,
 } from "@/lib/workflow/blocking-findings";
 import { isDeliveredStatus } from "@/lib/types/kanban";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
@@ -211,6 +213,13 @@ interface SessionFacts {
    * build commits to the epic's branch, so a review that predates it is stale.
    */
   lastTerminalCodeAt: string | null;
+  /**
+   * The two verdict windows behind `hasStandingNegativeVerdict`. The engine
+   * refuses a merge while a rejection stands, so the selector must not offer
+   * one — `tryAutoMerge` runs git before it validates.
+   */
+  lastCleanVerdictReviewAt: string | null;
+  lastNegativeVerdictReviewAt: string | null;
 }
 
 interface AwaitingFacts {
@@ -371,6 +380,8 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
       epicId: agentSessions.epicId,
       lastCleanReviewAt: lastCleanReviewAtSql(),
       lastTerminalCodeAt: lastTerminalCodeAtSql(),
+      lastCleanVerdictReviewAt: lastCleanVerdictReviewStartedAtSql(),
+      lastNegativeVerdictReviewAt: lastNegativeVerdictReviewStartedAtSql(),
     })
     .from(agentSessions)
     .where(
@@ -388,6 +399,8 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     sessionFactsByEpic.set(row.epicId, {
       lastCleanReviewAt: row.lastCleanReviewAt ?? null,
       lastTerminalCodeAt: row.lastTerminalCodeAt ?? null,
+      lastCleanVerdictReviewAt: row.lastCleanVerdictReviewAt ?? null,
+      lastNegativeVerdictReviewAt: row.lastNegativeVerdictReviewAt ?? null,
     });
   }
 
@@ -537,7 +550,7 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
   // must not hold different opinions about which rows still stand in the way.
   // The cutoff is joined rather than correlated for the reason the board
   // route spells out — a per-row scalar re-scans an unindexed table.
-  const supersessionCutoffs = supersessionCutoffsByEpic(db, projectId);
+  const verdictWindows = reviewVerdictWindowsByEpic(db, projectId);
 
   const openReviewRows = db
     .select({
@@ -547,14 +560,14 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     .from(reviewComments)
     .innerJoin(epics, eq(reviewComments.epicId, epics.id))
     .leftJoin(
-      supersessionCutoffs,
-      eq(supersessionCutoffs.epicId, reviewComments.epicId)
+      verdictWindows,
+      eq(verdictWindows.epicId, reviewComments.epicId)
     )
     .where(
       and(
         eq(epics.projectId, projectId),
         eq(reviewComments.status, "open"),
-        blocksMergeSql(supersessionCutoffs.cutoffAt)
+        blocksMergeSql(verdictWindows.cleanVerdictAt)
       )
     )
     .groupBy(reviewComments.epicId)
@@ -879,6 +892,8 @@ function mergeReadinessFacts(
     openFindings: board.openReviewCommentsByEpic.get(epic.id) ?? 0,
     lastCleanReviewAt: facts?.lastCleanReviewAt ?? null,
     lastTerminalCodeAt: facts?.lastTerminalCodeAt ?? null,
+    lastCleanVerdictReviewAt: facts?.lastCleanVerdictReviewAt ?? null,
+    lastNegativeVerdictReviewAt: facts?.lastNegativeVerdictReviewAt ?? null,
   };
 }
 

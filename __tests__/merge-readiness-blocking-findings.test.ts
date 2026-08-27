@@ -578,6 +578,127 @@ describe("review -> done under a standing changes_requested verdict", () => {
   });
 });
 
+/**
+ * The engine learned about a standing `changes_requested`; the board and the
+ * merge selector have to learn the same thing or they hand Full Auto a
+ * candidate the guard refuses — and `tryAutoMerge` merges with git FIRST, so
+ * every sweep would land the branch, be refused, and roll itself back.
+ *
+ * `evaluateMergeReadiness` cannot infer it: `lastCleanReviewAt` is a MAX over
+ * CLEAN reviews, so a later rejecting round is invisible to it — the value
+ * simply stays at the older approving round.
+ */
+describe("a standing changes_requested keeps the board and the engine agreed", () => {
+  /** Approved at :20-:25, then a SECOND review rejects at :30-:35. */
+  function seedLateRejection(id: string, position = 0): void {
+    addEpic(id, position);
+    addSession({ epicId: id, agentType: "build", endedAt: at(10) });
+    addSession({
+      epicId: id,
+      agentType: "review_code",
+      reviewVerdict: "approved",
+      startedAt: at(20),
+      endedAt: at(25),
+    });
+    addSession({
+      epicId: id,
+      agentType: "review_security",
+      reviewVerdict: "changes_requested",
+      startedAt: at(30),
+      endedAt: at(35),
+    });
+  }
+
+  it("refuses on the board, in the selector and in the engine alike", async () => {
+    seedLateRejection("cr-late");
+
+    expect(await readinessOf("cr-late")).toMatchObject({
+      ready: false,
+      blocker: "changes_requested",
+    });
+    expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([]);
+
+    const ctx = buildTransitionContext({
+      epicId: "cr-late",
+      fromStatus: "review",
+      toStatus: "done",
+      actor: "user",
+    });
+    ctx.source = "merge";
+    expect(validateTransition(ctx).error).toMatch(/requested changes/i);
+  });
+
+  it("clears once a newer review records a clean verdict", async () => {
+    seedLateRejection("cr-recovered");
+    addSession({ epicId: "cr-recovered", agentType: "build", endedAt: at(40) });
+    addSession({
+      epicId: "cr-recovered",
+      agentType: "review_code",
+      reviewVerdict: "approved",
+      startedAt: at(50),
+      endedAt: at(55),
+    });
+
+    expect(await readinessOf("cr-recovered")).toMatchObject({ ready: true });
+    expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([
+      "cr-recovered",
+    ]);
+  });
+
+  it("is not cleared by a later review that recorded no verdict", async () => {
+    seedLateRejection("cr-silent-after");
+    addSession({
+      epicId: "cr-silent-after",
+      agentType: "build",
+      endedAt: at(40),
+    });
+    addSession({
+      epicId: "cr-silent-after",
+      agentType: "review_code",
+      reviewVerdict: null,
+      startedAt: at(50),
+      endedAt: at(55),
+    });
+
+    expect(await readinessOf("cr-silent-after")).toMatchObject({
+      blocker: "changes_requested",
+    });
+    expect(selectMergeCandidates(PROJECT_ID).map((c) => c.epicId)).toEqual([]);
+  });
+
+  it("reports the rejection ahead of the vaguer 'no review' when it is the only one", async () => {
+    // With no clean round at all `lastCleanReviewAt` is NULL, so the honest
+    // blocker is the rejection rather than "awaiting review" — a review DID
+    // run, and it said no.
+    addEpic("cr-only");
+    addSession({ epicId: "cr-only", agentType: "build", endedAt: at(10) });
+    addSession({
+      epicId: "cr-only",
+      agentType: "review_code",
+      reviewVerdict: "changes_requested",
+      startedAt: at(20),
+      endedAt: at(25),
+    });
+    expect(await readinessOf("cr-only")).toMatchObject({
+      ready: false,
+      blocker: "changes_requested",
+    });
+  });
+
+  it("still reports a blocking finding first — it is the more actionable one", async () => {
+    seedLateRejection("cr-with-finding");
+    addFinding({
+      epicId: "cr-with-finding",
+      body: "[critical] Still standing",
+      createdAt: at(32),
+    });
+    expect(await readinessOf("cr-with-finding")).toMatchObject({
+      blocker: "open_findings",
+      openFindings: 1,
+    });
+  });
+});
+
 describe("board / Full Auto parity on blocking findings", () => {
   it("agrees with selectMergeCandidates once the definition narrows", async () => {
     seedApprovedEpic("p-minor", 0);

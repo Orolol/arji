@@ -264,8 +264,46 @@ describe("GET /api/projects/[projectId]/epics — merge readiness", () => {
       reviewVerdict: "changes_requested",
       endedAt: at(20),
     });
+    // The blocker is `changes_requested` rather than `no_review` since the
+    // board learned to see a standing rejection: with no clean round at all
+    // "awaiting review" was a lie — a review ran, and it said no. The
+    // property this case guards is unchanged, and it is the one that matters:
+    // a rejecting verdict never makes an epic mergeable.
     expect(await readinessOf("rejected")).toMatchObject({
-      blocker: "no_review",
+      ready: false,
+      blocker: "changes_requested",
+    });
+  });
+
+  it("goes back to plain 'awaiting review' once the rejection is cleared", async () => {
+    // Isolates `lastCleanReviewAtSql` from the rejection blocker: a clean
+    // verdict clears the standing rejection, and what surfaces underneath is
+    // the ordinary freshness rule — the build at :40 outdates the review.
+    addEpic({ id: "cleared-then-stale" });
+    addSession({
+      epicId: "cleared-then-stale",
+      agentType: "build",
+      endedAt: at(10),
+    });
+    addSession({
+      epicId: "cleared-then-stale",
+      agentType: "review_code",
+      reviewVerdict: "changes_requested",
+      endedAt: at(20),
+    });
+    addSession({
+      epicId: "cleared-then-stale",
+      agentType: "review_code",
+      reviewVerdict: "approved",
+      endedAt: at(30),
+    });
+    addSession({
+      epicId: "cleared-then-stale",
+      agentType: "build",
+      endedAt: at(40),
+    });
+    expect(await readinessOf("cleared-then-stale")).toMatchObject({
+      blocker: "stale_review",
     });
   });
 

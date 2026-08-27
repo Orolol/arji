@@ -52,10 +52,10 @@
  * regression waiting on table growth.
  *
  * Callers therefore aggregate the cutoff once per epic and hand the column in.
- * `supersessionCutoffsByEpic` builds that subquery for the two grouped
- * callers; `readSupersessionCutoff` reads the single scalar the one
- * per-epic caller needs. Both derive from the same fragment, so neither can
- * drift into its own idea of "superseded".
+ * `reviewVerdictWindowsByEpic` builds that subquery for the two grouped
+ * callers; `readReviewVerdictWindow` reads the scalars the one per-epic
+ * caller needs. Both derive from the same fragments, so neither can drift
+ * into its own idea of "superseded".
  */
 
 import { and, eq, sql, type SQL, type SQLWrapper } from "drizzle-orm";
@@ -65,7 +65,10 @@ import {
   BLOCKING_FINDING_PREFIXES,
   FINDING_SEVERITY_PREFIXES,
 } from "@/lib/review/finding-severity";
-import { lastVerdictBearingReviewStartedAtSql } from "./review-freshness";
+import {
+  lastCleanVerdictReviewStartedAtSql,
+  lastNegativeVerdictReviewStartedAtSql,
+} from "./review-freshness";
 
 /**
  * `SUBSTR(body, 1, n) = '[severity]'` for each prefix, OR-ed — the SQL
@@ -87,22 +90,31 @@ function bodyStartsWithAnySql(
 }
 
 /**
- * Per-epic supersession cutoff for one project, as a joinable subquery.
+ * Per-epic review-verdict windows for one project, as a joinable subquery.
  *
- * Left-join it on `epic_id` and pass its `cutoffAt` to `blocksMergeSql`. The
- * project scope is what keeps the aggregate off every other project's
- * sessions; the join to `epics` in the caller already made the result
- * project-local, so this only narrows what SQLite has to read.
+ * Two columns from one grouped scan, because both gates need both facts:
+ *   - `cleanVerdictAt` is the supersession cutoff `blocksMergeSql` compares
+ *     findings against;
+ *   - `negativeVerdictAt` is what `hasStandingNegativeVerdict`
+ *     (lib/kanban/merge-readiness.ts) weighs against it to decide whether a
+ *     rejection is still standing.
+ *
+ * Left-join on `epic_id`. The project scope keeps the aggregate off every
+ * other project's sessions; the join to `epics` in the caller already made
+ * the result project-local, so this only narrows what SQLite has to read.
  */
-export function supersessionCutoffsByEpic(
+export function reviewVerdictWindowsByEpic(
   database: ArijDatabase,
   projectId: string
 ) {
   return database
     .select({
       epicId: agentSessions.epicId,
-      cutoffAt: lastVerdictBearingReviewStartedAtSql().as(
-        "supersession_cutoff_at"
+      cleanVerdictAt: lastCleanVerdictReviewStartedAtSql().as(
+        "clean_verdict_at"
+      ),
+      negativeVerdictAt: lastNegativeVerdictReviewStartedAtSql().as(
+        "negative_verdict_at"
       ),
     })
     .from(agentSessions)
@@ -113,28 +125,47 @@ export function supersessionCutoffsByEpic(
       )
     )
     .groupBy(agentSessions.epicId)
-    .as("supersession_cutoffs");
+    .as("review_verdict_windows");
 }
 
 /**
- * The same cutoff for a single epic, as a plain string.
- *
- * `''` when no verdict-bearing review has ever run, which is the value
- * `blocksMergeSql` needs for "nothing has weighed this yet": every
- * `[critical]`/`[major]` then sorts at or after the cutoff and blocks.
+ * Deliberately keyed exactly like the matching half of `MergeReadinessFacts`,
+ * so the scalar read drops straight into `hasStandingNegativeVerdict` with no
+ * adapter. An adapter is where two names for one fact start disagreeing.
  */
-export function readSupersessionCutoff(
+export interface ReviewVerdictWindow {
+  /** `null` when no clean verdict has ever been recorded on the epic. */
+  lastCleanVerdictReviewAt: string | null;
+  /** `null` when no review has ever recorded `changes_requested`. */
+  lastNegativeVerdictReviewAt: string | null;
+}
+
+/**
+ * The same two windows for a single epic.
+ *
+ * The one per-epic caller (`buildTransitionContext`) reads them as scalars
+ * rather than joining — and reads them from HERE rather than sorting session
+ * rows in JavaScript, so the engine and the board cannot end up with
+ * different ideas of which verdict spoke last.
+ */
+export function readReviewVerdictWindow(
   database: ArijDatabase,
   epicId: string
-): string {
-  // A bare aggregate returns exactly one row. `.all()` rather than `.get()`
-  // to match how lib/workflow/context.ts reads everything else.
+): ReviewVerdictWindow {
+  // Bare aggregates return exactly one row. `.all()` rather than `.get()` to
+  // match how lib/workflow/context.ts reads everything else.
   const [row] = database
-    .select({ cutoffAt: lastVerdictBearingReviewStartedAtSql() })
+    .select({
+      lastCleanVerdictReviewAt: lastCleanVerdictReviewStartedAtSql(),
+      lastNegativeVerdictReviewAt: lastNegativeVerdictReviewStartedAtSql(),
+    })
     .from(agentSessions)
     .where(eq(agentSessions.epicId, epicId))
     .all();
-  return row?.cutoffAt ?? "";
+  return {
+    lastCleanVerdictReviewAt: row?.lastCleanVerdictReviewAt ?? null,
+    lastNegativeVerdictReviewAt: row?.lastNegativeVerdictReviewAt ?? null,
+  };
 }
 
 /**
