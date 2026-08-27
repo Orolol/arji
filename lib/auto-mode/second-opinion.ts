@@ -45,17 +45,13 @@ import {
   providerSupportsMcp,
 } from "@/lib/claude/mcp-injection";
 import type { AgentProvider } from "@/lib/agent-config/constants";
+import { sessionAtSql } from "@/lib/agent-sessions/session-time";
+import { ORDINARY_REVIEW_AGENT_TYPES } from "@/lib/pipeline/findings";
 import { autoRunId } from "./constants";
 
 /** Free-form session type: settings/schema migrations are not needed. */
 export const SECOND_OPINION_AGENT_TYPE = "review_second_opinion";
 
-const ORDINARY_REVIEW_AGENT_TYPES = [
-  "review_security",
-  "review_code",
-  "review_compliance",
-  "review_feature",
-];
 const ACTIVE_SESSION_STATUSES = new Set(["queued", "running"]);
 const STRUCTURED_VERDICT_RE =
   /^\*\*Review findings \((approved|approved with minor issues|changes requested)\)\*\*/i;
@@ -96,10 +92,9 @@ function latestOrdinaryReviewAt(
   projectId: string,
   epicId: string
 ): number | null {
-  const sessionAt = sql<string | null>`REPLACE(COALESCE(${agentSessions.endedAt}, ${agentSessions.completedAt}, ${agentSessions.createdAt}), ' ', 'T')`;
   const row = db
     .select({
-      sessionAt,
+      sessionAt: sessionAtSql() as ReturnType<typeof sql<string | null>>,
     })
     .from(agentSessions)
     .where(
@@ -109,10 +104,10 @@ function latestOrdinaryReviewAt(
         isNull(agentSessions.userStoryId),
         eq(agentSessions.status, "completed"),
         eq(agentSessions.outcome, "answered"),
-        inArray(agentSessions.agentType, ORDINARY_REVIEW_AGENT_TYPES)
+        inArray(agentSessions.agentType, [...ORDINARY_REVIEW_AGENT_TYPES])
       )
     )
-    .orderBy(desc(sessionAt))
+    .orderBy(desc(sessionAtSql()))
     .limit(1)
     .get();
   return timestamp(row?.sessionAt);

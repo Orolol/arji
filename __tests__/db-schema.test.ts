@@ -182,6 +182,7 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       error: "error",
       outcome: "outcome",
       reviewVerdict: "review_verdict",
+      mcpChannel: "mcp_channel",
       inputTokens: "input_tokens",
       outputTokens: "output_tokens",
       totalCostUsd: "total_cost_usd",
@@ -886,6 +887,16 @@ const INDEXES: Record<string, IndexSpec[]> = {
       name: "review_comments_epic_file_idx",
       unique: false,
       columns: ["epic_id", "file_path"],
+    },
+    {
+      // The unverifiable-review rule asks "did THIS session file rows?" from
+      // four sites, one of them a correlated subquery inside the Full Auto
+      // merge gate's aggregate. Without this index that subquery scans
+      // review_comments once per candidate review row, on a table nothing
+      // prunes.
+      name: "review_comments_session_idx",
+      unique: false,
+      columns: ["agent_session_id"],
     },
   ],
   verifyReports: [

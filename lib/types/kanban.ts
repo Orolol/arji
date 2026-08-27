@@ -132,6 +132,20 @@ export interface KanbanEpic {
   latestUserCommentCreatedAt?: string | null;
   /** The epic's read cursor (ticket_read_cursors.last_read_at), if any. */
   lastReadAt?: string | null;
+  /**
+   * True when the epic's LATEST delivered review could not file anything
+   * through `submit_findings` — no verdict, no findings — on a session that
+   * had the tool. That review proves nothing: Full Auto will not merge the
+   * epic, and it earns another review rather than a rebuild.
+   *
+   * Deliberately NOT a statement about `review → done`. That guard accepts
+   * ANY verifiable completed review ever (lib/workflow/context.ts), so an
+   * epic reviewed cleanly and then re-reviewed on a broken channel carries
+   * this flag while approval still passes. The badge speaks for the merge
+   * gate and for what happens next, which is what the Review column is about
+   * — see lib/pipeline/findings.ts for why the asymmetry is intended.
+   */
+  reviewUnverifiable?: boolean;
   /** Aggregate of the latest atomic acceptance-grading report. */
   gradingStatus?: GradingStatus | null;
   gradingSummary?: string | null;

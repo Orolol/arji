@@ -89,17 +89,30 @@ describe(MIGRATION_TAG, () => {
     connection.close();
   });
 
-  it("is registered after every existing migration", () => {
+  // Its own slot, not a shared one: `when` IS the migrator's identity, so a
+  // migration landing on a `when` another branch already used is skipped
+  // forever on databases that ran the other one. Asserted against the entry
+  // immediately BEFORE it rather than the journal's tail, so a migration
+  // appended later (as the review-channel branch's two were) stays legal.
+  it("is registered after the migration preceding it", () => {
     const journal = JSON.parse(
       fs.readFileSync(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf8")
     ) as {
       entries: Array<{ idx: number; when: number; tag: string }>;
     };
-    const entry = journal.entries.find((item) => item.tag === MIGRATION_TAG);
-    const previous = journal.entries.filter((item) => item.tag !== MIGRATION_TAG).at(-1);
+    const position = journal.entries.findIndex(
+      (item) => item.tag === MIGRATION_TAG
+    );
+    const entry = journal.entries[position];
+    const previous = position > 0 ? journal.entries[position - 1] : undefined;
 
     expect(entry).toBeDefined();
-    expect(entry?.idx).toBe((previous?.idx ?? -1) + 1);
-    expect(entry?.when).toBeGreaterThan(previous?.when ?? 0);
+    expect(entry.idx).toBe((previous?.idx ?? -1) + 1);
+    expect(entry.when).toBeGreaterThan(previous?.when ?? 0);
+
+    // And nothing after it reuses its slot.
+    for (const later of journal.entries.slice(position + 1)) {
+      expect(later.when).toBeGreaterThan(entry.when);
+    }
   });
 });

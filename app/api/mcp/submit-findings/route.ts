@@ -21,6 +21,13 @@
  * the reviewer's final word, while the findings of both calls accumulate as
  * separate rows (each one still has to be resolved).
  *
+ * A REJECTED call matters just as much as an accepted one. A 401 here means
+ * a review that will finish looking clean while having filed nothing, so the
+ * auth failure is traced onto the ticket before the rejection is returned
+ * (lib/mcp/review-channel-failure.ts). The verdict side of that guarantee —
+ * an MCP-capable reviewer with no persisted verdict does not count as clean
+ * — lives in lib/pipeline/findings.ts.
+ *
  * No ticket_id: findings always attach to the ticket the session was
  * launched for.
  */
@@ -34,6 +41,7 @@ import { createId } from "@/lib/utils/nanoid";
 import { isErrorResponse } from "@/lib/api/route-helpers";
 import { validateBody } from "@/lib/validation/validate";
 import { requireMcpToken, resolveTicketForToken } from "@/lib/mcp/http-auth";
+import { recordSubmitFindingsAuthFailure } from "@/lib/mcp/review-channel-failure";
 
 const findingSchema = z
   .object({
@@ -58,7 +66,14 @@ const bodySchema = z
 
 export async function POST(request: NextRequest) {
   const auth = requireMcpToken(request);
-  if (isErrorResponse(auth)) return auth;
+  if (isErrorResponse(auth)) {
+    // A rejected review is invisible everywhere else: the session still ends
+    // "answered" and simply files nothing, which every downstream gate used
+    // to read as "reviewed, nothing found". Leave a trace on the ticket
+    // before returning the 401 — the response itself is unchanged.
+    recordSubmitFindingsAuthFailure(request);
+    return auth;
+  }
 
   // Review-session tool: chat tokens (fast-mode board tools and CLI chat
   // turns) have no launch ticket and no review to file against.

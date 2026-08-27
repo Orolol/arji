@@ -648,6 +648,16 @@ describe("fix stage dispatch (epic scope)", () => {
 describe("review stage dispatch", () => {
   it("dispatches review_code in plan mode via purpose-review resolution and posts the labeled comment", async () => {
     const { projectId, epicId } = seed("review");
+    // An MCP-less reviewer: its markdown IS the verdict channel, which is
+    // what this case is about. On a provider that has submit_findings a
+    // verdict-less review would be unverifiable, and the ticket would come
+    // back rather than rest in review (lib/pipeline/findings.ts).
+    resolutionMocks.resolveAgentForDispatch.mockResolvedValue({
+      provider: "gemini-cli",
+      namedAgentId: null,
+      name: null,
+      model: null,
+    });
     processManagerState.result = {
       success: true,
       result: claudeEnvelope("**Overall Verdict: Complete** — all good."),
@@ -996,6 +1006,16 @@ describe("review stage dispatch", () => {
 
   it("reverts the ticket on a negative prose verdict and feeds the driver's prose fallback", async () => {
     const { projectId, epicId, storyId } = seed("review");
+    // An MCP-less reviewer: its markdown IS the verdict channel, which is
+    // what this case is about. On a provider that has submit_findings a
+    // verdict-less review would be unverifiable, and the ticket would come
+    // back rather than rest in review (lib/pipeline/findings.ts).
+    resolutionMocks.resolveAgentForDispatch.mockResolvedValue({
+      provider: "gemini-cli",
+      namedAgentId: null,
+      name: null,
+      model: null,
+    });
     processManagerState.result = {
       success: true,
       result: claudeEnvelope("**Overall Verdict: Changes Requested**"),

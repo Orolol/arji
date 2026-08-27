@@ -36,8 +36,20 @@ export interface TransitionContext {
   toStatus: KanbanStatus;
   /** Whether all open review comments have been resolved */
   hasOpenReviewComments: boolean;
-  /** Whether the epic has a completed review (at least one review session completed) */
+  /**
+   * Whether the epic has a completed review that actually delivered evidence
+   * — at least one completed review session that is not `unverifiable`
+   * (lib/workflow/context.ts).
+   */
   hasCompletedReview: boolean;
+  /**
+   * Whether every completed review on the epic is unverifiable: it ran on a
+   * provider with the structured `submit_findings` channel and filed no
+   * verdict on it. Purely a REASON refinement — `hasCompletedReview` is
+   * already false in that case; this exists so the refusal can name the
+   * broken channel instead of claiming no review ever ran.
+   */
+  hasUnverifiableReview?: boolean;
   /** Story approval is itself an explicit human review decision. */
   requireCompletedReview?: boolean;
   /** Story approval cannot resolve epic-scoped findings on its own. */
@@ -114,6 +126,25 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
         return "A story build may only move its own story; the parent epic is promoted once every sibling story reaches review.";
       }
       return "Cannot move an in-progress ticket while another agent session is queued or running.";
+    }
+    return null;
+  },
+  // A review ran, but its verdict never reached Arij. Ordered BEFORE the
+  // generic "no completed review" refusal so the operator gets the actionable
+  // sentence: the reviewer is not missing, its findings channel is broken,
+  // and the fix is another review rather than another look at the board.
+  (ctx) => {
+    if (
+      ctx.toStatus === "done" &&
+      ctx.requireCompletedReview !== false &&
+      !ctx.hasCompletedReview &&
+      ctx.hasUnverifiableReview
+    ) {
+      // "every" and not "the last": hasUnverifiableReview is
+      // `no verifiable review AND at least one completed one`
+      // (lib/workflow/context.ts), so an epic with one good review and one
+      // broken one never reaches this branch.
+      return "Cannot move to Done: every completed review filed no verdict through submit_findings, so nothing they found is recorded. Run a review that completes before marking as Done.";
     }
     return null;
   },

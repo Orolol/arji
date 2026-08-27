@@ -13,6 +13,8 @@ import {
   arijMcpToolPrefix,
   buildMcpSpawnConfig,
   cleanupMcpConfigFile,
+  MCP_CHANNEL_INJECTED,
+  MCP_CHANNEL_UNAVAILABLE,
 } from "./mcp-injection";
 import { arijToolsSection } from "./prompt-sections";
 import { isMcpExemptAgentType } from "@/lib/workflow/dreaming-constants";
@@ -116,8 +118,25 @@ class ClaudeProcessManager {
     // and the agent type not being one of the strict document rewriters.
     // The tool spelling and prompt prefix follow the provider (omp says
     // mcp__arij_*, one underscore short — see arijMcpToolPrefix).
+    // Whether this spawn was supposed to get the tool channel at all — the
+    // question `agent_sessions.mcp_channel` answers for the review gate.
+    //
+    // It starts TRUE for every MCP-capable provider and is cleared only when
+    // we positively learn the channel does not apply (toggle off, no session
+    // row, MCP-exempt agent type). That default is what makes a THROWN
+    // injection recordable: the failure paths below leave the flag set, so
+    // the row says `unavailable` and the gate judges such a review by prose
+    // instead of blaming it for a tool call it could not make. Clearing it
+    // first and setting it late would leave exactly the silent gap this
+    // column exists to close.
+    let mcpChannelIntended = providerSupportsMcp(provider);
     try {
-      if (providerSupportsMcp(provider) && isMcpToolsEnabled()) {
+      if (mcpChannelIntended && !isMcpToolsEnabled()) {
+        // Not a failure: the operator turned the channel off, and the
+        // judgement-time fallback reads the same toggle.
+        mcpChannelIntended = false;
+      }
+      if (mcpChannelIntended) {
         const row = db
           .select({
             projectId: agentSessions.projectId,
@@ -134,7 +153,9 @@ class ClaudeProcessManager {
         // land after the "respond with the document body and nothing else"
         // contract and end the prompt with ticket-tool guidance for a session
         // that owns no ticket. See MCP_EXEMPT_AGENT_TYPES.
-        if (row && !isMcpExemptAgentType(row.agentType)) {
+        if (!row || isMcpExemptAgentType(row.agentType)) {
+          mcpChannelIntended = false;
+        } else {
           const token = mintMcpToken({
             sessionId,
             projectId: row.projectId,
@@ -153,6 +174,12 @@ class ClaudeProcessManager {
         }
       }
     } catch (error) {
+      // Injection is best-effort: a session must never fail to spawn because
+      // the channel could not be built. But it must not pass for a session
+      // that CHOSE not to use its tools either — the review gate reads
+      // mcp_channel precisely so a reviewer with no channel is judged by
+      // prose instead of being blamed for a tool call it could not make.
+      options.mcp = undefined;
       console.warn(
         `[process-manager] MCP injection skipped for session ${sessionId}:`,
         error instanceof Error ? error.message : error,
@@ -221,6 +248,34 @@ class ClaudeProcessManager {
             .where(eq(agentSessions.id, sessionId))
             .run();
         } catch { /* best-effort */ }
+      }
+    }
+
+    // Record what the child actually got. `options.mcp` is cleared when the
+    // injection block failed; `spawned.mcpConfigPath` is null when the claude
+    // spawn could not write its config file and dropped --mcp-config. Either
+    // way the session ran WITHOUT the tools, and only the row says so — the
+    // child never reaches the HTTP route, so no 401 is traced.
+    if (mcpChannelIntended) {
+      const wired =
+        !!options.mcp && (provider !== "claude-code" || !!mcpConfigPath);
+      try {
+        db.update(agentSessions)
+          .set({
+            mcpChannel: wired ? MCP_CHANNEL_INJECTED : MCP_CHANNEL_UNAVAILABLE,
+          })
+          .where(eq(agentSessions.id, sessionId))
+          .run();
+      } catch (error) {
+        console.warn(
+          `[process-manager] Failed to record the MCP channel state for session ${sessionId}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+      if (!wired) {
+        console.warn(
+          `[process-manager] Session ${sessionId} spawned WITHOUT the Arij tool channel; its review cannot file structured findings.`,
+        );
       }
     }
 

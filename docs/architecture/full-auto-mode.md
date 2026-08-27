@@ -209,22 +209,83 @@ Four hazards were identified during design; each has a guard and a test.
 A review that **passes** leaves the epic in `review` — the pipeline never
 auto-approves. A naive "everything in Review" selector would review it forever.
 
-The guard is **temporal, not verdict-based**: an epic in `review` is a review
-candidate only if no review has been *attempted* since its newest terminal code
-session. (The verdict itself is a substring heuristic over the reviewer's
-markdown, with no structured field to read — so freshness is the fact, and the
-verdict is not.)
+The guard is **temporal first**: an epic in `review` is a review candidate only
+if no review has been *attempted* since its newest terminal code session.
+Freshness is a fact about sessions, so it is the base of the gate.
+
+On top of that sits one **verdict rule**, asked per session row, because
+whether a missing verdict means anything depends on who was reviewing:
+
+- The reviewer **had** the `submit_findings` channel: only `approved` /
+  `approved_with_minor_issues` is clean. `changes_requested` is an explicit
+  no, and **silence is missing evidence, not approval** — that is how a
+  reviewer whose findings were rejected 401 once produced a "reviewed, nothing
+  found" epic and unlocked its own merge.
+- The reviewer **did not**: `NULL` stays clean. Its markdown is its only
+  verdict signal, and this gate has never read markdown. That, and nothing
+  else, is what the prose fallback in `lib/pipeline/findings.ts` exists for.
+
+"Had the channel" is read from `agent_sessions.mcp_channel` — what Arij
+RECORDED at spawn time — and only falls back to the provider list plus the
+`mcp_tools_enabled` toggle for rows written before that column existed.
+Injection degrades silently (the process manager catches every injection error
+and spawns without tools; the claude spawn drops `--mcp-config` when its temp
+file cannot be written), and in both cases the child never reaches an
+`/api/mcp` route, so not even a 401 is traced. Reconstructing the answer from
+the provider would refuse such a review and tell the operator its reviewer
+"filed no verdict" — for a tool that session was never handed.
+
+**One predicate, two expressions.** This gate asks the question of every
+session row of a project inside one conditional aggregation, so it cannot call
+the JS rule per row — but it does not get its own copy either: the SQL comes
+from `cleanReviewVerdictSql` in `lib/pipeline/findings.ts`, beside the JS one,
+and `__tests__/review-gate-consistency.test.ts` pins them to the same table.
+The two disagreeing is not cosmetic. When findings.ts says "verifiable" and
+this gate says "not clean", `reconcileInFlight` charges nothing (it only
+charges an *unverifiable* review) while `needsReview` stays true every sweep —
+a reviewer dispatched forever on an epic that never parks.
+
+**The second opinion is exempt, everywhere.** `review_second_opinion` is a
+merge gate with its own prose fail-safe, so an APPROVING gate routinely
+carries no structured verdict and no findings rows — the exact shape the rule
+refuses. The exemption lives in the rule itself (`isOrdinaryReviewAgentType`),
+not in each caller: put in one caller, it was missed by the next, and an
+approving gate was charged as a failure until three of them parked the epic it
+had just cleared.
+
+**An unverifiable review is not a code failure — unless it found something.**
+With nothing to act on it buys another REVIEW, not a rebuild: the ticket stays
+in Review (`resolveReviewVerdict` reports it without marking it negative), the
+pipeline's stage ladder re-runs the review, and Full Auto re-dispatches one.
+Bouncing it to `in_progress` would put a build agent on a branch nothing
+faulted — and the completed session would clear the failure streak on the way
+past, so nothing would bound the loop.
+
+But a broken channel does not mean no evidence. `assessReviewOutcome` runs
+`ingestProseFindings` first, and Arij parses that report itself, independent of
+MCP — so an unverifiable review can carry real, anchored findings. Those rows
+are written with `agent_session_id` NULL, so they never prove the channel
+worked: the review stays unverifiable WITH a non-empty findings list. The
+pipeline dispatches a fix for exactly that case (`unverifiable &&
+blockingCount === 0` is what earns a re-review), because re-reviewing instead
+would discard the findings and re-ingest the same report on every fresh review
+window. Nothing becomes mergeable either way: the ingested rows are open, so
+`review → done` refuses, and the session still has no verdict and no rows of
+its own, so the merge gate still calls it not clean.
 
 A "review" is one completed, epic-scoped review session that delivered a
-verdict (`outcome = 'answered'`). That single signal drives both directions —
-reviewable when there is none newer than the last code change, mergeable when
-there is — which is what makes "reviewed exactly once, then merged" true by
-construction. Everything else is not a review, and every one of those cases is
-bounded by the **parking ladder** rather than by this guard:
+verdict (`outcome = 'answered'`) and passed the rule above. That single signal
+drives both directions — reviewable when there is none newer than the last code
+change, mergeable when there is — which is what makes "reviewed exactly once,
+then merged" true by construction. Everything else is not a review, and every
+one of those cases is bounded by the **parking ladder** or the
+**review-rejection budget** rather than by this guard:
 
 | Review session ended | Re-reviewed? | Satisfies the merge gate? |
 |---|---|---|
-| completed, `answered` | no | **yes** |
+| completed, `answered`, positive structured verdict (or an MCP-less reviewer) | no | **yes** |
+| completed, `answered`, `changes_requested` | yes — the ticket also bounces to `in_progress`, and the review-rejection budget parks it after three | no |
+| completed, `answered`, a reviewer that HAD the channel and filed neither a verdict nor a findings row | yes — the review is *unverifiable*; `reconcileInFlight` charges it exactly as it charges a `silent` review, so three park the epic | no (nothing it found was recorded) |
 | completed, `silent` | yes — but each one is charged as a failure, so three park the epic | no (it produced no verdict to approve with) |
 | completed, `asked_question` | yes, but only once the user replies (`isAwaitingReply` holds it until then, so a human is in the loop by construction) | no |
 | completed, no recorded outcome (legacy row) | yes, once — it earns a fresh, classified review | no |
@@ -252,11 +313,15 @@ either thread counts as the answer to a story question.
 
 "Review is OK" exists nowhere as a boolean, and Full Auto Mode does **not**
 invent one. The workflow engine's `review → done` guards *are* the gate:
-`applyTransition` refuses unless a review session completed and no review
-comment is still open (`lib/workflow/engine.ts`). The mode attempts the
-transition and treats a refusal as "not ready — skip". Its own selector is
-*stricter* than the engine's (the engine accepts any completed review ever; the
-mode wants one newer than the last code change).
+`applyTransition` refuses unless a review session completed *with evidence* and
+no review comment is still open (`lib/workflow/engine.ts`). "With evidence"
+excludes an unverifiable review — an MCP-capable reviewer that filed neither a
+verdict nor a finding — which the engine reports through its own refusal
+message so the operator is told the channel is broken rather than that no
+review ever ran. The mode attempts the transition and treats a refusal as "not
+ready — skip". Its own selector is still *stricter* than the engine's (the
+engine accepts any completed, verifiable review ever; the mode wants one newer
+than the last code change).
 
 `POST .../approve` is deliberately **not** reused anywhere in this code path: it
 bulk-resolves every open review comment before transitioning, which would
