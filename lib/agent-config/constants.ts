@@ -67,6 +67,50 @@ export const TICKET_MOVING_AGENT_TYPES: Exclude<
   "team_build"
 >[] = CODE_PRODUCING_AGENT_TYPES.filter((type) => type !== "team_build");
 
+/**
+ * Agent types that receive a named agent's persona pre-prompt.
+ *
+ * An ALLOWLIST, deliberately, and the asymmetry is the whole point: missing a
+ * type here costs a persona that should have been applied, while missing one
+ * in a blocklist writes free-form persona text into a document Arij persists
+ * verbatim. `spec_generation` replaces `projects.spec`, the memory writers
+ * replace the memory document, `release_notes` becomes CHANGELOG.md, and
+ * `title_generation` / `import_analysis` answer under strict format
+ * contracts — a persona such as "answer in French and summarise your
+ * reasoning" ends up inside the stored artifact, which then feeds every later
+ * prompt. A new agent type therefore gets no persona until someone adds it
+ * here on purpose.
+ *
+ * This is the same reasoning as MCP_EXEMPT_AGENT_TYPES in
+ * lib/workflow/dreaming-constants.ts, but the two lists are NOT
+ * interchangeable: that one is a blocklist covering only the types whose
+ * prompt must not gain a trailing tools section, and it does not include
+ * `spec_generation`.
+ *
+ * The set is the epic's stated scope — code work and review work —
+ * plus the review-adjacent types that share their prompt shape. Second
+ * opinion is a runtime-only string (SECOND_OPINION_AGENT_TYPE in
+ * lib/auto-mode/second-opinion.ts) rather than a member of AGENT_TYPES,
+ * so it is spelled out.
+ */
+export const PERSONA_AGENT_TYPES: readonly string[] = [
+  ...CODE_PRODUCING_AGENT_TYPES,
+  "review_security",
+  "review_code",
+  "review_compliance",
+  "review_feature",
+  "review_second_opinion",
+  "grading",
+  "merge",
+];
+
+/** True for the agent types a persona pre-prompt is injected into. */
+export function acceptsPersonaPrompt(
+  agentType: string | null | undefined
+): boolean {
+  return agentType != null && PERSONA_AGENT_TYPES.includes(agentType);
+}
+
 export const BUILTIN_REVIEW_TYPES = [
   "security",
   "code_review",

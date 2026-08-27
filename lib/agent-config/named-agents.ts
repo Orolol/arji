@@ -30,12 +30,27 @@ export interface NamedAgentRecord {
 /**
  * Blank and whitespace-only personas are stored as NULL, so "cleared" is one
  * state rather than two that the prompt builder would have to tell apart.
+ *
+ * An over-long persona is REJECTED, not truncated. Truncating is the one
+ * silent alteration this feature could make to a user-supplied value: the
+ * editor keeps showing the full text it holds in local state, so the field
+ * would read as saved while the tail had been dropped — and every option in
+ * the registry already fails loudly instead. The error travels the same path
+ * as an invalid option value and lands in the editor's alert.
  */
-function normalizePersonaPrompt(value: string | null | undefined): string | null {
-  if (typeof value !== "string") return null;
+function normalizePersonaPrompt(
+  value: string | null | undefined
+): { persona: string | null; error?: string } {
+  if (typeof value !== "string") return { persona: null };
   const trimmed = value.trim();
-  if (!trimmed) return null;
-  return trimmed.slice(0, PERSONA_PROMPT_MAX_CHARS);
+  if (!trimmed) return { persona: null };
+  if (trimmed.length > PERSONA_PROMPT_MAX_CHARS) {
+    return {
+      persona: null,
+      error: `Persona must be ${PERSONA_PROMPT_MAX_CHARS} characters or fewer (received ${trimmed.length})`,
+    };
+  }
+  return { persona: trimmed };
 }
 
 function toRecord(row: typeof namedAgents.$inferSelect): NamedAgentRecord {
@@ -187,10 +202,14 @@ export async function createNamedAgent(input: {
     return { data: null, error: errors[0] };
   }
 
-  const personaPrompt =
-    input.personaPrompt === undefined
-      ? DEFAULT_PERSONA_PROMPT
-      : normalizePersonaPrompt(input.personaPrompt);
+  let personaPrompt: string | null = DEFAULT_PERSONA_PROMPT;
+  if (input.personaPrompt !== undefined) {
+    const persona = normalizePersonaPrompt(input.personaPrompt);
+    if (persona.error) {
+      return { data: null, error: persona.error };
+    }
+    personaPrompt = persona.persona;
+  }
 
   const id = input.id || createId();
   const escalatesTo = normalizeEscalationTarget(input.escalatesTo);
@@ -279,7 +298,11 @@ export async function updateNamedAgent(
   }
 
   if (updates.personaPrompt !== undefined) {
-    patch.personaPrompt = normalizePersonaPrompt(updates.personaPrompt);
+    const persona = normalizePersonaPrompt(updates.personaPrompt);
+    if (persona.error) {
+      return { data: null, error: persona.error };
+    }
+    patch.personaPrompt = persona.persona;
   }
 
   if (updates.escalatesTo !== undefined) {
@@ -402,6 +425,9 @@ export function getNamedAgentRuntimeConfig(
       row.provider === provider
         ? parseStoredProviderOptions(provider, row.options)
         : {},
-    personaPrompt: normalizePersonaPrompt(row.personaPrompt),
+    // Stored rows are already within the limit; an over-long value can only
+    // come from a hand-edited database, and it injects nothing rather than
+    // an arbitrarily long preamble.
+    personaPrompt: normalizePersonaPrompt(row.personaPrompt).persona,
   };
 }

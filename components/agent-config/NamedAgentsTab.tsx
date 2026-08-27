@@ -24,7 +24,10 @@ import {
   CliOptionsFields,
   resetOptionsForProvider,
 } from "@/components/agent-config/CliOptionsFields";
-import { DEFAULT_PERSONA_PROMPT } from "@/lib/agent-config/constants";
+import {
+  DEFAULT_PERSONA_PROMPT,
+  PERSONA_PROMPT_MAX_CHARS,
+} from "@/lib/agent-config/constants";
 import type { NamedAgentCliOptions } from "@/lib/providers/options-registry";
 import {
   useProvidersAvailable,
@@ -291,6 +294,10 @@ function NamedAgentRow({
               value={personaPrompt}
               onChange={(e) => setPersonaPrompt(e.target.value)}
               placeholder={DEFAULT_PERSONA_PROMPT}
+              // The server rejects anything longer rather than truncating, so
+              // the field has to stop the user at the same limit instead of
+              // letting them paste text that can only fail to save.
+              maxLength={PERSONA_PROMPT_MAX_CHARS}
               rows={2}
               className="text-sm"
               disabled={saving || deleting}

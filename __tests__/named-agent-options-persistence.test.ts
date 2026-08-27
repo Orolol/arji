@@ -41,7 +41,10 @@ vi.mock("@/lib/utils/nanoid", () => ({
   createId: () => `agent-${++counter}`,
 }));
 
-import { DEFAULT_PERSONA_PROMPT } from "@/lib/agent-config/constants";
+import {
+  DEFAULT_PERSONA_PROMPT,
+  PERSONA_PROMPT_MAX_CHARS,
+} from "@/lib/agent-config/constants";
 
 // Dynamic: the module reads `db` at import time, and the mock factory above
 // cannot close over `testDb` until this file's top level has run.
@@ -214,6 +217,52 @@ describe("updateNamedAgent", () => {
 
     const cleared = await updateNamedAgent(id, { personaPrompt: "" });
     expect(cleared.data?.personaPrompt).toBeNull();
+  });
+
+  it("rejects an over-long persona instead of silently truncating it", async () => {
+    // Truncating would be the one silent alteration in this feature: the
+    // editor holds the full text in local state and never remounts, so the
+    // field would keep showing text the database no longer has, and every
+    // later save of that field would be a no-op the user cannot see.
+    const created = await createNamedAgent({
+      name: "Verbose",
+      provider: "claude-code",
+      personaPrompt: "short",
+    });
+    const tooLong = "x".repeat(PERSONA_PROMPT_MAX_CHARS + 1);
+
+    const result = await updateNamedAgent(created.data!.id, {
+      personaPrompt: tooLong,
+    });
+
+    expect(result.data).toBeNull();
+    expect(result.error).toContain(String(PERSONA_PROMPT_MAX_CHARS));
+    // The stored value is untouched — no partial write.
+    expect((await getNamedAgent(created.data!.id))?.personaPrompt).toBe("short");
+  });
+
+  it("accepts a persona exactly at the limit", async () => {
+    const atLimit = "y".repeat(PERSONA_PROMPT_MAX_CHARS);
+    const created = await createNamedAgent({
+      name: "At limit",
+      provider: "claude-code",
+      personaPrompt: atLimit,
+    });
+    expect(created.error).toBeUndefined();
+    expect(created.data?.personaPrompt).toBe(atLimit);
+  });
+
+  it("rejects an over-long persona at creation too", async () => {
+    const result = await createNamedAgent({
+      name: "Born verbose",
+      provider: "claude-code",
+      personaPrompt: "z".repeat(PERSONA_PROMPT_MAX_CHARS + 500),
+    });
+    expect(result.data).toBeNull();
+    expect(result.error).toContain(String(PERSONA_PROMPT_MAX_CHARS));
+    expect(
+      testSqlite.prepare("SELECT COUNT(*) AS n FROM named_agents").get(),
+    ).toEqual({ n: 0 });
   });
 
   it("leaves options and persona untouched by an unrelated edit", async () => {

@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildProviderOptionArgs,
+  filterProviderOptionsForAgentType,
   describeProviderOptions,
   getProviderOptionDefinitions,
   normalizeProviderOptions,
@@ -111,9 +112,9 @@ describe("claude-code permission mode", () => {
     ).toBe("acceptEdits");
   });
 
-  it("refuses to loosen a read-only posture", () => {
-    // A reviewer configured with bypassPermissions would otherwise gain write
-    // access to the worktree it is reviewing.
+  it("refuses to loosen a read-only spawn mode", () => {
+    // Defence in depth for the direct call sites (chat turns) that carry
+    // cliOptions without passing through the spawn wiring point.
     for (const mode of ["plan", "chat", "analyze"] as const) {
       expect(
         resolveClaudePermissionMode(mode, {
@@ -121,6 +122,27 @@ describe("claude-code permission mode", () => {
         }),
       ).toBe(mode === "plan" ? "plan" : mode === "chat" ? "default" : "bypassPermissions");
     }
+  });
+
+  it("does not offer `plan`, the one mode that severs the tool channel", () => {
+    // Measured on claude 2.1.245: with --allowedTools Write, every other mode
+    // wrote the file and `plan` did not. It also refuses mutating MCP tools
+    // regardless of the allowlist, so an agent set to it can never call
+    // update_ticket_status or submit_findings.
+    const permission = getProviderOptionDefinitions("claude-code").find(
+      (d) => d.key === "permission_mode",
+    );
+    expect(permission?.choices?.map((c) => c.value)).toEqual([
+      "acceptEdits",
+      "auto",
+      "bypassPermissions",
+      "manual",
+      "dontAsk",
+    ]);
+    // A value stored before the narrowing falls back to the derived posture.
+    expect(
+      resolveClaudePermissionMode("code", { permission_mode: "plan" }),
+    ).toBe("bypassPermissions");
   });
 
   it("ignores a value that is not a known claude permission mode", () => {
@@ -213,7 +235,16 @@ describe("oh-my-pi", () => {
 
 describe("agy", () => {
   it("exposes the flags agy 1.1.22 actually has", () => {
-    expect(keysFor("agy")).toEqual(["effort", "sandbox"]);
+    expect(keysFor("agy")).toEqual(["effort"]);
+  });
+
+  it("does not expose --sandbox", () => {
+    // Withheld for a measurement that could not be completed: its effect on
+    // run_command and on the MCP shim agy spawns as a child is unverified,
+    // and every other entry in the registry is justified by a measured
+    // effect on the tool channel.
+    expect(keysFor("agy")).not.toContain("sandbox");
+    expect(buildProviderOptionArgs("agy", { sandbox: true })).toEqual([]);
   });
 
   it("offers only the three effort levels agy accepts", () => {
@@ -227,10 +258,11 @@ describe("agy", () => {
     ]);
   });
 
-  it("translates effort and sandbox", () => {
-    expect(
-      buildProviderOptionArgs("agy", { effort: "high", sandbox: true }),
-    ).toEqual(["--effort", "high", "--sandbox"]);
+  it("translates effort", () => {
+    expect(buildProviderOptionArgs("agy", { effort: "high" })).toEqual([
+      "--effort",
+      "high",
+    ]);
     expect(buildProviderOptionArgs("agy", {})).toEqual([]);
   });
 });
@@ -308,6 +340,75 @@ describe("validation", () => {
     expect(normalizeProviderOptions("codex", "high").errors).toEqual([
       "options must be an object",
     ]);
+  });
+});
+
+describe("filterProviderOptionsForAgentType", () => {
+  /**
+   * The gate that matters for permission_mode. Reviews, grading and the
+   * second-opinion gate all spawn in mode "code" on purpose, so only the
+   * agent TYPE tells them apart from a build.
+   */
+  it("keeps a code-producing agent's permission mode", () => {
+    for (const agentType of ["build", "ticket_build", "team_build"]) {
+      expect(
+        filterProviderOptionsForAgentType(
+          "claude-code",
+          { effort: "high", permission_mode: "acceptEdits" },
+          agentType,
+        ),
+      ).toEqual({ effort: "high", permission_mode: "acceptEdits" });
+    }
+  });
+
+  it("strips it from reviews, grading and the second opinion", () => {
+    for (const agentType of [
+      "review_security",
+      "review_code",
+      "review_compliance",
+      "review_feature",
+      "review_second_opinion",
+      "grading",
+      "merge",
+      "spec_generation",
+    ]) {
+      expect(
+        filterProviderOptionsForAgentType(
+          "claude-code",
+          { effort: "high", permission_mode: "acceptEdits" },
+          agentType,
+        ),
+      ).toEqual({ effort: "high" });
+    }
+  });
+
+  it("strips it when the agent type is unknown", () => {
+    // A session whose role Arij cannot name does not get the option that
+    // widens what a spawn may do to the working tree.
+    expect(
+      filterProviderOptionsForAgentType(
+        "claude-code",
+        { permission_mode: "bypassPermissions" },
+        null,
+      ),
+    ).toEqual({});
+  });
+
+  it("leaves unrestricted options alone for every provider", () => {
+    const omp = { thinking: "high", max_time: 600, advisor: true };
+    expect(filterProviderOptionsForAgentType("oh-my-pi", omp, "review_code")).toEqual(
+      omp,
+    );
+    expect(filterProviderOptionsForAgentType("codex", { profile: "fast" }, null)).toEqual(
+      { profile: "fast" },
+    );
+    // An unregistered provider declares no restrictions, so this function
+    // passes the bag through untouched — dropping unknown keys is
+    // normalizeProviderOptions' job, and buildProviderOptionArgs emits
+    // nothing for it regardless.
+    expect(filterProviderOptionsForAgentType("zai", { x: 1 }, null)).toEqual({
+      x: 1,
+    });
   });
 });
 

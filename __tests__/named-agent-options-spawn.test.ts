@@ -241,14 +241,16 @@ describe("agy argv", () => {
     expect(withEmpty).toEqual(without);
   });
 
-  it("adds --effort and --sandbox", () => {
-    const { with: withOptions } = argvPair(spawnOnce, {
-      effort: "high",
-      sandbox: true,
-    });
+  it("adds --effort", () => {
+    const { with: withOptions } = argvPair(spawnOnce, { effort: "high" });
     expect(withOptions[withOptions.indexOf("--effort") + 1]).toBe("high");
-    expect(withOptions).toContain("--sandbox");
     expect(withOptions[withOptions.length - 2]).toBe("-p");
+  });
+
+  it("does not pass --sandbox, which the registry no longer offers", () => {
+    const { without, with: withStale } = argvPair(spawnOnce, { sandbox: true });
+    expect(withStale).toEqual(without);
+    expect(withStale).not.toContain("--sandbox");
   });
 });
 

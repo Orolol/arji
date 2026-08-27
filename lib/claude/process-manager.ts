@@ -21,6 +21,8 @@ import {
   revokeMcpTokensForSession,
 } from "@/lib/mcp/token-store";
 import { getNamedAgentRuntimeConfig } from "@/lib/agent-config/named-agents";
+import { acceptsPersonaPrompt } from "@/lib/agent-config/constants";
+import { filterProviderOptionsForAgentType } from "@/lib/providers/options-registry";
 import { personaSection } from "./prompt-sections";
 import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
@@ -111,6 +113,38 @@ class ClaudeProcessManager {
     // prompt.
     options = { ...options };
 
+    // One read of the session row for both blocks below. `agentType` is what
+    // scopes the persona and the agent-type-restricted options; the project
+    // and ticket ids are what the MCP token binds to. Best-effort: a session
+    // must never fail to spawn because its own row could not be read.
+    let sessionRow:
+      | {
+          projectId: string;
+          epicId: string | null;
+          userStoryId: string | null;
+          agentType: string | null;
+          namedAgentId: string | null;
+        }
+      | undefined;
+    try {
+      sessionRow = db
+        .select({
+          projectId: agentSessions.projectId,
+          epicId: agentSessions.epicId,
+          userStoryId: agentSessions.userStoryId,
+          agentType: agentSessions.agentType,
+          namedAgentId: agentSessions.namedAgentId,
+        })
+        .from(agentSessions)
+        .where(eq(agentSessions.id, sessionId))
+        .get();
+    } catch (error) {
+      console.warn(
+        `[process-manager] Session row unreadable for ${sessionId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+
     // Named-agent configuration — the second thing this wiring point owns,
     // alongside the MCP channel below. Every dispatch path (manual routes,
     // pipeline stages, night runs, Full Auto, grading, merge resolution)
@@ -121,19 +155,34 @@ class ClaudeProcessManager {
     // The persona is PREPENDED (the tools section is appended), which puts it
     // ahead of the role prompt, the specification and the ticket — see
     // docs/architecture/named-agent-cli-options.md for the full order.
+    //
+    // BOTH halves are scoped by the session's agent TYPE, not by its spawn
+    // mode. Reviews, grading and the second-opinion gate all spawn in mode
+    // "code" on purpose (plan mode refuses the mutating MCP tools they exist
+    // to call), so a mode-based gate would not tell them apart from a build.
     try {
-      const agentRow = db
-        .select({ namedAgentId: agentSessions.namedAgentId })
-        .from(agentSessions)
-        .where(eq(agentSessions.id, sessionId))
-        .get();
+      const agentRow = sessionRow;
 
-      const { options: cliOptions, personaPrompt } = getNamedAgentRuntimeConfig(
-        agentRow?.namedAgentId,
+      const { options: resolvedOptions, personaPrompt } =
+        getNamedAgentRuntimeConfig(agentRow?.namedAgentId, provider);
+
+      // Options the agent type may not carry (claude's permission mode) are
+      // dropped here, where the type is known; the registry declares which.
+      const cliOptions = filterProviderOptionsForAgentType(
         provider,
+        resolvedOptions,
+        agentRow?.agentType,
       );
 
-      const persona = personaSection(personaPrompt);
+      // Strict document-rewrite and fixed-contract sessions get NO persona.
+      // spec_generation replaces projects.spec with its response verbatim,
+      // the memory writers replace the memory document, release_notes becomes
+      // CHANGELOG.md — free-form persona text ("answer in French, summarise
+      // your reasoning") would be written into the stored artifact and then
+      // feed every later prompt. See PERSONA_AGENT_TYPES.
+      const persona = acceptsPersonaPrompt(agentRow?.agentType)
+        ? personaSection(personaPrompt)
+        : "";
       const patch: { cliOptions?: string; prompt?: string } = {};
 
       if (Object.keys(cliOptions).length > 0) {
@@ -184,16 +233,7 @@ class ClaudeProcessManager {
     // mcp__arij_*, one underscore short — see arijMcpToolPrefix).
     try {
       if (providerSupportsMcp(provider) && isMcpToolsEnabled()) {
-        const row = db
-          .select({
-            projectId: agentSessions.projectId,
-            epicId: agentSessions.epicId,
-            userStoryId: agentSessions.userStoryId,
-            agentType: agentSessions.agentType,
-          })
-          .from(agentSessions)
-          .where(eq(agentSessions.id, sessionId))
-          .get();
+        const row = sessionRow;
 
         // Strict document-rewrite agents opt out entirely (no token, no
         // config, no section): the section is APPENDED, so for them it would

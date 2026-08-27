@@ -40,7 +40,7 @@ versions.
 | Option | Argument |
 |---|---|
 | `effort` — low / medium / high / xhigh / max | `--effort <v>` |
-| `permission_mode` — acceptEdits / auto / bypassPermissions / manual / dontAsk / plan | replaces the derived `--permission-mode` |
+| `permission_mode` — acceptEdits / auto / bypassPermissions / manual / dontAsk | replaces the derived `--permission-mode`, code-producing sessions only |
 
 `--max-turns` and a `--fast` flag were both provisional in the epic; **neither
 exists** in `claude --help` on 2.1.245. Fast mode is a `/fast` slash command
@@ -93,24 +93,62 @@ whichever subclass is spawning.
 | Option | Argument |
 |---|---|
 | `effort` — low / medium / high | `--effort <v>` |
-| `sandbox` — boolean | `--sandbox` |
 
-**Not exposed:** `--mode`. Arij derives the read-only posture from the session
-mode, and a per-agent override would contradict it.
+**Not exposed:** `--mode` — Arij derives the read-only posture from the
+session mode, and a per-agent override would contradict it.
+
+**Not exposed:** `--sandbox`, and this one is withheld for a measurement that
+could not be *completed* rather than one that came back negative. Two things
+would have to hold first: that `run_command` still works (a build agent that
+cannot run the test suite is not a tightened build, it is a broken one), and
+that the Arij stdio MCP shim still starts — agy spawns it as a child that
+inherits `ARIJ_BASE_URL` / `ARIJ_MCP_TOKEN` from the CLI's own environment,
+which is exactly what a terminal sandbox restricts. A shell probe on 1.1.22
+was inconclusive (the control run without the flag did not write its file
+either), and the MCP half cannot be settled without a live token. Worth
+re-attempting against a running orchestrator.
 
 ## 3. The permission-mode exception
 
 Arij derives claude's `--permission-mode` from the session mode: `plan` for
 read-only research, `default` for chat, `bypassPermissions` for code and
-analyze. An agent-level `permission_mode` **only applies to `code` spawns**
-(`resolveClaudePermissionMode`).
+analyze. An agent-level `permission_mode` narrows that, under two gates.
 
-Read-only postures exist so that review, grading and chat sessions cannot
-touch the working tree. A per-agent setting is not authority to hand that
-guarantee away: a reviewer configured with `bypassPermissions` would silently
-gain write access to the epic worktree it is reviewing. Tightening a code
-spawn (`acceptEdits`, `manual`) is allowed; loosening a read-only one is not
-possible at all.
+**The agent-type gate is the one that matters.** Reviews, grading and the
+second-opinion gate all spawn in **mode `code`** — deliberately, because plan
+mode refuses the mutating MCP tools they exist to call (`submit_findings`,
+`submit_grading`). Anything scoped on the spawn *mode* therefore reaches
+reviewers as readily as builds. So the option is scoped on the session's
+agent **type** instead: `filterProviderOptionsForAgentType` drops it at the
+spawn wiring point for every type that is not code-producing (build,
+ticket_build, team_build).
+
+**The spawn-mode gate stays as defence in depth**, for the direct call sites
+that never reach the wiring point — CLI chat turns carry `cliOptions` on
+`ResolvedAgent` — so a read-only posture (`plan`, `chat`, `analyze`) can
+never be handed away by configuration.
+
+**`plan` is not offered as a value at all.** Measured on claude 2.1.245 with
+`claude --print --permission-mode <mode> --allowedTools Write`, asked to
+write one file:
+
+| Mode | File written |
+|---|---|
+| `bypassPermissions` | yes |
+| `acceptEdits` | yes |
+| `manual` | yes |
+| `dontAsk` | yes |
+| `auto` | yes |
+| `plan` | **no** |
+
+`plan` is also the mode that refuses mutating tools regardless of the
+allowlist, MCP tools included. An agent set to it could never call
+`update_ticket_status`, so its ticket would never leave `in_progress` — and a
+reviewer set to it filed no findings and persisted no `review_verdict`,
+silently degrading every review to the prose fallback. Arij still derives
+`plan` itself for genuinely read-only spawns; what is removed is the ability
+to *choose* it per agent. A value stored before that narrowing falls back to
+the derived posture rather than reaching argv.
 
 ## 4. Persistence
 
@@ -124,7 +162,11 @@ Migration `0041_named_agent_options` adds three columns:
   agents come out of the migration at NULL, which injects nothing: the persona
   rides at the head of every prompt, so backfilling would silently rewrite the
   prompt of every agent already configured. New agents get the product default
-  (`DEFAULT_PERSONA_PROMPT`) at creation time.
+  (`DEFAULT_PERSONA_PROMPT`) at creation time. A persona longer than
+  `PERSONA_PROMPT_MAX_CHARS` is **rejected**, not truncated — truncating is a
+  silent alteration of a user-supplied value, and the editor (which holds the
+  text in local state and never remounts) would go on showing text the
+  database no longer has.
 - `agent_sessions.cli_options` — JSON object of the options actually in effect
   for one run. The agent can be edited or deleted afterwards, so the session
   row carries its own copy; the session detail reads it from there.
@@ -147,13 +189,16 @@ paths.
 resolution, second opinion) funnels through it, which is why the automated
 modes inherit options and persona without a plumbing of their own. It:
 
-1. reads `named_agent_id` off the session row;
+1. reads `named_agent_id` and `agent_type` off the session row (one read,
+   shared with the MCP block);
 2. resolves that agent's options **against the provider this session is
    actually spawning on** (a mismatch degrades to no options rather than
    handing another CLI's flags to a child that would reject them fatally —
    this is what makes review-provider segregation apply the *reviewer's*
    options, not the builder's);
-3. prepends the persona section and attaches `cliOptions` to the spawn;
+3. drops the options this agent type may not carry
+   (`filterProviderOptionsForAgentType`), prepends the persona section **if
+   the agent type accepts one**, and attaches `cliOptions` to the spawn;
 4. persists the options and the persona-bearing prompt back onto the session
    row.
 
@@ -163,6 +208,26 @@ block per attempt.
 
 Reading the configuration is best-effort, like MCP injection: a session never
 fails to spawn because its optional configuration could not be read.
+
+### Which sessions get a persona
+
+`PERSONA_AGENT_TYPES` (lib/agent-config/constants.ts) is an **allowlist**:
+the code-producing types, the four review types, the second-opinion gate,
+grading and merge. Everything else gets nothing.
+
+The asymmetry is the point. Missing a type in an allowlist costs a persona
+that should have applied; missing one in a blocklist writes free-form persona
+text into a document Arij persists verbatim — `spec_generation` replaces
+`projects.spec`, the memory writers replace the memory document,
+`release_notes` becomes `CHANGELOG.md`, and `title_generation` /
+`import_analysis` answer under strict format contracts. A persona like
+*"answer in French and finish with a bullet summary of your reasoning"* would
+land inside the stored artifact and then feed every later prompt. A new agent
+type therefore gets no persona until someone adds it on purpose.
+
+This is the same reasoning as `MCP_EXEMPT_AGENT_TYPES`, but the two lists are
+not interchangeable: that one is a blocklist about a trailing tools section
+and does not include `spec_generation`.
 
 ### CLI chat turns
 

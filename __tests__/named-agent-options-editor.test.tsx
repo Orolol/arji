@@ -75,7 +75,10 @@ import {
   CliOptionsFields,
 } from "@/components/agent-config/CliOptionsFields";
 import { getProviderOptionDefinitions } from "@/lib/providers/options-registry";
-import { DEFAULT_PERSONA_PROMPT } from "@/lib/agent-config/constants";
+import {
+  DEFAULT_PERSONA_PROMPT,
+  PERSONA_PROMPT_MAX_CHARS,
+} from "@/lib/agent-config/constants";
 
 function seedAgent(overrides: Partial<StoredAgent> = {}): StoredAgent {
   const agent: StoredAgent = {
@@ -204,6 +207,18 @@ describe("persona field", () => {
 
     await waitFor(() => expect(putBodies).toHaveLength(1));
     expect(putBodies[0].personaPrompt).toBe("");
+  });
+
+  it("stops the user at the same limit the server enforces", async () => {
+    // The server rejects an over-long persona rather than truncating it, so
+    // the field must not let the user paste text that can only fail to save.
+    seedAgent({ personaPrompt: "Something" });
+    render(<NamedAgentsTab />);
+
+    const field = (await screen.findByLabelText(
+      "Persona",
+    )) as HTMLTextAreaElement;
+    expect(field.maxLength).toBe(PERSONA_PROMPT_MAX_CHARS);
   });
 
   it("shows an agent with no persona as empty, with the default as guidance", async () => {

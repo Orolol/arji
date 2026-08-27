@@ -18,7 +18,7 @@
  *                    (`minimal` parses but the API rejects it for gpt-5.5),
  *                    -p/--profile (NOT accepted by `codex exec resume`).
  *   omp 18.0.5       --thinking, --max-time, --advisor.
- *   agy 1.1.22       --effort (low|medium|high), --sandbox.
+ *   agy 1.1.22       --effort (low|medium|high).
  *
  * Deliberately NOT exposed, each for a measured reason:
  *   codex -s/--sandbox and its approval policy — the sandbox is what severs
@@ -28,11 +28,14 @@
  *   omp --approval-mode — same failure: always-ask gates device writes behind
  *     an approval that auto-blocks in print mode (see ./oh-my-pi.ts).
  *   agy --mode — Arij derives the read-only posture from the session mode.
+ *   agy --sandbox — its effect on run_command and on the MCP shim agy spawns
+ *     is unmeasured; see the note beside AGY_OPTIONS.
  *
  * This module is imported by client components, so it must stay free of node
  * built-ins and of any import that pulls in `child_process` or the database.
  */
 
+import { isCodeProducingAgentType } from "@/lib/agent-config/constants";
 import type { ProviderType } from "./types";
 
 export type ProviderOptionType = "select" | "bool" | "number" | "text";
@@ -80,6 +83,18 @@ export interface ProviderOptionDefinition {
    * is a fatal argv error, not a warning.
    */
   resumeSupported?: boolean;
+  /**
+   * True when the option may only be applied to a CODE-PRODUCING session
+   * (build / ticket_build / team_build), as decided by the session's agent
+   * TYPE — not by its spawn mode.
+   *
+   * The distinction is load-bearing: reviews, grading and the second-opinion
+   * gate all spawn in mode "code" on purpose, because plan mode refuses the
+   * mutating MCP tools they exist to call (see the comments at
+   * lib/pipeline/stages.ts and lib/grading/dispatch.ts). Anything gated on
+   * the spawn mode alone therefore reaches reviewers too.
+   */
+  codeProducingOnly?: boolean;
 }
 
 const EFFORT_CHOICES: ProviderOptionChoice[] = [
@@ -91,13 +106,32 @@ const EFFORT_CHOICES: ProviderOptionChoice[] = [
 ];
 
 /**
- * Claude Code's permission modes, as printed by `claude --help` on 2.1.245.
+ * Claude Code's permission modes that are SAFE for a headless, allowlisted
+ * spawn. `claude --help` on 2.1.245 prints six; `plan` is deliberately not
+ * offered.
  *
- * Arij normally derives this from the session mode: "plan" for read-only
- * research, "default" for chat, "bypassPermissions" for code/analyze. An
- * agent-level choice only replaces the derived value on code-producing
- * spawns — see resolveClaudePermissionMode for why a read-only posture is
- * never handed over to configuration.
+ * Measured on 2.1.245, `claude --print --permission-mode <mode>
+ * --allowedTools Write` asked to write one file:
+ *
+ *   bypassPermissions  file written
+ *   acceptEdits        file written
+ *   manual             file written
+ *   dontAsk            file written
+ *   auto               file written
+ *   plan               NOT written
+ *
+ * `plan` is the odd one out at the harness level too: it refuses mutating
+ * tools regardless of the allowlist, INCLUDING the Arij MCP tools (see
+ * buildClaudeArgs in lib/claude/spawn.ts). An agent set to it cannot call
+ * update_ticket_status, so its ticket never leaves in_progress, and — before
+ * the codeProducingOnly gate below — a reviewer set to it filed no findings
+ * and persisted no review_verdict, silently degrading every review to the
+ * prose fallback. Arij still derives "plan" itself for genuinely read-only
+ * spawns; what is removed is the ability to CHOOSE it per agent.
+ *
+ * The remaining five behave headlessly because allowlisted tools are
+ * auto-approved; they differ in how much they tighten a code session
+ * relative to Arij's bypassPermissions default.
  */
 const CLAUDE_PERMISSION_MODES: ProviderOptionChoice[] = [
   { value: "acceptEdits", label: "Accept edits" },
@@ -105,7 +139,6 @@ const CLAUDE_PERMISSION_MODES: ProviderOptionChoice[] = [
   { value: "bypassPermissions", label: "Bypass permissions" },
   { value: "manual", label: "Manual" },
   { value: "dontAsk", label: "Don't ask" },
-  { value: "plan", label: "Plan" },
 ];
 
 const CLAUDE_CODE_OPTIONS: ProviderOptionDefinition[] = [
@@ -121,10 +154,13 @@ const CLAUDE_CODE_OPTIONS: ProviderOptionDefinition[] = [
   {
     key: "permission_mode",
     label: "Permission mode",
-    hint: "Applies to build sessions only. Review and chat sessions keep their read-only posture whatever is chosen here.",
+    hint: "Applies to code-producing sessions (build, ticket build, team build). Reviews, grading and every read-only session keep the posture their tool channel needs.",
     type: "select",
     default: "",
     choices: CLAUDE_PERMISSION_MODES,
+    // Gated on the agent TYPE, not the spawn mode: reviews and grading spawn
+    // in mode "code" on purpose, so a mode-only gate would reach them.
+    codeProducingOnly: true,
     // No toArgs: buildClaudeArgs replaces its derived --permission-mode
     // rather than appending a second one.
   },
@@ -213,15 +249,27 @@ const AGY_OPTIONS: ProviderOptionDefinition[] = [
     ],
     toArgs: (value) => ["--effort", String(value)],
   },
-  {
-    key: "sandbox",
-    label: "Sandbox",
-    hint: "Runs Antigravity with terminal restrictions enabled.",
-    type: "bool",
-    default: false,
-    toArgs: () => ["--sandbox"],
-  },
 ];
+
+/*
+ * agy `--sandbox` ("terminal restrictions enabled") is deliberately NOT
+ * offered, and unlike the other exclusions this one is withheld for a
+ * measurement that could not be completed rather than one that came back
+ * negative. Two things would have to hold before it is safe:
+ *
+ *  1. run_command still works — a build agent that cannot run the test suite
+ *     is not a tightened build, it is a broken one;
+ *  2. the Arij stdio MCP shim still starts. agy spawns it as a child that
+ *     inherits ARIJ_BASE_URL / ARIJ_MCP_TOKEN from the CLI's own environment
+ *     (see the buildEnv note in ./agy.ts), which is exactly the kind of thing
+ *     a terminal sandbox restricts.
+ *
+ * A shell probe on 1.1.22 was inconclusive (the control run without the flag
+ * did not write its file either), and (2) cannot be settled without a live
+ * MCP token. Every other entry in this file is justified by a measured effect
+ * on the tool channel; shipping this one on a guess is precisely the failure
+ * the codex-sandbox exclusion above exists to prevent.
+ */
 
 /**
  * The registry. A provider absent from this map has no options — that is the
@@ -382,6 +430,40 @@ export function parseStoredProviderOptions(
   }
 }
 
+/**
+ * Drops options this session's agent TYPE is not allowed to carry.
+ *
+ * Applied at the spawn wiring point, where the agent type is known, so the
+ * registry stays the one place a restriction is declared. Options with no
+ * restriction pass through untouched, which keeps every other option's argv
+ * identical.
+ *
+ * `agentType` null/unknown is treated as NOT code-producing: a session whose
+ * role Arij cannot name does not get the option that widens what a spawn may
+ * do to the working tree.
+ */
+export function filterProviderOptionsForAgentType(
+  provider: string | null | undefined,
+  options: NamedAgentCliOptions | null | undefined,
+  agentType: string | null | undefined,
+): NamedAgentCliOptions {
+  if (!options) return {};
+
+  const restricted = getProviderOptionDefinitions(provider)
+    .filter((definition) => definition.codeProducingOnly)
+    .map((definition) => definition.key);
+  if (restricted.length === 0) return { ...options };
+
+  const codeProducing = isCodeProducingAgentType(agentType);
+  if (codeProducing) return { ...options };
+
+  const kept: NamedAgentCliOptions = {};
+  for (const [key, value] of Object.entries(options)) {
+    if (!restricted.includes(key)) kept[key] = value;
+  }
+  return kept;
+}
+
 export interface ProviderOptionArgsContext {
   /** True on a CLI resume path, where some flags are not accepted. */
   resume?: boolean;
@@ -419,13 +501,24 @@ export function buildProviderOptionArgs(
 /**
  * The `--permission-mode` a claude-code spawn should use.
  *
- * The agent-level option only applies to code-producing spawns. "plan",
- * "analyze" and "chat" postures exist so that review, grading and chat
- * sessions cannot touch the working tree, and a per-agent setting is not
- * authority to hand that guarantee away: a reviewer configured with
- * "bypassPermissions" would silently gain write access to the epic worktree
- * it is reviewing. Tightening is allowed in code mode (acceptEdits, manual);
- * loosening a read-only mode is not possible at all.
+ * TWO gates, and they cover different things:
+ *
+ *  1. The agent TYPE gate, applied upstream by
+ *     filterProviderOptionsForAgentType at the spawn wiring point. That is
+ *     the one that matters, because reviews, grading and the second-opinion
+ *     gate deliberately spawn in mode "code" — plan mode refuses the mutating
+ *     MCP tools they exist to call. By the time this function sees the
+ *     options, a non-code-producing session no longer carries the key.
+ *
+ *  2. The spawn MODE gate below, kept as defence in depth for the read-only
+ *     postures ("plan", "chat", "analyze") used by direct call sites that
+ *     never pass through the wiring point — chat turns carry cliOptions on
+ *     ResolvedAgent. A per-agent setting is not authority to hand a read-only
+ *     guarantee away.
+ *
+ * The value is also re-checked against the offered choices, so a bag written
+ * before an option was narrowed (the `plan` value, removed after measurement)
+ * falls back to the derived posture rather than reaching argv.
  */
 export function resolveClaudePermissionMode(
   mode: "plan" | "code" | "analyze" | "chat",

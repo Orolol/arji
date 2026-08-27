@@ -16,6 +16,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const pmState = vi.hoisted(() => ({
   /** named_agent_id on the session row start() reads. */
   namedAgentId: null as string | null,
+  /** agent_type on that row — what scopes the persona and the options. */
+  agentType: "build" as string | null,
   /** What getNamedAgentRuntimeConfig should answer, keyed by agent id. */
   agents: new Map<
     string,
@@ -51,7 +53,13 @@ vi.mock("@/lib/db", () => ({
       return {
         from: vi.fn(() => ({
           where: vi.fn(() => ({
-            get: vi.fn(() => ({ namedAgentId: pmState.namedAgentId })),
+            get: vi.fn(() => ({
+              projectId: "proj-1",
+              epicId: "epic-1",
+              userStoryId: null,
+              agentType: pmState.agentType,
+              namedAgentId: pmState.namedAgentId,
+            })),
           })),
         })),
       };
@@ -139,6 +147,7 @@ const BUILD_PROMPT = [
 beforeEach(async () => {
   vi.clearAllMocks();
   pmState.namedAgentId = null;
+  pmState.agentType = "build";
   pmState.agents = new Map();
   pmState.runtimeLookups = [];
   pmState.throwOnSelect = false;
@@ -151,9 +160,14 @@ beforeEach(async () => {
 
 function configureAgent(
   id: string,
-  config: { options?: Record<string, unknown>; personaPrompt?: string | null },
+  config: {
+    options?: Record<string, unknown>;
+    personaPrompt?: string | null;
+    agentType?: string | null;
+  },
 ) {
   pmState.namedAgentId = id;
+  if (config.agentType !== undefined) pmState.agentType = config.agentType;
   pmState.agents.set(id, {
     options: config.options ?? {},
     personaPrompt: config.personaPrompt ?? null,
@@ -229,6 +243,119 @@ describe("persona injection", () => {
       expect(prompt.split(`## ${PERSONA_HEADING}`)).toHaveLength(2);
     }
     expect(options.prompt).toBe(BUILD_PROMPT);
+  });
+});
+
+describe("persona scoping by agent type", () => {
+  /**
+   * The document rewriters persist their ENTIRE response verbatim:
+   * spec_generation replaces projects.spec, the memory writers replace the
+   * memory document, release_notes becomes CHANGELOG.md. A persona such as
+   * "answer in French and summarise your reasoning" would be written into
+   * that stored artifact, which then feeds every later prompt.
+   */
+  it.each([
+    "spec_generation",
+    "dreaming",
+    "memory_distill",
+    "release_notes",
+    "title_generation",
+    "import_analysis",
+    "failure_digest",
+    "refinement",
+    "tech_check",
+    "e2e_test",
+    "forensic",
+  ])("injects nothing into a %s session", (agentType) => {
+    configureAgent("agent-1", {
+      agentType,
+      personaPrompt: "Answer in French and summarise your reasoning",
+    });
+
+    processManager.start("s-doc", { mode: "plan", prompt: BUILD_PROMPT });
+
+    expect(pmState.spawnedOptions[0].prompt).toBe(BUILD_PROMPT);
+    expect(pmState.updates.some((patch) => "prompt" in patch)).toBe(false);
+  });
+
+  it.each([
+    "build",
+    "ticket_build",
+    "team_build",
+    "review_security",
+    "review_code",
+    "review_compliance",
+    "review_feature",
+    "review_second_opinion",
+    "grading",
+    "merge",
+  ])("injects into a %s session", (agentType) => {
+    configureAgent("agent-1", { agentType, personaPrompt: "Be rigorous" });
+
+    processManager.start("s-work", { mode: "code", prompt: BUILD_PROMPT });
+
+    expect(pmState.spawnedOptions[0].prompt).toContain(
+      `## ${PERSONA_HEADING}`,
+    );
+  });
+
+  it("injects nothing when the session carries no agent type", () => {
+    // Allowlist, not blocklist: an unnamed role gets no persona rather than
+    // inheriting one into an output contract nobody has checked.
+    configureAgent("agent-1", { agentType: null, personaPrompt: "Be rigorous" });
+
+    processManager.start("s-unknown", { mode: "code", prompt: BUILD_PROMPT });
+
+    expect(pmState.spawnedOptions[0].prompt).toBe(BUILD_PROMPT);
+  });
+});
+
+describe("permission mode scoping by agent type", () => {
+  /**
+   * Reviews, grading and the second-opinion gate spawn in mode "code" on
+   * purpose — plan mode refuses the mutating MCP tools they exist to call —
+   * so the spawn mode cannot tell them apart from a build. Only the agent
+   * type can.
+   */
+  it("keeps the permission mode for a build", () => {
+    configureAgent("agent-1", {
+      agentType: "build",
+      options: { effort: "high", permission_mode: "acceptEdits" },
+    });
+
+    processManager.start("s-build", { mode: "code", prompt: BUILD_PROMPT });
+
+    expect(pmState.spawnedOptions[0].cliOptions).toEqual({
+      effort: "high",
+      permission_mode: "acceptEdits",
+    });
+  });
+
+  it("strips it from a review that spawns in code mode", () => {
+    configureAgent("agent-1", {
+      agentType: "review_code",
+      options: { effort: "high", permission_mode: "acceptEdits" },
+    });
+
+    processManager.start("s-review", { mode: "code", prompt: BUILD_PROMPT });
+
+    expect(pmState.spawnedOptions[0].cliOptions).toEqual({ effort: "high" });
+    // And the audit trail records what was actually in effect, not what the
+    // agent was configured with.
+    const patch = pmState.updates.find((candidate) => "cliOptions" in candidate);
+    expect(patch?.cliOptions).toBe('{"effort":"high"}');
+  });
+
+  it("writes no options row when stripping leaves nothing", () => {
+    configureAgent("agent-1", {
+      agentType: "grading",
+      options: { permission_mode: "bypassPermissions" },
+    });
+
+    processManager.start("s-grade", { mode: "code", prompt: BUILD_PROMPT });
+
+    expect(pmState.spawnedOptions[0].cliOptions).toBeUndefined();
+    expect(pmState.updates.some((patch) => "cliOptions" in patch)).toBe(false);
   });
 });
 
