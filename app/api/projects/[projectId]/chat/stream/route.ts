@@ -61,7 +61,16 @@ import {
   DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS,
   DEFAULT_PERSISTENT_CHAT_TURN_STALL_MS,
   runPersistentChatTurn,
+  restartPersistentChatSession,
 } from "@/lib/chat/persistent-runner";
+import {
+  parsePersistentChatCapSetting,
+  parsePersistentChatDurationSetting,
+  PERSISTENT_CHAT_IDLE_TIMEOUT_SETTING,
+  PERSISTENT_CHAT_MAX_CONVERSATIONS_SETTING,
+  PERSISTENT_CHAT_TURN_STALL_SETTING,
+} from "@/lib/chat/persistent-chat-constants";
+import { isResumeSessionExpiredError } from "@/lib/chat/resume-expiry";
 
 /**
  * The stored conversation provider, honoured for any provider the app
@@ -76,12 +85,6 @@ function normalizeProvider(value: string | null | undefined): ChatModeProvider |
   return value && isChatProvider(value) ? value : null;
 }
 
-function isResumeSessionExpiredError(error: string | null | undefined): boolean {
-  if (!error) return false;
-  return /(session|resume).*(expired|not found|invalid|unknown|does not exist)|invalid.*(session|resume)/i.test(
-    error
-  );
-}
 
 /**
  * Upper bound on fast-mode tool rounds per turn (each round is one upstream
@@ -97,15 +100,8 @@ const MAX_TOOL_ROUNDS = 8;
  */
 const MAX_TOOL_CALLS_PER_ROUND = 8;
 
-function positiveNumberSetting(key: string, fallback: number): number {
-  const row = db.select().from(settings).where(eq(settings.key, key)).get();
-  if (!row) return fallback;
-  try {
-    const value = Number(JSON.parse(row.value));
-    return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
-  } catch {
-    return fallback;
-  }
+function settingValue(key: string): unknown {
+  return db.select().from(settings).where(eq(settings.key, key)).get()?.value;
 }
 
 /**
@@ -283,6 +279,35 @@ export async function POST(
   /**
    * Helper: save assistant message and generate title after stream completes.
    */
+  /**
+   * Enqueue that tolerates an already-closed controller.
+   *
+   * When the browser aborts the SSE fetch, the stream's `cancel()` runs and
+   * closes the controller before the in-flight turn settles. A raw
+   * `enqueue()` then throws `TypeError: Invalid state`, which on the
+   * persistent path aborted the handler before it could persist whatever the
+   * CLI had already streamed. Losing the frame is expected once the client is
+   * gone; losing the durable write is not.
+   */
+  function enqueueIfOpen(
+    controller: ReadableStreamDefaultController,
+    payload: string,
+  ) {
+    try {
+      controller.enqueue(encoder.encode(payload));
+    } catch {
+      // Client disconnected; nothing left to deliver this frame to.
+    }
+  }
+
+  function closeIfOpen(controller: ReadableStreamDefaultController) {
+    try {
+      controller.close();
+    } catch {
+      // Already closed by the client's cancel().
+    }
+  }
+
   function saveAssistantAndTitle(
     controller: ReadableStreamDefaultController,
     fullContent: string,
@@ -335,12 +360,11 @@ export async function POST(
 
     setConversationStatus(finalStatus);
 
-    controller.enqueue(
-      encoder.encode(
-        `data: ${JSON.stringify({ done: true, messageId: assistantMsgId })}\n\n`
-      )
+    enqueueIfOpen(
+      controller,
+      `data: ${JSON.stringify({ done: true, messageId: assistantMsgId })}\n\n`,
     );
-    controller.close();
+    closeIfOpen(controller);
   }
 
   // Full history including the user message just saved above, required by
@@ -729,6 +753,18 @@ export async function POST(
       .run();
   }
 
+  /**
+   * Forgets a CLI session the provider no longer has. Without this the next
+   * turn re-reads the same dead id and resumes into the same failure.
+   */
+  function clearConversationSessionId() {
+    if (!conversationId) return;
+    db.update(chatConversations)
+      .set({ cliSessionId: null })
+      .where(eq(chatConversations.id, conversationId))
+      .run();
+  }
+
   setConversationStatus("generating");
 
   // Determine conversation label for activity registry
@@ -747,27 +783,32 @@ export async function POST(
     let fullContent = "";
     let persistentChunkSink: ((chunk: StreamChunk) => void) | null = null;
 
-    const turn = runPersistentChatTurn({
+    const launchPersistentTurn = (
+      turnPrompt: string,
+      turnCliSessionId: string | undefined,
+      turnResumeSession: boolean,
+    ) =>
+      runPersistentChatTurn({
       conversationId,
       projectId,
       provider: persistentProvider,
-      prompt: effectivePrompt,
+      prompt: turnPrompt,
       cwd: project.gitRepoPath || process.cwd(),
       mode: claudeChatMode,
       model: resolvedAgent.model,
-      cliSessionId,
-      resumeSession,
+      cliSessionId: turnCliSessionId,
+      resumeSession: turnResumeSession,
       conversationType,
-      idleTimeoutMs: positiveNumberSetting(
-        "chat_persistent_idle_timeout_ms",
+      idleTimeoutMs: parsePersistentChatDurationSetting(
+        settingValue(PERSISTENT_CHAT_IDLE_TIMEOUT_SETTING),
         DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS,
       ),
-      maxWarmConversations: positiveNumberSetting(
-        "chat_persistent_max_conversations",
+      maxWarmConversations: parsePersistentChatCapSetting(
+        settingValue(PERSISTENT_CHAT_MAX_CONVERSATIONS_SETTING),
         DEFAULT_MAX_WARM_CHAT_CONVERSATIONS,
       ),
-      turnStallTimeoutMs: positiveNumberSetting(
-        "chat_persistent_turn_stall_ms",
+      turnStallTimeoutMs: parsePersistentChatDurationSetting(
+        settingValue(PERSISTENT_CHAT_TURN_STALL_SETTING),
         DEFAULT_PERSISTENT_CHAT_TURN_STALL_MS,
       ),
       onChunk(chunk) {
@@ -780,6 +821,8 @@ export async function POST(
         persistConversationSessionId(nextCliSessionId);
       },
     });
+
+    const turn = launchPersistentTurn(effectivePrompt, cliSessionId, resumeSession);
     currentKill = turn.kill;
 
     activityRegistry.register({
@@ -832,13 +875,48 @@ export async function POST(
           activityRegistry.unregister(activityId);
           saveAssistantAndTitle(controller, fullContent, "active");
         } catch (error) {
+          // Resume-first, same as the one-shot paths below: the CLI prunes its
+          // own session files (Claude Code after `cleanupPeriodDays`), and a
+          // stored id that has gone away would otherwise fail every future
+          // turn in this conversation with no in-app way out — "Restart
+          // session" only kills the process, it does not forget the dead id.
+          // Guarded on empty output so a mid-answer failure cannot splice two
+          // replies together.
+          const resumeExpired =
+            resumeSession &&
+            !fullContent &&
+            error instanceof Error &&
+            isResumeSessionExpiredError(error.message);
+          if (resumeExpired) {
+            restartPersistentChatSession(conversationId);
+            clearConversationSessionId();
+            // A fresh session has no history, so it needs the full prompt
+            // rather than the resume path's bare user message.
+            cliSessionId = providerAcceptsAssignedSessionId(resolvedAgent.provider)
+              ? crypto.randomUUID()
+              : undefined;
+            enqueueIfOpen(
+              controller,
+              `data: ${JSON.stringify({
+                status: `Stored ${PROVIDER_LABELS[persistentProvider]} session expired; starting a fresh one...`,
+              })}\n\n`,
+            );
+            const retry = launchPersistentTurn(prompt, cliSessionId, false);
+            currentKill = retry.kill;
+            try {
+              await retry.promise;
+              activityRegistry.unregister(activityId);
+              saveAssistantAndTitle(controller, fullContent, "active");
+              return;
+            } catch (retryError) {
+              error = retryError;
+            }
+          }
           const failureMessage =
             error instanceof Error ? `Error: ${error.message}` : "Error: Provider request failed";
           const delta = fullContent ? `\n\n${failureMessage}` : failureMessage;
           fullContent += delta;
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ delta })}\n\n`),
-          );
+          enqueueIfOpen(controller, `data: ${JSON.stringify({ delta })}\n\n`);
           activityRegistry.unregister(activityId);
           saveAssistantAndTitle(controller, fullContent, "error");
         } finally {

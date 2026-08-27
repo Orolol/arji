@@ -75,7 +75,17 @@ interface ActiveTurn {
   stallTimer: ReturnType<typeof setTimeout> | null;
   requestId?: string;
   fallbackText?: string;
-  errorMessage?: string;
+  /**
+   * Oh My Pi only. Kept as two fields with different lifetimes because they
+   * answer different questions and one sticky flag conflated them:
+   * - `messageError` describes the *latest* assistant message, so every
+   *   assistant `message_end` overwrites it — including clearing it when a
+   *   retried attempt finally settles cleanly.
+   * - `retryError` is OMP declaring the whole retry ladder spent, so it
+   *   survives later frames and is only lifted by an explicit recovery.
+   */
+  messageError?: string;
+  retryError?: string;
 }
 
 interface PersistentProcess {
@@ -375,36 +385,75 @@ function cleanupProcess(process: PersistentProcess, error?: Error): void {
   }
 }
 
-function spawnClaudeProcess(options: PersistentChatTurnOptions): PersistentProcess {
-  const channel = createChatCliToolChannel({
-    projectId: options.projectId,
-    provider: "claude-code",
-    conversationType: options.conversationType,
-  });
-  let mcpConfigPath: string | null = null;
-  let allowedToolNames: string[] = [];
-  if (channel) {
-    allowedToolNames = channel.mcp.allowedToolNames;
-    try {
-      mcpConfigPath = writeMcpConfigFile(channel.mcp);
-    } catch (error) {
-      allowedToolNames = [];
-      console.warn(
-        "[persistent-chat] MCP config write failed; continuing without board tools:",
-        error instanceof Error ? error.message : error,
-      );
-    }
-  }
-  const args = claudeArgs(options, mcpConfigPath, allowedToolNames);
-  const child = nodeSpawn("claude", args, {
+/**
+ * Everything that differs between the embedded CLIs. Everything that does not
+ * — process bookkeeping, turn registration, the stall watchdog, teardown —
+ * lives once in `spawnPersistentProcess` below. Two provider-specific event
+ * bugs shipped from this file while the two spawn paths were copies of each
+ * other; a fix applied to the shared half now cannot miss one of them.
+ */
+interface PersistentProviderAdapter {
+  displayName: string;
+  binary: string;
+  /** Message when the binary is missing from PATH. */
+  missingBinaryMessage: string;
+  /** Chat MCP token holder for this provider, or null when unavailable. */
+  createChannel(
+    options: PersistentChatTurnOptions,
+  ): ReturnType<typeof createChatCliToolChannel>;
+  /** Argv, environment, and any temp MCP config file to clean up later. */
+  buildSpawn(
+    options: PersistentChatTurnOptions,
+    channel: ReturnType<typeof createChatCliToolChannel>,
+  ): { args: string[]; env: NodeJS.ProcessEnv; mcpConfigPath: string | null };
+  /**
+   * Encodes one user turn as the bytes to write to stdin, plus the id the
+   * event handler will correlate responses against. Throwing here rejects the
+   * turn before it is registered, leaving the process reusable.
+   */
+  encodeTurnFrame(
+    process: PersistentProcess,
+    prompt: string,
+  ): { frame: string; requestId?: string };
+  /** Runs after the turn is registered but before its frame is written. */
+  afterTurnRegistered?(
+    process: PersistentProcess,
+    onCliSessionId?: (cliSessionId: string) => void,
+  ): void;
+  /**
+   * Wires provider-specific readiness and output handling. Returns the stdout
+   * line handler plus a teardown hook for anything it armed.
+   */
+  attach(
+    process: PersistentProcess,
+    ready: ReadyControls,
+    options: PersistentChatTurnOptions,
+  ): { handleLine(line: string): void; dispose(): void };
+}
+
+interface ReadyControls {
+  resolve(): void;
+  reject(error: Error): void;
+  /** Whether `ready` has already resolved or rejected. */
+  settled(): boolean;
+}
+
+function spawnPersistentProcess(
+  adapter: PersistentProviderAdapter,
+  options: PersistentChatTurnOptions,
+): PersistentProcess {
+  const channel = adapter.createChannel(options);
+  const { args, env, mcpConfigPath } = adapter.buildSpawn(options, channel);
+  const child = nodeSpawn(adapter.binary, args, {
     cwd: options.cwd,
-    env: { ...process.env },
+    env,
     stdio: ["pipe", "pipe", "pipe"],
   });
   child.stdin?.on("error", () => {});
 
   let resolveReady!: () => void;
   let rejectReady!: (error: Error) => void;
+  let readySettled = false;
   const ready = new Promise<void>((resolve, reject) => {
     resolveReady = resolve;
     rejectReady = reject;
@@ -414,11 +463,24 @@ function spawnClaudeProcess(options: PersistentChatTurnOptions): PersistentProce
   // a permanent no-op handler so a late `error` event cannot become an
   // unhandled rejection (fatal in Node outside dev).
   void ready.catch(() => {});
+  const readyControls: ReadyControls = {
+    resolve() {
+      if (readySettled) return;
+      readySettled = true;
+      resolveReady();
+    },
+    reject(error) {
+      if (readySettled) return;
+      readySettled = true;
+      rejectReady(error);
+    },
+    settled: () => readySettled,
+  };
 
   const persistent: PersistentProcess = {
     conversationId: options.conversationId,
     provider: options.provider,
-    displayName: "Claude Code",
+    displayName: adapter.displayName,
     child,
     channel,
     mcpConfigPath,
@@ -436,11 +498,20 @@ function spawnClaudeProcess(options: PersistentChatTurnOptions): PersistentProce
     async send(prompt, onChunk, onCliSessionId) {
       await ready;
       if (persistent.closing || !persistent.child.stdin?.writable) {
-        throw new Error("Persistent Claude Code process is not writable");
+        // A child that already exited has usually said why on stderr; that
+        // beats reporting the symptom ("not writable") back to the user.
+        const exited = persistent.child.exitCode !== null;
+        throw new Error(
+          (exited && persistent.stderrTail.trim()) ||
+            `Persistent ${adapter.displayName} process is not writable`,
+        );
       }
       if (persistent.activeTurn) {
         throw new Error("This conversation already has a turn in progress");
       }
+      // Encode before registering: a frame this process cannot carry must
+      // fail the turn without leaving one half-registered behind.
+      const { frame, requestId } = adapter.encodeTurnFrame(persistent, prompt);
       if (persistent.idleTimer) clearTimeout(persistent.idleTimer);
       persistent.idleTimer = null;
       await new Promise<void>((resolve, reject) => {
@@ -451,9 +522,11 @@ function spawnClaudeProcess(options: PersistentChatTurnOptions): PersistentProce
           reject,
           textDeltasEmitted: false,
           stallTimer: null,
+          requestId,
         };
         armTurnStallWatchdog(persistent);
-        persistent.child.stdin!.write(claudeInputMessage(prompt), (error) => {
+        adapter.afterTurnRegistered?.(persistent, onCliSessionId);
+        persistent.child.stdin!.write(frame, (error) => {
           if (error) finishTurn(persistent, error);
         });
       });
@@ -481,31 +554,39 @@ function spawnClaudeProcess(options: PersistentChatTurnOptions): PersistentProce
     },
   };
 
-  child.once("spawn", resolveReady);
+  const attached = adapter.attach(persistent, readyControls, options);
+
   child.stdout?.on("data", (chunk: Buffer) => {
     persistent.stdoutBuffer += chunk.toString("utf-8");
     const lines = persistent.stdoutBuffer.split("\n");
     persistent.stdoutBuffer = lines.pop() ?? "";
-    for (const line of lines) processClaudeEvent(persistent, line);
+    for (const line of lines) attached.handleLine(line);
   });
   child.stderr?.on("data", (chunk: Buffer) => {
     persistent.stderrTail = `${persistent.stderrTail}${chunk.toString("utf-8")}`.slice(-4000);
   });
   child.once("error", (error) => {
+    attached.dispose();
     const spawnError = new Error(
       error.message.includes("ENOENT")
-        ? "Claude CLI not found. Ensure `claude` is installed and available in PATH."
-        : `Failed to spawn Claude CLI: ${error.message}`,
+        ? adapter.missingBinaryMessage
+        : `Failed to spawn ${adapter.displayName} CLI: ${error.message}`,
     );
-    rejectReady(spawnError);
-    cleanupProcess(
-      persistent,
-      spawnError,
-    );
+    readyControls.reject(spawnError);
+    cleanupProcess(persistent, spawnError);
   });
   child.once("close", () => {
+    attached.dispose();
+    // A child that dies before it is usable must fail `ready`, or every later
+    // `send()` waits on a promise nothing will ever settle.
+    readyControls.reject(
+      new Error(
+        persistent.stderrTail.trim() ||
+          `Persistent ${adapter.displayName} process stopped before it was ready`,
+      ),
+    );
     if (persistent.stdoutBuffer.trim()) {
-      processClaudeEvent(persistent, persistent.stdoutBuffer);
+      attached.handleLine(persistent.stdoutBuffer);
       persistent.stdoutBuffer = "";
     }
     cleanupProcess(persistent);
@@ -513,6 +594,53 @@ function spawnClaudeProcess(options: PersistentChatTurnOptions): PersistentProce
   scheduleIdleReap(persistent);
   return persistent;
 }
+
+const claudeAdapter: PersistentProviderAdapter = {
+  displayName: "Claude Code",
+  binary: "claude",
+  missingBinaryMessage:
+    "Claude CLI not found. Ensure `claude` is installed and available in PATH.",
+  createChannel: (options) =>
+    createChatCliToolChannel({
+      projectId: options.projectId,
+      provider: "claude-code",
+      conversationType: options.conversationType,
+    }),
+  buildSpawn(options, channel) {
+    let mcpConfigPath: string | null = null;
+    let allowedToolNames: string[] = [];
+    if (channel) {
+      allowedToolNames = channel.mcp.allowedToolNames;
+      try {
+        mcpConfigPath = writeMcpConfigFile(channel.mcp);
+      } catch (error) {
+        allowedToolNames = [];
+        console.warn(
+          "[persistent-chat] MCP config write failed; continuing without board tools:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+    return {
+      args: claudeArgs(options, mcpConfigPath, allowedToolNames),
+      env: { ...process.env },
+      mcpConfigPath,
+    };
+  },
+  encodeTurnFrame: (_process, prompt) => ({ frame: claudeInputMessage(prompt) }),
+  attach(persistent, ready) {
+    persistent.child.once("spawn", () => ready.resolve());
+    return {
+      handleLine: (line) => processClaudeEvent(persistent, line),
+      dispose: () => {},
+    };
+  },
+};
+
+function spawnClaudeProcess(options: PersistentChatTurnOptions): PersistentProcess {
+  return spawnPersistentProcess(claudeAdapter, options);
+}
+
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -527,6 +655,15 @@ function readOmpTextBlocks(content: unknown): string {
     )
     .map((block) => block.text)
     .join("");
+}
+
+/**
+ * The error a turn should fail with, if any. A spent retry ladder outranks the
+ * last message's own error: its `finalError` is the summary OMP chose to
+ * report, and by then the message error is one symptom among several.
+ */
+function pendingOmpError(turn: ActiveTurn): string | undefined {
+  return turn.retryError ?? turn.messageError;
 }
 
 function processOmpEvent(process: PersistentProcess, raw: string): void {
@@ -606,11 +743,19 @@ function processOmpEvent(process: PersistentProcess, raw: string): void {
     return;
   }
 
-  if (event.type === "auto_retry_end" && event.success === false) {
-    turn.errorMessage =
-      typeof event.finalError === "string"
-        ? event.finalError
-        : "Oh My Pi exhausted its automatic retries.";
+  if (event.type === "auto_retry_end") {
+    if (event.success === false) {
+      turn.retryError =
+        typeof event.finalError === "string"
+          ? event.finalError
+          : "Oh My Pi exhausted its automatic retries.";
+      return;
+    }
+    // OMP emits this only from its `status: "recovered"` path, i.e. after a
+    // retry actually rescued the turn. Whatever the failed attempts left
+    // behind is now stale and must not reach the user.
+    turn.retryError = undefined;
+    turn.messageError = undefined;
     return;
   }
 
@@ -618,13 +763,17 @@ function processOmpEvent(process: PersistentProcess, raw: string): void {
     const message = event.message;
     if (message.role !== "assistant") return;
     turn.fallbackText = readOmpTextBlocks(message.content);
+    // Overwrite, never accumulate: a retried turn settles once per attempt,
+    // and only the last settle describes what the user actually got.
     if (message.stopReason === "error" || message.stopReason === "aborted") {
-      turn.errorMessage =
+      turn.messageError =
         typeof message.errorMessage === "string"
           ? message.errorMessage
           : message.stopReason === "aborted"
             ? "Oh My Pi run was aborted."
             : "Oh My Pi run ended with an error.";
+    } else {
+      turn.messageError = undefined;
     }
     return;
   }
@@ -637,8 +786,9 @@ function processOmpEvent(process: PersistentProcess, raw: string): void {
   // "more is coming".
   if (event.type !== "agent_end") return;
   if (event.isTerminal === false || event.willContinue === true) return;
-  if (turn.errorMessage) {
-    finishTurn(process, new Error(turn.errorMessage));
+  const failure = pendingOmpError(turn);
+  if (failure) {
+    finishTurn(process, new Error(failure));
     return;
   }
   if (!turn.textDeltasEmitted && turn.fallbackText) {
@@ -656,8 +806,9 @@ function finishLocalOnlyOmpTurn(
   process: PersistentProcess,
   turn: ActiveTurn,
 ): void {
-  if (turn.errorMessage) {
-    finishTurn(process, new Error(turn.errorMessage));
+  const failure = pendingOmpError(turn);
+  if (failure) {
+    finishTurn(process, new Error(failure));
     return;
   }
   if (!turn.textDeltasEmitted && turn.fallbackText) {
@@ -683,193 +834,97 @@ function ompArgs(options: PersistentChatTurnOptions): string[] {
   return args;
 }
 
-function spawnOmpProcess(options: PersistentChatTurnOptions): PersistentProcess {
-  const channel = createChatCliToolChannel({
-    projectId: options.projectId,
-    provider: "oh-my-pi",
-    conversationType: options.conversationType,
-  });
-  const child = nodeSpawn("omp", ompArgs(options), {
-    cwd: options.cwd,
+const ompAdapter: PersistentProviderAdapter = {
+  displayName: "Oh My Pi",
+  binary: "omp",
+  missingBinaryMessage:
+    "Oh My Pi CLI not found. Ensure `omp` is installed and available in PATH.",
+  createChannel: (options) =>
+    createChatCliToolChannel({
+      projectId: options.projectId,
+      provider: "oh-my-pi",
+      conversationType: options.conversationType,
+    }),
+  buildSpawn: (options, channel) => ({
+    args: ompArgs(options),
     env: buildOmpSpawnEnv(process.env, channel?.mcp),
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  child.stdin?.on("error", () => {});
-
-  let resolveReady!: () => void;
-  let rejectReady!: (error: Error) => void;
-  const ready = new Promise<void>((resolve, reject) => {
-    resolveReady = resolve;
-    rejectReady = reject;
-  });
-  // `send()` awaits `ready` and surfaces a spawn failure to the caller, but a
-  // turn cancelled between spawn and the first `send()` never awaits it. Keep
-  // a permanent no-op handler so a late `error` event cannot become an
-  // unhandled rejection (fatal in Node outside dev).
-  void ready.catch(() => {});
-
-  const persistent: PersistentProcess = {
-    conversationId: options.conversationId,
-    provider: options.provider,
-    displayName: "Oh My Pi",
-    child,
-    channel,
     mcpConfigPath: null,
-    lastUsedAt: Date.now(),
-    idleTimeoutMs: normalizedIdleTimeout(options.idleTimeoutMs),
-    idleTimer: null,
-    turnStallMs: normalizedTurnStall(options.turnStallTimeoutMs),
-    activeTurn: null,
-    stdoutBuffer: "",
-    stderrTail: "",
-    closing: false,
-    maxFrameBytes: undefined,
-    discoveredCliSessionId: options.cliSessionId,
-    ready,
-    async send(prompt, onChunk, onCliSessionId) {
-      await ready;
-      if (persistent.closing || !persistent.child.stdin?.writable) {
-        throw new Error("Persistent Oh My Pi process is not writable");
-      }
-      if (persistent.activeTurn) {
-        throw new Error("This conversation already has a turn in progress");
-      }
-      const requestId = crypto.randomUUID();
-      const frame = `${JSON.stringify({
-        id: requestId,
-        type: "prompt",
-        message: prompt,
-      })}\n`;
-      if (
-        persistent.maxFrameBytes &&
-        Buffer.byteLength(frame) > persistent.maxFrameBytes
-      ) {
-        throw new Error(
-          `Oh My Pi RPC prompt exceeds the ${persistent.maxFrameBytes}-byte frame limit`,
-        );
-      }
-      if (persistent.idleTimer) clearTimeout(persistent.idleTimer);
-      persistent.idleTimer = null;
-      await new Promise<void>((resolve, reject) => {
-        persistent.activeTurn = {
-          onChunk,
-          onCliSessionId,
-          resolve,
-          reject,
-          textDeltasEmitted: false,
-          stallTimer: null,
-          requestId,
-        };
-        armTurnStallWatchdog(persistent);
-        if (persistent.discoveredCliSessionId) {
-          onCliSessionId?.(persistent.discoveredCliSessionId);
+  }),
+  encodeTurnFrame(persistent, prompt) {
+    const requestId = crypto.randomUUID();
+    const frame = `${JSON.stringify({
+      id: requestId,
+      type: "prompt",
+      message: prompt,
+    })}\n`;
+    if (persistent.maxFrameBytes && Buffer.byteLength(frame) > persistent.maxFrameBytes) {
+      throw new Error(
+        `Oh My Pi RPC prompt exceeds the ${persistent.maxFrameBytes}-byte frame limit`,
+      );
+    }
+    return { frame, requestId };
+  },
+  afterTurnRegistered(persistent, onCliSessionId) {
+    // A resumed process already knows its session id, so report it without
+    // waiting for the `get_state` round trip.
+    if (persistent.discoveredCliSessionId) {
+      onCliSessionId?.(persistent.discoveredCliSessionId);
+    }
+  },
+  attach(persistent, ready, options) {
+    let protocolReady = false;
+    const handshakeTimer = setTimeout(() => {
+      if (protocolReady) return;
+      const error = new Error("Oh My Pi RPC handshake timed out");
+      ready.reject(error);
+      cleanupProcess(persistent, error);
+      persistent.terminate("RPC handshake timed out");
+    }, 10_000);
+    handshakeTimer.unref?.();
+
+    return {
+      dispose: () => clearTimeout(handshakeTimer),
+      handleLine(line) {
+        let event: Record<string, unknown> | null = null;
+        try {
+          event = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          // processOmpEvent deliberately ignores malformed/noisy lines too.
         }
-        persistent.child.stdin!.write(frame, (error) => {
-          if (error) finishTurn(persistent, error);
-        });
-      });
-    },
-    terminate(reason) {
-      if (persistent.closing) return;
-      persistent.closing = true;
-      removeProcess(persistent);
-      if (persistent.idleTimer) clearTimeout(persistent.idleTimer);
-      persistent.idleTimer = null;
-      if (persistent.activeTurn) {
-        const turn = persistent.activeTurn;
-        clearStallTimer(turn);
-        persistent.activeTurn = null;
-        turn.reject(new Error(`Persistent chat session stopped: ${reason}`));
-      }
-      if (!child.killed) child.kill("SIGTERM");
-      const forceTimer = setTimeout(() => {
-        if (child.exitCode === null) child.kill("SIGKILL");
-        cleanupProcess(persistent);
-      }, 5000);
-      forceTimer.unref?.();
-    },
-  };
-
-  let protocolReady = false;
-  const handshakeTimer = setTimeout(() => {
-    if (protocolReady) return;
-    const error = new Error("Oh My Pi RPC handshake timed out");
-    rejectReady(error);
-    cleanupProcess(persistent, error);
-    persistent.terminate("RPC handshake timed out");
-  }, 10_000);
-  handshakeTimer.unref?.();
-
-  child.stdout?.on("data", (chunk: Buffer) => {
-    persistent.stdoutBuffer += chunk.toString("utf-8");
-    const lines = persistent.stdoutBuffer.split("\n");
-    persistent.stdoutBuffer = lines.pop() ?? "";
-    for (const line of lines) {
-      let event: Record<string, unknown> | null = null;
-      try {
-        event = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        // processOmpEvent deliberately ignores malformed/noisy lines too.
-      }
-      if (event?.type === "ready") {
+        if (event?.type !== "ready") {
+          processOmpEvent(persistent, line);
+          return;
+        }
         const versions = Array.isArray(event.supportedProtocolVersions)
           ? event.supportedProtocolVersions
           : [event.protocolVersion];
         if (!versions.includes(1)) {
           const error = new Error("Oh My Pi RPC protocol 1 is not supported");
-          rejectReady(error);
+          ready.reject(error);
           cleanupProcess(persistent, error);
           persistent.terminate("unsupported RPC protocol");
-          continue;
+          return;
         }
         protocolReady = true;
         clearTimeout(handshakeTimer);
         persistent.maxFrameBytes =
           typeof event.maxFrameBytes === "number" ? event.maxFrameBytes : 1_048_576;
-        resolveReady();
-        child.stdin?.write(
+        ready.resolve();
+        persistent.child.stdin?.write(
           `${JSON.stringify({
             id: `arij-state-${options.conversationId}`,
             type: "get_state",
           })}\n`,
         );
-        continue;
-      }
-      processOmpEvent(persistent, line);
-    }
-  });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    persistent.stderrTail = `${persistent.stderrTail}${chunk.toString("utf-8")}`.slice(-4000);
-  });
-  child.once("error", (error) => {
-    clearTimeout(handshakeTimer);
-    const spawnError = new Error(
-      error.message.includes("ENOENT")
-        ? "Oh My Pi CLI not found. Ensure `omp` is installed and available in PATH."
-        : `Failed to spawn Oh My Pi CLI: ${error.message}`,
-    );
-    rejectReady(spawnError);
-    cleanupProcess(persistent, spawnError);
-  });
-  child.once("close", () => {
-    clearTimeout(handshakeTimer);
-    if (!protocolReady) {
-      rejectReady(
-        new Error(
-          persistent.stderrTail.trim() ||
-            "Oh My Pi process stopped before the RPC handshake",
-        ),
-      );
-    }
-    if (persistent.stdoutBuffer.trim()) {
-      processOmpEvent(persistent, persistent.stdoutBuffer);
-      persistent.stdoutBuffer = "";
-    }
-    cleanupProcess(persistent);
-  });
-  scheduleIdleReap(persistent);
-  return persistent;
+      },
+    };
+  },
+};
+
+function spawnOmpProcess(options: PersistentChatTurnOptions): PersistentProcess {
+  return spawnPersistentProcess(ompAdapter, options);
 }
+
 
 function evictForCapacity(maxWarmConversations: number, exceptConversationId: string): void {
   const candidates = [...globalState().processes.values()]

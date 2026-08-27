@@ -256,6 +256,24 @@ describe("ChatWorkspaceHeader provider select gating", () => {
     );
   });
 
+  it("keeps the session-linked badge for non-persistent conversations", () => {
+    // Warm/cold replaced this indicator for persistent providers only; an
+    // ordinary CLI conversation still resumes from its stored session id.
+    renderHeader({
+      activeConversation: conversation({
+        provider: "claude-code",
+        cliSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      }),
+    });
+    expect(screen.getByTestId("linked-session-state")).toHaveTextContent(
+      "session linked",
+    );
+    expect(screen.queryByTestId("persistent-session-state")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Restart persistent chat session" }),
+    ).toBeNull();
+  });
+
   it("keeps restart reachable while the conversation is busy", () => {
     // Restarting the embedded CLI is the recovery for a wedged turn, and a
     // wedged turn is precisely when the conversation stays busy.

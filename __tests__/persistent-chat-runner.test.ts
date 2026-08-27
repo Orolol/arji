@@ -300,6 +300,19 @@ describe("persistent chat runner — Claude Code", () => {
     expect(getPersistentChatSessionState("conversation-error")).toBe("cold");
   });
 
+  it("fails the turn when the child dies before it is ready", async () => {
+    // Previously Claude's close handler left `ready` unsettled, so `send()`
+    // awaited a promise nothing would resolve and the turn hung forever.
+    // Oh My Pi already rejected here; the shared factory gives both the
+    // same behaviour.
+    const turn = runPersistentChatTurn(options("conversation-early-exit"));
+    const child = await waitForSpawn();
+    child.stderr.emit("data", Buffer.from("claude: fatal: unusable credentials\n"));
+    child.closed(1);
+    await expect(turn.promise).rejects.toThrow("unusable credentials");
+    expect(getPersistentChatSessionState("conversation-early-exit")).toBe("cold");
+  });
+
   it("fails a silent turn and hands its warm slot back", async () => {
     vi.useFakeTimers();
     const turn = runPersistentChatTurn(
@@ -535,6 +548,23 @@ describe("persistent chat runner — Oh My Pi RPC", () => {
       maxFrameBytes: 100,
     });
     await expect(turn.promise).rejects.toThrow("100-byte frame limit");
+
+    // Encoding happens before the turn is registered, so an unsendable frame
+    // must not leave a half-registered turn pinning the process.
+    expect(getPersistentChatSessionState("omp-frame-limit")).toBe("hot");
+    const next = runPersistentChatTurn({
+      ...options("omp-frame-limit"),
+      provider: "oh-my-pi-persistent",
+      prompt: "short",
+    });
+    expect(next.wasWarm).toBe(true);
+    await vi.waitFor(() =>
+      expect(
+        child.writes.filter((value) => JSON.parse(value).type === "prompt"),
+      ).toHaveLength(1),
+    );
+    finishOmpTurn(child, "ok");
+    await next.promise;
   });
 
   it("surfaces RPC prompt failures", async () => {
@@ -696,6 +726,107 @@ describe("persistent chat runner — Oh My Pi RPC", () => {
     child.event({ id: prompt.id, type: "response", command: "prompt", success: true });
     child.event({ type: "prompt_result", id: prompt.id, agentInvoked: false });
     await turn.promise;
+  });
+
+  it("reports a turn Oh My Pi retried successfully as a success", async () => {
+    const chunks = vi.fn();
+    const turn = runPersistentChatTurn({
+      ...options("omp-recovered-retry", chunks),
+      provider: "oh-my-pi-persistent",
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+
+    // Attempt 1 settles in error, OMP retries, attempt 2 answers cleanly.
+    child.event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "429 rate_limit_error: Overloaded",
+      },
+    });
+    child.event({ type: "auto_retry_start", attempt: 1 });
+    child.event({
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "recovered" },
+    });
+    child.event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "recovered" }],
+        stopReason: "stop",
+      },
+    });
+    // OMP emits this only from its `status: "recovered"` path.
+    child.event({ type: "auto_retry_end", success: true, attempt: 1, retryErrors: [] });
+    child.event({ type: "agent_end", messages: [], isTerminal: true });
+
+    await turn.promise;
+    expect(chunks).toHaveBeenCalledWith({ type: "text", text: "recovered" });
+  });
+
+  it("clears a stale attempt error even without an auto_retry_end frame", async () => {
+    // The clean settle alone must be enough: `message_end` describes the
+    // latest attempt, so it overwrites rather than accumulates.
+    const turn = runPersistentChatTurn({
+      ...options("omp-stale-attempt"),
+      provider: "oh-my-pi-persistent",
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+
+    child.event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "400 transient",
+      },
+    });
+    child.event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "second attempt" }],
+        stopReason: "stop",
+      },
+    });
+    child.event({ type: "agent_end", messages: [], isTerminal: true });
+
+    await turn.promise;
+  });
+
+  it("still fails when the retry ladder is spent", async () => {
+    // The mirror of the two cases above: a terminal `success: false` must
+    // survive later frames rather than being cleared by them.
+    const turn = runPersistentChatTurn({
+      ...options("omp-spent-retries"),
+      provider: "oh-my-pi-persistent",
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+
+    child.event({
+      type: "auto_retry_end",
+      success: false,
+      attempt: 3,
+      finalError: "Retry budget exhausted after 3 retries: 529 overloaded_error",
+    });
+    child.event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "partial" }],
+        stopReason: "stop",
+      },
+    });
+    child.event({ type: "agent_end", messages: [], isTerminal: true });
+
+    await expect(turn.promise).rejects.toThrow("Retry budget exhausted");
   });
 
   it("fails a silent RPC turn instead of pinning its warm slot", async () => {

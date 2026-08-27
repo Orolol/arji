@@ -39,7 +39,7 @@ export function ChatWorkspaceHeader({
       <span data-testid="provider-select" className="sr-only">
         {activeProvider}
       </span>
-      {isPersistent && (
+      {isPersistent ? (
         <Badge
           variant="outline"
           className={
@@ -51,6 +51,18 @@ export function ChatWorkspaceHeader({
         >
           {isHot ? "session warm" : "session cold"}
         </Badge>
+      ) : (
+        // Non-persistent CLI conversations still resume from a stored session
+        // id; warm/cold replaces this indicator only where it applies.
+        activeConversation?.cliSessionId && (
+          <Badge
+            variant="outline"
+            className="border-agent-border text-[10px] text-agent"
+            data-testid="linked-session-state"
+          >
+            session linked
+          </Badge>
+        )
       )}
       {isPersistent && (
         // Deliberately enabled while the conversation is busy: killing the

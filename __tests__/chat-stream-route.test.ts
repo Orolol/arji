@@ -23,6 +23,7 @@ const mockDynamicProviderSpawn = vi.hoisted(() => vi.fn());
 const mockGetProvider = vi.hoisted(() => vi.fn());
 const mockResolveAgentByNamedId = vi.hoisted(() => vi.fn());
 const mockPersistentTurn = vi.hoisted(() => vi.fn());
+const mockRestartPersistentSession = vi.hoisted(() => vi.fn());
 
 // Real drizzle-orm + real @/lib/db/schema: both are side-effect-free pure
 // builders, and the chain mock ignores their output. No fake column maps.
@@ -76,6 +77,7 @@ vi.mock("@/lib/chat/persistent-runner", () => ({
   DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS: 900_000,
   DEFAULT_PERSISTENT_CHAT_TURN_STALL_MS: 300_000,
   runPersistentChatTurn: mockPersistentTurn,
+  restartPersistentChatSession: mockRestartPersistentSession,
 }));
 
 async function readSseEvents(response: Response): Promise<Array<Record<string, unknown>>> {
@@ -437,6 +439,148 @@ describe("POST /api/projects/[projectId]/chat/stream", () => {
     expect(dbMockState.updateCalls).toContainEqual({
       cliSessionId: "persistent-cli-session",
     });
+  });
+
+  it("retries on a fresh session when the stored persistent session expired", async () => {
+    const calls: Array<{ prompt: string; resumeSession: boolean }> = [];
+    mockPersistentTurn.mockImplementation(
+      (opts: {
+        prompt: string;
+        resumeSession: boolean;
+        onChunk: (c: unknown) => void;
+      }) => {
+        calls.push({ prompt: opts.prompt, resumeSession: opts.resumeSession });
+        if (opts.resumeSession) {
+          return {
+            wasWarm: false,
+            promise: Promise.reject(
+              new Error("No conversation found with session ID: dead-session"),
+            ),
+            kill: () => {},
+          };
+        }
+        queueMicrotask(() => opts.onChunk({ type: "text", text: "fresh answer" }));
+        return { wasWarm: false, promise: Promise.resolve(), kill: () => {} };
+      },
+    );
+
+    dbMockState.getQueue = [
+      { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
+      {
+        id: "conv-persistent",
+        type: "chat",
+        provider: "claude-code-persistent",
+        label: "Warm chat",
+        cliSessionId: "dead-session",
+      },
+    ];
+    dbMockState.allQueue = [[]];
+
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockJsonRequest({ content: "Hello", conversationId: "conv-persistent" }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+    const events = await readSseEvents(response);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0].resumeSession).toBe(true);
+    // A fresh session has no history, so the retry must carry the full prompt
+    // rather than the resume path's bare user message.
+    expect(calls[1]).toEqual({ prompt: "CHAT_PROMPT", resumeSession: false });
+    expect(mockRestartPersistentSession).toHaveBeenCalledWith("conv-persistent");
+    // The dead id is forgotten so the next turn does not resume into it again.
+    expect(dbMockState.updateCalls).toContainEqual({ cliSessionId: null });
+
+    expect(events).toContainEqual({ delta: "fresh answer" });
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ delta: expect.stringContaining("Error:") }),
+    );
+    expect(dbMockState.updateCalls).toContainEqual({ status: "active" });
+  });
+
+  it("still persists the partial reply when the client disconnects mid-turn", async () => {
+    let killTurn = () => {};
+    const turnPromise = new Promise<void>((_resolve, reject) => {
+      killTurn = () => reject(new Error("Persistent chat session stopped: turn cancelled"));
+    });
+    void turnPromise.catch(() => {});
+    mockPersistentTurn.mockImplementation((opts: { onChunk: (c: unknown) => void }) => {
+      // Stream a partial answer, then hand back a promise that only settles
+      // when the route kills the turn — i.e. on the client's disconnect.
+      queueMicrotask(() => opts.onChunk({ type: "text", text: "partial answer" }));
+      return { wasWarm: false, promise: turnPromise, kill: () => killTurn() };
+    });
+
+    dbMockState.getQueue = [
+      { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
+      {
+        id: "conv-persistent",
+        type: "chat",
+        provider: "claude-code-persistent",
+        label: "Warm chat",
+        cliSessionId: null,
+      },
+    ];
+    dbMockState.allQueue = [[]];
+
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockJsonRequest({ content: "Hello", conversationId: "conv-persistent" }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+
+    const reader = response.body!.getReader();
+    await reader.read();
+    // Tab closed / navigated away: cancelling the body runs the stream's
+    // cancel(), which closes the controller and kills the turn.
+    await reader.cancel();
+    await vi.waitFor(() =>
+      expect(
+        dbMockState.insertCalls.some(
+          (call) => (call as { role?: string }).role === "assistant",
+        ),
+      ).toBe(true),
+    );
+
+    const assistant = dbMockState.insertCalls.find(
+      (call) => (call as { role?: string }).role === "assistant",
+    ) as { content?: string };
+    expect(assistant.content).toContain("partial answer");
+  });
+
+  it("passes stored persistent-chat settings through to the runner", async () => {
+    // The defaults are asserted above; this covers the other half — that a
+    // stored row actually reaches the runner rather than being ignored.
+    dbMockState.getQueue = [
+      { id: "proj1", name: "Arij", description: "desc", spec: "spec", gitRepoPath: null },
+      {
+        id: "conv-persistent",
+        type: "chat",
+        provider: "claude-code-persistent",
+        label: "Warm chat",
+        cliSessionId: null,
+      },
+      { key: "chat_persistent_idle_timeout_ms", value: "60000" },
+      { key: "chat_persistent_max_conversations", value: "1" },
+      { key: "chat_persistent_turn_stall_ms", value: "30000" },
+    ];
+    dbMockState.allQueue = [[]];
+
+    const { POST } = await import("@/app/api/projects/[projectId]/chat/stream/route");
+    const response = await POST(
+      mockJsonRequest({ content: "Hello", conversationId: "conv-persistent" }),
+      mockRouteContext({ projectId: "proj1" }),
+    );
+    await readSseEvents(response);
+
+    expect(mockPersistentTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idleTimeoutMs: 60_000,
+        maxWarmConversations: 1,
+        turnStallTimeoutMs: 30_000,
+      }),
+    );
   });
 
   it("routes an opted-in Oh My Pi conversation through the RPC adapter", async () => {
