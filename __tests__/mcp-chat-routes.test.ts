@@ -1,8 +1,9 @@
 /**
  * Tests for the chat-toolset /api/mcp/* board routes (list-tickets,
- * create-ticket, update-ticket, get-agent-status, start-build) and the
- * chat-token guards on the agent-only routes (ask-question,
- * submit-findings, submit-grading).
+ * create-ticket, update-ticket, get-agent-status, start-build) and BOTH
+ * halves of the toolset boundary: the chat-token guards on the agent-only
+ * routes (ask-question, submit-findings, submit-grading) and the
+ * agent-token guard on the five board routes.
  *
  * Real handlers against an isolated in-memory database (createTestDb) and
  * real tokens from the MCP token store — same harness as mcp-routes.test.ts.
@@ -469,5 +470,92 @@ describe("agent-only routes — chat tokens are rejected", () => {
     expect(response.status).toBe(403);
     const body = (await response.json()) as { code: string };
     expect(body.code).toBe("FORBIDDEN");
+  });
+});
+
+/*
+ * The converse of the suite above. The shim picks a toolset from an env var
+ * inside the agent's own process (ARIJ_MCP_TOOLSET), and the bearer sits in
+ * that same environment — so the only place the split can be enforced is the
+ * route. These cases are what stops a build or review session from curling
+ * start-build and dispatching agents of its own.
+ */
+describe("chat-only board routes — agent tokens are rejected", () => {
+  // [name, handler, request body, the canonical-route payload that makes
+  // this tool succeed for a chat token].
+  const routes: Array<[string, RouteHandler, unknown, unknown]> = [
+    ["list-tickets", listTicketsPost, {}, { data: [] }],
+    [
+      "create-ticket",
+      createTicketPost,
+      { title: "Injected" },
+      { data: { id: "new-1", readableId: "E-main-002", title: "Injected", status: "backlog" } },
+    ],
+    ["update-ticket", updateTicketPost, { ticket_id: "E-main-001", title: "Renamed" }, { data: {} }],
+    ["get-agent-status", getAgentStatusPost, {}, { data: [] }],
+    [
+      "start-build",
+      startBuildPost,
+      { ticket_id: "E-main-001", comment: "Ship it" },
+      { data: { sessionId: "sess-1", branchName: "feat/main-epic" } },
+    ],
+  ];
+
+  function mintAgentToken(agentType: string | null): string {
+    return mintMcpToken({
+      sessionId: `sess-${createId()}`,
+      projectId,
+      epicId,
+      userStoryId: null,
+      agentType,
+    });
+  }
+
+  it.each(routes)(
+    "%s: a build token gets 403 FORBIDDEN, with no side effects",
+    async (_name, handler, body) => {
+      const response = await call(handler, body, mintAgentToken("build"));
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ code: "FORBIDDEN" });
+      // Nothing reached the canonical routes: no build launched, no ticket
+      // created or patched, no instruction comment posted.
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(
+        db().select().from(epics).where(eq(epics.projectId, projectId)).all()
+      ).toHaveLength(1);
+      expect(db().select().from(ticketComments).all()).toHaveLength(0);
+    }
+  );
+
+  it.each([
+    ["a review session", "review_code"],
+    ["a ticket build", "ticket_build"],
+    ["a team build", "team_build"],
+    ["a grading pass", "grading"],
+    ["a board refinement pass", "refinement"],
+    // Deny-by-default: the guard is an allowlist, so a type nobody has
+    // thought about yet — including a session row carrying none — is
+    // refused rather than silently admitted.
+    ["an agent type added after this guard", "some_future_agent_type"],
+    ["a token with no agent type", null],
+  ])("start-build refuses %s", async (_label, agentType) => {
+    const response = await call(
+      startBuildPost,
+      { ticket_id: "E-main-001" },
+      mintAgentToken(agentType)
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(routes)("%s: a chat token still succeeds", async (_name, handler, body, ok) => {
+    fetchMock.mockResolvedValue(jsonResponse(ok));
+
+    const response = await call(handler, body, chatToken);
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalled();
   });
 });
