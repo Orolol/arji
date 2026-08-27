@@ -14,6 +14,15 @@ import {
 
 export const DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 export const DEFAULT_MAX_WARM_CHAT_CONVERSATIONS = 3;
+/**
+ * Deadline on a *silent* turn: how long an in-flight turn may go without any
+ * frame from the CLI before Arij declares it wedged. Distinct from the idle
+ * timeout, which only reclaims processes between turns. Without this, a CLI
+ * that never emits its terminal frame pins its warm slot and its MCP token
+ * forever, because the idle reaper refuses to touch a process with an
+ * `activeTurn`.
+ */
+export const DEFAULT_PERSISTENT_CHAT_TURN_STALL_MS = 5 * 60 * 1000;
 
 interface PersistentRunnerGlobalState {
   processes: Map<string, PersistentProcess>;
@@ -44,6 +53,7 @@ export interface PersistentChatTurnOptions {
   conversationType: string | null;
   idleTimeoutMs?: number;
   maxWarmConversations?: number;
+  turnStallTimeoutMs?: number;
   onChunk: (chunk: StreamChunk) => void;
   onCliSessionId?: (cliSessionId: string) => void;
 }
@@ -62,6 +72,7 @@ interface ActiveTurn {
   resolve: () => void;
   reject: (error: Error) => void;
   textDeltasEmitted: boolean;
+  stallTimer: ReturnType<typeof setTimeout> | null;
   requestId?: string;
   fallbackText?: string;
   errorMessage?: string;
@@ -77,6 +88,7 @@ interface PersistentProcess {
   lastUsedAt: number;
   idleTimeoutMs: number;
   idleTimer: ReturnType<typeof setTimeout> | null;
+  turnStallMs: number;
   activeTurn: ActiveTurn | null;
   stdoutBuffer: string;
   stderrTail: string;
@@ -96,6 +108,12 @@ function normalizedIdleTimeout(value: number | undefined): number {
   return Number.isFinite(value) && (value ?? 0) > 0
     ? Math.floor(value!)
     : DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS;
+}
+
+function normalizedTurnStall(value: number | undefined): number {
+  return Number.isFinite(value) && (value ?? 0) > 0
+    ? Math.floor(value!)
+    : DEFAULT_PERSISTENT_CHAT_TURN_STALL_MS;
 }
 
 function normalizedWarmCap(value: number | undefined): number {
@@ -222,6 +240,7 @@ function processClaudeEvent(process: PersistentProcess, raw: string): void {
 
   const turn = process.activeTurn;
   if (!turn) return;
+  noteTurnProgress(process);
 
   const text = eventText(event);
   if (text) {
@@ -268,14 +287,57 @@ function processClaudeEvent(process: PersistentProcess, raw: string): void {
   finishTurn(process);
 }
 
+function clearStallTimer(turn: ActiveTurn | null): void {
+  if (!turn?.stallTimer) return;
+  clearTimeout(turn.stallTimer);
+  turn.stallTimer = null;
+}
+
 function finishTurn(process: PersistentProcess, error?: Error): void {
   const turn = process.activeTurn;
   if (!turn) return;
+  clearStallTimer(turn);
   process.activeTurn = null;
   process.lastUsedAt = Date.now();
   scheduleIdleReap(process);
   if (error) turn.reject(error);
   else turn.resolve();
+}
+
+function formatStallDelay(milliseconds: number): string {
+  const seconds = Math.round(milliseconds / 1000);
+  if (seconds < 120) return `${seconds}s`;
+  return `${Math.round(seconds / 60)} minutes`;
+}
+
+/**
+ * (Re)arms the silent-turn deadline. Called when a turn starts and again on
+ * every frame the CLI sends for it, so a slow-but-talking turn is never cut
+ * off — only a turn that has gone completely quiet.
+ */
+function armTurnStallWatchdog(process: PersistentProcess): void {
+  const turn = process.activeTurn;
+  if (!turn) return;
+  clearStallTimer(turn);
+  turn.stallTimer = setTimeout(() => {
+    finishTurn(
+      process,
+      new Error(
+        `${process.displayName} sent nothing for ${formatStallDelay(process.turnStallMs)} ` +
+          "and the turn never completed. The persistent session was restarted; " +
+          "send your message again.",
+      ),
+    );
+    // The CLI is wedged, not merely slow: drop the process so its warm slot
+    // and MCP token return to the pool instead of being pinned forever.
+    process.terminate("turn stalled");
+  }, process.turnStallMs);
+  turn.stallTimer.unref?.();
+}
+
+/** Any frame for the active turn counts as progress against the deadline. */
+function noteTurnProgress(process: PersistentProcess): void {
+  if (process.activeTurn) armTurnStallWatchdog(process);
 }
 
 function scheduleIdleReap(process: PersistentProcess): void {
@@ -301,6 +363,7 @@ function cleanupProcess(process: PersistentProcess, error?: Error): void {
   removeProcess(process);
   if (process.activeTurn) {
     const turn = process.activeTurn;
+    clearStallTimer(turn);
     process.activeTurn = null;
     const failure =
       error ??
@@ -346,6 +409,11 @@ function spawnClaudeProcess(options: PersistentChatTurnOptions): PersistentProce
     resolveReady = resolve;
     rejectReady = reject;
   });
+  // `send()` awaits `ready` and surfaces a spawn failure to the caller, but a
+  // turn cancelled between spawn and the first `send()` never awaits it. Keep
+  // a permanent no-op handler so a late `error` event cannot become an
+  // unhandled rejection (fatal in Node outside dev).
+  void ready.catch(() => {});
 
   const persistent: PersistentProcess = {
     conversationId: options.conversationId,
@@ -357,6 +425,7 @@ function spawnClaudeProcess(options: PersistentChatTurnOptions): PersistentProce
     lastUsedAt: Date.now(),
     idleTimeoutMs: normalizedIdleTimeout(options.idleTimeoutMs),
     idleTimer: null,
+    turnStallMs: normalizedTurnStall(options.turnStallTimeoutMs),
     activeTurn: null,
     stdoutBuffer: "",
     stderrTail: "",
@@ -381,7 +450,9 @@ function spawnClaudeProcess(options: PersistentChatTurnOptions): PersistentProce
           resolve,
           reject,
           textDeltasEmitted: false,
+          stallTimer: null,
         };
+        armTurnStallWatchdog(persistent);
         persistent.child.stdin!.write(claudeInputMessage(prompt), (error) => {
           if (error) finishTurn(persistent, error);
         });
@@ -395,6 +466,7 @@ function spawnClaudeProcess(options: PersistentChatTurnOptions): PersistentProce
       persistent.idleTimer = null;
       if (persistent.activeTurn) {
         const turn = persistent.activeTurn;
+        clearStallTimer(turn);
         persistent.activeTurn = null;
         turn.reject(new Error(`Persistent chat session stopped: ${reason}`));
       }
@@ -477,6 +549,7 @@ function processOmpEvent(process: PersistentProcess, raw: string): void {
 
   const turn = process.activeTurn;
   if (!turn) return;
+  noteTurnProgress(process);
 
   if (
     event.type === "response" &&
@@ -492,7 +565,24 @@ function processOmpEvent(process: PersistentProcess, raw: string): void {
             : "Oh My Pi rejected the prompt",
         ),
       );
+      return;
     }
+    // Acceptance is not completion: the run normally ends on `agent_end`.
+    // The one exception is a prompt OMP handled locally (a slash command that
+    // never starts an agent turn), which reports `agentInvoked: false` here or
+    // in a later `prompt_result` and emits no agent lifecycle events at all.
+    if (isRecord(event.data) && event.data.agentInvoked === false) {
+      finishLocalOnlyOmpTurn(process, turn);
+    }
+    return;
+  }
+
+  if (
+    event.type === "prompt_result" &&
+    event.agentInvoked === false &&
+    (!event.id || event.id === turn.requestId)
+  ) {
+    finishLocalOnlyOmpTurn(process, turn);
     return;
   }
 
@@ -524,16 +614,6 @@ function processOmpEvent(process: PersistentProcess, raw: string): void {
     return;
   }
 
-  if (
-    event.type === "compaction_end" &&
-    event.result === null &&
-    event.aborted === false &&
-    typeof event.errorMessage === "string"
-  ) {
-    turn.errorMessage = event.errorMessage;
-    return;
-  }
-
   if (event.type === "message_end" && isRecord(event.message)) {
     const message = event.message;
     if (message.role !== "assistant") return;
@@ -549,7 +629,33 @@ function processOmpEvent(process: PersistentProcess, raw: string): void {
     return;
   }
 
-  if (event.type !== "agent_settled") return;
+  // End of run. OMP's own RPC reference is explicit: "agent turns complete
+  // only on `agent_end` frames where `isTerminal !== false`". A non-terminal
+  // `agent_end` means maintenance or async delivery scheduled more work and
+  // the session will resume, so it must not close the turn. `willContinue` is
+  // the pre-mapping spelling of the same fact on some frames; treat either as
+  // "more is coming".
+  if (event.type !== "agent_end") return;
+  if (event.isTerminal === false || event.willContinue === true) return;
+  if (turn.errorMessage) {
+    finishTurn(process, new Error(turn.errorMessage));
+    return;
+  }
+  if (!turn.textDeltasEmitted && turn.fallbackText) {
+    turn.onChunk({ type: "text", text: turn.fallbackText });
+  }
+  finishTurn(process);
+}
+
+/**
+ * Completes a turn OMP resolved without invoking the agent. No assistant
+ * message exists in that case, so the accumulated `message_end` text (if any)
+ * is the only thing worth flushing.
+ */
+function finishLocalOnlyOmpTurn(
+  process: PersistentProcess,
+  turn: ActiveTurn,
+): void {
   if (turn.errorMessage) {
     finishTurn(process, new Error(turn.errorMessage));
     return;
@@ -596,6 +702,11 @@ function spawnOmpProcess(options: PersistentChatTurnOptions): PersistentProcess 
     resolveReady = resolve;
     rejectReady = reject;
   });
+  // `send()` awaits `ready` and surfaces a spawn failure to the caller, but a
+  // turn cancelled between spawn and the first `send()` never awaits it. Keep
+  // a permanent no-op handler so a late `error` event cannot become an
+  // unhandled rejection (fatal in Node outside dev).
+  void ready.catch(() => {});
 
   const persistent: PersistentProcess = {
     conversationId: options.conversationId,
@@ -607,6 +718,7 @@ function spawnOmpProcess(options: PersistentChatTurnOptions): PersistentProcess 
     lastUsedAt: Date.now(),
     idleTimeoutMs: normalizedIdleTimeout(options.idleTimeoutMs),
     idleTimer: null,
+    turnStallMs: normalizedTurnStall(options.turnStallTimeoutMs),
     activeTurn: null,
     stdoutBuffer: "",
     stderrTail: "",
@@ -645,8 +757,10 @@ function spawnOmpProcess(options: PersistentChatTurnOptions): PersistentProcess 
           resolve,
           reject,
           textDeltasEmitted: false,
+          stallTimer: null,
           requestId,
         };
+        armTurnStallWatchdog(persistent);
         if (persistent.discoveredCliSessionId) {
           onCliSessionId?.(persistent.discoveredCliSessionId);
         }
@@ -663,6 +777,7 @@ function spawnOmpProcess(options: PersistentChatTurnOptions): PersistentProcess 
       persistent.idleTimer = null;
       if (persistent.activeTurn) {
         const turn = persistent.activeTurn;
+        clearStallTimer(turn);
         persistent.activeTurn = null;
         turn.reject(new Error(`Persistent chat session stopped: ${reason}`));
       }
@@ -811,6 +926,12 @@ export function runPersistentChatTurn(
     }
     await process.send(options.prompt, options.onChunk, options.onCliSessionId);
   });
+  // The caller (the SSE route) only attaches its handler once the response
+  // body starts being read, several ticks later. A turn that fails before
+  // then — a stall deadline, a spawn error — would otherwise reject with no
+  // handler attached. This marks it handled without consuming it: `promise`
+  // itself still rejects for whoever awaits it.
+  void promise.catch(() => {});
   return {
     wasWarm,
     promise,

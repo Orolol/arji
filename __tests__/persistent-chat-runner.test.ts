@@ -299,6 +299,50 @@ describe("persistent chat runner — Claude Code", () => {
     expect(mocks.release).toHaveBeenCalledTimes(1);
     expect(getPersistentChatSessionState("conversation-error")).toBe("cold");
   });
+
+  it("fails a silent turn and hands its warm slot back", async () => {
+    vi.useFakeTimers();
+    const turn = runPersistentChatTurn(
+      options("conversation-stall", vi.fn(), { turnStallTimeoutMs: 1000 }),
+    );
+    await Promise.resolve();
+    const child = mocks.spawn.mock.results[0].value as FakeChild;
+    await startAndWaitForInput(child);
+
+    // The CLI acknowledges nothing and never emits `result`.
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(turn.promise).rejects.toThrow("Claude Code sent nothing for 1s");
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    child.closed();
+    expect(mocks.release).toHaveBeenCalledTimes(1);
+    expect(getPersistentChatSessionState("conversation-stall")).toBe("cold");
+  });
+
+  it("does not cut off a slow turn that keeps streaming", async () => {
+    vi.useFakeTimers();
+    const chunks = vi.fn();
+    const turn = runPersistentChatTurn(
+      options("conversation-slow", chunks, { turnStallTimeoutMs: 1000 }),
+    );
+    await Promise.resolve();
+    const child = mocks.spawn.mock.results[0].value as FakeChild;
+    await startAndWaitForInput(child);
+
+    for (let index = 0; index < 4; index += 1) {
+      await vi.advanceTimersByTimeAsync(800);
+      child.event({
+        type: "stream_event",
+        event: {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: `chunk-${index} ` },
+        },
+      });
+    }
+    finishClaudeTurn(child, "done");
+    await turn.promise;
+    expect(chunks).toHaveBeenCalledWith({ type: "text", text: "chunk-3 " });
+    expect(child.kill).not.toHaveBeenCalled();
+  });
 });
 
 describe("persistent chat runner — Oh My Pi RPC", () => {
@@ -364,10 +408,11 @@ describe("persistent chat runner — Oh My Pi RPC", () => {
         stopReason: "stop",
       },
     });
-    child.event({ type: "agent_settled" });
+    child.event({ type: "turn_end" });
+    child.event({ type: "agent_end", messages: [], isTerminal: true });
   }
 
-  it("maps RPC prompt/delta/settled frames and reuses one process end to end", async () => {
+  it("maps RPC prompt/delta/agent_end frames and reuses one process end to end", async () => {
     const firstChunks = vi.fn();
     const onSessionId = vi.fn();
     const first = runPersistentChatTurn({
@@ -446,7 +491,7 @@ describe("persistent chat runner — Oh My Pi RPC", () => {
         stopReason: "stop",
       },
     });
-    child.event({ type: "agent_settled" });
+    child.event({ type: "agent_end", messages: [], isTerminal: true });
     await turn.promise;
     expect(chunks).toHaveBeenCalledWith({
       type: "text",
@@ -512,7 +557,7 @@ describe("persistent chat runner — Oh My Pi RPC", () => {
     await expect(turn.promise).rejects.toThrow("model unavailable");
   });
 
-  it("waits for agent_settled, then surfaces an exhausted automatic retry", async () => {
+  it("waits for a terminal agent_end, then surfaces an exhausted automatic retry", async () => {
     const turn = runPersistentChatTurn({
       ...options("omp-retry-error"),
       provider: "oh-my-pi-persistent",
@@ -538,7 +583,138 @@ describe("persistent chat runner — Oh My Pi RPC", () => {
     await Promise.resolve();
     expect(settled).toBe(false);
 
-    child.event({ type: "agent_settled" });
+    child.event({ type: "agent_end", messages: [], isTerminal: true });
     await expect(turn.promise).rejects.toThrow("529 overloaded_error");
+  });
+
+  it("completes on the frames omp 18.0.5 actually emits, with no agent_settled", async () => {
+    const chunks = vi.fn();
+    const turn = runPersistentChatTurn({
+      ...options("omp-real-sequence", chunks),
+      provider: "oh-my-pi-persistent",
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+    const prompt = child.writes
+      .map((value) => JSON.parse(value) as { type?: string; id?: string })
+      .findLast((value) => value.type === "prompt")!;
+
+    // Verbatim frame order measured on omp 18.0.5: no `agent_settled` exists
+    // in that build, so `agent_end` has to be what closes the turn.
+    child.event({ id: prompt.id, type: "response", command: "prompt", success: true });
+    child.event({ type: "agent_start" });
+    child.event({ type: "turn_start" });
+    child.event({
+      type: "message_end",
+      message: { role: "user", content: [{ type: "text", text: "hi" }] },
+    });
+    child.event({
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "ALPHA" },
+    });
+    child.event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "ALPHA" }],
+        stopReason: "stop",
+      },
+    });
+    child.event({ type: "turn_end" });
+    child.event({ type: "agent_end", messages: [], isTerminal: true });
+
+    await turn.promise;
+    expect(chunks).toHaveBeenCalledWith({ type: "text", text: "ALPHA" });
+    expect(chunks).not.toHaveBeenCalledWith({ type: "text", text: "hi" });
+    expect(getPersistentChatSessionState("omp-real-sequence")).toBe("hot");
+  });
+
+  it("keeps the turn open across a non-terminal agent_end", async () => {
+    const turn = runPersistentChatTurn({
+      ...options("omp-non-terminal"),
+      provider: "oh-my-pi-persistent",
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+
+    let settled = false;
+    void turn.promise.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    child.event({ type: "agent_end", messages: [], isTerminal: false });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    child.event({ type: "agent_end", messages: [], willContinue: true });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    child.event({ type: "agent_end", messages: [], isTerminal: true });
+    await turn.promise;
+    expect(settled).toBe(true);
+  });
+
+  it("completes a prompt omp resolved locally without an agent turn", async () => {
+    const turn = runPersistentChatTurn({
+      ...options("omp-local-only"),
+      provider: "oh-my-pi-persistent",
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+    const prompt = child.writes
+      .map((value) => JSON.parse(value) as { type?: string; id?: string })
+      .findLast((value) => value.type === "prompt")!;
+
+    child.event({
+      id: prompt.id,
+      type: "response",
+      command: "prompt",
+      success: true,
+      data: { agentInvoked: false },
+    });
+    await turn.promise;
+    expect(getPersistentChatSessionState("omp-local-only")).toBe("hot");
+  });
+
+  it("completes a locally-resolved prompt reported by a later prompt_result", async () => {
+    const turn = runPersistentChatTurn({
+      ...options("omp-prompt-result"),
+      provider: "oh-my-pi-persistent",
+    });
+    const child = await waitForSpawn();
+    await startOmp(child);
+    const prompt = child.writes
+      .map((value) => JSON.parse(value) as { type?: string; id?: string })
+      .findLast((value) => value.type === "prompt")!;
+
+    child.event({ id: prompt.id, type: "response", command: "prompt", success: true });
+    child.event({ type: "prompt_result", id: prompt.id, agentInvoked: false });
+    await turn.promise;
+  });
+
+  it("fails a silent RPC turn instead of pinning its warm slot", async () => {
+    vi.useFakeTimers();
+    const turn = runPersistentChatTurn({
+      ...options("omp-stall", vi.fn(), { turnStallTimeoutMs: 1000 }),
+      provider: "oh-my-pi-persistent",
+    });
+    await Promise.resolve();
+    const child = mocks.spawn.mock.results[0].value as FakeChild;
+    await startOmp(child);
+
+    // A build that never emits its terminal frame: exactly the omp 18.0.5
+    // failure this adapter was hanging on before `agent_end` became terminal.
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(turn.promise).rejects.toThrow("Oh My Pi sent nothing for 1s");
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    child.closed();
+    expect(mocks.release).toHaveBeenCalledTimes(1);
+    expect(getPersistentChatSessionState("omp-stall")).toBe("cold");
   });
 });

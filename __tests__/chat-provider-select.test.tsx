@@ -255,4 +255,26 @@ describe("ChatWorkspaceHeader provider select gating", () => {
       "session warm",
     );
   });
+
+  it("keeps restart reachable while the conversation is busy", () => {
+    // Restarting the embedded CLI is the recovery for a wedged turn, and a
+    // wedged turn is precisely when the conversation stays busy.
+    const onRestart = vi.fn();
+    renderHeader({
+      activeConversation: conversation({
+        provider: "oh-my-pi-persistent",
+        persistentSessionState: "hot",
+      }),
+      activeProvider: "oh-my-pi-persistent",
+      isBusy: true,
+      onRestartPersistentSession: onRestart,
+    });
+
+    const restart = screen.getByRole("button", {
+      name: "Restart persistent chat session",
+    });
+    expect(restart).not.toBeDisabled();
+    fireEvent.click(restart);
+    expect(onRestart).toHaveBeenCalledTimes(1);
+  });
 });

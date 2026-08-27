@@ -59,6 +59,7 @@ import { generateConversationTitle } from "@/lib/chat/title-generation";
 import {
   DEFAULT_MAX_WARM_CHAT_CONVERSATIONS,
   DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS,
+  DEFAULT_PERSISTENT_CHAT_TURN_STALL_MS,
   runPersistentChatTurn,
 } from "@/lib/chat/persistent-runner";
 
@@ -764,6 +765,10 @@ export async function POST(
       maxWarmConversations: positiveNumberSetting(
         "chat_persistent_max_conversations",
         DEFAULT_MAX_WARM_CHAT_CONVERSATIONS,
+      ),
+      turnStallTimeoutMs: positiveNumberSetting(
+        "chat_persistent_turn_stall_ms",
+        DEFAULT_PERSISTENT_CHAT_TURN_STALL_MS,
       ),
       onChunk(chunk) {
         // Assigned by the stream start below before the process can emit a

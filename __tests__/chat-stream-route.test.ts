@@ -74,6 +74,7 @@ vi.mock("@/lib/chat/cli-tool-channel", () => ({
 vi.mock("@/lib/chat/persistent-runner", () => ({
   DEFAULT_MAX_WARM_CHAT_CONVERSATIONS: 3,
   DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS: 900_000,
+  DEFAULT_PERSISTENT_CHAT_TURN_STALL_MS: 300_000,
   runPersistentChatTurn: mockPersistentTurn,
 }));
 

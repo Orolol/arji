@@ -53,15 +53,18 @@ export function ChatWorkspaceHeader({
         </Badge>
       )}
       {isPersistent && (
+        // Deliberately enabled while the conversation is busy: killing the
+        // embedded CLI is the recovery for a turn that has wedged, and a
+        // wedged turn is exactly when the conversation stays "generating".
+        // Disabling it here would leave a page reload as the only escape.
         <Button
           type="button"
           size="icon"
           variant="ghost"
           className="h-7 w-7"
-          title="Restart session"
+          title={isBusy ? "Stop and restart session" : "Restart session"}
           aria-label="Restart persistent chat session"
           onClick={onRestartPersistentSession}
-          disabled={isBusy}
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </Button>
