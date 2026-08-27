@@ -24,7 +24,6 @@ import {
   classifySessionOutcome,
   extractSessionUsage,
 } from "@/lib/claude/resolve-session-output";
-import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { resolveAgentForDispatch } from "@/lib/agent-config/agent-resolution";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import {

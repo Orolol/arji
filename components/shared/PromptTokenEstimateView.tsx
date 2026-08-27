@@ -9,6 +9,8 @@ import type {
 } from "@/lib/tokens/estimator";
 
 export interface PromptTokenEstimateData {
+  skipped?: boolean;
+  skipReason?: string;
   total: number;
   breakdown: PromptTokenBreakdown;
   sessionsCount?: number;
@@ -29,7 +31,6 @@ export interface PromptTokenEstimateViewProps {
   dispatchType?: "build" | "review" | "grading";
   reviewTypes?: string[];
   comment?: string;
-  namedAgentId?: string | null;
   enabled?: boolean;
 }
 
@@ -40,7 +41,6 @@ export function PromptTokenEstimateView({
   dispatchType = "build",
   reviewTypes,
   comment,
-  namedAgentId,
   enabled = true,
 }: PromptTokenEstimateViewProps) {
   const [estimate, setEstimate] = useState<PromptTokenEstimateData | null>(null);
@@ -137,6 +137,17 @@ export function PromptTokenEstimateView({
     return null;
   }
 
+  if (estimate.skipped) {
+    return (
+      <div
+        className="rounded-[8px] border border-border/50 bg-band/20 px-3 py-1.5 text-xs text-muted-foreground"
+        data-testid="prompt-estimate-skipped"
+      >
+        {estimate.skipReason ?? "No agent session will be dispatched"}
+      </div>
+    );
+  }
+
   const { total, breakdown, budget, budgetExceeded, largestSection, sessionsCount = 1, perSessionEstimates } = estimate;
 
   return (
@@ -156,7 +167,7 @@ export function PromptTokenEstimateView({
             ~{formatTokens(total) ?? total} tokens
             {sessionsCount > 1 && (
               <span className="ml-1 text-[11px] font-normal text-muted-foreground">
-                ({sessionsCount} sessions)
+                across {sessionsCount} sessions
               </span>
             )}
           </span>

@@ -18,6 +18,25 @@ import {
   descriptionSection,
   projectContextSections,
   ticketImagesSection,
+  userStoriesSection,
+  commentHistorySection,
+  BUG_RED_GREEN_SECTION,
+  VISUAL_PROOF_SECTION,
+  REVIEW_CHECKLISTS,
+  BUG_REVIEW_CHECKLIST,
+  REVIEW_BOUNDARY_SECTION,
+  type PromptContextSectionKey,
+  type PromptSectionCollector,
+} from "./prompt-sections";
+
+export {
+  userStoriesSection,
+  commentHistorySection,
+  BUG_RED_GREEN_SECTION,
+  VISUAL_PROOF_SECTION,
+  REVIEW_CHECKLISTS,
+  BUG_REVIEW_CHECKLIST,
+  REVIEW_BOUNDARY_SECTION,
 } from "./prompt-sections";
 import { getProjectMemoryContent } from "@/lib/documents/memory";
 import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
@@ -29,6 +48,16 @@ import { utf8Head } from "@/lib/routines/ci-autofix-limits";
 import type { RefinementSnapshot } from "@/lib/refinement/snapshot";
 import { PRIORITY_LABELS } from "@/lib/types/kanban";
 import { fenceOnly, neutralizeControlMarkup } from "./untrusted";
+
+function pushPromptPart(
+  parts: string[],
+  collector: PromptSectionCollector | undefined,
+  key: PromptContextSectionKey,
+  text: string,
+): void {
+  parts.push(text);
+  if (text) collector?.(key, text);
+}
 
 // ---------------------------------------------------------------------------
 // Types — lightweight projections of the Drizzle schema rows
@@ -98,21 +127,6 @@ export interface PromptGradingStory extends PromptUserStory {
   /** Stable database id required by submit_grading's scoped payload. */
   id: string;
 }
-
-/**
- * Dedicated instruction block appended by every build builder when the
- * ticket's `type` is 'bug'. Encodes the RoboBun red → green rule: the
- * regression test must exist, must fail before the fix, and must be
- * committed with it — lib/verify/regression-check.ts re-verifies this
- * mechanically after the build stage.
- */
-export const BUG_RED_GREEN_SECTION = `## Bug-Fix Rule — mandatory red → green regression test
-
-This ticket is a **bug fix**. The pipeline runs a mechanical regression check on your branch, so follow this exact order:
-
-1. **Write the failing test first.** Add (or modify) a test that reproduces the reported bug and run it — it MUST fail against the unfixed code.
-2. **Then apply the fix.** Make the minimal change that makes the same test pass.
-3. **Commit the test file(s) together with the fix.** The check inspects the files added/modified on the branch and selects them with the project's configured test-file patterns — follow this repository's existing test layout and naming. A diff with no test file fails (\`no_test_in_diff\`), a test that already passes without the fix fails (\`test_passes_on_base\`), and a test still failing on the branch fails (\`test_fails_on_branch\`). Any of these sends the ticket back to a fix cycle.`;
 
 /** Minimal projection shared by deterministic-verification prompt sections. */
 export interface PromptVerificationCommand {
@@ -186,19 +200,11 @@ Arij executed these human-configured checks in the epic worktree before dispatch
 ${lines.join("\n")}`;
 }
 
-/**
- * Best-effort visual demo guidance for ticket-scoped code sessions. This is
- * appended only when the caller resolved visual_proof_enabled to true.
- */
-export const VISUAL_PROOF_SECTION = `## Optional visual proof
-
-If this project has a UI, a browser is available, and the \`attach_artifact\` tool is available, run the application, exercise the functionality you implemented, capture 1 to 3 screenshots, and attach each screenshot with \`attach_artifact\` using a clear caption.
-
-Visual proof is best-effort and is never a completion requirement. If the application or browser cannot be run, the tool is unavailable, or no useful screenshot can be produced, complete the session normally. Missing visual proof must never make the build fail.`;
-
 export interface BuildPromptOptions {
   /** Effective value of the global visual_proof_enabled setting. */
   visualProofEnabled?: boolean;
+  /** Optional exact-section sink used by dispatch token estimation. */
+  sectionCollector?: PromptSectionCollector;
 }
 
 export interface PromptEpicStatus {
@@ -239,44 +245,6 @@ function withProjectMemory<T extends PromptProject>(project: T): T {
   if (project.memory !== undefined) return project;
   if (!project.id) return project;
   return { ...project, memory: getProjectMemoryContent(project.id) };
-}
-
-export function userStoriesSection(
-  userStories: PromptUserStory[],
-  options: { heading?: string; checkmark?: boolean } = {},
-): string {
-  if (userStories.length === 0) return "";
-
-  const { heading = "User Stories", checkmark = true } = options;
-  const parts: string[] = [];
-
-  parts.push(`### ${heading}\n`);
-
-  const storyLines = userStories.map((us) => {
-    const lines: string[] = [];
-    const prefix = checkmark ? "- [ ] " : "- ";
-    lines.push(`${prefix}**${us.title}**`);
-
-    if (us.description) {
-      lines.push(`  ${us.description.trim()}`);
-    }
-
-    if (us.acceptanceCriteria) {
-      lines.push(`  **Acceptance criteria:**`);
-      // Indent each line of the acceptance criteria
-      const criteria = us.acceptanceCriteria
-        .trim()
-        .split("\n")
-        .map((line) => `  ${line}`)
-        .join("\n");
-      lines.push(criteria);
-    }
-
-    return lines.join("\n");
-  });
-
-  parts.push(storyLines.join("\n\n") + "\n");
-  return parts.join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -1105,28 +1073,30 @@ export function buildBuildPrompt(
 ): string {
   project = withProjectMemory(project);
   const parts: string[] = [];
+  const push = (key: PromptContextSectionKey, text: string) =>
+    pushPromptPart(parts, options.sectionCollector, key, text);
 
-  parts.push(systemSection(systemPrompt));
-  parts.push(projectHeader(project.name));
-  parts.push(specSection(project.spec));
-  parts.push(memorySection(project.memory));
-  parts.push(documentsSection(documents));
+  push("system", systemSection(systemPrompt));
+  push("spec", projectHeader(project.name));
+  push("spec", specSection(project.spec));
+  push("memory", memorySection(project.memory));
+  push("documents", documentsSection(documents));
 
   // Epic section
-  parts.push(`## Epic to Implement\n`);
-  parts.push(`### ${epic.title}\n`);
+  push("ticket", `## Epic to Implement\n`);
+  push("ticket", `### ${epic.title}\n`);
   if (epic.description) {
-    parts.push(`${epic.description.trim()}\n`);
+    push("ticket", `${epic.description.trim()}\n`);
   }
-  parts.push(ticketImagesSection(epic, { headingLevel: 3 }));
+  push("ticket", ticketImagesSection(epic, { headingLevel: 3 }));
 
   // User stories
-  parts.push(userStoriesSection(userStories));
+  push("ticket", userStoriesSection(userStories));
 
   // Comment history
-  parts.push(commentHistorySection(comments));
+  push("comments", commentHistorySection(comments));
 
-  parts.push(`## Instructions
+  push("other", `## Instructions
 
 Implement this epic following the specification above. For each user story:
 
@@ -1141,10 +1111,10 @@ Commit your changes with clear, descriptive commit messages that reference the e
 Work through the user stories in order. If a story depends on another, implement the dependency first.
 `);
   if (epic.type === "bug") {
-    parts.push(BUG_RED_GREEN_SECTION);
+    push("findings", BUG_RED_GREEN_SECTION);
   }
   if (options.visualProofEnabled) {
-    parts.push(VISUAL_PROOF_SECTION);
+    push("other", VISUAL_PROOF_SECTION);
   }
 
   return parts.filter(Boolean).join("\n");
@@ -1172,6 +1142,7 @@ export function buildCiFixPrompt(
     failures: PromptCiFailure[];
   },
   systemPrompt?: string | null,
+  sectionCollector?: PromptSectionCollector,
 ): string {
   project = withProjectMemory(project);
   // The CI evidence is already byte-budgeted; an uncapped spec could still
@@ -1188,39 +1159,43 @@ export function buildCiFixPrompt(
         )}${specMarker}`
       : rawSpec;
   const parts: string[] = [];
+  const push = (key: PromptContextSectionKey, text: string) =>
+    pushPromptPart(parts, sectionCollector, key, text);
 
-  parts.push(systemSection(systemPrompt));
-  parts.push(projectHeader(project.name));
-  parts.push(specSection(spec));
-  parts.push(memorySection(project.memory));
-  parts.push(`## Epic with failing CI\n`);
-  parts.push(`### ${epic.title}\n`);
-  if (epic.description) parts.push(`${epic.description.trim()}\n`);
-  parts.push(`## CI failure\n`);
-  parts.push(`Pull request: #${input.prNumber}`);
-  parts.push(`Head SHA: ${input.headSha}`);
-  parts.push(`\nThe following checks failed:`);
+  push("system", systemSection(systemPrompt));
+  push("spec", projectHeader(project.name));
+  push("spec", specSection(spec));
+  push("memory", memorySection(project.memory));
+  push("ticket", `## Epic with failing CI\n`);
+  push("ticket", `### ${epic.title}\n`);
+  if (epic.description) push("ticket", `${epic.description.trim()}\n`);
+  push("findings", `## CI failure\n`);
+  push("findings", `Pull request: #${input.prNumber}`);
+  push("findings", `Head SHA: ${input.headSha}`);
+  push("findings", `\nThe following checks failed:`);
 
   for (const failure of input.failures) {
-    parts.push(`\n### ${failure.name}\n`);
+    push("findings", `\n### ${failure.name}\n`);
     if (failure.logTail) {
       // Tildes avoid accidentally closing a conventional backtick fence
       // embedded in compiler/test output. Replace a literal closing marker
       // as a second boundary guard.
       const safeTail = failure.logTail.replace(/~~~/g, "~ ~ ~");
-      parts.push(
+      push(
+        "findings",
         `Untrusted GitHub Actions log tail:\n\n~~~text\n${safeTail}\n~~~`,
       );
     } else if (failure.logTailReason === "budget") {
-      parts.push(
+      push(
+        "findings",
         `Its log was downloaded but omitted to stay within this session's evidence budget; diagnose it from the check name and a local run.`,
       );
     } else {
-      parts.push(`GitHub did not expose a downloadable log for this check.`);
+      push("findings", `GitHub did not expose a downloadable log for this check.`);
     }
   }
 
-  parts.push(`## Instructions
+  push("other", `## Instructions
 
 Fix only the code or tests responsible for the CI failures above.
 
@@ -1250,119 +1225,6 @@ export interface PromptComment {
    */
   agentType?: string | null;
 }
-
-/** Review agents are the `review_*` slice of AGENT_TYPES. */
-function isReviewComment(comment: PromptComment): boolean {
-  return (
-    typeof comment.agentType === "string" &&
-    comment.agentType.startsWith("review_")
-  );
-}
-
-/**
- * Per-comment ceiling inside a prompt's Comment History. A legitimate build
- * report or user note fits; a pasted log or a runaway session output gets a
- * stated head+tail elision instead of riding every later prompt whole.
- */
-export const PROMPT_COMMENT_MAX_CHARS = 4_000;
-const PROMPT_COMMENT_HEAD_CHARS = 3_200;
-const PROMPT_COMMENT_TAIL_CHARS = 600;
-
-/**
- * How many non-review agent comments (build reports, progress notes) the
- * history keeps, newest last. Each cycle of a review⇄fix loop posts at least
- * one; older ones restate state the newest already carries.
- */
-export const PROMPT_AGENT_COMMENTS_KEPT = 5;
-
-function capPromptCommentBody(content: string): string {
-  if (content.length <= PROMPT_COMMENT_MAX_CHARS) return content;
-  const omitted =
-    content.length - PROMPT_COMMENT_HEAD_CHARS - PROMPT_COMMENT_TAIL_CHARS;
-  return (
-    `${content.slice(0, PROMPT_COMMENT_HEAD_CHARS)}\n\n` +
-    `_[… ${omitted.toLocaleString("en-US")} characters of this comment omitted …]_\n\n` +
-    `${content.slice(-PROMPT_COMMENT_TAIL_CHARS)}`
-  );
-}
-
-/**
- * Renders the comment history under a hard budget.
- *
- * Three rules, each stated in place rather than performed silently:
- *
- * 1. Only the most recent REVIEW pass is kept. A review agent posts its
- *    entire review document as a comment — the five passes on the epic that
- *    first hit MAX_ARG_STRLEN were 11 to 15 KB each, 52 % of a 137 KB prompt
- *    on their own — and each pass restates what is still open.
- * 2. Only the last PROMPT_AGENT_COMMENTS_KEPT non-review AGENT comments are
- *    kept. Build/fix reports accumulate one per cycle; on the ticket that
- *    reached a 4.9 MB prompt (2026-08-26) the history was the whole problem.
- *    USER comments are never elided this way — they are instructions, not
- *    state restatements.
- * 3. Every kept comment is capped at PROMPT_COMMENT_MAX_CHARS with a
- *    head+tail elision.
- */
-export function commentHistorySection(comments?: PromptComment[]): string {
-  if (!comments || comments.length === 0) return "";
-
-  const lastReviewIndex = comments.reduce(
-    (last, comment, index) => (isReviewComment(comment) ? index : last),
-    -1,
-  );
-  const elidedReviews = comments.filter(
-    (comment, index) => isReviewComment(comment) && index !== lastReviewIndex,
-  ).length;
-
-  // The most recent agent (non-review) comments, by position.
-  const agentIndexes = comments
-    .map((comment, index) => ({ comment, index }))
-    .filter(
-      ({ comment }) => comment.author !== "user" && !isReviewComment(comment),
-    )
-    .map(({ index }) => index);
-  const keptAgentIndexes = new Set(
-    agentIndexes.slice(-PROMPT_AGENT_COMMENTS_KEPT),
-  );
-  const elidedAgents = agentIndexes.length - keptAgentIndexes.size;
-
-  const rendered: string[] = [];
-  let reviewNoticeEmitted = false;
-  let agentNoticeEmitted = false;
-  comments.forEach((comment, index) => {
-    if (isReviewComment(comment) && index !== lastReviewIndex) {
-      if (!reviewNoticeEmitted) {
-        reviewNoticeEmitted = true;
-        rendered.push(
-          `_[${elidedReviews} earlier review pass${elidedReviews > 1 ? "es" : ""} omitted — superseded by the most recent review below.]_`,
-        );
-      }
-      return;
-    }
-    if (
-      comment.author !== "user" &&
-      !isReviewComment(comment) &&
-      !keptAgentIndexes.has(index)
-    ) {
-      if (!agentNoticeEmitted) {
-        agentNoticeEmitted = true;
-        rendered.push(
-          `_[${elidedAgents} earlier agent update${elidedAgents > 1 ? "s" : ""} omitted — the most recent updates below carry the current state.]_`,
-        );
-      }
-      return;
-    }
-    const prefix = comment.author === "user" ? "**User:**" : "**Agent:**";
-    // Comments are written by users and by other agent sessions; a comment
-    // body must not be able to pose as a control turn (lib/claude/untrusted).
-    rendered.push(
-      `${prefix}\n${neutralizeControlMarkup(capPromptCommentBody(comment.content.trim()))}`,
-    );
-  });
-
-  return `## Comment History\n\n${rendered.join("\n\n")}\n`;
-}
-
 /**
  * Builds the prompt for implementing a single ticket (user story) with
  * Claude Code in code mode. Includes project context, epic context, the
@@ -1379,37 +1241,39 @@ export function buildTicketBuildPrompt(
 ): string {
   project = withProjectMemory(project);
   const parts: string[] = [];
+  const push = (key: PromptContextSectionKey, text: string) =>
+    pushPromptPart(parts, options.sectionCollector, key, text);
 
-  parts.push(systemSection(systemPrompt));
-  parts.push(projectHeader(project.name));
-  parts.push(specSection(project.spec));
-  parts.push(memorySection(project.memory));
-  parts.push(documentsSection(documents));
+  push("system", systemSection(systemPrompt));
+  push("spec", projectHeader(project.name));
+  push("spec", specSection(project.spec));
+  push("memory", memorySection(project.memory));
+  push("documents", documentsSection(documents));
 
   // Epic context
-  parts.push(`## Epic Context\n`);
-  parts.push(`### ${epic.title}\n`);
+  push("ticket", `## Epic Context\n`);
+  push("ticket", `### ${epic.title}\n`);
   if (epic.description) {
-    parts.push(`${epic.description.trim()}\n`);
+    push("ticket", `${epic.description.trim()}\n`);
   }
 
-  parts.push(ticketImagesSection(epic, { headingLevel: 3 }));
+  push("ticket", ticketImagesSection(epic, { headingLevel: 3 }));
 
   // Ticket details
-  parts.push(`## Ticket to Implement\n`);
-  parts.push(`### ${story.title}\n`);
+  push("ticket", `## Ticket to Implement\n`);
+  push("ticket", `### ${story.title}\n`);
   if (story.description) {
-    parts.push(`${story.description.trim()}\n`);
+    push("ticket", `${story.description.trim()}\n`);
   }
   if (story.acceptanceCriteria) {
-    parts.push(`**Acceptance Criteria:**\n`);
-    parts.push(`${story.acceptanceCriteria.trim()}\n`);
+    push("ticket", `**Acceptance Criteria:**\n`);
+    push("ticket", `${story.acceptanceCriteria.trim()}\n`);
   }
 
   // Comment history
-  parts.push(commentHistorySection(comments));
+  push("comments", commentHistorySection(comments));
 
-  parts.push(`## Instructions
+  push("other", `## Instructions
 
 Implement this ticket following the specification and acceptance criteria above. Consider all comments in the history — they may contain clarifications, feedback, or specific instructions.
 
@@ -1418,10 +1282,10 @@ Implement this ticket following the specification and acceptance criteria above.
 3. Commit your changes with a clear, descriptive commit message referencing the ticket title.
 `);
   if (epic.type === "bug") {
-    parts.push(BUG_RED_GREEN_SECTION);
+    push("findings", BUG_RED_GREEN_SECTION);
   }
   if (options.visualProofEnabled) {
-    parts.push(VISUAL_PROOF_SECTION);
+    push("other", VISUAL_PROOF_SECTION);
   }
 
   return parts.filter(Boolean).join("\n");
@@ -1438,156 +1302,6 @@ export interface CustomReviewAgentPrompt {
   name: string;
   systemPrompt: string;
 }
-
-const REVIEW_CHECKLISTS: Record<ReviewType, string> = {
-  security: `## Security Audit Checklist
-
-Review the code changes for this ticket against the following security criteria:
-
-1. **OWASP Top 10**: Check for injection flaws (SQL, XSS, command injection), broken authentication, sensitive data exposure, XML external entities, broken access control, security misconfiguration, insecure deserialization, using components with known vulnerabilities, insufficient logging.
-2. **Input Validation**: All user inputs are validated and sanitized. No raw user input reaches SQL queries, shell commands, or HTML rendering.
-3. **Authentication & Authorization**: Auth checks are present where required. No privilege escalation paths. Session handling is secure.
-4. **Secrets Exposure**: No hardcoded API keys, passwords, tokens, or credentials in code. Secrets loaded from environment variables or secure config.
-5. **Data Protection**: Sensitive data encrypted at rest and in transit. No PII in logs. Proper error messages that don't leak internal details.
-6. **Dependencies**: No known vulnerable dependencies introduced. Lockfile is consistent.
-
-For each finding, specify:
-- **Severity**: Critical / High / Medium / Low / Info
-- **Location**: File path and line number
-- **Description**: What the issue is
-- **Recommendation**: How to fix it`,
-
-  code_review: `## Code Review Checklist
-
-Review the code changes for this ticket against the following quality criteria:
-
-1. **Readability**: Code is clear, well-structured, and easy to understand. Variable/function names are descriptive. Complex logic is commented.
-2. **DRY Principle**: No significant code duplication. Shared logic is properly abstracted.
-3. **Error Handling**: All error paths are handled gracefully. No unhandled promise rejections. Proper error messages for users.
-4. **Performance**: No obvious performance issues (N+1 queries, unnecessary re-renders, missing indexes, large payloads). Efficient algorithms for the data sizes involved.
-5. **Naming Conventions**: Consistent naming (camelCase for JS/TS, proper component naming for React). File names match conventions.
-6. **Type Safety**: Full TypeScript types, no \`any\` types. Proper interfaces for data structures.
-7. **Testing**: Adequate test coverage. Edge cases considered. Tests are maintainable and descriptive.
-8. **API Design**: Consistent REST conventions. Proper HTTP status codes. Clear request/response shapes.
-
-For each finding, specify:
-- **Severity**: Critical / Major / Minor / Suggestion
-- **Location**: File path and line number
-- **Description**: What the issue is
-- **Recommendation**: How to improve it`,
-
-  compliance: `## Compliance & Accessibility Checklist
-
-Review the code changes for this ticket against the following standards:
-
-1. **WCAG Accessibility (Level AA)**:
-   - Semantic HTML elements used correctly (headings, landmarks, lists)
-   - All interactive elements are keyboard-accessible
-   - Proper ARIA labels and roles where needed
-   - Color contrast meets 4.5:1 ratio for text
-   - Focus indicators visible
-   - Form inputs have associated labels
-   - Images have alt text
-   - Screen reader compatibility
-2. **Internationalization (i18n) Readiness**:
-   - No hardcoded user-facing strings (or flagged for future extraction)
-   - Date/number formatting considers locale
-   - RTL layout support not broken
-   - Text containers can accommodate longer translations
-3. **License Compliance**:
-   - New dependencies use compatible licenses (MIT, Apache 2.0, BSD)
-   - No GPL-licensed packages in a proprietary codebase (unless intended)
-   - Attribution requirements met
-
-For each finding, specify:
-- **Severity**: Critical / Major / Minor / Suggestion
-- **Location**: File path and line number
-- **Description**: What the issue is
-- **Recommendation**: How to fix it`,
-
-  feature_review: `## Feature Completeness Checklist
-
-Verify that the implementation fully satisfies the ticket's acceptance criteria and delivers a complete, working feature. Use ALL available tools — browser, shell commands, test runners, etc. — to validate each point.
-
-1. **Acceptance Criteria Verification**:
-   - Go through each acceptance criterion one by one
-   - For UI features: launch the app and use the browser to verify the feature works as described
-   - For API features: make actual HTTP requests to verify endpoints behave correctly
-   - For CLI/backend features: run the relevant commands and verify output
-   - Document PASS/FAIL for each criterion with evidence (screenshots, command output, etc.)
-
-2. **Functional Completeness**:
-   - All user-facing flows described in the ticket are implemented end-to-end
-   - Edge cases mentioned in the description or acceptance criteria are handled
-   - No placeholder or TODO code left for critical paths
-   - Error states are handled and display meaningful feedback to the user
-
-3. **Integration**:
-   - The feature integrates correctly with existing functionality (no regressions in adjacent features)
-   - Data flows correctly between frontend and backend
-   - Navigation and routing work as expected
-
-4. **Tests**:
-   - Tests exist that cover the acceptance criteria
-   - Run the test suite and verify tests pass
-   - Report any failing tests with details
-
-For each criterion, specify:
-- **Status**: PASS / FAIL / PARTIAL
-- **Evidence**: What you did to verify (command run, URL visited, screenshot taken)
-- **Details**: Description of what works or what's missing`,
-};
-
-const BUG_REVIEW_CHECKLIST = `## Bug Fix Verification Checklist
-
-Verify that the bug fix correctly addresses the reported issue without introducing regressions. Use ALL available tools — browser, shell commands, test runners, etc. — to validate each point.
-
-1. **Bug Fix Verification**:
-   - Reproduce the original bug scenario (or confirm the conditions that triggered it)
-   - Verify the fix resolves the reported issue
-   - Check that the root cause is addressed, not just the symptom
-   - Document PASS/FAIL with evidence (screenshots, command output, etc.)
-
-2. **Regression Check**:
-   - Verify that adjacent functionality is not broken by the fix
-   - Test related features and flows that might be affected
-   - Check edge cases around the fix area
-
-3. **Code Quality**:
-   - The fix is minimal and focused on the bug
-   - No unrelated changes are included
-   - Error handling is appropriate for the fix area
-
-4. **Tests**:
-   - Tests exist that cover the bug scenario
-   - Run the test suite and verify tests pass
-   - Report any failing tests with details
-
-For each criterion, specify:
-- **Status**: PASS / FAIL / PARTIAL
-- **Evidence**: What you did to verify (command run, URL visited, screenshot taken)
-- **Details**: Description of what works or what's missing`;
-
-/**
- * Boundary contract appended to every review prompt. Review sessions spawn
- * in code mode — plan mode refuses mutating MCP tools (submit_findings,
- * create_bug) and read-only provider postures cut the tool channel — so the
- * no-modification rule lives here, in the prompt, instead of in the harness.
- */
-export const REVIEW_BOUNDARY_SECTION = `## Review Boundary — No Code Modifications
-
-This session deliberately runs with full tool access — shell, browser, test
-runners, and MCP tools — so nothing blocks your investigation. In exchange,
-the no-modification rule is yours to uphold, not the harness's:
-
-- Do not edit, create, or delete repository files. Do not stage, commit,
-  amend, revert, or push. Leave branches and the git state exactly as found.
-- Running the app, executing tests, and building are all allowed, including
-  when they write caches or generated artifacts; leave any such incidental
-  output uncommitted and set it aside in your report.
-- When you spot a concrete fix, describe it in a finding — never apply it
-  yourself.`;
-
 /**
  * Builds the prompt for a review agent. Each review type gets a specialized
  * checklist. The agent reads and exercises the code but must not modify it
@@ -1600,43 +1314,47 @@ export function buildReviewPrompt(
   story: PromptUserStory,
   reviewType: ReviewType | CustomReviewAgentPrompt,
   systemPrompt?: string | null,
+  sectionCollector?: PromptSectionCollector,
 ): string {
   project = withProjectMemory(project);
   const parts: string[] = [];
+  const push = (key: PromptContextSectionKey, text: string) =>
+    pushPromptPart(parts, sectionCollector, key, text);
 
-  parts.push(systemSection(systemPrompt));
-  parts.push(projectHeader(project.name));
-  parts.push(specSection(project.spec));
-  parts.push(memorySection(project.memory));
-  parts.push(documentsSection(documents));
+  push("system", systemSection(systemPrompt));
+  push("spec", projectHeader(project.name));
+  push("spec", specSection(project.spec));
+  push("memory", memorySection(project.memory));
+  push("documents", documentsSection(documents));
 
   // Epic context
-  parts.push(`## Epic Context\n`);
-  parts.push(`### ${epic.title}\n`);
+  push("ticket", `## Epic Context\n`);
+  push("ticket", `### ${epic.title}\n`);
   if (epic.description) {
-    parts.push(`${epic.description.trim()}\n`);
+    push("ticket", `${epic.description.trim()}\n`);
   }
 
-  parts.push(ticketImagesSection(epic, { headingLevel: 3 }));
+  push("ticket", ticketImagesSection(epic, { headingLevel: 3 }));
 
   // Ticket details
-  parts.push(`## Ticket Under Review\n`);
-  parts.push(`### ${story.title}\n`);
+  push("ticket", `## Ticket Under Review\n`);
+  push("ticket", `### ${story.title}\n`);
   if (story.description) {
-    parts.push(`${story.description.trim()}\n`);
+    push("ticket", `${story.description.trim()}\n`);
   }
   if (story.acceptanceCriteria) {
-    parts.push(`**Acceptance Criteria:**\n`);
-    parts.push(`${story.acceptanceCriteria.trim()}\n`);
+    push("ticket", `**Acceptance Criteria:**\n`);
+    push("ticket", `${story.acceptanceCriteria.trim()}\n`);
   }
 
   const isCustomReview = typeof reviewType !== "string";
 
   if (isCustomReview) {
-    parts.push(
+    push(
+      "findings",
       `## Custom Review Agent Instructions\n\n${reviewType.systemPrompt.trim()}\n`,
     );
-    parts.push(`\n## Instructions
+    push("other", `\n## Instructions
 
 You are performing a **${reviewType.name}** review on the code changes for the ticket described above.
 
@@ -1647,9 +1365,9 @@ You are performing a **${reviewType.name}** review on the code changes for the t
 `);
   } else if (reviewType === "feature_review") {
     // Feature review — code mode with full tool access
-    parts.push(REVIEW_CHECKLISTS[reviewType]);
+    push("findings", REVIEW_CHECKLISTS[reviewType]);
 
-    parts.push(`\n## Instructions
+    push("other", `\n## Instructions
 
 You are performing a **feature completeness review** on the ticket described above. You have full access to all tools — browser, shell, file system, test runners, etc.
 
@@ -1668,9 +1386,9 @@ Your response should be a well-formatted markdown report. Do NOT just read the c
 `);
   } else {
     // Built-in review checklist
-    parts.push(REVIEW_CHECKLISTS[reviewType]);
+    push("findings", REVIEW_CHECKLISTS[reviewType]);
 
-    parts.push(`\n## Instructions
+    push("other", `\n## Instructions
 
 You are performing a **${reviewType.replace("_", " ")}** on the code changes for the ticket described above.
 
@@ -1689,7 +1407,7 @@ Your response should be a well-formatted markdown report.
 `);
   }
 
-  parts.push(REVIEW_BOUNDARY_SECTION);
+  push("other", REVIEW_BOUNDARY_SECTION);
 
   return parts.filter(Boolean).join("\n");
 }
@@ -1716,34 +1434,37 @@ export function buildGradingPrompt(
   epic: PromptEpic,
   stories: PromptGradingStory[],
   systemPrompt?: string | null,
+  sectionCollector?: PromptSectionCollector,
 ): string {
   project = withProjectMemory(project);
   const parts: string[] = [];
+  const push = (key: PromptContextSectionKey, text: string) =>
+    pushPromptPart(parts, sectionCollector, key, text);
 
-  parts.push(systemSection(systemPrompt));
-  parts.push(projectHeader(project.name));
-  parts.push(specSection(project.spec));
-  parts.push(memorySection(project.memory));
-  parts.push(documentsSection(documents));
+  push("system", systemSection(systemPrompt));
+  push("spec", projectHeader(project.name));
+  push("spec", specSection(project.spec));
+  push("memory", memorySection(project.memory));
+  push("documents", documentsSection(documents));
 
-  parts.push(`## Epic to Grade\n`);
-  parts.push(`### ${epic.title}\n`);
+  push("ticket", `## Epic to Grade\n`);
+  push("ticket", `### ${epic.title}\n`);
   if (epic.description) {
-    parts.push(`${epic.description.trim()}\n`);
+    push("ticket", `${epic.description.trim()}\n`);
   }
 
-  parts.push(`## Acceptance-Criteria Rubric\n`);
+  push("findings", `## Acceptance-Criteria Rubric\n`);
   for (const story of stories) {
-    parts.push(`### ${story.title}\n`);
-    parts.push(`- **storyId:** \`${story.id}\`\n`);
+    push("findings", `### ${story.title}\n`);
+    push("findings", `- **storyId:** \`${story.id}\`\n`);
     if (story.description) {
-      parts.push(`${story.description.trim()}\n`);
+      push("findings", `${story.description.trim()}\n`);
     }
-    parts.push(`**Acceptance criteria (verbatim):**\n`);
-    parts.push(`${story.acceptanceCriteria?.trim() ?? ""}\n`);
+    push("findings", `**Acceptance criteria (verbatim):**\n`);
+    push("findings", `${story.acceptanceCriteria?.trim() ?? ""}\n`);
   }
 
-  parts.push(`## Role Boundary
+  push("other", `## Role Boundary
 
 You are an acceptance-criteria grader, not a general code reviewer. Evaluate only whether the implementation satisfies each criterion above. Do not judge general code quality, style, architecture, or unrelated defects; those belong to review agents.
 
@@ -1843,43 +1564,46 @@ export function buildEpicReviewPrompt(
   reviewType: ReviewType,
   systemPrompt?: string | null,
   comments?: PromptComment[],
+  sectionCollector?: PromptSectionCollector,
 ): string {
   project = withProjectMemory(project);
   const isBug = epic.type === "bug";
   const parts: string[] = [];
+  const push = (key: PromptContextSectionKey, text: string) =>
+    pushPromptPart(parts, sectionCollector, key, text);
 
-  parts.push(systemSection(systemPrompt));
-  parts.push(projectHeader(project.name));
-  parts.push(specSection(project.spec));
-  parts.push(memorySection(project.memory));
-  parts.push(documentsSection(documents));
+  push("system", systemSection(systemPrompt));
+  push("spec", projectHeader(project.name));
+  push("spec", specSection(project.spec));
+  push("memory", memorySection(project.memory));
+  push("documents", documentsSection(documents));
 
   // Epic / Bug details — use appropriate label
-  parts.push(`## ${isBug ? "Bug Under Review" : "Epic Under Review"}\n`);
-  parts.push(`### ${epic.title}\n`);
+  push("ticket", `## ${isBug ? "Bug Under Review" : "Epic Under Review"}\n`);
+  push("ticket", `### ${epic.title}\n`);
   if (epic.description) {
-    parts.push(`${epic.description.trim()}\n`);
+    push("ticket", `${epic.description.trim()}\n`);
   }
-  parts.push(ticketImagesSection(epic, { headingLevel: 3 }));
+  push("ticket", ticketImagesSection(epic, { headingLevel: 3 }));
 
   // Skip user stories section for bug tickets (they have none)
   if (!isBug) {
-    parts.push(userStoriesSection(userStories, { checkmark: false }));
+    push("ticket", userStoriesSection(userStories, { checkmark: false }));
   }
 
   // Comment history
-  parts.push(commentHistorySection(comments));
+  push("comments", commentHistorySection(comments));
 
   // Review checklist — bug tickets get a dedicated checklist for feature_review
   if (isBug && reviewType === "feature_review") {
-    parts.push(BUG_REVIEW_CHECKLIST);
+    push("findings", BUG_REVIEW_CHECKLIST);
   } else {
-    parts.push(REVIEW_CHECKLISTS[reviewType]);
+    push("findings", REVIEW_CHECKLISTS[reviewType]);
   }
 
   if (reviewType === "feature_review") {
     if (isBug) {
-      parts.push(`\n## Instructions
+      push("other", `\n## Instructions
 
 You are performing a **bug fix verification** on the bug described above. You have full access to all tools — browser, shell, file system, test runners, etc.
 
@@ -1900,7 +1624,7 @@ You are performing a **bug fix verification** on the bug described above. You ha
 Your response should be a well-formatted markdown report. Do NOT just read the code — actually run and test the fix.
 `);
     } else {
-      parts.push(`\n## Instructions
+      push("other", `\n## Instructions
 
 You are performing a **feature completeness review** on the entire epic described above, covering all user stories. You have full access to all tools — browser, shell, file system, test runners, etc.
 
@@ -1922,7 +1646,7 @@ Your response should be a well-formatted markdown report. Do NOT just read the c
     const reviewLabel = isBug
       ? `${reviewType.replace("_", " ")} (bug fix)`
       : reviewType.replace("_", " ");
-    parts.push(`\n## Instructions
+    push("other", `\n## Instructions
 
 You are performing a **${reviewLabel}** on the ${isBug ? "bug fix" : "entire epic"} described above${isBug ? "" : ", covering all user stories"}.
 
@@ -1941,7 +1665,7 @@ Your response should be a well-formatted markdown report.
 `);
   }
 
-  parts.push(REVIEW_BOUNDARY_SECTION);
+  push("other", REVIEW_BOUNDARY_SECTION);
 
   return parts.filter(Boolean).join("\n");
 }

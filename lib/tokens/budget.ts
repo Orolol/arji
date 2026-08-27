@@ -10,44 +10,17 @@ import type {
   LargestContextSection,
 } from "./estimator";
 import { findLargestContextSection } from "./estimator";
+import {
+  parsePromptTokenBudget,
+  PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY,
+  promptTokenBudgetSettingKey,
+} from "./budget-settings";
 
-export const PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY = "prompt_token_budget";
-
-export function promptTokenBudgetSettingKey(projectId: string): string {
-  return `${PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY}:${projectId}`;
-}
-
-export function parsePromptTokenBudget(value: unknown): number | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "number") {
-    return Number.isFinite(value) && value > 0 ? Math.round(value) : null;
-  }
-  if (typeof value === "string") {
-    const trimmed = value.trim().toLowerCase();
-    if (!trimmed) return null;
-    try {
-      const parsedJson = JSON.parse(trimmed);
-      if (typeof parsedJson === "number") {
-        return Number.isFinite(parsedJson) && parsedJson > 0
-          ? Math.round(parsedJson)
-          : null;
-      }
-    } catch {
-      // not json, continue parsing string
-    }
-    const match = trimmed.match(/^([0-9]+(?:\.[0-9]+)?)\s*([km])?$/);
-    if (match) {
-      const num = parseFloat(match[1]);
-      const suffix = match[2];
-      if (Number.isFinite(num) && num > 0) {
-        if (suffix === "k") return Math.round(num * 1000);
-        if (suffix === "m") return Math.round(num * 1000000);
-        return Math.round(num);
-      }
-    }
-  }
-  return null;
-}
+export {
+  parsePromptTokenBudget,
+  PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY,
+  promptTokenBudgetSettingKey,
+} from "./budget-settings";
 
 export function resolvePromptTokenBudget(projectId: string): number | null {
   const projectKey = promptTokenBudgetSettingKey(projectId);

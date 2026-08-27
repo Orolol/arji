@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
-import { GET, POST } from "@/app/api/projects/[projectId]/prompt-estimate/route";
+import { POST } from "@/app/api/projects/[projectId]/prompt-estimate/route";
 import { db } from "@/lib/db";
 import { epics, projects, settings, ticketComments, userStories } from "@/lib/db/schema";
 import { nanoid } from "nanoid";
 import { promptTokenBudgetSettingKey } from "@/lib/tokens/budget";
+
+function postEstimate(projectId: string, body: Record<string, unknown>) {
+  const request = new NextRequest(
+    `http://localhost/api/projects/${projectId}/prompt-estimate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  return POST(request, { params: Promise.resolve({ projectId }) });
+}
 
 describe("Prompt Estimate API Route", () => {
   it("estimates tokens for an epic build prompt and checks budget", async () => {
@@ -40,12 +52,9 @@ describe("Prompt Estimate API Route", () => {
       })
       .run();
 
-    const req = new NextRequest(
-      `http://localhost/api/projects/${projectId}/prompt-estimate?epicId=${epicId}&dispatchType=build`
-    );
-
-    const res = await GET(req, {
-      params: Promise.resolve({ projectId }),
+    const res = await postEstimate(projectId, {
+      epicId,
+      dispatchType: "build",
     });
 
     expect(res.status).toBe(200);
@@ -146,12 +155,11 @@ describe("Prompt Estimate API Route", () => {
       })
       .run();
 
-    const req = new NextRequest(
-      `http://localhost/api/projects/${projectId}/prompt-estimate?epicId=${epicId}&storyId=${storyId}&dispatchType=review&reviewTypes=security,code_review`
-    );
-
-    const res = await GET(req, {
-      params: Promise.resolve({ projectId }),
+    const res = await postEstimate(projectId, {
+      epicId,
+      storyId,
+      dispatchType: "review",
+      reviewTypes: ["security", "code_review"],
     });
 
     expect(res.status).toBe(200);
@@ -200,12 +208,10 @@ describe("Prompt Estimate API Route", () => {
       })
       .run();
 
-    const req = new NextRequest(
-      `http://localhost/api/projects/${projectId}/prompt-estimate?epicId=${epicId}&storyId=${storyId}&dispatchType=grading`
-    );
-
-    const res = await GET(req, {
-      params: Promise.resolve({ projectId }),
+    const res = await postEstimate(projectId, {
+      epicId,
+      storyId,
+      dispatchType: "grading",
     });
 
     expect(res.status).toBe(200);
@@ -255,18 +261,47 @@ describe("Prompt Estimate API Route", () => {
       })
       .run();
 
-    const req = new NextRequest(
-      `http://localhost/api/projects/${projectId}/prompt-estimate?epicId=${epicId}&dispatchType=grading`
-    );
-
-    const res = await GET(req, {
-      params: Promise.resolve({ projectId }),
+    const res = await postEstimate(projectId, {
+      epicId,
+      dispatchType: "grading",
     });
 
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.data.total).toBeGreaterThan(0);
     expect(json.data.breakdown.findings).toBeGreaterThan(0);
+  });
+
+  it("returns the grading no-op when the scoped story has no rubric", async () => {
+    const projectId = `proj-${nanoid(6)}`;
+    const epicId = `epic-${nanoid(6)}`;
+    const storyId = `story-${nanoid(6)}`;
+    db.insert(projects).values({ id: projectId, name: "No Rubric" }).run();
+    db.insert(epics)
+      .values({ id: epicId, projectId, title: "Epic", status: "review" })
+      .run();
+    db.insert(userStories)
+      .values({
+        id: storyId,
+        epicId,
+        title: "Story",
+        acceptanceCriteria: "   ",
+        status: "review",
+      })
+      .run();
+
+    const res = await postEstimate(projectId, {
+      epicId,
+      storyId,
+      dispatchType: "grading",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      data: {
+        skipped: true,
+        skipReason: "No non-empty acceptance criteria to grade",
+      },
+    });
   });
 
   it("attributes a comment containing markdown headings to comments and NOT findings", async () => {
@@ -303,12 +338,9 @@ describe("Prompt Estimate API Route", () => {
       })
       .run();
 
-    const req = new NextRequest(
-      `http://localhost/api/projects/${projectId}/prompt-estimate?epicId=${epicId}&dispatchType=build`
-    );
-
-    const res = await GET(req, {
-      params: Promise.resolve({ projectId }),
+    const res = await postEstimate(projectId, {
+      epicId,
+      dispatchType: "build",
     });
 
     expect(res.status).toBe(200);

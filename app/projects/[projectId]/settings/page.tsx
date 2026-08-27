@@ -9,7 +9,7 @@ import {
   PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY,
   promptTokenBudgetSettingKey,
   parsePromptTokenBudget,
-} from "@/lib/tokens";
+} from "@/lib/tokens/budget-settings";
 
 function ProjectTokenBudgetSection({ projectId }: { projectId: string }) {
   const [budget, setBudget] = useState("");

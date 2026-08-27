@@ -63,7 +63,7 @@ import {
 import {
   PROMPT_TOKEN_BUDGET_GLOBAL_SETTING_KEY,
   parsePromptTokenBudget,
-} from "@/lib/tokens";
+} from "@/lib/tokens/budget-settings";
 import {
   Select,
   SelectContent,

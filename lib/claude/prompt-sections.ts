@@ -25,6 +25,22 @@ import type {
   PromptComment,
   ReviewType,
 } from "./prompt-builder";
+
+export type PromptContextSectionKey =
+  | "spec"
+  | "memory"
+  | "ticket"
+  | "comments"
+  | "findings"
+  | "documents"
+  | "system"
+  | "other";
+
+/** Receives the exact fragments a prompt builder appends, grouped by context. */
+export type PromptSectionCollector = (
+  key: PromptContextSectionKey,
+  text: string,
+) => void;
 // ---------------------------------------------------------------------------
 // Primitive helpers
 // ---------------------------------------------------------------------------
@@ -352,7 +368,6 @@ export const PROMPT_AGENT_COMMENTS_KEPT = 5;
 
 function isReviewComment(comment: PromptComment): boolean {
   return (
-    comment.author !== "user" &&
     typeof comment.agentType === "string" &&
     comment.agentType.startsWith("review_")
   );
@@ -438,7 +453,7 @@ export const VISUAL_PROOF_SECTION = `## Optional visual proof
 
 If this project has a UI, a browser is available, and the \`attach_artifact\` tool is available, run the application, exercise the functionality you implemented, capture 1 to 3 screenshots, and attach each screenshot with \`attach_artifact\` using a clear caption.
 
-Focus on the user flow described in this ticket. Capturing visual proof is non-blocking: proceed with review if UI testing is not feasible.`;
+Visual proof is best-effort and is never a completion requirement. If the application or browser cannot be run, the tool is unavailable, or no useful screenshot can be produced, complete the session normally. Missing visual proof must never make the build fail.`;
 
 export const REVIEW_CHECKLISTS: Record<ReviewType, string> = {
   security: `## Security Audit Checklist
@@ -544,24 +559,25 @@ export const BUG_REVIEW_CHECKLIST = `## Bug Fix Verification Checklist
 Verify that the bug fix correctly addresses the reported issue without introducing regressions. Use ALL available tools — browser, shell commands, test runners, etc. — to validate each point.
 
 1. **Bug Fix Verification**:
-   - Verify the fix directly addresses the root cause reported in the ticket
-   - Actively test the bug scenario using the browser, shell commands, or test runners
-   - Confirm the error or unexpected behavior no longer occurs
-   - Document PASS/FAIL for the bug fix with concrete evidence (command output, screenshots)
+   - Reproduce the original bug scenario (or confirm the conditions that triggered it)
+   - Verify the fix resolves the reported issue
+   - Check that the root cause is addressed, not just the symptom
+   - Document PASS/FAIL with evidence (screenshots, command output, etc.)
 
 2. **Regression Check**:
-   - Verify adjacent features and related workflows still function correctly
-   - Check that no new error states or broken flows were introduced
-   - Run existing test suites to confirm no regressions
+   - Verify that adjacent functionality is not broken by the fix
+   - Test related features and flows that might be affected
+   - Check edge cases around the fix area
 
 3. **Code Quality**:
-   - Minimal, focused change that addresses the bug without unnecessary refactoring
-   - Proper error handling and edge cases considered
-   - No temporary debug code or commented-out blocks left behind
+   - The fix is minimal and focused on the bug
+   - No unrelated changes are included
+   - Error handling is appropriate for the fix area
 
-4. **Test Coverage**:
-   - A regression test exists that reproduces the bug and verifies the fix
-   - Run the test and confirm it passes
+4. **Tests**:
+   - Tests exist that cover the bug scenario
+   - Run the test suite and verify tests pass
+   - Report any failing tests with details
 
 For each criterion, specify:
 - **Status**: PASS / FAIL / PARTIAL

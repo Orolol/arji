@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
-import { agentSessions, epics, projects, userStories } from "@/lib/db/schema";
+import { agentSessions, epics, projects } from "@/lib/db/schema";
 import { createQueuedSession } from "@/lib/agent-sessions/lifecycle";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -67,10 +67,7 @@ describe("Token Estimation in Automated Dispatches", () => {
     expect(session?.batchRunId).toBe(batchRunId);
     expect(session?.estimatedPromptTokens).toBeGreaterThan(0);
     expect(session?.estimatedPromptTokens).toBe(Math.ceil(prompt.length / 4));
-    expect(session?.estimatedPromptBreakdown).not.toBeNull();
-
-    const breakdown = JSON.parse(session!.estimatedPromptBreakdown!);
-    expect(breakdown.spec).toBeGreaterThan(0);
+    expect(session?.estimatedPromptBreakdown).toBeNull();
   });
 
   it("persists estimated prompt tokens for Full Auto and review sessions", () => {
@@ -127,11 +124,7 @@ describe("Token Estimation in Automated Dispatches", () => {
 
     expect(session).toBeDefined();
     expect(session?.estimatedPromptTokens).toBeGreaterThan(0);
-    expect(session?.estimatedPromptBreakdown).not.toBeNull();
-
-    const breakdown = JSON.parse(session!.estimatedPromptBreakdown!);
-    expect(breakdown.findings).toBeGreaterThan(0);
-    expect(breakdown.ticket).toBeGreaterThan(0);
+    expect(session?.estimatedPromptBreakdown).toBeNull();
   });
 
   it("persists exact by-construction breakdown when a comment contains markdown headings", async () => {

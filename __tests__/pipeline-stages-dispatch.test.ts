@@ -99,6 +99,7 @@ vi.mock("@/lib/verify/runner", () => ({
 }));
 
 vi.mock("@/lib/documents/mentions", () => ({
+  buildMentionContextBlock: vi.fn(() => ""),
   enrichPromptWithDocumentMentions: vi.fn(
     ({ prompt }: { prompt: string }) => ({ prompt, missing: [] })
   ),
@@ -302,6 +303,17 @@ describe("fix stage dispatch (epic scope)", () => {
     expect(row.prompt).toContain("## Code Review Feedback");
     expect(row.prompt).toContain("[critical] Token never expires");
     expect(row.prompt).toContain(PIPELINE_FIX_INSTRUCTIONS_SECTION);
+    expect(row.estimatedPromptTokens).toBeGreaterThan(0);
+    expect(row.estimatedPromptBreakdown).not.toBeNull();
+    const estimatedBreakdown = JSON.parse(row.estimatedPromptBreakdown!);
+    expect(estimatedBreakdown.findings).toBeGreaterThan(0);
+    expect(estimatedBreakdown.other).toBeGreaterThan(0);
+    const estimatedSum = Object.values(
+      estimatedBreakdown as Record<string, number>,
+    ).reduce((sum, tokens) => sum + tokens, 0);
+    expect(
+      Math.abs(estimatedSum - row.estimatedPromptTokens!),
+    ).toBeLessThanOrEqual(8);
 
     const spawn = startOpts();
     expect(spawn.sessionId).toBe(handle.sessionId);

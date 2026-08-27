@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { loadPromptComments } from "@/lib/claude/prompt-comments";
 import {
   epics,
   ticketComments,
@@ -36,10 +35,6 @@ import {
   markSessionRunning,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
-import {
-  enrichPromptWithDocumentMentions,
-  userAuthoredTexts,
-} from "@/lib/documents/mentions";
 import {
   buildEpicTargetUrl,
   createUnresolvedMentionsNotification,
@@ -134,6 +129,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     epic,
     story,
     comment: body.comment,
+    commentAlreadyPersisted: true,
   });
   const enrichedPrompt = assembled.prompt;
   createUnresolvedMentionsNotification({

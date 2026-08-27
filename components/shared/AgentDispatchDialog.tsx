@@ -116,15 +116,14 @@ export function AgentDispatchDialog({
           </p>
         )}
         {extraContent}
-        {open && (promptEstimateTarget?.epicId || promptEstimateTarget?.userStoryId || sessionPicker?.epicId || sessionPicker?.userStoryId) && (
+        {open && promptEstimateTarget && (promptEstimateTarget.epicId || promptEstimateTarget.userStoryId) && (
           <PromptTokenEstimateView
             projectId={projectId}
-            epicId={promptEstimateTarget?.epicId ?? sessionPicker?.epicId}
-            userStoryId={promptEstimateTarget?.userStoryId ?? sessionPicker?.userStoryId}
-            dispatchType={promptEstimateTarget?.dispatchType ?? (agentProps.dispatchRole === "review" ? "review" : "build")}
-            reviewTypes={promptEstimateTarget?.reviewTypes}
-            comment={promptEstimateTarget?.comment}
-            namedAgentId={agentProps.value}
+            epicId={promptEstimateTarget.epicId}
+            userStoryId={promptEstimateTarget.userStoryId}
+            dispatchType={promptEstimateTarget.dispatchType}
+            reviewTypes={promptEstimateTarget.reviewTypes}
+            comment={promptEstimateTarget.comment}
             enabled={open}
           />
         )}

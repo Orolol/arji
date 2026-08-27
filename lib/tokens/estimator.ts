@@ -1,19 +1,12 @@
+import type { PromptContextSectionKey } from "@/lib/claude/prompt-sections";
+export type { PromptContextSectionKey } from "@/lib/claude/prompt-sections";
+
 /**
  * Deterministic prompt token estimation and context section breakdown.
  *
  * Uses the chars/4 heuristic (~1 token per 4 characters), which is fast,
  * deterministic, and requires no external tokenizer dependencies.
  */
-
-export type PromptContextSectionKey =
-  | "spec"
-  | "memory"
-  | "ticket"
-  | "comments"
-  | "findings"
-  | "documents"
-  | "system"
-  | "other";
 
 export interface PromptTokenBreakdown {
   spec: number;
@@ -104,78 +97,10 @@ export function estimatePromptTokensBySections(
   };
 }
 
-function matchTopLevelHeading(headingLine: string): PromptContextSectionKey | null {
-  const line = headingLine.trim().toLowerCase();
-
-  if (line.startsWith("# system instructions")) {
-    return "system";
-  }
-  if (
-    line.startsWith("# project:") ||
-    line.startsWith("## project description") ||
-    line.startsWith("## project specification")
-  ) {
-    return "spec";
-  }
-  if (line.startsWith("## project memory")) {
-    return "memory";
-  }
-  if (line.startsWith("## reference documents")) {
-    return "documents";
-  }
-  if (
-    line.startsWith("## epic to implement") ||
-    line.startsWith("## ticket to implement") ||
-    line.startsWith("## epic context") ||
-    line.startsWith("## ticket under review") ||
-    line.startsWith("## epic under review") ||
-    line.startsWith("## bug under review") ||
-    line.startsWith("## user stories") ||
-    line.startsWith("### attached screenshots") ||
-    line.startsWith("## attached screenshots")
-  ) {
-    return "ticket";
-  }
-  if (
-    line.startsWith("## comment history") ||
-    line.startsWith("## conversation history")
-  ) {
-    return "comments";
-  }
-  if (
-    line.startsWith("## security audit checklist") ||
-    line.startsWith("## code review checklist") ||
-    line.startsWith("## compliance & accessibility review checklist") ||
-    line.startsWith("## feature completeness review checklist") ||
-    line.startsWith("## bug fix verification checklist") ||
-    line.startsWith("## custom review agent instructions") ||
-    line.startsWith("## code review feedback") ||
-    line.startsWith("## deterministic verification evidence") ||
-    line.startsWith("## bug-fix rule") ||
-    line.startsWith("## acceptance criteria grading rubric") ||
-    line.startsWith("## acceptance criteria grading evidence") ||
-    line.startsWith("## acceptance-criteria rubric") ||
-    line.startsWith("## review findings") ||
-    line.startsWith("## ci failure evidence") ||
-    line.startsWith("## forensic investigation evidence")
-  ) {
-    return "findings";
-  }
-  if (
-    line.startsWith("## instructions") ||
-    line.startsWith("## visual proof instructions") ||
-    line.startsWith("## role boundary")
-  ) {
-    return "other";
-  }
-
-  return null;
-}
-
 /**
- * Parses an assembled markdown prompt into context sections and calculates
- * the total estimated tokens and breakdown per section.
- * If sections are provided, attributes directly by construction.
+ * Calculates a total for arbitrary text. A breakdown is emitted only when
+ * exact builder sections are supplied; guessing from untrusted Markdown
+ * headings would produce confidently wrong persisted data.
  */
 export function estimatePromptTokens(
   prompt: string | null | undefined,
@@ -201,61 +126,18 @@ export function estimatePromptTokens(
     return estimatePromptTokensBySections(sections, prompt);
   }
 
-  const charCounts: Record<PromptContextSectionKey, number> = {
-    spec: 0,
-    memory: 0,
-    ticket: 0,
-    comments: 0,
-    findings: 0,
-    documents: 0,
-    system: 0,
-    other: 0,
-  };
-
-  // Split prompt by markdown headings outside of code blocks
-  const lines = prompt.split("\n");
-  let currentKey: PromptContextSectionKey = "other";
-  let currentBlockChars = 0;
-  let inCodeFence = false;
-
-  for (const line of lines) {
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith("```")) {
-      inCodeFence = !inCodeFence;
-    }
-
-    if (!inCodeFence && (line.startsWith("# ") || line.startsWith("## "))) {
-      const matchedKey = matchTopLevelHeading(line);
-      if (matchedKey !== null) {
-        if (currentBlockChars > 0) {
-          charCounts[currentKey] += currentBlockChars;
-          currentBlockChars = 0;
-        }
-        currentKey = matchedKey;
-      }
-    }
-    // line length + 1 for newline
-    currentBlockChars += line.length + 1;
-  }
-
-  if (currentBlockChars > 0) {
-    charCounts[currentKey] += currentBlockChars;
-  }
-
-  const breakdown: PromptTokenBreakdown = {
-    spec: Math.ceil(charCounts.spec / 4),
-    memory: Math.ceil(charCounts.memory / 4),
-    ticket: Math.ceil(charCounts.ticket / 4),
-    comments: Math.ceil(charCounts.comments / 4),
-    findings: Math.ceil(charCounts.findings / 4),
-    documents: Math.ceil(charCounts.documents / 4),
-    system: Math.ceil(charCounts.system / 4),
-    other: Math.ceil(charCounts.other / 4),
-  };
-
   return {
-    total: Math.ceil(prompt.length / 4),
-    breakdown,
+    total: estimateTokens(prompt),
+    breakdown: {
+      spec: 0,
+      memory: 0,
+      ticket: 0,
+      comments: 0,
+      findings: 0,
+      documents: 0,
+      system: 0,
+      other: 0,
+    },
   };
 }
 
@@ -291,7 +173,7 @@ export function findLargestContextSection(
   if (maxTokens <= 0) return null;
 
   const total = totalTokens && totalTokens > 0 ? totalTokens : maxTokens;
-  const percentage = Math.round((maxTokens / total) * 100);
+  const percentage = Math.min(100, Math.round((maxTokens / total) * 100));
 
   return {
     key: maxKey,

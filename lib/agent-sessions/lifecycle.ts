@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { notifySessionTerminal } from "./terminal-hooks";
 import { buildSessionFailureMessage, buildSessionLogsRecord } from "./failure-message";
-import { estimatePromptTokens } from "@/lib/tokens/estimator";
+import { estimateTokens } from "@/lib/tokens/estimator";
 export type AgentSessionLifecycleStatus =
   | "queued"
   | "running"
@@ -359,20 +359,13 @@ export type CreateQueuedSessionInput = Omit<
 
 export function createQueuedSession(values: CreateQueuedSessionInput): void {
   let estimatedPromptTokens = values.estimatedPromptTokens;
-  let estimatedPromptBreakdown = values.estimatedPromptBreakdown;
+  const estimatedPromptBreakdown = values.estimatedPromptBreakdown;
 
   if (
     values.prompt &&
     (estimatedPromptTokens === undefined || estimatedPromptTokens === null)
   ) {
-    const estimated = estimatePromptTokens(values.prompt);
-    estimatedPromptTokens = estimated.total;
-    if (
-      estimatedPromptBreakdown === undefined ||
-      estimatedPromptBreakdown === null
-    ) {
-      estimatedPromptBreakdown = JSON.stringify(estimated.breakdown);
-    }
+    estimatedPromptTokens = estimateTokens(values.prompt);
   }
 
   db.insert(agentSessions)

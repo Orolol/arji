@@ -63,6 +63,10 @@ import { nightRunRegistry } from "@/lib/night/registry";
 import { startNightRun } from "@/lib/night/run";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import {
+  createPromptSectionCapture,
+  finalizeCapturedPrompt,
+} from "@/lib/tokens/dispatch-prompt";
+import {
   finalizeBuildTerminalOutcome,
   holdFailedBuild,
   pullTicketBackIfPromoted,
@@ -524,6 +528,7 @@ export async function POST(
     );
 
     // Compose prompt
+    const promptSections = createPromptSectionCapture();
     const prompt = buildBuildPrompt(
       projectRef,
       [],
@@ -531,10 +536,17 @@ export async function POST(
       us,
       buildSystemPrompt,
       undefined,
-      { visualProofEnabled: isVisualProofEnabled() }
+      {
+        visualProofEnabled: isVisualProofEnabled(),
+        sectionCollector: promptSections.collect,
+      },
     );
     // Same as team mode: nothing user-written to resolve mentions from.
     const enrichedPrompt = prompt;
+    const estimatedPrompt = finalizeCapturedPrompt(
+      enrichedPrompt,
+      promptSections,
+    );
     const resolvedBuildAgent = resolveAgentByNamedId("build", projectId, namedAgentId);
 
     // Create session in DB
@@ -583,6 +595,10 @@ export async function POST(
       orchestrationMode: "solo",
       provider: resolvedBuildAgent.provider,
       prompt: enrichedPrompt,
+      estimatedPromptTokens: estimatedPrompt.tokens.total,
+      estimatedPromptBreakdown: JSON.stringify(
+        estimatedPrompt.tokens.breakdown,
+      ),
       logsPath,
       branchName,
       worktreePath,

@@ -22,17 +22,17 @@ import {
   checkPromptTokenBudget,
   resolvePromptTokenBudget,
 } from "@/lib/tokens/budget";
+import { gradableStories } from "@/lib/grading/dispatch";
+import { loadPromptComments } from "@/lib/claude/prompt-comments";
 
 type Params = { params: Promise<{ projectId: string }> };
 
 interface EstimateRequestInput {
-  targetType?: "epic" | "story";
   epicId?: string | null;
   storyId?: string | null;
   dispatchType?: "build" | "review" | "grading";
   reviewTypes?: string[] | string | null;
   comment?: string | null;
-  pipeline?: boolean;
 }
 
 const VALID_REVIEW_TYPES: ReviewType[] = [
@@ -41,34 +41,6 @@ const VALID_REVIEW_TYPES: ReviewType[] = [
   "compliance",
   "feature_review",
 ];
-
-export async function GET(request: NextRequest, { params }: Params) {
-  const { projectId } = await params;
-  const searchParams = request.nextUrl.searchParams;
-
-  const reviewTypesParam = searchParams.get("reviewTypes");
-  const reviewTypes = reviewTypesParam
-    ? reviewTypesParam
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : undefined;
-
-  const input: EstimateRequestInput = {
-    targetType:
-      (searchParams.get("targetType") as "epic" | "story") || undefined,
-    epicId: searchParams.get("epicId") || null,
-    storyId: searchParams.get("storyId") || null,
-    dispatchType:
-      (searchParams.get("dispatchType") as "build" | "review" | "grading") ||
-      "build",
-    reviewTypes,
-    comment: searchParams.get("comment") || null,
-    pipeline: searchParams.get("pipeline") === "true",
-  };
-
-  return handleEstimate(projectId, input);
-}
 
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
@@ -144,6 +116,17 @@ async function handleEstimate(projectId: string, input: EstimateRequestInput) {
     );
     const typesToEstimate = selectedTypes.length > 0 ? selectedTypes : ["feature_review" as ReviewType];
     sessionsCount = typesToEstimate.length;
+    const sharedComments = story
+      ? loadPromptComments({ userStoryId: story.id })
+      : loadPromptComments({ epicId });
+    const sharedStories = story
+      ? undefined
+      : db
+          .select()
+          .from(userStories)
+          .where(eq(userStories.epicId, epicId))
+          .orderBy(userStories.position)
+          .all();
 
     const sessionList: Array<{
       reviewType: ReviewType;
@@ -174,6 +157,7 @@ async function handleEstimate(projectId: string, input: EstimateRequestInput) {
           epic,
           story,
           reviewType: rt,
+          comments: sharedComments,
         });
         tokens = assembled.tokens;
       } else {
@@ -183,6 +167,8 @@ async function handleEstimate(projectId: string, input: EstimateRequestInput) {
           project,
           epic,
           reviewType: rt,
+          stories: sharedStories,
+          comments: sharedComments,
         });
         tokens = assembled.tokens;
       }
@@ -210,29 +196,28 @@ async function handleEstimate(projectId: string, input: EstimateRequestInput) {
     };
     perSessionEstimates = sessionList;
   } else if (dispatchType === "grading") {
-    let gradingStories;
-    if (story) {
-      gradingStories = [
-        {
-          id: story.id,
-          title: story.title,
-          description: story.description,
-          acceptanceCriteria: story.acceptanceCriteria,
-        },
-      ];
-    } else {
-      const us = db
+    const scopedStories = story
+      ? [story]
+      : db
         .select()
         .from(userStories)
         .where(eq(userStories.epicId, epicId))
         .orderBy(userStories.position)
         .all();
-      gradingStories = us.map((s) => ({
+    const gradingStories = gradableStories(scopedStories).map((s) => ({
         id: s.id,
         title: s.title,
         description: s.description,
         acceptanceCriteria: s.acceptanceCriteria,
       }));
+
+    if (gradingStories.length === 0) {
+      return NextResponse.json({
+        data: {
+          skipped: true,
+          skipReason: "No non-empty acceptance criteria to grade",
+        },
+      });
     }
 
     const assembled = await assembleGradingPrompt({

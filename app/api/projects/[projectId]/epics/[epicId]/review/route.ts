@@ -24,7 +24,6 @@ import {
 } from "@/lib/api/route-helpers";
 import fs from "fs";
 import path from "path";
-import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import { REVIEW_TYPE_TO_AGENT_TYPE } from "@/lib/agent-config/constants";
 import { resolveAgentForDispatch } from "@/lib/agent-config/agent-resolution";
 import {
@@ -38,10 +37,6 @@ import {
   markSessionRunning,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
-import {
-  enrichPromptWithDocumentMentions,
-  userAuthoredTexts,
-} from "@/lib/documents/mentions";
 import {
   buildEpicTargetUrl,
   createUnresolvedMentionsNotification,
@@ -178,6 +173,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       project,
       epic,
       reviewType,
+      stories: us,
+      comments: promptComments,
     });
     const enrichedPrompt = assembled.prompt;
     createUnresolvedMentionsNotification({

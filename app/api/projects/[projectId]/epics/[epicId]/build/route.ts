@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { loadPromptComments } from "@/lib/claude/prompt-comments";
 import {
   epics,
-  userStories,
   ticketComments,
-  reviewComments,
   agentSessions,
 } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
@@ -24,7 +21,6 @@ import {
 } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import { assembleEpicBuildPrompt } from "@/lib/tokens";
-import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import {
   classifySessionOutcome,
   extractSessionUsage,
@@ -44,10 +40,6 @@ import {
   markSessionRunning,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
-import {
-  enrichPromptWithDocumentMentions,
-  userAuthoredTexts,
-} from "@/lib/documents/mentions";
 import {
   buildEpicTargetUrl,
   createCiAutofixReadyNotification,
@@ -186,17 +178,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .run();
   }
 
-  // Load context
-  const us = db
-    .select()
-    .from(userStories)
-    .where(eq(userStories.epicId, epicId))
-    .orderBy(userStories.position)
-    .all();
-
   // Prepare worktree
-
-  const buildSystemPrompt = await resolveAgentPrompt("build", projectId);
 
   // A CI autofix must modify the exact branch behind the PR. Deriving a
   // branch from the current epic title could silently cut a new branch from
@@ -217,6 +199,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     project,
     epic,
     comment: body.comment,
+    commentAlreadyPersisted: true,
     ciAutofix,
     worktreeHead,
   });

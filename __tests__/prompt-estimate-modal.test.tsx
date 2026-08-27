@@ -135,6 +135,18 @@ beforeEach(() => {
         json: () => Promise.resolve({ data: mockExceededEstimateData }),
       });
     }
+    if (body.epicId === "epic-skip") {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: {
+              skipped: true,
+              skipReason: "No non-empty acceptance criteria to grade",
+            },
+          }),
+      });
+    }
     return Promise.resolve({
       ok: true,
       json: () => Promise.resolve({ data: mockEstimateData }),
@@ -197,7 +209,7 @@ describe("PromptTokenEstimateView", () => {
     });
 
     expect(screen.getByTestId("prompt-estimate-total")).toHaveTextContent("~32.0k tokens");
-    expect(screen.getByTestId("prompt-estimate-total")).toHaveTextContent("(2 sessions)");
+    expect(screen.getByTestId("prompt-estimate-total")).toHaveTextContent("across 2 sessions");
     const perSession = screen.getByTestId("prompt-estimate-per-session");
     expect(perSession).toHaveTextContent("Per session:");
     expect(perSession).toHaveTextContent("Security");
@@ -218,6 +230,23 @@ describe("PromptTokenEstimateView", () => {
     });
 
     expect(screen.getByText("Prompt estimate unavailable")).toBeInTheDocument();
+  });
+
+  it("explains when grading will not dispatch a session", async () => {
+    render(
+      <PromptTokenEstimateView
+        projectId="proj-1"
+        epicId="epic-skip"
+        dispatchType="grading"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("prompt-estimate-skipped")).toHaveTextContent(
+        "No non-empty acceptance criteria to grade",
+      );
+    });
+    expect(screen.queryByTestId("prompt-estimate-total")).not.toBeInTheDocument();
   });
 
   it("renders non-blocking warning when budget is exceeded and names the heaviest section", async () => {

@@ -3,7 +3,6 @@ import {
   estimateTokens,
   estimatePromptTokens,
   findLargestContextSection,
-  SECTION_LABELS,
   estimatePromptTokensBySections,
 } from "@/lib/tokens/estimator";
 import {
@@ -22,15 +21,21 @@ import {
 import {
   buildBuildPrompt,
   buildReviewPrompt,
-  buildTicketBuildPrompt,
-  buildEpicReviewPrompt,
   type PromptDocument,
   type PromptEpic,
   type PromptProject,
   type PromptUserStory,
 } from "@/lib/claude/prompt-builder";
 import { db } from "@/lib/db";
-import { agentSessions, epics, projects, settings, userStories } from "@/lib/db/schema";
+import {
+  agentSessions,
+  documents,
+  epics,
+  projects,
+  settings,
+  ticketComments,
+  userStories,
+} from "@/lib/db/schema";
 import { createQueuedSession } from "@/lib/agent-sessions/lifecycle";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -95,18 +100,8 @@ describe("Token Estimator", () => {
     expect(result.total).toBeGreaterThan(0);
     expect(result.total).toBe(Math.ceil(prompt.length / 4));
 
-    expect(result.breakdown.system).toBeGreaterThan(0);
-    expect(result.breakdown.spec).toBeGreaterThan(0);
-    expect(result.breakdown.memory).toBeGreaterThan(0);
-    expect(result.breakdown.documents).toBeGreaterThan(0);
-    expect(result.breakdown.ticket).toBeGreaterThan(0);
-    expect(result.breakdown.comments).toBeGreaterThan(0);
-    expect(result.breakdown.other).toBeGreaterThan(0);
-
-    const largest = findLargestContextSection(result.breakdown, result.total);
-    expect(largest).not.toBeNull();
-    expect(largest?.tokens).toBeGreaterThan(0);
-    expect(SECTION_LABELS[largest!.key]).toBeDefined();
+    expect(Object.values(result.breakdown)).toEqual(Array(8).fill(0));
+    expect(findLargestContextSection(result.breakdown, result.total)).toBeNull();
   });
 
   it("handles review prompts and identifies findings & checklists", () => {
@@ -134,9 +129,8 @@ describe("Token Estimator", () => {
     );
 
     const result = estimatePromptTokens(prompt);
-    expect(result.breakdown.findings).toBeGreaterThan(0);
-    expect(result.breakdown.ticket).toBeGreaterThan(0);
-    expect(result.breakdown.spec).toBeGreaterThan(0);
+    expect(result.total).toBe(Math.ceil(prompt.length / 4));
+    expect(Object.values(result.breakdown)).toEqual(Array(8).fill(0));
   });
 
   it("returns zero counts for empty or missing prompt", () => {
@@ -204,12 +198,22 @@ describe("Token Estimator", () => {
       })
       .run();
 
+    db.insert(documents)
+      .values({
+        id: `doc-${nanoid(6)}`,
+        projectId: projId,
+        originalFilename: "notes.md",
+        kind: "text",
+        markdownContent: "Mentioned document content.",
+      })
+      .run();
+
     const assembled = await assembleEpicBuildPrompt({
       projectId: projId,
       epicId,
       project: { name: "Test Shared Proj", spec: "# Spec\nFull specification here.", memory: "Memory content here." },
       epic: { title: "Test Shared Epic", description: "Shared Epic description" },
-      comment: "User comment on dispatch",
+      comment: "User comment on dispatch; read @notes.md",
     });
 
     expect(assembled.prompt).toContain("Test Shared Epic");
@@ -218,6 +222,8 @@ describe("Token Estimator", () => {
     expect(assembled.tokens.breakdown.memory).toBeGreaterThan(0);
     expect(assembled.tokens.breakdown.ticket).toBeGreaterThan(0);
     expect(assembled.tokens.breakdown.comments).toBeGreaterThan(0);
+    expect(assembled.tokens.breakdown.documents).toBeGreaterThan(0);
+    expect(assembled.prompt).toContain("## Mentioned Project Documents");
 
     // Assert all 8 categories sum to total (within ceiling arithmetic tolerance)
     const sum = Object.values(assembled.tokens.breakdown).reduce((a, b) => a + b, 0);
@@ -298,6 +304,114 @@ describe("Token Estimator", () => {
     const sum = Object.values(assembled.tokens.breakdown).reduce((a, b) => a + b, 0);
     expect(Math.abs(sum - assembled.tokens.total)).toBeLessThanOrEqual(8);
   });
+
+  it("does not charge story-review comments that are only mention sources", async () => {
+    const projId = `proj-${nanoid(6)}`;
+    const epicId = `epic-${nanoid(6)}`;
+    const storyId = `story-${nanoid(6)}`;
+    db.insert(projects).values({ id: projId, name: "Story Review" }).run();
+    db.insert(epics)
+      .values({ id: epicId, projectId: projId, title: "Epic", status: "review" })
+      .run();
+    db.insert(userStories)
+      .values({
+        id: storyId,
+        epicId,
+        title: "Story",
+        acceptanceCriteria: "Works",
+        status: "review",
+      })
+      .run();
+    db.insert(ticketComments)
+      .values({
+        id: `comment-${nanoid(6)}`,
+        userStoryId: storyId,
+        author: "agent",
+        content: "## Code Review Checklist\n" + "details ".repeat(300),
+      })
+      .run();
+
+    const assembled = await assembleStoryReviewPrompt({
+      projectId: projId,
+      epicId,
+      storyId,
+      project: { name: "Story Review" },
+      epic: { title: "Epic" },
+      story: { title: "Story", acceptanceCriteria: "Works" },
+      reviewType: "code_review",
+    });
+
+    expect(assembled.prompt).not.toContain("## Comment History");
+    expect(assembled.tokens.breakdown.comments).toBe(0);
+    const sum = Object.values(assembled.tokens.breakdown).reduce((a, b) => a + b, 0);
+    expect(Math.abs(sum - assembled.tokens.total)).toBeLessThanOrEqual(8);
+  });
+
+  it("captures the truncated CI autofix prompt without placeholders or over-counting", async () => {
+    const projId = `proj-${nanoid(6)}`;
+    const epicId = `epic-${nanoid(6)}`;
+    const project = {
+      name: "CI Autofix",
+      spec: "é".repeat(20_000),
+    };
+    db.insert(projects).values({ id: projId, ...project }).run();
+    db.insert(epics)
+      .values({ id: epicId, projectId: projId, title: "CI Epic", status: "todo" })
+      .run();
+
+    const assembled = await assembleEpicBuildPrompt({
+      projectId: projId,
+      epicId,
+      project,
+      epic: { title: "CI Epic" },
+      ciAutofix: {
+        prNumber: 42,
+        headSha: "abc123",
+        failures: [{ name: "test", logTail: "expected true to be false" }],
+      },
+      worktreeHead: "def456",
+    });
+
+    expect(assembled.prompt).toContain("[Specification truncated for this fix session]");
+    expect(assembled.sections.other).not.toContain("...");
+    expect(assembled.tokens.breakdown.spec).toBeLessThan(assembled.tokens.total);
+    const largest = findLargestContextSection(
+      assembled.tokens.breakdown,
+      assembled.tokens.total,
+    );
+    expect(largest?.percentage).toBeLessThanOrEqual(100);
+    const sum = Object.values(assembled.tokens.breakdown).reduce((a, b) => a + b, 0);
+    expect(Math.abs(sum - assembled.tokens.total)).toBeLessThanOrEqual(8);
+  });
+
+  it("keeps a launch comment exactly once after the route persisted it", async () => {
+    const projId = `proj-${nanoid(6)}`;
+    const epicId = `epic-${nanoid(6)}`;
+    const marker = "PLEASE_DEDUPE_ME";
+    db.insert(projects).values({ id: projId, name: "Dedupe" }).run();
+    db.insert(epics)
+      .values({ id: epicId, projectId: projId, title: "Epic", status: "todo" })
+      .run();
+    db.insert(ticketComments)
+      .values({
+        id: `comment-${nanoid(6)}`,
+        epicId,
+        author: "user",
+        content: marker,
+      })
+      .run();
+
+    const assembled = await assembleEpicBuildPrompt({
+      projectId: projId,
+      epicId,
+      project: { name: "Dedupe" },
+      epic: { title: "Epic" },
+      comment: marker,
+      commentAlreadyPersisted: true,
+    });
+
+    expect(assembled.prompt.split(marker)).toHaveLength(2);
+  });
 });
 
 describe("Token Budget", () => {
@@ -339,6 +453,11 @@ describe("Token Budget", () => {
     expect(exceeded.largestSection?.key).toBe("spec");
     expect(exceeded.largestSection?.tokens).toBe(30000);
     expect(exceeded.largestSection?.percentage).toBe(58);
+
+    expect(
+      findLargestContextSection({ ...breakdown, spec: 60_000 }, 52_000)
+        ?.percentage,
+    ).toBe(100);
   });
 });
 
@@ -372,10 +491,7 @@ describe("Session Creation Token Persistence", () => {
 
     expect(session).toBeDefined();
     expect(session?.estimatedPromptTokens).toBe(Math.ceil(prompt.length / 4));
-    expect(session?.estimatedPromptBreakdown).not.toBeNull();
-
-    const breakdown = JSON.parse(session!.estimatedPromptBreakdown!);
-    expect(breakdown.spec).toBeGreaterThan(0);
+    expect(session?.estimatedPromptBreakdown).toBeNull();
   });
 
   it("resolves project-specific budget before global budget", () => {
