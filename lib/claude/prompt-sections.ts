@@ -289,7 +289,9 @@ export function arijToolsSection(
         "verdict decides the ticket's next column — a passing verdict moves " +
         "it to To Merge (ready for the user to merge), 'changes_requested' " +
         "sends it back to In Progress. Each finding you file (file+line " +
-        "anchored) becomes a review comment on the ticket. When your prompt " +
+        "anchored) becomes a review comment on the ticket, and an " +
+        "'approved' verdict filed alongside a [critical] or [major] finding " +
+        "still counts as changes requested. When your prompt " +
         "lists prior findings with [RC:id] tokens, report each one you " +
         "verified in prior_findings ('fixed' resolves it in Arij; a finding " +
         "you do not mention stays open). Call it once, at the end, with " +
