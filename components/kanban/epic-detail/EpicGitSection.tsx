@@ -248,7 +248,7 @@ export function EpicGitSection({
         </div>
       )}
 
-      {(epicStatus === "review" || epicStatus === "done") && (
+      {epicStatus === "to_merge" && (
         <div className="flex justify-end pt-[11px]">
           <Button
             size="sm"

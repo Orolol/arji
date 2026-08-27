@@ -75,9 +75,14 @@ import { parseReviewReport } from "./parse-review-report";
  * defaults coexist. reviewComments is epic-keyed only, so the same queries
  * serve story-scoped runs.
  *
- * The pipeline never mutates reviewComments — no auto-resolve. A second
- * cycle's verdict is computed from the second stage's window; humans
- * bulk-resolve open rows at approve time.
+ * Finding RESOLUTION has two agent channels and one terminal one. The
+ * reviewer of cycle N+1 is asked to verify each prior finding and report
+ * `{id, status: "fixed"}` through `submit_findings.prior_findings` (the
+ * structured channel, app/api/mcp/submit-findings/route.ts) — and to echo
+ * `[RC:id] FIXED` lines in its report, which
+ * {@link resolvePriorFindingsFromProse} parses when the structured channel
+ * was unavailable. Whatever remains open at merge time is resolved by the
+ * merge itself (lib/workflow/merge-approval.ts): the merge IS the approval.
  */
 
 export interface BlockingFinding {
@@ -767,6 +772,13 @@ export function ingestProseFindings(input: {
   epicId: string;
   sinceIso: string;
   sessionOutput: string;
+  /**
+   * The review session the report came from. Recorded on the recovered rows
+   * so the session "proves its channel" exactly like a submit_findings call
+   * would — without it the review stayed `unverifiable` even though its
+   * findings were recovered, and telescope/dreaming could not attribute them.
+   */
+  sessionId?: string | null;
   database?: ArijDatabase;
 }): number {
   const database = input.database ?? defaultDb;
@@ -780,8 +792,35 @@ export function ingestProseFindings(input: {
   const parsed = parseReviewReport(input.sessionOutput);
   if (parsed.length === 0) return 0;
 
+  // Dedup against rows from EARLIER windows: a reviewer that repeats an
+  // unfixed finding verbatim on cycle N+1 must not mint a second open row —
+  // that was the duplicate-accumulation path nothing ever resolved.
+  const existingOpen = new Set(
+    database
+      .select({
+        filePath: reviewComments.filePath,
+        lineNumber: reviewComments.lineNumber,
+        body: reviewComments.body,
+      })
+      .from(reviewComments)
+      .where(
+        and(
+          eq(reviewComments.epicId, input.epicId),
+          eq(reviewComments.author, "agent"),
+          eq(reviewComments.status, "open")
+        )
+      )
+      .all()
+      .map((row) => `${row.filePath}:${row.lineNumber}:${row.body}`)
+  );
+
   const now = new Date().toISOString();
+  let created = 0;
   for (const finding of parsed) {
+    const body = `[${finding.severity}] ${finding.body}`;
+    const key = `${finding.filePath}:${finding.lineNumber}:${body}`;
+    if (existingOpen.has(key)) continue;
+    existingOpen.add(key);
     database
       .insert(reviewComments)
       .values({
@@ -789,16 +828,72 @@ export function ingestProseFindings(input: {
         epicId: input.epicId,
         filePath: finding.filePath,
         lineNumber: finding.lineNumber,
-        body: `[${finding.severity}] ${finding.body}`,
+        body,
         author: "agent",
         status: "open",
+        agentSessionId: input.sessionId ?? null,
         createdAt: now,
         updatedAt: now,
       })
       .run();
+    created += 1;
   }
 
-  return parsed.length;
+  return created;
+}
+
+/**
+ * `[RC:id] FIXED` / `[RC:id] STILL OPEN` lines in a review report — the
+ * prose fallback of the structured `submit_findings.prior_findings` channel.
+ * The prior-findings prompt section (lib/pipeline/stages.ts) asks the
+ * reviewer for both; a reviewer on an MCP-less provider only produces this
+ * one. Backticks and simple separators around the token are tolerated.
+ */
+const PRIOR_FINDING_VERDICT_RE =
+  /\[RC:([A-Za-z0-9_-]+)\]`?\s*(?:[-—:*]+\s*)?\**(FIXED|STILL OPEN)\**/gi;
+
+/**
+ * Resolve the epic's prior findings a review report declares FIXED.
+ *
+ * Only open, agent-authored rows of THIS epic are touched, so a hallucinated
+ * or stale id no-ops. Rows already resolved through the structured channel
+ * are skipped by the same status filter. Returns the resolved ids.
+ */
+export function resolvePriorFindingsFromProse(input: {
+  epicId: string;
+  sessionOutput: string;
+  database?: ArijDatabase;
+}): string[] {
+  const database = input.database ?? defaultDb;
+  const fixedIds = new Set<string>();
+  for (const match of input.sessionOutput.matchAll(PRIOR_FINDING_VERDICT_RE)) {
+    if (match[2].toUpperCase() === "FIXED") fixedIds.add(match[1]);
+  }
+  if (fixedIds.size === 0) return [];
+
+  const now = new Date().toISOString();
+  const resolved: string[] = [];
+  for (const id of fixedIds) {
+    const row = database
+      .select({
+        id: reviewComments.id,
+        epicId: reviewComments.epicId,
+        status: reviewComments.status,
+        author: reviewComments.author,
+      })
+      .from(reviewComments)
+      .where(eq(reviewComments.id, id))
+      .get();
+    if (!row || row.epicId !== input.epicId) continue;
+    if (row.author !== "agent" || row.status !== "open") continue;
+    database
+      .update(reviewComments)
+      .set({ status: "resolved", updatedAt: now })
+      .where(eq(reviewComments.id, id))
+      .run();
+    resolved.push(id);
+  }
+  return resolved;
 }
 
 /* ------------------------------------------------------------------ */
@@ -856,6 +951,16 @@ export function assessReviewOutcome(input: {
   const proseNegative = isNegativeProseVerdict(input.sessionOutput);
   const usedProseFallback = agentCommentCount === 0;
 
+  // Prior findings the report declares FIXED are resolved first — the prose
+  // fallback of submit_findings.prior_findings. Scoped to pre-window rows by
+  // construction (an [RC:id] token only exists for a finding the prompt
+  // listed), so this never touches the verdict below.
+  resolvePriorFindingsFromProse({
+    epicId: input.epicId,
+    sessionOutput: input.sessionOutput,
+    database,
+  });
+
   // Recover anchored findings from the report BEFORE collecting, so a
   // prose-only review still hands the next builder file+line context.
   //
@@ -869,6 +974,7 @@ export function assessReviewOutcome(input: {
         epicId: input.epicId,
         sinceIso: input.sinceIso,
         sessionOutput: input.sessionOutput,
+        sessionId: input.reviewSessionId ?? null,
         database,
       })
     : 0;

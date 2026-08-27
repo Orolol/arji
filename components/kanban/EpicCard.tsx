@@ -87,11 +87,11 @@ export interface EpicCardView {
    * A queued OR running session owns this epic. Broader than `activity`,
    * which only covers agents that already started: merging removes the epic's
    * worktree, so a merge over a QUEUED build drops it into a directory that
-   * no longer exists. The approve route refuses the same case with a 409;
+   * no longer exists. The merge route refuses the same case with a 409;
    * this keeps the board from offering the click at all.
    */
   agentBusy?: boolean;
-  /** Merge this epic (POST .../approve). Absent when the card is not ready. */
+  /** Merge this epic (POST .../merge). Absent when the card is not ready. */
   onMerge?: () => void;
   /** Dispatch the merge-conflict resolution flow. */
   onResolveMerge?: () => void;
@@ -267,7 +267,7 @@ export function EpicCard({
 
   // Merge affordances. Any session that owns the ticket — queued or running —
   // suppresses them: the card defers to the activity line rather than
-  // offering a click the approve route would refuse (or, worse, one that
+  // offering a click the merge route would refuse (or, worse, one that
   // would pull the worktree out from under a build about to start).
   const mergePending = mergeState?.pending === true;
   const mergeLocked = mergeState?.locked === true;

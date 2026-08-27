@@ -104,7 +104,7 @@ export const createEpicSchema = z.object({
   description: z.string().trim().max(10000).nullish(),
   priority: z.number().int().min(0).max(3).optional(),
   status: z
-    .enum(["backlog", "todo", "in_progress", "review", "done"])
+    .enum(["backlog", "todo", "in_progress", "review", "to_merge", "done"])
     .optional(),
   type: z.enum(["feature", "bug"]).optional(),
   branchName: z.string().max(300).nullish(),
@@ -153,7 +153,7 @@ export const updateEpicSchema = z.object({
   description: z.string().max(10000).nullish(),
   priority: z.number().int().min(0).max(3).optional(),
   status: z
-    .enum(["backlog", "todo", "in_progress", "review", "done"])
+    .enum(["backlog", "todo", "in_progress", "review", "to_merge", "done"])
     .optional(),
   position: z.number().int().min(0).optional(),
   branchName: z.string().max(300).nullish(),

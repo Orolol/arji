@@ -162,7 +162,6 @@ export function EpicDetail({
     sendToReview,
     sendToGrading,
     resolveMerge,
-    approve,
   } = useAgentDispatch(projectId, { kind: "epic", epicId });
 
   const {
@@ -286,22 +285,12 @@ export function EpicDetail({
     setResolvingMerge(false);
   }
 
-  async function handleApprove() {
-    try {
-      await approve();
-      setMergeError(null);
-    } catch (e) {
-      if (isAgentAlreadyRunningError(e)) {
-        onAgentConflict?.({
-          message: e.message,
-          sessionUrl: e.sessionUrl || `/projects/${projectId}/sessions/${e.activeSessionId}`,
-        });
-      }
-      // Same surface as resolve-merge failures: the destructive line in the
-      // Git section, next to the Resolve Merge action the message points at.
-      setMergeError(e instanceof Error ? e.message : "Failed to approve epic");
-    }
-    // Refresh either way — on a merge failure the epic stayed in review.
+  async function handleMerge() {
+    // The merge IS the approval. useEpicMutations owns the request and its
+    // error surface (mergeError / mergeConflict in the Git section, next to
+    // the Resolve Merge action the message points at).
+    await merge();
+    // Refresh either way — on a merge failure the epic keeps its status.
     refresh();
   }
 
@@ -602,7 +591,7 @@ export function EpicDetail({
                 onSendToDev={handleSendToDev}
                 onSendToReview={handleSendToReview}
                 onSendToGrading={handleSendToGrading}
-                onApprove={handleApprove}
+                onComplete={handleMerge}
                 onActionError={(error) => {
                   if (isAgentAlreadyRunningError(error)) {
                     onAgentConflict?.({
@@ -817,7 +806,7 @@ export function EpicDetail({
                   epicId={epicId}
                   epicStatus={epic.status}
                   onBackToDev={handleBackToDev}
-                  onApprove={handleApprove}
+                  onMerge={handleMerge}
                   dispatching={dispatching}
                   isRunning={isRunning}
                 />
@@ -837,7 +826,7 @@ export function EpicDetail({
                   commentsLoading={commentsLoading}
                   onAddComment={addComment}
                   onSendToDev={
-                    epic && ["backlog", "todo", "in_progress", "review"].includes(epic.status)
+                    epic && ["backlog", "todo", "in_progress", "review", "to_merge"].includes(epic.status)
                       ? async () => {
                           try {
                             await sendToDev();

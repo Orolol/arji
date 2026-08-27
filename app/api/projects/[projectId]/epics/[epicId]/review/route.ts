@@ -51,8 +51,14 @@ import {
 import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
-import { transitionReviewRejected } from "@/lib/workflow/automatic-transitions";
-import { resolveReviewVerdict } from "@/lib/pipeline/findings";
+import {
+  transitionReviewRejected,
+  transitionReviewPassed,
+} from "@/lib/workflow/automatic-transitions";
+import {
+  resolveReviewVerdict,
+  resolvePriorFindingsFromProse,
+} from "@/lib/pipeline/findings";
 import { handleAskedQuestionOutcome } from "@/lib/workflow/agent-question";
 import {
   emitSessionStarted,
@@ -107,9 +113,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   const foundEpic = getEpicOr404(projectId, epicId);
   if (isErrorResponse(foundEpic)) return foundEpic;
   const { epic } = foundEpic;
-  if (epic.status !== "review" && epic.status !== "done") {
+  if (
+    epic.status !== "review" &&
+    epic.status !== "to_merge" &&
+    epic.status !== "done"
+  ) {
     return NextResponse.json(
-      { error: "Epic must be in review or done status for agent review" },
+      { error: "Epic must be in review, to merge or done status for agent review" },
       { status: 400 }
     );
   }
@@ -337,6 +347,12 @@ export async function POST(request: NextRequest, { params }: Params) {
         // reviewer's persisted submit_findings verdict, else the prose scan of
         // its final message (lib/pipeline/findings.ts owns the priority; a
         // reviewer on a provider without MCP only ever produces the prose one).
+        // Prose fallback of submit_findings.prior_findings: [RC:id] FIXED
+        // lines in the report resolve the prior findings they name.
+        if (!askedQuestion) {
+          resolvePriorFindingsFromProse({ epicId, sessionOutput: output });
+        }
+
         const decision = askedQuestion
           ? null
           : resolveReviewVerdict({
@@ -358,7 +374,12 @@ export async function POST(request: NextRequest, { params }: Params) {
             .where(eq(epics.id, epicId))
             .get();
 
-          if (currentEpic && (currentEpic.status === "done" || currentEpic.status === "review")) {
+          if (
+            currentEpic &&
+            (currentEpic.status === "done" ||
+              currentEpic.status === "review" ||
+              currentEpic.status === "to_merge")
+          ) {
             transitionReviewRejected({
               projectId,
               epicId,
@@ -367,6 +388,26 @@ export async function POST(request: NextRequest, { params }: Params) {
               sessionId: sid,
               verdictSource: decision.source,
             });
+          }
+        } else if (decision && !decision.unverifiable && result?.success) {
+          // Review passed: promote to the merge boundary. transitionReviewPassed
+          // itself no-ops (with a decision line) when the ticket already left
+          // review — e.g. a concurrent move while the reviewer ran.
+          try {
+            transitionReviewPassed({
+              projectId,
+              epicId,
+              scope: "epic",
+              reason: `Review verdict: passed (${lbl})`,
+              sessionId: sid,
+              verdictSource:
+                decision.source === "structured" ? "structured" : "prose",
+            });
+          } catch (err) {
+            console.warn(
+              "[review] review passed but to_merge promotion was refused:",
+              (err as Error).message
+            );
           }
         }
       });

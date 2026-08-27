@@ -29,6 +29,7 @@ import {
 import { agentScheduler } from "@/lib/agents/scheduler";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
 import { applyTransition } from "@/lib/workflow/transition-service";
+import { resolveOpenReviewComments } from "@/lib/workflow/merge-approval";
 import { logTransition } from "@/lib/workflow/log";
 import {
   buildMergeBlockedReason,
@@ -68,11 +69,12 @@ export async function POST(
     return NextResponse.json({ error: "Epic has no branch to merge" }, { status: 400 });
   }
 
-  // Workflow guards run before git, so a dirty review can never be merged.
+  // Workflow guards run before git, so only a ticket at the merge boundary
+  // (to_merge) can land on main.
   const preflight = applyTransition({
     projectId,
     epicId,
-    fromStatus: (epic.status ?? "review") as KanbanStatus,
+    fromStatus: (epic.status ?? "to_merge") as KanbanStatus,
     toStatus: "done",
     actor: "user",
     source: "merge",
@@ -102,7 +104,11 @@ export async function POST(
   );
 
   if (result.merged) {
-    const prevStatus = (epic.status ?? "review") as KanbanStatus;
+    const prevStatus = (epic.status ?? "to_merge") as KanbanStatus;
+
+    // The merge is the approval: whatever review comments stayed open —
+    // minor findings, notes from earlier cycles — are accepted with it.
+    resolveOpenReviewComments(epicId);
 
     // Re-check and apply after git: guards may have changed during the merge.
     const validation = applyTransition({
@@ -242,11 +248,12 @@ export async function POST(
           { defaultBranch: project.defaultBranch }
         );
         if (retryResult.merged) {
+          resolveOpenReviewComments(epicId);
           const currentStatus = (db
             .select({ status: epics.status })
             .from(epics)
             .where(eq(epics.id, epicId))
-            .get()?.status ?? "review") as KanbanStatus;
+            .get()?.status ?? "to_merge") as KanbanStatus;
           const transition = applyTransition({
             projectId,
             epicId,

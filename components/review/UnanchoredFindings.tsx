@@ -6,11 +6,16 @@ import type { ReviewComment } from "@/hooks/useReviewComments";
 import { InlineCommentThread } from "./InlineCommentThread";
 
 /**
- * Review comments whose (filePath, lineNumber) does not match any line of the
- * currently rendered diff. Inline threads only render on matching DiffLine
- * rows, so without this partition agent-submitted findings (submit_findings
- * anchors to arbitrary file+line, including unchanged lines or files outside
- * the diff) would be invisible while still blocking approval.
+ * OPEN review comments whose (filePath, lineNumber) does not match any line
+ * of the currently rendered diff. Inline threads only render on matching
+ * DiffLine rows, so without this partition agent-submitted findings
+ * (submit_findings anchors to arbitrary file+line, including unchanged lines
+ * or files outside the diff) would be invisible while still awaiting a fix.
+ *
+ * Resolved comments are excluded: on a ticket that went through several
+ * review cycles the resolved tail grows without bound, and a list of greyed
+ * rows under "outside the diff" carries no information the ticket history
+ * does not.
  */
 export function partitionUnanchoredComments(
   files: FileDiff[],
@@ -29,7 +34,8 @@ export function partitionUnanchoredComments(
     }
   }
   return comments.filter(
-    (c) => !anchored.has(`${c.filePath}:${c.lineNumber}`)
+    (c) =>
+      c.status === "open" && !anchored.has(`${c.filePath}:${c.lineNumber}`)
   );
 }
 
@@ -73,7 +79,8 @@ export function UnanchoredFindings({
         <FileQuestion className="h-4 w-4 text-amber-500" />
         Findings outside the diff
         <span className="text-xs text-muted-foreground font-normal">
-          — anchored to lines not shown above; open ones still block approval
+          — anchored to lines not shown above; resolved by the reviewer or by
+          the merge
         </span>
       </div>
       {Array.from(groups.entries()).map(([key, group]) => (

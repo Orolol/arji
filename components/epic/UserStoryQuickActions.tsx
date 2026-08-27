@@ -94,11 +94,8 @@ export function UserStoryQuickActions({
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error || "Failed to approve");
-      // Approving the last story merges the epic; a 200 can still report
-      // that the merge failed — the story is approved, the epic is not merged.
-      if (data.data?.mergeError) {
-        setError(`Story approved, but the epic merge failed: ${data.data.mergeError}`);
-      }
+      // Story approval closes the story only — the epic closes through its
+      // own merge (to_merge → done).
       onRefresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to approve");

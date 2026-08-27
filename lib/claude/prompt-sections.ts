@@ -258,7 +258,8 @@ export function arijToolsSection(
     "create_bug to preserve an adjacent bug as a standalone, non-blocking " +
     "ticket in the current project; " +
     "update_ticket_status to move the ticket (transitions are validated — " +
-    "review→done requires human approval); ask_question when you are blocked " +
+    "To Merge is reached by a passing review verdict and Done by the merge " +
+    "itself, never by this tool); ask_question when you are blocked " +
     "on the user — it reliably holds the ticket and marks the session as " +
     "awaiting a reply, so prefer it over ending with a question in text. " +
     "When something is broken, misleading, flaky, or unclear, call " +
@@ -285,12 +286,14 @@ export function arijToolsSection(
   const reviewExtra =
     agentType && agentType.startsWith("review_")
       ? " submit_findings is the channel your review is read from: its " +
-        "verdict decides whether the ticket goes back for changes, and each " +
-        "finding you file (file+line anchored) becomes an open review " +
-        "comment that blocks approval until it is resolved — so an " +
-        "'approved' verdict alongside an open [critical] or [major] finding " +
-        "still blocks. Call it once, at the end, with your real verdict. " +
-        "Also end your final message with the required " +
+        "verdict decides the ticket's next column — a passing verdict moves " +
+        "it to To Merge (ready for the user to merge), 'changes_requested' " +
+        "sends it back to In Progress. Each finding you file (file+line " +
+        "anchored) becomes a review comment on the ticket. When your prompt " +
+        "lists prior findings with [RC:id] tokens, report each one you " +
+        "verified in prior_findings ('fixed' resolves it in Arij; a finding " +
+        "you do not mention stays open). Call it once, at the end, with " +
+        "your real verdict. Also end your final message with the required " +
         "'**Overall Verdict: …**' line: it is the fallback Arij reads only " +
         "when no submit_findings verdict was recorded."
       : "";

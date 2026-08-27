@@ -204,7 +204,7 @@ export const PIPELINE_REASONS = {
   pausedQuestion: (stage: string) =>
     `Pipeline paused: agent asked a question (${stage})`,
   cancelled: "Pipeline stopped: session cancelled by user",
-  finished: "Pipeline finished: review passed, awaiting approval",
+  finished: "Pipeline finished: review passed — ticket ready to merge",
   failedFindings: (cycles: number) =>
     `Pipeline failed: blocking findings remain after ${cycles} fix cycles`,
   failedStage: (stage: string, attempts: number) =>

@@ -3,10 +3,11 @@
  * tool.
  *
  * Binds straight to the unified transition service, so agent moves obey
- * exactly the same workflow engine as UI drags: review→done still requires
- * the human approve/merge flow, and "released" is not even in the input enum
- * (system-only status). Invalid transitions surface as 409 tool errors the
- * agent can read and react to.
+ * exactly the same workflow engine as UI drags. Neither "to_merge" nor
+ * "done" is in the input enum: To Merge is reached through a passing review
+ * verdict (the review drivers, source "review"), Done through a successful
+ * merge, and "released" is system-only. Invalid transitions surface as 409
+ * tool errors the agent can read and react to.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -28,7 +29,7 @@ import { REFINEMENT_AGENT_TYPE } from "@/lib/refinement/constants";
 
 const bodySchema = z
   .object({
-    status: z.enum(["backlog", "todo", "in_progress", "review", "done"]),
+    status: z.enum(["backlog", "todo", "in_progress", "review"]),
     ticket_id: z.string().min(1).optional(),
     reason: z.string().max(500).optional(),
   })

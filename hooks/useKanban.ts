@@ -11,7 +11,7 @@ import {
   type TicketDependencyEdge,
   type ReorderItem,
 } from "@/lib/types/kanban";
-import { sortReviewColumn } from "@/lib/kanban/merge-readiness";
+import { sortMergeColumn } from "@/lib/kanban/merge-readiness";
 import { persistedColumnOrder } from "@/lib/kanban/reorder";
 
 interface ReleaseRow {
@@ -33,6 +33,7 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       todo: [],
       in_progress: [],
       review: [],
+      to_merge: [],
       done: [],
       released: [],
     },
@@ -104,6 +105,7 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
         todo: [],
         in_progress: [],
         review: [],
+        to_merge: [],
         done: [],
         released: [],
       };
@@ -126,14 +128,15 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
         columns[col].sort((a, b) => a.position - b.position);
       }
 
-      // Review is the one column whose order is not purely `position`:
-      // merge-ready tickets float to the top so the column's two sections are
-      // contiguous slices of ONE array. Sorting here rather than in the
-      // column component keeps a single order in play — drag indices, the
-      // optimistic splice in `moveEpic` and the persisted positions all agree
-      // with what the user sees, and section membership stays derived (a card
-      // dropped into the other section keeps its new position and snaps back).
-      columns.review = sortReviewColumn(columns.review);
+      // To Merge is the one column whose order is not purely `position`:
+      // merge-ready tickets float to the top (conflicted branches sink) so
+      // the column's two sections are contiguous slices of ONE array. Sorting
+      // here rather than in the column component keeps a single order in play
+      // — drag indices, the optimistic splice in `moveEpic` and the persisted
+      // positions all agree with what the user sees, and section membership
+      // stays derived (a card dropped into the other section keeps its new
+      // position and snaps back).
+      columns.to_merge = sortMergeColumn(columns.to_merge);
 
       const releaseGroups: ReleaseGroup[] = releaseRows.map((rel) => {
         let epicIds: string[] = [];
@@ -286,13 +289,13 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
         });
       }
 
-      // Re-establish Review's ready-first order NOW, with the fresh
+      // Re-establish To Merge's ready-first order NOW, with the fresh
       // positions. The Board renders this exact array and derives drop
       // indices from it, so leaving it in drop order while the Board re-split
       // the sections for display would make the next drag anchor against a
       // different sequence than the user is looking at.
-      if (touched.has("review")) {
-        next.columns.review = sortReviewColumn(next.columns.review);
+      if (touched.has("to_merge")) {
+        next.columns.to_merge = sortMergeColumn(next.columns.to_merge);
       }
 
       boardRef.current = next;
@@ -334,16 +337,16 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       );
 
       // Optimistic half: the reorder route rewrites the same positions.
-      // Review is DISPLAYED merge-ready-first, so the priority ranking lands
-      // in `position` while the column keeps showing its two sections — the
-      // sort reorders within each, which is what the user is looking at.
+      // To Merge is DISPLAYED merge-ready-first, so the priority ranking
+      // lands in `position` while the column keeps showing its two sections —
+      // the sort reorders within each, which is what the user is looking at.
       setBoard((prev) => {
         const next = {
           columns: { ...prev.columns },
           releaseGroups: prev.releaseGroups,
         };
         next.columns[column] =
-          column === "review" ? sortReviewColumn(repositioned) : repositioned;
+          column === "to_merge" ? sortMergeColumn(repositioned) : repositioned;
         return next;
       });
 

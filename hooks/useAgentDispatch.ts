@@ -150,9 +150,16 @@ export function useAgentDispatch(projectId: string, target: AgentDispatchTarget)
     [kind, targetPath, requestJson, pollSessions]
   );
 
-  const approve = useCallback(async () => {
+  /**
+   * Merge the epic's branch — the merge IS the approval. Epic targets hit
+   * POST .../merge; story targets keep the story approve route (a story has
+   * no branch of its own).
+   */
+  const merge = useCallback(async () => {
     if (!targetPath) return;
-    const res = await fetch(`${targetPath}/approve`, {
+    const endpoint =
+      kind === "epic" ? `${targetPath}/merge` : `${targetPath}/approve`;
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
@@ -161,7 +168,7 @@ export function useAgentDispatch(projectId: string, target: AgentDispatchTarget)
       throw toAgentRequestError(data);
     }
     return data.data;
-  }, [targetPath]);
+  }, [kind, targetPath]);
 
   const isRunning = activeSessions.some((s) => s.status === "running");
   const activeSession = activeSessions[0] ?? null;
@@ -175,7 +182,7 @@ export function useAgentDispatch(projectId: string, target: AgentDispatchTarget)
     sendToReview,
     sendToGrading,
     resolveMerge,
-    approve,
+    merge,
     refreshSessions: pollSessions,
   };
 }

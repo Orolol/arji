@@ -418,13 +418,13 @@ export function Board({
       for (const epic of board.columns[status]) {
         const failedSession = failedSessions?.[epic.id];
 
-        // Merge affordances belong to the Review column alone: the signal is
-        // only meaningful there, and a Merge button on an In Progress card
-        // would be an invitation the approve route refuses.
-        const inReview = status === "review";
+        // Merge affordances belong to the To Merge column alone: the signal
+        // is only meaningful there, and a Merge button on an In Progress card
+        // would be an invitation the merge route refuses.
+        const inMergeColumn = status === "to_merge";
         const isThisPending = activeMergeEpicId === epic.id;
         const isLocked = activeMergeEpicId !== null && !isThisPending;
-        const baseMergeState = inReview ? mergeStateByEpic[epic.id] : undefined;
+        const baseMergeState = inMergeColumn ? mergeStateByEpic[epic.id] : undefined;
         const mergeState = baseMergeState || isLocked
           ? {
               ...baseMergeState,
@@ -447,12 +447,12 @@ export function Board({
           unreadAi: unreadAiByEpicId[epic.id] || false,
           awaitingReply: isAwaitingReply(epic),
           failedSession,
-          mergeReadiness: inReview ? epic.mergeReadiness : undefined,
+          mergeReadiness: inMergeColumn ? epic.mergeReadiness : undefined,
           mergeState,
           agentBusy: busyEpicIds?.has(epic.id) || false,
-          onMerge: inReview ? () => merge(epic.id) : undefined,
-          onResolveMerge: inReview ? () => resolveMerge(epic.id) : undefined,
-          onDismissMergeError: inReview
+          onMerge: inMergeColumn ? () => merge(epic.id) : undefined,
+          onResolveMerge: inMergeColumn ? () => resolveMerge(epic.id) : undefined,
+          onDismissMergeError: inMergeColumn
             ? () => dismissMergeError(epic.id)
             : undefined,
           onToggleSelect: onToggleSelect
@@ -532,11 +532,11 @@ export function Board({
   ]);
 
   /**
-   * The Review column's two derived sections, SLICED out of the rendered
+   * The To Merge column's two derived sections, SLICED out of the rendered
    * array rather than rebuilt from it.
    *
    * This is load-bearing. `handleDragEnd` derives the drop index from
-   * `board.columns.review`, and `moveEpic` splices into (and
+   * `board.columns.to_merge`, and `moveEpic` splices into (and
    * `persistedColumnOrder` anchors against) that same array — so the order
    * drawn on screen has to BE that array, not a re-derived permutation of it.
    * `useKanban` keeps the column merge-ready-first on load and after every
@@ -545,12 +545,12 @@ export function Board({
    * Slicing at the first non-ready card, rather than partitioning, is what
    * enforces the invariant instead of papering over it: if a card ever sits
    * out of order (an optimistic drop whose readiness has not been recomputed
-   * yet), it is grouped under "In review" for one refresh — the render order
+   * yet), it is grouped under "Blocked" for one refresh — the render order
    * still matches the array exactly, so no drag can be persisted to the wrong
    * rank.
    */
-  const reviewSections = useMemo<ColumnSection[]>(() => {
-    const visible = visibleColumns.review;
+  const mergeSections = useMemo<ColumnSection[]>(() => {
+    const visible = visibleColumns.to_merge;
     let boundary = 0;
     while (boundary < visible.length && isMergeReadyEpic(visible[boundary])) {
       boundary += 1;
@@ -564,7 +564,7 @@ export function Board({
         accent: true,
         emptyHint: "Nothing cleared review yet.",
       },
-      { key: "in-review", label: "In review", epics: visible.slice(boundary) },
+      { key: "blocked", label: "Blocked", epics: visible.slice(boundary) },
     ];
   }, [visibleColumns]);
 
@@ -773,7 +773,7 @@ export function Board({
                 key={status}
                 status={status}
                 epics={visibleColumns[status]}
-                sections={status === "review" ? reviewSections : undefined}
+                sections={status === "to_merge" ? mergeSections : undefined}
                 onEpicClick={handleEpicClick}
                 epicViews={epicViews}
                 dropDisabled={filtersActive && activeColumn === status}

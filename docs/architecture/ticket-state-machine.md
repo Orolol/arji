@@ -9,34 +9,64 @@ board event. Both write an identifiable same-state activity entry when a guard
 refuses a move. Inserts may set an initial status; those are ticket creation,
 not state transitions.
 
+## The workflow (2026-08-27 refonte — the merge is the approval)
+
+The epic lifecycle has exactly one human decision point, the merge:
+
+1. A build agent finishes → the ticket moves to `review`.
+2. The review agent's verdict decides: passing → `to_merge`;
+   `changes_requested` → back to `in_progress`.
+3. From `to_merge` the USER merges (with an optional merge-fix agent for
+   conflicts). A successful merge moves the ticket to `done` and resolves
+   whatever review comments were still open (`lib/workflow/merge-approval.ts`).
+
+There is no manual approve step: `POST .../approve` (epic) was removed, and
+`→ done` is only reachable with `source: "merge"`.
+
 ## Resulting state machine
 
 | From | To | Trigger/reason | Production source |
 |---|---|---|---|
 | `backlog` | `todo` | planning / drag | epic PATCH, reorder, MCP |
 | `backlog` or `todo` | `in_progress` | build accepted; transition completes **before** `queued` session insert. Full Auto is the exception on the source side: it selects and dispatches only from `todo`/`in_progress` (`BUILDABLE_EPIC_STATUSES`), so a `backlog` build comes from a manual dispatch, a batch/night run or a pipeline | `automatic-transitions.ts` via manual build, batch/night, pipeline and Full Auto |
-| `review` | `in_progress` | story-scoped build of a story left behind (added mid-build, or added to an epic already in Review); the epic reopens to finish it. Full Auto allows this one parent status beyond its buildable set (`STORY_PARENT_BUILDABLE_STATUSES`) and refuses to merge an epic with such a story | `automatic-transitions.ts` via `transitionBuildStarted` |
+| `review` or `to_merge` | `in_progress` | story-scoped build of a story left behind (added mid-build, or added to an epic already past In Progress); the epic reopens to finish it. Full Auto allows these parent statuses beyond its buildable set (`STORY_PARENT_BUILDABLE_STATUSES`) and refuses to merge an epic with such a story | `automatic-transitions.ts` via `transitionBuildStarted` |
 | `in_progress` | `review` | successful build (`answered` and legacy successful outcomes); epic scope advances only stories already `in_progress` (a story added mid-build stays `todo`), story scope only promotes the parent after every story is `review`/`done` | `automatic-transitions.ts` |
 | current | current | failed build, unanswered question, successful story with siblings remaining, or refused terminal promotion; no status write, explicit activity reason, terminal handlers continue posting agent output. A refusal persists `transition_refused`, settles pipeline/wave work as failed, emits failure feedback, and counts toward Full Auto parking | terminal outcome helper / question handler |
-| `review` or `done` | `in_progress` | negative review / requested changes; the review session is already terminal | `automatic-transitions.ts` via review routes and pipeline |
-| `review` | `done` | explicit approval or merge; requires a completed review that delivered evidence and zero open comments. A review on an MCP-capable provider that filed neither a `submit_findings` verdict nor a finding row is *unverifiable* and does not satisfy the guard — the refusal names the broken channel | approve/merge routes, Full Auto merge |
-| story `review` | story `done` | explicit human story approval does not require a separate story review-agent session and never mutates epic-scoped findings; parent completion is attempted separately under the strict epic guards | story approve route |
+| `review`, `to_merge` or `done` | `in_progress` | negative review / requested changes; the review session is already terminal | `automatic-transitions.ts` via review routes and pipeline (`transitionReviewRejected`) |
+| `review` | `to_merge` | PASSING review verdict (structured `submit_findings` verdict, or the prose scan for MCP-less providers). Requires a completed review that delivered evidence; a review on an MCP-capable provider that filed neither a verdict nor a finding row is *unverifiable*, leaves the ticket in `review`, and earns another review. A human may also drag/select this edge — the same completed-review guard applies | `automatic-transitions.ts` via `transitionReviewPassed` (pipeline `finalizeReviewSession`, epic review route); drag/API for humans |
+| `to_merge` | `done` | successful merge ONLY (`source: "merge"`). The merge bulk-resolves the epic's remaining open review comments — the merge IS the approval. Conflicts dispatch a merge-fix agent whose retry finalizes the same way | merge / resolve-merge routes, Full Auto merge |
+| story `review` | story `done` | explicit human story approval (`source: "approve"`, no separate review-agent session required) or the parent epic's merge cascade (`completeReviewedStories`). Story approval never merges or closes the epic | story approve route; merge cascade |
 | `done` | `released` | release creation, system actor only | releases route |
 | any structurally allowed edge | target | manual drag/API/MCP or guarded `arji.json` reconciliation | epic/story PATCH, reorder, MCP, sync import |
 
-The structural edge list lives in `lib/workflow/engine.ts`. `released` is
-terminal. `review → done` cannot be achieved by drag/API; its source must be
-`approve` or `merge`. An `in_progress` ticket cannot leave the column while a
-`build`, `ticket_build`, or `team_build` session is queued/running; review,
-chat, merge and auxiliary sessions do not own that column. Full Auto
-deliberately excludes backlog: only todo/in-progress are candidates (plus a
-leftover story under a `review` parent), ordered by column rank then board
-`position` — In Progress drains before To Do — and the driver owns the move to
-`in_progress`. A rejected review returning to `in_progress` remains
-automatically buildable. Epic approval advances only children already in
-`review`; todo/in-progress children are retained and named in the activity
-log, returned as `skippedStories`, and shown persistently on a delivered epic
-card as an unfinished-stories warning.
+The structural edge lists live in `lib/workflow/engine.ts` — `EPIC_TRANSITIONS`
+(with `to_merge` between `review` and `done`) and `STORY_TRANSITIONS` (no
+`to_merge`: stories have no branch of their own; the engine's `targetKind`
+selects the graph). `released` is terminal. `→ done` cannot be achieved by
+drag/API for epics; its source must be `merge` (stories: `approve` or
+`merge`). Agents cannot reach `to_merge` through `update_ticket_status`
+(source `api` is refused; only source `review` — the review drivers — or a
+human). An `in_progress` ticket cannot leave the column while a `build`,
+`ticket_build`, or `team_build` session is queued/running; review, chat,
+merge and auxiliary sessions do not own that column. Full Auto deliberately
+excludes backlog: only todo/in-progress are candidates (plus a leftover story
+under a `review`/`to_merge` parent), ordered by column rank then board
+`position` — In Progress drains before To Do — and the driver owns the move
+to `in_progress`. A rejected review returning to `in_progress` remains
+automatically buildable.
+
+### Findings lifecycle
+
+`review_comments` rows are display truth, not a transition gate. Three things
+resolve them: the reviewer of a later cycle reporting
+`prior_findings: [{id, status: "fixed"}]` through `submit_findings` (the ids
+are injected into its prompt as `[RC:id]` tokens); the prose fallback
+`[RC:id] FIXED` lines parsed by `resolvePriorFindingsFromProse`
+(lib/pipeline/findings.ts) for MCP-less providers; and the merge, which
+resolves everything still open (`resolveOpenReviewComments`). Blocking
+severity (`[critical]`/`[major]`) still vetoes a review verdict within its
+stage window — that is what sends a ticket back to `in_progress` instead of
+`to_merge` — but open findings no longer block the merge itself.
 
 ## Exhaustive workflow-service call sites
 
@@ -60,16 +90,15 @@ Full Auto itself does not write status: `lib/auto-mode/select.ts` selects and
 
 ### Manual, approval, merge and reconciliation calls
 
-- `app/api/mcp/update-ticket-status/route.ts:44` — MCP/manual agent request.
-- `app/api/projects/[projectId]/epics/[epicId]/route.ts:49` — epic PATCH.
-- `app/api/projects/[projectId]/epics/reorder/route.ts:79,118` — drag preflight and apply.
-- `app/api/projects/[projectId]/stories/[storyId]/route.ts:62` and `user-stories/route.ts:103` — story PATCH variants.
-- `app/api/projects/[projectId]/epics/[epicId]/approve/route.ts:60,78,103` — epic approval plus eligible reviewed stories; skipped child states are logged.
-- `app/api/projects/[projectId]/stories/[storyId]/approve/route.ts:51,70,82,98` — explicit story approval (without resolving epic findings) and separately guarded last-story epic completion.
-- `app/api/projects/[projectId]/epics/[epicId]/merge/route.ts:63,99,238` — manual merge preflight/finalization and merge-fix finalization.
-- `app/api/projects/[projectId]/epics/[epicId]/resolve-merge/route.ts:105,128,282,303` — clean/conflicted merge resolution.
-- `lib/auto-mode/merge.ts:162,320` — Full Auto merge finalization and preflight.
-- `app/api/projects/[projectId]/releases/route.ts:451` — `done → released`.
+- `app/api/mcp/update-ticket-status/route.ts` — MCP/manual agent request (enum: backlog/todo/in_progress/review only).
+- `app/api/projects/[projectId]/epics/[epicId]/route.ts` — epic PATCH.
+- `app/api/projects/[projectId]/epics/reorder/route.ts` — drag preflight and apply.
+- `app/api/projects/[projectId]/stories/[storyId]/route.ts` and `user-stories/route.ts` — story PATCH variants.
+- `app/api/projects/[projectId]/stories/[storyId]/approve/route.ts` — explicit story approval; never merges nor closes the epic (a decision line records when the last story closed).
+- `app/api/projects/[projectId]/epics/[epicId]/merge/route.ts` — manual merge preflight/finalization (resolves open findings on success) and merge-fix finalization.
+- `app/api/projects/[projectId]/epics/[epicId]/resolve-merge/route.ts` — clean/conflicted merge resolution; both success paths resolve open findings, and a refused completion after a merge-fix leaves a ticket comment + notification instead of returning silently.
+- `lib/auto-mode/merge.ts` — Full Auto merge finalization (resolves open findings after the guarded transition) and preflight.
+- `app/api/projects/[projectId]/releases/route.ts` — `done → released`.
 - `lib/sync/import.ts:88,162` — guarded status changes for existing imported epics/stories; refused statuses are logged, returned in `statusesSkipped`, and skipped while other content continues. Epic move events are emitted only after commit. New rows only receive an initial status.
 
 The only existing-ticket status writes are therefore
@@ -91,11 +120,11 @@ requests.
 | successful/`answered` build promotion; incomplete siblings stay with a reason | `automatic-transition-invariants.test.ts` — “deterministic build completion” |
 | terminal refusal is non-throwing, preserves output, persists `transition_refused`, settles pipeline work as failed, and cannot revive a released ticket | `automatic-transition-invariants.test.ts`; `pipeline-stages-dispatch.test.ts`; `epic-build-asked-question.test.ts` |
 | one refused team-build promotion does not abort later epics | `automatic-transition-invariants.test.ts` — team-build isolation regression |
-| stories added mid-build stay todo; epic approval returns/logs non-review children and delivered cards warn while they remain unfinished | `automatic-transition-invariants.test.ts`; `workflow-approval-regressions.test.ts`; `epic-card.test.tsx` |
-| story approval is explicit human review, preserves all epic-scoped findings, and holds the strict parent guard independently | `workflow-approval-regressions.test.ts` — multi-story finding regression |
+| stories added mid-build stay todo; the merge cascade returns/logs non-review children and delivered cards warn while they remain unfinished | `automatic-transition-invariants.test.ts`; `workflow-approval-regressions.test.ts`; `epic-card.test.tsx` |
+| story approval is explicit human review, closes only the story, and never merges the epic | `workflow-approval-regressions.test.ts` |
 | refused import statuses preserve content, are returned in `statusesSkipped`, and transaction rollback emits no phantom move | `arji-json-sync-roundtrip.test.ts` — guarded reconciliation regressions |
 | error and `asked_question` terminal branches | `automatic-transition-invariants.test.ts` terminal tests; `epic-build-asked-question.test.ts` route regression |
-| `review → done` needs completed review and no open comments | `workflow-engine.test.ts`; `auto-mode-merge.test.ts` |
+| `review → to_merge` needs a completed verifiable review; `→ done` needs source `merge`; the merge resolves open comments | `workflow-engine.test.ts`; `auto-mode-merge.test.ts` |
 | a review that filed nothing through `submit_findings` counts as neither clean nor completed, and a 401 on that call is traced onto the ticket | `review-unverifiable-gate.test.ts` |
 | an unverifiable review with nothing to act on earns a re-review, never a rebuild, and three of them park the epic | `pipeline-runner.test.ts`; `auto-mode-engine.test.ts` |
 | an unverifiable review whose prose yielded findings dispatches a fix instead of discarding them | `pipeline-runner.test.ts`; `review-unverifiable-gate.test.ts` |
@@ -105,7 +134,7 @@ requests.
 | negative review returns to `in_progress` | `automatic-transition-invariants.test.ts`; `pipeline-stages-dispatch.test.ts` |
 | occupied/awaiting tickets are excluded and consecutive sweeps do not double-dispatch | `auto-mode-select.test.ts`; `auto-mode-engine.test.ts` budget/idempotence tests |
 | review freshness prevents infinite re-review | `auto-mode-select.test.ts`; `auto-mode-e2e.test.ts` |
-| merge is refused until review is clean | `auto-mode-merge.test.ts`; `auto-mode-e2e.test.ts` |
+| only `to_merge` epics are merge candidates; a passing verdict promotes there | `auto-mode-merge.test.ts`; `auto-mode-select.test.ts`; `pipeline-stages-dispatch.test.ts` |
 | terminal hook cannot re-dispatch before promotion is attempted | `auto-mode-engine.test.ts` — kick deferral |
 | refused terminal promotions feed the Full Auto failure/parking ladder instead of clearing it | `auto-mode-engine.test.ts` — `transition_refused` parking regression |
 

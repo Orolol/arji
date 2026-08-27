@@ -51,6 +51,7 @@ import {
   providerAcceptsAssignedSessionId,
 } from "@/lib/agent-sessions/resume-capability";
 import { applyTransition } from "@/lib/workflow/transition-service";
+import { resolveOpenReviewComments } from "@/lib/workflow/merge-approval";
 import type { KanbanStatus } from "@/lib/types/kanban";
 
 type Params = { params: Promise<{ projectId: string; epicId: string }> };
@@ -144,7 +145,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const preflight = applyTransition({
       projectId,
       epicId,
-      fromStatus: (epic.status ?? "review") as KanbanStatus,
+      fromStatus: (epic.status ?? "to_merge") as KanbanStatus,
       toStatus: "done",
       actor: "user",
       source: "merge",
@@ -190,10 +191,13 @@ export async function POST(request: NextRequest, { params }: Params) {
       );
     }
 
+    // The merge is the approval: open review comments are accepted with it.
+    resolveOpenReviewComments(epicId);
+
     const transition = applyTransition({
       projectId,
       epicId,
-      fromStatus: (epic.status ?? "review") as KanbanStatus,
+      fromStatus: (epic.status ?? "to_merge") as KanbanStatus,
       toStatus: "done",
       actor: "user",
       source: "merge",
@@ -326,7 +330,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         .select({ status: epics.status })
         .from(epics)
         .where(eq(epics.id, epicId))
-        .get()?.status ?? "review") as KanbanStatus;
+        .get()?.status ?? "to_merge") as KanbanStatus;
       const preflight = applyTransition({
         projectId,
         epicId,
@@ -338,7 +342,35 @@ export async function POST(request: NextRequest, { params }: Params) {
         sessionId,
         validateOnly: true,
       });
-      if (!preflight.valid) return;
+      if (!preflight.valid) {
+        // A silent return here is how tickets used to get stuck in a merge
+        // loop: the agent resolved the conflicts, the workflow refused the
+        // completion, and nobody was told. Leave a trail.
+        try {
+          db.insert(ticketComments)
+            .values({
+              id: createId(),
+              epicId,
+              author: "agent",
+              content: `**Merge resolution finished, but the ticket could not be completed.** ${preflight.error ?? "The workflow engine refused the transition."}\n\nThe branch was NOT merged. Fix the refusal reason, then run the merge again.`,
+              agentSessionId: sessionId,
+              createdAt: completedAt,
+            })
+            .run();
+          createMergeRetryFailedNotification({
+            projectId,
+            epicId,
+            sessionId,
+            error: preflight.error ?? "Workflow transition refused",
+          });
+        } catch (trailError) {
+          console.error(
+            "[resolve merge] Failed to record the refusal trail:",
+            trailError
+          );
+        }
+        return;
+      }
       if (!autoModeRegistry.tryLockProjectMerge(projectId)) {
         createMergeRetryFailedNotification({
           projectId,
@@ -368,6 +400,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
 
       if (finalMerge.merged) {
+        resolveOpenReviewComments(epicId);
         const transition = applyTransition({
           projectId,
           epicId,
@@ -378,7 +411,28 @@ export async function POST(request: NextRequest, { params }: Params) {
           reason: "Merge-fix agent resolved conflicts and merged",
           sessionId,
         });
-        if (!transition.valid) return;
+        if (!transition.valid) {
+          // The branch IS on main at this point — never fail silently, or
+          // the board and the repository quietly disagree.
+          try {
+            db.insert(ticketComments)
+              .values({
+                id: createId(),
+                epicId,
+                author: "agent",
+                content: `**Branch merged, but the ticket could not be moved to Done.** ${transition.error ?? "The workflow engine refused the transition."}\n\nThe code IS on main; move the ticket manually once the refusal reason is fixed.`,
+                agentSessionId: sessionId,
+                createdAt: completedAt,
+              })
+              .run();
+          } catch (trailError) {
+            console.error(
+              "[resolve merge] Failed to record the post-merge refusal trail:",
+              trailError
+            );
+          }
+          return;
+        }
         db.update(epics)
           .set({ branchName: null, updatedAt: completedAt })
           .where(eq(epics.id, epicId))

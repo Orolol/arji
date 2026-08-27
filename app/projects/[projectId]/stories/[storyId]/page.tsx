@@ -49,7 +49,7 @@ export default function StoryDetailPage() {
     isRunning,
     sendToDev,
     sendToReview,
-    approve,
+    merge,
   } = useAgentDispatch(projectId, {
     kind: "story",
     storyId,
@@ -152,15 +152,12 @@ export default function StoryDetailPage() {
           onSendToReview={async (types, namedAgentId, resumeSessionId) => {
             await sendToReview(types, namedAgentId, resumeSessionId);
           }}
-          onApprove={async () => {
-            // Thrown errors are caught by AgentActionsBar and routed to
-            // onActionError. A 200 response can still carry a mergeError
-            // (story approved, epic merge failed) — surface that too.
-            const result = (await approve()) as { mergeError?: string } | undefined;
+          onComplete={async () => {
+            // Story approval closes the story only; the epic closes through
+            // its own merge. Thrown errors are caught by AgentActionsBar and
+            // routed to onActionError.
+            await merge();
             refreshStory();
-            if (result?.mergeError) {
-              addToast(`Story approved, but the epic merge failed: ${result.mergeError}`);
-            }
           }}
           activeSessionId={activeSession?.id || null}
           onActionError={handleAgentActionError}

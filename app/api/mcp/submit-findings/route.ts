@@ -2,11 +2,14 @@
  * POST /api/mcp/submit-findings — the mcp__arij__submit_findings tool
  * (review sessions).
  *
- * Storage decision: per-finding rows go into review_comments because that is
- * the table the workflow actually enforces on — open rows block review→done
- * (lib/workflow/context.ts feeding the engine guards) and the approve route
- * bulk-resolves them. One summary ticket comment mirrors the verdict into the
- * activity feed (same mirror pattern as the review-comments route).
+ * Storage decision: per-finding rows go into review_comments — the table the
+ * review UI renders and the prior-findings section of the next review cycle
+ * is built from. Open rows no longer gate any transition (the merge IS the
+ * approval and resolves what remains), but their open/resolved state is the
+ * board's display truth, which is why `prior_findings` below exists: it is
+ * the reviewer's structured channel for marking earlier findings fixed. One
+ * summary ticket comment mirrors the verdict into the activity feed (same
+ * mirror pattern as the review-comments route).
  *
  * The verdict is persisted on the CALLING SESSION's row
  * (agent_sessions.review_verdict) and is the authoritative transition signal
@@ -52,6 +55,13 @@ const findingSchema = z
   })
   .strict();
 
+const priorFindingSchema = z
+  .object({
+    id: z.string().min(1),
+    status: z.enum(["fixed", "still_open"]),
+  })
+  .strict();
+
 const bodySchema = z
   .object({
     verdict: z.enum([
@@ -61,6 +71,7 @@ const bodySchema = z
     ]),
     summary: z.string().min(1).max(4000),
     findings: z.array(findingSchema).max(50),
+    prior_findings: z.array(priorFindingSchema).max(100).optional(),
   })
   .strict();
 
@@ -120,6 +131,34 @@ export async function POST(request: NextRequest) {
     findingIds.push(id);
   }
 
+  // Prior-findings verification: the reviewer's structured word on the
+  // findings of EARLIER cycles. "fixed" resolves the row — this is the only
+  // agent channel that closes a finding, and without it every fixed finding
+  // stayed "open" in the UI forever. Scoped to this epic and to open agent
+  // rows so a reviewer can neither resolve another ticket's findings nor
+  // human-authored comments.
+  const resolvedIds: string[] = [];
+  for (const prior of body.prior_findings ?? []) {
+    if (prior.status !== "fixed") continue;
+    const row = db
+      .select({
+        id: reviewComments.id,
+        epicId: reviewComments.epicId,
+        status: reviewComments.status,
+        author: reviewComments.author,
+      })
+      .from(reviewComments)
+      .where(eq(reviewComments.id, prior.id))
+      .get();
+    if (!row || row.epicId !== epic.id) continue;
+    if (row.author !== "agent" || row.status !== "open") continue;
+    db.update(reviewComments)
+      .set({ status: "resolved", updatedAt: now })
+      .where(eq(reviewComments.id, prior.id))
+      .run();
+    resolvedIds.push(prior.id);
+  }
+
   // The verdict belongs to the session, not to a finding — a summary-only
   // review files zero findings and still delivered a verdict. Scoped to the
   // token's own session id, so a review can only ever speak for itself.
@@ -140,5 +179,5 @@ export async function POST(request: NextRequest) {
     })
     .run();
 
-  return NextResponse.json({ data: { findingIds, commentId } });
+  return NextResponse.json({ data: { findingIds, resolvedIds, commentId } });
 }

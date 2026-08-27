@@ -6,9 +6,9 @@
  * its rules the client can evaluate on its own so the status dropdown only
  * offers what the engine would accept:
  *
- * - structural edges (backlog → todo → in_progress → review → done →
- *   released);
- * - review → done requires the explicit Approve action (or a merge) — a
+ * - structural edges (backlog → todo → in_progress → review → to_merge →
+ *   done → released);
+ * - `→ done` requires a successful merge (the merge IS the approval) — a
  *   plain status change is rejected by the engine, so the option is shown
  *   but explicitly disabled with the reason;
  * - released is a system-only destination (release creation moves tickets
@@ -51,8 +51,8 @@ export interface TicketStatusContext {
   hasRunningSession?: boolean;
 }
 
-export const REASON_APPROVAL_REQUIRED =
-  "Done requires approval — use the Approve action.";
+export const REASON_MERGE_REQUIRED =
+  "Done requires a merge — use the Merge action.";
 export const REASON_RELEASED_SYSTEM_ONLY =
   "Tickets reach Released automatically when a release is created.";
 export const REASON_SESSION_RUNNING =
@@ -108,16 +108,16 @@ export function ticketStatusOptions(
       };
     }
 
-    // review → done carries the engine's approval guard (completed review,
-    // resolved comments, approve/merge): a plain status change is rejected,
-    // so the option is shown but explicitly disabled with the reason.
-    if (from === "review" && status === "done") {
+    // `→ done` carries the engine's merge guard (source "merge" only): a
+    // plain status change is rejected, so the option is shown but explicitly
+    // disabled with the reason.
+    if (status === "done") {
       return {
         status,
         label,
         isCurrent: false,
         enabled: false,
-        disabledReason: REASON_APPROVAL_REQUIRED,
+        disabledReason: REASON_MERGE_REQUIRED,
       };
     }
 

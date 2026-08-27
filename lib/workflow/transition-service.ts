@@ -34,13 +34,6 @@ export interface ApplyTransitionOpts {
   validateOnly?: boolean;
   /** Buffer the ticket:moved event in the caller until its transaction commits. */
   deferEvent?: boolean;
-  /**
-   * When true, validate as if every open review comment were already
-   * resolved. For the approve flow's pre-merge check: approval bulk-resolves
-   * comments and closes the ticket in one action, but must validate BEFORE
-   * writing anything — the comment resolution included.
-   */
-  assumeReviewCommentsResolved?: boolean;
 }
 
 export interface ApplyTransitionResult {
@@ -77,13 +70,6 @@ export interface ApplyStoryTransitionOpts {
   reviewScope?: "story" | "epic";
   /** Explicit human story approval does not require a separate review-agent session. */
   requireCompletedReview?: boolean;
-  /** Epic-scoped findings stay open when one child story is approved. */
-  requireResolvedComments?: boolean;
-  /**
-   * Validate as if every open review comment were already resolved — for the
-   * approve flow, which bulk-resolves them as part of the same action.
-   */
-  assumeReviewCommentsResolved?: boolean;
   /**
    * Whether this story's move gets an activity row of its own. Default true.
    *
@@ -107,7 +93,6 @@ export interface CompleteReviewedStoriesOpts {
   reason: string;
   sessionId?: string;
   validateOnly?: boolean;
-  assumeReviewCommentsResolved?: boolean;
 }
 
 function logRefusedTransition(opts: {
@@ -159,7 +144,6 @@ export function applyTransition(opts: ApplyTransitionOpts): ApplyTransitionResul
     sessionId,
     validateOnly,
     deferEvent,
-    assumeReviewCommentsResolved,
   } = opts;
 
   // Same-status is a no-op (reorder within column)
@@ -178,9 +162,6 @@ export function applyTransition(opts: ApplyTransitionOpts): ApplyTransitionResul
     sessionId,
   });
   ctx.source = source;
-  if (assumeReviewCommentsResolved) {
-    ctx.hasOpenReviewComments = false;
-  }
   const result = validateTransition(ctx);
   if (!result.valid) {
     logRefusedTransition({
@@ -212,7 +193,6 @@ export function applyTransition(opts: ApplyTransitionOpts): ApplyTransitionResul
           reason: reason ?? "Parent epic completed",
           ...(sessionId ? { sessionId } : {}),
           validateOnly,
-          assumeReviewCommentsResolved,
         })
       : { valid: true as const };
   if (!storyCompletion.valid) {
@@ -280,8 +260,6 @@ export function applyStoryTransition(
     validateOnly,
     reviewScope = "story",
     requireCompletedReview = true,
-    requireResolvedComments = true,
-    assumeReviewCommentsResolved,
     logActivity = true,
   } = opts;
 
@@ -293,14 +271,11 @@ export function applyStoryTransition(
     fromStatus,
     toStatus,
     actor,
+    targetKind: "story",
     sessionId,
     requireCompletedReview,
-    requireResolvedComments,
   });
   ctx.source = source;
-  if (assumeReviewCommentsResolved) {
-    ctx.hasOpenReviewComments = false;
-  }
   const result = validateTransition(ctx);
   if (!result.valid) {
     logRefusedTransition({
@@ -378,7 +353,6 @@ export function completeReviewedStories(
       ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
       reviewScope: "epic",
       validateOnly: true,
-      assumeReviewCommentsResolved: opts.assumeReviewCommentsResolved,
     });
     if (!validation.valid) {
       return {
@@ -407,7 +381,6 @@ export function completeReviewedStories(
       reason: opts.reason,
       ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
       reviewScope: "epic",
-      assumeReviewCommentsResolved: opts.assumeReviewCommentsResolved,
     });
     if (!transition.valid) {
       return {

@@ -52,7 +52,10 @@ import {
 import { validateResumeSession } from "@/lib/agent-sessions/validate-resume";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import { transitionReviewRejected } from "@/lib/workflow/automatic-transitions";
-import { resolveReviewVerdict } from "@/lib/pipeline/findings";
+import {
+  resolveReviewVerdict,
+  resolvePriorFindingsFromProse,
+} from "@/lib/pipeline/findings";
 
 type Params = { params: Promise<{ projectId: string; storyId: string }> };
 
@@ -344,6 +347,15 @@ export async function POST(request: NextRequest, { params }: Params) {
         // persisted submit_findings verdict, else the prose scan of its final
         // message (lib/pipeline/findings.ts owns the priority; a reviewer on
         // a provider without MCP only ever produces the prose one).
+        // Prose fallback of submit_findings.prior_findings: [RC:id] FIXED
+        // lines in the report resolve the prior findings they name.
+        if (!askedQuestion) {
+          resolvePriorFindingsFromProse({
+            epicId: epic.id,
+            sessionOutput: output,
+          });
+        }
+
         const decision = askedQuestion
           ? null
           : resolveReviewVerdict({

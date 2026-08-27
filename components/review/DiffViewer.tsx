@@ -18,7 +18,8 @@ interface DiffViewerProps {
   epicId: string;
   epicStatus: string;
   onBackToDev: (comment: string) => Promise<unknown>;
-  onApprove: () => Promise<unknown>;
+  /** Merge the epic's branch — the merge IS the approval. */
+  onMerge: () => Promise<unknown>;
   dispatching?: boolean;
   isRunning?: boolean;
 }
@@ -28,7 +29,7 @@ export function DiffViewer({
   epicId,
   epicStatus,
   onBackToDev,
-  onApprove,
+  onMerge,
   dispatching,
   isRunning,
 }: DiffViewerProps) {
@@ -44,9 +45,9 @@ export function DiffViewer({
     refresh: refreshComments,
   } = useReviewComments(projectId, epicId);
 
-  // Review comments (typically agent-submitted findings) whose file:line has
-  // no matching line in the rendered diff — they must stay visible because
-  // open ones block approval.
+  // Open review comments (typically agent-submitted findings) whose file:line
+  // has no matching line in the rendered diff — they must stay visible so the
+  // reviewer's unresolved feedback is never silently hidden.
   const unanchoredComments = partitionUnanchoredComments(files, comments);
 
   const totalAdditions = files.reduce(
@@ -188,7 +189,7 @@ export function DiffViewer({
         openCount={openCount}
         comments={comments}
         onBackToDev={onBackToDev}
-        onApprove={onApprove}
+        onMerge={onMerge}
         onResolveAll={resolveAll}
         dispatching={dispatching}
         isRunning={isRunning}

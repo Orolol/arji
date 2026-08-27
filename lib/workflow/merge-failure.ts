@@ -46,28 +46,18 @@ function reasonPrefix(build: (argument: string) => string): string {
   return prefix;
 }
 
-/** Head of the reason `POST .../approve` logs when a merge hits conflicts. */
+/**
+ * Head of the reason the RETIRED `POST .../approve` route logged when a merge
+ * hit conflicts. The route is gone (the merge is the approval now), but the
+ * rows it wrote are permanent activity history: the prefix stays in the
+ * recognized lists below so a conflict recorded before the workflow change
+ * still reads as one.
+ */
 export const APPROVAL_MERGE_BLOCKED_PREFIX = "Approval blocked: merge of ";
 
-/** The approve route's merge-conflict reason. */
-export function buildApprovalMergeBlockedReason(input: {
-  branchName: string;
-  error: string;
-}): string {
-  return `${APPROVAL_MERGE_BLOCKED_PREFIX}${input.branchName} failed — ${input.error}`;
-}
-
-/** Head of the reason `POST .../approve` logs when a branch has committed conflict markers. */
+/** Retired approve route's conflict-markers reason head — same rationale. */
 export const APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX =
   "Approval blocked: conflict markers on ";
-
-/** The approve route's conflict-markers reason. */
-export function buildApprovalConflictMarkersBlockedReason(input: {
-  branchName: string;
-  error: string;
-}): string {
-  return `${APPROVAL_CONFLICT_MARKERS_BLOCKED_PREFIX}${input.branchName} — ${input.error}`;
-}
 
 /** Head of the reason `POST .../merge` logs when a direct merge hits conflicts. */
 export const MERGE_BLOCKED_PREFIX = "Merge blocked: merge of ";
