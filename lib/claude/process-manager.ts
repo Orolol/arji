@@ -16,7 +16,8 @@ import {
   MCP_CHANNEL_INJECTED,
   MCP_CHANNEL_UNAVAILABLE,
 } from "./mcp-injection";
-import { arijToolsSection } from "./prompt-sections";
+import { arijToolsSection, extraMcpServersSection } from "./prompt-sections";
+import { resolveExtraMcpServers } from "@/lib/mcp/servers";
 import { isMcpExemptAgentType } from "@/lib/workflow/dreaming-constants";
 import {
   mintMcpToken,
@@ -271,14 +272,37 @@ class ClaudeProcessManager {
             userStoryId: row.userStoryId,
             agentType: row.agentType,
           });
+          // User-declared servers ride alongside the arij channel. Resolution
+          // (scope, enabled, agent_types, provider capability) lives in
+          // lib/mcp/servers.ts; a failure here is caught by the same
+          // best-effort try/catch as the rest of injection, so a broken extra
+          // can cost the session its tools but never its spawn.
+          const extras = resolveExtraMcpServers({
+            projectId: row.projectId,
+            provider,
+            agentType: row.agentType ?? null,
+          });
+          if (extras.excludedProjectScoped.length > 0) {
+            // Not silent: `${provider}` reads a user-global MCP registry that
+            // Arij cannot vary per spawn, so these project-scoped servers
+            // cannot reach it. The UI states the same limitation per server.
+            console.info(
+              `[process-manager] session ${sessionId}: provider "${provider}" ` +
+                "cannot honor project-scoped MCP servers " +
+                `(${extras.excludedProjectScoped.join(", ")}) — ` +
+                "only global servers are injected for it",
+            );
+          }
           options.mcp = buildMcpSpawnConfig({
             token,
             agentType: row.agentType,
             provider,
+            extraServers: extras.servers,
           });
           options.prompt +=
             "\n" +
-            arijToolsSection(row.agentType ?? null, arijMcpToolPrefix(provider));
+            arijToolsSection(row.agentType ?? null, arijMcpToolPrefix(provider)) +
+            extraMcpServersSection(extras.servers, provider);
         }
       }
     } catch (error) {

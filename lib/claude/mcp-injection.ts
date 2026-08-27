@@ -37,7 +37,11 @@ import { eq } from "drizzle-orm";
 import { db, type ArijDatabase } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { getAppBaseUrl } from "@/lib/webhooks/send";
-import type { McpSpawnConfig } from "@/lib/providers/types";
+import type {
+  McpServerSpec,
+  McpSpawnConfig,
+  McpStdioServerSpec,
+} from "@/lib/providers/types";
 
 /**
  * Settings key for the global toggle. Absent row = enabled; only an
@@ -109,6 +113,50 @@ export function arijMcpToolPrefix(provider: string): string {
   if (provider === "agy") return "";
   const separator = provider === "oh-my-pi" ? "_" : "__";
   return `mcp__${ARIJ_MCP_SERVER_NAME}${separator}`;
+}
+
+/**
+ * A THIRD-PARTY server's allowlist entry, in `provider`'s spelling.
+ *
+ * Arij's own tools are enumerable (ARIJ_MCP_AGENT_TOOLS), so they go into the
+ * allowlist one by one. A user-declared server's tools are not: they are
+ * whatever that server answers `tools/list` with, which Arij only learns by
+ * contacting it — and a build must not depend on a third-party process being
+ * reachable at spawn time. So an extra contributes ONE whole-server entry
+ * (`mcp__godot` on claude/codex, `mcp__godot_` on omp) unless the user pinned
+ * a `tool_allowlist`, in which case the pinned names are spelled out and the
+ * whole-server entry is withheld.
+ *
+ * agy is the odd one out: it mounts MCP tools under their BARE names, so
+ * there is no server-level entry to write at all. Its allowlist contribution
+ * is the pinned tool names or nothing — which is consistent with agy also
+ * being `user-global` scope, where the server set is not ours to vary anyway.
+ *
+ * Only claude-code actually CONSUMES `allowedToolNames` (buildClaudeArgs
+ * merges it into `--allowedTools`). codex has no allowlist flag, and on omp
+ * MCP tools are orthogonal to `--tools` — feeding one in is a fatal argv
+ * error (measured on 17.2.1, see lib/providers/oh-my-pi.ts). The entries are
+ * still produced in the session provider's spelling because that is the one
+ * spelling any consumer of this config may use.
+ */
+export function extraMcpAllowlistEntries(
+  provider: string,
+  server: { name: string; toolAllowlist?: string[] | null },
+): string[] {
+  const pinned = server.toolAllowlist;
+  if (pinned && pinned.length > 0) {
+    return pinned.map((tool) => `${extraMcpToolPrefix(provider, server.name)}${tool}`);
+  }
+  if (provider === "agy") return [];
+  const separator = provider === "oh-my-pi" ? "_" : "";
+  return [`mcp__${server.name}${separator}`];
+}
+
+/** A third-party server's tool prefix, in `provider`'s spelling. */
+export function extraMcpToolPrefix(provider: string, serverName: string): string {
+  if (provider === "agy") return "";
+  const separator = provider === "oh-my-pi" ? "_" : "__";
+  return `mcp__${serverName}${separator}`;
 }
 
 /** One tool's full name in `provider`'s spelling. */
@@ -302,15 +350,23 @@ export function buildMcpSpawnConfig({
   toolset = "agent",
   agentType = null,
   provider = "claude-code",
+  extraServers = [],
 }: {
   token: string;
   toolset?: ArijMcpToolset;
   /** Narrows the agent toolset — see AGENT_TYPE_WITHHELD_TOOL_NAMES. */
   agentType?: string | null;
   provider?: string;
+  /**
+   * User-declared servers already resolved for this session
+   * (lib/mcp/servers.ts resolveExtraMcpServers): enabled, agent-type
+   * eligible, project entries shadowing globals of the same name, and
+   * filtered by the provider's extra-MCP scope.
+   */
+  extraServers?: McpServerSpec[];
 }): McpSpawnConfig {
-  return {
-    serverName: ARIJ_MCP_SERVER_NAME,
+  const arijChannel: McpStdioServerSpec = {
+    name: ARIJ_MCP_SERVER_NAME,
     command: process.execPath,
     args: [path.join(process.cwd(), ...ARIJ_MCP_SHIM_RELATIVE_PATH)],
     env: {
@@ -318,10 +374,23 @@ export function buildMcpSpawnConfig({
       ARIJ_MCP_TOKEN: token,
       ...(toolset === "chat" ? { ARIJ_MCP_TOOLSET: "chat" as const } : {}),
     },
-    allowedToolNames:
-      toolset === "chat"
+  };
+
+  // The reserved name is enforced at validation time (lib/mcp/servers.ts), but
+  // the control channel is too important to depend on that alone: a row that
+  // predates the rule, or arrives by any other path, must not displace it.
+  const extras = extraServers.filter(
+    (server) => server.name !== ARIJ_MCP_SERVER_NAME,
+  );
+
+  return {
+    servers: [arijChannel, ...extras],
+    allowedToolNames: [
+      ...(toolset === "chat"
         ? ARIJ_MCP_CHAT_TOOLS.map((tool) => arijMcpToolName(provider, tool))
-        : allowedToolNamesForAgentType(agentType, provider),
+        : allowedToolNamesForAgentType(agentType, provider)),
+      ...extras.flatMap((server) => extraMcpAllowlistEntries(provider, server)),
+    ],
   };
 }
 
@@ -332,21 +401,36 @@ export const MCP_CONFIG_DIR_PREFIX = "arij-mcp-";
 export const MCP_CONFIG_FILE_NAME = "mcp-config.json";
 
 /**
- * The `--mcp-config` payload for the claude CLI, as a plain object.
+ * The `--mcp-config` payload for the claude CLI, as a JSON string.
+ *
+ * Every resolved server lands here, not just Arij's: `--strict-mcp-config`
+ * makes this file the COMPLETE server set for the spawn, so a user-declared
+ * server that is missing from it is simply absent from the session.
  * Exported so tests can assert the file's contents without duplicating the
  * shape.
  */
 export function buildClaudeMcpConfigJson(mcp: McpSpawnConfig): string {
-  return JSON.stringify({
-    mcpServers: {
-      [mcp.serverName]: {
-        type: "stdio",
-        command: mcp.command,
-        args: mcp.args,
-        env: mcp.env,
-      },
-    },
-  });
+  const mcpServers: Record<string, unknown> = {};
+  for (const server of mcp.servers) {
+    // A later entry of the same name would overwrite an earlier one, which is
+    // precisely the shadowing rule the resolver already applied (project beats
+    // global). servers[0] is the arij channel and its name is reserved, so it
+    // can never be the one overwritten.
+    mcpServers[server.name] =
+      server.command !== undefined
+        ? {
+            type: "stdio",
+            command: server.command,
+            args: server.args,
+            env: server.env,
+          }
+        : {
+            type: "http",
+            url: server.url,
+            headers: server.headers,
+          };
+  }
+  return JSON.stringify({ mcpServers });
 }
 
 /**

@@ -856,3 +856,66 @@ export const providerUsageSnapshots = sqliteTable("provider_usage_snapshots", {
 
 export type ProviderUsageSnapshot = typeof providerUsageSnapshots.$inferSelect;
 export type NewProviderUsageSnapshot = typeof providerUsageSnapshots.$inferInsert;
+
+/**
+ * User-declared third-party MCP servers (epic "Serveurs MCP additionnels,
+ * globaux et par projet").
+ *
+ * `projectId` NULL = a global server injected into every project's
+ * sessions; a value scopes the server to one project. The cascade FK
+ * makes project deletion clean up the project's servers automatically.
+ * `name` is unique per scope in the service (lib/mcp/servers.ts) — a
+ * SQLite UNIQUE index cannot express "unique among the globals" because
+ * NULLs are distinct — and the name `arij` is reserved by the service.
+ *
+ * `env` / `headers` values are write-only: reads mask them (see
+ * maskMcpServerSecrets), and `agentTypes` NULL means "every session type"
+ * (agent types AND chat turns).
+ */
+export const mcpServers = sqliteTable(
+  "mcp_servers",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").references(() => projects.id, {
+      onDelete: "cascade",
+    }),
+    name: text("name").notNull(),
+    enabled: integer("enabled", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    transport: text("transport", { enum: ["stdio", "http"] })
+      .notNull()
+      .default("stdio"),
+    command: text("command"),
+    args: text("args").notNull().default("[]"),
+    env: text("env").notNull().default("{}"),
+    url: text("url"),
+    headers: text("headers").notNull().default("{}"),
+    /** JSON array of agent types ("chat" names CLI chat turns); NULL = all. */
+    agentTypes: text("agent_types"),
+    /** JSON array of bare tool names; NULL = every tool the server exposes. */
+    toolAllowlist: text("tool_allowlist"),
+    usageHint: text("usage_hint"),
+    lastCheckedAt: text("last_checked_at"),
+    /** Tri-state: NULL = never checked. */
+    lastCheckOk: integer("last_check_ok", { mode: "boolean" }),
+    lastCheckError: text("last_check_error"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    scopeNameIdx: index("mcp_servers_scope_name_idx").on(
+      table.projectId,
+      table.name
+    ),
+    transportCheck: check(
+      "mcp_servers_transport_check",
+      sql`${table.transport} IN ('stdio', 'http')`
+    ),
+  })
+);
+
+export type McpServer = typeof mcpServers.$inferSelect;
+export type NewMcpServer = typeof mcpServers.$inferInsert;
+

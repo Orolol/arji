@@ -24,6 +24,12 @@
  * config selects the shim's "chat" toolset, so the CLI sees the board tools
  * instead of the agent toolset.
  *
+ * User-declared MCP servers (lib/mcp/servers.ts) are resolved here too, with
+ * agent type "chat", so a conversation reaches the same third-party servers a
+ * build would. The OpenAI-compatible fast path is NOT an MCP host and is
+ * deliberately untouched: it has board tools of its own (lib/chat/board-tools.ts)
+ * and no way to mount a third-party MCP server.
+ *
  * Strictly best-effort: a chat turn must never fail because the tool channel
  * did, so any error here degrades to a plain (uninjected) spawn.
  */
@@ -36,7 +42,8 @@ import {
 } from "@/lib/claude/mcp-injection";
 import { isToolIneligibleConversationAgentType } from "@/lib/chat/conversation-agent";
 import { mintMcpToken, revokeMcpTokensForSession } from "@/lib/mcp/token-store";
-import type { McpSpawnConfig } from "@/lib/providers/types";
+import { resolveExtraMcpServers } from "@/lib/mcp/servers";
+import type { McpServerSpec, McpSpawnConfig } from "@/lib/providers/types";
 
 export interface ChatCliToolChannel {
   /** Spawn config to pass as `options.mcp` (scoped chat toolset token). */
@@ -68,9 +75,35 @@ export function createChatCliToolChannel({
       agentType: "chat",
     });
 
+    // Story parity: the chat channel does NOT go through
+    // processManager.start(), so without this it would be the one surface
+    // where user-declared MCP servers are silently absent — available in
+    // build and review, missing in chat. Same merge rule as an agent session;
+    // the agent type is "chat", so a server whose `agent_types` omits it stays
+    // out. Best-effort like the rest of this function: a resolution failure
+    // degrades to the arij channel alone rather than losing the turn's tools.
+    let extraServers: McpServerSpec[] = [];
+    try {
+      extraServers = resolveExtraMcpServers({
+        projectId,
+        provider,
+        agentType: "chat",
+      }).servers;
+    } catch (error) {
+      console.warn(
+        "[chat] extra MCP servers skipped for this turn:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+
     let released = false;
     return {
-      mcp: buildMcpSpawnConfig({ token, toolset: "chat", provider }),
+      mcp: buildMcpSpawnConfig({
+        token,
+        toolset: "chat",
+        provider,
+        extraServers,
+      }),
       release: () => {
         if (released) return;
         released = true;
