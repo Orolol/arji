@@ -178,6 +178,7 @@ export async function pushGitBranch(
   const options = setUpstream ? ["--set-upstream"] : [];
   return git.push(cleanRemote, cleanBranch, options);
 }
+
 export async function validatePushPreconditions(
   repoPath: string,
   branch: string,

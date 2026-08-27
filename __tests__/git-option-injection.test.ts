@@ -44,27 +44,47 @@ describe("git option-injection defense", () => {
   });
 
   describe("nonInteractiveEnv", () => {
-    it("disables interactive credential prompts while stripping all 18 dangerous environment variables", () => {
+    it("disables interactive credential prompts while stripping all dangerous environment variables regardless of casing", () => {
       const dangerousKeys = [
         "GIT_EDITOR",
+        "git_editor",
         "GIT_SEQUENCE_EDITOR",
+        "git_sequence_editor",
         "GIT_PAGER",
+        "git_pager",
         "GIT_SSH",
+        "git_ssh",
         "GIT_SSH_COMMAND",
+        "git_ssh_command",
         "GIT_CONFIG",
+        "git_config",
         "GIT_CONFIG_GLOBAL",
+        "git_config_global",
         "GIT_CONFIG_SYSTEM",
+        "git_config_system",
         "GIT_CONFIG_COUNT",
+        "git_config_count",
+        "GIT_CONFIG_KEY_0",
+        "git_config_key_0",
+        "GIT_CONFIG_VALUE_0",
+        "git_config_value_0",
         "GIT_EXEC_PATH",
+        "git_exec_path",
         "GIT_EXTERNAL_DIFF",
+        "git_external_diff",
         "GIT_PROXY_COMMAND",
+        "git_proxy_command",
         "GIT_TEMPLATE_DIR",
+        "git_template_dir",
         "EDITOR",
+        "editor",
         "PAGER",
+        "pager",
         "PREFIX",
+        "prefix",
       ];
 
-      // Temporarily populate process.env with dangerous keys
+      // Temporarily populate process.env with dangerous keys in various casings
       const originalEnv = { ...process.env };
       for (const key of dangerousKeys) {
         process.env[key] = "malicious-value";
@@ -79,7 +99,7 @@ describe("git option-injection defense", () => {
         expect(env.SSH_ASKPASS).toBe("");
         expect(env.GCM_INTERACTIVE).toBe("never");
 
-        // Must strip all 18 dangerous keys
+        // Must strip all dangerous keys in all casing variants
         for (const key of dangerousKeys) {
           expect(env[key]).toBeUndefined();
         }

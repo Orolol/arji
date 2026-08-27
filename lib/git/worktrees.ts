@@ -128,4 +128,3 @@ export async function pruneOrphanWorktrees(
 
   return { pruned: Math.max(0, orphansBefore - orphansAfter), remaining };
 }
-

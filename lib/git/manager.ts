@@ -234,8 +234,9 @@ async function grepFilesInRef(
     const batch = files.slice(i, i + GREP_PATHSPEC_BATCH);
     let out: string;
     try {
-      // Invariant: `--` separator ensures file paths in batch are treated as
-      // pathspecs, not options. `pattern` and `ref` are positioned as subcommand operands.
+      // Invariant: `--` separator ensures file paths in batch are treated as pathspecs,
+      // not options. `pattern` is always a fixed regex literal from findConflictMarkerFiles
+      // and `ref` is branchName validated before mergeWorktree calls here.
       out = await git.raw([
         // Raw paths in the output: quotepath would octal-escape non-ASCII
         // filenames ("caf\303\251.ts"), which then match nothing when the
