@@ -97,7 +97,8 @@ requests.
 | error and `asked_question` terminal branches | `automatic-transition-invariants.test.ts` terminal tests; `epic-build-asked-question.test.ts` route regression |
 | `review → done` needs completed review and no open comments | `workflow-engine.test.ts`; `auto-mode-merge.test.ts` |
 | a review that filed nothing through `submit_findings` counts as neither clean nor completed, and a 401 on that call is traced onto the ticket | `review-unverifiable-gate.test.ts` |
-| an unverifiable review earns a re-review, never a rebuild, and three of them park the epic | `pipeline-runner.test.ts`; `auto-mode-engine.test.ts` |
+| an unverifiable review with nothing to act on earns a re-review, never a rebuild, and three of them park the epic | `pipeline-runner.test.ts`; `auto-mode-engine.test.ts` |
+| an unverifiable review whose prose yielded findings dispatches a fix instead of discarding them | `pipeline-runner.test.ts`; `review-unverifiable-gate.test.ts` |
 | a session whose MCP channel Arij could not wire is judged by prose, not refused | `review-channel-wiring.test.ts`; `mcp-injection-lifecycle.test.ts` |
 | the JS rule and the merge gate's SQL give the same verdict for every review row shape | `review-gate-consistency.test.ts` |
 | a second opinion that approved through its prose fail-safe is never charged as a failure | `review-gate-consistency.test.ts`; `auto-mode-engine.test.ts` |

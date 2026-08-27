@@ -35,10 +35,17 @@ interface ScriptedStage {
 /**
  * `true`/`false` = blocking findings or a clean review. `"throw"` = the
  * assessment itself crashed. `"unverifiable"` = the review delivered but its
- * structured channel produced nothing — blocking, but with no finding to fix,
- * so the ladder must re-REVIEW rather than dispatch a fix.
+ * structured channel produced nothing AND nothing was recovered from its
+ * prose — blocking, with no finding to fix, so the ladder must re-REVIEW.
+ * `"unverifiable-with-findings"` = the same broken channel, but
+ * `ingestProseFindings` recovered anchored findings from the report: there IS
+ * something to fix, and the run must not throw it away.
  */
-type ScriptedAssessment = boolean | "throw" | "unverifiable";
+type ScriptedAssessment =
+  | boolean
+  | "throw"
+  | "unverifiable"
+  | "unverifiable-with-findings";
 
 interface HarnessConfig {
   build?: ScriptedStage;
@@ -156,10 +163,17 @@ function runScripted(config: HarnessConfig = {}) {
       assessIndex += 1;
       const scripted = config.assessments?.[index] ?? false;
       if (scripted === "throw") throw new Error("assessment exploded");
-      if (scripted === "unverifiable") {
+      if (
+        scripted === "unverifiable" ||
+        scripted === "unverifiable-with-findings"
+      ) {
+        const recovered = scripted === "unverifiable-with-findings";
         return {
           blocking: true,
-          blockingCount: 0,
+          // Rows recovered by ingestProseFindings carry agent_session_id
+          // NULL, so they never prove the channel worked: the session stays
+          // unverifiable while blockingCount is non-zero.
+          blockingCount: recovered ? 1 : 0,
           agentCommentCount: 0,
           usedProseFallback: false,
           unverifiable: true,
@@ -577,6 +591,28 @@ describe("runPipeline — fix cycle caps", () => {
     expect(h.requests.map((r) => r.stage)).toEqual(["review", "review"]);
     expect(h.requests.filter((r) => r.stage === "review").map((r) => r.attempt))
       .toEqual([1, 2]);
+  });
+
+  /**
+   * The channel is down, so the reviewer's prose report is the only evidence
+   * — and Arij parsed it itself, independent of MCP. Those findings are real
+   * and anchored; re-reviewing instead of fixing discards them, and every
+   * fresh review window re-ingests the same report, leaving duplicate open
+   * rows that nothing ever addresses.
+   */
+  it("fixes an unverifiable review that recovered findings from its prose", async () => {
+    const h = runScripted({
+      stages: [
+        { sessionId: "s-review-1" },
+        { sessionId: "s-fix-1" },
+        { sessionId: "s-review-2" },
+      ],
+      assessments: ["unverifiable-with-findings", false],
+    });
+    const summary = await h.promise;
+
+    expect(summary).toMatchObject({ state: "succeeded", fixCycles: 1 });
+    expect(h.requests.map((r) => r.stage)).toEqual(["review", "fix", "review"]);
   });
 
   it("fails an unverifiable review that never delivers, without a fix cycle", async () => {

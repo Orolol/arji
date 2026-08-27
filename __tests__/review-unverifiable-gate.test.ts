@@ -267,6 +267,43 @@ describe("assessReviewOutcome — the vacuous clean review", () => {
     expect(assessment.verdictSource).toBe("structured");
   });
 
+  /**
+   * The input shape the runner has to handle: a broken channel does NOT mean
+   * no evidence. assessReviewOutcome runs ingestProseFindings before it
+   * collects, and those rows carry agent_session_id NULL — so they never
+   * prove the channel worked, and the assessment reports `unverifiable` and
+   * a non-empty findings list at the same time.
+   */
+  it("recovers anchored findings from the prose while staying unverifiable", () => {
+    const sessionId = insertReviewSession({ provider: "claude-code" });
+    const report = [
+      "## Findings",
+      "",
+      "### 1. Token never expires",
+      "",
+      "- **Severity:** Major",
+      "- **Location:** `lib/auth/session.ts:42`",
+      "- **Description:** The issued token has no expiry.",
+    ].join("\n");
+
+    const assessment = assessReviewOutcome({
+      epicId: EPIC_ID,
+      sinceIso: REVIEW_STARTED_AT,
+      sessionOutput: report,
+      reviewSessionId: sessionId,
+      database: db(),
+    });
+
+    expect(assessment).toMatchObject({
+      blocking: true,
+      unverifiable: true,
+      verdictSource: "unverifiable",
+      proseIngestedCount: 1,
+    });
+    expect(assessment.blockingFindings).toHaveLength(1);
+    expect(assessment.blockingFindings[0].severity).toBe("major");
+  });
+
   it("does not fire when the caller has no review session to judge", () => {
     expect(
       assessReviewOutcome({

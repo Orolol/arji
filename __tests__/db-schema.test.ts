@@ -888,6 +888,16 @@ const INDEXES: Record<string, IndexSpec[]> = {
       unique: false,
       columns: ["epic_id", "file_path"],
     },
+    {
+      // The unverifiable-review rule asks "did THIS session file rows?" from
+      // four sites, one of them a correlated subquery inside the Full Auto
+      // merge gate's aggregate. Without this index that subquery scans
+      // review_comments once per candidate review row, on a table nothing
+      // prunes.
+      name: "review_comments_session_idx",
+      unique: false,
+      columns: ["agent_session_id"],
+    },
   ],
   verifyReports: [
     {

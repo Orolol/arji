@@ -544,6 +544,10 @@ export const reviewComments = sqliteTable(
       table.epicId,
       table.filePath
     ),
+    // "Did this session file rows of its own?" — the escape hatch of the
+    // unverifiable-review rule (0042). The epic/file index cannot serve it:
+    // wrong leading column.
+    sessionIdx: index("review_comments_session_idx").on(table.agentSessionId),
   })
 );
 

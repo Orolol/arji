@@ -302,9 +302,16 @@ export const POSITIVE_STRUCTURED_VERDICTS: ReadonlyArray<StructuredReviewVerdict
  * the provider's injection surface AND the global `mcp_tools_enabled`
  * toggle, exactly the two conditions lib/claude/mcp-injection.ts applies
  * when it decides whether to wire the channel up. Reading the toggle at
- * judgement time rather than persisting it per session is deliberate: an
- * operator who turns the channel off must not find every epic in the board
+ * judgement time rather than persisting it per session is deliberate there:
+ * an operator who turns the channel off must not find every RECORDLESS epic
  * suddenly unmergeable for want of a verdict nobody can produce any more.
+ *
+ * That escape does NOT reach rows carrying a record, and should not: a
+ * session recorded `injected` genuinely had the tool when it ran, whatever
+ * the toggle says today. Turning the channel off therefore unblocks future
+ * work (new sessions record `unavailable`) rather than retroactively
+ * absolving past silence — the only way to clear an epic already judged is to
+ * review it again.
  *
  * `provedChannelWithRows` is the escape hatch that keeps the rule about the
  * CHANNEL rather than about the reviewer's manners. A session with
@@ -562,9 +569,16 @@ export function cleanReviewVerdictSql(database: ArijDatabase = defaultDb) {
     WHERE ${reviewComments.agentSessionId} = ${agentSessions.id}
   )`;
 
-  const unverifiable = sql`(${agentSessions.agentType} IN (${sql.raw(
+  // COALESCE'd for the same reason as the verdict term above: a NULL
+  // agent_type would make this NULL, NULL through the conjunction, and the
+  // whole predicate NULL — which the enclosing CASE reads as "not clean".
+  // Latent while the only caller pre-filters by agent type, but this is an
+  // exported predicate and the next caller inherits whatever is written here.
+  const isOrdinaryReview = sql`COALESCE(${agentSessions.agentType} IN (${sql.raw(
     sqlLiteralList(ORDINARY_REVIEW_AGENT_TYPES)
-  )})
+  )}), 0) = 1`;
+
+  const unverifiable = sql`(${isOrdinaryReview}
     AND ${hadChannel} = 1
     AND NOT ${hasStructuredVerdict}
     AND NOT ${provedChannelWithRows})`;

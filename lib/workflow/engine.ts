@@ -140,7 +140,11 @@ const TRANSITION_GUARDS: TransitionGuard[] = [
       !ctx.hasCompletedReview &&
       ctx.hasUnverifiableReview
     ) {
-      return "Cannot move to Done: the last review filed no verdict through submit_findings, so nothing it found is recorded. Run a review that completes before marking as Done.";
+      // "every" and not "the last": hasUnverifiableReview is
+      // `no verifiable review AND at least one completed one`
+      // (lib/workflow/context.ts), so an epic with one good review and one
+      // broken one never reaches this branch.
+      return "Cannot move to Done: every completed review filed no verdict through submit_findings, so nothing they found is recorded. Run a review that completes before marking as Done.";
     }
     return null;
   },

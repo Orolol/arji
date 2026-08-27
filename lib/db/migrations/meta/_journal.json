@@ -288,6 +288,13 @@
       "when": 1786713800000,
       "tag": "0041_agent_session_mcp_channel",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1786713900000,
+      "tag": "0042_review_comment_session_index",
+      "breakpoints": true
     }
   ]
 }

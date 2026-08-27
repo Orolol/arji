@@ -253,12 +253,25 @@ not in each caller: put in one caller, it was missed by the next, and an
 approving gate was charged as a failure until three of them parked the epic it
 had just cleared.
 
-**An unverifiable review is not a code failure.** It buys another REVIEW, not
-a rebuild: the ticket stays in Review (`resolveReviewVerdict` reports it
-without marking it negative), the pipeline's stage ladder re-runs the review,
-and Full Auto re-dispatches one. Bouncing it to `in_progress` would put a
-build agent on a branch nothing faulted — and the completed session would
-clear the failure streak on the way past, so nothing would bound the loop.
+**An unverifiable review is not a code failure — unless it found something.**
+With nothing to act on it buys another REVIEW, not a rebuild: the ticket stays
+in Review (`resolveReviewVerdict` reports it without marking it negative), the
+pipeline's stage ladder re-runs the review, and Full Auto re-dispatches one.
+Bouncing it to `in_progress` would put a build agent on a branch nothing
+faulted — and the completed session would clear the failure streak on the way
+past, so nothing would bound the loop.
+
+But a broken channel does not mean no evidence. `assessReviewOutcome` runs
+`ingestProseFindings` first, and Arij parses that report itself, independent of
+MCP — so an unverifiable review can carry real, anchored findings. Those rows
+are written with `agent_session_id` NULL, so they never prove the channel
+worked: the review stays unverifiable WITH a non-empty findings list. The
+pipeline dispatches a fix for exactly that case (`unverifiable &&
+blockingCount === 0` is what earns a re-review), because re-reviewing instead
+would discard the findings and re-ingest the same report on every fresh review
+window. Nothing becomes mergeable either way: the ingested rows are open, so
+`review → done` refuses, and the session still has no verdict and no rows of
+its own, so the merge gate still calls it not clean.
 
 A "review" is one completed, epic-scoped review session that delivered a
 verdict (`outcome = 'answered'`) and passed the rule above. That single signal
