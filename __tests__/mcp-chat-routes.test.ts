@@ -3,7 +3,10 @@
  * create-ticket, update-ticket, get-agent-status, start-build) and BOTH
  * halves of the toolset boundary: the chat-token guards on the agent-only
  * routes (ask-question, submit-findings, submit-grading) and the
- * agent-token guard on the five board routes.
+ * agent-token guard on the five board routes. The two rejection suites are
+ * deliberately symmetric: every board route is refused for both a
+ * code-producing and a review token, and every refusal is checked to leave
+ * the database untouched.
  *
  * Real handlers against an isolated in-memory database (createTestDb) and
  * real tokens from the MCP token store — same harness as mcp-routes.test.ts.
@@ -17,7 +20,14 @@ import type { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "@/lib/db/test-utils";
 import { mockNextRequest } from "@/__tests__/helpers/db-mock";
-import { epics, projects, ticketComments } from "@/lib/db/schema";
+import {
+  agentSessions,
+  epics,
+  projects,
+  ticketActivityLog,
+  ticketComments,
+  userStories,
+} from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import {
   _resetMcpTokenStoreForTests,
@@ -474,11 +484,19 @@ describe("agent-only routes — chat tokens are rejected", () => {
 });
 
 /*
- * The converse of the suite above. The shim picks a toolset from an env var
- * inside the agent's own process (ARIJ_MCP_TOOLSET), and the bearer sits in
- * that same environment — so the only place the split can be enforced is the
- * route. These cases are what stops a build or review session from curling
- * start-build and dispatching agents of its own.
+ * The converse of the suite above, and the symmetric half of the toolset
+ * boundary.
+ *
+ * The shim picks a toolset from an env var inside the agent's own process
+ * (ARIJ_MCP_TOOLSET), and the bearer sits in that same environment — so the
+ * only place the split can be enforced is the route. These cases are what
+ * stops a build or review session from curling start-build and dispatching
+ * agents of its own, on a ticket of its choosing.
+ *
+ * The matrix is deliberate: every board route against BOTH shapes of
+ * code-side token, because the guard lives in one shared factory
+ * (createBoardToolRouteHandler) and a route that stopped routing through it
+ * would keep passing a single-route test.
  */
 describe("chat-only board routes — agent tokens are rejected", () => {
   // [name, handler, request body, the canonical-route payload that makes
@@ -501,6 +519,19 @@ describe("chat-only board routes — agent tokens are rejected", () => {
     ],
   ];
 
+  /**
+   * The two token shapes a code-producing session actually carries: the
+   * builder that owns the worktree and the reviewer that reads it back.
+   * `review_code` stands in for the review family (the others are covered on
+   * start-build below) — both are minted by the same durable-session path in
+   * lib/claude/process-manager.ts and both land in the agent's own
+   * environment.
+   */
+  const DENIED_TOOLSET_TOKENS: Array<[string, string]> = [
+    ["a build token", "build"],
+    ["a review token", "review_code"],
+  ];
+
   function mintAgentToken(agentType: string | null): string {
     return mintMcpToken({
       sessionId: `sess-${createId()}`,
@@ -511,27 +542,65 @@ describe("chat-only board routes — agent tokens are rejected", () => {
     });
   }
 
-  it.each(routes)(
-    "%s: a build token gets 403 FORBIDDEN, with no side effects",
-    async (_name, handler, body) => {
-      const response = await call(handler, body, mintAgentToken("build"));
+  /**
+   * Every table these five tools can write, read whole rather than counted:
+   * a refused call must leave the board byte-identical, not merely the same
+   * size. Minting a token touches the in-memory store only, so taking the
+   * "before" snapshot after the mint is still a fair comparison.
+   */
+  function boardSnapshot() {
+    return {
+      epics: db().select().from(epics).all(),
+      userStories: db().select().from(userStories).all(),
+      comments: db().select().from(ticketComments).all(),
+      activity: db().select().from(ticketActivityLog).all(),
+      sessions: db().select().from(agentSessions).all(),
+    };
+  }
+
+  const deniedCases: Array<[string, RouteHandler, unknown, string]> = routes.flatMap(
+    ([name, handler, body]) =>
+      DENIED_TOOLSET_TOKENS.map(
+        ([label, agentType]) =>
+          [`${name} — ${label}`, handler, body, agentType] as [
+            string,
+            RouteHandler,
+            unknown,
+            string,
+          ]
+      )
+  );
+
+  it.each(deniedCases)(
+    "%s: 403 FORBIDDEN, no canonical call, no database mutation",
+    async (_label, handler, body, agentType) => {
+      const token = mintAgentToken(agentType);
+      const before = boardSnapshot();
+
+      const response = await call(handler, body, token);
 
       expect(response.status).toBe(403);
       expect(await response.json()).toMatchObject({ code: "FORBIDDEN" });
       // Nothing reached the canonical routes: no build launched, no ticket
-      // created or patched, no instruction comment posted.
+      // created or patched, no instruction comment posted. The guard runs
+      // ahead of body validation, so this holds for well-formed bodies too —
+      // which is what every body above is.
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(
-        db().select().from(epics).where(eq(epics.projectId, projectId)).all()
-      ).toHaveLength(1);
-      expect(db().select().from(ticketComments).all()).toHaveLength(0);
+      expect(boardSnapshot()).toEqual(before);
     }
   );
 
   it.each([
-    ["a review session", "review_code"],
+    // The rest of the review family, which reaches the same routes with the
+    // same bearer…
+    ["a security review", "review_security"],
+    ["a compliance review", "review_compliance"],
+    ["a feature review", "review_feature"],
+    ["a merge second opinion", "review_second_opinion"],
+    // …and the other code-side and mechanical session types.
     ["a ticket build", "ticket_build"],
     ["a team build", "team_build"],
+    ["a merge session", "merge"],
     ["a grading pass", "grading"],
     ["a board refinement pass", "refinement"],
     // Deny-by-default: the guard is an allowlist, so a type nobody has
@@ -540,6 +609,8 @@ describe("chat-only board routes — agent tokens are rejected", () => {
     ["an agent type added after this guard", "some_future_agent_type"],
     ["a token with no agent type", null],
   ])("start-build refuses %s", async (_label, agentType) => {
+    const before = boardSnapshot();
+
     const response = await call(
       startBuildPost,
       { ticket_id: "E-main-001" },
@@ -547,7 +618,9 @@ describe("chat-only board routes — agent tokens are rejected", () => {
     );
 
     expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: "FORBIDDEN" });
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(boardSnapshot()).toEqual(before);
   });
 
   it.each(routes)("%s: a chat token still succeeds", async (_name, handler, body, ok) => {
