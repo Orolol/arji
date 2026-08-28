@@ -212,7 +212,12 @@ export function validateMcpServerShape(
     if (value.command) {
       issue("command is not allowed on an http server", "command");
     }
-    if (value.args) {
+    // LENGTH, not truthiness: `effectiveState` normalises a missing `args`
+    // column to `[]`, and an empty array is truthy. A bare `if (value.args)`
+    // therefore fired on EVERY update of an http server — including the
+    // one-click enable/disable toggle, and including a transport switch that
+    // correctly sent `args: null` — making http servers uneditable outright.
+    if (value.args && value.args.length > 0) {
       issue("args are not allowed on an http server", "args");
     }
   }
@@ -594,9 +599,22 @@ export function deleteMcpServer(
 
 /**
  * Locally disables an inherited GLOBAL server for one project by shadowing
- * it with a project row of the same name (`enabled: false`). The copy
- * carries the global's exact fields (secrets included — server-side, they
- * never cross the API). 409 when a shadow already exists: edit it instead.
+ * it with a project row of the same name (`enabled: false`). 409 when a
+ * shadow already exists: edit it instead.
+ *
+ * The copy carries the global's shape (transport, command, args, url,
+ * agent types, tool allowlist, hint) but NOT its secrets. A disabled row is
+ * never spawned, so it needs none — and copying them would be actively
+ * harmful in the case the docstring and the UI both invite next: re-enabling
+ * the shadow as a real override. That override would then run on a snapshot
+ * of the credentials taken at disable time, and rotating the global's token
+ * would leave it silently presenting the old one, with nothing on screen
+ * showing the two rows had ever diverged. It would also put a second copy of
+ * a live credential in the database for a row whose whole purpose is NOT to
+ * run the server.
+ *
+ * Re-enabling therefore requires entering the credentials explicitly, through
+ * the normal edit flow.
  */
 export function disableGlobalForProject(
   projectId: string,
@@ -626,9 +644,10 @@ export function disableGlobalForProject(
       transport: globalRow.transport,
       command: globalRow.command,
       args: globalRow.args,
-      env: globalRow.env,
+      // Shape yes, secrets no — see the docstring.
+      env: "{}",
       url: globalRow.url,
-      headers: globalRow.headers,
+      headers: "{}",
       agentTypes: globalRow.agentTypes,
       toolAllowlist: globalRow.toolAllowlist,
       usageHint: globalRow.usageHint,

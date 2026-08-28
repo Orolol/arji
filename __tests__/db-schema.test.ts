@@ -937,6 +937,20 @@ const INDEXES: Record<string, IndexSpec[]> = {
       unique: false,
       columns: ["project_id", "name"],
     },
+    // Per-scope uniqueness needs TWO partial indexes, not one: a global row is
+    // unique on `name` alone (its `project_id` is NULL, and SQLite treats NULLs
+    // as distinct, so the pair would never collide), a project row on the pair.
+    // Migration 0046 creates both.
+    {
+      name: "mcp_servers_global_name_uq",
+      unique: true,
+      columns: ["name"],
+    },
+    {
+      name: "mcp_servers_project_name_uq",
+      unique: true,
+      columns: ["project_id", "name"],
+    },
   ],
   gradingReports: [
     {

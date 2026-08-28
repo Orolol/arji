@@ -359,12 +359,16 @@ export const EXTRA_MCP_SERVERS_SECTION_MAX_CHARS = 1500;
  * applied. Returns "" when there are none, keeping prompts byte-identical to
  * before the feature for every session without extras.
  *
- * SECURITY NOTE: the tool DESCRIPTIONS these servers return at runtime land in
- * the agent's context and are the same untrusted-input surface as
- * `projects.spec` — a third-party server can attempt prompt injection through
- * them. Nothing in this block can prevent that; it is documented in
- * docs/architecture/mcp-provider-matrix.md so the risk is a decision the user
- * makes when declaring a server rather than a surprise.
+ * SECURITY NOTE: `usage_hint` is stored, user-editable text, so it is passed
+ * through `neutralizeControlMarkup` like every other stored string this file
+ * renders.
+ *
+ * What CANNOT be neutralised here is the tool DESCRIPTIONS these servers return
+ * at runtime: they land in the agent's context without ever passing through
+ * Arij, and are the same untrusted-input surface as `projects.spec`. Declaring
+ * a server is what grants it that reach; the trade-off is documented in
+ * docs/architecture/mcp-provider-matrix.md so it is a decision rather than a
+ * surprise.
  */
 export function extraMcpServersSection(
   servers: Array<{ name: string; usageHint?: string | null }>,
@@ -385,7 +389,11 @@ export function extraMcpServersSection(
   for (const server of servers) {
     const prefix = extraMcpToolPrefix(provider, server.name);
     const naming = prefix ? `tools named ${prefix}*` : "tools under their bare names";
-    const hint = server.usageHint?.trim();
+    // `usage_hint` is DB-stored free text rendered straight into the model's
+    // instruction stream — the same untrusted-input class as the project
+    // description above, which this file already neutralises. Neutralise BEFORE
+    // measuring, so the budget counts the string that is actually emitted.
+    const hint = neutralizeControlMarkup(server.usageHint?.trim() ?? "");
     const line = `- **${server.name}** — ${naming}${hint ? `: ${hint}` : ""}\n`;
 
     // Budget check BEFORE appending, so the block never exceeds the cap; what

@@ -153,8 +153,11 @@ describe("secret fields behave like password fields", () => {
     await waitFor(() => {
       const patch = calls.find((c) => c.method === "PATCH");
       expect(patch).toBeDefined();
-      // Left blank => the key is absent => the service keeps the stored value.
-      expect((patch!.body as { env: Record<string, string> }).env).toEqual({});
+      // Left blank => the key is ABSENT from the patch => the service keeps the
+      // stored value. Sending `{}` instead is not a weaker version of this, it
+      // is the opposite: `mergeSecretMap` walks the patch it is handed, so an
+      // empty map erases every stored secret.
+      expect((patch!.body as Record<string, unknown>)).not.toHaveProperty("env");
       expect((patch!.body as { usageHint: string }).usageHint).toBe(
         "scenes, nodes and signals",
       );
@@ -198,6 +201,256 @@ describe("length caps are mirrored on the inputs", () => {
     // how a form starts accepting what the API refuses.
     expect(maxLengths).toContain(String(MCP_SERVER_NAME_MAX_LENGTH));
     expect(maxLengths).toContain(String(MCP_SERVER_USAGE_HINT_MAX_LENGTH));
+  });
+});
+
+/**
+ * PATCH is a MERGE, so every field the form stops rendering has to be cleared
+ * explicitly or it survives into the merged row. Two things break otherwise:
+ * the row goes transport-inconsistent and the API rejects the save naming a
+ * field the form is no longer showing, and the abandoned side's credentials
+ * stay live on a server that no longer uses them.
+ */
+describe("switching an existing server's transport", () => {
+  const transportSelect = () => screen.getByTestId("mcp-server-transport");
+
+  it("stdio -> http clears command and args", async () => {
+    const calls = mockFetch({
+      "/api/settings/mcp-servers": { data: [godot] },
+      "PATCH /api/settings/mcp-servers/srv-1": { data: godot },
+    });
+    render(<McpServersSection projectId={null} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(transportSelect(), { target: { value: "http" } });
+    fireEvent.change(screen.getByTestId("mcp-server-url"), {
+      target: { value: "https://godot.local/mcp" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === "PATCH");
+      const body = patch?.body as Record<string, unknown>;
+      expect(body?.url).toBe("https://godot.local/mcp");
+      // Left behind, these make the merged row transport-inconsistent and the
+      // save comes back "command is not allowed on an http server" — naming a
+      // field the form has just stopped rendering.
+      expect(body?.command).toBeNull();
+      expect(body?.args).toBeNull();
+    });
+  });
+
+  it("http -> stdio clears the url", async () => {
+    const remote: McpServerView = {
+      ...godot,
+      transport: "http",
+      command: null,
+      // `[]`, not null: toView coerces a NULL args column to an empty array, so
+      // this is the shape the API can actually return.
+      args: [],
+      url: "https://godot.local/mcp",
+      env: {},
+      headers: { Authorization: MCP_SERVER_SECRET_MASK },
+    };
+    const calls = mockFetch({
+      "/api/settings/mcp-servers": { data: [remote] },
+      "PATCH /api/settings/mcp-servers/srv-1": { data: remote },
+    });
+    render(<McpServersSection projectId={null} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(transportSelect(), { target: { value: "stdio" } });
+    fireEvent.change(screen.getByTestId("mcp-server-command"), {
+      target: { value: "/usr/bin/godot-mcp" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === "PATCH");
+      const body = patch?.body as Record<string, unknown>;
+      expect(body?.command).toBe("/usr/bin/godot-mcp");
+      expect(body?.url).toBeNull();
+    });
+  });
+
+  it("drops the abandoned transport's secrets, which are now dead config", async () => {
+    const calls = mockFetch({
+      "/api/settings/mcp-servers": { data: [godot] },
+      "PATCH /api/settings/mcp-servers/srv-1": { data: godot },
+    });
+    render(<McpServersSection projectId={null} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(transportSelect(), { target: { value: "http" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === "PATCH");
+      const body = patch?.body as Record<string, unknown>;
+      // `env` belonged to the stdio side. An empty map is the ERASE signal
+      // here, and erasing is what we want — the opposite of the blank-textarea
+      // case, where the key is omitted so the stored value survives.
+      expect(body?.env).toEqual({});
+      // The user typed no header, so the http side is left untouched for them
+      // to fill in.
+      expect(body).not.toHaveProperty("headers");
+    });
+  });
+
+  it("leaves both sides alone on an ordinary edit that keeps the transport", async () => {
+    const calls = mockFetch({
+      "/api/settings/mcp-servers": { data: [godot] },
+      "PATCH /api/settings/mcp-servers/srv-1": { data: godot },
+    });
+    render(<McpServersSection projectId={null} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByDisplayValue("scenes and nodes"), {
+      target: { value: "scenes, nodes and signals" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === "PATCH");
+      const body = patch?.body as Record<string, unknown>;
+      expect(body?.usageHint).toBe("scenes, nodes and signals");
+      // The clearing above must fire on an actual SWITCH only. A hint edit that
+      // wiped the command would be the same class of bug, one field over.
+      expect(body).not.toHaveProperty("env");
+      expect(body).not.toHaveProperty("headers");
+      expect(body?.command).toBe("/usr/bin/godot-mcp");
+    });
+  });
+});
+
+/**
+ * Both columns are load-bearing and both are silent when wrong: an
+ * `agent_types` of ["reviewer"] instead of a real agent type means the server
+ * never injects anywhere, with no error at any layer. So they need to be
+ * settable AND visible.
+ */
+describe("agent types and tool allowlist", () => {
+  const scoped: McpServerView = {
+    ...godot,
+    agentTypes: ["ticket_build", "review_security"],
+    toolAllowlist: ["list_nodes"],
+  };
+
+  it("shows both on the row so a typo is visible", async () => {
+    mockFetch({ "/api/settings/mcp-servers": { data: [scoped] } });
+    render(<McpServersSection projectId={null} />);
+
+    const row = await screen.findByTestId("mcp-server-godot");
+    expect(
+      within(row).getByTestId("mcp-server-agent-types-godot"),
+    ).toHaveTextContent("ticket_build, review_security");
+    expect(within(row).getByTestId("mcp-server-tools-godot")).toHaveTextContent(
+      "list_nodes",
+    );
+  });
+
+  it("shows the stored secret KEYS, so a credential-less row is visible", async () => {
+    mockFetch({ "/api/settings/mcp-servers": { data: [godot] } });
+    render(<McpServersSection projectId={null} />);
+
+    const row = await screen.findByTestId("mcp-server-godot");
+    const badge = within(row).getByTestId("mcp-server-secret-keys-godot");
+    expect(badge).toHaveTextContent("GODOT_TOKEN");
+    // Keys only. The value is masked by the API and must not appear anywhere.
+    expect(badge).not.toHaveTextContent(MCP_SERVER_SECRET_MASK);
+  });
+
+  it("shows no secrets badge on a row that stores none", async () => {
+    // What "Disable for this project" produces: the global's shape, none of
+    // its credentials. The one-click Enable sits right next to it, so the
+    // absence has to be visible rather than discovered at spawn time.
+    mockFetch({
+      "/api/settings/mcp-servers": { data: [{ ...godot, env: {}, enabled: false }] },
+    });
+    render(<McpServersSection projectId={null} />);
+
+    const row = await screen.findByTestId("mcp-server-godot");
+    expect(within(row).queryByTestId("mcp-server-secret-keys-godot")).toBeNull();
+  });
+
+  it("reads the http side's keys for an http server", async () => {
+    mockFetch({
+      "/api/settings/mcp-servers": {
+        data: [
+          {
+            ...godot,
+            transport: "http",
+            command: null,
+            args: [],
+            url: "https://godot.local/mcp",
+            env: {},
+            headers: { Authorization: MCP_SERVER_SECRET_MASK },
+          },
+        ],
+      },
+    });
+    render(<McpServersSection projectId={null} />);
+
+    const row = await screen.findByTestId("mcp-server-godot");
+    expect(
+      within(row).getByTestId("mcp-server-secret-keys-godot"),
+    ).toHaveTextContent("Authorization");
+  });
+
+  it("says nothing on a row that restricts neither", async () => {
+    mockFetch({ "/api/settings/mcp-servers": { data: [godot] } });
+    render(<McpServersSection projectId={null} />);
+
+    const row = await screen.findByTestId("mcp-server-godot");
+    expect(within(row).queryByTestId("mcp-server-agent-types-godot")).toBeNull();
+    expect(within(row).queryByTestId("mcp-server-tools-godot")).toBeNull();
+  });
+
+  it("round-trips the stored values through the form", async () => {
+    const calls = mockFetch({
+      "/api/settings/mcp-servers": { data: [scoped] },
+      "PATCH /api/settings/mcp-servers/srv-1": { data: scoped },
+    });
+    render(<McpServersSection projectId={null} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const types = screen.getByTestId("mcp-server-agent-types") as HTMLTextAreaElement;
+    expect(types.value).toBe("ticket_build\nreview_security");
+
+    fireEvent.change(types, { target: { value: "ticket_build\nchat" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === "PATCH");
+      expect((patch?.body as Record<string, unknown>)?.agentTypes).toEqual([
+        "ticket_build",
+        "chat",
+      ]);
+    });
+  });
+
+  it("sends null, not [], when the box is emptied", async () => {
+    const calls = mockFetch({
+      "/api/settings/mcp-servers": { data: [scoped] },
+      "PATCH /api/settings/mcp-servers/srv-1": { data: scoped },
+    });
+    render(<McpServersSection projectId={null} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByTestId("mcp-server-agent-types"), {
+      target: { value: "  \n " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === "PATCH");
+      const body = patch?.body as Record<string, unknown>;
+      // NULL is "every agent type". An empty ARRAY matches nothing, which would
+      // silently keep the server out of every session — the exact failure the
+      // row badges exist to make visible.
+      expect(body?.agentTypes).toBeNull();
+      expect(body?.toolAllowlist).toEqual(["list_nodes"]);
+    });
   });
 });
 
@@ -259,6 +512,36 @@ describe("project scope", () => {
     });
   });
 
+  /**
+   * "Disable for this project" writes a PROJECT row, and a project row cannot
+   * reach a user-global registry — so on oh-my-pi and agy the global keeps
+   * loading. That asymmetry is deliberate on the resolution side (a row those
+   * CLIs cannot see must not suppress a global they can), which makes saying so
+   * on screen the only thing standing between the user and a button that
+   * silently does nothing on half the providers.
+   */
+  it("warns that disabling here will not reach the user-global providers", async () => {
+    mockFetch({ "/api/projects/proj-1/mcp-servers": projectPayload });
+    render(<McpServersSection projectId="proj-1" />);
+
+    const note = await screen.findByTestId("mcp-inherited-partial-godot");
+    expect(note).toHaveTextContent(/will not affect agy, oh-my-pi/);
+    // And it names the recourse that DOES work everywhere.
+    expect(note).toHaveTextContent(/disable it globally/);
+  });
+
+  it("drops the warning when every provider honours a project row", async () => {
+    mockFetch({
+      "/api/projects/proj-1/mcp-servers": {
+        data: { ...projectPayload.data, unsupportedProviders: [] },
+      },
+    });
+    render(<McpServersSection projectId="proj-1" />);
+
+    await screen.findByTestId("mcp-inherited-godot");
+    expect(screen.queryByTestId("mcp-inherited-partial-godot")).toBeNull();
+  });
+
   it("marks an already-overridden global and drops its disable button", async () => {
     mockFetch({
       "/api/projects/proj-1/mcp-servers": {
@@ -268,7 +551,13 @@ describe("project scope", () => {
     render(<McpServersSection projectId="proj-1" />);
 
     const row = await screen.findByTestId("mcp-inherited-godot");
-    expect(within(row).getByText("overridden here")).toBeInTheDocument();
+    // Qualified, not a bare "overridden here": the override is a PROJECT row,
+    // and a project row cannot reach a user-global registry, so those two CLIs
+    // keep loading the global. An unqualified badge would state the opposite of
+    // what happens on half the providers.
+    expect(
+      within(row).getByText("overridden here — except on agy, oh-my-pi"),
+    ).toBeInTheDocument();
     expect(
       within(row).queryByRole("button", { name: "Disable for this project" }),
     ).toBeNull();

@@ -51,11 +51,21 @@ interface Draft {
   id: string | null;
   name: string;
   transport: "stdio" | "http";
+  /**
+   * The transport the row had when editing started, or null on create. A save
+   * needs to distinguish "switched transport" (clear the other side's stored
+   * fields) from "edited something else" (leave them alone).
+   */
+  originalTransport: "stdio" | "http" | null;
   command: string;
   args: string;
   url: string;
   usageHint: string;
   secrets: string;
+  /** Newline-separated agent types; blank = every type (stored as NULL). */
+  agentTypes: string;
+  /** Newline-separated bare tool names; blank = every tool the server exposes. */
+  toolAllowlist: string;
   enabled: boolean;
 }
 
@@ -63,18 +73,24 @@ const EMPTY_DRAFT: Draft = {
   id: null,
   name: "",
   transport: "stdio",
+  originalTransport: null,
   command: "",
   args: "",
   url: "",
   usageHint: "",
   secrets: "",
+  agentTypes: "",
+  toolAllowlist: "",
   enabled: true,
 };
 
 /**
- * Parses the `KEY=value` textarea into a map. Only keys the user actually typed
- * are sent, which is what makes "leave it blank to keep it" work: an untouched
- * secret is simply absent from the patch and the service keeps the stored value.
+ * Parses the `KEY=value` textarea into a map.
+ *
+ * "Leave it blank to keep it" is enforced by the CALLER, not here: a blank
+ * textarea must make the secret key absent from the payload entirely. Sending
+ * `{}` is NOT the same thing — `mergeSecretMap` iterates the patch it is given,
+ * so an empty map erases every stored value rather than preserving them.
  */
 function parseSecretLines(text: string): Record<string, string> {
   const map: Record<string, string> = {};
@@ -86,6 +102,31 @@ function parseSecretLines(text: string): Record<string, string> {
     map[line.slice(0, eq).trim()] = line.slice(eq + 1);
   }
   return map;
+}
+
+/**
+ * Newline list -> array, or NULL when blank.
+ *
+ * NULL and [] mean different things in these two columns: `agent_types` NULL is
+ * "every agent type", while an empty array would match nothing and silently
+ * keep the server out of every session. Same for `tool_allowlist`, where NULL
+ * is "every tool the server exposes".
+ */
+function parseListLines(text: string): string[] | null {
+  const items = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : null;
+}
+
+/**
+ * The stored secret KEYS for a server's transport. Values are masked by the
+ * API and never appear here; the keys are what make "this server has
+ * credentials configured" legible on the list.
+ */
+function secretKeys(server: McpServerView): string[] {
+  return Object.keys(server.transport === "http" ? server.headers : server.env);
 }
 
 function healthLabel(server: McpServerView): {
@@ -181,23 +222,46 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
 
   async function handleSave() {
     if (!draft) return;
-    const secrets = parseSecretLines(draft.secrets);
-    const secretField = draft.transport === "http" ? "headers" : "env";
+    const isStdio = draft.transport === "stdio";
     const payload: Record<string, unknown> = {
       name: draft.name.trim(),
       transport: draft.transport,
       enabled: draft.enabled,
       usageHint: draft.usageHint.trim() || null,
-      [secretField]: secrets,
+      agentTypes: parseListLines(draft.agentTypes),
+      toolAllowlist: parseListLines(draft.toolAllowlist),
     };
-    if (draft.transport === "stdio") {
+
+    // PATCH is a merge, so the fields belonging to the OTHER transport have to
+    // be cleared explicitly. Leaving them behind makes the merged row
+    // transport-inconsistent and the API rejects the save naming a field the
+    // form has just stopped rendering — with no affordance to fix it.
+    if (isStdio) {
       payload.command = draft.command.trim();
       payload.args = draft.args
         .split("\n")
         .map((a) => a.trim())
         .filter(Boolean);
+      payload.url = null;
     } else {
       payload.url = draft.url.trim();
+      payload.command = null;
+      payload.args = null;
+    }
+
+    // A blank secrets box means "keep what is stored", which requires OMITTING
+    // the key: `mergeSecretMap` walks the patch it receives, so `{}` would
+    // erase every stored value instead of preserving it.
+    const secretsText = draft.secrets.trim();
+    if (secretsText) {
+      payload[isStdio ? "env" : "headers"] = parseSecretLines(secretsText);
+    }
+
+    // Switching transport makes the other side's credentials dead config for
+    // this server. Clear them rather than leaving a live secret in the row —
+    // but only on an actual switch, so an ordinary edit never drops anything.
+    if (draft.originalTransport && draft.originalTransport !== draft.transport) {
+      payload[isStdio ? "headers" : "env"] = {};
     }
 
     const ok = draft.id
@@ -249,7 +313,10 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
       // Deliberately EMPTY: the API never hands back a secret, and rendering
       // the "***" mask here would save that literal string on the next PATCH.
       secrets: "",
+      agentTypes: (server.agentTypes ?? []).join("\n"),
+      toolAllowlist: (server.toolAllowlist ?? []).join("\n"),
       enabled: server.enabled,
+      originalTransport: server.transport,
     });
   }
 
@@ -290,6 +357,38 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
               <Badge variant="outline">{server.transport}</Badge>
               {!server.enabled && <Badge variant="outline">disabled</Badge>}
               <Badge variant={health.variant}>{health.text}</Badge>
+              {/* Rendered so a typo ("reviewer" for "review_security") shows up
+                  here instead of silently never injecting anywhere. */}
+              {server.agentTypes && server.agentTypes.length > 0 && (
+                <Badge
+                  variant="outline"
+                  data-testid={`mcp-server-agent-types-${server.name}`}
+                >
+                  types: {server.agentTypes.join(", ")}
+                </Badge>
+              )}
+              {server.toolAllowlist && server.toolAllowlist.length > 0 && (
+                <Badge
+                  variant="outline"
+                  data-testid={`mcp-server-tools-${server.name}`}
+                >
+                  tools: {server.toolAllowlist.join(", ")}
+                </Badge>
+              )}
+              {/* KEYS only — the API masks every value, so this leaks nothing.
+                  Without it, "has credentials" is invisible: a shadow row
+                  created by "Disable for this project" deliberately carries
+                  none, and the one-click Enable next to it would otherwise
+                  start a credential-less server with no hint as to why it
+                  fails. */}
+              {secretKeys(server).length > 0 && (
+                <Badge
+                  variant="outline"
+                  data-testid={`mcp-server-secret-keys-${server.name}`}
+                >
+                  secrets: {secretKeys(server).join(", ")}
+                </Badge>
+              )}
               {server.usageHint && (
                 <span className="text-muted-foreground">{server.usageHint}</span>
               )}
@@ -367,7 +466,15 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
               <span className="font-medium">{server.name}</span>
               <Badge variant="outline">global</Badge>
               {server.shadowed && (
-                <Badge variant="secondary">overridden here</Badge>
+                // An override is a PROJECT row, and a project row cannot reach a
+                // user-global provider — so those CLIs keep loading the global.
+                // An unqualified "overridden here" would state the opposite of
+                // what actually happens on two of the four providers.
+                <Badge variant="secondary">
+                  {unsupportedProviders.length > 0
+                    ? `overridden here — except on ${unsupportedProviders.join(", ")}`
+                    : "overridden here"}
+                </Badge>
               )}
               {server.usageHint && (
                 <span className="text-muted-foreground">{server.usageHint}</span>
@@ -388,12 +495,25 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
                   </Button>
                 )}
               </span>
+              {!server.shadowed && unsupportedProviders.length > 0 && (
+                <span
+                  className="w-full text-xs text-muted-foreground"
+                  data-testid={`mcp-inherited-partial-${server.name}`}
+                >
+                  Disabling this here will not affect{" "}
+                  {unsupportedProviders.join(", ")} — a per-project entry cannot
+                  reach a user-global MCP registry, so their sessions keep
+                  loading this server. Delete or disable it globally to stop it
+                  everywhere.
+                </span>
+              )}
             </div>
           ))}
           <p className="text-xs text-muted-foreground">
             Inherited servers are read-only here — edit them in the global
             settings. To change one for this project only, disable it or add a
-            local server with the same name: a project entry takes precedence.
+            local server with the same name: a project entry takes precedence
+            — on the providers that read per-spawn config.
           </p>
         </div>
       )}
@@ -433,6 +553,7 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
                     transport: e.target.value as "stdio" | "http",
                   })
                 }
+                data-testid="mcp-server-transport"
               >
                 <option value="stdio">stdio</option>
                 <option value="http">http</option>
@@ -450,6 +571,7 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
                   onChange={(e) =>
                     setDraft({ ...draft, command: e.target.value })
                   }
+                  data-testid="mcp-server-command"
                 />
               </label>
               <label className="text-sm">
@@ -470,6 +592,7 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
                 value={draft.url}
                 maxLength={MCP_SERVER_URL_MAX_LENGTH}
                 onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+                data-testid="mcp-server-url"
               />
             </label>
           )}
@@ -486,6 +609,39 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
               }
             />
           </label>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="text-sm">
+              <span className="block text-muted-foreground">
+                Agent types (one per line) — blank means every type, chat
+                included
+              </span>
+              <textarea
+                className="min-h-16 w-full rounded-md border border-input bg-transparent p-2 text-sm"
+                placeholder={"ticket_build\nreview_security\nchat"}
+                value={draft.agentTypes}
+                onChange={(e) =>
+                  setDraft({ ...draft, agentTypes: e.target.value })
+                }
+                data-testid="mcp-server-agent-types"
+              />
+            </label>
+            <label className="text-sm">
+              <span className="block text-muted-foreground">
+                Allowed tools (one per line) — blank means every tool the server
+                exposes
+              </span>
+              <textarea
+                className="min-h-16 w-full rounded-md border border-input bg-transparent p-2 text-sm"
+                placeholder={"list_nodes\nrun_scene"}
+                value={draft.toolAllowlist}
+                onChange={(e) =>
+                  setDraft({ ...draft, toolAllowlist: e.target.value })
+                }
+                data-testid="mcp-server-tool-allowlist"
+              />
+            </label>
+          </div>
 
           <label className="text-sm">
             <span className="block text-muted-foreground">

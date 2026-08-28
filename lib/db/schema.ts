@@ -864,9 +864,12 @@ export type NewProviderUsageSnapshot = typeof providerUsageSnapshots.$inferInser
  * `projectId` NULL = a global server injected into every project's
  * sessions; a value scopes the server to one project. The cascade FK
  * makes project deletion clean up the project's servers automatically.
- * `name` is unique per scope in the service (lib/mcp/servers.ts) — a
- * SQLite UNIQUE index cannot express "unique among the globals" because
- * NULLs are distinct — and the name `arij` is reserved by the service.
+ * `name` is unique PER SCOPE, enforced by two PARTIAL unique indexes
+ * (migration 0046): a plain UNIQUE(project_id, name) cannot express
+ * "unique among the globals" because SQLite treats NULLs as distinct, but
+ * a partial index keyed on `project_id IS NULL` can. The service checks the
+ * same invariant first so the API answers 409 rather than surfacing a raw
+ * constraint error. The name `arij` is reserved by the service.
  *
  * `env` / `headers` values are write-only: reads mask them (see
  * maskMcpServerSecrets), and `agentTypes` NULL means "every session type"
@@ -909,6 +912,15 @@ export const mcpServers = sqliteTable(
       table.projectId,
       table.name
     ),
+    // Per-scope uniqueness (migration 0046). Two PARTIAL indexes, because the
+    // scopes need different key shapes: a global is unique on `name` alone, a
+    // project row on the pair.
+    globalNameUq: uniqueIndex("mcp_servers_global_name_uq")
+      .on(table.name)
+      .where(sql`${table.projectId} IS NULL`),
+    projectNameUq: uniqueIndex("mcp_servers_project_name_uq")
+      .on(table.projectId, table.name)
+      .where(sql`${table.projectId} IS NOT NULL`),
     transportCheck: check(
       "mcp_servers_transport_check",
       sql`${table.transport} IN ('stdio', 'http')`

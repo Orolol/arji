@@ -29,8 +29,14 @@
  *    a config we cannot parse is a config we must not rewrite.
  * 3. **Never touch `arij`.** install.sh owns that entry, and its
  *    `${ARIJ_MCP_TOKEN}` indirection is what makes the control channel work.
- * 4. **Never throw.** This runs inside CRUD request handlers; a missing omp
- *    install or an unwritable home directory must not fail a settings save.
+ * 4. **Never throw, and never block.** This is requested from CRUD request
+ *    handlers, so a missing omp install or an unwritable home directory must
+ *    not fail a settings save — and the work must not run inline either.
+ *    Arij is a single process: a synchronous child-process spawn stops SSE,
+ *    session chunk persistence, the watchdog, pipelines and Full Auto for its
+ *    whole duration. Reconciliation is therefore scheduled in the background
+ *    and awaited by nobody; the registries mirror the database rather than
+ *    holding any truth the response depends on.
  * 5. **Only ever reconcile from the LIVE application database.** These writes
  *    leave the repository and the process: they change the user's own CLI
  *    config and shell out to `agy`. Reconciling from anything else — a test's
@@ -60,12 +66,33 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { execFileSync } from "child_process";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { eq } from "drizzle-orm";
 import { db, type ArijDatabase } from "@/lib/db";
 import { mcpServers, settings } from "@/lib/db/schema";
 import { isNull } from "drizzle-orm";
 import { ARIJ_MCP_SERVER_NAME } from "@/lib/claude/mcp-injection";
+
+/**
+ * Promisified `execFile`, resolved LAZILY.
+ *
+ * Deliberately not `const execFileAsync = promisify(execFile)` at module
+ * scope: that touches `child_process` at import time, and this module is
+ * pulled in by lib/mcp/servers.ts, which a good number of suites import while
+ * mocking `child_process` with only the members they care about. A partial
+ * mock would make `execFile` undefined and `promisify` throw during import,
+ * turning an unrelated test's mock into a crash on load. Resolving inside the
+ * call keeps importing this module free of side effects — and the guards in
+ * `syncUserGlobalMcpServers` mean tests never reach the call at all.
+ */
+function execFileAsync(
+  file: string,
+  args: string[],
+  options: Parameters<typeof execFile>[2],
+): Promise<unknown> {
+  return promisify(execFile)(file, args, options ?? {});
+}
 
 /**
  * Settings key for the reconciliation toggle. Absent row = ENABLED, matching
@@ -333,13 +360,28 @@ function agyAddArgs(server: SyncableServer): string[] {
   ];
 }
 
-function runAgy(args: string[]): boolean {
+/**
+ * Runs one `agy` subcommand.
+ *
+ * ASYNC on purpose. The synchronous form blocks the Node event loop, and Arij
+ * is deliberately a single process: SSE subscriptions, session chunk
+ * persistence, the stalled-session watchdog, pipeline ticks and Full Auto all
+ * stop while a spawn is in flight. With one `mcp list` probe plus one call per
+ * global server, and a 10s timeout ceiling each, a hung CLI could freeze the
+ * orchestrator for (1 + N) × 10s. Awaiting `execFile` keeps the loop free while
+ * the child runs.
+ */
+async function runAgy(args: string[]): Promise<boolean> {
   try {
-    execFileSync("agy", args, {
-      stdio: "ignore",
+    await execFileAsync("agy", args, {
       timeout: 10_000,
-      // Never let a hung CLI hold a request handler open.
       killSignal: "SIGKILL",
+      // `execFile` BUFFERS output that the old synchronous call discarded with
+      // `stdio: "ignore"`. Past the ceiling Node kills the child and rejects,
+      // which here reads as "agy is unavailable" and skips the whole sync — so
+      // the ceiling is set well above any plausible `mcp list` rather than left
+      // at the 1 MiB default.
+      maxBuffer: 16 * 1024 * 1024,
     });
     return true;
   } catch {
@@ -347,17 +389,15 @@ function runAgy(args: string[]): boolean {
   }
 }
 
-function agyAvailable(): boolean {
-  try {
-    execFileSync("agy", ["mcp", "list"], { stdio: "ignore", timeout: 10_000 });
-    return true;
-  } catch {
-    return false;
-  }
+async function agyAvailable(): Promise<boolean> {
+  return runAgy(["mcp", "list"]);
 }
 
-function syncAgy(servers: SyncableServer[], previouslyOwned: string[]): string[] {
-  if (!agyAvailable()) return previouslyOwned;
+async function syncAgy(
+  servers: SyncableServer[],
+  previouslyOwned: string[],
+): Promise<string[]> {
+  if (!(await agyAvailable())) return previouslyOwned;
 
   const wanted = new Set(servers.map((s) => s.name));
   const owned = new Set<string>();
@@ -365,7 +405,7 @@ function syncAgy(servers: SyncableServer[], previouslyOwned: string[]): string[]
   for (const name of previouslyOwned) {
     if (name === ARIJ_MCP_SERVER_NAME) continue;
     if (!wanted.has(name)) {
-      if (!runAgy(["mcp", "remove", name])) {
+      if (!(await runAgy(["mcp", "remove", name]))) {
         // Could not drop it — keep claiming ownership so the next sync retries
         // instead of orphaning an entry Arij put there.
         owned.add(name);
@@ -374,7 +414,7 @@ function syncAgy(servers: SyncableServer[], previouslyOwned: string[]): string[]
   }
 
   for (const server of servers) {
-    if (runAgy(agyAddArgs(server))) {
+    if (await runAgy(agyAddArgs(server))) {
       owned.add(server.name);
     } else {
       console.warn(
@@ -389,31 +429,80 @@ function syncAgy(servers: SyncableServer[], previouslyOwned: string[]): string[]
 /* ------------------------------------------------------------------ */
 
 /**
- * Reconciles the user-global registries with the current GLOBAL servers.
+ * Serialization + coalescing for the background reconciliation.
  *
- * Called from the global-scope CRUD paths in lib/mcp/servers.ts. Best-effort
- * and never throws: a settings save must not fail because omp is not
- * installed or a home directory is read-only.
+ * Two writes landing together must not interleave: both would read the same
+ * manifest, rewrite the same mcp.json, and drive `agy mcp add/remove` against
+ * the same register, so the loser's view of "what Arij owns" would be stale.
+ * Runs are therefore chained.
+ *
+ * Coalescing matters just as much. Every create/update/delete asks for a sync,
+ * and reconciliation is a full rebuild from current DB state rather than a
+ * delta — so N queued runs would do identical work N times. At most ONE run is
+ * ever pending behind the active one; further requests fold into it, because by
+ * the time it starts it will already see every write that asked for it.
+ */
+let activeSync: Promise<void> = Promise.resolve();
+let syncQueued = false;
+
+async function reconcile(database: ArijDatabase): Promise<void> {
+  if (!isUserGlobalMcpSyncEnabled(database)) return;
+  const servers = syncableGlobalServers(database);
+  const manifest = readManifest();
+  // omp first (pure file I/O), then agy (child processes) — order is not
+  // load-bearing, but keeping the cheap one first means a hanging agy cannot
+  // delay the file that most setups actually use.
+  const omp = syncOmp(servers, manifest.omp);
+  const agy = await syncAgy(servers, manifest.agy);
+  writeManifest({ omp, agy });
+}
+
+/**
+ * Requests reconciliation of the user-global registries with the current
+ * GLOBAL servers.
+ *
+ * Returns IMMEDIATELY and does the work in the background. It is called from
+ * the CRUD paths in lib/mcp/servers.ts, which are request handlers, and the
+ * work spawns child processes — an inline synchronous version froze the whole
+ * single-process app for the duration of every settings save, including the
+ * one-click Enable/Disable button. The registries are a mirror of the database,
+ * not the source of truth, so the response does not need to wait for them.
+ *
+ * Best-effort and never throws — into the caller OR as an unhandled rejection:
+ * a settings save must not fail because omp is not installed or a home
+ * directory is read-only.
  */
 export function syncUserGlobalMcpServers(database: ArijDatabase = db): void {
-  try {
-    // Rule 5. An injected handle means the caller is not the live app, and
-    // nothing but the live app has any business rewriting a user's CLI config.
-    if (database !== db) return;
-    // Belt and braces: even if some future caller passes the real `db` from a
-    // test, a test run must not reach the developer's own home directory.
-    if (process.env.VITEST || process.env.NODE_ENV === "test") return;
-    if (!isUserGlobalMcpSyncEnabled(database)) return;
-    const servers = syncableGlobalServers(database);
-    const manifest = readManifest();
-    writeManifest({
-      omp: syncOmp(servers, manifest.omp),
-      agy: syncAgy(servers, manifest.agy),
+  // These guards run SYNCHRONOUSLY, before anything is scheduled, so a test or
+  // a non-live caller never even queues work.
+  //
+  // Rule 5. An injected handle means the caller is not the live app, and
+  // nothing but the live app has any business rewriting a user's CLI config.
+  if (database !== db) return;
+  // Belt and braces: even if some future caller passes the real `db` from a
+  // test, a test run must not reach the developer's own home directory.
+  if (process.env.VITEST || process.env.NODE_ENV === "test") return;
+
+  if (syncQueued) return; // an already-pending run will see this write too
+  syncQueued = true;
+  activeSync = activeSync
+    .then(() => {
+      syncQueued = false;
+      return reconcile(database);
+    })
+    .catch((error) => {
+      syncQueued = false;
+      console.warn(
+        "[mcp-user-global] reconciliation skipped:",
+        error instanceof Error ? error.message : error,
+      );
     });
-  } catch (error) {
-    console.warn(
-      "[mcp-user-global] reconciliation skipped:",
-      error instanceof Error ? error.message : error,
-    );
-  }
+}
+
+/**
+ * Resolves once no reconciliation is in flight. For tests and for shutdown
+ * paths that want the background work finished before they look at the files.
+ */
+export function whenUserGlobalMcpSyncSettles(): Promise<void> {
+  return activeSync;
 }

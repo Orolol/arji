@@ -7,11 +7,15 @@
 -- its servers. (Unlike the flat `settings` table, this table owns its
 -- foreign key, so no perProjectSettingKeys() entry is needed.)
 --
--- `name` is unique per scope (global vs project) in the service layer
--- (lib/mcp/servers.ts), not here: a SQLite UNIQUE index treats NULLs as
--- distinct, so `(project_id, name)` could not express "unique among the
--- globals". The service enforces it and the API reports a 409. The name
--- `arij` is reserved by the service as well — it is the control channel.
+-- `name` is unique per scope (global vs project). This file enforces it in
+-- the service layer only (lib/mcp/servers.ts); migration 0046 adds the two
+-- PARTIAL unique indexes that enforce it in the database. The note that used
+-- to sit here — that a UNIQUE index "could not express unique-among-the-globals
+-- because SQLite treats NULLs as distinct" — was wrong: it is true of a plain
+-- UNIQUE(project_id, name), but a partial index keyed on `project_id IS NULL`
+-- expresses it exactly. The service check remains so the API reports a 409
+-- rather than a raw constraint error. The name `arij` is reserved by the
+-- service as well — it is the control channel.
 --
 -- `agent_types` NULL = the server applies to every session (agent types
 -- AND chat turns); a JSON array restricts it to the listed types ("chat"

@@ -316,6 +316,13 @@
       "when": 1786714200000,
       "tag": "0045_mcp_servers",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1786714300000,
+      "tag": "0046_mcp_servers_scope_unique",
+      "breakpoints": true
     }
   ]
 }

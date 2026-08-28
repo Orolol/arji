@@ -24,6 +24,7 @@ import {
   ompMcpConfigPath,
   syncUserGlobalMcpServers,
   syncableGlobalServers,
+  whenUserGlobalMcpSyncSettles,
 } from "@/lib/mcp/user-global-sync";
 
 let db: ReturnType<typeof createTestDb>["db"];
@@ -125,6 +126,47 @@ describe("what would be reconciled", () => {
       url: "https://example.com/mcp",
       headers: { Authorization: "Bearer abc" },
     });
+  });
+});
+
+/**
+ * Reconciliation spawns child processes, and `syncUserGlobalMcpServers` is
+ * called from CRUD request handlers. Arij is deliberately one process: a
+ * SYNCHRONOUS spawn there stops SSE, session chunk persistence, the watchdog,
+ * pipeline ticks and Full Auto for its whole duration — so the work has to
+ * leave the request path, and the module has to stay importable.
+ */
+describe("the request path is never blocked", () => {
+  it("returns without waiting for the reconciliation", () => {
+    createMcpServer(stdio("godot"), db, null);
+    // Synchronous `void` return: there is no promise for a handler to await,
+    // by construction.
+    expect(syncUserGlobalMcpServers(db)).toBeUndefined();
+  });
+
+  it("settles through an awaitable the callers do not have to use", async () => {
+    await expect(whenUserGlobalMcpSyncSettles()).resolves.toBeUndefined();
+  });
+
+  it("imports cleanly when child_process is only partially mocked", async () => {
+    // The regression this pins: promisifying `execFile` at MODULE SCOPE reads
+    // `child_process` at import time. lib/mcp/servers.ts imports this module,
+    // and several suites import THAT while mocking `child_process` with only
+    // the members they use — so a module-scope `promisify(execFile)` turned an
+    // unrelated test's partial mock into "The 'original' argument must be of
+    // type function" on load. Resolving it inside the call keeps import pure.
+    vi.resetModules();
+    vi.doMock("child_process", () => ({
+      spawn: vi.fn(),
+      execSync: vi.fn(),
+      default: { spawn: vi.fn(), execSync: vi.fn() },
+    }));
+
+    await expect(import("@/lib/mcp/user-global-sync")).resolves.toBeDefined();
+    await expect(import("@/lib/mcp/servers")).resolves.toBeDefined();
+
+    vi.doUnmock("child_process");
+    vi.resetModules();
   });
 });
 
