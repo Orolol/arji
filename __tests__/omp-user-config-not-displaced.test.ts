@@ -31,14 +31,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   spawn: vi.fn(),
+  execFileSync: vi.fn(() => "omp/18.0.6\n"),
   createChannel: vi.fn(),
   writeMcpConfigFile: vi.fn(() => "/tmp/arij-persistent-mcp.json"),
   cleanupMcpConfigFile: vi.fn(),
 }));
 
+// The persistent omp path now checks `omp --version` before it spawns
+// anything: with the `tools.xdev` overlay gone, the `--tools` allowlist is the
+// whole read-only isolation mechanism and only omp 18.0.6+ is measured to
+// honour it. Report a version at the floor so these tests exercise the spawn
+// path itself — the gate's own supported/refused/unreadable cases live in
+// `omp-version-gate.test.ts`.
 vi.mock("child_process", () => ({
-  default: { spawn: mocks.spawn },
+  default: { spawn: mocks.spawn, execFileSync: mocks.execFileSync },
   spawn: mocks.spawn,
+  execFileSync: mocks.execFileSync,
 }));
 vi.mock("@/lib/chat/cli-tool-channel", () => ({
   createChatCliToolChannel: mocks.createChannel,

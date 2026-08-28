@@ -10,6 +10,7 @@ import {
   buildOmpSpawnEnv,
   OMP_READONLY_TOOLS,
 } from "@/lib/providers/oh-my-pi";
+import { ompRestrictedToolsBlockReason } from "@/lib/providers/omp-version";
 
 export const DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 export const DEFAULT_MAX_WARM_CHAT_CONVERSATIONS = 3;
@@ -396,6 +397,11 @@ interface PersistentProviderAdapter {
   binary: string;
   /** Message when the binary is missing from PATH. */
   missingBinaryMessage: string;
+  /**
+   * Refuse the spawn before anything is allocated — no MCP token, no child.
+   * A returned string is thrown to the caller as the turn's failure.
+   */
+  preflight?(): string | null;
   /** Chat MCP token holder for this provider, or null when unavailable. */
   createChannel(
     options: PersistentChatTurnOptions,
@@ -441,6 +447,13 @@ function spawnPersistentProcess(
   adapter: PersistentProviderAdapter,
   options: PersistentChatTurnOptions,
 ): PersistentProcess {
+  // Before the MCP token and the child: a precondition that makes the spawn
+  // unsafe rather than merely unlucky (an omp too old to honour --tools).
+  // getOrSpawn() runs inside the turn promise, so throwing here rejects the
+  // turn with this reason and leaves no process registered.
+  const blocked = adapter.preflight?.();
+  if (blocked) throw new Error(blocked);
+
   const channel = adapter.createChannel(options);
   const { args, env, mcpConfigPath } = adapter.buildSpawn(options, channel);
   const child = nodeSpawn(adapter.binary, args, {
@@ -819,7 +832,9 @@ function finishLocalOnlyOmpTurn(
 function ompArgs(options: PersistentChatTurnOptions): string[] {
   // No `--config`: the xdev-off overlay this used to carry is measurably a
   // no-op on omp 18.0.6, and the flag can displace the user's whole
-  // ~/.omp/agent/config.yml — see lib/providers/oh-my-pi.ts.
+  // ~/.omp/agent/config.yml — see lib/providers/oh-my-pi.ts. The allowlist
+  // below is therefore the whole isolation mechanism, which is what the
+  // adapter's `preflight` version floor protects.
   const args = [
     "--mode",
     "rpc",
@@ -839,6 +854,9 @@ const ompAdapter: PersistentProviderAdapter = {
   binary: "omp",
   missingBinaryMessage:
     "Oh My Pi CLI not found. Ensure `omp` is installed and available in PATH.",
+  // Persistent chat is always tool-restricted (see ompArgs), so the allowlist
+  // is its whole isolation mechanism and the version floor always applies.
+  preflight: ompRestrictedToolsBlockReason,
   createChannel: (options) =>
     createChatCliToolChannel({
       projectId: options.projectId,

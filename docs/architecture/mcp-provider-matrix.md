@@ -285,6 +285,37 @@ read,grep,glob`, restore the isolation through a lever that cannot displace
 user config — not by re-adding `--config` with a minimal overlay. Regression
 coverage: `__tests__/omp-user-config-not-displaced.test.ts` (both call sites).
 
+#### The version gate that pays for it
+
+Dropping the overlay left the allowlist as the whole isolation mechanism, and
+that mechanism is version-dependent: 17.2.1 demonstrably does not enforce it,
+18.0.6 does, and 18.0.5 sits between them and was never probed for this
+property. Arij spawns whatever `omp` is on PATH, so a user on an older install
+would otherwise get a silently writable "read-only" session.
+
+`lib/providers/omp-version.ts` is the single gate both spawn paths call:
+
+| Path | Hook | Scope |
+|---|---|---|
+| One-shot | `OhMyPiProvider.preflight()` (`BaseCliProvider.spawn`) | Every mode whose `toolAllowlist()` returns a list — plan, chat, analyze |
+| Persistent RPC chat | `ompAdapter.preflight` (`spawnPersistentProcess`) | Always: persistent chat is always `--tools read,grep,glob` |
+
+Below `OMP_MIN_ALLOWLIST_VERSION` (`18.0.6`) the spawn is refused with an
+upgrade message and no process starts; on the persistent path the refusal
+happens before the MCP token is minted. Code mode passes no `--tools` and
+claims no isolation, so it is deliberately ungated and runs on any version.
+
+The gate fails closed — an unreadable `omp --version` is not evidence of
+safety — with one exception: a **missing** binary is left to the spawn's own
+"CLI not found" error, since nothing runs and there is no isolation to
+protect. Only a *trusted* verdict is memoised, so a user who reacts to the
+error by running `omp update` is unblocked without restarting the server.
+
+Raising `OMP_MIN_ALLOWLIST_VERSION` is only correct against a fresh
+measurement of the allowlist on that release. Coverage:
+`__tests__/omp-version-gate.test.ts` (comparison boundary, probe
+classification, both spawn paths supported and refused).
+
 ## agy — wired 2026-08-26
 
 Measured live on agy 1.1.21 before adding the provider:

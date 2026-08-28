@@ -46,6 +46,14 @@
  *   Re-probe the allowlist on each omp upgrade, as with the rest of the
  *   contract: if `write` ever comes back under `--tools read,grep,glob`,
  *   restore the isolation through something that cannot displace user config.
+ * - VERSION GATE, the price of the line above. With the overlay gone the
+ *   allowlist is the whole isolation mechanism, and 18.0.6 is the only
+ *   release measured to enforce it — 17.2.1 demonstrably does not, and 18.0.5
+ *   was never probed for this property. Arij spawns whatever `omp` is on
+ *   PATH, so a restricted spawn now refuses outright below that floor rather
+ *   than handing a "read-only" session a working `write` tool. `preflight()`
+ *   below applies it to one-shot spawns and the persistent RPC runner applies
+ *   the same check; both live in lib/providers/omp-version.ts.
  * - MCP: pi has none; omp reads mcp.json with ${VAR} expansion at load time,
  *   so the Arij tool channel rides the child's environment (buildEnv).
  *   Measured on 17.2.1: MCP tools are ORTHOGONAL to the `--tools` allowlist
@@ -53,8 +61,10 @@
  *   tools in --tools") that kills the spawn. So review sessions keep the
  *   channel with no flag work at all, and they mount as first-class
  *   `mcp__arij_*` tools (see above).
- * - Re-probed on 18.0.5 (2026-08-26): all of the above still holds, and one
- *   thing that was ASSUMED does not. An UNSET ${ARIJ_MCP_TOKEN} does not
+ * - Re-probed on 18.0.5 (2026-08-26). Everything above about the MCP channel
+ *   still held — the tool-allowlist behaviour was NOT part of that probe,
+ *   which is why 18.0.5 is below the version gate's floor — and one thing
+ *   that was ASSUMED does not hold. An UNSET ${ARIJ_MCP_TOKEN} does not
  *   expand to nothing — omp leaves the unresolved placeholder as a LITERAL
  *   string, which is non-empty, so a channel-less spawn used to mount every
  *   Arij tool and 401 on every call. buildEnv now supplies an explicitly
@@ -63,6 +73,7 @@
  *   See docs/architecture/mcp-provider-matrix.md.
  */
 
+import { ompRestrictedToolsBlockReason } from "./omp-version";
 import { PiProvider } from "./pi";
 import type {
   McpSpawnConfig,
@@ -103,6 +114,17 @@ export class OhMyPiProvider extends PiProvider {
 
   protected readonlyTools(): string[] {
     return OMP_READONLY_TOOLS;
+  }
+
+  /**
+   * Refuse a restricted spawn on an omp that is not measured to honour
+   * `--tools`. Gated exactly when `toolAllowlist()` returns a list, so plan,
+   * chat and analyze are covered and code mode — which restricts nothing and
+   * claims no isolation — runs on any version.
+   */
+  protected preflight(options: ProviderSpawnOptions): string | undefined {
+    if (!this.toolAllowlist(options.mode)) return undefined;
+    return ompRestrictedToolsBlockReason() ?? undefined;
   }
 
   /**
