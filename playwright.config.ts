@@ -13,10 +13,11 @@ const PORT = process.env.E2E_PORT ? Number(process.env.E2E_PORT) : 3100;
  * hydrates, and every spec that needs client data or interaction fails on a
  * skeleton. Only the static-markup smoke tests survive it.
  *
- * The host is the fix rather than `allowedDevOrigins` in next.config.ts —
- * `localhost` is both what Next trusts out of the box and what a developer
- * actually browses, so the suite drives the app the way it is used instead of
- * relaxing a dev-server security default to suit the harness.
+ * next.config.ts now also lists the loopback IPs in `allowedDevOrigins`, so a
+ * developer browsing `http://127.0.0.1:3000` gets a page that hydrates. The
+ * base URL stays on `localhost` anyway: it is what Next trusts with no config
+ * at all, so the suite keeps working even if that setting is changed, and it
+ * drives the app by the host a developer actually types.
  */
 const BASE_URL = `http://localhost:${PORT}`;
 

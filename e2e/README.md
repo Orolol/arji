@@ -64,8 +64,18 @@ labels the chunk `<script>` loads of a page served from an IP literal
 The symptom is not an error — it is a page that renders and does nothing: the
 server markup is there, hydration never runs, and specs fail on a skeleton
 (`h1` stuck at `...`, `0 tickets visible`, SSE `Offline`). Only the
-static-markup smoke tests pass. If you point the suite somewhere by hand, keep
-it on `localhost`.
+static-markup smoke tests pass.
+
+`next.config.ts` now lists `127.0.0.1` and `[::1]` in `allowedDevOrigins`, so
+browsing the app on a loopback IP works too. The base URL stays on `localhost`
+regardless: that is what Next trusts with no config at all, so the suite does
+not depend on that setting being right. If you point it somewhere by hand,
+keep it on `localhost`.
+
+`__tests__/next-config-dev-origins.test.ts` pins the two layers together —
+every loopback host `middleware.ts` accepts for `/api/*` must also be served
+`/_next/*`. A Next upgrade that changes the rule fails that test rather than
+this suite.
 
 ## Reuse a dev server that is already running
 
