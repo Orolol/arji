@@ -100,6 +100,33 @@ is never displaceable by a user entry.
 **The `mcp_tools_enabled` gate is single and covers everything.** Off means no
 MCP at all: no arij channel, no extras.
 
+### Chat gets them too, on the same rule
+
+CLI chat conversations do not go through `processManager.start()` — they have no
+`agent_sessions` row and wire their own channel in `lib/chat/cli-tool-channel.ts`
+— so they resolve the extras themselves, with agent type `chat`. Same merge
+order, same shadowing, same `agent_types` filter: a server whose `agent_types`
+omits `chat` stays out of a conversation while still reaching builds. Without
+that call the feature would work in build and review and be silently absent from
+chat, which is the asymmetry the epic exists to avoid.
+
+Arij's own `chat` toolset is unchanged by this: the board tools
+(`ARIJ_MCP_CHAT_TOOLS`) are what a chat token gets, and the agent-only tools stay
+agent-only — the routes reject a chat token regardless of the allowlist.
+
+**Resolution timing differs between the two chat paths, and it shows.** A
+one-shot turn builds a channel per turn, so a newly declared server is present on
+the next message. The persistent (warm-process) runner builds one channel when
+the process spawns, and `--strict-mcp-config` freezes that file's server set for
+the life of the process — so a server added or removed later reaches that
+conversation only after the process is reaped or restarted.
+
+The **OpenAI-compatible fast path is not an MCP host** and is deliberately
+untouched. It talks to an HTTP chat-completions endpoint and has its own
+built-in board tools (`lib/chat/board-tools.ts`); there is no place to mount a
+third-party MCP server. The settings screen says so, so its absence there is a
+stated limit rather than a server that looks broken.
+
 ### Why the scope column is not the same as the channel column
 
 `extraMcpScope` (`lib/providers/extra-mcp-scope.ts`) is a SEPARATE capability

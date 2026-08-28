@@ -21,6 +21,7 @@ import { createChatCliToolChannel } from "@/lib/chat/cli-tool-channel";
 import {
   ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
   ARIJ_MCP_SERVER_NAME,
+  buildClaudeMcpConfigJson,
 } from "@/lib/claude/mcp-injection";
 import {
   _resetMcpTokenStoreForTests,
@@ -259,5 +260,73 @@ describe("user-declared MCP servers reach a chat turn too", () => {
 
     expect(channel).not.toBeNull();
     expect(arijChannelSpec(channel!.mcp).name).toBe(ARIJ_MCP_SERVER_NAME);
+  });
+});
+
+/**
+ * The criterion is that a CLI chat conversation *receives* the servers, and on
+ * claude-code what it receives is exactly the `--mcp-config` file: both chat
+ * paths pass `--strict-mcp-config` (the one-shot spawn and
+ * lib/chat/persistent-runner.ts claudeArgs), which makes that file the CLI's
+ * COMPLETE server set. Asserting the channel object alone would stop one step
+ * short of the artifact the CLI actually reads.
+ */
+describe("what a claude-code chat spawn is actually handed", () => {
+  function godotRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "srv-1",
+      projectId: null,
+      name: "godot",
+      enabled: true,
+      transport: "stdio",
+      command: "/usr/bin/godot-mcp",
+      args: JSON.stringify(["--headless"]),
+      env: "{}",
+      url: null,
+      headers: "{}",
+      agentTypes: null,
+      toolAllowlist: null,
+      usageHint: null,
+      lastCheckedAt: null,
+      lastCheckOk: null,
+      lastCheckError: null,
+      createdAt: "2026-08-27",
+      ...overrides,
+    };
+  }
+
+  it("writes the resolved extras into the strict config alongside arij", () => {
+    dbMockState.allRows = [godotRow()];
+
+    const channel = createChatCliToolChannel({
+      projectId: "proj1",
+      provider: "claude-code",
+      conversationType: null,
+    });
+
+    const config = JSON.parse(buildClaudeMcpConfigJson(channel!.mcp));
+    expect(Object.keys(config.mcpServers)).toEqual([ARIJ_MCP_SERVER_NAME, "godot"]);
+    expect(config.mcpServers.godot).toMatchObject({
+      type: "stdio",
+      command: "/usr/bin/godot-mcp",
+      args: ["--headless"],
+    });
+  });
+
+  it("omits a chat-ineligible server from the strict config entirely", () => {
+    // Under --strict-mcp-config "not in the file" is the only way to be absent:
+    // there is no second source the CLI could still load it from.
+    dbMockState.allRows = [
+      godotRow({ agentTypes: JSON.stringify(["ticket_build", "review_code"]) }),
+    ];
+
+    const channel = createChatCliToolChannel({
+      projectId: "proj1",
+      provider: "claude-code",
+      conversationType: null,
+    });
+
+    const config = JSON.parse(buildClaudeMcpConfigJson(channel!.mcp));
+    expect(Object.keys(config.mcpServers)).toEqual([ARIJ_MCP_SERVER_NAME]);
   });
 });

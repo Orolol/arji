@@ -335,13 +335,21 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
         <h2 className="text-lg font-semibold">MCP servers</h2>
         <p className="text-sm text-muted-foreground">
           Extra MCP servers (Godot, Confluence, Playwright…) handed to agent
-          sessions alongside Arij&apos;s own tool channel.{" "}
+          sessions and CLI chat conversations alongside Arij&apos;s own tool
+          channel.{" "}
           {scopedProjectId
             ? "These are scoped to this project; global servers are inherited below."
             : "These are global — every project's sessions get them."}{" "}
           Arij runs agents with strict MCP config, so servers configured in your
           own <code>~/.claude.json</code> or <code>.mcp.json</code> are ignored:
           declare them here instead.
+        </p>
+        {/* Stated rather than left to be discovered: the fast chat mode is an
+            HTTP chat endpoint, not an MCP host, so nothing declared here can
+            reach it. Without this line its absence reads as a broken server. */}
+        <p className="mt-1 text-xs text-muted-foreground">
+          Not used by the OpenAI-compatible chat mode — it is an HTTP endpoint,
+          not an MCP host, and keeps its own built-in board tools.
         </p>
       </div>
 

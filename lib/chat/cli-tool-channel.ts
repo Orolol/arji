@@ -30,6 +30,15 @@
  * deliberately untouched: it has board tools of its own (lib/chat/board-tools.ts)
  * and no way to mount a third-party MCP server.
  *
+ * WHEN that resolution happens differs by path, and it is visible to the user.
+ * A one-shot turn resolves per turn, so a server declared mid-conversation is
+ * there on the next message. The persistent runner resolves ONCE, when the warm
+ * process spawns — `--strict-mcp-config` makes the file written at that moment
+ * the CLI's complete server set for the process's whole life — so a server
+ * added or removed later reaches that conversation only after the process is
+ * reaped or restarted. Re-resolving would mean respawning the warm process
+ * under the user, which is a worse trade than a stale set until the next spawn.
+ *
  * Strictly best-effort: a chat turn must never fail because the tool channel
  * did, so any error here degrades to a plain (uninjected) spawn.
  */

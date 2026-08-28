@@ -633,3 +633,34 @@ describe("connection test", () => {
     ).toBeNull();
   });
 });
+
+/**
+ * Story "Parité du canal chat".
+ *
+ * Where a feature applies is part of the feature. Once chat conversations get
+ * these servers, a screen that still says "agent sessions" understates the
+ * blast radius — and the one surface that genuinely cannot have them, the
+ * OpenAI-compatible chat mode, has to say so, or its absence there reads as a
+ * broken server rather than a stated limit.
+ */
+describe("which surfaces the section says these servers reach", () => {
+  it("names CLI chat conversations, not agent sessions alone", async () => {
+    mockFetch({ "/api/settings/mcp-servers": { data: [godot] } });
+    render(<McpServersSection projectId={null} />);
+
+    await screen.findByText("godot");
+    expect(
+      screen.getByText(/agent sessions and CLI chat conversations/i),
+    ).toBeInTheDocument();
+  });
+
+  it("states that the OpenAI-compatible mode is not one of them", async () => {
+    mockFetch({ "/api/settings/mcp-servers": { data: [godot] } });
+    render(<McpServersSection projectId={null} />);
+
+    await screen.findByText("godot");
+    expect(
+      screen.getByText(/Not used by the OpenAI-compatible chat mode/i),
+    ).toBeInTheDocument();
+  });
+});
