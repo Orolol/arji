@@ -36,7 +36,18 @@ export async function openTicketDetail(page: Page, title: string): Promise<Locat
 
   const panel = page.getByTestId("epic-detail-panel");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("Loading...")).toHaveCount(0);
+  /**
+   * Past the suite's default expect timeout because opening a ticket fans out
+   * into a dozen route handlers (comments, artifacts, grading, verify, stories,
+   * dependencies, sessions…), each of which `next dev` may still be compiling,
+   * against one server shared by every worker. The panel sitting on "Loading…"
+   * for more than 15s is ordinary under that load and says nothing about the
+   * behaviour under test.
+   *
+   * A panel that never loads still fails — this widens the window, it does not
+   * remove the check.
+   */
+  await expect(panel.getByText("Loading...")).toHaveCount(0, { timeout: 45_000 });
 
   return panel;
 }

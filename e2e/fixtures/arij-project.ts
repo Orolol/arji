@@ -1,9 +1,9 @@
 import { test as base, expect, type APIRequestContext } from "@playwright/test";
-import Database from "better-sqlite3";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DATA_ROOT, DATABASE_FILE, withDatabase } from "./data-root";
 
 /**
  * A throwaway Arij project, board URL included.
@@ -19,6 +19,14 @@ export interface ArijProject {
   name: string;
   /** Absolute path of the scratch repo the project is attached to. */
   repoPath: string;
+  /**
+   * The temp directory holding the repo — and everything Arij creates BESIDE
+   * it, which is why the fixture tracks it separately: `createWorktree` puts
+   * an epic's worktree in `<repoPath>/../.arij-worktrees` (lib/git/manager.ts),
+   * so the repository has to sit one level down or a build would leave
+   * worktrees in the OS temp root that nothing owns.
+   */
+  rootPath: string;
   /** Path to navigate to for the kanban board. */
   boardUrl: string;
 }
@@ -28,8 +36,10 @@ export interface ArijProject {
  * existing directory, and the board's git surfaces expect a real repository
  * with a branch — hence the empty initial commit rather than a bare `mkdir`.
  */
-function createScratchRepo(): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "arij-e2e-"));
+function createScratchRepo(): { rootPath: string; repoPath: string } {
+  const rootPath = mkdtempSync(path.join(tmpdir(), "arij-e2e-"));
+  const dir = path.join(rootPath, "repo");
+  mkdirSync(dir);
 
   git(dir, "init", "-b", "main");
   // Written into the repository's own config rather than passed per command:
@@ -41,7 +51,7 @@ function createScratchRepo(): string {
   git(dir, "config", "commit.gpgsign", "false");
   git(dir, "commit", "--allow-empty", "-m", "initial");
 
-  return dir;
+  return { rootPath, repoPath: dir };
 }
 
 /** Runs one git command in `repoPath`, throwing on a non-zero exit. */
@@ -50,39 +60,6 @@ function git(repoPath: string, ...args: string[]): string {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
-}
-
-/**
- * Commits `content` on a new branch off the current HEAD and returns to the
- * base branch — the shape a finished epic worktree leaves behind, which is
- * what `POST /api/projects/:p/epics/:e/merge` lands.
- *
- * The base branch is left checked out because that is where the merge route
- * expects to work; a branch still checked out would also make
- * `git branch -D` (which `mergeWorktree` runs after landing) fail.
- */
-export function commitOnBranch(options: {
-  repoPath: string;
-  branch: string;
-  filePath: string;
-  content: string;
-  message?: string;
-  baseBranch?: string;
-}): void {
-  const {
-    repoPath,
-    branch,
-    filePath,
-    content,
-    message = `Work on ${branch}`,
-    baseBranch = "main",
-  } = options;
-
-  git(repoPath, "checkout", "-b", branch);
-  writeFileSync(path.join(repoPath, filePath), content);
-  git(repoPath, "add", "--", filePath);
-  git(repoPath, "commit", "-m", message);
-  git(repoPath, "checkout", baseBranch);
 }
 
 /** Every local branch of `repoPath`, so a test can assert one is gone. */
@@ -99,81 +76,6 @@ export function commitSubjects(repoPath: string, branch = "main"): string[] {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-}
-
-/**
- * Records a completed review session on an epic, the way a reviewer that
- * called `submit_findings` would.
- *
- * Written straight to SQLite because there is no other way in: the only
- * writer of `agent_sessions.review_verdict` is the MCP `submit-findings`
- * route, whose token is minted for a live provider process — and spawning a
- * real CLI is out of scope for a browser test (slow, billed, and never twice
- * the same). Everything the row then unlocks is real: the transition service
- * reads it through `buildTransitionContext`, and the review gate it opens
- * (review -> to_merge) is asserted in both directions by the caller.
- *
- * The columns are exactly the ones the unverifiable-review rule reads
- * (lib/pipeline/findings.ts): a completed, answered, ordinary review session
- * carrying a structured verdict. Drop any of them and the epic stays stuck in
- * Review — which is the failure this seed is meant to make impossible to
- * confuse with a broken guard.
- */
-export function seedCompletedReview(options: {
-  projectId: string;
-  epicId: string;
-  verdict?: string;
-  agentType?: string;
-}): string {
-  const {
-    projectId,
-    epicId,
-    verdict = "approved",
-    agentType = "review_code",
-  } = options;
-  const id = `e2e-review-${Math.random().toString(36).slice(2, 12)}`;
-  const now = new Date().toISOString();
-
-  const db = openDatabase();
-  try {
-    db.prepare(
-      `INSERT INTO agent_sessions
-         (id, project_id, epic_id, status, mode, provider, agent_type,
-          outcome, review_verdict, mcp_channel, started_at, completed_at,
-          ended_at, created_at)
-       VALUES (?, ?, ?, 'completed', 'plan', 'claude-code', ?,
-               'answered', ?, 'injected', ?, ?, ?, ?)`
-    ).run(id, projectId, epicId, agentType, verdict, now, now, now, now);
-  } finally {
-    db.close();
-  }
-
-  return id;
-}
-
-/**
- * Where the server under test keeps its database and uploads.
- *
- * Both `lib/db/index.ts` and the upload route resolve it from `process.cwd()`,
- * and Playwright spawns `next dev` from the directory holding the config — so
- * the runner and the server agree by construction. They only diverge when
- * `reuseExistingServer` picks up a dev server that was started from somewhere
- * else; `E2E_DATA_ROOT` is the way to say so.
- *
- * Anchored on this file (`<repo>/e2e/fixtures/`) rather than on
- * `testInfo.config.rootDir`, which Playwright resolves to the *test* directory.
- */
-const DATA_ROOT = process.env.E2E_DATA_ROOT
-  ? path.resolve(process.env.E2E_DATA_ROOT)
-  : path.resolve(__dirname, "..", "..", "data");
-
-const DATABASE_FILE = path.join(DATA_ROOT, "arij.db");
-
-/** The dev server holds the same WAL database open, so writes may have to queue. */
-function openDatabase(): Database.Database {
-  const connection = new Database(DATABASE_FILE);
-  connection.pragma("busy_timeout = 5000");
-  return connection;
 }
 
 /**
@@ -200,19 +102,16 @@ function uploadPathPattern(projectId: string): string {
 function assertSharedDatabase(projectId: string): void {
   expect(
     existsSync(DATABASE_FILE),
-    `no Arij database at ${DATABASE_FILE}; point E2E_DATA_ROOT at the data directory of the server under test`
+    `no Arij database at ${DATABASE_FILE}; point E2E_DATA_ROOT (or ARIJ_DB_PATH) at the database of the server under test`
   ).toBe(true);
 
-  const db = openDatabase();
-  try {
-    const row = db.prepare("SELECT id FROM projects WHERE id = ?").get(projectId);
-    expect(
-      row,
-      `the project this fixture just created is absent from ${DATABASE_FILE}, so the server writes elsewhere; point E2E_DATA_ROOT at its data directory`
-    ).toBeTruthy();
-  } finally {
-    db.close();
-  }
+  const row = withDatabase((db) =>
+    db.prepare("SELECT id FROM projects WHERE id = ?").get(projectId)
+  );
+  expect(
+    row,
+    `the project this fixture just created is absent from ${DATABASE_FILE}, so the server writes elsewhere; point E2E_DATA_ROOT (or ARIJ_DB_PATH) at the database it opens`
+  ).toBeTruthy();
 }
 
 /** What `DELETE /api/projects/:id` should have removed and didn't. */
@@ -256,8 +155,7 @@ function takeUploadResidue(projectId: string): UploadResidue {
   if (!existsSync(DATABASE_FILE)) return { rows: 0, directory };
 
   const pattern = uploadPathPattern(projectId);
-  const db = openDatabase();
-  try {
+  return withDatabase((db) => {
     const rows = (
       db
         .prepare("SELECT COUNT(*) AS count FROM chat_attachments WHERE file_path GLOB ?")
@@ -269,21 +167,16 @@ function takeUploadResidue(projectId: string): UploadResidue {
     }
 
     return { rows, directory };
-  } finally {
-    db.close();
-  }
+  });
 }
 
 /** Whether the project row survived its own delete. */
 function projectRowExists(projectId: string): boolean {
   if (!existsSync(DATABASE_FILE)) return false;
 
-  const db = openDatabase();
-  try {
-    return db.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId) !== undefined;
-  } finally {
-    db.close();
-  }
+  return withDatabase(
+    (db) => db.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId) !== undefined
+  );
 }
 
 /**
@@ -299,12 +192,39 @@ async function deleteProject(
   projectId: string
 ): Promise<{ ok: boolean; detail: string }> {
   try {
-    const response = await request.delete(`/api/projects/${projectId}`);
+    const response = await withTransportRetry(() =>
+      request.delete(`/api/projects/${projectId}`)
+    );
     if (response.ok()) return { ok: true, detail: String(response.status()) };
 
     return { ok: false, detail: `${response.status()} ${await response.text()}` };
   } catch (error) {
     return { ok: false, detail: `request failed: ${String(error)}` };
+  }
+}
+
+/**
+ * Runs an API call, retrying once when the CONNECTION failed rather than the
+ * request.
+ *
+ * `read ECONNRESET` is the dev server dropping a socket, not an answer about
+ * the product: it shows up on the fixture's own reads when the machine is
+ * oversubscribed (several agent sessions share this one, and four workers
+ * already share a single `next dev`). Retrying it keeps a transport hiccup
+ * from being reported as a board that failed to move.
+ *
+ * Deliberately narrow. Only a thrown transport error is retried — any response
+ * the server actually produced, success or 500, is returned untouched, so no
+ * assertion is softened. One retry, because a second reset in a row is a
+ * server that is genuinely gone and should be reported as such.
+ */
+async function withTransportRetry<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (!/ECONNRESET|ECONNREFUSED|socket hang up/i.test(String(error))) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return await call();
   }
 }
 
@@ -328,9 +248,11 @@ export async function createEpic(
   title: string,
   description = "Created by the e2e suite."
 ): Promise<SeededEpic> {
-  const created = await request.post(`/api/projects/${projectId}/epics`, {
-    data: { title, description },
-  });
+  const created = await withTransportRetry(() =>
+    request.post(`/api/projects/${projectId}/epics`, {
+      data: { title, description },
+    })
+  );
   expect(
     created.ok(),
     `epic creation failed: ${created.status()} ${await created.text()}`
@@ -354,7 +276,9 @@ export async function storedEpicStatus(
   projectId: string,
   epicId: string
 ): Promise<string> {
-  const response = await request.get(`/api/projects/${projectId}/epics`);
+  const response = await withTransportRetry(() =>
+    request.get(`/api/projects/${projectId}/epics`)
+  );
   expect(response.ok(), `epics read failed: ${response.status()}`).toBeTruthy();
   const { data } = (await response.json()) as {
     data: { id: string; status: string }[];
@@ -373,7 +297,9 @@ export async function storedColumnOrder(
   projectId: string,
   status: string
 ): Promise<string[]> {
-  const response = await request.get(`/api/projects/${projectId}/epics`);
+  const response = await withTransportRetry(() =>
+    request.get(`/api/projects/${projectId}/epics`)
+  );
   expect(response.ok(), `epics read failed: ${response.status()}`).toBeTruthy();
   const { data } = (await response.json()) as {
     data: { title: string; status: string; position: number }[];
@@ -390,7 +316,9 @@ export async function storedEpicBranch(
   projectId: string,
   epicId: string
 ): Promise<string | null> {
-  const response = await request.get(`/api/projects/${projectId}/epics`);
+  const response = await withTransportRetry(() =>
+    request.get(`/api/projects/${projectId}/epics`)
+  );
   expect(response.ok(), `epics read failed: ${response.status()}`).toBeTruthy();
   const { data } = (await response.json()) as {
     data: { id: string; branchName: string | null }[];
@@ -398,33 +326,129 @@ export async function storedEpicBranch(
   return data.find((epic) => epic.id === epicId)?.branchName ?? null;
 }
 
-/** Points an epic at the branch a build would have produced. */
-export async function attachBranch(
+/** One agent session, as the sessions route reports it. */
+export interface StoredSession {
+  id: string;
+  agentType: string | null;
+  status: string;
+  provider: string | null;
+  outcome: string | null;
+  reviewVerdict: string | null;
+  error: string | null;
+  branchName: string | null;
+}
+
+/**
+ * The agent sessions a ticket accumulated, oldest first.
+ *
+ * A journey that dispatches real builds and reviews is judged on these rows:
+ * they are what the routes create, what the scheduler runs, and what the
+ * workflow transitions read. `kind` separates them from the chat
+ * conversations the same endpoint returns.
+ */
+export async function epicSessions(
   request: APIRequestContext,
   projectId: string,
-  epicId: string,
-  branchName: string
-): Promise<void> {
-  const patched = await request.patch(
-    `/api/projects/${projectId}/epics/${epicId}`,
-    { data: { branchName } }
+  epicId: string
+): Promise<StoredSession[]> {
+  const response = await withTransportRetry(() =>
+    request.get(`/api/projects/${projectId}/sessions`)
   );
-  expect(
-    patched.ok(),
-    `attaching ${branchName} failed: ${patched.status()} ${await patched.text()}`
-  ).toBeTruthy();
+  expect(response.ok(), `sessions read failed: ${response.status()}`).toBeTruthy();
+  const { data } = (await response.json()) as {
+    data: ({ kind: string; epicId: string | null; createdAt: string } & StoredSession)[];
+  };
+  return data
+    .filter((row) => row.kind === "agent_session" && row.epicId === epicId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/** The review findings filed against a ticket, oldest first. */
+export async function epicFindings(
+  request: APIRequestContext,
+  projectId: string,
+  epicId: string
+): Promise<{ body: string; status: string; filePath: string; agentSessionId: string | null }[]> {
+  const response = await withTransportRetry(() =>
+    request.get(`/api/projects/${projectId}/epics/${epicId}/review-comments`)
+  );
+  expect(response.ok(), `findings read failed: ${response.status()}`).toBeTruthy();
+  const { data } = (await response.json()) as {
+    data: { body: string; status: string; filePath: string; agentSessionId: string | null }[];
+  };
+  return data;
+}
+
+/**
+ * Agent types a dispatch journey pins to a known provider.
+ *
+ * `build` is the epic build route's, `review_feature` the one
+ * `REVIEW_TYPE_TO_AGENT_TYPE` maps the dialog's default review type to.
+ */
+export const PINNED_AGENT_TYPES = ["build", "review_feature"] as const;
+
+/**
+ * Pins this project's dispatches to claude-code.
+ *
+ * Agent resolution is a precedence chain (explicit choice, project role,
+ * global role, built-in claude-code fallback), and the suite runs against the
+ * developer's real database — where a global role assignment pointing `build`
+ * at another CLI is perfectly ordinary. Without a project-scoped pin, whose
+ * provider a journey lands on would depend on the machine it runs on.
+ *
+ * The other providers' stubs refuse to run agents, so a pin that stopped
+ * working fails the journey with a readable error instead of reaching a real
+ * CLI — but it should not come to that, which is what this is for.
+ */
+export async function pinProjectAgents(
+  request: APIRequestContext,
+  projectId: string
+): Promise<void> {
+  for (const agentType of PINNED_AGENT_TYPES) {
+    const response = await request.put(
+      `/api/projects/${projectId}/agent-config/providers/${agentType}`,
+      { data: { provider: "claude-code" } }
+    );
+    expect(
+      response.ok(),
+      `pinning ${agentType} failed: ${response.status()} ${await response.text()}`
+    ).toBeTruthy();
+  }
+}
+
+/**
+ * Removes the pins.
+ *
+ * `agent_provider_defaults` rows are scoped by a plain `scope` text column
+ * rather than a foreign key, so deleting the project does NOT cascade them —
+ * they would outlive the run as rows naming a project that no longer exists.
+ * That orphaning is a product gap worth its own ticket (the project delete
+ * route unlinks uploads but never these rows); until it is closed, the suite
+ * cleans up after itself rather than leaking a row per run.
+ */
+export async function unpinProjectAgents(
+  request: APIRequestContext,
+  projectId: string
+): Promise<void> {
+  for (const agentType of PINNED_AGENT_TYPES) {
+    await request
+      .delete(`/api/projects/${projectId}/agent-config/providers/${agentType}`)
+      .catch(() => undefined);
+  }
 }
 
 export const test = base.extend<{ project: ArijProject }>({
   project: async ({ request }, use, testInfo) => {
-    const repoPath = createScratchRepo();
+    const { rootPath, repoPath } = createScratchRepo();
     // `createProjectSchema` caps the name at 200 chars, and the worker index
     // keeps two parallel tests of the same title apart.
     const name = `E2E ${testInfo.title}`.slice(0, 180) + ` #${testInfo.workerIndex}`;
 
-    const created = await request.post("/api/projects", {
-      data: { name, gitRepoPath: repoPath },
-    });
+    const created = await withTransportRetry(() =>
+      request.post("/api/projects", {
+        data: { name, gitRepoPath: repoPath },
+      })
+    );
     expect(
       created.ok(),
       `project creation failed: ${created.status()} ${await created.text()}`
@@ -435,6 +459,7 @@ export const test = base.extend<{ project: ArijProject }>({
       id: data.id,
       name,
       repoPath,
+      rootPath,
       boardUrl: `/projects/${data.id}`,
     };
 
@@ -448,7 +473,9 @@ export const test = base.extend<{ project: ArijProject }>({
       // No `removeDirectory=true`: this project was never cloned by Arij, so the
       // route would decline anyway — the scratch repo is ours to remove.
       const deleted = await deleteProject(request, project.id);
-      rmSync(repoPath, { recursive: true, force: true });
+      // The whole temp root, not just the repository: a build's worktree is
+      // created beside it (see ArijProject.rootPath).
+      rmSync(rootPath, { recursive: true, force: true });
       const residue = takeUploadResidue(project.id);
 
       // Asserted only once every removal above has run, so a teardown that

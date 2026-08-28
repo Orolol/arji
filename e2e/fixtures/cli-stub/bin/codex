@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+// The e2e agent stub, spawned instead of the real `codex` CLI. See ../runtime.mjs.
+// Extensionless (PATH resolves it by exact name) and therefore CommonJS, so the
+// ESM runtime is reached through a dynamic import.
+import("../runtime.mjs").then((runtime) => runtime.main("codex"));

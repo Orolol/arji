@@ -5,8 +5,9 @@ npm run test:e2e
 ```
 
 Playwright starts `next dev` itself (port 3100 by default) and drives the real
-routes — no mocked fetches. Two things about this host are worth knowing before
-the first run.
+routes — no mocked fetches. Three things are worth knowing before the first
+run: which browser it drives, what stands in for the agent CLIs, and how to
+point it at a dev server that is already up.
 
 ## The browser
 
@@ -28,6 +29,27 @@ PLAYWRIGHT_CHANNEL=chrome npm run test:e2e
 Any Playwright channel name works (`chrome`, `msedge`, `chrome-beta`, …); the
 value is passed straight through to the `chromium` project.
 
+## The agent boundary
+
+`build-review-merge.spec.ts` dispatches a real build and a real review — the
+routes, the worktree, the session rows, the MCP token and every workflow
+transition are the product's. The one thing it does not run is the CLI child
+process those dispatches spawn: a real agent is slow, billed, and never twice
+the same.
+
+So the CLI, and only the CLI, is replaced. `e2e/fixtures/cli-stub/bin/` holds a
+`claude`, `codex`, `omp` and `agy` that Arij spawns by bare name off the dev
+server's PATH; `playwright.config.ts` prepends that directory (and sets
+`ARIJ_BASE_URL`, which is what a spawned agent is told to call Arij back on).
+The `claude` one plays a scenario the test wrote in advance: it commits in the
+worktree it was given and files its verdict through the session's own
+`submit_findings`. The other three refuse to run agents, so a dispatch that
+resolves to the wrong provider fails loudly instead of reaching a real CLI.
+
+Nothing is dispatched until `assertCliStubInstalled` has proved the server
+under test really spawns them, so a misconfigured run fails with an
+explanation instead of spending a real agent.
+
 ## Reuse a dev server that is already running
 
 Next 16 holds a lock on `.next/dev`, so a second `next dev` in the same
@@ -43,6 +65,14 @@ spawn entirely:
 
 ```
 E2E_PORT=3199 npm run test:e2e
+```
+
+A reused server was started by you, so it does not have the stub PATH or the
+base URL that `webServer.env` would have given it — start it with both:
+
+```
+PATH="$PWD/e2e/fixtures/cli-stub/bin:$PATH" ARIJ_BASE_URL=http://127.0.0.1:3199 \
+  npm run dev -- --port 3199
 ```
 
 ## Test data
