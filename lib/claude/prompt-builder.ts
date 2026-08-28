@@ -299,7 +299,10 @@ export function buildSpecGenerationPrompt(
   parts.push(systemSection(systemPrompt));
   parts.push(projectHeader(project.name));
   parts.push(descriptionSection(project.description));
-  parts.push(section("Current Specification", project.spec));
+  // Fenced like every other builder: the stored spec is agent-writable, and
+  // this is the builder whose output rewrites it — an injected directive
+  // read as instructions here would persist itself. See ./untrusted.ts.
+  parts.push(specSection(project.spec));
   parts.push(memorySection(project.memory));
   parts.push(documentsSection(documents));
   parts.push(chatHistorySection(chatHistory));
