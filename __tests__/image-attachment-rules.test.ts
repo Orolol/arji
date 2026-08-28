@@ -6,6 +6,7 @@ import {
   formatImageRejections,
   imageFilesFromClipboard,
   imageFilesFromDrop,
+  imageUploadRejection,
   imageUploadRejectionReason,
   isAllowedImageMimeType,
   partitionImageFiles,
@@ -20,7 +21,7 @@ function fileOfSize(name: string, type: string, size: number): File {
 describe("image attachment rules", () => {
   it("pins the limits the chat upload route enforces", () => {
     // The bug modal reuses the chat pipeline; if these drift the UI would
-    // accept files the server then rejects with a 400.
+    // accept files the server then rejects.
     expect(MAX_IMAGE_UPLOAD_BYTES).toBe(10 * 1024 * 1024);
     expect(ALLOWED_IMAGE_MIME_TYPES).toEqual([
       "image/png",
@@ -72,6 +73,30 @@ describe("image attachment rules", () => {
         size: MAX_IMAGE_UPLOAD_BYTES + 1,
       })
     ).not.toBeNull();
+  });
+
+  it("labels the two rejections apart so the route can pick a status", () => {
+    // The upload route answers `too_large` with 413 and `unsupported_type`
+    // with 400; collapsing the codes would collapse the statuses with them.
+    expect(
+      imageUploadRejection({ type: "image/png", size: MAX_IMAGE_UPLOAD_BYTES + 1 })
+    ).toEqual({
+      code: "too_large",
+      reason: "File too large (10.0MB). Max: 10MB",
+    });
+    expect(imageUploadRejection({ type: "application/pdf", size: 10 })?.code).toBe(
+      "unsupported_type"
+    );
+    expect(
+      imageUploadRejection({ type: "image/png", size: MAX_IMAGE_UPLOAD_BYTES })
+    ).toBeNull();
+  });
+
+  it("keeps the reason helper in step with the structured rejection", () => {
+    const oversized = { type: "image/png", size: 12 * 1024 * 1024 };
+    expect(imageUploadRejectionReason(oversized)).toBe(
+      imageUploadRejection(oversized)?.reason
+    );
   });
 
   it("splits a mixed batch into uploadable files and named rejections", () => {
