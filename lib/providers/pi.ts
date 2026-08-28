@@ -218,16 +218,6 @@ export abstract class PiProvider extends BaseCliProvider {
     return ["--session", cliSessionId];
   }
 
-  /**
-   * Extra argv appended alongside a restricted tool allowlist. On pi the
-   * allowlist genuinely strips the mutating built-ins (verified on 0.84.2:
-   * write is unavailable under `--tools read,grep,find,ls`), so there is
-   * nothing to add; omp needs an overlay on top — see OhMyPiProvider.
-   */
-  protected restrictedToolsExtraArgs(): string[] {
-    return [];
-  }
-
   protected notAuthenticatedMessage(): string {
     return "Pi is not authenticated. Run `pi` and use /login, or set the provider API key.";
   }
@@ -247,6 +237,31 @@ export abstract class PiProvider extends BaseCliProvider {
     removePromptFile((spawnContext as PiSpawnContext | undefined)?.promptFilePath);
   }
 
+  /**
+   * The `--tools` allowlist for a mode, or undefined when the mode restricts
+   * nothing (code mode passes no flag and gets the CLI's full tool set).
+   *
+   * Plan/chat runs must not touch the working tree. Analyze adds only the
+   * write primitive required to create arji.json; edit and bash stay absent.
+   * The allowlist is the WHOLE isolation mechanism for both CLIs — verified on
+   * pi 0.84.2 and re-verified on omp 18.0.6, where `write` no longer survives
+   * it. MCP tool names must NEVER be added here: omp validates --tools against
+   * built-in names only, and an unknown name is a fatal argv error that kills
+   * the spawn. Its MCP tools are orthogonal to this allowlist and stay mounted
+   * regardless — see lib/providers/oh-my-pi.ts.
+   *
+   * This is the single source of truth for both the argv and the version gate
+   * that guarantees the CLI honours it: a mode is gated exactly when this
+   * returns a list. Adding a restricted mode therefore cannot forget the gate.
+   */
+  protected toolAllowlist(
+    mode: ProviderSpawnOptions["mode"],
+  ): string[] | undefined {
+    if (mode === "plan" || mode === "chat") return this.readonlyTools();
+    if (mode === "analyze") return [...this.readonlyTools(), WRITE_TOOL];
+    return undefined;
+  }
+
   buildArgs(
     options: ProviderSpawnOptions,
     spawnContext?: ProviderSpawnContext,
@@ -258,18 +273,9 @@ export abstract class PiProvider extends BaseCliProvider {
 
     const args: string[] = ["--mode", "json"];
 
-    // Plan/chat runs must not touch the working tree. Analyze adds only the
-    // write primitive required to create arji.json; edit and bash stay absent.
-    // MCP tool names must NEVER be added here: omp validates --tools against
-    // built-in names only, and an unknown name is a fatal argv error that
-    // kills the spawn. Its MCP tools are orthogonal to this allowlist and
-    // stay mounted regardless — see lib/providers/oh-my-pi.ts.
-    if (mode === "plan" || mode === "chat") {
-      args.push("--tools", this.readonlyTools().join(","));
-      args.push(...this.restrictedToolsExtraArgs());
-    } else if (mode === "analyze") {
-      args.push("--tools", [...this.readonlyTools(), WRITE_TOOL].join(","));
-      args.push(...this.restrictedToolsExtraArgs());
+    const allowlist = this.toolAllowlist(mode);
+    if (allowlist) {
+      args.push("--tools", allowlist.join(","));
     }
 
     if (cliSessionId && resumeSession) {

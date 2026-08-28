@@ -9,7 +9,6 @@
  * ended on a model error still exits 0 — so success has to be downgraded from
  * the stream, not the exit code.
  */
-import { readFileSync } from "fs";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const { mockSpawn } = vi.hoisted(() => ({
@@ -481,26 +480,29 @@ describe("OhMyPiProvider", () => {
     expect(args[args.indexOf("--tools") + 1]).toBe("read,grep,glob");
   });
 
-  it("adds the xdev-off overlay in read-only modes — omp's allowlist alone leaves write mounted", () => {
+  it("needs no config overlay in read-only modes — omp 18.0.6's allowlist strips write on its own", () => {
+    // Was: an `--config` overlay carrying `tools.xdev: false`, needed on omp
+    // 17.2.1 because the device system force-mounted `write` through the
+    // allowlist. Re-measured on 18.0.6 with a live MCP server: the tool
+    // surface is identical with and without it, and the flag can displace
+    // the user's whole config. See __tests__/omp-user-config-not-displaced.
     for (const mode of ["plan", "chat"] as const) {
       const args = provider.buildArgs(baseOptions({ mode }));
-      const overlayPath = args[args.indexOf("--config") + 1];
-      expect(overlayPath).toMatch(/arij-omp-readonly-\d+\.yml$/);
-      expect(readFileSync(overlayPath, "utf-8")).toBe("tools:\n  xdev: false\n");
+      expect(args).not.toContain("--config");
     }
   });
 
-  it("allows reads and one write tool in analyze mode with the xdev overlay", () => {
+  it("allows reads and one write tool in analyze mode", () => {
     const args = provider.buildArgs(baseOptions({ mode: "analyze" }));
     expect(args[args.indexOf("--tools") + 1]).toBe(
       "read,grep,glob,write",
     );
-    expect(args).toContain("--config");
+    expect(args).not.toContain("--config");
     expect(args.join(" ")).not.toContain("edit");
     expect(args.join(" ")).not.toContain("bash");
   });
 
-  it("keeps the full tool set in code mode: no --tools, no overlay", () => {
+  it("keeps the full tool set in code mode: no --tools", () => {
     const args = provider.buildArgs(baseOptions({ mode: "code" }));
     expect(args).not.toContain("--tools");
     expect(args).not.toContain("--config");

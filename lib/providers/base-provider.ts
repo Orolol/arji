@@ -172,6 +172,21 @@ export abstract class BaseCliProvider implements AgentProvider {
     return undefined;
   }
 
+  /**
+   * Refuse the spawn before the child starts. A returned string becomes the
+   * session's error and no process runs; `undefined` lets the spawn proceed.
+   *
+   * This is for preconditions argv cannot express — a CLI whose installed
+   * version does not honour the capability restriction Arij is about to ask
+   * for, say. Failing here is deliberately louder than failing silently:
+   * an unenforced restriction is indistinguishable from an enforced one in
+   * the output, so it has to be caught before the agent gets its tools.
+   * Default: nothing to check.
+   */
+  protected preflight(_options: ProviderSpawnOptions): string | undefined {
+    return undefined;
+  }
+
   /** Build CLI arguments from spawn options. */
   abstract buildArgs(
     options: ProviderSpawnOptions,
@@ -434,24 +449,33 @@ export abstract class BaseCliProvider implements AgentProvider {
     const callbacks = this.buildChunkCallbacks(options);
     const stdinPayload = this.stdinPayload(spawnContext);
 
-    // execve() would fail with a bare `spawn E2BIG` here — a provider that
-    // cannot move the prompt off argv says why instead.
-    const oversized = findOversizedArg(args);
-    if (oversized) {
+    // Refusals decided before the child exists: the process never starts and
+    // the reason becomes the session's error.
+    const abort = (error: string): ProviderSession => {
       this.cleanupSpawnContext(spawnContext);
       return {
         handle: `${this.handlePrefix}-${sessionId}`,
         kill: () => {},
-        promise: Promise.resolve({
-          success: false,
-          error: oversizedArgMessage(
-            this.binaryName,
-            Buffer.byteLength(oversized, "utf8"),
-          ),
-          duration: 0,
-        }),
+        promise: Promise.resolve({ success: false, error, duration: 0 }),
         command: this.buildDisplayCommand(args, prompt),
       };
+    };
+
+    // A precondition the provider cannot express through argv — today, an omp
+    // install too old to honour the tool allowlist Arij is relying on.
+    const blocked = this.preflight(options);
+    if (blocked) return abort(blocked);
+
+    // execve() would fail with a bare `spawn E2BIG` here — a provider that
+    // cannot move the prompt off argv says why instead.
+    const oversized = findOversizedArg(args);
+    if (oversized) {
+      return abort(
+        oversizedArgMessage(
+          this.binaryName,
+          Buffer.byteLength(oversized, "utf8"),
+        ),
+      );
     }
 
     // Optional NDJSON logging

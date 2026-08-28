@@ -9,7 +9,7 @@
  * event parsing, result extraction and failure detection are all inherited
  * from PiProvider.
  *
- * CLI: omp --mode json [--tools <allowlist> --config <overlay>] [--resume <ID>] [--model <M>] -p <PROMPT>
+ * CLI: omp --mode json [--tools <allowlist>] [--resume <ID>] [--model <M>] -p <PROMPT>
  *
  * (omp's `-p` is a boolean `--print` flag with the prompt as a positional
  * argument, so the argv shape happens to match pi's `-p <PROMPT>` exactly.)
@@ -19,29 +19,52 @@
  * - resume: `--resume <ID>` (omp has no `--session` flag); resuming re-emits
  *   the session header with the SAME id, so the stored id stays stable
  * - read-only tools: omp ships `glob` instead of pi's `find`/`ls`
- * - read-only modes need MORE than the allowlist. Measured on omp 17.2.1
- *   (2026-08-21): under `--tools read,grep,glob` the `write` built-in stays
- *   force-mounted — it is the invocation surface for xd:// devices (MCP
- *   tools) — and it writes REAL files as readily as devices, so a plan or
- *   review session could modify the worktree. edit and bash are genuinely
- *   stripped; write is the only leak, and pi does not have it (no device
- *   system). `--approval-mode always-ask` closes the leak but gates device
- *   writes behind the same approval, which auto-blocks in print mode and
- *   severs the MCP channel. The fix that keeps both properties is a
- *   `--config` overlay with `tools.xdev: false`: with the device system off
- *   nothing force-mounts write, so the allowlist finally strips it, and MCP
- *   tools mount as first-class tools instead — with the exact names Arij
- *   already spells into prompts (`mcp__arij_get_ticket`, …), calls verified
- *   to reach the server.
+ * - read-only modes used to need MORE than the allowlist, and no longer do.
+ *   Measured on omp 17.2.1 (2026-08-21): under `--tools read,grep,glob` the
+ *   `write` built-in stayed force-mounted — it is the invocation surface for
+ *   xd:// devices (MCP tools) — and it wrote REAL files as readily as
+ *   devices, so a plan or review session could modify the worktree. The fix
+ *   was a `--config` overlay carrying `tools.xdev: false`, which turned the
+ *   device system off so the allowlist could finally strip write.
+ *   Re-measured on 18.0.6 (2026-08-28) with a live stdio MCP server mounted,
+ *   so the device surface was NOT vacuously empty:
+ *     --tools read,grep,glob              -> read, grep, glob, mcp__arij_get_ticket
+ *     ... plus --config <xdev-off>.yml    -> read, grep, glob, mcp__arij_get_ticket
+ *   (`dumpTools` from an `--mode rpc` `get_state`.) write is gone from the
+ *   registry either way, and MCP tools already mount as first-class tools
+ *   under the exact names Arij spells into prompts. The overlay changes the
+ *   tool surface by nothing, so it is gone — see the `--config` note below.
+ * - NO `--config`, deliberately. omp's `--config` is documented as an overlay
+ *   layered over the user's config (`defaults <- global <- project <-
+ *   overlays <- runtime`), and on 18.0.6 it measures that way: a deep merge
+ *   that preserves modelRoles and untouched sibling keys. But a session
+ *   measured it REPLACING ~/.omp/agent/config.yml on 18.0.5, which silently
+ *   dropped every omp session onto a fallback local model and discarded
+ *   modelRoles, agentModelOverrides and session settings with it. Arij now
+ *   buys nothing from that flag (see above), so it hands omp no config file
+ *   at all rather than keep a lever over the user's whole configuration.
+ *   Re-probe the allowlist on each omp upgrade, as with the rest of the
+ *   contract: if `write` ever comes back under `--tools read,grep,glob`,
+ *   restore the isolation through something that cannot displace user config.
+ * - VERSION GATE, the price of the line above. With the overlay gone the
+ *   allowlist is the whole isolation mechanism, and 18.0.6 is the only
+ *   release measured to enforce it — 17.2.1 demonstrably does not, and 18.0.5
+ *   was never probed for this property. Arij spawns whatever `omp` is on
+ *   PATH, so a restricted spawn now refuses outright below that floor rather
+ *   than handing a "read-only" session a working `write` tool. `preflight()`
+ *   below applies it to one-shot spawns and the persistent RPC runner applies
+ *   the same check; both live in lib/providers/omp-version.ts.
  * - MCP: pi has none; omp reads mcp.json with ${VAR} expansion at load time,
  *   so the Arij tool channel rides the child's environment (buildEnv).
  *   Measured on 17.2.1: MCP tools are ORTHOGONAL to the `--tools` allowlist
  *   — putting an MCP name into `--tools` is a fatal argv error ("Unknown
  *   tools in --tools") that kills the spawn. So review sessions keep the
- *   channel with no flag work at all (under the xdev-off overlay they mount
- *   as first-class tools, see above).
- * - Re-probed on 18.0.5 (2026-08-26): all of the above still holds, and one
- *   thing that was ASSUMED does not. An UNSET ${ARIJ_MCP_TOKEN} does not
+ *   channel with no flag work at all, and they mount as first-class
+ *   `mcp__arij_*` tools (see above).
+ * - Re-probed on 18.0.5 (2026-08-26). Everything above about the MCP channel
+ *   still held — the tool-allowlist behaviour was NOT part of that probe,
+ *   which is why 18.0.5 is below the version gate's floor — and one thing
+ *   that was ASSUMED does not hold. An UNSET ${ARIJ_MCP_TOKEN} does not
  *   expand to nothing — omp leaves the unresolved placeholder as a LITERAL
  *   string, which is non-empty, so a channel-less spawn used to mount every
  *   Arij tool and 401 on every call. buildEnv now supplies an explicitly
@@ -50,9 +73,7 @@
  *   See docs/architecture/mcp-provider-matrix.md.
  */
 
-import { writeFileSync } from "fs";
-import os from "os";
-import path from "path";
+import { ompRestrictedToolsBlockReason } from "./omp-version";
 import { PiProvider } from "./pi";
 import type {
   McpSpawnConfig,
@@ -62,29 +83,6 @@ import type {
 
 /** omp built-ins that cannot modify the working tree. */
 export const OMP_READONLY_TOOLS = ["read", "grep", "glob"];
-
-/** config.yml overlay that turns off omp's xd:// device system. */
-const OMP_READONLY_OVERLAY_CONTENT = "tools:\n  xdev: false\n";
-
-let readonlyOverlayPath: string | null = null;
-
-/**
- * Path of the xdev-off overlay passed via `--config` on read-only spawns.
- * Written lazily to one per-process temp file and reused by every spawn —
- * the content is a constant with no secrets, so unlike claude's mcp-config
- * temp file it needs no per-spawn identity or cleanup.
- */
-export function ompReadonlyOverlayPath(): string {
-  if (!readonlyOverlayPath) {
-    const filePath = path.join(
-      os.tmpdir(),
-      `arij-omp-readonly-${process.pid}.yml`,
-    );
-    writeFileSync(filePath, OMP_READONLY_OVERLAY_CONTENT);
-    readonlyOverlayPath = filePath;
-  }
-  return readonlyOverlayPath;
-}
 
 /**
  * Build the process environment used by both one-shot and persistent OMP
@@ -118,9 +116,15 @@ export class OhMyPiProvider extends PiProvider {
     return OMP_READONLY_TOOLS;
   }
 
-  /** The allowlist alone leaves `write` mounted — see the header. */
-  protected restrictedToolsExtraArgs(): string[] {
-    return ["--config", ompReadonlyOverlayPath()];
+  /**
+   * Refuse a restricted spawn on an omp that is not measured to honour
+   * `--tools`. Gated exactly when `toolAllowlist()` returns a list, so plan,
+   * chat and analyze are covered and code mode — which restricts nothing and
+   * claims no isolation — runs on any version.
+   */
+  protected preflight(options: ProviderSpawnOptions): string | undefined {
+    if (!this.toolAllowlist(options.mode)) return undefined;
+    return ompRestrictedToolsBlockReason() ?? undefined;
   }
 
   /**
