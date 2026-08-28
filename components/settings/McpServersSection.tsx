@@ -27,6 +27,18 @@
  *      cannot accept something the API will reject. The server still rejects
  *      over-length input explicitly rather than truncating it; this is the
  *      other half of that rule, not a replacement for it.
+ *
+ *      The four single-value fields (name, command, url, usage hint) carry one
+ *      because their cap is 1:1 with the field. The multi-line ones — args,
+ *      agent types, allowed tools, secrets — deliberately do NOT, and that is
+ *      a decision rather than an omission: each of their caps is per-ITEM
+ *      (`MCP_SERVER_ARG_MAX_LENGTH` per line, `MCP_SERVER_ENV_VALUE_MAX_LENGTH`
+ *      per value), which a single textarea-wide `maxLength` cannot express.
+ *      Spending the args cap on the textarea would be actively wrong, since
+ *      `MCP_SERVER_ARGS_MAX_TOTAL_LENGTH` is measured over the JSON encoding
+ *      — quotes, commas and brackets included — and so does not correspond to
+ *      any count of the raw characters typed here. These fields are left to
+ *      the server's explicit rejection, which reports the offending limit.
  */
 
 import { useCallback, useEffect, useState } from "react";
