@@ -358,11 +358,7 @@ export abstract class PiProvider extends BaseCliProvider {
     const failure = findPiRunFailure(info.stdout, this.cliDisplayName);
     if (!failure) return result;
 
-    const deliverable = this.extractResult(
-      info.stdout,
-      info.stderr,
-      info.spawnContext,
-    );
+    const deliverable = this.extractResult(info.stdout);
     return {
       ...result,
       success: false,
