@@ -373,10 +373,15 @@ server's own environment when the channel doesn't set one — otherwise a
 stray export would silently hand every agent session the board-wide chat
 toolset (create_ticket, start_build) on an agent token.
 
-Note also `tools.discoveryMode` in `~/.omp/agent/config.yml`: past 40 tools the
-default `auto` mode hides MCP tools behind a `search_tool_bm25` discovery step
-rather than putting them in the prompt. Worth pinning if Arij's five tools ever
-need to be unconditionally visible.
+Note also that omp's progressive tool disclosure can drop the arij tools out of
+the prompt with no error once enough servers are declared — the failure mode
+that makes a tool-heavy extra server dangerous on a `user-global` provider. An
+earlier revision of this note named `tools.discoveryMode`, a `search_tool_bm25`
+step and a 40-tool threshold; **none of the three could be confirmed on the
+installed build (2026-08-27)** — the live key is `inlineToolDescriptors`. See
+[omp: a large server set can make tools disappear with no
+error](#omp-a-large-server-set-can-make-tools-disappear-with-no-error) for what
+was actually measured and for the pinning recommendation.
 
 ## agy — wired 2026-08-26
 
