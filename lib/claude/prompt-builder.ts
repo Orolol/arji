@@ -1762,7 +1762,14 @@ export interface MemoryDistillSessionContext {
  * just-finished session taught into the project's memory document.
  *
  * Deliberately does NOT inject the memory section like other builders — the
- * current memory is the object being rewritten and gets its own framing.
+ * current memory is the object being rewritten and gets its own framing:
+ * a heading and the document itself, not a fenced reference block it would
+ * then be asked to quote back.
+ *
+ * That framing is not a defence, though. The memory document is written by
+ * agents (this builder's own sessions, and Dreaming), so it is neutralised
+ * on the way in exactly as `memorySection` neutralises the record channel —
+ * only the fence differs.
  */
 export function buildMemoryDistillPrompt(
   project: PromptProject,
@@ -1777,7 +1784,8 @@ export function buildMemoryDistillPrompt(
 
   parts.push(`## Current Project Memory\n`);
   if (currentMemory && currentMemory.trim().length > 0) {
-    parts.push(currentMemory.trim() + "\n");
+    // Unfenced by design (see the docblock) — so this is the whole defence.
+    parts.push(neutralizeControlMarkup(currentMemory.trim()) + "\n");
   } else {
     parts.push(`(The project memory is currently empty.)\n`);
   }
@@ -1856,7 +1864,8 @@ export interface DreamingDigestContext {
  * Like the distill and the spec rewrite, the current memory is the object
  * being rewritten and gets its own framing instead of the standard injected
  * section (callers pass `memory: null` so the builder-level injection cannot
- * duplicate it).
+ * duplicate it). The document is still neutralised: unfenced framing changes
+ * how it reads, not whether it can impersonate a control turn.
  */
 export function buildDreamingPrompt(
   project: PromptProject,
@@ -1872,7 +1881,8 @@ export function buildDreamingPrompt(
 
   parts.push(`## Current Project Memory\n`);
   if (currentMemory && currentMemory.trim().length > 0) {
-    parts.push(currentMemory.trim() + "\n");
+    // Unfenced by design (see the docblock) — so this is the whole defence.
+    parts.push(neutralizeControlMarkup(currentMemory.trim()) + "\n");
   } else {
     parts.push(`(The project memory is currently empty.)\n`);
   }
@@ -1997,7 +2007,10 @@ function specRewriteBoardSection(board: SpecRewriteBoardState): string {
 /**
  * Builds the prompt for the automatic spec rewrite fired after a release.
  * Like the memory distill, the current spec is the object being rewritten
- * and gets its own framing instead of the standard injected section.
+ * and gets its own framing instead of the standard injected section — and,
+ * like it, the document is neutralised on the way in. This path runs
+ * unattended and writes its result back to `projects.spec`, so a directive
+ * left in the stored spec would otherwise be read, obeyed and re-persisted.
  */
 export function buildSpecAutoRewritePrompt(
   project: PromptProject,
@@ -2014,7 +2027,9 @@ export function buildSpecAutoRewritePrompt(
 
   parts.push(`## Current Specification\n`);
   if (currentSpec && currentSpec.trim().length > 0) {
-    parts.push(currentSpec.trim() + "\n");
+    // Unfenced by design (see the docblock) — so this is the whole defence,
+    // on the one path whose output is written back over the document itself.
+    parts.push(neutralizeControlMarkup(currentSpec.trim()) + "\n");
   } else {
     parts.push(`(The project specification is currently empty.)\n`);
   }

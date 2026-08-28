@@ -24,6 +24,16 @@
  * other field left empty and no reference documents, so that the untrusted-
  * content notice is a per-channel signal: a builder that fences the memory
  * but not the spec fails the spec run and nothing else.
+ *
+ * Stored documents reach a prompt through two distinct channels, and a
+ * defence on one says nothing about the other. The *record* channel is a
+ * builder reading `project.spec` / `project.memory` off the project row —
+ * that is what the fixtures above exercise. The *parameter* channel is the
+ * three document-rewrite builders, which receive the document as their own
+ * `currentSpec` / `currentMemory` argument (callers null the project field so
+ * it is not injected twice) and frame it as the object being rewritten. Those
+ * are exercised separately at the bottom of this file, against the same
+ * poisoned payload: no fence there, deliberately, but the same neutralisation.
  */
 
 import { describe, expect, it } from "vitest";
@@ -65,6 +75,8 @@ const ANTML_CLOSE = `</${ANTML_PREFIX}invoke>`;
 /** Canaries prove a builder really read the field rather than dropping it. */
 const SPEC_CANARY = "SPEC-CANARY-a7f19c";
 const MEMORY_CANARY = "MEMORY-CANARY-b3e08d";
+/** The document handed to a rewrite builder as its own parameter. */
+const REWRITE_CANARY = "REWRITE-CANARY-c5d21f";
 
 /**
  * A fenced code sample, because a specification full of them is the normal
@@ -156,6 +168,17 @@ const CHANNELS: StoredChannel[] = [
   },
 ];
 
+/**
+ * The project row for a parameter-channel run: both stored fields empty, so
+ * the poison can only have arrived through the argument under test.
+ */
+const cleanProject: PromptProject = {
+  name: "Arij",
+  description: "A local-first project orchestrator.",
+  spec: null,
+  memory: null,
+};
+
 // Kept empty: documentsSection() emits the same notice, which would mask a
 // missing one on the spec or the memory. Documents have their own coverage.
 const documents: PromptDocument[] = [];
@@ -213,12 +236,30 @@ const telescopeCollection: TelescopeCollectionResult = {
 type StoredContentChannel =
   /** Injects project.spec / project.memory via specSection / memorySection. */
   | "fenced"
+  /**
+   * Takes the stored document as its own parameter (`currentMemory` /
+   * `currentSpec`) because the document is the object the session rewrites:
+   * it keeps its own `##` heading and reads as a document rather than as a
+   * quoted reference block, and callers null the project field so the
+   * builder-level injection cannot duplicate it. That framing is deliberate
+   * — but framing is not the defence, so the parameter is still neutralised.
+   */
+  | "rewrite-parameter"
   /** Reads neither field — the poisoned fixture must not surface at all. */
   | "not-injected";
 
 interface BuilderCase {
   channel: StoredContentChannel;
+  /** Builds with the poisoned document stored on the project row. */
   build: (project: PromptProject) => string;
+  /**
+   * "rewrite-parameter" only: builds with the poisoned document passed as the
+   * `currentMemory` / `currentSpec` argument — the channel the project row
+   * cannot reach, and the one that shipped raw.
+   */
+  buildFromParameter?: (document: string) => string;
+  /** "rewrite-parameter" only: the heading the document is framed under. */
+  parameterHeading?: string;
   /** Why the classification is what it is, when it is not self-evident. */
   note?: string;
 }
@@ -353,13 +394,18 @@ const BUILDERS: Record<string, BuilderCase> = {
         null,
       ),
   },
+  // -- Builders that rewrite a document handed to them as a parameter ------
+
   buildMemoryDistillPrompt: {
-    channel: "not-injected",
+    channel: "rewrite-parameter",
     build: (p) => promptBuilder.buildMemoryDistillPrompt(p, null, {}, null),
-    note: "Takes the memory document as its own `currentMemory` parameter, and callers pass memory: null so the injected section cannot duplicate it. That parameter is interpolated raw (prompt-builder.ts, `## Current Project Memory`) — a separate hole from the one this file gates, and its own ticket.",
+    buildFromParameter: (document) =>
+      promptBuilder.buildMemoryDistillPrompt(cleanProject, document, {}, null),
+    parameterHeading: "## Current Project Memory",
+    note: "Takes the memory document as its own `currentMemory` parameter; callers pass memory: null so the injected section cannot duplicate it.",
   },
   buildDreamingPrompt: {
-    channel: "not-injected",
+    channel: "rewrite-parameter",
     build: (p) =>
       promptBuilder.buildDreamingPrompt(
         p,
@@ -367,10 +413,18 @@ const BUILDERS: Record<string, BuilderCase> = {
         { digest: "", sessionCount: 0, sinceIso: "2026-08-11T12:00:00.000Z" },
         null,
       ),
-    note: "Same shape as buildMemoryDistillPrompt: the memory arrives as `currentMemory` and is interpolated raw.",
+    buildFromParameter: (document) =>
+      promptBuilder.buildDreamingPrompt(
+        cleanProject,
+        document,
+        { digest: "", sessionCount: 0, sinceIso: "2026-08-11T12:00:00.000Z" },
+        null,
+      ),
+    parameterHeading: "## Current Project Memory",
+    note: "Same shape as buildMemoryDistillPrompt: the memory arrives as `currentMemory`.",
   },
   buildSpecAutoRewritePrompt: {
-    channel: "not-injected",
+    channel: "rewrite-parameter",
     build: (p) =>
       promptBuilder.buildSpecAutoRewritePrompt(
         p,
@@ -379,7 +433,16 @@ const BUILDERS: Record<string, BuilderCase> = {
         { version: "0.0.2", title: null, changelog: null },
         null,
       ),
-    note: "The spec arrives as `currentSpec`, the object being rewritten, and is interpolated raw under `## Current Specification`.",
+    buildFromParameter: (document) =>
+      promptBuilder.buildSpecAutoRewritePrompt(
+        cleanProject,
+        document,
+        { epics: [], userStories: [], releases: [] },
+        { version: "0.0.2", title: null, changelog: null },
+        null,
+      ),
+    parameterHeading: "## Current Specification",
+    note: "The post-release automatic rewrite: the spec arrives as `currentSpec` and its output is written back to projects.spec, so a directive obeyed here re-persists itself.",
   },
 };
 
@@ -454,8 +517,11 @@ describe.each(cases)("%s", (_label, builder, channel) => {
     expect(prompt).not.toContain(ANTML_CLOSE);
   });
 
-  if (builder.channel === "not-injected") {
-    it("does not read the stored document at all", () => {
+  if (builder.channel !== "fenced") {
+    // Either it reads no stored document at all, or it takes one by
+    // parameter — which the fixture leaves null. Both mean the poisoned
+    // project row must not surface here.
+    it("does not read the stored document off the project row", () => {
       expect(prompt).not.toContain(channel.canary);
     });
     return;
@@ -494,5 +560,70 @@ describe.each(cases)("%s", (_label, builder, channel) => {
     // The document's own ``` sample stayed inside rather than ending the
     // block early — that is what fenceLength() buys.
     expect(holding[0]).toContain(BREAKOUT_ATTEMPT);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The parameter channel: documents handed to the builder that rewrites them
+// ---------------------------------------------------------------------------
+
+const REWRITE_CASES = Object.entries(BUILDERS).filter(
+  ([, builder]) => builder.channel === "rewrite-parameter",
+);
+
+describe("rewrite-parameter coverage", () => {
+  it("has cases, so the channel cannot be emptied by reclassification", () => {
+    expect(REWRITE_CASES.length).toBeGreaterThan(0);
+  });
+
+  it.each(REWRITE_CASES)(
+    "%s declares how its document arrives",
+    (_name, builder) => {
+      expect(typeof builder.buildFromParameter).toBe("function");
+      expect(builder.parameterHeading).toMatch(/^## /);
+    },
+  );
+});
+
+describe.each(REWRITE_CASES)("%s [rewrite parameter]", (_name, builder) => {
+  const document = poisonedDocument("Document under rewrite", REWRITE_CANARY);
+  const prompt = builder.buildFromParameter!(document);
+
+  it("emits no harness-impersonating markup", () => {
+    for (const tag of IMPERSONATING_TAG_NAMES) {
+      expect(prompt).not.toContain(`<${tag}>`);
+      expect(prompt).not.toContain(`</${tag}>`);
+    }
+    expect(prompt).not.toContain(ANTML_OPEN);
+    expect(prompt).not.toContain(ANTML_CLOSE);
+  });
+
+  it("escapes every impersonating tag the document carries", () => {
+    expect(prompt).toContain("&lt;system-directive&gt;");
+    for (const tag of IMPERSONATING_TAG_NAMES) {
+      expect(prompt).toContain(`&lt;${tag}&gt;`);
+      expect(prompt).toContain(`&lt;/${tag}&gt;`);
+    }
+    expect(prompt).toContain(`&lt;${ANTML_PREFIX}invoke name="Bash"&gt;`);
+  });
+
+  it("keeps the document legible under its own heading", () => {
+    const heading = prompt.indexOf(builder.parameterHeading!);
+    expect(heading).toBeGreaterThan(-1);
+    expect(prompt.indexOf(REWRITE_CANARY)).toBeGreaterThan(heading);
+    // The escaped form still says what it said, so a reviewer reading the
+    // stored prompt can see what was attempted.
+    expect(prompt).toContain(INJECTION_PAYLOAD);
+  });
+
+  it("reads as a document rather than as a fenced quotation", () => {
+    // Deliberate asymmetry with the record channel: this document is the
+    // object the session rewrites, so fencing it would tell the agent to
+    // quote back a fenced block. Neutralisation is what defends it, and the
+    // assertions above are what enforce that. Fence this one day and these
+    // two expectations are the ones to revisit, together.
+    const blocks = fencedBlocks(prompt);
+    expect(blocks.filter((block) => block.includes(REWRITE_CANARY))).toEqual([]);
+    expect(prompt).not.toContain(UNTRUSTED_CONTENT_NOTICE);
   });
 });
