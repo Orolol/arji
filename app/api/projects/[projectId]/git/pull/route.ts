@@ -9,8 +9,10 @@ import {
 } from "@/lib/api/route-helpers";
 import { resolveCliSessionId } from "@/lib/db/resolve-cli-session-id";
 import {
+  assertRemoteConfigured,
   getCurrentGitBranch,
   getConflictFileDiffs,
+  GitRemoteNotConfiguredError,
   pullGitBranchWithConflictSupport,
 } from "@/lib/git/remote";
 import { writeGitSyncLog } from "@/lib/github/sync-log";
@@ -72,6 +74,11 @@ export async function POST(request: NextRequest, { params }: Params) {
   const model = resolved.model;
 
   try {
+    // Checked before the pull itself: without a remote there is nothing to
+    // merge, and git's failure for that state is indistinguishable from a
+    // transport error once it reaches the route.
+    await assertRemoteConfigured(project.gitRepoPath, remote);
+
     const result = await pullGitBranchWithConflictSupport(project.gitRepoPath, branch, remote);
 
     if (result.conflicted) {
@@ -291,6 +298,33 @@ export async function POST(request: NextRequest, { params }: Params) {
       },
     });
   } catch (error) {
+    // An unconfigured remote is a precondition the user can fix, not a fault:
+    // 409 with the code and the repository's real remotes so the client can
+    // offer them, matching git/detect-remote's 4xx for the same state.
+    if (error instanceof GitRemoteNotConfiguredError) {
+      writeGitSyncLog({
+        projectId,
+        operation: "pull",
+        status: "failed",
+        branch,
+        detail: {
+          remote,
+          code: error.code,
+          error: error.message,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code,
+          remote: error.remote,
+          configuredRemotes: error.configuredRemotes,
+        },
+        { status: 409 }
+      );
+    }
+
     writeGitSyncLog({
       projectId,
       operation: "pull",

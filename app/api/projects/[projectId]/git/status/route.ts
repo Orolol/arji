@@ -8,6 +8,8 @@ import {
   fetchGitRemote,
   getBranchSyncStatus,
   getCurrentGitBranch,
+  getRemoteAvailability,
+  type GitRemoteAvailability,
 } from "@/lib/git/remote";
 
 type Params = { params: Promise<{ projectId: string }> };
@@ -87,7 +89,26 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const remote = request.nextUrl.searchParams.get("remote") || "origin";
 
-  const freshness = await refreshRemoteIfStale(project.gitRepoPath, remote);
+  // Read the repository's remote list first. This is the state the Git Sync
+  // page derives its "no remote to sync with" affordance from, so it has to
+  // come back on every status read rather than only in a failed push/pull
+  // response the client would lose on the next mount.
+  let availability: GitRemoteAvailability | null = null;
+  try {
+    availability = await getRemoteAvailability(project.gitRepoPath, remote);
+  } catch {
+    // An unreadable remote list (bad path, flag-like remote name) is not a
+    // precondition answer: leave it unknown rather than claiming the remote is
+    // missing, and let the branch read below report the real failure.
+    availability = null;
+  }
+
+  // Fetching a remote that does not exist can only produce a misleading
+  // `lastFetchError`; the missing remote is the honest answer.
+  const freshness =
+    availability && !availability.configured
+      ? { lastFetchedAt: null, lastFetchError: null }
+      : await refreshRemoteIfStale(project.gitRepoPath, remote);
 
   const requestedBranch = request.nextUrl.searchParams.get("branch")?.trim() || "";
   const branch = requestedBranch || (await getCurrentGitBranch(project.gitRepoPath));
@@ -104,6 +125,8 @@ export async function GET(request: NextRequest, { params }: Params) {
         ahead: status.ahead,
         behind: status.behind,
         hasRemoteBranch: status.hasRemoteBranch,
+        remoteConfigured: availability ? availability.configured : null,
+        configuredRemotes: availability ? availability.configuredRemotes : null,
         lastFetchedAt: freshness.lastFetchedAt,
         lastFetchError: freshness.lastFetchError,
       },

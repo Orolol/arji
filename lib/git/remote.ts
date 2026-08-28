@@ -36,6 +36,15 @@ export interface PullWithConflictResult {
   conflictedFiles: string[];
 }
 
+export interface GitRemoteAvailability {
+  /** The remote that was asked about, after name validation. */
+  remote: string;
+  /** True when that remote exists in the repository with a usable URL. */
+  configured: boolean;
+  /** Every remote the repository does have — the UI's recovery options. */
+  configuredRemotes: string[];
+}
+
 export class PushValidationError extends Error {
   readonly code: "working_tree_dirty" | "branch_behind_remote";
 
@@ -46,6 +55,28 @@ export class PushValidationError extends Error {
     super(message);
     this.name = "PushValidationError";
     this.code = code;
+  }
+}
+
+/**
+ * "This repository has no usable `origin`" is a precondition, not a transport
+ * fault. Throwing this instead of letting git's own `fatal: 'origin' does not
+ * appear to be a git repository` bubble up lets the routes answer 409 with a
+ * machine-readable `code` — the shape `merge_conflicts` and
+ * `working_tree_dirty` already use — rather than a 500 the UI cannot act on.
+ */
+export class GitRemoteNotConfiguredError extends Error {
+  readonly code = "remote_not_configured" as const;
+  readonly remote: string;
+  readonly configuredRemotes: string[];
+
+  constructor(remote: string, configuredRemotes: string[]) {
+    super(
+      `No git remote named '${remote}' is configured for this repository.`
+    );
+    this.name = "GitRemoteNotConfiguredError";
+    this.remote = remote;
+    this.configuredRemotes = configuredRemotes;
   }
 }
 
@@ -125,6 +156,56 @@ export async function detectGitHubRemote(
   }
 
   return null;
+}
+
+/**
+ * Reads the repository's remote list and answers whether `remote` is usable.
+ *
+ * Deliberately decided from git's own configuration rather than from a failed
+ * push/pull's stderr: the message differs per git version and per transport,
+ * and reading it back is what turned an ordinary unconfigured project into a
+ * server fault.
+ */
+export async function getRemoteAvailability(
+  repoPath: string,
+  remote = "origin"
+): Promise<GitRemoteAvailability> {
+  const cleanRemote = defaultRemote(remote);
+  const git = getGit(repoPath);
+  const remotes = await git.getRemotes(true);
+
+  // A remote row with no fetch or push URL is registered but unusable, so it
+  // is not something push/pull could ever talk to.
+  const configuredRemotes = remotes
+    .filter((entry) =>
+      Boolean(
+        (entry.refs?.fetch || "").trim() || (entry.refs?.push || "").trim()
+      )
+    )
+    .map((entry) => entry.name);
+
+  return {
+    remote: cleanRemote,
+    configured: configuredRemotes.includes(cleanRemote),
+    configuredRemotes,
+  };
+}
+
+/**
+ * Guard for the operations that need a remote to exist before they start.
+ * Throws GitRemoteNotConfiguredError when it does not.
+ */
+export async function assertRemoteConfigured(
+  repoPath: string,
+  remote = "origin"
+): Promise<void> {
+  const availability = await getRemoteAvailability(repoPath, remote);
+  if (!availability.configured) {
+    throw new GitRemoteNotConfiguredError(
+      availability.remote,
+      availability.configuredRemotes
+    );
+  }
 }
 
 export async function fetchGitRemote(
