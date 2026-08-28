@@ -89,7 +89,9 @@ describe("chat upload route limits", () => {
       mockRouteContext({ projectId: "proj-1" })
     );
 
-    expect(res.status).toBe(400);
+    // 413, like a body the platform refused to deliver: one status for "too
+    // big" whichever side of the platform cap the upload landed on.
+    expect(res.status).toBe(413);
     await expect(res.json()).resolves.toEqual({
       error: "File too large (11.0MB). Max: 10MB",
     });

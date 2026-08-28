@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { NextRequest } from "next/server";
-import nextConfig from "@/next.config";
 import { resetDbMockState, mockRouteContext } from "@/__tests__/helpers/db-mock";
+import {
+  PLATFORM_MAX_BODY_BYTES,
+  fileOfSize,
+  multipartEnvelopeBytes,
+  platformRequest,
+} from "@/__tests__/helpers/upload-request";
 import {
   MAX_IMAGE_UPLOAD_BYTES,
   MAX_IMAGE_UPLOAD_LABEL,
@@ -32,93 +36,11 @@ import { POST } from "@/app/api/projects/[projectId]/chat/upload/route";
  * `request.formData()` threw, and `imageUploadRejectionReason`'s
  * `File too large` branch never ran for any file it was written to explain.
  *
- * These tests drive the route through a simulation of that truncation rule,
- * reading the cap from `next.config.ts` so the suite tracks the real
- * configuration rather than a copy of it.
+ * These tests drive the route through `__tests__/helpers/upload-request.ts`,
+ * which simulates that truncation rule and reads the cap from `next.config.ts`
+ * so the suite tracks the real configuration rather than a copy of it.
  */
 describe("chat upload under the platform body cap", () => {
-  /** Next's documented default when the option is not configured. */
-  const NEXT_DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024;
-
-  const SIZE_UNITS: Record<string, number> = {
-    b: 1,
-    kb: 1024,
-    mb: 1024 * 1024,
-    gb: 1024 * 1024 * 1024,
-  };
-
-  function parseSizeLimit(value: string): number {
-    const match = /^\s*([\d.]+)\s*(b|kb|mb|gb)\s*$/i.exec(value);
-    if (!match) throw new Error(`Unparseable size limit: ${value}`);
-    return Number(match[1]) * SIZE_UNITS[match[2]!.toLowerCase()]!;
-  }
-
-  /** What the platform will actually let through to the route handler. */
-  const PLATFORM_MAX_BODY_BYTES = (() => {
-    const configured = nextConfig.experimental?.proxyClientMaxBodySize;
-    if (typeof configured === "number") return configured;
-    if (typeof configured === "string") return parseSizeLimit(configured);
-    return NEXT_DEFAULT_MAX_BODY_BYTES;
-  })();
-
-  const BOUNDARY = "----ArijFormBoundaryEXAMPLE0123456789";
-
-  /**
-   * Bytes the multipart wrapper adds around the file's own bytes. Measured
-   * from the real headers rather than guessed, because the whole defect is
-   * that this overhead is what pushed an at-the-limit file past the cap.
-   */
-  function multipartEnvelopeBytes(fileName: string, mimeType: string): number {
-    const encoder = new TextEncoder();
-    const head =
-      `--${BOUNDARY}\r\n` +
-      `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
-      `Content-Type: ${mimeType}\r\n\r\n`;
-    const tail = `\r\n--${BOUNDARY}--\r\n`;
-    return encoder.encode(head).length + encoder.encode(tail).length;
-  }
-
-  // jsdom's File has no arrayBuffer(), and the route needs one — so the
-  // uploaded file is described directly rather than through jsdom.
-  function fileOfSize(name: string, type: string, size: number): File {
-    return {
-      name,
-      type,
-      size,
-      arrayBuffer: async () => new ArrayBuffer(8),
-    } as unknown as File;
-  }
-
-  /**
-   * A request as the platform delivers it: intact when the whole multipart
-   * body fits under the cap, truncated — so `formData()` rejects the way it
-   * does in production — when it does not. `content-length` still describes
-   * what the client tried to send either way.
-   */
-  function platformRequest(file: File): NextRequest {
-    const bodyBytes = file.size + multipartEnvelopeBytes(file.name, file.type);
-    const headers = new Headers({
-      "content-length": String(bodyBytes),
-      "content-type": `multipart/form-data; boundary=${BOUNDARY}`,
-    });
-
-    if (bodyBytes > PLATFORM_MAX_BODY_BYTES) {
-      return {
-        headers,
-        formData: async () => {
-          throw new TypeError("Failed to parse body as FormData.");
-        },
-      } as unknown as NextRequest;
-    }
-
-    return {
-      headers,
-      formData: async () => ({
-        get: (name: string) => (name === "file" ? file : null),
-      }),
-    } as unknown as NextRequest;
-  }
-
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
@@ -152,7 +74,7 @@ describe("chat upload under the platform body cap", () => {
       mockRouteContext({ projectId: "proj-1" })
     );
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(413);
     await expect(res.json()).resolves.toEqual({
       error: `File too large (10.5MB). Max: ${MAX_IMAGE_UPLOAD_LABEL}`,
     });

@@ -5,7 +5,7 @@ import { createId } from "@/lib/utils/nanoid";
 import { errorResponse } from "@/lib/api/route-helpers";
 import {
   MAX_IMAGE_UPLOAD_BYTES,
-  imageUploadRejectionReason,
+  imageUploadRejection,
   oversizedUploadReason,
 } from "@/lib/uploads/image-attachments";
 import path from "path";
@@ -53,9 +53,15 @@ export async function POST(
 
   // Same rules the attach UI enforces client-side — one source of truth, so
   // the two cannot drift apart.
-  const rejectionReason = imageUploadRejectionReason(file);
-  if (rejectionReason) {
-    return NextResponse.json({ error: rejectionReason }, { status: 400 });
+  const rejection = imageUploadRejection(file);
+  if (rejection) {
+    // A file the route could read and refused for its size is `413`, the same
+    // answer as a body the platform would not deliver at all: the caller sees
+    // one status for "too big" whichever side of the platform cap it landed
+    // on, and can tell it apart from a file of the wrong shape. The message
+    // still comes from the guard, so it names the file's own size.
+    const status = rejection.code === "too_large" ? 413 : 400;
+    return NextResponse.json({ error: rejection.reason }, { status });
   }
 
   try {

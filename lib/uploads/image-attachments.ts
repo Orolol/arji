@@ -68,20 +68,46 @@ export function isAllowedImageMimeType(type: string): boolean {
 }
 
 /**
+ * Why an upload is refused, split by kind.
+ *
+ * The two kinds are not the same answer over HTTP: a file that is too big is
+ * `413 Payload Too Large`, while a file of the wrong type is a `400`. Callers
+ * that only need the wording use `imageUploadRejectionReason` below; the
+ * upload route needs the distinction to pick a status.
+ */
+export type ImageUploadRejectionCode = "unsupported_type" | "too_large";
+
+export interface ImageUploadRejection {
+  code: ImageUploadRejectionCode;
+  reason: string;
+}
+
+/**
  * Why this file cannot be uploaded, or `null` when it is acceptable.
  * The wording is what the upload route returns to API callers.
  */
-export function imageUploadRejectionReason(file: ImageFileLike): string | null {
+export function imageUploadRejection(file: ImageFileLike): ImageUploadRejection | null {
   if (!isAllowedImageMimeType(file.type)) {
-    return `Unsupported file type: ${file.type || "unknown"}. Allowed: ${ALLOWED_EXTENSIONS_LABEL}`;
+    return {
+      code: "unsupported_type",
+      reason: `Unsupported file type: ${file.type || "unknown"}. Allowed: ${ALLOWED_EXTENSIONS_LABEL}`,
+    };
   }
 
   if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
     const megabytes = (file.size / 1024 / 1024).toFixed(1);
-    return `File too large (${megabytes}MB). Max: ${MAX_IMAGE_UPLOAD_LABEL}`;
+    return {
+      code: "too_large",
+      reason: `File too large (${megabytes}MB). Max: ${MAX_IMAGE_UPLOAD_LABEL}`,
+    };
   }
 
   return null;
+}
+
+/** The rejection wording alone — one source of truth with the route's. */
+export function imageUploadRejectionReason(file: ImageFileLike): string | null {
+  return imageUploadRejection(file)?.reason ?? null;
 }
 
 /**
