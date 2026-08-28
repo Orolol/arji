@@ -275,10 +275,64 @@ describe("oversized chunks", () => {
     );
   });
 
+  it("stops saying so once the chunk has been walked to its end", async () => {
+    // The slice that completes an oversized chunk ends the warning: after
+    // "Load more" has read it out, the pane really does hold all of it.
+    mockPages([
+      {
+        chunks: [
+          {
+            ...chunk(1, "-second-half"),
+            contentOffset: 6,
+            contentLength: 18,
+            contentTruncated: true,
+          },
+        ],
+        nextAfter: 1,
+        nextOffset: 0,
+        hasMore: false,
+      },
+    ]);
+    const head = {
+      ...chunk(1, "first-"),
+      contentLength: 18,
+      contentTruncated: true,
+    };
+    renderStream({ seed: { chunks: [head], nextAfter: 1, nextOffset: 6, hasMore: true } });
+
+    expect(screen.getByTestId("stream-truncated-raw")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("stream-load-more-raw"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("stream-raw")).toHaveTextContent("first--second-half");
+    });
+    expect(screen.queryByTestId("stream-truncated-raw")).not.toBeInTheDocument();
+  });
+
+  it("measures a slice in code points, as SQLite reported its length", () => {
+    mockPages([]);
+    // Four emoji: eight UTF-16 units, but `length()` on the server counted
+    // four — so a UTF-16 measure would reach 4 + 4 = 8 of a 6-character chunk
+    // and call it complete while two characters are still unread.
+    const partial = {
+      ...chunk(1, "🙂🙂🙂🙂"),
+      contentOffset: 0,
+      contentLength: 6,
+      contentTruncated: true,
+    };
+    renderStream({ seed: seed([partial], false) });
+
+    expect(screen.getByTestId("stream-truncated-raw")).toHaveTextContent(
+      "One oversized chunk is shown in part."
+    );
+  });
+
   it("counts several of them", () => {
     mockPages([]);
-    const a = { ...chunk(1, "a"), contentTruncated: true };
-    const b = { ...chunk(2, "b"), contentTruncated: true };
+    // contentLength is the size of the STORED chunk, so a slice that is only
+    // part of one has to report more than it carries.
+    const a = { ...chunk(1, "a"), contentLength: 900_000, contentTruncated: true };
+    const b = { ...chunk(2, "b"), contentLength: 900_000, contentTruncated: true };
     renderStream({ seed: seed([a, b], false) });
 
     expect(screen.getByTestId("stream-truncated-raw")).toHaveTextContent(

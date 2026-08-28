@@ -27,6 +27,21 @@ import type {
 /** The three streams a session records. */
 export const SESSION_STREAM_TYPES = ["raw", "output", "response"] as const;
 
+/**
+ * Characters, as SQLite counts them.
+ *
+ * `contentLength` and `contentOffset` on a bounded chunk both come from
+ * SQLite `length()`/`substr()`, which work in code points. A JS `.length` is
+ * UTF-16 units — larger for anything astral, and agent output carries emoji
+ * routinely — so measuring a slice that way over-counts, and a client
+ * comparing it against `contentLength` would conclude it holds the whole
+ * chunk while part of it is still unread. Lives here, in the module both
+ * sides already share, so the two ends cannot drift apart on it.
+ */
+export function countCharacters(text: string): number {
+  return [...text].length;
+}
+
 export function isSessionStreamType(
   value: string | null
 ): value is AgentSessionStreamType {

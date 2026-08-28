@@ -10,6 +10,8 @@ import {
   agentSessions,
 } from "@/lib/db/schema";
 import { extractLastNonEmptyText } from "@/lib/agent-sessions/last-text";
+// Type-only in the other direction, so this is not a runtime cycle.
+import { countCharacters } from "@/lib/agent-sessions/session-detail";
 
 export type AgentSessionStreamType = "response" | "raw" | "output";
 
@@ -100,15 +102,6 @@ export interface SessionChunkPage {
   nextOffset: number;
   /** True when more chunks — or more of the current one — remain. */
   hasMore: boolean;
-}
-
-/**
- * Characters, as SQLite counts them: `substr`/`length` work in code points,
- * and a UTF-16 length would drift on astral characters — enough to duplicate
- * or drop text at a slice boundary.
- */
-function countCharacters(text: string): number {
-  return [...text].length;
 }
 
 /**

@@ -7,7 +7,10 @@ import type {
   AgentSessionStreamType,
   BoundedSessionChunk,
 } from "@/lib/agent-sessions/chunks";
-import { fetchSessionChunkPage } from "@/lib/agent-sessions/session-detail";
+import {
+  countCharacters,
+  fetchSessionChunkPage,
+} from "@/lib/agent-sessions/session-detail";
 
 /** The bounded first page the session detail payload already carried. */
 export interface SessionStreamSeed {
@@ -131,11 +134,31 @@ export function SessionOutputStream({
     );
   }
 
-  // Distinct CHUNKS, not slices: one 8.3 MB chunk walked out over five pages
-  // is one oversized chunk, and saying "5" would misdescribe the stream.
-  const truncatedCount = new Set(
-    chunks.filter((chunk) => chunk.contentTruncated).map((chunk) => chunk.sequence)
-  ).size;
+  /**
+   * Chunks that are on screen only in part.
+   *
+   * Counted per CHUNK, not per slice — one 8.3 MB chunk walked out over five
+   * pages is one oversized chunk, not five — and a chunk whose slices have
+   * reached its end no longer counts at all: after "Load more" has walked it
+   * out, the pane really is showing all of it.
+   */
+  const truncatedCount = (() => {
+    const reachBySequence = new Map<number, { reach: number; length: number }>();
+    for (const chunk of chunks) {
+      if (!chunk.contentTruncated && chunk.contentOffset === 0) continue;
+      const reach = chunk.contentOffset + countCharacters(chunk.content);
+      const seen = reachBySequence.get(chunk.sequence);
+      reachBySequence.set(chunk.sequence, {
+        reach: Math.max(reach, seen?.reach ?? 0),
+        length: chunk.contentLength,
+      });
+    }
+    let count = 0;
+    for (const { reach, length } of reachBySequence.values()) {
+      if (reach < length) count += 1;
+    }
+    return count;
+  })();
 
   return (
     <div className="flex flex-col gap-[10px]" data-testid={`stream-${streamType}`}>
