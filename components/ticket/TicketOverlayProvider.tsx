@@ -1,32 +1,33 @@
 "use client";
 
 /**
- * TicketOverlayProvider — STUB.
+ * TicketOverlayProvider — the one way a screen opens a ticket.
  *
- * Frame 6a (the ticket overlay) is a separate packet. This file exists so the
- * desk has a real, typed way to say "open this ticket" today, and so that
- * packet can replace the panel wholesale without touching a single call site.
- *
- * THE CONTRACT — this is the part that must not change:
+ * THE CONTRACT — unchanged since the foundation gate, and depended on by the
+ * desk, the board and every future ticket reference:
  *
  *   const { openTicket, closeTicket, ticketId } = useTicketOverlay();
  *   openTicket(epicId, { projectId })   // opens
  *   closeTicket()                       // closes; Escape does too
  *
  * Screens NEVER import the overlay tree. They call `openTicket()` and the
- * provider decides what to render, which is what lets 6a land as a swap of
- * this one file.
+ * provider decides what to render, which is what let frame 6a land as a swap
+ * of the panel body alone.
  *
- * What the stub deliberately does NOT do: fetch the ticket, render the 7/3
- * overlay body, or own any of the ticket's mutations. It renders a minimal
- * labelled panel over a scrim so the wiring is visible and testable.
+ * WHAT CHANGED WHEN 6a LANDED: the default panel is now the real
+ * `TicketOverlay`, which paints its own scrim and modal (it needs the full
+ * 1200px / max-height / overflow geometry and the Escape *precedence* rules —
+ * a delete or dispatch dialog on top must swallow Escape, and only a
+ * component that knows those dialogs are open can decide that). The
+ * `renderPanel` seam keeps its previous behaviour exactly: a custom panel is
+ * still wrapped in the provider's own scrim and still gets the provider's
+ * plain Escape-closes handling.
  */
 
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
-import { Mono, PillButton } from "@/components/piscine";
-import { X } from "lucide-react";
+import { TicketOverlay } from "@/components/ticket/TicketOverlay";
 
 export interface OpenTicketOptions {
   /** Which project the ticket belongs to. Required by the real overlay's fetch. */
@@ -100,16 +101,18 @@ export function TicketOverlayProvider({
     setProjectId(null);
   }, []);
 
-  // Escape closes — the same rule frame 6a specifies, kept here so it does not
-  // have to be rediscovered when the panel is replaced.
+  // Escape closes. The DEFAULT panel owns this itself, because it is the only
+  // thing that knows whether one of its own dialogs is up and should swallow
+  // the key instead; a custom `renderPanel` keeps the provider's plain rule.
+  const escapeHandledByPanel = renderPanel === undefined;
   React.useEffect(() => {
-    if (!ticketId) return;
+    if (!ticketId || escapeHandledByPanel) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeTicket();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ticketId, closeTicket]);
+  }, [ticketId, closeTicket, escapeHandledByPanel]);
 
   const value = React.useMemo<TicketOverlayContextValue>(
     () => ({
@@ -125,7 +128,7 @@ export function TicketOverlayProvider({
   return (
     <TicketOverlayContext.Provider value={value}>
       {children}
-      {ticketId ? (
+      {ticketId && renderPanel ? (
         <div
           data-testid="ticket-overlay"
           className={cn(
@@ -145,30 +148,19 @@ export function TicketOverlayProvider({
               "shadow-[var(--shadow-overlay)]",
             )}
           >
-            {renderPanel ? (
-              renderPanel({ ticketId, projectId, close: closeTicket })
-            ) : (
-              <div className="flex items-center gap-3">
-                <Mono size={11} tone="muted">
-                  {ticketId}
-                </Mono>
-                <span className="font-display text-[19px] font-bold text-foreground">
-                  Ticket
-                </span>
-                <PillButton
-                  className="ml-auto"
-                  variant="outline"
-                  outlineTone="neutral"
-                  iconOnly
-                  icon={X}
-                  onClick={closeTicket}
-                >
-                  Close
-                </PillButton>
-              </div>
-            )}
+            {renderPanel({ ticketId, projectId, close: closeTicket })}
           </div>
         </div>
+      ) : null}
+      {ticketId && !renderPanel ? (
+        // The real 6a overlay: it paints its own scrim, owns the modal
+        // geometry and owns Escape precedence over its dialogs.
+        <TicketOverlay
+          projectId={projectId ?? ""}
+          epicId={ticketId}
+          open
+          onClose={closeTicket}
+        />
       ) : null}
     </TicketOverlayContext.Provider>
   );

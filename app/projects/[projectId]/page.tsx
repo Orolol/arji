@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { NowDesk } from "@/components/desk/NowDesk";
-import { EpicDetail } from "@/components/kanban/EpicDetail";
+import { TicketOverlay } from "@/components/ticket/TicketOverlay";
 import { UnifiedChatPanel, type UnifiedChatPanelHandle } from "@/components/chat/UnifiedChatPanel";
 import { AgentMonitor } from "@/components/monitor/AgentMonitor";
 import { useAgentPolling } from "@/hooks/useAgentPolling";
@@ -439,45 +439,14 @@ export default function ProjectDeskPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-hidden">
+        {/* The ticket is a modal over a still-live desk now (frame 6a), not a
+            column beside the chat: it is rendered below, outside the chat
+            panel, so the desk keeps receiving SSE and keeps ticking behind
+            the scrim. The chat panel keeps its own view to itself. */}
         <UnifiedChatPanel
           projectId={projectId}
           ref={panelRef}
           onEpicCreated={() => setRefreshTrigger((t) => t + 1)}
-          sharedPanelView={
-            activeDetailTicketId
-              ? {
-                  panelId: activeDetailTicketId,
-                  label: "Ticket",
-                  onClose: handleCloseDetailPanel,
-                  content: (
-                    <EpicDetail
-                      projectId={projectId}
-                      epicId={activeDetailTicketId}
-                      open
-                      refreshTrigger={refreshTrigger}
-                      onClose={handleCloseDetailPanel}
-                      onAgentConflict={({ message, sessionUrl }) =>
-                        addToast(
-                          "error",
-                          message,
-                          sessionUrl
-                            ? { href: sessionUrl, label: "Open active session" }
-                            : undefined
-                        )
-                      }
-                      onMerged={() => {
-                        setRefreshTrigger((t) => t + 1);
-                        addToast("success", "Branch merged into main");
-                      }}
-                      onDeleted={() => {
-                        setRefreshTrigger((t) => t + 1);
-                        addToast("success", "Epic deleted permanently");
-                      }}
-                    />
-                  ),
-                }
-              : null
-          }
         >
           <div className="flex h-full flex-col">
             {/* Project-scoped controls the desk's own chrome does not carry:
@@ -705,6 +674,37 @@ export default function ProjectDeskPage() {
           </div>
         </UnifiedChatPanel>
       </div>
+
+      {/* The ticket overlay. `?ticket=<epicId>` and a plain desk click both
+          land in the batch selection, and the selection's active ticket is
+          what opens here — one source of truth for "which ticket is open",
+          so closing the overlay clears the selection and vice versa. */}
+      {activeDetailTicketId && (
+        <TicketOverlay
+          projectId={projectId}
+          epicId={activeDetailTicketId}
+          open
+          refreshTrigger={refreshTrigger}
+          onClose={handleCloseDetailPanel}
+          onAgentConflict={({ message, sessionUrl }) =>
+            addToast(
+              "error",
+              message,
+              sessionUrl
+                ? { href: sessionUrl, label: "Open active session" }
+                : undefined
+            )
+          }
+          onMerged={() => {
+            setRefreshTrigger((t) => t + 1);
+            addToast("success", "Branch merged into main");
+          }}
+          onDeleted={() => {
+            setRefreshTrigger((t) => t + 1);
+            addToast("success", "Epic deleted permanently");
+          }}
+        />
+      )}
 
       {/* Toast notifications */}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">

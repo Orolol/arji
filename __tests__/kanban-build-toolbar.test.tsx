@@ -92,8 +92,8 @@ vi.mock("@/components/desk/NowDesk", () => ({
   ),
 }));
 
-vi.mock("@/components/kanban/EpicDetail", () => ({
-  EpicDetail: () => null,
+vi.mock("@/components/ticket/TicketOverlay", () => ({
+  TicketOverlay: () => null,
 }));
 
 const mockPanelOpenChat = vi.fn();

@@ -72,11 +72,6 @@
       "count": 2
     }
   },
-  "components/kanban/epic-detail/WhatTheAgentDid.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
   "components/layout/RepoStatusBar.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1

@@ -87,17 +87,20 @@ vi.mock("@/components/desk/NowDesk", () => ({
   ),
 }));
 
-vi.mock("@/components/kanban/EpicDetail", () => ({
-  EpicDetail: ({
+// The ticket is a modal overlay now (frame 6a), not a column inside the chat
+// panel — but the page contract is unchanged: the batch selection's active
+// ticket is what opens, and closing clears the selection.
+vi.mock("@/components/ticket/TicketOverlay", () => ({
+  TicketOverlay: ({
     epicId,
     onClose,
   }: {
     epicId: string;
     onClose: () => void;
   }) => (
-    <div data-testid="epic-detail">
+    <div data-testid="ticket-overlay">
       Detail: {epicId}
-      <button data-testid="close-detail" onClick={onClose}>
+      <button data-testid="ticket-overlay-close" onClick={onClose}>
         Close
       </button>
     </div>
@@ -106,19 +109,7 @@ vi.mock("@/components/kanban/EpicDetail", () => ({
 
 vi.mock("@/components/chat/UnifiedChatPanel", () => ({
   UnifiedChatPanel: forwardRef(
-    (
-      {
-        children,
-        sharedPanelView,
-      }: {
-        children: ReactNode;
-        sharedPanelView?: {
-          content: ReactNode;
-          onClose?: () => void;
-        } | null;
-      },
-      ref
-    ) => {
+    ({ children }: { children: ReactNode }, ref) => {
       useImperativeHandle(ref, () => ({
         openChat: vi.fn(),
         openNewEpic: vi.fn(),
@@ -129,17 +120,6 @@ vi.mock("@/components/chat/UnifiedChatPanel", () => ({
       return (
         <div data-testid="unified-chat-panel">
           <div>{children}</div>
-          {sharedPanelView ? (
-            <aside data-testid="shared-panel">
-              {sharedPanelView.content}
-              <button
-                data-testid="shared-panel-close"
-                onClick={() => sharedPanelView.onClose?.()}
-              >
-                Close Shared
-              </button>
-            </aside>
-          ) : null}
         </div>
       );
     }
@@ -172,13 +152,13 @@ describe("kanban ticket detail selection flow", () => {
     vi.restoreAllMocks();
   });
 
-  it("primary click selects ticket and opens detail panel in one action", () => {
+  it("primary click selects ticket and opens the ticket overlay in one action", () => {
     render(<KanbanPage />);
 
     fireEvent.click(screen.getByTestId("primary-epic-1"));
 
     expect(screen.getByText("1 epic selected")).toBeInTheDocument();
-    expect(screen.getByTestId("shared-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("ticket-overlay")).toBeInTheDocument();
     expect(screen.getByText("Detail: epic-1")).toBeInTheDocument();
   });
 
@@ -203,11 +183,11 @@ describe("kanban ticket detail selection flow", () => {
     expect(screen.getByText("Detail: epic-2")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("toggle-epic-2"));
-    expect(screen.queryByTestId("shared-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-overlay")).not.toBeInTheDocument();
     expect(screen.queryByText(/epic selected/)).not.toBeInTheDocument();
   });
 
-  it("keeps board controls interactive while details are open", () => {
+  it("keeps desk controls interactive while the overlay is open", () => {
     render(<KanbanPage />);
 
     fireEvent.click(screen.getByTestId("primary-epic-1"));
@@ -217,13 +197,13 @@ describe("kanban ticket detail selection flow", () => {
     expect(screen.getByText("Detail: epic-1")).toBeInTheDocument();
   });
 
-  it("closing shared panel clears selection without navigating away from board", () => {
+  it("closing the overlay clears selection without navigating away from the desk", () => {
     render(<KanbanPage />);
 
     fireEvent.click(screen.getByTestId("primary-epic-1"));
-    fireEvent.click(screen.getByTestId("shared-panel-close"));
+    fireEvent.click(screen.getByTestId("ticket-overlay-close"));
 
-    expect(screen.queryByTestId("shared-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-overlay")).not.toBeInTheDocument();
     expect(screen.queryByText(/epic selected/)).not.toBeInTheDocument();
     expect(screen.getByTestId("board")).toBeInTheDocument();
   });

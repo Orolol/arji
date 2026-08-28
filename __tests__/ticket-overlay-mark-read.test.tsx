@@ -1,54 +1,77 @@
+/**
+ * Mark-as-read on open.
+ *
+ * This lives in the overlay, not in any caller, ON PURPOSE: it is what moves
+ * the ticket's `ticket_read_cursors` row to now, clearing both the kanban
+ * unread dot and the cross-project inbox badge. Owning it here means EVERY
+ * path that opens a ticket clears the dot — the desk, the board, the inbox, a
+ * deep link, a future command palette. If it moved to a caller, every new
+ * entry point would have to remember it, and one of them would not.
+ *
+ * Ported from the deleted `epic-detail-mark-read.test.tsx`; the request shape
+ * (`POST /api/inbox/read` with `{epicId}`) is unchanged, which is what keeps
+ * the inbox route's own suites green.
+ */
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
-import { EpicDetail } from "@/components/kanban/EpicDetail";
+
+import { TicketOverlay } from "@/components/ticket/TicketOverlay";
 
 const mockUseEpicDetail = vi.hoisted(() => vi.fn());
 const mockUseTicketComments = vi.hoisted(() => vi.fn());
 const mockUseAgentDispatch = vi.hoisted(() => vi.fn());
 const mockUseEpicPr = vi.hoisted(() => vi.fn());
 const mockUseGitHubConfig = vi.hoisted(() => vi.fn());
-const mockUseGitStatus = vi.hoisted(() => vi.fn());
-const mockUseProvidersAvailable = vi.hoisted(() => vi.fn());
+const mockUseEpicDependencies = vi.hoisted(() => vi.fn());
+const mockUseProjectEpicsList = vi.hoisted(() => vi.fn());
+const mockUseNamedAgentsList = vi.hoisted(() => vi.fn());
+const mockFetchUnifiedSessions = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/useEpicDetail", () => ({
   useEpicDetail: (...args: unknown[]) => mockUseEpicDetail(...args),
 }));
-
 vi.mock("@/hooks/useTicketComments", () => ({
   useTicketComments: (...args: unknown[]) => mockUseTicketComments(...args),
 }));
-
 vi.mock("@/hooks/useAgentDispatch", () => ({
   useAgentDispatch: (...args: unknown[]) => mockUseAgentDispatch(...args),
 }));
-
 vi.mock("@/hooks/useEpicPr", () => ({
   useEpicPr: (...args: unknown[]) => mockUseEpicPr(...args),
 }));
-
 vi.mock("@/hooks/useGitHubConfig", () => ({
   useGitHubConfig: (...args: unknown[]) => mockUseGitHubConfig(...args),
 }));
-
-vi.mock("@/hooks/useGitStatus", () => ({
-  useGitStatus: (...args: unknown[]) => mockUseGitStatus(...args),
+vi.mock("@/hooks/useEpicDependencies", () => ({
+  useEpicDependencies: (...args: unknown[]) => mockUseEpicDependencies(...args),
+}));
+vi.mock("@/hooks/useProjectEpicsList", () => ({
+  useProjectEpicsList: (...args: unknown[]) => mockUseProjectEpicsList(...args),
+}));
+vi.mock("@/hooks/useNamedAgentsList", () => ({
+  useNamedAgentsList: (...args: unknown[]) => mockUseNamedAgentsList(...args),
+}));
+vi.mock("@/hooks/useProjectEvents", () => ({
+  useProjectEvents: () => ({ status: "connected", pollTick: 0 }),
+}));
+vi.mock("@/lib/agent-sessions/session-list", () => ({
+  fetchUnifiedSessions: (...args: unknown[]) =>
+    mockFetchUnifiedSessions(...args),
+}));
+vi.mock("@/components/review/DiffViewer", () => ({
+  DiffViewer: () => <div data-testid="diff-viewer" />,
+}));
+vi.mock("@/components/shared/AgentDispatchDialog", () => ({
+  AgentDispatchDialog: () => null,
+}));
+vi.mock("@/components/chat/MarkdownContent", () => ({
+  MarkdownContent: ({ content }: { content: string }) => <div>{content}</div>,
 }));
 
-vi.mock("@/hooks/useProvidersAvailable", () => ({
-  useProvidersAvailable: (...args: unknown[]) => mockUseProvidersAvailable(...args),
-}));
-
-vi.mock("@/components/shared/AgentActionsBar", () => ({
-  AgentActionsBar: () => <div data-testid="epic-actions" />,
-}));
-
-vi.mock("@/components/dependencies/DependencyEditor", () => ({
-  DependencyEditor: () => <div data-testid="dependency-editor" />,
-}));
-
-describe("EpicDetail mark-read on mount", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+describe("TicketOverlay mark-read on open", () => {
+  // The spy is re-shaped per test (resolve, then reject); `any` keeps the
+  // overload noise out of what these tests are actually about.
   let fetchSpy: any;
 
   beforeEach(() => {
@@ -71,13 +94,13 @@ describe("EpicDetail mark-read on mount", () => {
         type: "feature",
         linkedEpicId: null,
         images: null,
+        readableId: "ARJ-1",
+        createdAt: null,
+        updatedAt: null,
       },
       userStories: [],
       loading: false,
       updateEpic: vi.fn(),
-      addUserStory: vi.fn(),
-      updateUserStory: vi.fn(),
-      deleteUserStory: vi.fn(),
       refresh: vi.fn(),
       setPolling: vi.fn(),
     });
@@ -93,7 +116,7 @@ describe("EpicDetail mark-read on mount", () => {
       sendToDev: vi.fn(),
       sendToReview: vi.fn(),
       resolveMerge: vi.fn(),
-      approve: vi.fn(),
+      refreshSessions: vi.fn(),
     });
     mockUseEpicPr.mockReturnValue({
       pr: null,
@@ -103,31 +126,27 @@ describe("EpicDetail mark-read on mount", () => {
       syncPr: vi.fn(),
     });
     mockUseGitHubConfig.mockReturnValue({ isConfigured: false });
-    mockUseGitStatus.mockReturnValue({
-      ahead: 0,
-      behind: 0,
-      loading: false,
-      error: null,
-      refresh: vi.fn(),
-      push: vi.fn(),
-      pushing: false,
+    mockUseEpicDependencies.mockReturnValue({
+      predecessors: [],
+      successors: [],
     });
-    mockUseProvidersAvailable.mockReturnValue({
-      codexAvailable: true,
-      codexInstalled: true,
-    });
+    mockUseProjectEpicsList.mockReturnValue({ epics: [] });
+    mockUseNamedAgentsList.mockReturnValue({ agents: [] });
+    mockFetchUnifiedSessions.mockResolvedValue([]);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  function renderSubject(overrides?: Partial<ComponentProps<typeof EpicDetail>>) {
+  function renderSubject(
+    overrides?: Partial<ComponentProps<typeof TicketOverlay>>
+  ) {
     return render(
-      <EpicDetail
+      <TicketOverlay
         projectId="proj-1"
         epicId="epic-1"
-        open={true}
+        open
         onClose={vi.fn()}
         {...overrides}
       />
@@ -166,10 +185,10 @@ describe("EpicDetail mark-read on mount", () => {
     await waitFor(() => expect(markReadCalls()).toHaveLength(1));
 
     rerender(
-      <EpicDetail
+      <TicketOverlay
         projectId="proj-1"
         epicId="epic-2"
-        open={true}
+        open
         onClose={vi.fn()}
       />
     );
@@ -180,24 +199,36 @@ describe("EpicDetail mark-read on mount", () => {
     });
   });
 
-  it("counts the comments on the Activity tab, and hides the counter at zero", async () => {
+  it("counts the comments on the conversation band, and hides the counter at zero", async () => {
     const empty = renderSubject();
-    expect(empty.queryByTestId("epic-activity-comment-count")).toBeNull();
+    expect(empty.queryByText("2")).toBeNull();
     empty.unmount();
 
     mockUseTicketComments.mockReturnValue({
       comments: [
-        { id: "c1", body: "one", authorType: "user" },
-        { id: "c2", body: "two", authorType: "agent" },
+        {
+          id: "c1",
+          epicId: "epic-1",
+          author: "agent",
+          content: "one",
+          agentSessionId: null,
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: "c2",
+          epicId: "epic-1",
+          author: "user",
+          content: "two",
+          agentSessionId: null,
+          createdAt: new Date().toISOString(),
+        },
       ],
       loading: false,
       addComment: vi.fn(),
     });
 
     const withComments = renderSubject();
-    expect(
-      withComments.getByTestId("epic-activity-comment-count")
-    ).toHaveTextContent("2");
+    expect(withComments.getByText("2")).toBeInTheDocument();
   });
 
   it("survives a failing mark-read call", async () => {
@@ -207,5 +238,11 @@ describe("EpicDetail mark-read on mount", () => {
 
     await new Promise((r) => setTimeout(r, 20));
     expect(getByTestId("epic-detail-panel")).toBeInTheDocument();
+  });
+
+  it("never renders the literal string the e2e board fixture forbids", () => {
+    const { container } = renderSubject();
+    // e2e/fixtures/board.ts asserts `Loading...` is absent from the panel.
+    expect(container.textContent).not.toContain("Loading...");
   });
 });
