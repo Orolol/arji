@@ -76,8 +76,15 @@ describe("TicketOverlay mark-read on open", () => {
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis, "fetch");
-    fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ data: { ok: true } }), { status: 200 })
+    // A fresh Response per call — a body is readable once, and the overlay
+    // opens several endpoints at a time.
+    fetchSpy.mockImplementation(async (input: RequestInfo | URL) =>
+      new Response(
+        JSON.stringify(
+          String(input).endsWith("/activity") ? { data: [] } : { data: { ok: true } }
+        ),
+        { status: 200 }
+      )
     );
 
     mockUseEpicDetail.mockReturnValue({

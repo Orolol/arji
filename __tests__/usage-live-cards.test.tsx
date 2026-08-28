@@ -302,9 +302,11 @@ describe("Usage page — claude live quota", () => {
     expect(
       await screen.findByTestId("usage-sub-claude-live-5h-reset")
     ).toHaveTextContent("window expired — data stale");
-    expect(screen.getByTestId("usage-sub-claude-live-5h-fill")).toHaveStyle({
-      opacity: "0.35",
-    });
+    // Dimmed, not recoloured — and flagged on the row so the signal survives
+    // a restyling of the bar itself.
+    expect(screen.getByTestId("usage-sub-claude-live-5h")).toHaveAttribute(
+      "data-dimmed"
+    );
     // The reported utilization is still replayed verbatim.
     expect(
       screen.getByTestId("usage-sub-claude-live-5h-readout")
@@ -451,7 +453,10 @@ describe("Usage page — claude live quota", () => {
 
     const captured = await screen.findByTestId("usage-sub-claude-captured");
     expect(captured).toHaveTextContent("Live · polled 2m ago · claude CLI");
-    expect(captured.className).not.toContain("text-priority-yellow");
+    // Staleness is a word plus an icon, never a colour: a fresh read carries
+    // neither the marker nor the flag the marker is derived from.
+    expect(captured).not.toHaveAttribute("data-stale");
+    expect(captured).not.toHaveTextContent("stale");
   });
 
   it("demotes the Arij meter under an explicit this-machine-only label", async () => {
@@ -506,7 +511,10 @@ describe("Usage page — claude live quota", () => {
 
     const readout = await screen.findByTestId("usage-sub-claude-budget-readout");
     expect(readout).toHaveTextContent("$70.00 / $50.00");
-    expect(readout.className).toContain("text-destructive");
+    // The alarm lives on the `Mono` run inside the readout slot.
+    expect(
+      readout.querySelector('[data-slot="mono"]')?.className
+    ).toContain("text-destructive");
     expect(screen.getByTestId("usage-sub-claude-budget-fill")).toHaveStyle({
       width: "100%",
     });

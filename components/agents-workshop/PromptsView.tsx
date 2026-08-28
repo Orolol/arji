@@ -12,6 +12,7 @@ import {
   Shield,
 } from "lucide-react";
 
+import { FieldBoxInput } from "@/components/agents-workshop/FieldBox";
 import { ScopeSwitcher } from "@/components/agents-workshop/ScopeSwitcher";
 import { sourceLabel } from "@/components/agents-workshop/agent-initials";
 import {
@@ -42,8 +43,11 @@ import {
  * band grammar rather than pixel work. The textareas keep `font-mono`: they
  * hold prompt text, where alignment carries meaning.
  */
+// `outline-none` on its own would leave a keyboard user with NO focus
+// indicator at all; the ring is the replacement, matching the buttons below
+// and FieldBoxInput's own focus treatment.
 const PROMPT_TEXTAREA =
-  "min-h-32 w-full resize-y rounded-[10px] border-0 bg-card px-3 py-2 font-mono text-[12.5px] leading-[1.5] text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-60";
+  "min-h-32 w-full resize-y rounded-[10px] border-0 bg-card px-3 py-2 font-mono text-[12.5px] leading-[1.5] text-foreground outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring placeholder:text-muted-foreground disabled:opacity-60";
 
 export function PromptsView({ projectId }: { projectId?: string }) {
   const [scope, setScope] = useState<"global" | "project">(
@@ -74,7 +78,7 @@ export function PromptsView({ projectId }: { projectId?: string }) {
           meta="ce que chaque rôle fait quand il tourne — les valeurs actuelles marchent déjà"
         />
         {loading ? (
-          <Loader2 className="h-4 w-4 animate-spin text-strata-feed-deep" />
+          <Loader2 className="h-4 w-4 animate-spin text-strata-feed-deep motion-reduce:animate-none" />
         ) : (
           <div className="flex flex-col gap-1.5">
             {AGENT_TYPES.map((agentType) => {
@@ -255,7 +259,7 @@ function ReviewAgentsBand({
       </p>
 
       {loading ? (
-        <Loader2 className="h-4 w-4 animate-spin text-strata-next-mid" />
+        <Loader2 className="h-4 w-4 animate-spin text-strata-next-mid motion-reduce:animate-none" />
       ) : (
         <div className="flex flex-col gap-1.5">
           {data.map((agent) => (
@@ -338,13 +342,13 @@ function CustomReviewAgentRow({
   return (
     <SurfaceCard radius={10} className="flex flex-col gap-2 px-4 py-3">
       <div className="flex items-center gap-3">
-        <input
+        <FieldBoxInput
           value={name}
           onChange={(event) => setName(event.target.value)}
           disabled={inherited}
           aria-label="Review agent name"
           placeholder="Agent name"
-          className="min-w-0 flex-1 rounded-[8px] border-0 bg-transparent font-sans text-[13px] font-semibold text-foreground outline-none disabled:opacity-60"
+          className="flex-1"
         />
         <Mono size={10} tone="muted">
           {inherited ? "Shared across projects" : "Editable here"}
@@ -430,13 +434,12 @@ function NewReviewAgentForm({
 
   return (
     <div className="flex flex-col gap-2 rounded-[10px] border-[1.5px] border-dashed border-border-strong p-4">
-      <input
+      <FieldBoxInput
         autoFocus
         value={name}
         onChange={(event) => setName(event.target.value)}
         aria-label="New review agent name"
         placeholder="New agent name"
-        className="h-[34px] rounded-[10px] border-[1.5px] border-border bg-transparent px-3 font-sans text-[13px] font-semibold text-foreground outline-none"
       />
       <textarea
         value={prompt}

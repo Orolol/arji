@@ -140,6 +140,35 @@ describe("GET /api/control-desk", () => {
     expect(data.queued[0].readableId).toBe("LDG-84");
   });
 
+  // The dispatch role must not come from the prompt. It is the biggest column
+  // in the database (77 KB average, 5 MB seen) on a route polled every 4 s,
+  // AND the substring test it fed was wrong: every prompt carries the project
+  // spec, so a spec that mentions merge conflicts turned every build into a
+  // MERGE card. Fails with the pre-fix `prompt.includes("merge conflict")`.
+  it("reads no prompt: a build whose spec mentions merge conflicts stays a BUILD", async () => {
+    db.insert(epics)
+      .values({ id: "e1", projectId: "p1", title: "SSE stream", readableId: "ARJ-122", status: "in_progress" })
+      .run();
+    db.insert(agentSessions)
+      .values({
+        id: "s1",
+        projectId: "p1",
+        epicId: "e1",
+        status: "running",
+        agentType: "ticket_build",
+        mode: "code",
+        orchestrationMode: "solo",
+        prompt: `${"spec filler ".repeat(4000)}- hard parking after unresolved merge conflicts.`,
+        startedAt: today(1),
+        createdAt: today(1),
+      })
+      .run();
+
+    const data = await payload();
+    expect(data.working).toHaveLength(1);
+    expect(data.working[0].taskType).toBe("BUILD");
+  });
+
   it("rolls up today's shipped tickets, cost and session counts", async () => {
     db.insert(epics)
       .values({ id: "e1", projectId: "p1", title: "T", status: "done" })
@@ -189,6 +218,82 @@ describe("GET /api/control-desk", () => {
     // SUM() over rows with no cost answers NULL, and NULL must reach the tile.
     expect(data.today.costUsd).toBeNull();
     expect(data.today.sessions).toBe(1);
+  });
+
+  it("answers 0 failures on a quiet day, not an em-dash", async () => {
+    // COUNT over an empty range is 0 but a bare SUM is NULL, and the tile
+    // renders NULL as an em-dash. "— failed" beside "0 sessions" is a figure
+    // the desk HAS, printed as one it does not.
+    const empty = await payload();
+    expect(empty.today.sessions).toBe(0);
+    expect(empty.today.failedSessions).toBe(0);
+
+    db.insert(agentSessions)
+      .values({ id: "s1", projectId: "p1", status: "completed", createdAt: today(8) })
+      .run();
+    const quiet = await payload();
+    expect(quiet.today.sessions).toBe(1);
+    expect(quiet.today.failedSessions).toBe(0);
+  });
+
+  // The latest-comment and latest-session facts used to be ROW_NUMBER windows
+  // over whole tables (`ORDER BY created_at DESC, id DESC`). They are now
+  // MAX(created_at) per epic joined back, with the `id DESC` half applied in
+  // JS — so the same-timestamp tie must still resolve the same way.
+  it("breaks a same-timestamp tie on the id, as the window did", async () => {
+    db.insert(epics)
+      .values({ id: "e1", projectId: "p1", title: "Renderer", readableId: "ARJ-24", status: "review" })
+      .run();
+    db.insert(agentSessions)
+      .values([
+        // Same createdAt; "s-a" < "s-b", so the question must lose to the
+        // clean run and the ticket must NOT read as awaiting a reply.
+        {
+          id: "s-a",
+          projectId: "p1",
+          epicId: "e1",
+          status: "completed",
+          outcome: "asked_question",
+          endedAt: today(8),
+          createdAt: today(8),
+        },
+        {
+          id: "s-b",
+          projectId: "p1",
+          epicId: "e1",
+          status: "completed",
+          outcome: "delivered",
+          endedAt: today(8),
+          createdAt: today(8),
+        },
+      ])
+      .run();
+    db.insert(ticketComments)
+      .values([
+        { id: "c-a", epicId: "e1", author: "agent", content: "older", createdAt: today(9) },
+        { id: "c-b", epicId: "e1", author: "agent", content: "newer", createdAt: today(9) },
+      ])
+      .run();
+
+    const data = await payload();
+    expect(data.yourTurn.awaitingReply).toHaveLength(0);
+
+    // And the comment tie goes the same way: "c-b" wins.
+    db.delete(agentSessions).run();
+    db.insert(agentSessions)
+      .values({
+        id: "s-c",
+        projectId: "p1",
+        epicId: "e1",
+        status: "completed",
+        outcome: "asked_question",
+        endedAt: today(8),
+        createdAt: today(8),
+      })
+      .run();
+    const asked = await payload();
+    expect(asked.yourTurn.awaitingReply).toHaveLength(1);
+    expect(asked.yourTurn.awaitingReply[0].question).toBe("newer");
   });
 
   it("puts an unanswered agent question in YOUR TURN, across projects", async () => {

@@ -74,7 +74,6 @@ function session(overrides: Partial<SessionRow> & { id: string }): SessionRow {
     orchestrationMode: "solo",
     provider: "claude-code",
     namedAgentName: "Opus Builder",
-    prompt: null,
     batchRunId: null,
     startedAt: "2026-08-28T09:00:00.000Z",
     createdAt: "2026-08-28T09:00:00.000Z",
@@ -155,26 +154,43 @@ describe("working / queued", () => {
     expect(deriveQueued(rows).map((s) => s.sessionId)).toEqual(["s2"]);
   });
 
-  it("classifies the dispatch role the way the sessions/active route does", () => {
+  it("classifies the dispatch role from the agent type, the orchestration and the mode", () => {
     expect(
-      inferTaskType({ agentType: "review_code", orchestrationMode: null, mode: "code", prompt: null }),
+      inferTaskType({ agentType: "review_code", orchestrationMode: null, mode: "code" }),
     ).toBe("REVIEW");
     expect(
-      inferTaskType({ agentType: "merge", orchestrationMode: null, mode: "code", prompt: null }),
+      inferTaskType({ agentType: "merge", orchestrationMode: null, mode: "code" }),
     ).toBe("MERGE");
     expect(
-      inferTaskType({ agentType: "grading", orchestrationMode: null, mode: "plan", prompt: null }),
+      inferTaskType({ agentType: "grading", orchestrationMode: null, mode: "plan" }),
     ).toBe("GRADING");
-    // A team build runs in code mode and must not fall through to the prompt
-    // heuristics below it.
+    // A team build runs in code mode and must not fall through to the mode
+    // heuristic below it.
     expect(
-      inferTaskType({ agentType: null, orchestrationMode: "team", mode: "plan", prompt: null }),
+      inferTaskType({ agentType: null, orchestrationMode: "team", mode: "plan" }),
     ).toBe("BUILD");
     expect(
-      inferTaskType({ agentType: null, orchestrationMode: "solo", mode: "plan", prompt: null }),
+      inferTaskType({ agentType: null, orchestrationMode: "solo", mode: "plan" }),
     ).toBe("REVIEW");
     expect(
-      inferTaskType({ agentType: null, orchestrationMode: "solo", mode: "code", prompt: null }),
+      inferTaskType({ agentType: null, orchestrationMode: "solo", mode: "code" }),
+    ).toBe("BUILD");
+  });
+
+  // The classification takes NO prompt: the sessions/active heuristic it used
+  // to copy reads the whole 77 KB-average column on a 4 s poll, and reads it
+  // wrong — every prompt carries the project spec, so a spec that says the
+  // words "merge conflict" turned every build on that project into a MERGE
+  // card. The merge agent is already identified by its agent type, which is
+  // checked first, so the heuristic could only ever have produced that
+  // mislabel. `control-desk-route.test.ts` pins the same case end to end.
+  it("keeps an ordinary build a BUILD even when its spec talks about merge conflicts", () => {
+    expect(
+      inferTaskType({
+        agentType: "ticket_build",
+        orchestrationMode: "solo",
+        mode: "code",
+      }),
     ).toBe("BUILD");
   });
 

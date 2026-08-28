@@ -150,6 +150,17 @@ describe("row geometry", () => {
     expect(screen.getByText("LEDGER").className).toContain("text-project-2-deep");
   });
 
+  it("draws the rail label with the Mono primitive, not a hand-rolled run", () => {
+    // Mono is what guarantees Space Mono and tabular-nums; a raw `font-mono`
+    // run gets neither for free, and `font-bold` on the label is only honest
+    // because Space Mono ships a real 700.
+    renderBand([{ projectId: "p1", tickets: [ticket({ epicId: "1" })] }]);
+    const label = screen.getByText("ARIJ");
+    expect(label).toHaveAttribute("data-slot", "mono");
+    expect(label.className).toContain("tabular-nums");
+    expect(label.className).toContain("font-bold");
+  });
+
   it("hides a project with an empty queue rather than drawing an empty row", () => {
     renderBand([
       { projectId: "p1", tickets: [ticket({ epicId: "1" })] },

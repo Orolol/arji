@@ -9,20 +9,27 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  activityTimelineLines,
   countAcceptanceCriteria,
+  dependencyOptions,
   dependencyRowItems,
   descriptionMeta,
   diffTotals,
   hashString,
   liveStampLabel,
+  mergeTimelineLines,
   pipelineSteps,
   projectToneIndex,
   shortId,
   ticketLabel,
   timelineKindForAction,
+  toggledWaitsOn,
   UNKNOWN_DIFF_TOTALS,
   type EpicIndexEntry,
 } from "@/components/ticket/derive";
+import type { EpicActivityEntry } from "@/hooks/useEpicActivity";
+import { buildActivityFeed } from "@/lib/kanban/activity-feed";
+import { MCP_CREATE_BUG_ACTIVITY_PREFIX } from "@/lib/mcp/create-bug-contract";
 import { projectTone } from "@/lib/piscine/tokens";
 
 describe("countAcceptanceCriteria", () => {
@@ -294,5 +301,204 @@ describe("descriptionMeta", () => {
     expect(descriptionMeta({ priority: 0, createdAt: null })).toBe(
       "priority low",
     );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Dependency editing                                                  */
+/* ------------------------------------------------------------------ */
+
+describe("dependencyOptions", () => {
+  const rows = [
+    { id: "epic-1", readableId: "ARJ-1", title: "Self" },
+    { id: "epic-2", readableId: "ARJ-2", title: "Streaming logs" },
+    { id: "epic-3", readableId: null, title: "   " },
+  ];
+
+  it("offers every other ticket, never the ticket itself", () => {
+    const options = dependencyOptions(rows, "epic-1", []);
+    expect(options.map((option) => option.id)).toEqual(["epic-2", "epic-3"]);
+  });
+
+  it("marks the ones already waited on", () => {
+    const options = dependencyOptions(rows, "epic-1", ["epic-3"]);
+    expect(options.find((o) => o.id === "epic-2")?.selected).toBe(false);
+    expect(options.find((o) => o.id === "epic-3")?.selected).toBe(true);
+  });
+
+  it("falls back to the id tail and drops a blank title", () => {
+    const [, third] = dependencyOptions(rows, "epic-1", []);
+    expect(third.label).toBe("epic-3");
+    // A whitespace-only title is nothing to render, not an empty string.
+    expect(third.title).toBeNull();
+  });
+});
+
+describe("toggledWaitsOn", () => {
+  it("adds at the end and removes in place", () => {
+    expect(toggledWaitsOn(["a", "b"], "c")).toEqual(["a", "b", "c"]);
+    expect(toggledWaitsOn(["a", "b", "c"], "b")).toEqual(["a", "c"]);
+  });
+
+  it("never mutates its input", () => {
+    const ids = ["a"];
+    toggledWaitsOn(ids, "b");
+    expect(ids).toEqual(["a"]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Activity → timeline                                                 */
+/* ------------------------------------------------------------------ */
+
+function activity(
+  overrides: Partial<EpicActivityEntry> & { id: string },
+): EpicActivityEntry {
+  return {
+    projectId: "proj-1",
+    epicId: "epic-1",
+    fromStatus: "review",
+    toStatus: "to_merge",
+    actor: "user",
+    reason: null,
+    sessionId: null,
+    createdAt: "2026-08-28T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("activityTimelineLines", () => {
+  it("reads a transition as a completed step, in board labels", () => {
+    const [line] = activityTimelineLines(
+      buildActivityFeed([], [activity({ id: "a1" })]),
+    );
+    expect(line.kind).toBe("done");
+    expect(line.text).toBe("you · Review → To Merge");
+    expect(line.at).toBe("2026-08-28T10:00:00.000Z");
+  });
+
+  it("appends the recorded reason when there is one", () => {
+    const [line] = activityTimelineLines(
+      buildActivityFeed([], [activity({ id: "a1", reason: "review passed" })]),
+    );
+    expect(line.text).toBe("you · Review → To Merge — review passed");
+  });
+
+  it("renders pipeline narration as its own summary line, not a status move", () => {
+    const [line] = activityTimelineLines(
+      buildActivityFeed(
+        [],
+        [
+          activity({
+            id: "a1",
+            actor: "system",
+            fromStatus: "in_progress",
+            toStatus: "in_progress",
+            reason: "Pipeline finished: everything green",
+          }),
+        ],
+      ),
+    );
+    expect(line.kind).toBe("summary");
+    expect(line.text).toBe("Pipeline finished: everything green");
+  });
+
+  it("names the bug an agent filed, carrying its detail", () => {
+    const [line] = activityTimelineLines(
+      buildActivityFeed(
+        [],
+        [
+          activity({
+            id: "a1",
+            actor: "agent",
+            reason: `${MCP_CREATE_BUG_ACTIVITY_PREFIX} reported from ARJ-9`,
+          }),
+        ],
+      ),
+    );
+    expect(line.text).toBe("agent created this bug — reported from ARJ-9");
+  });
+
+  it("collapses a burst of automatic transitions and keeps every line inside it", () => {
+    const burst = [
+      activity({
+        id: "a1",
+        actor: "system",
+        createdAt: "2026-08-28T10:00:00.000Z",
+      }),
+      activity({
+        id: "a2",
+        actor: "system",
+        fromStatus: "to_merge",
+        toStatus: "done",
+        createdAt: "2026-08-28T10:00:10.000Z",
+      }),
+    ];
+    const [line] = activityTimelineLines(buildActivityFeed([], burst));
+    expect(line.text).toBe("2 automatic transitions");
+    expect(line.group).toEqual([
+      "system · Review → To Merge",
+      "system · To Merge → Done",
+    ]);
+  });
+
+  it("never echoes a comment — the CONVERSATION band owns those", () => {
+    const lines = activityTimelineLines(
+      buildActivityFeed(
+        [
+          {
+            id: "c1",
+            author: "user",
+            content: "hello",
+            createdAt: "2026-08-28T09:00:00.000Z",
+          } as never,
+        ],
+        [activity({ id: "a1" })],
+      ),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0].text).toBe("you · Review → To Merge");
+  });
+});
+
+describe("mergeTimelineLines", () => {
+  const line = (key: string, at: string | null) => ({
+    key,
+    kind: "summary" as const,
+    text: key,
+    at,
+  });
+
+  it("interleaves two chronological lists by timestamp", () => {
+    const merged = mergeTimelineLines(
+      [line("t1", "2026-08-28T10:00:00.000Z"), line("t2", "2026-08-28T12:00:00.000Z")],
+      [line("s1", "2026-08-28T11:00:00.000Z")],
+    );
+    expect(merged.map((item) => item.key)).toEqual(["t1", "s1", "t2"]);
+  });
+
+  it("anchors an undated line to the last dated line of its own list", () => {
+    // s2 has no clock: it must stay after s1, not jump ahead of t1.
+    const merged = mergeTimelineLines(
+      [line("t1", "2026-08-28T12:00:00.000Z")],
+      [line("s1", "2026-08-28T11:00:00.000Z"), line("s2", null)],
+    );
+    expect(merged.map((item) => item.key)).toEqual(["s1", "s2", "t1"]);
+  });
+
+  it("keeps each list's own order whatever the clocks say", () => {
+    const merged = mergeTimelineLines(
+      [line("t1", "2026-08-28T12:00:00.000Z"), line("t2", "2026-08-28T09:00:00.000Z")],
+      [],
+    );
+    expect(merged.map((item) => item.key)).toEqual(["t1", "t2"]);
+  });
+
+  it("puts a tie on the left list, so the merge is stable", () => {
+    const merged = mergeTimelineLines(
+      [line("t1", "2026-08-28T10:00:00.000Z")],
+      [line("s1", "2026-08-28T10:00:00.000Z")],
+    );
+    expect(merged.map((item) => item.key)).toEqual(["t1", "s1"]);
   });
 });

@@ -33,7 +33,7 @@ import {
 function PageLoading() {
   return (
     <div className="flex flex-1 items-center justify-center">
-      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground motion-reduce:animate-none" />
     </div>
   );
 }

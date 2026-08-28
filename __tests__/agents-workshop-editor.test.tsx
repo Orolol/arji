@@ -35,7 +35,10 @@ vi.mock("@/hooks/useAgentConfig", () => ({
     updateNamedAgent: state.updateNamedAgent,
     deleteNamedAgent: state.deleteNamedAgent,
   }),
-  useAgentRosterStats: () => ({ data: {}, loading: false, refresh: vi.fn() }),
+  // "ready" with an empty map is the honest shape for a roster whose agents
+  // have not run today; the em-dash-vs-zero distinction itself is pinned in
+  // __tests__/agents-workshop-roster-stats.test.tsx.
+  useAgentRosterStats: () => ({ data: {}, status: "ready", refresh: vi.fn() }),
   useNamedAgentStats: () => ({ data: null, loading: false }),
   useAgentAssignments: () => ({
     data: state.assignments,
@@ -267,7 +270,7 @@ describe("agents workshop editor", () => {
     expect(screen.getByLabelText("Name")).toHaveValue("Codex Fast");
 
     // The roster keeps the SAVED name — an unsaved rename must not relabel the
-    // card the user is looking for; the dirty dot is what marks it instead.
+    // card the user is looking for; the UNSAVED word is what marks it instead.
     fireEvent.click(within(roster()).getByRole("button", { name: "Opus Builder" }));
     expect(screen.getByLabelText("Name")).toHaveValue("Opus Builder EDITED");
   });

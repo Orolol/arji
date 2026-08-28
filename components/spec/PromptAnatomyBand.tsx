@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { BandHeader, Mono, PROMPT_SEGMENT, StrataBand } from "@/components/piscine";
+import {
+  BandHeader,
+  FieldKicker,
+  PROMPT_SEGMENT,
+  StrataBand,
+} from "@/components/piscine";
 import { useProjectEvents } from "@/hooks/useProjectEvents";
 import { PromptBarRow } from "@/components/spec/PromptBarRow";
 import type { PromptAnatomyRow } from "@/components/spec/spec-format";
@@ -93,9 +98,12 @@ export function PromptAnatomyBand({
                 className="h-[9px] w-[9px] rounded-[3px]"
                 style={{ background: PROMPT_SEGMENT[item.key] }}
               />
-              <Mono size={9.5} tone="land-mid">
+              {/* FieldKicker, not a bare Mono: 9.5px is legal only for an
+                  uppercase TRACKED mono label, and the primitive is what
+                  guarantees the tracking comes with the size. */}
+              <FieldKicker size={9.5} stratum="land">
                 {item.label}
-              </Mono>
+              </FieldKicker>
             </span>
           ))}
         </div>

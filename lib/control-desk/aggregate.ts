@@ -123,7 +123,6 @@ export interface SessionRow {
   orchestrationMode: string | null;
   provider: string | null;
   namedAgentName: string | null;
-  prompt: string | null;
   batchRunId: string | null;
   startedAt: string | null;
   createdAt: string | null;
@@ -138,16 +137,39 @@ export interface SessionRow {
  * Dispatch role of a session, as the card prints it.
  *
  * The classification is the one `app/api/projects/[projectId]/sessions/active`
- * applies (agent type first, orchestration second, prompt heuristics last);
- * only the vocabulary differs, because the card prints one uppercase word.
- * Kept as a pure function here so the desk does not have to fan out to that
- * per-project route once per project.
+ * applies — agent type first, orchestration second, `mode` last — only the
+ * vocabulary differs, because the card prints one uppercase word. Kept as a
+ * pure function here so the desk does not have to fan out to that per-project
+ * route once per project.
+ *
+ * WHAT IT DELIBERATELY DOES NOT READ: `agent_sessions.prompt`. That route's
+ * last resort is a pair of substring tests over the whole prompt
+ * ("merge conflict", "git merge main" -> MERGE), and the desk cannot afford
+ * them twice over.
+ *
+ * 1. COST. The prompt averages 77 KB and reaches 5 MB on the developer's
+ *    board, and this function's caller is a route polled every 4 s from two
+ *    pages. Selecting the column for the classification was measured at 17x
+ *    the cost of the same read without it (1.54 ms vs 0.09 ms for 12 active
+ *    sessions), plus ~736 KB of throwaway strings per poll.
+ * 2. IT IS WRONG ANYWAY. The merge-resolution agent writes
+ *    `agent_type = "merge"` (app/api/projects/[projectId]/epics/[epicId]/
+ *    resolve-merge/route.ts), caught two lines up — so the substring tests can
+ *    only ever fire on a session that is NOT a merge agent. Every prompt
+ *    carries the project spec and memory, and any project whose spec says the
+ *    words "merge conflict" turns every one of its builds into a MERGE card.
+ *    On that same board this mislabelled 256 of the 378 sessions that reach
+ *    the fallback.
+ *
+ * The prompt cannot be sampled with a short `substr` either: the markers sit
+ * after the spec and memory sections, measured as deep as 4.9 MB in.
+ *
+ * The sibling route still runs the heuristic; it is not this packet's file.
  */
 export function inferTaskType(row: {
   agentType: string | null;
   orchestrationMode: string | null;
   mode: string | null;
-  prompt: string | null;
 }): DeskTaskType {
   const agentType = row.agentType ?? "";
   if (agentType === "release_notes") return "RELEASE";
@@ -160,14 +182,7 @@ export function inferTaskType(row: {
   if (agentType === "memory_distill" || agentType === "dreaming") return "MEMORY";
   if (agentType === "merge") return "MERGE";
   if (row.orchestrationMode === "team") return "BUILD";
-
-  const prompt = (row.prompt ?? "").toLowerCase();
-  if (prompt.includes("merge conflict") || prompt.includes("git merge main")) {
-    return "MERGE";
-  }
-  if (row.mode === "plan" || /you are performing a \*\*.+review/.test(prompt)) {
-    return "REVIEW";
-  }
+  if (row.mode === "plan") return "REVIEW";
   return "BUILD";
 }
 

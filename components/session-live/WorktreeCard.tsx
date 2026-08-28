@@ -41,7 +41,7 @@ export function WorktreeCard({
       <BandHeader label="Worktree" stratum="land" labelSize={12} standalone />
 
       {branchName && (
-        <span className="self-start rounded-[8px] bg-card px-[9px] py-[5px]">
+        <span className="self-start rounded-full bg-card px-[9px] py-[5px]">
           <Mono size={11} clamp={1}>
             {branchName}
           </Mono>

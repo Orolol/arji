@@ -44,6 +44,9 @@ export function StatusControl({
   onStatusChange,
   onPriorityChange,
 }: StatusControlProps) {
+  // "(current)" is plain sans, so it lives under the system's 11px floor —
+  // the 9.5px exception is for uppercase tracked mono kickers only, which
+  // this is not.
   const options = ticketStatusOptions(status, { hasRunningSession });
 
   /**
@@ -78,7 +81,7 @@ export function StatusControl({
             <span className="flex items-center gap-2">
               <span>{option.label}</span>
               {option.isCurrent ? (
-                <span className="text-[10px] font-normal text-muted-foreground">
+                <span className="text-[11px] font-normal text-muted-foreground">
                   (current)
                 </span>
               ) : null}
@@ -96,7 +99,7 @@ export function StatusControl({
             <span className="flex items-center gap-2">
               <span>{label}</span>
               {Number(value) === priority ? (
-                <span className="text-[10px] font-normal text-muted-foreground">
+                <span className="text-[11px] font-normal text-muted-foreground">
                   (current)
                 </span>
               ) : null}

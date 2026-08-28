@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
+import { FieldBoxInput } from "@/components/agents-workshop/FieldBox";
 import { ScopeSwitcher } from "@/components/agents-workshop/ScopeSwitcher";
 import {
   BandHeader,
@@ -289,7 +290,8 @@ function RuntimeBand({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <input
+          <FieldBoxInput
+            mono
             id="agent-max-concurrent"
             type="number"
             min={0}
@@ -309,7 +311,7 @@ function RuntimeBand({
             onBlur={() => void saveMaxConcurrent()}
             placeholder={formatMaxConcurrent(inheritedMaxConcurrent)}
             disabled={maxConcurrent === null || savingMaxConcurrent}
-            className="h-[34px] w-24 rounded-[10px] border-[1.5px] border-border bg-transparent px-3 font-mono text-[12px] tabular-nums text-foreground outline-none focus-visible:border-border-strong disabled:opacity-50"
+            className="w-24"
           />
           <PillButton
             variant="filled"
@@ -407,7 +409,7 @@ function ReviewBounceCard({ projectId }: { projectId?: string }) {
       ) : null}
 
       {rows === null ? (
-        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground motion-reduce:animate-none" />
       ) : rows.length === 0 ? (
         <p className="font-sans text-[12px] text-muted-foreground">
           No epic has reached review yet.

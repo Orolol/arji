@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { SelectPill } from "@/components/piscine";
+import { GhostInputPill, SelectPill } from "@/components/piscine";
 import {
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -87,23 +87,30 @@ export function VersionPill({
           </>
         ) : null}
         <div className="px-1 py-1">
-          <input
-            type="text"
+          {/*
+            The field IS `GhostInputPill` — its recipe used to be transcribed
+            here by hand with the height quietly changed to 30px, which is how
+            a primitive drifts. `width` is not passed: neither a fixed px width
+            nor `flex-1` fills a block container, so the pill takes `w-full`
+            through `className`.
+          */}
+          <GhostInputPill
             aria-label="Version"
             data-testid="release-version-input"
             value={draft}
+            onChange={setDraft}
             placeholder="1.0.0"
-            onChange={(e) => setDraft(e.target.value)}
+            className="w-full"
             // Radix's menu typeahead would otherwise swallow every keystroke
-            // and move focus off the field.
+            // and move focus off the field. GhostInputPill spreads `{...props}`
+            // AFTER its own handler, so owning `onKeyDown` means owning Enter
+            // (and its IME guard) as well — `onSubmit` would never fire.
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === "Enter") {
-                e.preventDefault();
-                commit();
-              }
+              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              commit();
             }}
-            className="h-[30px] w-full rounded-full border-[1.5px] border-input bg-field px-3 font-sans text-[12.5px] leading-none text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           />
         </div>
       </SelectPill>

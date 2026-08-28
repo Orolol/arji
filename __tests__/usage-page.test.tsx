@@ -393,7 +393,9 @@ describe("Usage page — provider-reported gauges (codex)", () => {
 
     const captured = await screen.findByTestId("usage-sub-codex-captured");
     expect(captured).toHaveTextContent("Captured 2h ago · ~/.codex/sessions");
-    expect(captured.className).not.toContain("text-priority-yellow");
+    // Staleness is a word plus an icon, never a colour.
+    expect(captured).not.toHaveAttribute("data-stale");
+    expect(captured).not.toHaveTextContent("stale");
   });
 
   it("flags a snapshot older than a day", async () => {
@@ -409,7 +411,11 @@ describe("Usage page — provider-reported gauges (codex)", () => {
 
     const captured = await screen.findByTestId("usage-sub-codex-captured");
     expect(captured).toHaveTextContent("Captured 61d ago");
-    expect(captured.className).toContain("text-priority-yellow");
+    // Said in words (and an icon), not in `text-priority-yellow`: colour
+    // encodes the stratum, never a state.
+    expect(captured).toHaveAttribute("data-stale");
+    expect(captured).toHaveTextContent("— stale");
+    expect(captured.className).not.toContain("text-priority-yellow");
   });
 
   it("marks an elapsed window stale instead of extrapolating it forward", async () => {
@@ -429,9 +435,10 @@ describe("Usage page — provider-reported gauges (codex)", () => {
     expect(
       await screen.findByTestId("usage-sub-codex-primary-reset")
     ).toHaveTextContent("window expired — data stale");
-    expect(screen.getByTestId("usage-sub-codex-primary-fill")).toHaveStyle({
-      opacity: "0.35",
-    });
+    // Dimmed, not recoloured — flagged on the row, not on the bar's styling.
+    expect(screen.getByTestId("usage-sub-codex-primary")).toHaveAttribute(
+      "data-dimmed"
+    );
     // The reported percentage itself is still replayed verbatim.
     expect(
       screen.getByTestId("usage-sub-codex-primary-readout")
@@ -559,7 +566,10 @@ describe("Usage page — metered gauge (claude)", () => {
 
     const readout = await screen.findByTestId("usage-sub-claude-budget-readout");
     expect(readout).toHaveTextContent("$70.00 / $50.00");
-    expect(readout.className).toContain("text-destructive");
+    // The alarm lives on the `Mono` run inside the readout slot.
+    expect(
+      readout.querySelector('[data-slot="mono"]')?.className
+    ).toContain("text-destructive");
     expect(screen.getByTestId("usage-sub-claude-budget-fill")).toHaveStyle({
       width: "100%",
     });

@@ -305,13 +305,21 @@ describe("getNamedAgentStats", () => {
 });
 
 describe("getAgentDayStats", () => {
-  it("returns one row per named agent in a single pass", () => {
+  it("returns at most one row per named agent, bounded to today plus anything running", () => {
     const rows = getAgentDayStats();
     const ids = rows.map((row) => row.namedAgentId).sort();
 
-    // agent-empty never ran, so it has no row at all — the card renders its
-    // absence as zeros/em-dashes rather than the query inventing one.
-    expect(ids).toEqual(["agent-blame", "agent-even", "agent-odd", "agent-other"]);
+    // THE BOUND IS THE POINT. This is polled every 10s for as long as the
+    // workshop is open, so it may not read the whole history of the widest
+    // table in the database. Only rows that could produce a non-zero figure
+    // are admitted: today's, plus anything still running on any day.
+    //
+    // agent-odd and agent-blame ran only in the past and are running nothing,
+    // so they drop OUT — exactly like agent-empty, which never ran at all.
+    // That is not a loss: the all-zero row they used to return renders
+    // identically to their absence (`0 runs / — / —`), because the card reads
+    // a missing row as a truthful zero whenever the aggregate itself answered.
+    expect(ids).toEqual(["agent-even", "agent-other"]);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
@@ -319,10 +327,14 @@ describe("getAgentDayStats", () => {
     const rows = getAgentDayStats();
     const byId = new Map(rows.map((row) => [row.namedAgentId, row]));
 
-    // Both seeded `running` sessions are dated well before today.
+    // Both seeded `running` sessions are dated well before today, and the
+    // date bound must not drop them: a session started yesterday and still
+    // running is live NOW.
     expect(byId.get("agent-even")?.liveSessions).toBe(1);
     expect(byId.get("agent-other")?.liveSessions).toBe(1);
-    expect(byId.get("agent-odd")?.liveSessions).toBe(0);
+    // ...while their older, finished siblings contribute nothing to today.
+    expect(byId.get("agent-even")?.runsToday).toBe(0);
+    expect(byId.has("agent-odd")).toBe(false);
   });
 
   it("reports today's window separately from the live count", () => {

@@ -70,7 +70,10 @@ export function PersonaBand({ value, onChange, disabled }: PersonaBandProps) {
         aria-label="Persona"
         disabled={disabled}
         style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
-        className="resize-none overflow-y-auto rounded-[10px] border-0 bg-card px-[14px] py-3 font-sans text-[13.5px] leading-[1.55] text-foreground shadow-none outline-none placeholder:text-muted-foreground disabled:opacity-60"
+        // `outline-none` is only safe next to a replacement: without the ring
+        // this borderless field would be the one control on the page a
+        // keyboard user cannot locate.
+        className="resize-none overflow-y-auto rounded-[10px] border-0 bg-card px-[14px] py-3 font-sans text-[13.5px] leading-[1.55] text-foreground shadow-none outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring placeholder:text-muted-foreground disabled:opacity-60"
       />
       {value.length > COUNTER_THRESHOLD ? (
         <Mono size={10} tone="muted">

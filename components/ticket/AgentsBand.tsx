@@ -3,9 +3,14 @@
 /**
  * AGENTS on the linden ground (frame 6a, lines 309-317).
  *
- * Two outline pills and zero filled ones — correct, and deliberate: this
+ * Three outline pills and zero filled ones — correct, and deliberate: this
  * screen's two-loud-colour budget is already spent on turquoise (liveness)
  * and coral (the conversation label and the delete link).
+ *
+ * GRADE is the third. Acceptance grading is observational — it never moves the
+ * ticket, it writes a report the USER STORIES band stamps — so it is a peer of
+ * Review and Re-build, not a fourth stratum's worth of UI. Its dispatch route
+ * has always existed; the redesign simply left it with no button.
  *
  * The frame renders a literal `▾` in the select pill; `SelectPill` ships a
  * lucide chevron instead. That is the system's glyph language; no text caret
@@ -16,7 +21,7 @@
  * information.
  */
 
-import { Hammer, Search } from "lucide-react";
+import { ClipboardCheck, Hammer, Search } from "lucide-react";
 
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
@@ -37,6 +42,8 @@ export interface AgentsBandProps {
   onSelectAgent: (agentId: string | null) => void;
   onReview: () => void;
   onRebuild: () => void;
+  /** Dispatch acceptance grading. Omit to drop the pill entirely. */
+  onGrade?: () => void;
   /** True while a dispatch is in flight or a session already owns the ticket. */
   locked: boolean;
 }
@@ -47,6 +54,7 @@ export function AgentsBand({
   onSelectAgent,
   onReview,
   onRebuild,
+  onGrade,
   locked,
 }: AgentsBandProps) {
   const selected = agents.find((agent) => agent.id === selectedAgentId);
@@ -106,6 +114,19 @@ export function AgentsBand({
         >
           Re-build
         </PillButton>
+        {onGrade ? (
+          <PillButton
+            variant="outline"
+            outlineTone="action"
+            size="sm"
+            icon={ClipboardCheck}
+            onClick={onGrade}
+            disabled={locked}
+            data-testid="ticket-grade"
+          >
+            Grade
+          </PillButton>
+        ) : null}
       </div>
     </StrataBand>
   );

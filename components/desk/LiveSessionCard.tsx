@@ -1,6 +1,6 @@
 "use client";
 
-import { Moon, StopCircle } from "lucide-react";
+import { Hourglass, Moon, StopCircle } from "lucide-react";
 
 import {
   Chrono,
@@ -73,9 +73,20 @@ export function LiveSessionCard({
           </span>
         ) : null}
         {session.stale ? (
-          <Mono size={10} tone="you-deep" className="shrink-0">
-            STALLED
-          </Mono>
+          // Colour is stratum, never state — so the stall is an icon plus the
+          // word, in this band's own turquoise mid, exactly like NIGHT above
+          // it. Painting it coral would have imported the YOUR TURN deep into
+          // the WORKING band to mean "bad", which is the thing the card's
+          // header comment says it never does.
+          <span
+            data-testid="desk-stalled-tag"
+            className="flex shrink-0 items-center gap-1 text-strata-live-mid"
+          >
+            <Hourglass size={11} aria-hidden="true" />
+            <Mono size={10} tone="live-mid">
+              STALLED
+            </Mono>
+          </span>
         ) : null}
         <button
           type="button"

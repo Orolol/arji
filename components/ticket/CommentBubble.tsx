@@ -16,7 +16,7 @@
 
 import * as React from "react";
 
-import { Mono } from "@/components/piscine";
+import { Mono, QuietLink } from "@/components/piscine";
 import { cn } from "@/lib/utils";
 import { commentPreview, isLongComment } from "@/lib/kanban/activity-feed";
 import type { TicketComment } from "@/hooks/useTicketComments";
@@ -48,13 +48,18 @@ export function CommentBubble({ comment }: CommentBubbleProps) {
         {body}
       </p>
       {long ? (
-        <button
-          type="button"
+        // The system's chromeless action, not a hand-rolled copy of it. The
+        // tone is `muted`, not the coral it used to hard-code: the bubble is a
+        // white card, and a stratum deep is only ink-legal on its own ground.
+        <QuietLink
+          tone="muted"
+          size={11.5}
           onClick={() => setExpanded((value) => !value)}
-          className="mt-1 border-0 bg-transparent p-0 font-sans text-[11.5px] text-strata-you-deep outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          testId="ticket-comment-expand"
+          className="mt-1"
         >
           {expanded ? "moins" : "voir tout"}
-        </button>
+        </QuietLink>
       ) : null}
     </div>
   );

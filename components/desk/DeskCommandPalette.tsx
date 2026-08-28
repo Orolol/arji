@@ -156,10 +156,11 @@ export function DeskCommandPalette({
         aria-modal="true"
         aria-label="Rechercher"
         onClick={(event) => event.stopPropagation()}
-        className={cn(
-          "flex w-[min(620px,92vw)] flex-col gap-2 rounded-lg bg-background p-3",
-          "shadow-[var(--shadow-overlay)]",
-        )}
+        // No shadow. `--shadow-overlay` is the system's ONLY shadow and it
+        // belongs to the ticket overlay; the scrim behind this panel already
+        // separates it from the desk, so borrowing the overlay's one effect
+        // would make it the second thing that reads as "the modal".
+        className="flex w-[min(620px,92vw)] flex-col gap-2 rounded-lg bg-background p-3"
       >
         <div className="flex items-center gap-2 rounded-[10px] border-[1.5px] border-input bg-field px-3 py-2">
           <Search size={13} aria-hidden="true" className="shrink-0 text-muted-foreground" />

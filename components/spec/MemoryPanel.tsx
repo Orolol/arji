@@ -370,11 +370,17 @@ export function MemoryPanel({
 
   // The cap indicator is the one numeral on this band that changes tone, and
   // it changes it for a NUMBER crossing a threshold, not for a UI state.
-  // Amber is not a Piscine colour, so "approaching" borrows the sand deep.
+  //
+  // Amber is not a Piscine colour, so "approaching" borrows the SAND deep —
+  // `land-deep` (#756008). It used to say `you-deep`, which the comment
+  // already called the sand deep but which actually resolves to the coral
+  // #a63a1a — the very same value as `danger`, in BOTH themes. The middle
+  // step of a three-step ramp rendered identically to its last step, so
+  // "approaching the cap" was invisible until the cap was already blown.
   const capTone: MonoTone = overCap
     ? "danger"
     : approachingCap
-      ? "you-deep"
+      ? "land-deep"
       : "live-mid";
 
   const provenanceStamp = provenance?.at ?? updatedAt;
@@ -616,7 +622,12 @@ export function MemoryPanel({
                 data-testid="memory-provenance-bar"
                 className="flex min-w-0 items-center gap-[6px]"
               >
-                <Mono size={9.5} tone="live-mid" clamp={1}>
+                {/*
+                  11px, not 9.5: this is mixed-case prose ("Manual edit ·
+                  18/08/2026 14:02"), and the 9.5px floor exemption covers
+                  UPPERCASE TRACKED mono labels only.
+                */}
+                <Mono size={11} tone="live-mid" clamp={1}>
                   {`${sourceLabel(provenance?.source)}${
                     provenanceStamp
                       ? ` · ${new Date(provenanceStamp).toLocaleString()}`
@@ -685,8 +696,11 @@ export function MemoryPanel({
           </div>
         )}
 
+        {/* The sentence tracks the numeral's ramp: sand deep for approaching,
+            coral for over. It said `text-strata-you-deep` here too, which is
+            the same #a63a1a as `text-destructive` below it. */}
         {approachingCap && (
-          <p className="flex-none text-[12px] text-strata-you-deep">
+          <p className="flex-none text-[12px] text-strata-land-deep">
             Approaching the {PROJECT_MEMORY_MAX_CHARS}-character cap (
             {safeContent.length}/{PROJECT_MEMORY_MAX_CHARS}).
           </p>

@@ -124,6 +124,18 @@ describe("LiveSessionCard", () => {
     expect(screen.getByText("STALLED")).toBeInTheDocument();
   });
 
+  it("keeps the STALLED tag on the WORKING band's own turquoise", () => {
+    // The tag used to paint `tone="you-deep"` — the YOUR TURN coral — inside
+    // the turquoise band, which encodes state as colour. It carries an icon
+    // and the word instead, in this stratum's mid, exactly like NIGHT.
+    renderBand({ working: [live({ stale: true })] });
+    const tag = screen.getByTestId("desk-stalled-tag");
+    expect(tag).toHaveTextContent("STALLED");
+    expect(tag.querySelector("svg")).not.toBeNull();
+    expect(tag.className).toContain("text-strata-live-mid");
+    expect(tag.innerHTML).not.toContain("you-deep");
+  });
+
   it("opens the ticket from the title and stops the session from the icon", () => {
     const onOpenTicket = vi.fn();
     const onStopSession = vi.fn();

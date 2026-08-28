@@ -92,7 +92,7 @@ export function GitBand({
             size={11}
             tone="ink"
             clamp={1}
-            className="rounded-[8px] bg-card px-[9px] py-[5px]"
+            className="rounded-[10px] bg-card px-[9px] py-[5px]"
           >
             {branchName}
           </Mono>

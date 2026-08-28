@@ -3,7 +3,7 @@
 import * as React from "react";
 import { Sparkles } from "lucide-react";
 
-import { SelectPill, projectTone } from "@/components/piscine";
+import { SelectPill, StrataBand, projectTone } from "@/components/piscine";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useNamedAgentsList } from "@/hooks/useNamedAgentsList";
 import type { DeskProject } from "@/lib/control-desk/types";
@@ -84,11 +84,21 @@ export function DeskComposer({
   }
 
   return (
-    <div
-      data-testid="desk-composer"
+    // The linden ground is StrataBand's, not this file's: the hand-rolled
+    // version repeated the recipe (radius, `bg-strata-feed`, the
+    // `.stratum-feed` scope class the breathing/progress figures read) and
+    // would have drifted from it the first time the band changed. `flex-row`
+    // + `py-0` are the two things a composer legitimately overrides — it is a
+    // single-row bar of fixed height, not a stacked band.
+    // NO `data-testid` here: unlike `SurfaceCard`, `StrataBand` does not
+    // forward extra `<div>` props, so one would be silently dropped. The band
+    // stamps `data-slot="strata-band" data-stratum="feed"` itself, which is
+    // what the tests select on.
+    <StrataBand
+      stratum="feed"
+      gap={13}
       className={cn(
-        "mx-[14px] mt-[10px] mb-3 flex h-[58px] shrink-0 items-center gap-[13px]",
-        "rounded-lg bg-strata-feed stratum-feed px-[18px]",
+        "mx-[14px] mt-[10px] mb-3 h-[58px] flex-row items-center px-[18px] py-0",
         className,
       )}
     >
@@ -117,7 +127,11 @@ export function DeskComposer({
         }}
         className={cn(
           "min-w-0 flex-1 border-0 bg-transparent p-0",
-          "font-sans text-[13.5px] font-medium text-strata-feed-deep",
+          // What the user types is INK. The linden deep belongs to the band's
+          // own chrome — the sparkle and the placeholder — and colouring the
+          // typed title with it made the user's words read as decoration of
+          // the stratum rather than as content.
+          "font-sans text-[13.5px] font-medium text-foreground",
           "placeholder:text-strata-feed-deep placeholder:opacity-80",
           "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
           "disabled:opacity-60",
@@ -150,6 +164,6 @@ export function DeskComposer({
           </DropdownMenuItem>
         ))}
       </SelectPill>
-    </div>
+    </StrataBand>
   );
 }

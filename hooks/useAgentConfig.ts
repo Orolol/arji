@@ -352,6 +352,20 @@ export interface AgentDayStats {
 }
 
 /**
+ * Whether the roster aggregate is usable at all.
+ *
+ * Three states, not two, because the card's figures mean three different
+ * things and a boolean cannot tell the middle one from the last:
+ *
+ *   - `loading`     — nothing has come back yet. Em-dashes.
+ *   - `unavailable` — the last attempt failed. Em-dashes; a `0` here would be
+ *                     a number the server never said.
+ *   - `ready`       — the aggregate answered. An agent MISSING from it really
+ *                     has no runs today, so its card shows a truthful `0`.
+ */
+export type AgentRosterStatsStatus = "loading" | "ready" | "unavailable";
+
+/**
  * Today's numbers for EVERY named agent, from one request.
  *
  * The roster renders a card per agent; fetching per card would be an N+1 over
@@ -360,34 +374,48 @@ export interface AgentDayStats {
  *
  * Polled at 10s (the dashboard cadence) so the live dots and today's counters
  * move without a reload. Do not poll faster: this is a five-column aggregate
- * over the whole session table.
+ * over the session table.
+ *
+ * A FAILED POLL CLEARS THE DATA. Every rejection path — a transport error, a
+ * non-2xx (the route answers 500 with `{ error }`, which parses perfectly
+ * happily and would otherwise read as "no agents ran today"), or a payload
+ * without the expected array — lands on `unavailable` with an EMPTY map. That
+ * is the only shape in which "we do not know" reaches the card: keeping the
+ * previous poll's rows would leave a live dot breathing next to numbers no
+ * server currently vouches for.
  */
 export function useAgentRosterStats(): {
   data: Record<string, AgentDayStats>;
-  loading: boolean;
-  refresh: () => void;
+  status: AgentRosterStatsStatus;
+  refresh: () => Promise<void>;
 } {
   const [data, setData] = useState<Record<string, AgentDayStats>>({});
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<AgentRosterStatsStatus>("loading");
 
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/agent-config/named-agents/all/stats");
+      if (!res.ok) throw new Error(`Roster stats responded ${res.status}`);
       const json = await res.json();
-      const rows: AgentDayStats[] = json?.data?.agents ?? [];
+      const rows: unknown = json?.data?.agents;
+      if (!Array.isArray(rows)) {
+        throw new Error("Roster stats payload carries no agents array");
+      }
       const next: Record<string, AgentDayStats> = {};
-      for (const row of rows) next[row.namedAgentId] = row;
+      for (const row of rows as AgentDayStats[]) next[row.namedAgentId] = row;
       setData(next);
+      setStatus("ready");
     } catch {
       // A missing aggregate collapses the card figures to em-dashes; it must
       // never take the roster down with it.
+      setData({});
+      setStatus("unavailable");
     }
-    setLoading(false);
   }, []);
 
   usePolling(load, 10_000);
 
-  return { data, loading, refresh: load };
+  return { data, status, refresh: load };
 }
 
 /** One calendar day of the 14-day sparkline. */

@@ -9,8 +9,11 @@
 
 import type { PipelineStep } from "@/components/piscine";
 import type { TimelineKind } from "@/components/piscine";
+import type { EpicActivityEntry } from "@/hooks/useEpicActivity";
+import type { FeedItem } from "@/lib/kanban/activity-feed";
+import { MCP_CREATE_BUG_ACTIVITY_PREFIX } from "@/lib/mcp/create-bug-contract";
 import type { ProjectTone } from "@/lib/piscine/tokens";
-import { PRIORITY_LABELS } from "@/lib/types/kanban";
+import { COLUMN_LABELS, PRIORITY_LABELS } from "@/lib/types/kanban";
 import { timeAgo } from "@/lib/utils/format-date";
 
 /* ------------------------------------------------------------------ */
@@ -198,6 +201,53 @@ export interface EpicIndexEntry {
 }
 
 /**
+ * One candidate in the WAITS ON editor: every other ticket of the project,
+ * carrying whether this ticket already waits on it.
+ *
+ * Only the WAITS ON side is editable, and that is not a simplification: the
+ * dependencies route stores one edge per (ticket, dependsOnTicket) pair and
+ * `PUT …/dependencies` replaces THIS ticket's predecessor list. A BLOCKS edge
+ * is the other ticket's predecessor row, so it is edited from that ticket.
+ */
+export interface DependencyOption {
+  id: string;
+  /** `readableId` when known, the id tail otherwise. Never empty. */
+  label: string;
+  title: string | null;
+  selected: boolean;
+}
+
+/** The project's other tickets, marked with the current WAITS ON selection. */
+export function dependencyOptions(
+  rows: ReadonlyArray<{ id: string; readableId?: string | null; title?: string | null }>,
+  selfId: string | null,
+  waitsOnIds: readonly string[],
+): DependencyOption[] {
+  const selected = new Set(waitsOnIds);
+  const options: DependencyOption[] = [];
+  for (const row of rows) {
+    if (!row.id || row.id === selfId) continue;
+    options.push({
+      id: row.id,
+      label: ticketLabel(row.readableId, row.id),
+      title: row.title?.trim() ? row.title : null,
+      selected: selected.has(row.id),
+    });
+  }
+  return options;
+}
+
+/** Add or drop one predecessor, preserving the order of the rest. */
+export function toggledWaitsOn(
+  waitsOnIds: readonly string[],
+  epicId: string,
+): string[] {
+  return waitsOnIds.includes(epicId)
+    ? waitsOnIds.filter((id) => id !== epicId)
+    : [...waitsOnIds, epicId];
+}
+
+/**
  * `DependencyRecord` carries ids only. Resolve them through an index built
  * from the project's epic list; an id that resolves to nothing keeps its chip
  * (the edge is real) and simply has no title.
@@ -268,6 +318,139 @@ const ARIJ_ACTION_TIMELINE_KIND: Record<string, TimelineKind> = {
  */
 export function timelineKindForAction(kind: string): TimelineKind {
   return ARIJ_ACTION_TIMELINE_KIND[kind] ?? "summary";
+}
+
+/**
+ * One line of WHAT THE AGENT IS DOING, from either source that feeds it: the
+ * latest session's recorded board effects, or the ticket's transition log.
+ *
+ * `at` exists only to interleave the two — it is never rendered. `group` is a
+ * collapsed burst of automatic transitions, revealed in place rather than
+ * dropped, so a heavy pipeline run does not bury the lines around it.
+ */
+export interface TimelineLineItem {
+  key: string;
+  kind: TimelineKind;
+  text: string;
+  at: string | null;
+  group?: string[];
+}
+
+const ACTIVITY_ACTOR_WORD: Record<string, string> = {
+  user: "you",
+  agent: "agent",
+  system: "system",
+};
+
+function columnLabel(status: string): string {
+  return (COLUMN_LABELS as Record<string, string>)[status] ?? status;
+}
+
+/** `you · Review → To Merge`, with the recorded reason when there is one. */
+function transitionText(entry: EpicActivityEntry): string {
+  const actor = ACTIVITY_ACTOR_WORD[entry.actor] ?? entry.actor;
+  // U+2192 RIGHTWARDS ARROW — the system's move glyph, never "->".
+  const move = `${columnLabel(entry.fromStatus)} → ${columnLabel(entry.toStatus)}`;
+  const reason = entry.reason?.trim();
+  return reason ? `${actor} · ${move} — ${reason}` : `${actor} · ${move}`;
+}
+
+/**
+ * Turn a built activity feed into timeline lines.
+ *
+ * COMMENTS ARE DROPPED. The overlay builds the feed with an empty comment
+ * list on purpose — the CONVERSATION band already renders every comment, and
+ * echoing them here would print each reply twice on one screen. The guard
+ * stays anyway: `buildActivityFeed` is shared, and a future caller passing
+ * comments must not silently duplicate them into the timeline.
+ */
+export function activityTimelineLines(feed: FeedItem[]): TimelineLineItem[] {
+  const lines: TimelineLineItem[] = [];
+
+  feed.forEach((item, index) => {
+    if (item.kind === "comment") return;
+
+    if (item.kind === "transition-group") {
+      lines.push({
+        key: `activity-group-${index}`,
+        kind: "summary",
+        text: `${item.entries.length} automatic transitions`,
+        at: item.ts || null,
+        group: item.entries.map(transitionText),
+      });
+      return;
+    }
+
+    if (item.kind === "pipeline") {
+      lines.push({
+        key: `activity-${item.entry.id}`,
+        kind: "summary",
+        text: item.entry.reason?.trim() || "Pipeline event",
+        at: item.entry.createdAt,
+      });
+      return;
+    }
+
+    if (item.kind === "bug-created") {
+      const detail = item.entry.reason
+        ?.slice(MCP_CREATE_BUG_ACTIVITY_PREFIX.length)
+        .trim();
+      lines.push({
+        key: `activity-${item.entry.id}`,
+        kind: "summary",
+        text: detail
+          ? `agent created this bug — ${detail}`
+          : "agent created this bug",
+        at: item.entry.createdAt,
+      });
+      return;
+    }
+
+    lines.push({
+      key: `activity-${item.entry.id}`,
+      kind: "done",
+      text: transitionText(item.entry),
+      at: item.entry.createdAt,
+    });
+  });
+
+  return lines;
+}
+
+/**
+ * Interleave two already-chronological line lists into one.
+ *
+ * Both sources carry nullable timestamps (`arijActions[].at` is nullable, and
+ * so is a transition row's `created_at`). An undated line INHERITS the last
+ * dated line of its own list instead of sorting to the front, so a missing
+ * clock never reorders a list against itself; ties go to the left list, which
+ * keeps the merge stable and makes it a pure function of the two inputs.
+ */
+export function mergeTimelineLines<T extends { at: string | null }>(
+  left: T[],
+  right: T[],
+): T[] {
+  const stamped = (list: T[]) => {
+    let last = Number.NEGATIVE_INFINITY;
+    return list.map((item) => {
+      const parsed = item.at ? Date.parse(item.at) : Number.NaN;
+      if (!Number.isNaN(parsed)) last = parsed;
+      return { item, ts: last };
+    });
+  };
+
+  const a = stamped(left);
+  const b = stamped(right);
+  const out: T[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i].ts <= b[j].ts) out.push(a[i++].item);
+    else out.push(b[j++].item);
+  }
+  while (i < a.length) out.push(a[i++].item);
+  while (j < b.length) out.push(b[j++].item);
+  return out;
 }
 
 /* ------------------------------------------------------------------ */

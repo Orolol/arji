@@ -31,7 +31,7 @@ import type { NamedAgentCliOptions } from "@/lib/providers/options-registry";
  * free. One shared editor column would throw them away on every roster click,
  * which is a regression a rewrite makes without noticing — so edits are kept
  * in a map keyed by agent id, seeded from the server record the first time an
- * agent is touched, and the roster marks a dirty agent with an action dot.
+ * agent is touched, and the roster marks a dirty agent with an UNSAVED word.
  *
  * SELECTION IS DERIVED, NOT SYNCED. Falling back to the first agent when the
  * stored id no longer resolves means no effect has to chase `data`, which also
@@ -72,7 +72,7 @@ function isDirty(draft: Draft, agent: NamedAgent): boolean {
 function WorkshopLoading() {
   return (
     <div className="flex flex-1 items-center justify-center">
-      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground motion-reduce:animate-none" />
     </div>
   );
 }
@@ -95,7 +95,7 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
   } = useNamedAgents();
   const { providers: availability, loading: availabilityLoading } =
     useProvidersAvailable();
-  const { data: rosterStats, loading: rosterStatsLoading } =
+  const { data: rosterStats, status: rosterStatsStatus } =
     useAgentRosterStats();
   const {
     data: assignments,
@@ -244,7 +244,7 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
         selectedId={activeId}
         dirtyIds={dirtyIds}
         stats={rosterStats}
-        statsLoading={rosterStatsLoading}
+        statsStatus={rosterStatsStatus}
         availability={availability}
         availabilityLoading={availabilityLoading}
         onSelect={handleSelect}

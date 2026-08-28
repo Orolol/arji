@@ -110,7 +110,7 @@ export function SpecUpdateProgress({
         {status === "running" && (
           <pre
             ref={streamRef}
-            className="max-h-[160px] overflow-y-auto rounded-[8px] bg-muted p-[10px] font-mono text-[11.5px] leading-[1.5] tabular-nums break-words whitespace-pre-wrap text-muted-foreground"
+            className="max-h-[160px] overflow-y-auto rounded-[10px] bg-muted p-[10px] font-mono text-[11.5px] leading-[1.5] tabular-nums break-words whitespace-pre-wrap text-muted-foreground"
             data-testid="spec-update-stream"
           >
             {stream ? stream : "Waiting for agent output…"}
@@ -123,7 +123,7 @@ export function SpecUpdateProgress({
               Agent response
             </Mono>
             <pre
-              className="max-h-[160px] overflow-y-auto rounded-[8px] bg-muted p-[10px] font-mono text-[11.5px] leading-[1.5] tabular-nums break-words whitespace-pre-wrap text-muted-foreground"
+              className="max-h-[160px] overflow-y-auto rounded-[10px] bg-muted p-[10px] font-mono text-[11.5px] leading-[1.5] tabular-nums break-words whitespace-pre-wrap text-muted-foreground"
               data-testid="spec-update-response"
             >
               {response}
@@ -133,7 +133,7 @@ export function SpecUpdateProgress({
 
         {status === "failed" && error && (
           <pre
-            className="max-h-[140px] overflow-y-auto rounded-[8px] bg-muted p-[10px] font-mono text-[11.5px] leading-[1.5] tabular-nums break-words whitespace-pre-wrap text-destructive"
+            className="max-h-[140px] overflow-y-auto rounded-[10px] bg-muted p-[10px] font-mono text-[11.5px] leading-[1.5] tabular-nums break-words whitespace-pre-wrap text-destructive"
             data-testid="spec-update-error"
           >
             {error}

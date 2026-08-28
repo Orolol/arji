@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { usePolling } from "@/hooks/usePolling";
 import type { ControlDeskPayload } from "@/lib/control-desk/types";
@@ -35,14 +35,52 @@ export function useControlDesk(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Ordering guards for desk polls. Same two the board carries (hooks/
+   * useKanban.ts, commit a2a827c — "stop a stale board GET reverting a
+   * completed action"), because the desk reproduced the shape that made that
+   * a shipped bug.
+   *
+   * Every desk action ends in `refresh()`, and the 4 s poll keeps running
+   * through it. So a poll issued BEFORE a Land / Dispatch / Reply lands can
+   * still be in flight when the action's own refresh has already painted the
+   * result — and it carries the pre-action world. Applying it puts the ticket
+   * back in READY TO LAND, or the session back in QUEUED. Nothing then
+   * corrects it until the next tick, which on a 4 s poll is a visible revert
+   * of an action the server accepted.
+   *
+   * - `requestSeq` numbers each request and `appliedSeq` records the newest
+   *   one that reached the state: a response that lost the race is dropped.
+   * - `mutationSeq` counts confirmed writes. `refresh()` bumps it, so every
+   *   poll already in flight when an action completes is discarded even if it
+   *   is the newest request issued — it describes a world the user has left.
+   *
+   * `refresh()` itself is the recovery half: it is the one GET whose timing is
+   * tied to the write, so it always applies.
+   */
+  const requestSeqRef = useRef(0);
+  const appliedSeqRef = useRef(0);
+  const mutationSeqRef = useRef(0);
+
   const load = useCallback(async () => {
+    const requestSeq = ++requestSeqRef.current;
+    const issuedAtMutation = mutationSeqRef.current;
+    // True for a response that lost a race — checked after the last await, so
+    // nothing can slip in between the check and the state it guards.
+    const stale = () =>
+      requestSeq <= appliedSeqRef.current ||
+      mutationSeqRef.current !== issuedAtMutation;
     try {
       const res = await fetch("/api/control-desk");
       if (!res.ok) {
+        if (stale()) return;
+        appliedSeqRef.current = requestSeq;
         setError(`Failed to load the desk (${res.status})`);
         return;
       }
       const body = await res.json();
+      if (stale()) return;
+      appliedSeqRef.current = requestSeq;
       if (body?.error) {
         setError(body.error);
         return;
@@ -50,11 +88,25 @@ export function useControlDesk(
       setError(null);
       setData(body.data as ControlDeskPayload);
     } catch {
+      if (stale()) return;
+      appliedSeqRef.current = requestSeq;
       setError("Failed to load the desk");
     } finally {
       setLoading(false);
     }
   }, []);
+
+  /**
+   * Re-read the desk after a confirmed write.
+   *
+   * The bump is the point: it invalidates every poll already in flight, which
+   * is what stops one of them from repainting the state this refresh is about
+   * to replace.
+   */
+  const refresh = useCallback(async () => {
+    mutationSeqRef.current += 1;
+    await load();
+  }, [load]);
 
   usePolling(load, intervalMs);
 
@@ -63,7 +115,7 @@ export function useControlDesk(
     [data, projectId],
   );
 
-  return { data: filtered, loading, error, refresh: load };
+  return { data: filtered, loading, error, refresh };
 }
 
 /**

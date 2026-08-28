@@ -183,9 +183,17 @@ function statusMenu() {
 }
 
 beforeEach(() => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(JSON.stringify({ data: { name: "Arij" } }), { status: 200 }),
-  );
+  // A FRESH Response per call, never one shared instance: a Response body can
+  // only be read once, and the overlay reads several endpoints on open (the
+  // project, the transition log, …). Sharing one made whichever consumer came
+  // second silently see a spent body.
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    const body = url.endsWith("/activity")
+      ? { data: [] }
+      : { data: { name: "Arij" } };
+    return new Response(JSON.stringify(body), { status: 200 });
+  });
   updateEpic = vi.fn().mockResolvedValue({ ok: true });
   setPolling = vi.fn();
   setEpic();

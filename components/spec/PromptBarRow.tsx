@@ -1,6 +1,6 @@
 "use client";
 
-import { Mono, PROMPT_SEGMENT } from "@/components/piscine";
+import { FieldKicker, Mono, PROMPT_SEGMENT } from "@/components/piscine";
 import { PROMPT_ANATOMY_ORDER } from "@/lib/tokens/estimator";
 import { formatTokens, type PromptAnatomyRow } from "@/components/spec/spec-format";
 
@@ -35,9 +35,12 @@ export function PromptBarRow({ row, max }: PromptBarRowProps) {
     >
       <span className="flex w-[172px] shrink-0 items-baseline gap-[5px] text-[12.5px] font-semibold text-foreground max-[1199px]:w-[132px]">
         <span className="min-w-0 truncate">{row.agentName}</span>
-        <Mono size={9.5} tone="land-mid" className="shrink-0">
+        {/* The role is an uppercase token ("BUILD", "REVIEW", "BUG FIX"),
+            which is the only kind of label allowed below 11px — and only when
+            it is tracked. FieldKicker is what enforces the tracking. */}
+        <FieldKicker size={9.5} stratum="land" className="shrink-0">
           {`· ${row.role}`}
-        </Mono>
+        </FieldKicker>
       </span>
 
       <div className="flex h-[26px] flex-1 overflow-hidden rounded-[8px]">

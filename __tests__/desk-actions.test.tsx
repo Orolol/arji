@@ -161,6 +161,67 @@ describe("desk mutations", () => {
       screen.getByText("An agent is already running on this epic"),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
+
+    // A toast floats over every stratum and belongs to none, so it has no deep
+    // to borrow: the body stays ink and the failure is carried by the wording
+    // and the icon. It used to be recoloured `text-destructive` by tone.
+    const toast = screen.getByTestId("desk-toast");
+    expect(toast.className).toContain("text-foreground");
+    expect(toast.className).not.toContain("text-destructive");
+    expect(toast.querySelector("svg")).not.toBeNull();
+  });
+
+  it("grounds the composer on StrataBand and keeps the typed title ink", async () => {
+    // The linden ground was rebuilt by hand here — radius, fill and the
+    // `.stratum-feed` scope class the figures read — which is a copy of the
+    // primitive's recipe that drifts the first time the band changes.
+    mockFetch(() => ({ body: { data: {} } }));
+    render(<NowDesk />);
+
+    const input = await screen.findByTestId("desk-composer-input");
+    const composer = input.closest('[data-slot="strata-band"]');
+    expect(composer).not.toBeNull();
+    expect(composer).toHaveAttribute("data-stratum", "feed");
+
+    const inputClasses = input.className.split(/\s+/);
+    expect(inputClasses).toContain("text-foreground");
+    // The linden deep survives only as the PLACEHOLDER variant — the band's
+    // own chrome. The value itself is ink.
+    expect(inputClasses).not.toContain("text-strata-feed-deep");
+    expect(inputClasses).toContain("placeholder:text-strata-feed-deep");
+  });
+
+  it("floats the command palette on the scrim alone, with no shadow", async () => {
+    // `--shadow-overlay` is the only shadow in the system and it belongs to
+    // the ticket overlay.
+    mockFetch(() => ({ body: { data: {} } }));
+    render(<NowDesk />);
+    await screen.findByTestId("desk-composer-input");
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.className).not.toContain("shadow-");
+  });
+
+  it("toggles Full Auto from a CheckMark, not a bare native checkbox", async () => {
+    // Tailwind preflight zeroes `border` on inputs, so the native checkbox's
+    // `border-border` painted nothing at all and its `rounded` was off the
+    // system's radius scale. The primitive is the toggle now.
+    const fetchMock = mockFetch(() => ({ body: { data: {} } }));
+    render(<NowDesk />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Full Auto/ }));
+
+    const row = await screen.findByRole("checkbox", { name: /Arij/ });
+    expect(row.querySelector('[data-slot="check-mark"]')).not.toBeNull();
+    expect(document.querySelector('input[type="checkbox"]')).toBeNull();
+
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(calls(fetchMock, "/auto-mode").length).toBeGreaterThan(0),
+    );
+    const [, init] = calls(fetchMock, "/auto-mode")[0];
+    expect(JSON.parse(String(init!.body))).toEqual({ enabled: true });
   });
 
   it("prefers the server's own session url when it supplies one", async () => {

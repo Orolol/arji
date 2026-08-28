@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, Pause } from "lucide-react";
 
 import {
   BandHeader,
@@ -58,7 +58,13 @@ export interface LiveLogBandProps {
 
 /**
  * The tail toggle. No primitive covers it — it is a bare button with an icon
- * and a word, and the whole of its state is the word plus the colour family.
+ * and a word.
+ *
+ * Its state is the ICON plus the WORD, and nothing else. It used to swap
+ * `--strata-live-deep` for `--muted-foreground` between on and off, which is
+ * colour encoding state — the one rule the system never bends. The colour now
+ * stays the live ground's own deep in both states (colour = stratum), and the
+ * arrow becomes a pause glyph when the tail is released.
  */
 function TailToggle({
   on,
@@ -67,6 +73,8 @@ function TailToggle({
   on: boolean;
   onToggle: () => void;
 }) {
+  const Icon = on ? ArrowDown : Pause;
+
   return (
     <button
       type="button"
@@ -76,10 +84,10 @@ function TailToggle({
         "flex items-center gap-[6px] border-0 bg-transparent p-0",
         "font-sans text-[12px] font-semibold leading-none outline-none",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-        on ? "text-strata-live-deep" : "text-muted-foreground",
+        "text-strata-live-deep",
       )}
     >
-      <ArrowDown width={12} height={12} aria-hidden="true" />
+      <Icon width={12} height={12} aria-hidden="true" />
       {on ? "tail on" : "tail off"}
     </button>
   );
@@ -147,13 +155,15 @@ export function LiveLogBand({
           serve here" and "the logs file is unreadable" used to collapse into
           one silent null. `chunkStreamsUnavailable` is the third and lives on
           the terminal card itself. */}
+      {/* 11px, not 10.5: both of these are full sentences of prose. The
+          sub-11px allowance is for UPPERCASE TRACKED mono labels only. */}
       {session.logsUnavailable && (
-        <Mono size={10.5} tone="danger">
+        <Mono size={11} tone="danger">
           {LOGS_UNAVAILABLE_COPY}
         </Mono>
       )}
       {session.logsTruncated && (
-        <Mono size={10.5} tone="live-mid">
+        <Mono size={11} tone="live-mid">
           {LOGS_TRUNCATED_COPY}
         </Mono>
       )}

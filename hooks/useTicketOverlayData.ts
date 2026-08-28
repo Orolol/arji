@@ -20,11 +20,17 @@
  *     `git diff`; it is fetched once, after paint, only when there is a
  *     branch, and never polled. `hooks/useDiff.ts` is deliberately NOT used
  *     here — it fetches eagerly on mount.
+ *  5. THE MERGED TIMELINE. The overlay's activity band reads two sources —
+ *     the latest session's recorded board effects and the ticket's transition
+ *     log — and they are interleaved here, by timestamp, into one chronology.
+ *     The transition log follows the same gate as (2): fetched on open and on
+ *     every SSE bump, polled only while a session is live.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useAgentDispatch } from "@/hooks/useAgentDispatch";
+import { useEpicActivity } from "@/hooks/useEpicActivity";
 import { useEpicDependencies } from "@/hooks/useEpicDependencies";
 import { useEpicDetail } from "@/hooks/useEpicDetail";
 import { useEpicMutations } from "@/hooks/useEpicMutations";
@@ -36,26 +42,34 @@ import { useProjectEvents } from "@/hooks/useProjectEvents";
 import { useTicketComments } from "@/hooks/useTicketComments";
 import type { ArijActionItem } from "@/components/shared/ArijActionsList";
 import { fetchUnifiedSessions } from "@/lib/agent-sessions/session-list";
+import { aggregateGradingStatus, type GradingStatus } from "@/lib/grading/report";
+import { buildActivityFeed } from "@/lib/kanban/activity-feed";
 import { projectTone, type ProjectTone } from "@/lib/piscine/tokens";
-import type { TimelineKind } from "@/components/piscine";
 import {
   activeAgentType,
+  activityTimelineLines,
+  dependencyOptions,
   dependencyRowItems,
   diffTotals,
+  mergeTimelineLines,
   projectToneIndex,
   shortId,
   timelineKindForAction,
+  toggledWaitsOn,
   UNKNOWN_DIFF_TOTALS,
+  type DependencyOption,
   type DependencyRowItem,
   type DiffTotals,
   type EpicIndexEntry,
+  type TimelineLineItem,
 } from "@/components/ticket/derive";
 
-export interface TimelineEntry {
-  key: string;
-  kind: TimelineKind;
-  text: string;
-}
+/**
+ * One line of the agent-activity timeline. Declared in `derive.ts` so the
+ * mapping and the merge stay pure; re-exported here because the band imports
+ * the view model's vocabulary, not the derivation module's.
+ */
+export type TimelineEntry = TimelineLineItem;
 
 export interface UseTicketOverlayDataOptions {
   /** Bumped by the host page's project SSE stream; forces an immediate refresh. */
@@ -101,6 +115,7 @@ export function useTicketOverlayData(
     updateEpic,
     refresh,
     setPolling,
+    gradingReport,
   } = useEpicDetail(projectId, activeEpicId);
 
   const { comments, addComment } = useTicketComments(projectId, {
@@ -114,6 +129,7 @@ export function useTicketOverlayData(
     isRunning,
     sendToDev,
     sendToReview,
+    sendToGrading,
     resolveMerge,
     refreshSessions,
   } = useAgentDispatch(projectId, { kind: "epic", epicId: activeEpicId });
@@ -133,10 +149,13 @@ export function useTicketOverlayData(
     onDeleteSuccess,
   });
 
-  const { predecessors, successors } = useEpicDependencies(
-    projectId,
-    activeEpicId,
-  );
+  const {
+    predecessors,
+    successors,
+    saving: dependencySaving,
+    error: dependencyError,
+    saveDependencies,
+  } = useEpicDependencies(projectId, activeEpicId);
 
   const { pr, loading: prLoading, error: prError, createPr, syncPr } =
     useEpicPr(projectId, activeEpicId);
@@ -152,6 +171,18 @@ export function useTicketOverlayData(
   );
 
   const { agents: namedAgents } = useNamedAgentsList();
+
+  /**
+   * The ticket's transition log. FETCHED, NOT POLLED, while nothing runs: an
+   * idle ticket's status history is static, so the 5s poll is gated on a live
+   * session exactly like the epic poll, and the one-shot load below covers
+   * open, ticket switch and every SSE refresh.
+   */
+  const { entries: activityEntries, refresh: refreshActivity } = useEpicActivity(
+    projectId,
+    activeEpicId,
+    open && isRunning,
+  );
 
   /* ---------------- mark-as-read ------------------------------------ */
 
@@ -186,6 +217,14 @@ export function useTicketOverlayData(
     if (refreshTrigger > 0) void refresh();
   }, [refreshTrigger, refresh]);
 
+  // The transition log's one-shot load: on open, on ticket switch, and on
+  // every SSE bump. `refreshActivity` is memoised on the activity URL, so this
+  // re-runs exactly when the target ticket changes.
+  useEffect(() => {
+    if (!open || !activeEpicId) return;
+    void refreshActivity();
+  }, [open, activeEpicId, refreshTrigger, refreshActivity]);
+
   // Grader/verify completions arrive as session:completed and ticket:updated.
   // Refresh immediately so the overlay does not wait on the next poll. The
   // subscription only exists while the overlay is mounted.
@@ -193,9 +232,13 @@ export function useTicketOverlayData(
     "session:completed": () => {
       void refresh();
       void refreshSessions();
+      void refreshActivity();
     },
     "ticket:updated": (event) => {
-      if (!activeEpicId || event.epicId === activeEpicId) void refresh();
+      if (!activeEpicId || event.epicId === activeEpicId) {
+        void refresh();
+        void refreshActivity();
+      }
     },
   });
 
@@ -317,19 +360,42 @@ export function useTicketOverlayData(
   const liveLabel =
     (activeSession as { label?: string | null } | null)?.label ?? null;
 
+  /**
+   * The ticket's status history, as timeline lines.
+   *
+   * `buildActivityFeed` is called with NO comments: the CONVERSATION band
+   * already renders every one of them, and the feed's own job here is the
+   * grouping — consecutive automatic transitions collapse into one line that
+   * expands in place, so a pipeline burst does not bury the session's work.
+   */
+  const activityLines = useMemo(
+    () =>
+      activityTimelineLines(
+        // `useEpicActivity` installs `data.data` unvalidated, so a malformed
+        // or unexpected payload reaches here as a non-array. The band showing
+        // nothing is the correct failure; a thrown render is not.
+        buildActivityFeed([], Array.isArray(activityEntries) ? activityEntries : []),
+      ),
+    [activityEntries],
+  );
+
   const timeline: TimelineEntry[] = useMemo(() => {
-    const lines: TimelineEntry[] = sessionActions.map((action, index) => ({
+    const sessionLines: TimelineEntry[] = sessionActions.map((action, index) => ({
       key: `${index}-${action.at ?? ""}`,
       kind: timelineKindForAction(action.kind),
       text: action.summary,
+      at: action.at ?? null,
     }));
+    // Two chronological sources, one chronology: a transition recorded after
+    // the session's last action must read after it, not before the whole run.
+    const lines = mergeTimelineLines<TimelineEntry>(activityLines, sessionLines);
     // The live line is the in-flight marker: a breathing dot and no glyph.
     // It only exists while a session is actually running.
     if (isRunning && liveLabel) {
-      lines.push({ key: "live", kind: "live", text: liveLabel });
+      lines.push({ key: "live", kind: "live", text: liveLabel, at: null });
     }
     return lines;
-  }, [sessionActions, isRunning, liveLabel]);
+  }, [activityLines, sessionActions, isRunning, liveLabel]);
 
   const displaySessionId = activeSession?.id ?? sessionId;
   const sessionHref = displaySessionId
@@ -370,6 +436,46 @@ export function useTicketOverlayData(
     [predecessors, epicIndex],
   );
 
+  /**
+   * WAITS ON is the editable side, and the only one: `PUT …/dependencies`
+   * replaces THIS ticket's predecessor list, so a BLOCKS edge is edited from
+   * the ticket that owns it. The route re-checks for cycles and its refusal
+   * comes back as `dependencyError`.
+   */
+  const waitsOnIds = useMemo(
+    () => predecessors.map((record) => record.dependsOnTicketId),
+    [predecessors],
+  );
+
+  const waitsOnOptions: DependencyOption[] = useMemo(
+    () =>
+      dependencyOptions(
+        projectEpics as unknown as ProjectEpicRow[],
+        activeEpicId,
+        waitsOnIds,
+      ),
+    [projectEpics, activeEpicId, waitsOnIds],
+  );
+
+  const toggleWaitsOn = useCallback(
+    (epicId: string) => {
+      // `saveDependencies` clears the previous error itself and refetches on
+      // success, so the chips below follow the server, never the click.
+      void saveDependencies(toggledWaitsOn(waitsOnIds, epicId));
+    },
+    [waitsOnIds, saveDependencies],
+  );
+
+  /* ---------------- acceptance grading -------------------------------- */
+
+  // One word for the whole report: missed dominates partial dominates met,
+  // and an absent or malformed report is `null` — ungraded, never "met".
+  const gradingStatus: GradingStatus | null = useMemo(
+    () => aggregateGradingStatus(gradingReport?.gradings),
+    [gradingReport],
+  );
+  const gradingSummary = gradingReport?.summary?.trim() || null;
+
   /* ---------------- stop the running session -------------------------- */
 
   const activeSessionId = activeSession?.id ?? null;
@@ -403,6 +509,7 @@ export function useTicketOverlayData(
     dispatching,
     sendToDev,
     sendToReview,
+    sendToGrading,
     resolveMerge,
     stopSession,
 
@@ -425,7 +532,14 @@ export function useTicketOverlayData(
 
     blocks,
     waitsOn,
+    waitsOnOptions,
+    toggleWaitsOn,
+    dependencySaving,
+    dependencyError,
     namedAgents,
+
+    gradingStatus,
+    gradingSummary,
 
     diffstat,
     timeline,

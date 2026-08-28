@@ -107,6 +107,7 @@ export function TicketOverlay({
     dispatching,
     sendToDev,
     sendToReview,
+    sendToGrading,
     resolveMerge,
     stopSession,
     merge,
@@ -126,7 +127,13 @@ export function TicketOverlay({
     githubConfigured,
     blocks,
     waitsOn,
+    waitsOnOptions,
+    toggleWaitsOn,
+    dependencySaving,
+    dependencyError,
     namedAgents,
+    gradingStatus,
+    gradingSummary,
     diffstat,
     timeline,
     sessionMeta,
@@ -286,6 +293,17 @@ export function TicketOverlay({
     }
   }
 
+  async function handleGrade() {
+    try {
+      // Grading is observational: it writes a report and never moves the
+      // ticket, so there is nothing to reconcile beyond the refresh.
+      await sendToGrading(selectedAgentId);
+      refresh();
+    } catch (error) {
+      reportConflict(error);
+    }
+  }
+
   async function handleBackToDev(reviewComment: string) {
     await sendToDev(reviewComment);
     refresh();
@@ -409,8 +427,15 @@ export function TicketOverlay({
               <TicketDescriptionCard
                 description={epic?.description ?? null}
                 meta={epic ? descriptionMeta(epic) : ""}
+                projectId={projectId}
+                images={epic?.images ?? null}
               />
-              <UserStoriesBand stories={userStories} />
+              <UserStoriesBand
+                stories={userStories}
+                projectId={projectId}
+                gradingStatus={gradingStatus}
+                gradingSummary={gradingSummary}
+              />
               <AgentActivityBand
                 lines={timeline}
                 isRunning={isRunning}
@@ -459,13 +484,22 @@ export function TicketOverlay({
                 resolvingMerge={resolvingMerge}
                 isRunning={isRunning}
               />
-              <DependenciesBand blocks={blocks} waitsOn={waitsOn} tone={tone} />
+              <DependenciesBand
+                blocks={blocks}
+                waitsOn={waitsOn}
+                tone={tone}
+                options={waitsOnOptions}
+                onToggleWaitsOn={toggleWaitsOn}
+                saving={dependencySaving}
+                error={dependencyError}
+              />
               <AgentsBand
                 agents={namedAgents}
                 selectedAgentId={selectedAgentId}
                 onSelectAgent={setSelectedAgentId}
                 onReview={handleReview}
                 onRebuild={handleRebuild}
+                onGrade={handleGrade}
                 locked={dispatching || isRunning}
               />
 

@@ -2,9 +2,17 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Inbox, Infinity as InfinityIcon, LayoutGrid, Search, Settings } from "lucide-react";
+import {
+  AlertTriangle,
+  Inbox,
+  Infinity as InfinityIcon,
+  LayoutGrid,
+  Search,
+  Settings,
+} from "lucide-react";
 
 import {
+  CheckMark,
   DeskHeader,
   Mono,
   PillButton,
@@ -638,26 +646,36 @@ export function NowDesk({
               className="w-[260px] rounded-[12px] border-[1.5px] border-border bg-card p-2 shadow-none"
             >
               <div className="flex flex-col gap-1">
+                {/*
+                  The row is the control, and the mark is the CheckMark
+                  primitive. A native <input type="checkbox"> painted nothing
+                  here: Tailwind's preflight sets `border: 0` on inputs, so the
+                  `border-border` it carried never rendered, and its `rounded`
+                  was off the 10/12/14/9999 scale the system allows.
+                */}
                 {projects.map((project) => (
-                  <label
+                  <button
                     key={project.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-[10px] px-2 py-[6px] hover:bg-muted"
+                    type="button"
+                    role="checkbox"
+                    aria-checked={project.autoModeEnabled}
+                    onClick={() =>
+                      void toggleAutoMode(project.id, !project.autoModeEnabled)
+                    }
+                    className={cn(
+                      "flex w-full cursor-pointer items-center gap-2 rounded-[10px] px-2 py-[6px] text-left",
+                      "outline-none hover:bg-muted",
+                      "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    )}
                   >
-                    <input
-                      type="checkbox"
-                      checked={project.autoModeEnabled}
-                      onChange={(event) =>
-                        void toggleAutoMode(project.id, event.target.checked)
-                      }
-                      className="h-3.5 w-3.5 rounded border-border"
-                    />
+                    <CheckMark checked={project.autoModeEnabled} />
                     <span className="min-w-0 flex-1 truncate font-sans text-[12.5px] text-foreground">
                       {project.name}
                     </span>
                     <Mono size={10.5} tone="muted">
                       {project.activeAgents > 0 ? `${project.activeAgents} live` : "—"}
                     </Mono>
-                  </label>
+                  </button>
                 ))}
               </div>
             </PopoverContent>
@@ -737,16 +755,27 @@ export function NowDesk({
 
       {onToast ? null : (
         <div className="fixed right-4 bottom-4 z-50 flex flex-col gap-2">
+          {/*
+            The body stays ink whatever the tone. A toast floats over the desk
+            and belongs to no stratum, so it has no deep to borrow — and colour
+            here would be encoding state, which the strata do not do either.
+            The failure is in the wording (every error message names what
+            failed) and in the icon beside it.
+          */}
           {toasts.map((toast) => (
             <SurfaceCard
               key={toast.id}
               radius={11}
               data-testid="desk-toast"
-              className={cn(
-                "flex items-center gap-2 px-[14px] py-[10px] font-sans text-[13px]",
-                toast.tone === "error" ? "text-destructive" : "text-foreground",
-              )}
+              className="flex items-center gap-2 px-[14px] py-[10px] font-sans text-[13px] text-foreground"
             >
+              {toast.tone === "success" ? null : (
+                <AlertTriangle
+                  size={13}
+                  aria-hidden="true"
+                  className="shrink-0 text-muted-foreground"
+                />
+              )}
               <span>{toast.message}</span>
               {toast.href ? (
                 <a href={toast.href} className="text-[12px] whitespace-nowrap underline">

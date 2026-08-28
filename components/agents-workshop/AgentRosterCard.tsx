@@ -6,7 +6,11 @@ import {
   Mono,
   SurfaceCard,
 } from "@/components/piscine";
-import type { AgentDayStats, NamedAgent } from "@/hooks/useAgentConfig";
+import type {
+  AgentDayStats,
+  AgentRosterStatsStatus,
+  NamedAgent,
+} from "@/hooks/useAgentConfig";
 import { formatReliabilityPercent } from "@/lib/agent-config/dispatch-reliability-constants";
 import { formatCostUsd } from "@/lib/utils/format-usage";
 import { cn } from "@/lib/utils";
@@ -35,7 +39,12 @@ export interface AgentRosterCardProps {
   selected: boolean;
   dirty: boolean;
   stats?: AgentDayStats;
-  statsLoading: boolean;
+  /**
+   * The AGGREGATE's state, not this agent's. `ready` with no `stats` is a
+   * truthful zero (the query returns no row for an agent that has not run
+   * today); anything else is "we do not know", and prints em-dashes.
+   */
+  statsStatus: AgentRosterStatsStatus;
   onSelect: () => void;
 }
 
@@ -44,17 +53,21 @@ export function AgentRosterCard({
   selected,
   dirty,
   stats,
-  statsLoading,
+  statsStatus,
   onSelect,
 }: AgentRosterCardProps) {
-  const pending = statsLoading && !stats;
-  const live = stats?.liveSessions ?? 0;
+  // THE EM-DASH-NOT-ZERO INVARIANT. `stats?.runsToday ?? 0` alone cannot hold
+  // it: the fallback fires both when the agent genuinely ran nothing and when
+  // the aggregate never arrived, and printing "0 runs today" for a request
+  // that failed is a figure the server never gave us.
+  const known = statsStatus === "ready";
+  const live = known ? (stats?.liveSessions ?? 0) : 0;
 
-  const runs = pending ? EM_DASH : String(stats?.runsToday ?? 0);
-  const clean = pending
-    ? EM_DASH
-    : formatReliabilityPercent(stats?.cleanRate ?? null);
-  const cost = pending ? EM_DASH : (formatCostUsd(stats?.costTodayUsd) ?? EM_DASH);
+  const runs = known ? String(stats?.runsToday ?? 0) : EM_DASH;
+  const clean = known
+    ? formatReliabilityPercent(stats?.cleanRate ?? null)
+    : EM_DASH;
+  const cost = known ? (formatCostUsd(stats?.costTodayUsd) ?? EM_DASH) : EM_DASH;
 
   return (
     <SurfaceCard
@@ -79,21 +92,33 @@ export function AgentRosterCard({
             size={34}
           />
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate font-sans text-[14.5px] font-semibold text-foreground">
-              {agent.name}
+            <span className="flex min-w-0 items-baseline gap-[5px]">
+              <span className="truncate font-sans text-[14.5px] font-semibold text-foreground">
+                {agent.name}
+              </span>
+              {/* A WORD, not a colour. This used to be a --action dot, which
+                  spent the screen's filled-button green on a boolean and put
+                  a third loud colour in a two-colour frame. Unsaved is a
+                  state, and state is carried by the word. */}
               {dirty ? (
-                <span
-                  aria-hidden="true"
-                  title="unsaved changes"
-                  className="ml-1.5 inline-block size-1 rounded-full bg-action align-middle"
-                />
+                <Mono
+                  size={9.5}
+                  tone="muted"
+                  uppercase
+                  tracking={0.06}
+                  className="shrink-0"
+                >
+                  unsaved
+                </Mono>
               ) : null}
             </span>
             <Mono size={10.5} tone="muted" clamp={1}>
               {`${agent.provider} · ${agent.model || "CLI default"}`}
             </Mono>
           </span>
-          {/* No dot at all when nothing runs — never a grey placeholder here. */}
+          {/* No dot at all when nothing runs — never a grey placeholder here,
+              and never a stale one: an unavailable aggregate reports 0 live
+              rather than leaving the previous poll's dot breathing. */}
           {live > 0 ? (
             <span
               title={`${live} session${live === 1 ? "" : "s"} live`}

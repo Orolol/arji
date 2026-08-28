@@ -1,5 +1,13 @@
 "use client";
 
+import { TriangleAlert } from "lucide-react";
+
+import {
+  FieldKicker,
+  Mono,
+  ProgressTrack,
+  SurfaceCard,
+} from "@/components/piscine";
 import { cn } from "@/lib/utils";
 import { formatCostUsd, formatTokens } from "@/lib/utils/format-usage";
 import {
@@ -24,16 +32,47 @@ import type {
 /* -------------------------------------------------------------------------- */
 /* Subscription cards                                                         */
 /*                                                                            */
-/* Moved VERBATIM out of app/usage/page.tsx (frame 8d re-skin). Exactly one    */
-/* line changed: the outer container is now borderless with radius 14, to      */
-/* match the Piscine system. Everything else — every testid, class, DOM node,  */
-/* inline style and comment — is byte-for-byte what 66 tests across            */
-/* __tests__/usage-live-cards.test.tsx and __tests__/usage-page.test.tsx pin.  */
+/* Lifted out of app/usage/page.tsx for the frame 8d re-skin and then actually */
+/* converted to the Piscine language (the first pass moved the markup          */
+/* verbatim, which left a legacy "cassette pêche" block sitting inside 8d):    */
+/*                                                                            */
+/*   - the shell is a `SurfaceCard` (radius 12 — this is a card, not a band);  */
+/*   - every uppercase micro-label is a `FieldKicker`, i.e. TRACKED MONO, the  */
+/*     one thing the system allows below the 11px floor. The old labels were   */
+/*     10.5px Instrument Sans, which the floor does not exempt;                */
+/*   - every mono run is a `Mono`, so tabular figures are not optional;        */
+/*   - every gauge is a determinate `ProgressTrack` instead of a hand-rolled   */
+/*     copy of its recipe;                                                     */
+/*   - the two rules left in the card are 1.5px, the house border weight;      */
+/*   - STALENESS IS NO LONGER A COLOUR. It used to be `text-priority-yellow`,  */
+/*     which is colour encoding state — the one rule the system never bends.   */
+/*     It is now an icon plus the word "stale", per "state is icon + word +    */
+/*     motion".                                                                */
+/*                                                                            */
+/* Every testid, every string and every number on screen is unchanged.         */
 /*                                                                            */
 /* The frame does not draw these cards. That is a coverage gap in the design,  */
 /* not a deletion order: they are the only place in the app that answers       */
 /* "what does the provider itself say about my account quota".                 */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * The one "this data is old" marker in the card. Colour is not available to
+ * say it (colour = stratum, never state), so it is said with an icon and a
+ * word — the same way `ResetLine` says "window expired — data stale".
+ */
+function StaleMark() {
+  return (
+    <>
+      <TriangleAlert
+        width={11}
+        height={11}
+        aria-hidden="true"
+        className="inline-block shrink-0 align-[-1px]"
+      />{" "}
+    </>
+  );
+}
 
 /**
  * `nowMs` is the report's own generation time, not a render-time clock read:
@@ -48,28 +87,31 @@ export function SubscriptionCard({
   nowMs: number;
 }) {
   return (
-    <div
-      className="w-[340px] max-w-full rounded-[14px] bg-card p-[16px]"
+    <SurfaceCard
+      radius={12}
+      className="w-[340px] max-w-full p-[16px]"
       data-testid={`usage-sub-${sub.provider}`}
     >
       <div className="flex items-center justify-between gap-[10px]">
-        <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
+        <Mono size={11.5} weight={700} uppercase tracking={0.08} tone="muted">
           {providerLabel(sub.provider)}
-        </span>
+        </Mono>
         <span
-          className="rounded-full border border-border-soft px-[7px] py-[2px] text-[10.5px] uppercase tracking-[.08em] text-meta"
+          className="shrink-0 rounded-full border-[1.5px] border-border-soft px-[7px] py-[2px]"
           data-testid={`usage-sub-${sub.provider}-source`}
         >
-          {sub.source === "provider-reported"
-            ? "Provider-reported"
-            : "Metered via Arij"}
+          <FieldKicker size={10.5} stratum="card">
+            {sub.source === "provider-reported"
+              ? "Provider-reported"
+              : "Metered via Arij"}
+          </FieldKicker>
         </span>
       </div>
 
       {sub.plan && (
-        <p className="mt-[6px] font-mono text-[11px] text-meta">
+        <Mono as="div" size={11} tone="muted" className="mt-[6px]">
           plan: {sub.plan}
-        </p>
+        </Mono>
       )}
 
       {/*
@@ -87,7 +129,7 @@ export function SubscriptionCard({
       ) : (
         <ProviderReportedBody sub={sub} nowMs={nowMs} />
       )}
-    </div>
+    </SurfaceCard>
   );
 }
 
@@ -165,41 +207,41 @@ function ClaudeLiveBody({
         ))}
 
       {extra?.isEnabled && (
-        <p
-          className="mt-[12px] font-mono text-[11px] text-meta"
-          data-testid="usage-sub-claude-extra"
-        >
-          Extra usage: {numberOrDash(extra.usedCredits)} /{" "}
-          {numberOrDash(extra.monthlyLimit)} credits ·{" "}
-          {numberOrDash(extra.utilizationPercent)}%
-        </p>
+        // `Mono` takes no arbitrary DOM props, so the testid lives on a
+        // wrapper rather than on a hand-rolled copy of its class recipe.
+        <div className="mt-[12px]" data-testid="usage-sub-claude-extra">
+          <Mono size={11} tone="muted">
+            Extra usage: {numberOrDash(extra.usedCredits)} /{" "}
+            {numberOrDash(extra.monthlyLimit)} credits ·{" "}
+            {numberOrDash(extra.utilizationPercent)}%
+          </Mono>
+        </div>
       )}
 
       {ageMs !== null && (
         <p
-          className={cn(
-            "mt-[12px] text-[11px]",
-            stale ? "text-priority-yellow" : "text-meta"
-          )}
+          className="mt-[12px] text-[11px] text-meta"
+          data-stale={stale ? "" : undefined}
           data-testid="usage-sub-claude-captured"
         >
+          {stale && <StaleMark />}
           Live · polled {formatRelativeAge(ageMs)} ago · claude CLI
+          {stale ? " — stale" : ""}
         </p>
       )}
 
       {sub.metered && (
-        <div className="mt-[14px] border-t border-border-soft pt-[10px]">
+        <div className="mt-[14px] border-t-[1.5px] border-border-soft pt-[10px]">
           {/*
             Demoted rendering: the standalone disclaimer sentence is dropped
             because this section label already says exactly what these numbers
             are — and unlike the fallback card, an account-wide truth is
             visible right above it.
           */}
-          <span
-            className="text-[10.5px] uppercase tracking-[.08em] text-meta"
-            data-testid="usage-sub-claude-metered-sub"
-          >
-            ARIJ-METERED · THIS MACHINE ONLY
+          <span data-testid="usage-sub-claude-metered-sub">
+            <FieldKicker size={10.5} stratum="card">
+              ARIJ-METERED · THIS MACHINE ONLY
+            </FieldKicker>
           </span>
           <MeteredLine
             label="LAST 5H"
@@ -218,11 +260,9 @@ function ClaudeLiveBody({
                 formatCostUsd(sub.metered.budgetUsdWeek) ?? "—"
               }`}
               percent={sub.metered.budgetUsedPercent}
-              readoutClassName={
+              alarm={
                 sub.metered.budgetUsedPercent !== null &&
                 sub.metered.budgetUsedPercent > 100
-                  ? "text-destructive"
-                  : undefined
               }
               testId="usage-sub-claude-budget"
             />
@@ -301,25 +341,24 @@ function CodexLiveBody({
       ))}
 
       {credits && (credits.hasCredits || credits.unlimited) && (
-        <p
-          className="mt-[12px] font-mono text-[11px] text-meta"
-          data-testid="usage-sub-codex-credits"
-        >
-          {credits.unlimited
-            ? "Credits: unlimited"
-            : `Credits: ${credits.balance ?? "—"}`}
-        </p>
+        <div className="mt-[12px]" data-testid="usage-sub-codex-credits">
+          <Mono size={11} tone="muted">
+            {credits.unlimited
+              ? "Credits: unlimited"
+              : `Credits: ${credits.balance ?? "—"}`}
+          </Mono>
+        </div>
       )}
 
       {ageMs !== null && (
         <p
-          className={cn(
-            "mt-[12px] text-[11px]",
-            stale ? "text-priority-yellow" : "text-meta"
-          )}
+          className="mt-[12px] text-[11px] text-meta"
+          data-stale={stale ? "" : undefined}
           data-testid="usage-sub-codex-captured"
         >
+          {stale && <StaleMark />}
           Live · polled {formatRelativeAge(ageMs)} ago · codex app-server
+          {stale ? " — stale" : ""}
         </p>
       )}
 
@@ -398,12 +437,11 @@ function CodexHistoryStrip({ live }: { live: CodexLiveQuota }) {
   const maxTokens = days.reduce((max, d) => Math.max(max, d.tokens), 0);
 
   return (
-    <div className="mt-[14px] border-t border-border-soft pt-[10px]">
-      <span
-        className="text-[10.5px] uppercase tracking-[.08em] text-meta"
-        data-testid="usage-sub-codex-history-label"
-      >
-        ALL DEVICES · PROVIDER-REPORTED
+    <div className="mt-[14px] border-t-[1.5px] border-border-soft pt-[10px]">
+      <span data-testid="usage-sub-codex-history-label">
+        <FieldKicker size={10.5} stratum="card">
+          ALL DEVICES · PROVIDER-REPORTED
+        </FieldKicker>
       </span>
 
       {days.length > 0 && (
@@ -427,20 +465,25 @@ function CodexHistoryStrip({ live }: { live: CodexLiveQuota }) {
               />
             ))}
           </div>
-          <div className="mt-[6px] flex justify-between font-mono text-[10.5px] text-meta">
-            <span>{formatDayLabel(days[0].date)}</span>
-            <span>{formatDayLabel(days[days.length - 1].date)}</span>
+          {/* Mixed-case month labels, so they sit at the 11px floor rather
+              than at the tracked-mono 9.5/10.5 allowance. */}
+          <div className="mt-[6px] flex justify-between">
+            <Mono size={11} tone="muted">
+              {formatDayLabel(days[0].date)}
+            </Mono>
+            <Mono size={11} tone="muted">
+              {formatDayLabel(days[days.length - 1].date)}
+            </Mono>
           </div>
         </>
       )}
 
       {live.lifetimeTokens !== null && (
-        <p
-          className="mt-[6px] font-mono text-[11px] text-meta"
-          data-testid="usage-sub-codex-lifetime"
-        >
-          Lifetime: {formatTokens(live.lifetimeTokens) ?? "—"} tokens
-        </p>
+        <div className="mt-[6px]" data-testid="usage-sub-codex-lifetime">
+          <Mono size={11} tone="muted">
+            Lifetime: {formatTokens(live.lifetimeTokens) ?? "—"} tokens
+          </Mono>
+        </div>
       )}
     </div>
   );
@@ -460,16 +503,15 @@ function ResetLine({
   testId: string;
 }) {
   return (
-    <p
-      className="mt-[5px] font-mono text-[11px] text-meta"
-      data-testid={`${testId}-reset`}
-    >
-      {remainingMs === null
-        ? "reset time unknown"
-        : remainingMs <= 0
-          ? "window expired — data stale"
-          : `resets in ${formatCountdown(remainingMs)}`}
-    </p>
+    <div className="mt-[5px]" data-testid={`${testId}-reset`}>
+      <Mono size={11} tone="muted">
+        {remainingMs === null
+          ? "reset time unknown"
+          : remainingMs <= 0
+            ? "window expired — data stale"
+            : `resets in ${formatCountdown(remainingMs)}`}
+      </Mono>
+    </div>
   );
 }
 
@@ -522,10 +564,13 @@ function ProviderReportedBody({
         testId="usage-sub-codex-secondary"
       />
       <p
-        className={cn("mt-[12px] text-[11px]", stale ? "text-priority-yellow" : "text-meta")}
+        className="mt-[12px] text-[11px] text-meta"
+        data-stale={stale ? "" : undefined}
         data-testid="usage-sub-codex-captured"
       >
+        {stale && <StaleMark />}
         Captured {formatRelativeAge(ageMs)} ago · ~/.codex/sessions
+        {stale ? " — stale" : ""}
       </p>
     </>
   );
@@ -614,7 +659,7 @@ function MeteredBody({
             formatCostUsd(budget) ?? "—"
           }`}
           percent={percent}
-          readoutClassName={over ? "text-destructive" : undefined}
+          alarm={over}
           testId="usage-sub-claude-budget"
         />
       )}
@@ -645,66 +690,78 @@ function MeteredLine({
 
   return (
     <div className="mt-[10px]">
-      <span className="text-[10.5px] uppercase tracking-[.08em] text-meta">
+      <FieldKicker size={10.5} stratum="card">
         {label}
-      </span>
-      <p className="mt-[3px] font-mono text-[12.5px]" data-testid={testId}>
-        {usage.sessions} session{usage.sessions === 1 ? "" : "s"} ·{" "}
-        {tokens ?? "—"} tokens · {formatCostUsd(usage.costUsd) ?? "—"}
-      </p>
+      </FieldKicker>
+      <div className="mt-[3px]" data-testid={testId}>
+        <Mono size={12.5}>
+          {usage.sessions} session{usage.sessions === 1 ? "" : "s"} ·{" "}
+          {tokens ?? "—"} tokens · {formatCostUsd(usage.costUsd) ?? "—"}
+        </Mono>
+      </div>
     </div>
   );
 }
 
 /**
- * Determinate gauge. Deliberately inline-styled rather than `.progress-track`,
- * whose `.crawl-fill` is an indeterminate crawl animation. Fill width is
- * clamped to [0,100]; the readout is not, so a blown budget reads honestly.
+ * Determinate gauge, drawn by the `ProgressTrack` primitive in its determinate
+ * mode (its defaults — `--strata-live-fill` on `--strata-live-track` — are the
+ * exact pair the old hand-rolled bar named through the `--agent` aliases).
+ *
+ * Fill width is clamped to [0,100] by the primitive; the readout is not, so a
+ * blown budget reads honestly.
+ *
+ * An expired window is DIMMED, not recoloured: opacity says "this reading is
+ * no longer current" without spending one of the screen's two loud colours,
+ * and the `ResetLine` right underneath says it in words as well. `data-dimmed`
+ * on the row is what the suite asserts, so the signal survives a restyling.
  */
 function GaugeRow({
   label,
   readout,
   percent,
   dimmed = false,
-  readoutClassName,
+  alarm = false,
   testId,
 }: {
   label: string;
   readout: string;
   percent: number | null;
   dimmed?: boolean;
-  readoutClassName?: string;
+  /** Over the stated budget — the one place this gauge's readout is coloured. */
+  alarm?: boolean;
   testId: string;
 }) {
   const width = percent === null ? 0 : Math.min(100, Math.max(0, percent));
 
   return (
-    <div className="mt-[12px]" data-testid={testId}>
+    <div
+      className="mt-[12px]"
+      data-testid={testId}
+      data-dimmed={dimmed ? "" : undefined}
+    >
       <div className="flex items-baseline justify-between gap-[10px]">
-        <span className="text-[10.5px] uppercase tracking-[.08em] text-meta">
+        <FieldKicker size={10.5} stratum="card">
           {label}
-        </span>
-        <span
-          className={cn("font-mono text-[11px]", readoutClassName)}
-          data-testid={`${testId}-readout`}
-        >
-          {readout}
+        </FieldKicker>
+        <span data-testid={`${testId}-readout`}>
+          {/*
+            Over budget is one of the design's two sanctioned alarms, and
+            `--destructive` is the same value as `--strata-you-deep`, so "text
+            is never coloured except stratum deeps" still holds. Identical
+            reasoning to `MonthlyCapTile`.
+          */}
+          <Mono size={11} tone={alarm ? "danger" : "ink"}>
+            {readout}
+          </Mono>
         </span>
       </div>
-      <div
-        className="mt-[6px] h-[3px] w-full overflow-hidden rounded-full"
-        style={{ background: "var(--agent-track)" }}
-      >
-        <div
-          className="h-full rounded-full"
-          style={{
-            width: `${width}%`,
-            background: "var(--agent)",
-            opacity: dimmed ? 0.35 : 1,
-          }}
-          data-testid={`${testId}-fill`}
-        />
-      </div>
+      <ProgressTrack
+        height={3}
+        percent={width}
+        fillTestId={`${testId}-fill`}
+        className={cn("mt-[6px]", dimmed && "opacity-[0.35]")}
+      />
     </div>
   );
 }

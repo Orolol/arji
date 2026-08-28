@@ -1,6 +1,10 @@
 "use client";
 
-import type { AgentDayStats, NamedAgent } from "@/hooks/useAgentConfig";
+import type {
+  AgentDayStats,
+  AgentRosterStatsStatus,
+  NamedAgent,
+} from "@/hooks/useAgentConfig";
 import type { AgentProvider } from "@/lib/agent-config/constants";
 
 import { AddAgentCard } from "./AddAgentCard";
@@ -20,7 +24,8 @@ export interface AgentRosterProps {
   selectedId: string | null;
   dirtyIds: Set<string>;
   stats: Record<string, AgentDayStats>;
-  statsLoading: boolean;
+  /** Tri-state: the cards print em-dashes unless this is "ready". */
+  statsStatus: AgentRosterStatsStatus;
   availability: Record<AgentProvider, boolean>;
   availabilityLoading: boolean;
   onSelect: (agentId: string) => void;
@@ -35,7 +40,7 @@ export function AgentRoster({
   selectedId,
   dirtyIds,
   stats,
-  statsLoading,
+  statsStatus,
   availability,
   availabilityLoading,
   onSelect,
@@ -54,7 +59,7 @@ export function AgentRoster({
             selected={agent.id === selectedId}
             dirty={dirtyIds.has(agent.id)}
             stats={stats[agent.id]}
-            statsLoading={statsLoading}
+            statsStatus={statsStatus}
             onSelect={() => onSelect(agent.id)}
           />
         ))}

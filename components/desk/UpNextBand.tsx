@@ -136,14 +136,21 @@ export function UpNextBand({
             data-testid="desk-up-next-row"
             className="flex items-center gap-[9px]"
           >
-            <span
-              className={cn(
-                "w-[70px] shrink-0 font-mono text-[10px] font-bold tabular-nums",
-                PROJECT_LABEL_CLASS[tone],
-              )}
+            {/*
+              Mono, not a hand-rolled `font-mono` run: the primitive is what
+              guarantees Space Mono (the canvas helper resolves to Geist Mono)
+              and `tabular-nums` on every mono run in the design. The project
+              deep is a colour no `MonoTone` carries, so it arrives the
+              documented way — a utility class through `className`, which
+              twMerge lets win over the tone class.
+            */}
+            <Mono
+              size={10}
+              weight={700}
+              className={cn("w-[70px] shrink-0", PROJECT_LABEL_CLASS[tone])}
             >
               {project?.shortName ?? "—"}
-            </span>
+            </Mono>
 
             {visible.map((ticket) => {
               const rank = chipRank(ticket);
