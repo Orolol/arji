@@ -37,6 +37,26 @@ Arij is a local, AI-first project orchestrator. It provides a web interface for 
 - `npm run test:e2e` — Playwright
 - `npx drizzle-kit push` — Push schema to DB
 
+## Install hygiene — a stale install fakes type errors
+Worktrees usually get `node_modules` hardlinked from another checkout, so the
+install routinely lags `package-lock.json`. It does not fail loudly: it fails
+*misleadingly*, as *phantom type errors in files your diff never touched*.
+
+`lib/git/clone.ts` is the recurring example. The `unsafe: { allowUnsafeAskPass:
+true }` it passes to `simpleGit()` is a TS2769 on `simple-git` 3.30 and clean on
+the pinned 3.36 — the flag only exists once `SimpleGitOptions["unsafe"]` picks
+up `VulnerabilityCategoryFlags` from `@simple-git/argv-parser`. Sessions keep
+triaging that ghost as a real regression in `clone.ts`.
+
+Before triaging any type error, or reporting a failure as pre-existing:
+- `npm ci` — if installed and locked versions disagree, reinstall and re-measure
+  **everything** against the clean install.
+- Say in the handoff which install the measurements came from.
+
+`__tests__/lockfile-install-consistency.test.ts` pins this mechanically: it
+fails when a direct dependency drifts from the lockfile, and when `simple-git`
+stops declaring the option `clone.ts` needs.
+
 ## Migrations
 Migrations are **hand-written**. Do not run `npx drizzle-kit generate`: the
 `lib/db/migrations/meta/*_snapshot.json` files stop at 0013 while the journal
