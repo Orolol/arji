@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Download, Github, Loader2, RefreshCw } from "lucide-react";
 import { useGitHubConfig } from "@/hooks/useGitHubConfig";
+import type { GitHubConfigErrorCode } from "@/lib/github/client";
 import { cn } from "@/lib/utils";
 
 interface GitHubIssueRow {
@@ -28,6 +29,34 @@ interface Toast {
 
 const GRID = "grid-cols-[64px_1fr_180px_110px_120px]";
 
+/**
+ * The triage and sync routes answer 400 with one of these codes when GitHub is
+ * not set up for the project. Branching on the code -- rather than on the prose
+ * message, or on a 500 that says nothing at all -- is what lets the page
+ * explain the state instead of reporting a failure.
+ */
+const CONFIG_EMPTY_STATE: Record<
+  GitHubConfigErrorCode,
+  { title: string; detail: string }
+> = {
+  GITHUB_REPO_NOT_CONFIGURED: {
+    title: "No GitHub repository is connected to this project.",
+    detail:
+      "Connect this project to a GitHub repository from the Git sync page to triage its issues here.",
+  },
+  GITHUB_PAT_NOT_CONFIGURED: {
+    title: "No GitHub personal access token is stored.",
+    detail:
+      "Add a GitHub PAT in Settings so Arij can read this repository's issues.",
+  },
+};
+
+function asConfigErrorCode(value: unknown): GitHubConfigErrorCode | null {
+  return typeof value === "string" && value in CONFIG_EMPTY_STATE
+    ? (value as GitHubConfigErrorCode)
+    : null;
+}
+
 export default function GitHubIssuesPage() {
   const params = useParams();
   const projectId = params.projectId as string;
@@ -44,7 +73,24 @@ export default function GitHubIssuesPage() {
   const [bugLabels, setBugLabels] = useState("");
   const [savingMapping, setSavingMapping] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const { ownerRepo } = useGitHubConfig(projectId);
+  const [serverConfigCode, setServerConfigCode] =
+    useState<GitHubConfigErrorCode | null>(null);
+  const { ownerRepo, tokenSet, loading: configLoading } =
+    useGitHubConfig(projectId);
+
+  // Derived from the project/settings reads the page already makes, so the
+  // unconfigured case never has to be discovered by firing a request that
+  // cannot succeed.
+  const clientConfigCode: GitHubConfigErrorCode | null = configLoading
+    ? null
+    : !ownerRepo
+      ? "GITHUB_REPO_NOT_CONFIGURED"
+      : !tokenSet
+        ? "GITHUB_PAT_NOT_CONFIGURED"
+        : null;
+  // The server stays authoritative: it can disagree with the reads above when
+  // the configuration changes mid-session.
+  const configCode = clientConfigCode ?? serverConfigCode;
 
   const showToast = useCallback((type: "success" | "error", message: string) => {
     const id = crypto.randomUUID();
@@ -63,10 +109,13 @@ export default function GitHubIssuesPage() {
 
     try {
       const res = await fetch(`/api/projects/${projectId}/github/issues/triage?${query.toString()}`);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json.error || "Failed to load issues");
+        const code = asConfigErrorCode(json.code);
+        setServerConfigCode(code);
+        if (!code) setError(json.error || "Failed to load issues");
       } else {
+        setServerConfigCode(null);
         setIssues(Array.isArray(json.data) ? json.data : []);
       }
     } catch {
@@ -77,8 +126,15 @@ export default function GitHubIssuesPage() {
   }, [projectId, labelFilter, milestoneFilter]);
 
   useEffect(() => {
+    if (configLoading) return;
+    if (clientConfigCode) {
+      setIssues([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     loadIssues();
-  }, [loadIssues]);
+  }, [configLoading, clientConfigCode, loadIssues]);
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}/github/label-mapping`)
@@ -117,9 +173,24 @@ export default function GitHubIssuesPage() {
   async function syncNow() {
     setSyncing(true);
     try {
-      await fetch(`/api/projects/${projectId}/github/issues/sync`, { method: "POST" });
+      const res = await fetch(`/api/projects/${projectId}/github/issues/sync`, {
+        method: "POST",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const code = asConfigErrorCode(json.code);
+        if (code) {
+          setServerConfigCode(code);
+          return;
+        }
+        showToast("error", json.error || "Failed to sync issues");
+        return;
+      }
+      setServerConfigCode(null);
       await loadIssues();
       showToast("success", "Issues synced");
+    } catch {
+      showToast("error", "Failed to sync issues");
     } finally {
       setSyncing(false);
     }
@@ -169,7 +240,7 @@ export default function GitHubIssuesPage() {
             variant="outline"
             className="h-[31px] rounded-[8px] px-[12px] text-[13px]"
             onClick={syncNow}
-            disabled={syncing}
+            disabled={syncing || Boolean(configCode)}
           >
             {syncing ? (
               <Loader2 className="h-[14px] w-[14px] animate-spin" />
@@ -243,81 +314,95 @@ export default function GitHubIssuesPage() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {error && (
-              <p className="px-[22px] py-[14px] text-[13px] text-destructive">
-                {error}
-              </p>
-            )}
-            {loading ? (
-              <p className="px-[22px] py-[14px] text-[13px] text-muted-foreground">
-                Loading issues...
-              </p>
-            ) : visible.length === 0 ? (
-              <p className="px-[22px] py-[14px] text-[13px] text-muted-foreground">
-                No open issues found.
-              </p>
+            {configCode ? (
+              <div className="flex flex-col items-center gap-[8px] px-[22px] py-[44px] text-center">
+                <Github className="h-[20px] w-[20px] text-meta" />
+                <p className="text-[13.5px] font-medium">
+                  {CONFIG_EMPTY_STATE[configCode].title}
+                </p>
+                <p className="max-w-[420px] text-[12.5px] leading-[1.5] text-muted-foreground">
+                  {CONFIG_EMPTY_STATE[configCode].detail}
+                </p>
+              </div>
             ) : (
-              visible.map((issue) => {
-                const checked = selected.has(issue.issueNumber);
-                const imported = Boolean(issue.importedEpicId);
-                return (
-                  <div
-                    key={issue.id}
-                    className={cn(
-                      "grid items-center gap-[14px] border-b border-border-soft px-[22px] py-[14px] transition-colors hover:bg-band",
-                      GRID
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-[6px]">
-                      <Checkbox
-                        checked={checked}
-                        aria-label={`Select issue #${issue.issueNumber}`}
-                        onCheckedChange={(value) => {
-                          setSelected((prev) => {
-                            const next = new Set(prev);
-                            if (value) next.add(issue.issueNumber);
-                            else next.delete(issue.issueNumber);
-                            return next;
-                          });
-                        }}
-                        disabled={imported}
-                      />
-                      <span className="truncate font-mono text-[11.5px] text-meta">
-                        #{issue.issueNumber}
-                      </span>
-                    </span>
-                    <a
-                      href={issue.githubUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="truncate text-[13.5px] leading-[1.4] hover:underline"
-                    >
-                      {issue.title}
-                    </a>
-                    <span className="flex flex-wrap gap-[6px]">
-                      {issue.labels.map((label) => (
-                        <span
-                          key={label}
-                          className="rounded-full bg-band px-[8px] py-[2px] text-[11px] text-muted-foreground"
-                        >
-                          {label}
+              <>
+                {error && (
+                  <p className="px-[22px] py-[14px] text-[13px] text-destructive">
+                    {error}
+                  </p>
+                )}
+                {loading ? (
+                  <p className="px-[22px] py-[14px] text-[13px] text-muted-foreground">
+                    Loading issues...
+                  </p>
+                ) : visible.length === 0 ? (
+                  <p className="px-[22px] py-[14px] text-[13px] text-muted-foreground">
+                    No open issues found.
+                  </p>
+                ) : (
+                  visible.map((issue) => {
+                    const checked = selected.has(issue.issueNumber);
+                    const imported = Boolean(issue.importedEpicId);
+                    return (
+                      <div
+                        key={issue.id}
+                        className={cn(
+                          "grid items-center gap-[14px] border-b border-border-soft px-[22px] py-[14px] transition-colors hover:bg-band",
+                          GRID
+                        )}
+                      >
+                        <span className="flex min-w-0 items-center gap-[6px]">
+                          <Checkbox
+                            checked={checked}
+                            aria-label={`Select issue #${issue.issueNumber}`}
+                            onCheckedChange={(value) => {
+                              setSelected((prev) => {
+                                const next = new Set(prev);
+                                if (value) next.add(issue.issueNumber);
+                                else next.delete(issue.issueNumber);
+                                return next;
+                              });
+                            }}
+                            disabled={imported}
+                          />
+                          <span className="truncate font-mono text-[11.5px] text-meta">
+                            #{issue.issueNumber}
+                          </span>
                         </span>
-                      ))}
-                    </span>
-                    <span className="truncate font-mono text-[11.5px] text-meta">
-                      {issue.milestone || ""}
-                    </span>
-                    <span
-                      className={cn(
-                        "justify-self-end text-[12px]",
-                        imported ? "text-agent" : "text-primary"
-                      )}
-                    >
-                      {imported ? "imported" : "to import"}
-                    </span>
-                  </div>
-                );
-              })
+                        <a
+                          href={issue.githubUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="truncate text-[13.5px] leading-[1.4] hover:underline"
+                        >
+                          {issue.title}
+                        </a>
+                        <span className="flex flex-wrap gap-[6px]">
+                          {issue.labels.map((label) => (
+                            <span
+                              key={label}
+                              className="rounded-full bg-band px-[8px] py-[2px] text-[11px] text-muted-foreground"
+                            >
+                              {label}
+                            </span>
+                          ))}
+                        </span>
+                        <span className="truncate font-mono text-[11.5px] text-meta">
+                          {issue.milestone || ""}
+                        </span>
+                        <span
+                          className={cn(
+                            "justify-self-end text-[12px]",
+                            imported ? "text-agent" : "text-primary"
+                          )}
+                        >
+                          {imported ? "imported" : "to import"}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
+              </>
             )}
           </div>
         </div>

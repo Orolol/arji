@@ -2,7 +2,13 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { githubIssues, namedAgents, projects, epics, gitSyncLog } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
-import { createOctokit, parseOwnerRepo } from "@/lib/github/client";
+import {
+  GITHUB_PAT_NOT_CONFIGURED_MESSAGE,
+  GitHubNotConfiguredError,
+  createOctokit,
+  getGitHubTokenFromSettings,
+  parseOwnerRepo,
+} from "@/lib/github/client";
 import { generateReadableId } from "@/lib/db/readable-id";
 import { logSyncOperation } from "@/lib/github/sync-log";
 import { getLabelMapping, mapIssueTypeWithMapping } from "@/lib/github/label-mapping";
@@ -59,7 +65,19 @@ export async function fetchOpenGitHubIssues(ownerRepo: string): Promise<RemoteIs
     }));
 }
 
-export async function syncProjectGitHubIssues(projectId: string): Promise<{ synced: number }> {
+export const GITHUB_REPO_NOT_CONFIGURED_MESSAGE =
+  "GitHub repository is not configured for this project.";
+
+/**
+ * Resolves the owner/repo this project's issues live in, or throws
+ * GitHubNotConfiguredError when GitHub is not set up for it.
+ *
+ * Both issue routes call this up front rather than relying on the throw deeper
+ * inside the sync: `isGitHubIssueSyncDue` gates whether a sync runs at all, so
+ * triage would otherwise report the missing configuration when a sync happened
+ * to be due and answer 200-with-an-empty-list when it was not.
+ */
+export function assertGitHubIssuesConfigured(projectId: string): string {
   const project = db
     .select()
     .from(projects)
@@ -67,10 +85,26 @@ export async function syncProjectGitHubIssues(projectId: string): Promise<{ sync
     .get();
 
   if (!project || !project.githubOwnerRepo) {
-    throw new Error("GitHub repository is not configured for this project.");
+    throw new GitHubNotConfiguredError(
+      "GITHUB_REPO_NOT_CONFIGURED",
+      GITHUB_REPO_NOT_CONFIGURED_MESSAGE
+    );
   }
 
-  const issues = await fetchOpenGitHubIssues(project.githubOwnerRepo);
+  if (!getGitHubTokenFromSettings()) {
+    throw new GitHubNotConfiguredError(
+      "GITHUB_PAT_NOT_CONFIGURED",
+      GITHUB_PAT_NOT_CONFIGURED_MESSAGE
+    );
+  }
+
+  return project.githubOwnerRepo;
+}
+
+export async function syncProjectGitHubIssues(projectId: string): Promise<{ synced: number }> {
+  const ownerRepo = assertGitHubIssuesConfigured(projectId);
+
+  const issues = await fetchOpenGitHubIssues(ownerRepo);
   const now = new Date().toISOString();
 
   for (const issue of issues) {

@@ -5,6 +5,35 @@ import { settings } from "@/lib/db/schema";
 
 export const GITHUB_PAT_SETTING_KEY = "github_pat";
 
+/**
+ * The GitHub preconditions a project must satisfy before any GitHub call can
+ * succeed. Sent to clients as the `code` field so the UI can branch on the
+ * exact missing piece instead of pattern-matching prose.
+ */
+export type GitHubConfigErrorCode =
+  | "GITHUB_REPO_NOT_CONFIGURED"
+  | "GITHUB_PAT_NOT_CONFIGURED";
+
+/**
+ * "GitHub is not set up for this project" is an ordinary, recoverable state,
+ * not a server fault. Throwing this instead of a bare Error lets routes answer
+ * 400 with a machine-readable `code` — the shape `epics/:epicId/pr` and
+ * `git/detect-remote` already use for the same class of condition — rather
+ * than letting it fall through to a 500 the UI cannot act on.
+ */
+export class GitHubNotConfiguredError extends Error {
+  readonly code: GitHubConfigErrorCode;
+
+  constructor(code: GitHubConfigErrorCode, message: string) {
+    super(message);
+    this.name = "GitHubNotConfiguredError";
+    this.code = code;
+  }
+}
+
+export const GITHUB_PAT_NOT_CONFIGURED_MESSAGE =
+  "GitHub PAT not configured. Set it in Settings.";
+
 function normalizeToken(value: unknown): string {
   if (typeof value === "string") {
     return value.trim();
@@ -47,12 +76,15 @@ export function createGitHubClient(token: string): Octokit {
 
 /**
  * Creates an authenticated Octokit instance using the stored PAT.
- * Throws if no token is configured.
+ * Throws GitHubNotConfiguredError if no token is configured.
  */
 export function createOctokit(): Octokit {
   const token = getGitHubTokenFromSettings();
   if (!token) {
-    throw new Error("GitHub PAT not configured. Set it in Settings.");
+    throw new GitHubNotConfiguredError(
+      "GITHUB_PAT_NOT_CONFIGURED",
+      GITHUB_PAT_NOT_CONFIGURED_MESSAGE
+    );
   }
   return createGitHubClient(token);
 }
