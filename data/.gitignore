@@ -10,3 +10,4 @@ arij.db.audit37-backup*
 # `git status` AND in Tailwind's source scan — a 20 MB SQLite file full of
 # ticket text yields bogus utility candidates that fail the CSS build.
 arij.db.backup-*
+backups/
