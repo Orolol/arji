@@ -392,6 +392,19 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
               {server.usageHint && (
                 <span className="text-muted-foreground">{server.usageHint}</span>
               )}
+              {/* The stored reason, not just the stored verdict. The probe
+                  goes to the trouble of recovering a failing server's own
+                  diagnostic (lib/mcp/probe.ts); showing it only in the
+                  transient message below would lose it on the next reload and
+                  leave a bare "Failed — <date>" that names no cause. */}
+              {server.lastCheckOk === false && server.lastCheckError && (
+                <span
+                  className="w-full break-words text-xs text-destructive"
+                  data-testid={`mcp-server-check-error-${server.name}`}
+                >
+                  {server.lastCheckError}
+                </span>
+              )}
               <span className="ml-auto flex gap-2">
                 <Button
                   size="sm"

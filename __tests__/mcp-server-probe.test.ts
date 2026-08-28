@@ -20,7 +20,11 @@ import { execFileSync } from "child_process";
 import { createTestDb } from "@/lib/db/test-utils";
 import { createMcpServer, resolveExtraMcpServers } from "@/lib/mcp/servers";
 import { buildMcpSpawnConfig } from "@/lib/claude/mcp-injection";
-import { probeMcpServer, scrubSecrets } from "@/lib/mcp/probe";
+import {
+  MCP_PROBE_STDERR_MAX_CHARS,
+  probeMcpServer,
+  scrubSecrets,
+} from "@/lib/mcp/probe";
 
 let tempDir: string;
 
@@ -37,7 +41,7 @@ afterEach(() => {
  * `initialize` and `tools/list`. `mode` picks the misbehaviour to exercise.
  */
 function writeFixtureServer(
-  mode: "ok" | "silent" | "crash",
+  mode: "ok" | "silent" | "crash" | "flood",
   toolNames: string[] = ["list_nodes", "run_scene"],
 ): string {
   const file = path.join(tempDir, `server-${mode}.mjs`);
@@ -46,10 +50,14 @@ function writeFixtureServer(
     `
 const MODE = ${JSON.stringify(mode)};
 const TOOLS = ${JSON.stringify(toolNames)};
+if (MODE === "flood") {
+  process.stderr.write("x".repeat(200000) + "\\n");
+  process.exit(4);
+}
 if (MODE === "crash") {
   // Echo the environment first: a real broken server often does, which is why
   // the probe scrubs its own configured values out of the error.
-  process.stderr.write("failed to start with " + JSON.stringify(process.env.GODOT_TOKEN ?? "") + "\\n");
+  process.stderr.write("FATAL: bad config: GODOT_TOKEN=" + (process.env.GODOT_TOKEN ?? "") + " rejected\\n");
   process.exit(3);
 }
 let buffer = "";
@@ -151,7 +159,25 @@ describe("probeMcpServer — a broken server", () => {
     expect(childProcessCount()).toBeLessThanOrEqual(before);
   }, 20000);
 
+  it("surfaces the server's own diagnostic instead of \"Connection closed\"", async () => {
+    // The load-bearing case for "une erreur lisible": a server that starts,
+    // rejects its configuration and exits. At the protocol level that is only
+    // `MCP error -32000: Connection closed`, which names no cause. The reason
+    // it printed is sitting unread in the stderr pipe.
+    const result = await probeMcpServer(
+      stdioSpec(writeFixtureServer("crash"), { env: { GODOT_TOKEN: "tok" } }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("FATAL: bad config");
+    expect(result.error).toContain("rejected");
+  });
+
   it("keeps configured secrets out of the returned error", async () => {
+    // This is the reason the scrub exists rather than a belt-and-braces
+    // nicety: the diagnostic recovered above is the server's OWN output, and a
+    // server that rejects a credential routinely quotes it back. Without
+    // `scrubSecrets` in `fail()` this assertion fails.
     const result = await probeMcpServer(
       stdioSpec(writeFixtureServer("crash"), {
         env: { GODOT_TOKEN: "s3cret-godot-value" },
@@ -159,7 +185,18 @@ describe("probeMcpServer — a broken server", () => {
     );
 
     expect(result.ok).toBe(false);
+    expect(result.error).toContain("FATAL: bad config");
     expect(result.error).not.toContain("s3cret-godot-value");
+    expect(result.error).toContain("<redacted>");
+  });
+
+  it("bounds the recovered diagnostic — a chatty server is not a log sink", async () => {
+    const result = await probeMcpServer(stdioSpec(writeFixtureServer("flood")));
+
+    expect(result.ok).toBe(false);
+    // The cap applies to the appended diagnostic, so the whole message stays
+    // in the region of it rather than carrying a megabyte into a DB column.
+    expect(result.error!.length).toBeLessThan(MCP_PROBE_STDERR_MAX_CHARS + 200);
   });
 });
 

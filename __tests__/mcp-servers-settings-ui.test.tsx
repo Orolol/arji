@@ -595,4 +595,41 @@ describe("connection test", () => {
 
     expect(await screen.findByText(/Failed — spawn ENOENT/)).toBeInTheDocument();
   });
+
+  it("shows the STORED reason on the row, so it survives a reload", async () => {
+    // The transient message above is gone on the next mount. The reason the
+    // probe recovers from the server's stderr is only useful if it is read
+    // back from the row, which is what a user returning to the page sees.
+    mockFetch({
+      "/api/settings/mcp-servers": {
+        data: [
+          {
+            ...godot,
+            lastCheckOk: false,
+            lastCheckError:
+              "MCP error -32000: Connection closed — the server reported: FATAL: bad config",
+          },
+        ],
+      },
+    });
+    render(<McpServersSection projectId={null} />);
+
+    const row = await screen.findByTestId("mcp-server-godot");
+    expect(within(row).getByText(/Failed —/)).toBeInTheDocument();
+    expect(
+      within(row).getByTestId("mcp-server-check-error-godot").textContent,
+    ).toContain("FATAL: bad config");
+  });
+
+  it("shows no stored reason on a healthy row", async () => {
+    // The negative direction: a passing check must not leave a red line
+    // behind, which is the same stale-error trap the route clears on the row.
+    mockFetch({ "/api/settings/mcp-servers": { data: [godot] } });
+    render(<McpServersSection projectId={null} />);
+
+    const row = await screen.findByTestId("mcp-server-godot");
+    expect(
+      within(row).queryByTestId("mcp-server-check-error-godot"),
+    ).toBeNull();
+  });
 });
