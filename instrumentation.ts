@@ -35,6 +35,15 @@
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Cap test-runner parallelism in every child this server spawns. Agent
+    // sessions run in worktrees snapshotted from main at branch creation, so
+    // the maxWorkers cap in vitest.config.ts only reaches worktrees created
+    // after it landed; these env vars ride `{ ...process.env }` into every
+    // spawn and vitest applies them over whatever the checkout's config says.
+    // `??=` keeps a value the operator set when launching the server.
+    process.env.VITEST_MAX_FORKS ??= "4";
+    process.env.VITEST_MAX_THREADS ??= "4";
+
     const { ensureDbReady } = await import("@/lib/db");
     ensureDbReady();
 

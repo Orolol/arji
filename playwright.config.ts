@@ -54,7 +54,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Locally the machine is shared with agent sessions and vitest runs;
+  // Playwright's default (half the cores) plus one Chrome per worker is too
+  // greedy next to them.
+  workers: process.env.CI ? 1 : 4,
 
   // The generous waits belong to `next dev`, not to the assertions: a route
   // being compiled for the first time can take ~12s to reach a hydrated page,
