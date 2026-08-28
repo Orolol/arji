@@ -2,23 +2,36 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useGitHubConfig } from "@/hooks/useGitHubConfig";
 
+/**
+ * `GET /api/settings` never returns the PAT itself: it masks `github_pat`
+ * down to `{ hasToken: boolean }` (app/api/settings/route.ts). These tests
+ * mock that masked shape — the only shape the hook can actually observe —
+ * so a hook reading the key as a raw string reports "not configured" here
+ * exactly as it did in the product.
+ */
+function mockSettings(githubPat: unknown, ownerRepo: string | null = "owner/repo") {
+  global.fetch = vi.fn().mockImplementation((url: string) => {
+    if (url.includes("/api/projects/")) {
+      return Promise.resolve({
+        json: () => Promise.resolve({ data: { githubOwnerRepo: ownerRepo } }),
+      });
+    }
+    return Promise.resolve({
+      json: () =>
+        Promise.resolve({
+          data: githubPat === undefined ? {} : { github_pat: githubPat },
+        }),
+    });
+  });
+}
+
 describe("useGitHubConfig", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("returns isConfigured=true when ownerRepo and token are set", async () => {
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes("/api/projects/")) {
-        return Promise.resolve({
-          json: () =>
-            Promise.resolve({ data: { githubOwnerRepo: "owner/repo" } }),
-        });
-      }
-      return Promise.resolve({
-        json: () => Promise.resolve({ data: { github_pat: "ghp_token123" } }),
-      });
-    });
+  it("treats the masked { hasToken: true } payload as a configured token", async () => {
+    mockSettings({ hasToken: true });
 
     const { result } = renderHook(() => useGitHubConfig("proj-1"));
 
@@ -26,23 +39,13 @@ describe("useGitHubConfig", () => {
       expect(result.current.loading).toBe(false);
     });
 
+    expect(result.current.tokenSet).toBe(true);
     expect(result.current.isConfigured).toBe(true);
     expect(result.current.ownerRepo).toBe("owner/repo");
-    expect(result.current.tokenSet).toBe(true);
   });
 
-  it("returns isConfigured=false when ownerRepo is missing", async () => {
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes("/api/projects/")) {
-        return Promise.resolve({
-          json: () =>
-            Promise.resolve({ data: { githubOwnerRepo: null } }),
-        });
-      }
-      return Promise.resolve({
-        json: () => Promise.resolve({ data: { github_pat: "ghp_token123" } }),
-      });
-    });
+  it("treats the masked { hasToken: false } payload as no token", async () => {
+    mockSettings({ hasToken: false });
 
     const { result } = renderHook(() => useGitHubConfig("proj-1"));
 
@@ -50,31 +53,48 @@ describe("useGitHubConfig", () => {
       expect(result.current.loading).toBe(false);
     });
 
+    expect(result.current.tokenSet).toBe(false);
+    expect(result.current.isConfigured).toBe(false);
+  });
+
+  it("treats an absent github_pat key as no token", async () => {
+    mockSettings(undefined);
+
+    const { result } = renderHook(() => useGitHubConfig("proj-1"));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.tokenSet).toBe(false);
+    expect(result.current.isConfigured).toBe(false);
+  });
+
+  it("does not accept a bare string as a token (the API always masks)", async () => {
+    mockSettings("ghp_token123");
+
+    const { result } = renderHook(() => useGitHubConfig("proj-1"));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.tokenSet).toBe(false);
+    expect(result.current.isConfigured).toBe(false);
+  });
+
+  it("returns isConfigured=false when ownerRepo is missing but a token is set", async () => {
+    mockSettings({ hasToken: true }, null);
+
+    const { result } = renderHook(() => useGitHubConfig("proj-1"));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.tokenSet).toBe(true);
     expect(result.current.isConfigured).toBe(false);
     expect(result.current.ownerRepo).toBeNull();
-  });
-
-  it("returns isConfigured=false when token is not set", async () => {
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes("/api/projects/")) {
-        return Promise.resolve({
-          json: () =>
-            Promise.resolve({ data: { githubOwnerRepo: "owner/repo" } }),
-        });
-      }
-      return Promise.resolve({
-        json: () => Promise.resolve({ data: { github_pat: "" } }),
-      });
-    });
-
-    const { result } = renderHook(() => useGitHubConfig("proj-1"));
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-
-    expect(result.current.isConfigured).toBe(false);
-    expect(result.current.tokenSet).toBe(false);
   });
 
   it("handles API errors gracefully", async () => {
@@ -85,7 +105,7 @@ describe("useGitHubConfig", () => {
         });
       }
       return Promise.resolve({
-        json: () => Promise.resolve({ data: { github_pat: "ghp_token123" } }),
+        json: () => Promise.resolve({ data: { github_pat: { hasToken: true } } }),
       });
     });
 
@@ -96,6 +116,7 @@ describe("useGitHubConfig", () => {
     });
 
     expect(result.current.isConfigured).toBe(false);
+    expect(result.current.ownerRepo).toBeNull();
   });
 
   it("handles fetch failure gracefully", async () => {
@@ -108,36 +129,18 @@ describe("useGitHubConfig", () => {
     });
 
     expect(result.current.isConfigured).toBe(false);
+    expect(result.current.tokenSet).toBe(false);
   });
 
   it("starts in loading state", () => {
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes("/api/projects/")) {
-        return Promise.resolve({
-          json: () =>
-            Promise.resolve({ data: { githubOwnerRepo: null } }),
-        });
-      }
-      return Promise.resolve({
-        json: () => Promise.resolve({ data: { github_pat: "" } }),
-      });
-    });
+    mockSettings({ hasToken: false }, null);
 
     const { result } = renderHook(() => useGitHubConfig("proj-1"));
     expect(result.current.loading).toBe(true);
   });
 
   it("does not fetch when projectId is undefined", async () => {
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes("/api/projects/")) {
-        return Promise.resolve({
-          json: () => Promise.resolve({ data: {} }),
-        });
-      }
-      return Promise.resolve({
-        json: () => Promise.resolve({ data: {} }),
-      });
-    });
+    mockSettings({ hasToken: true });
 
     renderHook(() => useGitHubConfig(undefined));
 
