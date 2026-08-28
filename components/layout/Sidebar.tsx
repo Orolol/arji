@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Gauge, LayoutDashboard, Plus, Settings } from "lucide-react";
+import { Bot, Gauge, LayoutDashboard, Plus, Settings } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { AgentConfigButton } from "@/components/agent-config/AgentConfigButton";
 import { useProjects } from "@/hooks/useProjects";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "./NotificationBell";
@@ -30,9 +29,18 @@ export function projectInitials(name: string): string {
  * utility cluster (dashboard, usage, agent config, notifications, theme,
  * inbox, settings).
  */
+/**
+ * Routes that ship their own Piscine header (project chips + utility cluster)
+ * and must not double up on the rail. Everything not listed here is still on
+ * the pre-redesign visual language and keeps the rail as its only navigation.
+ */
+const SELF_NAVIGATING = ["/", "/agents", "/usage"];
+
 export function Sidebar() {
   const pathname = usePathname() ?? "";
   const { allProjects } = useProjects();
+
+  if (SELF_NAVIGATING.includes(pathname)) return null;
 
   const visibleProjects = allProjects.filter((p) => p.status !== "archived");
 
@@ -100,7 +108,14 @@ export function Sidebar() {
       >
         <Gauge className="w-[17px] h-[17px]" />
       </Link>
-      <AgentConfigButton />
+      <Link
+        href="/agents"
+        className="flex items-center justify-center w-[34px] h-[34px] rounded-[9px] text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors"
+        title="Agents"
+        data-testid="rail-agents-link"
+      >
+        <Bot className="w-[17px] h-[17px]" />
+      </Link>
       <NotificationBell />
       <ThemeToggle />
       <InboxNavLink />

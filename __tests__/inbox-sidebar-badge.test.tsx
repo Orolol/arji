@@ -41,9 +41,6 @@ vi.mock("@/hooks/useProjects", () => ({
 }));
 
 // Frozen rail mounts — stubbed so this test stays about the rail itself.
-vi.mock("@/components/agent-config/AgentConfigButton", () => ({
-  AgentConfigButton: () => <button type="button">Agent Configuration</button>,
-}));
 vi.mock("@/components/ThemeToggle", () => ({
   ThemeToggle: () => <button type="button">Theme</button>,
 }));

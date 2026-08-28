@@ -1,20 +1,40 @@
 import type { Metadata } from "next";
-import localFont from "next/font/local";
+import { Bricolage_Grotesque, Instrument_Sans, Space_Mono } from "next/font/google";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Sidebar } from "@/components/layout/Sidebar";
 
-const geistSans = localFont({
-  src: "./fonts/GeistVF.woff2",
-  variable: "--font-geist-sans",
-  weight: "100 900",
+/* Piscine typography. next/font/google self-hosts these at build time — no
+   runtime request to Google — and each `variable` is bridged to a Tailwind
+   font namespace in app/globals.css (--font-sans / --font-mono / --font-display).
+   If a build host is offline, vendor the three families' .woff2 into app/fonts/
+   and swap to next/font/local under identical variable names; nothing else changes. */
+
+/* Titles, strata labels. Variable 200-800; the design uses 500/600/700. */
+const bricolage = Bricolage_Grotesque({
+  subsets: ["latin"],
+  weight: "variable",
+  variable: "--font-bricolage",
+  display: "swap",
 });
 
-const geistMono = localFont({
-  src: "./fonts/GeistMonoVF.woff2",
-  variable: "--font-geist-mono",
-  weight: "100 900",
+/* UI text — the body face. Variable 400-700; the design uses 400/500/600. */
+const instrumentSans = Instrument_Sans({
+  subsets: ["latin"],
+  weight: "variable",
+  variable: "--font-instrument",
+  display: "swap",
+});
+
+/* Ids, chronos, stamps, counters, logs. NON-VARIABLE: `weight` is required and
+   only 400/700 exist, so font-medium/font-semibold on a mono element now
+   synthesises a faux weight (Geist Mono was 100-900). Both real weights loaded. */
+const spaceMono = Space_Mono({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  variable: "--font-space-mono",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -45,7 +65,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${bricolage.variable} ${instrumentSans.variable} ${spaceMono.variable} antialiased`}
       >
         <ThemeProvider>
           <TooltipProvider>

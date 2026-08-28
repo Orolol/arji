@@ -1,12 +1,16 @@
 /**
  * The usage observatory's entry point in the rail's bottom utility cluster.
+ *
+ * The rail now hides itself on routes that ship their own Piscine header
+ * ("/", "/agents", "/usage"), so this renders at a legacy route — which is
+ * where the rail is still the only navigation.
  */
 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/",
+  usePathname: () => "/projects/p1/settings",
   useParams: () => ({}),
   useRouter: () => ({ push: vi.fn() }),
 }));
@@ -35,9 +39,6 @@ vi.mock("@/hooks/useInbox", () => ({
 }));
 
 // Frozen rail mounts — stubbed so this test stays about the rail itself.
-vi.mock("@/components/agent-config/AgentConfigButton", () => ({
-  AgentConfigButton: () => <button type="button">Agent Configuration</button>,
-}));
 vi.mock("@/components/ThemeToggle", () => ({
   ThemeToggle: () => <button type="button">Theme</button>,
 }));
