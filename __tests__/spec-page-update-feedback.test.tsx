@@ -62,6 +62,12 @@ let pendingUpdateInfo: { pending: boolean; sessionId: string | null; status: str
   status: null,
 };
 let sessionQueue: (SessionResponse | Error | "HTTP_500" | "HTTP_404")[] = [];
+/**
+ * The session's `output` stream, in order. The detail route no longer inlines
+ * the streams — the page walks them with `?stream=output&after=<sequence>` —
+ * so the fake serves whatever has not been delivered to that cursor yet.
+ */
+let outputChunks: string[] = [];
 let patchCalls: unknown[] = [];
 
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
@@ -82,6 +88,37 @@ vi.stubGlobal(
     }
     if (urlStr.endsWith("/spec/update")) {
       return jsonResponse({ data: pendingUpdateInfo });
+    }
+    if (urlStr.includes("/sessions/sess-1?stream=")) {
+      const parsed = new URL(urlStr, "http://localhost:3000");
+      const after = Number.parseInt(parsed.searchParams.get("after") ?? "", 10);
+      const chunks = outputChunks
+        .map((content, index) => ({
+          id: `chunk-${index}`,
+          sessionId: "sess-1",
+          streamType: parsed.searchParams.get("stream"),
+          sequence: index + 1,
+          chunkKey: null,
+          content,
+          createdAt: null,
+          contentLength: content.length,
+          contentTruncated: false,
+        }))
+        .filter((chunk) => !Number.isFinite(after) || chunk.sequence > after);
+      return jsonResponse({
+        data: {
+          sessionId: "sess-1",
+          streamType: parsed.searchParams.get("stream"),
+          chunks,
+          nextAfter:
+            chunks.length > 0
+              ? chunks[chunks.length - 1].sequence
+              : Number.isFinite(after)
+                ? after
+                : null,
+          hasMore: false,
+        },
+      });
     }
     if (urlStr.endsWith("/sessions/sess-1")) {
       const next = sessionQueue.shift() ?? { status: "running" };
@@ -111,6 +148,7 @@ beforeEach(() => {
   projectSpec = "# Spec\n\nOld content.";
   pendingUpdateInfo = { pending: false, sessionId: null, status: null };
   sessionQueue = [];
+  outputChunks = [];
 });
 
 describe("SpecPage spec-update feedback", () => {
@@ -132,15 +170,8 @@ describe("SpecPage spec-update feedback", () => {
     expect(editor).toBeDisabled();
     expect(saveButton).toBeDisabled();
 
-    sessionQueue.push({
-      status: "running",
-      chunkStreams: {
-        output: [
-          { content: "Reading board… " },
-          { content: "updating specification" },
-        ],
-      },
-    });
+    outputChunks = ["Reading board… ", "updating specification"];
+    sessionQueue.push({ status: "running" });
 
     await waitFor(() =>
       expect(screen.getByTestId("spec-update-stream")).toHaveTextContent(

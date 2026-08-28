@@ -5,9 +5,11 @@
  * the epic row (freshness, verdict windows, cost) and once inside the
  * blocking-findings count, which compares every candidate row against the
  * supersession cutoff. Written as two subqueries — or two statements — that
- * is two full scans of a table with no usable index on `epic_id`, never
- * pruned, on paths that run on every `session:*` SSE event and every 15-second
- * Full Auto sweep.
+ * is two separate passes over the table, on paths that run on every
+ * `session:*` SSE event and every 15-second Full Auto sweep. Since
+ * 0046_core_table_indexes each pass is index-served rather than a full scan,
+ * which lowers the cost of a pass but not the number of them — that is what
+ * this file still pins.
  *
  * So this file asserts the SHAPE of the SQL, not its results: the aggregate is
  * published as a CTE (`epicSessionFactsCte`) and referenced twice, which
@@ -44,11 +46,18 @@ function at(minute: number): string {
 
 /**
  * Runs `work` with `sqlite.prepare` instrumented, then replays every statement
- * it executed through EXPLAIN QUERY PLAN and counts full scans of
- * `agent_sessions`. A materialised CTE scans once however often it is
- * referenced; an inlined subquery scans once PER reference.
+ * it executed through EXPLAIN QUERY PLAN and counts how many times it reads
+ * `agent_sessions`. A materialised CTE reads once however often it is
+ * referenced; an inlined subquery reads once PER reference.
+ *
+ * SCAN *and* SEARCH both count. What this budget guards is the NUMBER of
+ * passes over the table, not how each one is served: since
+ * 0046_core_table_indexes these queries are answered by
+ * `agent_sessions_project_created_at_idx` / `agent_sessions_epic_idx`, so
+ * matching "SCAN agent_sessions" alone would silently count zero and let a
+ * re-inlined subquery through unnoticed.
  */
-async function countAgentSessionScans(work: () => Promise<void> | void) {
+async function countAgentSessionReads(work: () => Promise<void> | void) {
   const original = sqlite.prepare.bind(sqlite);
   const executed: Array<{ sql: string; params: unknown[] }> = [];
 
@@ -83,7 +92,9 @@ async function countAgentSessionScans(work: () => Promise<void> | void) {
     } catch {
       continue; // not a plannable statement (DDL, pragma)
     }
-    scans += plan.filter((step) => step.detail === "SCAN agent_sessions").length;
+    scans += plan.filter((step) =>
+      /^(SCAN|SEARCH) agent_sessions\b/.test(step.detail)
+    ).length;
   }
   return scans;
 }
@@ -163,7 +174,7 @@ beforeEach(() => {
 
 describe("merge-gate query shape", () => {
   it("reads agent_sessions twice per board load, not three times", async () => {
-    const scans = await countAgentSessionScans(async () => {
+    const scans = await countAgentSessionReads(async () => {
       const response = await GET(
         {} as never,
         mockRouteContext({ projectId: PROJECT_ID })
@@ -189,7 +200,7 @@ describe("merge-gate query shape", () => {
 
   it("reads agent_sessions four times per Full Auto sweep, not five", () => {
     let scans = 0;
-    const done = countAgentSessionScans(() => {
+    const done = countAgentSessionReads(() => {
       loadAutoModeBoard(PROJECT_ID);
     }).then((value) => {
       scans = value;

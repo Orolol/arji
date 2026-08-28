@@ -28,6 +28,12 @@ import {
   describeProviderOptions,
   parseStoredProviderOptions,
 } from "@/lib/providers/options-registry";
+import {
+  SessionOutputStream,
+  type SessionStreamSeed,
+} from "@/components/sessions/SessionOutputStream";
+import { fetchSessionArijActions } from "@/lib/agent-sessions/session-detail";
+import type { AgentSessionStreamType } from "@/lib/agent-sessions/chunks";
 
 interface SessionDetail {
   id: string;
@@ -63,7 +69,15 @@ interface SessionDetail {
     result?: string;
     error?: string;
     duration?: number;
-  };
+  } | null;
+  /** Bounded first page of each stream; the rest is paged in on demand. */
+  chunkStreams?: Partial<Record<AgentSessionStreamType, SessionStreamSeed>> | null;
+  /** The chunk read failed — distinct from a session that wrote nothing. */
+  chunkStreamsUnavailable?: boolean;
+  /** `logs.json` was too large to serve whole, or its result was capped. */
+  logsTruncated?: boolean;
+  /** `logs.json` exists but could not be read or parsed. */
+  logsUnavailable?: boolean;
 }
 
 const AGENT_TYPE_LABELS: Record<string, string> = {
@@ -147,6 +161,16 @@ export default function SessionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [distilling, setDistilling] = useState(false);
   const [distillError, setDistillError] = useState<string | null>(null);
+  const [tab, setTab] = useState("response");
+  const [prompt, setPrompt] = useState<string | null>(null);
+  const [promptState, setPromptState] = useState<
+    "idle" | "loading" | "loaded" | "error"
+  >("idle");
+  /**
+   * Arij actions, once the raw-stream scan has run. Null until then, so the
+   * list falls back to the durable half the detail payload already carries.
+   */
+  const [arijActions, setArijActions] = useState<ArijActionItem[] | null>(null);
 
   const loadSession = useCallback(async () => {
     const res = await fetch(
@@ -155,7 +179,43 @@ export default function SessionDetailPage() {
     const data = await res.json();
     setSession(data.data);
     setLoading(false);
+
+    // The chunk-derived half of the actions list is its own request: finding
+    // it means scanning the raw stream, which is 113 MB for the worst session
+    // on the live database and would stall the shared connection on every
+    // 3-second poll if it rode along with the payload above. The scan resumes
+    // where it left off server-side, so after the first pass a poll only
+    // covers what the session appended since.
+    const actions = await fetchSessionArijActions(projectId, sessionId, {
+      onPage: (page) => setArijActions(page.actions),
+    });
+    if (actions) setArijActions(actions);
   }, [projectId, sessionId]);
+
+  /**
+   * The prompt is up to 1.8 MB on the live database and is only ever looked
+   * at in the Prompt tab, so the route leaves it out unless it is asked for.
+   * Fetched once, on the first open of that tab.
+   */
+  const loadPrompt = useCallback(async () => {
+    setPromptState((current) => (current === "idle" || current === "error" ? "loading" : current));
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/sessions/${sessionId}?include=prompt`
+      );
+      if (!res.ok) throw new Error(`Prompt request failed (${res.status})`);
+      const data = await res.json();
+      setPrompt(data.data?.prompt ?? null);
+      setPromptState("loaded");
+    } catch {
+      setPromptState("error");
+    }
+  }, [projectId, sessionId]);
+
+  function handleTabChange(next: string) {
+    setTab(next);
+    if (next === "prompt" && promptState === "idle") void loadPrompt();
+  }
 
   // Initial load + poll if running
   usePolling(loadSession, 3000);
@@ -450,8 +510,10 @@ export default function SessionDetailPage() {
         )}
       </div>
 
-      {/* Structured board effects (MCP tool calls + dispatch artifacts) */}
-      <ArijActionsList actions={session.arijActions} />
+      {/* Structured board effects (MCP tool calls + dispatch artifacts).
+          The payload carries the durable half; the scan above supersedes it
+          with the raw-stream supplement once it lands. */}
+      <ArijActionsList actions={arijActions ?? session.arijActions} />
 
       {/* Error */}
       {session.error && (
@@ -487,7 +549,7 @@ export default function SessionDetailPage() {
       )}
 
       {/* Output: Response / Prompt / Raw Logs */}
-      <Tabs defaultValue="response">
+      <Tabs value={tab} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="response">Response</TabsTrigger>
           <TabsTrigger value="prompt">Prompt</TabsTrigger>
@@ -496,28 +558,50 @@ export default function SessionDetailPage() {
 
         <TabsContent value="response">
           <div className="overflow-hidden rounded-[11px] bg-band p-[14px]">
-            {session.logs?.result ? (
-              <ScrollPane className="text-muted-foreground">
-                {session.logs.result}
-              </ScrollPane>
-            ) : isRunning ? (
-              <p className="text-[13px] text-muted-foreground">
-                Waiting for agent to respond...
-              </p>
-            ) : (
-              <p className="text-[13px] text-muted-foreground">
-                No response available
-              </p>
-            )}
+            <SessionOutputStream
+              projectId={projectId}
+              sessionId={sessionId}
+              streamType="response"
+              seed={session.chunkStreams?.response ?? null}
+              unavailable={session.chunkStreamsUnavailable}
+              isRunning={isRunning}
+              waitingLabel="Waiting for agent to respond..."
+              emptyLabel="No response available"
+              // Sessions predating the chunk store have no response stream;
+              // their text only exists in logs.json.
+              fallback={
+                session.logs?.result ? (
+                  <ScrollPane className="text-muted-foreground">
+                    {session.logs.result}
+                  </ScrollPane>
+                ) : null
+              }
+            />
           </div>
         </TabsContent>
 
         <TabsContent value="prompt">
           <div className="overflow-hidden rounded-[11px] bg-band p-[14px]">
-            {session.prompt ? (
-              <ScrollPane className="text-muted-foreground">
-                {session.prompt}
-              </ScrollPane>
+            {prompt ? (
+              <ScrollPane className="text-muted-foreground">{prompt}</ScrollPane>
+            ) : promptState === "loading" ? (
+              <p className="text-[13px] text-muted-foreground">
+                Loading prompt...
+              </p>
+            ) : promptState === "error" ? (
+              <div className="flex flex-col items-start gap-[8px]">
+                <p className="text-[13px] text-destructive">
+                  Could not load the prompt.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-[29px] rounded-[8px] px-[12px] text-[12.5px]"
+                  onClick={loadPrompt}
+                >
+                  Retry
+                </Button>
+              </div>
             ) : (
               <p className="text-[13px] text-muted-foreground">
                 No prompt available
@@ -527,16 +611,35 @@ export default function SessionDetailPage() {
         </TabsContent>
 
         <TabsContent value="raw">
-          <div className="overflow-hidden rounded-[11px] bg-band p-[14px]">
-            {session.logs ? (
-              <ScrollPane className="text-muted-foreground">
-                {JSON.stringify(session.logs, null, 2)}
-              </ScrollPane>
-            ) : (
-              <p className="text-[13px] text-muted-foreground">
-                No logs available
+          <div className="flex flex-col gap-[10px] overflow-hidden rounded-[11px] bg-band p-[14px]">
+            {session.logsUnavailable && (
+              <p className="text-[12.5px] text-destructive/90">
+                This session&apos;s logs.json could not be read. The raw stream
+                below is what the process actually wrote.
               </p>
             )}
+            {session.logsTruncated && (
+              <p className="text-[12.5px] text-meta">
+                logs.json was too large to serve in full — the stream below is
+                the same output, paged.
+              </p>
+            )}
+            <SessionOutputStream
+              projectId={projectId}
+              sessionId={sessionId}
+              streamType="raw"
+              seed={session.chunkStreams?.raw ?? null}
+              unavailable={session.chunkStreamsUnavailable}
+              isRunning={isRunning}
+              emptyLabel="No logs available"
+              fallback={
+                session.logs ? (
+                  <ScrollPane className="text-muted-foreground">
+                    {JSON.stringify(session.logs, null, 2)}
+                  </ScrollPane>
+                ) : null
+              }
+            />
           </div>
         </TabsContent>
       </Tabs>

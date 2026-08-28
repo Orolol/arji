@@ -52,6 +52,14 @@ const REVIEW_VERDICT_MIGRATION_MS = 1786713100000;
  * timestamp. On bookkeeping-less databases these are stamped as applied when
  * the column already exists (re-running the ALTER would throw), and left to
  * run normally when it does not.
+ *
+ * ONLY column-adding migrations belong here. A migration whose statements are
+ * all `IF NOT EXISTS` (CREATE TABLE / CREATE INDEX) re-runs harmlessly, so it
+ * needs no entry — 0043_review_comment_session_index and
+ * 0046_core_table_indexes are index-only and are deliberately absent. Adding
+ * one would be actively wrong: an entry RAISES the stamp ceiling, so every
+ * migration at or below its timestamp is marked applied WITHOUT running, and
+ * the index DDL a legacy database actually needs would be skipped.
  */
 const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
   folderMillis: number;

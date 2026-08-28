@@ -73,7 +73,9 @@ beforeEach(() => {
 describe("session detail GET — project scope", () => {
   it("serves the session under its own project", async () => {
     const response = await GET(
-      mockNextRequest(),
+      // The prompt is behind an opt-in now (it is up to 1.8 MB), so the
+      // scope check has to be exercised on the request that carries it.
+      mockNextRequest({ searchParams: { include: "prompt" } }),
       mockRouteContext({ projectId: OWNER, sessionId: SESSION_ID })
     );
     const json = await response.json();
@@ -85,7 +87,7 @@ describe("session detail GET — project scope", () => {
 
   it("404s — and leaks nothing — under a different project", async () => {
     const response = await GET(
-      mockNextRequest(),
+      mockNextRequest({ searchParams: { include: "prompt" } }),
       mockRouteContext({ projectId: OTHER, sessionId: SESSION_ID })
     );
     const json = await response.json();

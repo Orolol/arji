@@ -11,19 +11,13 @@ import { SpecUpdateDialog } from "@/components/spec/SpecUpdateDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { timeAgo } from "@/lib/utils/format-date";
-
-interface SessionChunk {
-  content: string;
-}
+import { fetchSessionStream } from "@/lib/agent-sessions/session-detail";
 
 interface SessionDetailResponse {
   status?: string;
-  chunkStreams?: {
-    output?: SessionChunk[];
-  };
   logs?: {
     result?: string;
-  };
+  } | null;
   lastNonEmptyText?: string;
   error?: string;
 }
@@ -135,6 +129,12 @@ export default function SpecPage({
     if (!updateSessionId || updateStatus !== "running" || !projectId) return;
 
     let cancelled = false;
+    // The detail payload carries only a short preview of each stream now, and
+    // it always starts from the beginning — so the live view keeps its own
+    // cursor and appends, instead of re-reading the whole stream every 2s.
+    let cursor: number | null = null;
+    let streamed = "";
+    let lastChunk = "";
 
     const poll = async () => {
       try {
@@ -158,10 +158,26 @@ export default function SpecPage({
         const session = data.data;
         if (!session) return;
 
-        const chunks = session.chunkStreams?.output ?? [];
-        if (chunks.length > 0) {
-          setUpdateStream(chunks.map((c) => c.content).join(""));
-        } else if (session.lastNonEmptyText) {
+        try {
+          const page = await fetchSessionStream(
+            projectId,
+            updateSessionId,
+            "output",
+            { after: cursor }
+          );
+          if (cancelled) return;
+          cursor = page.nextAfter;
+          if (page.chunks.length > 0) {
+            streamed += page.chunks.map((c) => c.content).join("");
+            lastChunk = page.chunks[page.chunks.length - 1].content;
+            setUpdateStream(streamed);
+          }
+        } catch {
+          // Transient stream error — the status poll above still drives the
+          // dialog, and the next tick asks from the same cursor.
+        }
+
+        if (!streamed && session.lastNonEmptyText) {
           setUpdateStream(session.lastNonEmptyText);
         }
 
@@ -169,9 +185,8 @@ export default function SpecPage({
           setUpdateStatus("done");
           const finalResult =
             session.logs?.result ||
-            (chunks.length > 0
-              ? chunks[chunks.length - 1].content
-              : session.lastNonEmptyText) ||
+            lastChunk ||
+            session.lastNonEmptyText ||
             null;
           setUpdateResponse(finalResult);
           refreshSpec();

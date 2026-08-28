@@ -7,6 +7,7 @@ import {
   formatArijActionTime,
   type ArijActionItem,
 } from "@/components/shared/ArijActionsList";
+import { fetchUnifiedSessions } from "@/lib/agent-sessions/session-list";
 
 interface WhatTheAgentDidProps {
   projectId: string;
@@ -32,6 +33,13 @@ interface UnifiedSessionRow {
  * `ArijActionsList`; renders nothing when the session recorded no actions
  * (or when there is no agent session yet), so tickets that never ran an
  * agent stay visually unchanged.
+ *
+ * Durable effects only — status changes, comments, questions, findings and
+ * artifacts, all of which come from indexed session-scoped reads. The session
+ * detail page additionally scans the raw stream (`?view=arij-actions`) for
+ * read-only calls and calls the board refused; that scan is worth paging
+ * through on a page dedicated to one session, but not on an ambient block
+ * inside the ticket panel.
  */
 export function WhatTheAgentDid({
   projectId,
@@ -50,11 +58,8 @@ export function WhatTheAgentDid({
 
     async function load(currentEpicId: string) {
       try {
-        const listRes = await fetch(`/api/projects/${projectId}/sessions`);
-        if (!listRes.ok) return;
-        const listJson = await listRes.json();
-        const rows = (listJson?.data ?? []) as UnifiedSessionRow[];
-        // The route already sorts newest-first.
+        const rows = await fetchUnifiedSessions<UnifiedSessionRow>(projectId);
+        // The route already sorts newest-first, across pages.
         const latest = rows.find(
           (row) => row.kind === "agent_session" && row.epicId === currentEpicId,
         );
