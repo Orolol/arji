@@ -96,6 +96,40 @@ describe("fetchUnifiedSessions", () => {
     expect(calls).toBeLessThan(SESSION_LIST_MAX_PAGES);
   });
 
+  it("rejects at the page ceiling rather than returning a prefix", async () => {
+    // The runaway backstop, behind the cursor-cycle check: a server that never
+    // repeats a cursor and never ends. Cycle detection cannot see this one —
+    // every cursor is genuinely new — so the page count is the only thing that
+    // stops the loop, and what it does on the way out is the whole point. It
+    // must reject: returning `rows` here would hand back a prefix wearing the
+    // "complete list" contract, which is the failure this loop exists to make
+    // impossible.
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        calls += 1;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: [{ id: `row-${calls}` }],
+            nextCursor: `cursor-${calls}`,
+          }),
+        } as Response;
+      })
+    );
+
+    const error = await fetchUnifiedSessions<Row>("proj-1").catch((e) => e);
+
+    expect(error).toBeInstanceOf(UnifiedSessionListIncompleteError);
+    // Stopped AT the ceiling — neither early nor one page past it.
+    expect(calls).toBe(SESSION_LIST_MAX_PAGES);
+    expect((error as UnifiedSessionListIncompleteError).partialRowCount).toBe(
+      SESSION_LIST_MAX_PAGES
+    );
+  });
+
   it("carries how much it had collected when it gave up", async () => {
     let calls = 0;
     vi.stubGlobal(
