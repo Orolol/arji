@@ -120,7 +120,17 @@ export const epics = sqliteTable("epics", {
   githubIssueUrl: text("github_issue_url"),
   githubIssueState: text("github_issue_state"),
   releaseId: text("release_id").references(() => releases.id, { onDelete: "set null" }),
-});
+},
+(table) => ({
+  // The board reads epics project-scoped, buckets them by status and orders
+  // them by position. Without this index that query SCANs the whole table on
+  // the one synchronous connection every other request shares.
+  projectStatusPositionIdx: index("epics_project_status_position_idx").on(
+    table.projectId,
+    table.status,
+    table.position
+  ),
+}));
 
 export const userStories = sqliteTable("user_stories", {
   id: text("id").primaryKey(),
@@ -133,7 +143,14 @@ export const userStories = sqliteTable("user_stories", {
   status: text("status").default("todo"), // todo | in_progress | review | done
   position: integer("position").default(0),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
-});
+},
+(table) => ({
+  // Stories are only ever read epic-scoped, in position order.
+  epicPositionIdx: index("user_stories_epic_position_idx").on(
+    table.epicId,
+    table.position
+  ),
+}));
 
 export const chatConversations = sqliteTable("chat_conversations", {
   id: text("id").primaryKey(),
@@ -247,7 +264,20 @@ export const agentSessions = sqliteTable("agent_sessions", {
   cliOptions: text("cli_options"),
   cliCommand: text("cli_command"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
-});
+},
+(table) => ({
+  // The sessions list is project-scoped and keyset-paged on creation time.
+  // The leading key prunes the scan; the route's `coalesce(created_at, '')`
+  // sort still needs a temp b-tree, since SQLite cannot match an expression
+  // to a plain column index.
+  projectCreatedAtIdx: index("agent_sessions_project_created_at_idx").on(
+    table.projectId,
+    table.createdAt
+  ),
+  // Ticket detail, pipeline ownership checks and the Full Auto sweep all ask
+  // which sessions belong to one epic.
+  epicIdx: index("agent_sessions_epic_idx").on(table.epicId),
+}));
 
 export const agentSessionSequences = sqliteTable("agent_session_sequences", {
   sessionId: text("session_id")
@@ -379,7 +409,14 @@ export const ticketComments = sqliteTable("ticket_comments", {
   content: text("content").notNull(),
   agentSessionId: text("agent_session_id").references(() => agentSessions.id),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
-});
+},
+(table) => ({
+  // A comment hangs off exactly one of the two targets and each side is
+  // queried on its own, so these stay two single-column indexes rather than
+  // one composite that would only ever serve the epic lookup.
+  epicIdx: index("ticket_comments_epic_idx").on(table.epicId),
+  userStoryIdx: index("ticket_comments_user_story_idx").on(table.userStoryId),
+}));
 
 export const releases = sqliteTable("releases", {
   id: text("id").primaryKey(),
