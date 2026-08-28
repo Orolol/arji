@@ -43,15 +43,37 @@ const epics = [
   makeEpic({ id: "b", position: 1 }),
 ];
 
-/** Routes each board request to a canned payload; reorder POSTs are recorded. */
+/**
+ * Routes each board request to a canned payload; reorder POSTs are recorded.
+ *
+ * An accepted reorder is also STORED, because the hook refetches the board as
+ * soon as the server confirms a write. A fake that kept serving the pre-drag
+ * order would replay it over the move it had just accepted — a state no real
+ * server can be in, and one that would make these tests fail for a reason
+ * that has nothing to do with what they cover.
+ */
 function installFetch(reorderOk = true) {
   const reorderCalls: unknown[] = [];
+  let stored = epics;
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("/epics/reorder")) {
-      reorderCalls.push(JSON.parse(String(init?.body)));
+      const body = JSON.parse(String(init?.body));
+      reorderCalls.push(body);
+      if (reorderOk) {
+        const items = new Map(
+          (body.items as Array<{ id: string; status: string; position: number }>)
+            .map((item) => [item.id, item])
+        );
+        stored = stored.map((epic) => {
+          const item = items.get(epic.id);
+          return item
+            ? { ...epic, status: item.status as KanbanEpic["status"], position: item.position }
+            : epic;
+        });
+      }
       return jsonResponse(reorderOk ? {} : { error: "Refused" }, reorderOk);
     }
-    if (url.endsWith("/epics")) return jsonResponse({ data: epics });
+    if (url.endsWith("/epics")) return jsonResponse({ data: stored });
     if (url.endsWith("/releases")) return jsonResponse({ data: [] });
     if (url.endsWith("/dependencies")) return jsonResponse({ data: [] });
     return jsonResponse({ data: [] });

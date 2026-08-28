@@ -131,6 +131,27 @@ function epic(overrides: Partial<KanbanEpic> & { id: string }): KanbanEpic {
 
 let epicsPayload: KanbanEpic[] = [];
 let fetchMock: ReturnType<typeof vi.fn>;
+/**
+ * Arm to leave every later board GET in flight. The hook refetches once a
+ * reorder is accepted, so this is how a test says "the user dragged again
+ * before that refetch landed" — the case the local-position mirroring exists
+ * for, and the one the hook's mutation guard discards the refetch in.
+ */
+let holdBoardGets = false;
+
+/** The fake server stores an accepted reorder, as the real route does. */
+function applyReorder(
+  rows: KanbanEpic[],
+  items: Array<{ id: string; status: string; position: number }>
+): KanbanEpic[] {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return rows.map((row) => {
+    const item = byId.get(row.id);
+    return item
+      ? { ...row, status: item.status as KanbanEpic["status"], position: item.position }
+      : row;
+  });
+}
 
 /** Every reorder POST body seen so far, newest last. */
 function reorderPayloads(): Array<{
@@ -144,8 +165,15 @@ function reorderPayloads(): Array<{
 }
 
 beforeEach(() => {
-  fetchMock = vi.fn(async (url: string) => {
+  holdBoardGets = false;
+  fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url).includes("/epics/reorder")) {
+      const { items } = JSON.parse(String(init?.body));
+      epicsPayload = applyReorder(epicsPayload, items);
+      return { ok: true, json: async () => ({ data: {} }) };
+    }
     if (String(url).endsWith("/epics")) {
+      if (holdBoardGets) return new Promise<never>(() => {});
       return { ok: true, json: async () => ({ data: epicsPayload }) };
     }
     if (String(url).endsWith("/releases")) {
@@ -288,6 +316,10 @@ describe("useKanban.moveEpic — column order and reorder payloads", () => {
     ];
 
     const { result } = await mountBoard();
+    // No board GET may land between the two drags: the second one must be
+    // carried by the positions the first mirrored onto the local rows, not by
+    // a server round-trip.
+    holdBoardGets = true;
 
     await act(async () => {
       await result.current.moveEpic("x", "todo", "review", 0);
