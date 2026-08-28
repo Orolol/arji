@@ -9,7 +9,6 @@ import type { PersistentChatProvider } from "@/lib/agent-config/constants";
 import {
   buildOmpSpawnEnv,
   OMP_READONLY_TOOLS,
-  ompReadonlyOverlayPath,
 } from "@/lib/providers/oh-my-pi";
 
 export const DEFAULT_PERSISTENT_CHAT_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
@@ -818,13 +817,14 @@ function finishLocalOnlyOmpTurn(
 }
 
 function ompArgs(options: PersistentChatTurnOptions): string[] {
+  // No `--config`: the xdev-off overlay this used to carry is measurably a
+  // no-op on omp 18.0.6, and the flag can displace the user's whole
+  // ~/.omp/agent/config.yml — see lib/providers/oh-my-pi.ts.
   const args = [
     "--mode",
     "rpc",
     "--tools",
     OMP_READONLY_TOOLS.join(","),
-    "--config",
-    ompReadonlyOverlayPath(),
     "--no-title",
   ];
   if (options.cliSessionId && options.resumeSession) {

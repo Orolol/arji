@@ -249,6 +249,42 @@ default `auto` mode hides MCP tools behind a `search_tool_bm25` discovery step
 rather than putting them in the prompt. Worth pinning if Arij's five tools ever
 need to be unconditionally visible.
 
+### Re-probed on omp 18.0.6 — 2026-08-28: the `--config` overlay is gone
+
+Arij used to pass `--config <tmp>.yml` containing only `tools: {xdev: false}`
+on every read-only omp spawn (`OhMyPiProvider.restrictedToolsExtraArgs` and the
+persistent runner's `ompArgs`). Two things were measured against 18.0.6, both
+with a live stdio MCP server registered so the xd:// device surface was *not*
+vacuously empty. Tool names come from `dumpTools` in an `--mode rpc`
+`get_state` response:
+
+    --tools read,grep,glob                       -> glob, grep, read, mcp__arij_get_ticket
+    --tools read,grep,glob --config <xdev-off>   -> glob, grep, read, mcp__arij_get_ticket
+    --tools read,grep,glob,write                 -> glob, grep, read, write
+
+1. **The overlay buys nothing.** `write` is no longer force-mounted through the
+   allowlist — it appears only when explicitly allowlisted (analyze mode) — and
+   MCP tools already mount as first-class tools under the exact
+   `mcp__arij_*` names Arij spells into prompts. The 17.2.1 leak the overlay
+   existed to close is closed upstream.
+2. **The flag is a lever over the user's whole configuration.** A session
+   measured `--config` on 18.0.5 *replacing* `~/.omp/agent/config.yml` rather
+   than layering over it, which silently dropped every omp session onto a
+   fallback local model (burning the machine's GPU) and discarded modelRoles,
+   agentModelOverrides and session settings with it. On 18.0.6 it measures as
+   the documented overlay instead — `defaults <- global <- project <-
+   PI_CONFIG_FILES <- --config <- runtime`, a deep merge that preserves
+   sibling keys (probed with an overlay setting only `modelRoles.smol`:
+   `modelRoles.default` survived) — but the flag no longer earns that risk.
+
+So Arij hands omp no config file at all. The tool allowlist is now the whole
+isolation mechanism for read-only omp spawns.
+
+**Re-probe on each omp upgrade.** If `write` ever comes back under `--tools
+read,grep,glob`, restore the isolation through a lever that cannot displace
+user config — not by re-adding `--config` with a minimal overlay. Regression
+coverage: `__tests__/omp-user-config-not-displaced.test.ts` (both call sites).
+
 ## agy — wired 2026-08-26
 
 Measured live on agy 1.1.21 before adding the provider:

@@ -468,14 +468,11 @@ describe("persistent chat runner — Oh My Pi RPC", () => {
     ];
     expect(binary).toBe("omp");
     expect(args).toEqual(
-      expect.arrayContaining([
-        "--mode",
-        "rpc",
-        "--tools",
-        "read,grep,glob",
-        "--config",
-      ]),
+      expect.arrayContaining(["--mode", "rpc", "--tools", "read,grep,glob"]),
     );
+    // No `--config`: the overlay it used to carry is a measured no-op on omp
+    // 18.0.6 and the flag can displace the user's own config.
+    expect(args).not.toContain("--config");
     expect(spawnOptions.env).toMatchObject({
       ARIJ_MCP_TOKEN: "omp-secret",
       ARIJ_MCP_TOOLSET: "chat",

@@ -218,16 +218,6 @@ export abstract class PiProvider extends BaseCliProvider {
     return ["--session", cliSessionId];
   }
 
-  /**
-   * Extra argv appended alongside a restricted tool allowlist. On pi the
-   * allowlist genuinely strips the mutating built-ins (verified on 0.84.2:
-   * write is unavailable under `--tools read,grep,find,ls`), so there is
-   * nothing to add; omp needs an overlay on top — see OhMyPiProvider.
-   */
-  protected restrictedToolsExtraArgs(): string[] {
-    return [];
-  }
-
   protected notAuthenticatedMessage(): string {
     return "Pi is not authenticated. Run `pi` and use /login, or set the provider API key.";
   }
@@ -260,16 +250,16 @@ export abstract class PiProvider extends BaseCliProvider {
 
     // Plan/chat runs must not touch the working tree. Analyze adds only the
     // write primitive required to create arji.json; edit and bash stay absent.
-    // MCP tool names must NEVER be added here: omp validates --tools against
-    // built-in names only, and an unknown name is a fatal argv error that
-    // kills the spawn. Its MCP tools are orthogonal to this allowlist and
-    // stay mounted regardless — see lib/providers/oh-my-pi.ts.
+    // The allowlist is the WHOLE isolation mechanism for both CLIs — verified
+    // on pi 0.84.2 and re-verified on omp 18.0.6, where `write` no longer
+    // survives it. MCP tool names must NEVER be added here: omp validates
+    // --tools against built-in names only, and an unknown name is a fatal
+    // argv error that kills the spawn. Its MCP tools are orthogonal to this
+    // allowlist and stay mounted regardless — see lib/providers/oh-my-pi.ts.
     if (mode === "plan" || mode === "chat") {
       args.push("--tools", this.readonlyTools().join(","));
-      args.push(...this.restrictedToolsExtraArgs());
     } else if (mode === "analyze") {
       args.push("--tools", [...this.readonlyTools(), WRITE_TOOL].join(","));
-      args.push(...this.restrictedToolsExtraArgs());
     }
 
     if (cliSessionId && resumeSession) {
