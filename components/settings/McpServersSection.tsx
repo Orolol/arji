@@ -11,10 +11,16 @@
  * Two contracts this component exists to honour, both easy to get wrong:
  *
  *   1. **Secrets are write-only.** The API returns "***" for every `env` /
- *      `header` value, never the value. So the inputs are `type="password"`,
- *      they start EMPTY on edit, and an empty field means "keep what is
- *      stored" — never "clear it". Rendering the mask into the input would
- *      save the literal string "***" the moment the user touched anything else.
+ *      `header` value, never the value. So the secrets box starts EMPTY on
+ *      edit, and an empty field means "keep what is stored" — never "clear
+ *      it", which is why `handleSave` OMITS the key rather than sending `{}`
+ *      (`mergeSecretMap` walks the patch it is given, so `{}` erases).
+ *      Rendering the mask into the field would save the literal string "***"
+ *      the moment the user touched anything else.
+ *
+ *      The field is a `<textarea>` — several `KEY=value` lines at once — so it
+ *      cannot carry `type="password"`. It is password-CLASS by behaviour, not
+ *      by input type: never pre-filled, never echoed back, blank preserves.
  *
  *   2. **Length caps are mirrored, not re-invented.** Every `maxLength` here
  *      comes from the same constant the service validates against, so the form
