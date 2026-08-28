@@ -7,8 +7,14 @@
  * The bug this file pins lived exactly in between: the Board re-derived the
  * To Merge order for display while `handleDragEnd`, the optimistic splice and
  * `persistedColumnOrder` all indexed the raw state array. They agree at load
- * and diverge after the first To Merge drag that crosses the ready boundary —
- * and nothing refetches an idle board, so they stay diverged.
+ * and diverge after the first To Merge drag that crosses the ready boundary,
+ * and stay diverged for as long as no board GET lands.
+ *
+ * The board now refetches once a reorder is accepted, so these drags are run
+ * against a fake server that holds its board GETs in flight: that is the
+ * reachable case (a second drag before the refetch lands, which the hook's
+ * mutation guard then discards) and the one where the two arrays have only
+ * themselves to stay in step with.
  *
  * Only `fetch` and dnd-kit are stubbed here; the hook and the Board are real.
  */
@@ -110,6 +116,8 @@ function epic(
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
+/** True once the mount's board GET has been answered. */
+let boardServed = false;
 
 /** Reorder payloads seen so far, newest last. */
 function reorderPayloads(): Array<
@@ -147,6 +155,7 @@ async function drag(activeId: string, overId: string) {
 beforeEach(() => {
   localStorage.clear();
   dnd.onDragEnd = null;
+  boardServed = false;
   // A (ready) floats above B and C, so the rendered column is [A, B, C]
   // while stored positions are A=0, B=1, C=2.
   const epics = [
@@ -156,6 +165,11 @@ beforeEach(() => {
   ];
   fetchMock = vi.fn(async (url: string) => {
     if (String(url).endsWith("/epics")) {
+      // Served once, for the mount; every later GET — including the refetch
+      // that follows an accepted reorder — is left in flight. See the file
+      // docstring.
+      if (boardServed) return new Promise<never>(() => {});
+      boardServed = true;
       return { ok: true, json: async () => ({ data: epics }) };
     }
     if (String(url).endsWith("/releases")) {
