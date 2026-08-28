@@ -47,7 +47,11 @@ import type { TelescopeCollectionResult } from "@/lib/telescope/collect";
 import { utf8Head } from "@/lib/routines/ci-autofix-limits";
 import type { RefinementSnapshot } from "@/lib/refinement/snapshot";
 import { PRIORITY_LABELS } from "@/lib/types/kanban";
-import { fenceOnly, neutralizeControlMarkup } from "./untrusted";
+import {
+  fenceAgentOutput,
+  fenceOnly,
+  neutralizeControlMarkup,
+} from "./untrusted";
 
 function pushPromptPart(
   parts: string[],
@@ -686,6 +690,14 @@ Your response should be a well-formatted markdown report.
  * The collector has already selected, normalized, grouped, and capped the
  * evidence. Keeping that boundary explicit prevents the agent from receiving
  * unbounded raw logs or quietly redefining which incidents belong together.
+ *
+ * The grouped payload still carries session messages, errors and chunk
+ * excerpts verbatim, and `JSON.stringify` is weaker cover than it looks: it
+ * escapes quotes, backslashes and newlines, but not angle brackets, so
+ * `<system-directive>` reaches the prompt intact inside a string value. The
+ * serialized payload therefore goes through `fenceAgentOutput` like every
+ * other evidence block — the ```json label survives, the fence grows past any
+ * backtick run in the payload, and the tags come out escaped.
  */
 export function buildFailureDigestPrompt(
   project: PromptProject,
@@ -726,9 +738,7 @@ that are absent from the payload.
 
 ### Mechanically Grouped Evidence
 
-\`\`\`json
-${JSON.stringify(collection.groups, null, 2)}
-\`\`\`
+${fenceAgentOutput(JSON.stringify(collection.groups, null, 2), "json")}
 
 ### Required Report Format
 
@@ -1770,6 +1780,13 @@ export interface MemoryDistillSessionContext {
  * agents (this builder's own sessions, and Dreaming), so it is neutralised
  * on the way in exactly as `memorySection` neutralises the record channel —
  * only the fence differs.
+ *
+ * `sessionContext.resultSummary` is a second channel and gets the stronger
+ * treatment: it is the finished session's own last message, so it is
+ * neutralised AND fenced under the agent-output notice. Evidence is quoted
+ * from rather than reproduced, which makes a fence free here in a way it is
+ * not for the document above — and the stakes are the same, since what this
+ * session writes is injected into every later prompt for the project.
  */
 export function buildMemoryDistillPrompt(
   project: PromptProject,
@@ -1808,7 +1825,11 @@ export function buildMemoryDistillPrompt(
   );
   if (sessionContext.resultSummary && sessionContext.resultSummary.trim()) {
     parts.push(`### Session Result\n`);
-    parts.push(sessionContext.resultSummary.trim() + "\n");
+    // The finished session's own last message: agent output, and this
+    // builder's result becomes the memory injected into every later prompt.
+    // Fenced as well as neutralised — unlike the memory above, this is
+    // evidence to read, not a document to reproduce.
+    parts.push(fenceAgentOutput(sessionContext.resultSummary) + "\n");
   }
 
   parts.push(`## Task: Distill Project Memory
@@ -1866,6 +1887,12 @@ export interface DreamingDigestContext {
  * section (callers pass `memory: null` so the builder-level injection cannot
  * duplicate it). The document is still neutralised: unfenced framing changes
  * how it reads, not whether it can impersonate a control turn.
+ *
+ * The digest is the evidence channel and is fenced as well as neutralised.
+ * It is assembled from dozens of sessions' final-response tails, errors,
+ * forensic reports and findings, and its own `###` session headings sit
+ * directly above the `##` sections that carry this prompt's instructions —
+ * so the boundary has to be one the content cannot cross.
  */
 export function buildDreamingPrompt(
   project: PromptProject,
@@ -1906,7 +1933,11 @@ export function buildDreamingPrompt(
   parts.push(coverage.join("\n") + "\n");
   parts.push(
     context.digest.trim().length > 0
-      ? context.digest.trim() + "\n"
+      // Up to 30 sessions' final-response tails, errors, forensic reports and
+      // findings — all agent output. Fenced as well as neutralised: the
+      // digest's own `###` session headings must not be able to grow into the
+      // `##` sections this prompt uses for its instructions.
+      ? fenceAgentOutput(context.digest) + "\n"
       : "(No session records available.)\n",
   );
 
