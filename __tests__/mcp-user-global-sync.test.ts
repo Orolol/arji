@@ -148,6 +148,40 @@ describe("the request path is never blocked", () => {
     await expect(whenUserGlobalMcpSyncSettles()).resolves.toBeUndefined();
   });
 
+  it("shells out through no SYNCHRONOUS child_process API", () => {
+    // The two tests above document the non-blocking contract but cannot pin it:
+    // `syncUserGlobalMcpServers` returns `void` whether the work behind it
+    // blocks or not, and the VITEST guard makes it return before spawning
+    // anything, so no behavioural assertion can reach the spawn. Reverting
+    // `execFileAsync` to `execFileSync` keeps this whole suite green.
+    //
+    // Hence a source-level check. The finding this pins is a MAJOR one: an
+    // inline `execFileSync` on the CRUD request path froze the single-process
+    // app — SSE, chunk persistence, the watchdog, pipelines and Full Auto —
+    // for ~0.5s per global server, up to (1 + N) x 10s against the timeout
+    // ceiling, on every settings save including the Enable/Disable button.
+    //
+    // The list is Node's COMPLETE set of synchronous child_process entry
+    // points, so a regression through any of them fails here rather than
+    // slipping past a spot-check of the one that caused the original bug.
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "lib", "mcp", "user-global-sync.ts"),
+      "utf-8",
+    );
+    // Comments are stripped first: the prose above the implementation names
+    // `execFileSync` to explain what it must not do, and that must stay legal.
+    const code = source
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^[ \t]*\/\/.*$/gm, "");
+
+    for (const sync of ["execSync", "execFileSync", "spawnSync"]) {
+      expect(code).not.toMatch(new RegExp(`\\b${sync}\\b`));
+    }
+    // ...and the async one it does use is still there, so the assertion above
+    // cannot pass merely because the spawning code was deleted or renamed.
+    expect(code).toMatch(/\bexecFile\b/);
+  });
+
   it("imports cleanly when child_process is only partially mocked", async () => {
     // The regression this pins: promisifying `execFile` at MODULE SCOPE reads
     // `child_process` at import time. lib/mcp/servers.ts imports this module,
