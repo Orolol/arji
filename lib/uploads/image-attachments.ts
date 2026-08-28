@@ -19,9 +19,19 @@ export const ALLOWED_IMAGE_MIME_TYPES = [
 /** Value for an `<input type="file">` accept attribute. */
 export const IMAGE_UPLOAD_ACCEPT = ALLOWED_IMAGE_MIME_TYPES.join(",");
 
+/**
+ * The application's own limit on one attached image.
+ *
+ * It must stay strictly below `experimental.proxyClientMaxBodySize` in
+ * `next.config.ts`: `middleware.ts` matches `/api/:path*`, so Next buffers the
+ * request body up to that cap, and a file at the same number overflows it once
+ * the multipart envelope is added — the body then reaches the route truncated
+ * and `imageUploadRejectionReason` never sees the file at all.
+ */
 export const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
 
-export const MAX_IMAGE_UPLOAD_LABEL = "10MB";
+/** Derived, so the wording of the limit cannot drift away from the limit. */
+export const MAX_IMAGE_UPLOAD_LABEL = `${MAX_IMAGE_UPLOAD_BYTES / 1024 / 1024}MB`;
 
 /**
  * How many screenshots one ticket may carry.
