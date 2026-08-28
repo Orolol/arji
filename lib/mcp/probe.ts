@@ -78,12 +78,36 @@ export interface McpProbeResult {
  * miss a token echoed as part of a URL, a JSON blob, or an argv dump. The
  * values are exactly what must not appear, so they are exactly what is
  * searched for.
+ *
+ * ## Every non-empty value, however short
+ *
+ * There is deliberately NO minimum length. `env`/`headers` values are
+ * write-only by product contract — reads return `"***"` per key — so a value
+ * the API refuses to show cannot be allowed back out through an error message
+ * instead. A three-character `PIN` echoed by a failing server's stderr reaches
+ * `{ data.error }`, `persistMcpServerCheck` writes it to `last_check_error`,
+ * and the settings screen then renders it after every reload. That is the same
+ * leak whatever the value's length.
+ *
+ * The cost is real and accepted: a one- or two-character value redacts
+ * anywhere it occurs, so configuring `DEBUG=1` turns "timed out after 15000ms"
+ * into noise. A mangled diagnostic is recoverable — the user can clear the
+ * field and probe again; a leaked credential is not. Rejecting short values at
+ * validation instead would refuse legitimate settings (`DEBUG=1`, `PORT=80`)
+ * that merely live in a field the contract treats as secret.
+ *
+ * Longest first, because a short value that is a PREFIX of a longer one would
+ * otherwise fragment it: with `["abc", "abc123"]`, redacting `abc` first
+ * leaves `<redacted>123` and the real credential never matches its own
+ * occurrence.
  */
 export function scrubSecrets(text: string, secrets: string[]): string {
   let scrubbed = text;
-  for (const secret of secrets) {
-    // A short value would match everywhere; those are not credentials.
-    if (!secret || secret.length < 4) continue;
+  const ordered = [...new Set(secrets)].sort((a, b) => b.length - a.length);
+  for (const secret of ordered) {
+    // Only the empty string is skipped — splitting on it matches everywhere
+    // and would replace nothing meaningfully.
+    if (!secret) continue;
     scrubbed = scrubbed.split(secret).join("<redacted>");
   }
   return scrubbed;

@@ -13,8 +13,10 @@
  */
 
 import fs from "fs";
+import http from "http";
 import os from "os";
 import path from "path";
+import type { AddressInfo } from "net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "child_process";
 import { createTestDb } from "@/lib/db/test-utils";
@@ -41,7 +43,7 @@ afterEach(() => {
  * `initialize` and `tools/list`. `mode` picks the misbehaviour to exercise.
  */
 function writeFixtureServer(
-  mode: "ok" | "silent" | "crash" | "flood",
+  mode: "ok" | "silent" | "crash" | "crash-short" | "flood",
   toolNames: string[] = ["list_nodes", "run_scene"],
 ): string {
   const file = path.join(tempDir, `server-${mode}.mjs`);
@@ -58,6 +60,12 @@ if (MODE === "crash") {
   // Echo the environment first: a real broken server often does, which is why
   // the probe scrubs its own configured values out of the error.
   process.stderr.write("FATAL: bad config: GODOT_TOKEN=" + (process.env.GODOT_TOKEN ?? "") + " rejected\\n");
+  process.exit(3);
+}
+if (MODE === "crash-short") {
+  // Same echo, but of a THREE-character credential — the length the scrub
+  // used to skip.
+  process.stderr.write("FATAL: bad config: PIN=" + (process.env.PIN ?? "") + " rejected\\n");
   process.exit(3);
 }
 let buffer = "";
@@ -190,6 +198,23 @@ describe("probeMcpServer — a broken server", () => {
     expect(result.error).toContain("<redacted>");
   });
 
+  it("keeps a THREE-character secret out of the error too", async () => {
+    // The regression: the scrub used to skip any value under four characters
+    // as "not a credential", while the CRUD schema happily accepts one. A
+    // server that echoes `PIN=123` on its way down therefore sent the PIN back
+    // in `{ data.error }`, and `persistMcpServerCheck` wrote it to
+    // `last_check_error` for the settings screen to render after every reload.
+    // Length is not what makes a value secret — the field it was typed into is.
+    const result = await probeMcpServer(
+      stdioSpec(writeFixtureServer("crash-short"), { env: { PIN: "123" } }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("FATAL: bad config");
+    expect(result.error).not.toContain("PIN=123");
+    expect(result.error).toContain("<redacted>");
+  });
+
   it("bounds the recovered diagnostic — a chatty server is not a log sink", async () => {
     const result = await probeMcpServer(stdioSpec(writeFixtureServer("flood")));
 
@@ -200,6 +225,45 @@ describe("probeMcpServer — a broken server", () => {
   });
 });
 
+/**
+ * The http transport has its own leak path, and it is not the child's stderr.
+ * The SDK builds its failure as `Error POSTing to endpoint: ${body}`, so a
+ * server that quotes the credential it rejected puts it straight into the
+ * message the route persists — no misbehaving CLI required.
+ */
+describe("probeMcpServer — an http server", () => {
+  let server: http.Server;
+  let url: string;
+
+  beforeEach(async () => {
+    server = http.createServer((request, response) => {
+      // What an auth-checking endpoint does: refuse, and say what it saw.
+      response.writeHead(400, { "Content-Type": "text/plain" });
+      response.end(`rejected credential ${request.headers.authorization ?? ""}`);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it("keeps a short header value out of the returned error", async () => {
+    const result = await probeMcpServer(
+      { name: "confluence", url, headers: { Authorization: "abc" } },
+      5000,
+    );
+
+    expect(result.ok).toBe(false);
+    // The body reached the message — otherwise this test would pass for the
+    // wrong reason, on an error that never carried the header at all.
+    expect(result.error).toContain("rejected credential");
+    expect(result.error).not.toContain("abc");
+    expect(result.error).toContain("<redacted>");
+  });
+});
+
 describe("scrubSecrets", () => {
   it("replaces every occurrence of a configured value", () => {
     expect(scrubSecrets("auth=abc123 retry auth=abc123", ["abc123"])).toBe(
@@ -207,9 +271,27 @@ describe("scrubSecrets", () => {
     );
   });
 
-  it("leaves short values alone — those are not credentials", () => {
-    // Scrubbing "1" or "on" would redact half of every error message.
-    expect(scrubSecrets("port 80 is closed", ["80"])).toBe("port 80 is closed");
+  it("redacts a short value as readily as a long one", () => {
+    // Deliberately NOT "80 is too short to be a credential". `env`/`headers`
+    // values are write-only by contract — reads return "***" — so a value the
+    // API refuses to show must not come back out through an error string
+    // instead. The mangled message is the accepted price; see scrubSecrets.
+    expect(scrubSecrets("port 80 is closed", ["80"])).toBe(
+      "port <redacted> is closed",
+    );
+  });
+
+  it("redacts the longest value first, so a prefix cannot fragment it", () => {
+    // With "abc" applied first, "abc123" becomes "<redacted>123" and the real
+    // credential never matches its own occurrence — the leak the ordering
+    // exists to prevent.
+    expect(scrubSecrets("token=abc123", ["abc", "abc123"])).toBe(
+      "token=<redacted>",
+    );
+  });
+
+  it("ignores an empty value rather than matching everywhere", () => {
+    expect(scrubSecrets("nothing to hide", [""])).toBe("nothing to hide");
   });
 });
 

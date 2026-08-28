@@ -74,7 +74,7 @@ afterEach(() => {
  * `crash` mode that echoes its own environment on the way out — which is what
  * a genuinely broken server does, and the reason the scrub exists.
  */
-function writeFixtureServer(mode: "ok" | "crash"): string {
+function writeFixtureServer(mode: "ok" | "crash" | "crash-short"): string {
   const file = path.join(tempDir, `server-${mode}.mjs`);
   fs.writeFileSync(
     file,
@@ -82,6 +82,10 @@ function writeFixtureServer(mode: "ok" | "crash"): string {
 const MODE = ${JSON.stringify(mode)};
 if (MODE === "crash") {
   process.stderr.write("failed to start with " + JSON.stringify(process.env.GODOT_TOKEN ?? "") + "\\n");
+  process.exit(3);
+}
+if (MODE === "crash-short") {
+  process.stderr.write("failed to start with PIN=" + (process.env.PIN ?? "") + "\\n");
   process.exit(3);
 }
 let buffer = "";
@@ -135,7 +139,10 @@ function insertServer(values: Record<string, unknown>): string {
   return id;
 }
 
-function stdioFixture(mode: "ok" | "crash", values: Record<string, unknown> = {}) {
+function stdioFixture(
+  mode: "ok" | "crash" | "crash-short",
+  values: Record<string, unknown> = {},
+) {
   return insertServer({
     command: process.execPath,
     args: JSON.stringify([writeFixtureServer(mode)]),
@@ -248,6 +255,21 @@ describe("a broken server", () => {
     expect(payload.data.ok).toBe(false);
     expect(JSON.stringify(payload)).not.toContain(SECRET);
     expect(rowOf(id).lastCheckError ?? "").not.toContain(SECRET);
+  });
+
+  it("keeps a SHORT configured secret out of the stored error as well", async () => {
+    // The same durability argument as above, for the case the scrub used to
+    // wave through: a value under four characters was returned verbatim and
+    // written to `last_check_error`, where the settings screen renders it on
+    // every reload. The write-only contract does not have a length threshold.
+    const id = stdioFixture("crash-short", { env: JSON.stringify({ PIN: "123" }) });
+
+    const payload = await (await probeGlobal(id)).json();
+
+    expect(payload.data.ok).toBe(false);
+    expect(JSON.stringify(payload)).not.toContain("PIN=123");
+    expect(rowOf(id).lastCheckError ?? "").not.toContain("PIN=123");
+    expect(rowOf(id).lastCheckError ?? "").toContain("<redacted>");
   });
 
   it("reports a row whose transport fields are incomplete instead of probing it", async () => {

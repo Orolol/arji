@@ -15,9 +15,13 @@
  *   McpServerConflictError   → 409
  * A validation error carries the same shape whether it came from Zod or from
  * the shape/cap rules, so the UI has one alert path.
+ *
+ * A GLOBAL write additionally waits for the user-global reconciliation before
+ * it answers — see `settleUserGlobalSync` below.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { whenUserGlobalMcpSyncSettles } from "./user-global-sync";
 import {
   McpServerConflictError,
   McpServerNotFoundError,
@@ -48,6 +52,37 @@ export function mcpServerErrorResponse(error: unknown): NextResponse {
     },
     { status: 500 },
   );
+}
+
+/**
+ * Waits for the reconciliation a GLOBAL write just requested, before that
+ * write is acknowledged.
+ *
+ * A global create/update/delete calls `syncUserGlobalMcpServers`, which pushes
+ * the new server set into oh-my-pi's `mcp.json` and agy's register in the
+ * BACKGROUND — those two CLIs have no per-spawn MCP surface, so a user-global
+ * registry is the only place their sessions can read it from.
+ *
+ * Answering before that lands would be a silent correctness bug rather than
+ * mere lag: both CLIs snapshot their server set when the process starts and
+ * hold it for the entire run, so a session launched in the gap would run a
+ * deleted server, miss a newly enabled one, or present a credential the user
+ * has already rotated — while Arij's own database and the prompt text handed
+ * to that session describe the new set. Awaiting here is what makes a 2xx mean
+ * "already applied": every session started after it observes what it promised.
+ *
+ * Cheap in the ordinary case and never blocking: the reconciliation's child
+ * processes are awaited rather than run synchronously, so the event loop stays
+ * free for SSE, chunk persistence, the watchdog and pipelines while this one
+ * request waits. Never rejects — a settings save must not fail because `agy`
+ * is missing (see lib/mcp/user-global-sync.ts, rules 4 and 5).
+ *
+ * Project-scoped writes skip it: they request no sync, because a per-project
+ * server cannot be expressed in a user-global registry at all.
+ */
+async function settleUserGlobalSync(projectId: string | null): Promise<void> {
+  if (projectId !== null) return;
+  await whenUserGlobalMcpSyncSettles();
 }
 
 async function parseBody(request: NextRequest): Promise<unknown | NextResponse> {
@@ -96,6 +131,7 @@ export async function handleCreateMcpServer(
   }
   try {
     const data = createMcpServer(parsed.data, undefined, projectId);
+    await settleUserGlobalSync(projectId);
     return NextResponse.json({ data }, { status: 201 });
   } catch (error) {
     return mcpServerErrorResponse(error);
@@ -119,6 +155,7 @@ export async function handleUpdateMcpServer(
   }
   try {
     const data = updateMcpServer(serverId, parsed.data, undefined, projectId);
+    await settleUserGlobalSync(projectId);
     return NextResponse.json({ data });
   } catch (error) {
     return mcpServerErrorResponse(error);
@@ -131,6 +168,7 @@ export async function handleDeleteMcpServer(
 ): Promise<NextResponse> {
   try {
     deleteMcpServer(serverId, undefined, projectId);
+    await settleUserGlobalSync(projectId);
     return NextResponse.json({ data: { id: serverId, deleted: true } });
   } catch (error) {
     return mcpServerErrorResponse(error);

@@ -29,15 +29,31 @@
  *    a config we cannot parse is a config we must not rewrite.
  * 3. **Never touch `arij`.** install.sh owns that entry, and its
  *    `${ARIJ_MCP_TOKEN}` indirection is what makes the control channel work.
- * 4. **Never throw, and never block.** This is requested from CRUD request
- *    handlers, so a missing omp install or an unwritable home directory must
- *    not fail a settings save — and the work must not run inline either.
- *    Arij is a single process: a synchronous child-process spawn stops SSE,
- *    session chunk persistence, the watchdog, pipelines and Full Auto for its
- *    whole duration. Reconciliation is therefore scheduled in the background
- *    and awaited by nobody; the registries mirror the database rather than
- *    holding any truth the response depends on.
- * 5. **Only ever reconcile from the LIVE application database.** These writes
+ * 4. **Never throw, and never block the event loop.** This is requested from
+ *    CRUD request handlers, so a missing omp install or an unwritable home
+ *    directory must not fail a settings save — and the work must not run
+ *    INLINE either. Arij is a single process: a synchronous child-process
+ *    spawn stops SSE, session chunk persistence, the watchdog, pipelines and
+ *    Full Auto for its whole duration. Every spawn here is therefore awaited
+ *    rather than blocking, and the work is scheduled off the call itself.
+ * 5. **A global CRUD response must mean the registries already agree with
+ *    it.** Scheduling alone is not enough. omp and agy hand a session its
+ *    COMPLETE server set when the CLI starts and freeze it for the whole run,
+ *    so a session launched between the HTTP response and the end of
+ *    reconciliation would silently use the OLD set — a server the user just
+ *    deleted still live, a rotated credential still the previous one, a newly
+ *    enabled server absent — while the database and the injected prompt both
+ *    describe the new one. That is an access-control gap, not a lag.
+ *
+ *    The fix is a completion barrier rather than a return to inline work: the
+ *    route handlers await `whenUserGlobalMcpSyncSettles()` before answering
+ *    (lib/mcp/server-routes.ts). Because the spawns are asynchronous, the
+ *    event loop stays free for everything else while that one request waits —
+ *    rule 4 is intact — and the acknowledgement gains a meaning it did not
+ *    have: any session started AFTER a 2xx sees the state that 2xx describes.
+ *    A session started DURING the request is unordered with respect to it and
+ *    may still see either state, which is what "not yet acknowledged" means.
+ * 6. **Only ever reconcile from the LIVE application database.** These writes
  *    leave the repository and the process: they change the user's own CLI
  *    config and shell out to `agy`. Reconciling from anything else — a test's
  *    in-memory database, a migration script, a one-off handle — would push
@@ -143,9 +159,9 @@ interface UserGlobalManifest {
 
 const EMPTY_MANIFEST: UserGlobalManifest = { omp: [], agy: [] };
 
-function readManifest(): UserGlobalManifest {
+function readManifest(file: string): UserGlobalManifest {
   try {
-    const raw = fs.readFileSync(userGlobalManifestPath(), "utf-8");
+    const raw = fs.readFileSync(file, "utf-8");
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return { ...EMPTY_MANIFEST };
     const record = parsed as Record<string, unknown>;
@@ -159,9 +175,8 @@ function readManifest(): UserGlobalManifest {
   }
 }
 
-function writeManifest(manifest: UserGlobalManifest): void {
+function writeManifest(file: string, manifest: UserGlobalManifest): void {
   try {
-    const file = userGlobalManifestPath();
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`, {
       encoding: "utf-8",
@@ -176,7 +191,7 @@ function writeManifest(manifest: UserGlobalManifest): void {
 }
 
 /** A global server as this module needs it — unmasked, straight from the row. */
-interface SyncableServer {
+export interface SyncableServer {
   name: string;
   transport: "stdio" | "http";
   command: string | null;
@@ -239,9 +254,11 @@ export function syncableGlobalServers(database: ArijDatabase = db): SyncableServ
 /* oh-my-pi — a JSON file we merge into                                */
 /* ------------------------------------------------------------------ */
 
-function syncOmp(servers: SyncableServer[], previouslyOwned: string[]): string[] {
-  const configPath = ompMcpConfigPath();
-
+function syncOmp(
+  configPath: string,
+  servers: SyncableServer[],
+  previouslyOwned: string[],
+): string[] {
   let config: Record<string, unknown> = {};
   if (fs.existsSync(configPath)) {
     let raw: string;
@@ -389,15 +406,22 @@ async function runAgy(args: string[]): Promise<boolean> {
   }
 }
 
-async function agyAvailable(): Promise<boolean> {
-  return runAgy(["mcp", "list"]);
-}
+/**
+ * Runs one `agy` subcommand and reports whether it succeeded.
+ *
+ * Injected rather than imported so the reconciliation can be exercised
+ * end-to-end without an `agy` on the machine — and, more to the point, with a
+ * SLOW one: the completion barrier below is only worth anything if a test can
+ * hold reconciliation open and observe what a session would see meanwhile.
+ */
+export type AgyRunner = (args: string[]) => Promise<boolean>;
 
 async function syncAgy(
+  runner: AgyRunner,
   servers: SyncableServer[],
   previouslyOwned: string[],
 ): Promise<string[]> {
-  if (!(await agyAvailable())) return previouslyOwned;
+  if (!(await runner(["mcp", "list"]))) return previouslyOwned;
 
   const wanted = new Set(servers.map((s) => s.name));
   const owned = new Set<string>();
@@ -405,7 +429,7 @@ async function syncAgy(
   for (const name of previouslyOwned) {
     if (name === ARIJ_MCP_SERVER_NAME) continue;
     if (!wanted.has(name)) {
-      if (!(await runAgy(["mcp", "remove", name]))) {
+      if (!(await runner(["mcp", "remove", name]))) {
         // Could not drop it — keep claiming ownership so the next sync retries
         // instead of orphaning an entry Arij put there.
         owned.add(name);
@@ -414,7 +438,7 @@ async function syncAgy(
   }
 
   for (const server of servers) {
-    if (await runAgy(agyAddArgs(server))) {
+    if (await runner(agyAddArgs(server))) {
       owned.add(server.name);
     } else {
       console.warn(
@@ -428,81 +452,155 @@ async function syncAgy(
 
 /* ------------------------------------------------------------------ */
 
-/**
- * Serialization + coalescing for the background reconciliation.
- *
- * Two writes landing together must not interleave: both would read the same
- * manifest, rewrite the same mcp.json, and drive `agy mcp add/remove` against
- * the same register, so the loser's view of "what Arij owns" would be stale.
- * Runs are therefore chained.
- *
- * Coalescing matters just as much. Every create/update/delete asks for a sync,
- * and reconciliation is a full rebuild from current DB state rather than a
- * delta — so N queued runs would do identical work N times. At most ONE run is
- * ever pending behind the active one; further requests fold into it, because by
- * the time it starts it will already see every write that asked for it.
- */
-let activeSync: Promise<void> = Promise.resolve();
-let syncQueued = false;
+/** Everything one reconciliation writes to, so a test can point it elsewhere. */
+export interface UserGlobalSyncTargets {
+  /** omp's `mcp.json`. */
+  ompConfigPath: string;
+  /** Arij's ownership manifest (rule 1). */
+  manifestPath: string;
+  runAgy: AgyRunner;
+}
 
-async function reconcile(database: ArijDatabase): Promise<void> {
-  if (!isUserGlobalMcpSyncEnabled(database)) return;
-  const servers = syncableGlobalServers(database);
-  const manifest = readManifest();
+/**
+ * One reconciliation pass: bring both registries in line with `servers`.
+ *
+ * A full rebuild from the given list rather than a delta — that is what lets
+ * the scheduler below coalesce requests, and what makes a missed run
+ * self-healing rather than permanently divergent.
+ */
+export async function reconcileUserGlobalMcpServers(
+  servers: SyncableServer[],
+  targets: UserGlobalSyncTargets,
+): Promise<void> {
+  const manifest = readManifest(targets.manifestPath);
   // omp first (pure file I/O), then agy (child processes) — order is not
   // load-bearing, but keeping the cheap one first means a hanging agy cannot
   // delay the file that most setups actually use.
-  const omp = syncOmp(servers, manifest.omp);
-  const agy = await syncAgy(servers, manifest.agy);
-  writeManifest({ omp, agy });
+  const omp = syncOmp(targets.ompConfigPath, servers, manifest.omp);
+  const agy = await syncAgy(targets.runAgy, servers, manifest.agy);
+  writeManifest(targets.manifestPath, { omp, agy });
 }
+
+/**
+ * Serialization, coalescing, and the completion barrier for the background
+ * reconciliation.
+ *
+ * **Serialization.** Two writes landing together must not interleave: both
+ * would read the same manifest, rewrite the same mcp.json, and drive
+ * `agy mcp add/remove` against the same register, so the loser's view of "what
+ * Arij owns" would be stale. Runs are therefore chained.
+ *
+ * **Coalescing.** Every create/update/delete asks for a sync, and
+ * reconciliation is a full rebuild from current database state rather than a
+ * delta — so N queued runs would do identical work N times. At most ONE run is
+ * ever pending behind the active one; further requests fold into it.
+ *
+ * That fold is only sound because of a pairing this function and `run` have to
+ * honour together: `queued` is cleared immediately BEFORE `run()` is invoked,
+ * and `run()` reads the database synchronously before its first `await`. So
+ * while `queued` is true the pending run has provably not looked at the
+ * database yet and will see the write that folded into it; once it has looked,
+ * `queued` is false and the next write schedules a fresh run of its own.
+ *
+ * **The barrier.** `settled()` resolves when every run requested so far has
+ * finished. It is what makes a global CRUD response mean something (rule 5):
+ * omp and agy freeze a session's server set at spawn, so "scheduled" is not a
+ * state a caller can safely acknowledge. Exposed as a factory rather than
+ * hard-wired so it can be driven by a test with a deliberately slow runner —
+ * a barrier nothing can hold open is a barrier nothing can verify.
+ */
+export function createUserGlobalSyncScheduler(run: () => Promise<void>): {
+  request: () => void;
+  settled: () => Promise<void>;
+} {
+  let active: Promise<void> = Promise.resolve();
+  let queued = false;
+
+  return {
+    request() {
+      if (queued) return; // an already-pending run will see this write too
+      queued = true;
+      active = active
+        .then(() => {
+          queued = false;
+          return run();
+        })
+        .catch((error) => {
+          // Never an unhandled rejection: `active` is handed to request
+          // handlers, and a settings save must not fail because omp is not
+          // installed or a home directory is read-only.
+          console.warn(
+            "[mcp-user-global] reconciliation skipped:",
+            error instanceof Error ? error.message : error,
+          );
+        });
+    },
+    settled() {
+      return active;
+    },
+  };
+}
+
+/** The live targets: the user's real files and the real `agy` on PATH. */
+function liveTargets(): UserGlobalSyncTargets {
+  return {
+    ompConfigPath: ompMcpConfigPath(),
+    manifestPath: userGlobalManifestPath(),
+    runAgy,
+  };
+}
+
+/**
+ * Reconciles from the live database. Synchronous up to its first `await`,
+ * which is the invariant `createUserGlobalSyncScheduler` folds requests on —
+ * do not introduce an `await` before `syncableGlobalServers` reads.
+ */
+async function reconcileLive(): Promise<void> {
+  if (!isUserGlobalMcpSyncEnabled(db)) return;
+  await reconcileUserGlobalMcpServers(syncableGlobalServers(db), liveTargets());
+}
+
+const scheduler = createUserGlobalSyncScheduler(reconcileLive);
 
 /**
  * Requests reconciliation of the user-global registries with the current
  * GLOBAL servers.
  *
- * Returns IMMEDIATELY and does the work in the background. It is called from
- * the CRUD paths in lib/mcp/servers.ts, which are request handlers, and the
- * work spawns child processes — an inline synchronous version froze the whole
- * single-process app for the duration of every settings save, including the
- * one-click Enable/Disable button. The registries are a mirror of the database,
- * not the source of truth, so the response does not need to wait for them.
+ * Returns IMMEDIATELY and does the work in the background: the CRUD paths in
+ * lib/mcp/servers.ts are request handlers, and an inline synchronous version
+ * froze the whole single-process app for the duration of every settings save,
+ * including the one-click Enable/Disable button.
  *
- * Best-effort and never throws — into the caller OR as an unhandled rejection:
- * a settings save must not fail because omp is not installed or a home
- * directory is read-only.
+ * "In the background" is not the same as "unobserved", though — see rule 5.
+ * Callers that are about to ACKNOWLEDGE the write, or to spawn a session that
+ * would freeze the registry's contents for its whole run, must await
+ * `whenUserGlobalMcpSyncSettles()` first. The route handlers do
+ * (lib/mcp/server-routes.ts).
+ *
+ * Best-effort and never throws — into the caller OR as an unhandled rejection.
  */
 export function syncUserGlobalMcpServers(database: ArijDatabase = db): void {
   // These guards run SYNCHRONOUSLY, before anything is scheduled, so a test or
   // a non-live caller never even queues work.
   //
-  // Rule 5. An injected handle means the caller is not the live app, and
+  // Rule 6. An injected handle means the caller is not the live app, and
   // nothing but the live app has any business rewriting a user's CLI config.
   if (database !== db) return;
   // Belt and braces: even if some future caller passes the real `db` from a
   // test, a test run must not reach the developer's own home directory.
   if (process.env.VITEST || process.env.NODE_ENV === "test") return;
 
-  if (syncQueued) return; // an already-pending run will see this write too
-  syncQueued = true;
-  activeSync = activeSync
-    .then(() => {
-      syncQueued = false;
-      return reconcile(database);
-    })
-    .catch((error) => {
-      syncQueued = false;
-      console.warn(
-        "[mcp-user-global] reconciliation skipped:",
-        error instanceof Error ? error.message : error,
-      );
-    });
+  scheduler.request();
 }
 
 /**
- * Resolves once no reconciliation is in flight. For tests and for shutdown
- * paths that want the background work finished before they look at the files.
+ * Resolves once every reconciliation requested so far has finished.
+ *
+ * The completion barrier of rule 5, and the reason it is safe for a route to
+ * answer at all: awaiting this before responding is what makes "200 OK" mean
+ * "omp's mcp.json and agy's register already say this", rather than "a process
+ * that will eventually say this has been started". Never rejects.
  */
 export function whenUserGlobalMcpSyncSettles(): Promise<void> {
-  return activeSync;
+  return scheduler.settled();
 }

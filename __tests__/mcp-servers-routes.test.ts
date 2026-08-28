@@ -28,6 +28,39 @@ vi.mock("@/lib/db", async () => {
   return { db: created.db, sqlite: created.sqlite, ensureDbReady: vi.fn() };
 });
 
+/**
+ * A handle on the user-global reconciliation barrier.
+ *
+ * The real one is always resolved under VITEST — the sync guards refuse to
+ * touch a developer's `~/.omp` or run `agy` from a test — so nothing here could
+ * otherwise tell an awaited barrier from an ignored one. `pending` stands in
+ * for a reconciliation still in flight; it is null (resolved, like production
+ * at rest) for every test that does not care.
+ */
+const syncBarrier = vi.hoisted(() => ({
+  pending: null as Promise<void> | null,
+  release: null as (() => void) | null,
+  hold() {
+    this.pending = new Promise<void>((resolve) => {
+      this.release = resolve;
+    });
+  },
+  free() {
+    this.release?.();
+    this.pending = null;
+    this.release = null;
+  },
+}));
+
+vi.mock("@/lib/mcp/user-global-sync", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/mcp/user-global-sync")>();
+  return {
+    ...actual,
+    whenUserGlobalMcpSyncSettles: () => syncBarrier.pending ?? Promise.resolve(),
+  };
+});
+
 const { db } = await import("@/lib/db");
 const { mcpServers, projects } = await import("@/lib/db/schema");
 const {
@@ -58,6 +91,7 @@ const stdio = (name: string, extra: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
+  syncBarrier.free();
   db.delete(mcpServers).run();
   db.delete(projects).run();
   db.insert(projects)
@@ -418,5 +452,95 @@ describe("project MCP server routes", () => {
       mockRouteContext({ projectId: PROJECT_ID }),
     );
     expect(malformed.status).toBe(400);
+  });
+});
+
+/**
+ * The reconciliation barrier (lib/mcp/user-global-sync.ts, rule 5).
+ *
+ * A global write is pushed into oh-my-pi's `mcp.json` and agy's register in the
+ * background, and those two CLIs freeze their server set when the process
+ * starts. So the moment the handler answers is the moment a session may start
+ * on the new configuration — which makes answering early a correctness bug and
+ * not a cosmetic lag: the session would run the previous set (a deleted server
+ * still mounted, a rotated credential still the old one) while the database and
+ * its own prompt describe the new one.
+ *
+ * These tests hold the barrier open and assert the response has not been sent.
+ * The DB assertion inside the window matters too: the write must already have
+ * landed, so the barrier is the last step of the handler rather than a lock
+ * taken before it.
+ */
+describe("a global write waits for the user-global reconciliation", () => {
+  /** Resolves to true only if `work` settles within a few event-loop turns. */
+  async function settlesPromptly(work: Promise<unknown>): Promise<boolean> {
+    const marker = Symbol("pending");
+    const raced = await Promise.race([
+      work,
+      new Promise((resolve) => setTimeout(() => resolve(marker), 30)),
+    ]);
+    return raced !== marker;
+  }
+
+  it("holds the POST response until the registries agree", async () => {
+    syncBarrier.hold();
+
+    const inFlight = globalRoute.POST(mockJsonRequest(stdio("godot")));
+
+    expect(await settlesPromptly(inFlight)).toBe(false);
+    // The row is already written: the handler is waiting on reconciliation,
+    // not on a lock it takes before doing the work.
+    expect(db.select().from(mcpServers).all()).toHaveLength(1);
+
+    syncBarrier.free();
+    const response = await inFlight;
+    expect(response.status).toBe(201);
+  });
+
+  it("holds the PATCH response too — a rotated credential is the point", async () => {
+    const { payload } = await createGlobal(stdio("godot"));
+    syncBarrier.hold();
+
+    const inFlight = globalItemRoute.PATCH(
+      mockJsonRequest({ env: { GODOT_TOKEN: "rotated-value" } }),
+      mockRouteContext({ serverId: payload.data.id }),
+    );
+
+    expect(await settlesPromptly(inFlight)).toBe(false);
+
+    syncBarrier.free();
+    expect((await inFlight).status).toBe(200);
+  });
+
+  it("holds the DELETE response — the deleted server is still mounted until it lands", async () => {
+    const { payload } = await createGlobal(stdio("godot"));
+    syncBarrier.hold();
+
+    const inFlight = globalItemRoute.DELETE(
+      mockNextRequest({ method: "DELETE" }),
+      mockRouteContext({ serverId: payload.data.id }),
+    );
+
+    expect(await settlesPromptly(inFlight)).toBe(false);
+    expect(db.select().from(mcpServers).all()).toHaveLength(0);
+
+    syncBarrier.free();
+    expect((await inFlight).status).toBe(200);
+  });
+
+  it("does not make a PROJECT write wait for it", async () => {
+    // A project-scoped server cannot be expressed in a user-global registry at
+    // all, so it requests no reconciliation and must not inherit its latency.
+    syncBarrier.hold();
+
+    const inFlight = projectRoute.POST(
+      mockJsonRequest(stdio("playwright")),
+      mockRouteContext({ projectId: PROJECT_ID }),
+    );
+
+    expect(await settlesPromptly(inFlight)).toBe(true);
+    expect((await inFlight).status).toBe(201);
+
+    syncBarrier.free();
   });
 });

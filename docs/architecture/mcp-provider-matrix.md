@@ -154,6 +154,19 @@ to rewrite a config it cannot parse, never touches the `arij` entry, and tracks
 the names it wrote in `data/mcp-user-global.json` so it only ever removes its
 own. It never throws into a request handler.
 
+Its child processes are awaited rather than run synchronously — Arij is one
+process, and a blocking spawn on the CRUD path stops SSE, chunk persistence, the
+watchdog, pipelines and Full Auto with it. But a GLOBAL write is not
+acknowledged until that reconciliation has landed: the handlers await
+`whenUserGlobalMcpSyncSettles()` before responding. omp and agy freeze a
+session's server set when the CLI starts, so a session launched between the
+response and the end of reconciliation would run the previous set — a deleted
+server still mounted, a rotated credential still the old one — while the
+database and the injected prompt describe the new one. A 2xx therefore means
+"already in the registry", not "queued". Project-scoped writes skip the wait:
+they request no reconciliation, having nothing a user-global registry can
+express.
+
 ### Secret exposure differs by provider — this is a decision, not a detail
 
 | Where the value lands | Providers | Who can read it |
