@@ -1,5 +1,11 @@
 import { expect, test } from "./fixtures/arij-project";
-import { openNewMenu, openTicketDetail, pasteImage, ticketCard } from "./fixtures/board";
+import {
+  naturalWidthOfLazyImage,
+  openNewMenu,
+  openTicketDetail,
+  pasteImage,
+  ticketCard,
+} from "./fixtures/board";
 
 /**
  * The screenshot path end to end: New → New Bug → Ctrl/Cmd+V → a bug whose
@@ -42,8 +48,14 @@ test.describe("Bug creation with a pasted screenshot", () => {
 
     // The element rendering is not enough: assert the browser actually decoded
     // bytes served back for that path, so a broken src fails here.
+    //
+    // Through `naturalWidthOfLazyImage`, which scrolls the thumbnail into view
+    // on every tick before reading it. The thumbnail is `loading="lazy"` inside
+    // a scroll container, and a bare `evaluate` never scrolls — so whether
+    // Chrome had even issued the request was left to where the panel's layout
+    // happened to put the image. See the helper for the measurement.
     await expect
-      .poll(() => thumbnails.first().evaluate((img: HTMLImageElement) => img.naturalWidth))
+      .poll(() => naturalWidthOfLazyImage(thumbnails.first()))
       .toBeGreaterThan(0);
 
     // Clicking it opens the full-size view.
