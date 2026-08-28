@@ -13,6 +13,7 @@ import {
   loadProjectGraph,
 } from "@/lib/dependencies/validation";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
+import { compareExecutionOrder } from "@/lib/kanban/queue";
 import {
   evaluateMergeReadiness,
   hasFreshCleanReview,
@@ -700,47 +701,18 @@ function isEpicSelectable(board: AutoModeBoard, epic: EpicRow): boolean {
 /**
  * Execution order of the candidate set: column rank, then position ASC.
  *
- * `position` is written PER COLUMN — creation uses `MAX(position) + 1`
- * scoped to the target status, and the reorder route rewrites each column as
- * 0..n-1 — so every column has its own position 0 and position alone is not
- * a total order over a set that spans two columns. The build selector spans
- * exactly two (To Do and unoccupied In Progress), so the column is the
- * primary key and position the secondary one. Without that rule the
- * cross-column tie would fall through to `epicRows`, which query 1 reads
- * with no ORDER BY — i.e. to creation order, which is invisible on the board
- * and unreachable by dragging.
+ * The rule itself lives in `compareExecutionOrder`
+ * (lib/kanban/queue.ts) — client-safe, pure, and therefore readable by the
+ * screens that CLAIM to show this queue. Two copies of "the order Full Auto
+ * picks in" is precisely the divergence the desk's UP NEXT column would
+ * otherwise reproduce; the supervisor and the UI now sort with one function.
  *
- * In Progress ranks before To Do: a ticket sitting there came back from a
- * negative review, and finishing work already started beats opening a new
- * front. Within a column, position ASC is the column's visual reading order
- * — position is the single source of truth for execution order, so what the
- * user sees is what the supervisor runs (WYSIWYG). Priority stays a badge
- * and a filter, never a scheduling criterion; the "Sort by priority" button
- * makes it visible in the order by rewriting positions in bulk.
- *
- * The `id` tiebreak only fires on a malformed board (two rows sharing a
- * position after a partial write). It is arbitrary but deterministic, which
- * beats "whatever SQLite returned first".
+ * The cross-column rule matters here because the build selector spans two
+ * columns (To Do and unoccupied In Progress). Without it the tie would fall
+ * through to `epicRows`, which query 1 reads with no ORDER BY — i.e. to
+ * creation order, which is invisible on the board.
  */
-const EXECUTION_COLUMN_RANK: Readonly<Record<string, number>> = {
-  in_progress: 0,
-  todo: 1,
-};
-
-/** Columns the build selector does not span sort last, among themselves. */
-const UNRANKED_COLUMN = 2;
-
-function compareEpics(a: EpicRow, b: EpicRow): number {
-  const byColumn =
-    (EXECUTION_COLUMN_RANK[a.status ?? ""] ?? UNRANKED_COLUMN) -
-    (EXECUTION_COLUMN_RANK[b.status ?? ""] ?? UNRANKED_COLUMN);
-  if (byColumn !== 0) return byColumn;
-
-  const byPosition = (a.position ?? 0) - (b.position ?? 0);
-  if (byPosition !== 0) return byPosition;
-
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-}
+const compareEpics = compareExecutionOrder;
 
 /**
  * The infinite-re-review guard.

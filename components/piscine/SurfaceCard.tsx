@@ -21,12 +21,21 @@ import { cn } from "@/lib/utils";
  * - `selected`  → 2px `--foreground`               (house rule: 2px = selection only)
  * Switching between them costs 0.5px per side, i.e. nothing you can see, and
  * never the 4px jump a naive implementation would produce.
+ *
+ * EXTENSION (packet A, frame 5a): the component spreads the remaining
+ * `<div>` props onto its root, so a caller can attach `data-testid`, `id`,
+ * `role`, `onClick` or `tabIndex` without wrapping the card in an extra
+ * element — a wrapper would break the grid/flex layouts the frames rely on
+ * (the card IS the grid cell). `className` and `children` stay explicit so
+ * `cn()` keeps the last word on styling. Purely additive: no existing call
+ * site changes behaviour.
  */
 
 /** Corner radius, in px. 12 default; 10 for tight story rows and the 8a terminal card; 11 for 7a tiles and 8c ticket rows. */
 export type SurfaceRadius = 10 | 11 | 12;
 
-export interface SurfaceCardProps {
+export interface SurfaceCardProps
+  extends Omit<React.ComponentPropsWithoutRef<"div">, "className" | "children"> {
   /** Use `--card-translucent` instead of the solid card fill. */
   translucent?: boolean;
   /** Corner radius in px. Defaults to 12. */
@@ -52,11 +61,13 @@ export function SurfaceCard({
   interactive = false,
   className,
   children,
+  ...props
 }: SurfaceCardProps) {
   return (
     <div
       data-slot="surface-card"
       data-selected={selected ? "" : undefined}
+      {...props}
       className={cn(
         translucent ? "bg-card-translucent" : "bg-card",
         RADIUS[radius],

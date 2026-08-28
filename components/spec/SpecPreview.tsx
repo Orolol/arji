@@ -7,10 +7,19 @@ interface SpecPreviewProps {
   markdown: string;
 }
 
+/**
+ * Rendered markdown for the spec and the memory preview.
+ *
+ * Typography follows frame 8b's editor card: Bricolage Grotesque 700 for the
+ * headings (h1 21 / h2 15 / h3 13.5), Instrument Sans 13.5/1.6 in `--foreground`
+ * for prose, Space Mono on `--muted` for code. Structure and the plugin set are
+ * unchanged.
+ */
+
 export function SpecPreview({ markdown }: SpecPreviewProps) {
   if (!markdown) {
     return (
-      <p className="text-[14px] text-muted-foreground">
+      <p className="text-[13.5px] text-muted-foreground">
         No specification written yet. Use the editor or generate one from the
         chat.
       </p>
@@ -18,27 +27,27 @@ export function SpecPreview({ markdown }: SpecPreviewProps) {
   }
 
   return (
-    <div className="text-[14.5px] leading-[1.7] text-foreground">
+    <div className="font-sans text-[13.5px] leading-[1.6] text-foreground">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }) => (
-            <h1 className="mb-[12px] mt-[26px] text-[26px] font-semibold tracking-[-0.01em] first:mt-0">
+            <h1 className="mb-[10px] mt-[22px] font-display text-[21px] font-bold tracking-[-0.01em] first:mt-0">
               {children}
             </h1>
           ),
           h2: ({ children }) => (
-            <h2 className="mb-[10px] mt-[26px] text-[20px] font-semibold first:mt-0">
+            <h2 className="mb-[8px] mt-[20px] font-display text-[15px] font-bold first:mt-0">
               {children}
             </h2>
           ),
           h3: ({ children }) => (
-            <h3 className="mb-[10px] mt-[26px] text-[17px] font-semibold first:mt-0">
+            <h3 className="mb-[8px] mt-[18px] font-display text-[13.5px] font-bold first:mt-0">
               {children}
             </h3>
           ),
           h4: ({ children }) => (
-            <h4 className="mb-[8px] mt-[20px] text-[15px] font-semibold first:mt-0">
+            <h4 className="mb-[6px] mt-[16px] font-display text-[12.5px] font-bold first:mt-0">
               {children}
             </h4>
           ),
@@ -72,19 +81,19 @@ export function SpecPreview({ markdown }: SpecPreviewProps) {
               );
             }
             return (
-              <code className="rounded bg-band px-[5px] py-[2px] font-mono text-[12.5px]">
+              <code className="rounded bg-muted px-[5px] py-[2px] font-mono text-[12.5px]">
                 {children}
               </code>
             );
           },
           pre: ({ children }) => (
-            <pre className="my-[12px] overflow-x-auto rounded-[10px] bg-band p-[14px] leading-[1.7]">
+            <pre className="my-[12px] overflow-x-auto rounded-[10px] bg-muted p-[14px] leading-[1.6]">
               {children}
             </pre>
           ),
           table: ({ children }) => (
             <div className="my-[12px] overflow-x-auto">
-              <table className="w-full text-[13.5px]">{children}</table>
+              <table className="w-full text-[12.5px]">{children}</table>
             </div>
           ),
           th: ({ children }) => (

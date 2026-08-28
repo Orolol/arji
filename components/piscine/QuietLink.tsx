@@ -34,6 +34,11 @@ export interface QuietLinkProps {
   onClick?: () => void;
   tone?: QuietLinkTone;
   size?: 11.5 | 12;
+  /**
+   * `data-testid` on the interactive element itself. Additive: a test has to
+   * be able to CLICK the link, so the id cannot live on a wrapper.
+   */
+  testId?: string;
   className?: string;
   children: React.ReactNode;
 }
@@ -43,6 +48,7 @@ export function QuietLink({
   onClick,
   tone = "next",
   size = 12,
+  testId,
   className,
   children,
 }: QuietLinkProps) {
@@ -59,14 +65,26 @@ export function QuietLink({
 
   if (href) {
     return (
-      <Link data-slot="quiet-link" href={href} onClick={onClick} className={classes}>
+      <Link
+        data-slot="quiet-link"
+        data-testid={testId}
+        href={href}
+        onClick={onClick}
+        className={classes}
+      >
         {children}
       </Link>
     );
   }
 
   return (
-    <button data-slot="quiet-link" type="button" onClick={onClick} className={classes}>
+    <button
+      data-slot="quiet-link"
+      data-testid={testId}
+      type="button"
+      onClick={onClick}
+      className={classes}
+    >
       {children}
     </button>
   );

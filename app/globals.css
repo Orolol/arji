@@ -370,7 +370,7 @@
    carrying .stratum-you — recolours every indicator inside it. The five
    .stratum-* scopes below do exactly that.
 
-   Dot SIZE stays a call-site concern via w-*/h-* utilities (7px on cards,
+   Dot SIZE stays a call-site concern via w-* / h-* utilities (7px on cards,
    8px in the rail, 6px in the Piscine header chips). This file must not
    declare width/height on .breathing-dot: these rules are unlayered and
    would out-rank the layered Tailwind utilities the 11 call sites use. */

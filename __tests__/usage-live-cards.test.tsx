@@ -177,6 +177,11 @@ function claudeSubWith(
  * Minimal report: one recorded session so the page renders its lower
  * sections (the Arij 30-day strip in particular, which the codex history
  * strip must stay visually distinct from).
+ *
+ * The `dashboard` block below is the ONLY change this file received for the
+ * frame-8d re-skin: `UsageReport` gained a required ninth key, so the fixture
+ * has to carry one. Not one assertion in this file changed — it is still the
+ * proof that the subscription-card subtree moved verbatim.
  */
 function report(subscriptions: SubscriptionStatus[]): UsageReport {
   return {
@@ -195,6 +200,27 @@ function report(subscriptions: SubscriptionStatus[]): UsageReport {
     },
     subscriptions,
     generatedAt: "2026-08-18T12:00:00.000Z",
+    dashboard: {
+      range: "30d",
+      since: "2026-07-19T12:00:00.000Z",
+      totals: {
+        costUsd: 1,
+        sessions: 1,
+        cleanPercent: 100,
+        ticketsShipped: 0,
+        costPerTicketUsd: null,
+      },
+      cap: { capUsd: null, spentUsd: 1, usedPercent: null, alertPercent: 80 },
+      byAgent: [],
+      byProject: [],
+      byDay: Array.from({ length: 30 }, (_, i) => ({
+        date: `2026-08-${String(i + 1).padStart(2, "0")}`,
+        sessions: i === 29 ? 1 : 0,
+        costUsd: i === 29 ? 1 : null,
+        failedSessions: 0,
+      })),
+      nightYesterdayUsd: null,
+    },
   };
 }
 

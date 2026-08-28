@@ -13,6 +13,15 @@ import { cn } from "@/lib/utils";
 export interface CappedBar {
   value: number;
   failed?: boolean;
+  /**
+   * Native tooltip for the day this bar stands for. Optional and additive: a
+   * bar series that carries no identity (the 7a sparkline) omits it.
+   */
+  title?: string;
+  /** `data-testid` for the bar element (the wrapper on a failed day). */
+  testId?: string;
+  /** `data-testid` for the red cap span. Only read when `failed`. */
+  capTestId?: string;
 }
 
 export interface CappedBarChartProps {
@@ -23,6 +32,8 @@ export interface CappedBarChartProps {
   capPx?: number;
   /** px between bars. 4 for 7a, 5 for 8d. */
   gap?: number;
+  /** `data-testid` for the bars row itself. */
+  testId?: string;
   className?: string;
 }
 
@@ -31,6 +42,7 @@ export function CappedBarChart({
   height,
   capPx = 6,
   gap = 4,
+  testId,
   className,
 }: CappedBarChartProps) {
   // An empty series renders nothing; the caller collapses the band around it.
@@ -45,6 +57,7 @@ export function CappedBarChart({
   return (
     <div
       data-slot="capped-bar-chart"
+      data-testid={testId}
       className={cn(
         "flex items-end",
         // 8d: grow into the band. min-h-0 is what lets a flex child actually
@@ -64,6 +77,8 @@ export function CappedBarChart({
           return (
             <span
               key={i}
+              data-testid={bar.testId}
+              title={bar.title}
               className="min-w-0 flex-1 rounded-t-[3px] bg-strata-live-bar"
               style={{ height: barHeight }}
             />
@@ -74,9 +89,12 @@ export function CappedBarChart({
           <span
             key={i}
             data-failed=""
+            data-testid={bar.testId}
+            title={bar.title}
             className="flex min-w-0 flex-1 flex-col justify-end"
           >
             <span
+              data-testid={bar.capTestId}
               className="shrink-0 rounded-t-[3px] bg-chart-fail"
               style={{ height: `${capPx}px` }}
             />

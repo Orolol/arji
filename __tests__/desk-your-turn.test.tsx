@@ -1,0 +1,268 @@
+/**
+ * The coral stratum: the three things that are blocked on a human.
+ *
+ * Replaces the deleted `epic-card-failure` / `kanban-unread-ai-indicator` /
+ * inbox-side coverage: the failure line and its meta, the awaiting-reply quote,
+ * the merge-conflict affordance rule, and the invariant that an empty stratum
+ * folds to its label line instead of showing an "all clear" placeholder.
+ */
+
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+
+import { relativeAge } from "@/components/desk/AttentionRow";
+import { YourTurnBand } from "@/components/desk/YourTurnBand";
+import { deriveProjects } from "@/lib/control-desk/aggregate";
+import type {
+  DeskAwaitingReply,
+  DeskConflict,
+  DeskFailure,
+} from "@/lib/control-desk/types";
+
+const projects = deriveProjects([{ id: "p1", name: "Arij", createdAt: "2026-01-01" }]);
+const projectsById = new Map(projects.map((p) => [p.id, p]));
+
+function asks(overrides: Partial<DeskAwaitingReply> = {}): DeskAwaitingReply {
+  return {
+    epicId: "e1",
+    projectId: "p1",
+    readableId: "PXB-24",
+    title: "Legacy renderer",
+    question: "Je garde le renderer legacy derrière un flag, ou je le supprime ?",
+    author: "agent",
+    askedAt: "2026-08-28T09:00:00",
+    unreadAi: true,
+    ...overrides,
+  };
+}
+
+function failure(overrides: Partial<DeskFailure> = {}): DeskFailure {
+  return {
+    epicId: "e2",
+    projectId: "p1",
+    readableId: "NMB-09",
+    title: "Worker pool",
+    sessionId: "s9",
+    error: "exit 1 — worker pool did not drain in 120s",
+    agentType: "build",
+    agentName: "Opus Builder",
+    provider: "claude-code",
+    namedAgentId: "a1",
+    userStoryId: null,
+    producedOutput: true,
+    failedAt: new Date(Date.now() - 21 * 60_000).toISOString(),
+    ...overrides,
+  };
+}
+
+function conflict(overrides: Partial<DeskConflict> = {}): DeskConflict {
+  return {
+    epicId: "e3",
+    projectId: "p1",
+    readableId: "LDG-71",
+    title: "Tax export",
+    blocker: "merge_conflict",
+    branchName: "epic/ldg-71",
+    at: "2026-08-28T09:00:00",
+    ...overrides,
+  };
+}
+
+function renderBand(props: Partial<React.ComponentProps<typeof YourTurnBand>> = {}) {
+  const handlers = {
+    onReply: vi.fn(),
+    onSendToDev: vi.fn(),
+    onRetry: vi.fn(),
+    onOpenLog: vi.fn(),
+    onResolveConflict: vi.fn(),
+    onOpenDiff: vi.fn(),
+  };
+  render(
+    <YourTurnBand
+      awaitingReply={[]}
+      failed={[]}
+      conflicts={[]}
+      projectsById={projectsById}
+      {...handlers}
+      {...props}
+    />,
+  );
+  return handlers;
+}
+
+describe("empty stratum", () => {
+  it("collapses to its label line — no rows, no counter, no hint", () => {
+    renderBand();
+    expect(screen.getByText("Your turn")).toBeInTheDocument();
+    expect(screen.queryByTestId("desk-your-turn-rows")).not.toBeInTheDocument();
+    expect(screen.queryByText(/parcourir/)).not.toBeInTheDocument();
+  });
+
+  it("shows the counter and the keyboard hint as soon as something blocks", () => {
+    renderBand({ awaitingReply: [asks()], failed: [failure()] });
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText("↹ parcourir · ⏎ répondre")).toBeInTheDocument();
+  });
+});
+
+describe("ASKS YOU", () => {
+  it("quotes the agent's question with French quotation marks", () => {
+    renderBand({ awaitingReply: [asks()] });
+    expect(
+      screen.getByText(
+        "« Je garde le renderer legacy derrière un flag, ou je le supprime ? »",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to the ticket title when no comment was captured", () => {
+    renderBand({ awaitingReply: [asks({ question: null })] });
+    expect(screen.getByText("Legacy renderer")).toBeInTheDocument();
+  });
+
+  it("keeps Send disabled until something is typed, then posts the reply", async () => {
+    const { onReply } = renderBand({ awaitingReply: [asks()] });
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText("Répondre à l'agent…"), {
+      target: { value: "Supprime-le" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onReply).toHaveBeenCalledTimes(1));
+    expect(onReply.mock.calls[0][1]).toBe("Supprime-le");
+  });
+
+  it("submits on Enter from the reply field", async () => {
+    const { onReply } = renderBand({ awaitingReply: [asks()] });
+    const field = screen.getByPlaceholderText("Répondre à l'agent…");
+    fireEvent.change(field, { target: { value: "Garde-le" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(onReply).toHaveBeenCalledTimes(1));
+  });
+
+  it("ignores Enter while an IME candidate window is open", () => {
+    const { onReply } = renderBand({ awaitingReply: [asks()] });
+    const field = screen.getByPlaceholderText("Répondre à l'agent…");
+    fireEvent.change(field, { target: { value: "こんにちは" } });
+    fireEvent.compositionStart(field);
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(onReply).not.toHaveBeenCalled();
+  });
+
+  it("routes the typed answer to a builder through Send to dev", () => {
+    const { onSendToDev } = renderBand({ awaitingReply: [asks()] });
+    fireEvent.change(screen.getByPlaceholderText("Répondre à l'agent…"), {
+      target: { value: "Fais-le" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send to dev" }));
+    expect(onSendToDev).toHaveBeenCalledTimes(1);
+    expect(onSendToDev.mock.calls[0][1]).toBe("Fais-le");
+  });
+
+  it("is tab-walkable and ⏎ on the row focuses its reply field", () => {
+    renderBand({ awaitingReply: [asks()] });
+    const row = screen.getByTestId("desk-asks-you-row");
+    expect(row).toHaveAttribute("tabIndex", "0");
+
+    row.focus();
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(document.activeElement).toBe(
+      screen.getByPlaceholderText("Répondre à l'agent…"),
+    );
+  });
+});
+
+describe("FAILED", () => {
+  it("prints the error and the age · agent meta", () => {
+    renderBand({ failed: [failure()] });
+    expect(
+      screen.getByText("exit 1 — worker pool did not drain in 120s"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("21m ago · Opus Builder")).toBeInTheDocument();
+  });
+
+  it("retries from the button and from ⏎ on the row", () => {
+    const { onRetry } = renderBand({ failed: [failure()] });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(screen.getByTestId("desk-failed-row"), { key: "Enter" });
+    expect(onRetry).toHaveBeenCalledTimes(2);
+  });
+
+  it("swaps the WORD while a retry is in flight — it never recolours", () => {
+    renderBand({ failed: [failure()], pendingIds: new Set(["e2"]) });
+    expect(screen.getByRole("button", { name: "Retrying" })).toBeDisabled();
+  });
+
+  it("opens the session log", () => {
+    const { onOpenLog } = renderBand({ failed: [failure()] });
+    fireEvent.click(screen.getByRole("button", { name: "Log" }));
+    expect(onOpenLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("formats the age in the frame's units", () => {
+    const now = new Date("2026-08-28T12:00:00.000Z");
+    expect(relativeAge("2026-08-28T11:59:30.000Z", now)).toBe("30s ago");
+    expect(relativeAge("2026-08-28T11:39:00.000Z", now)).toBe("21m ago");
+    expect(relativeAge("2026-08-28T09:00:00.000Z", now)).toBe("3h ago");
+    // SQLite CURRENT_TIMESTAMP has no zone marker and is UTC.
+    expect(relativeAge("2026-08-28 11:39:00", now)).toBe("21m ago");
+    expect(relativeAge(null, now)).toBe("—");
+  });
+});
+
+describe("CONFLICT", () => {
+  it("names the branch that cannot land, in mono", () => {
+    renderBand({ conflicts: [conflict()] });
+    expect(screen.getByText("epic/ldg-71")).toBeInTheDocument();
+    expect(screen.getByTestId("desk-conflict-row")).toHaveTextContent(
+      "Conflit avec main",
+    );
+  });
+
+  it("offers the resolution agent for a real merge conflict", () => {
+    const { onResolveConflict } = renderBand({ conflicts: [conflict()] });
+    fireEvent.click(screen.getByRole("button", { name: "Resolve with agent" }));
+    expect(onResolveConflict).toHaveBeenCalledTimes(1);
+  });
+
+  it("withholds the agent for committed conflict markers", () => {
+    // An agent merging main would find a clean merge and leave the markers in
+    // place, so the affordance must not be offered at all.
+    renderBand({ conflicts: [conflict({ blocker: "conflict_markers" })] });
+    expect(
+      screen.queryByRole("button", { name: "Resolve with agent" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("desk-conflict-row")).toHaveTextContent(
+      "Marqueurs de conflit commités",
+    );
+    // The way out is still visible.
+    expect(screen.getByRole("button", { name: "Diff" })).toBeInTheDocument();
+  });
+
+  it("does nothing on ⏎ when there is no resolution to run", () => {
+    const { onResolveConflict } = renderBand({
+      conflicts: [conflict({ blocker: "conflict_markers" })],
+    });
+    fireEvent.keyDown(screen.getByTestId("desk-conflict-row"), { key: "Enter" });
+    expect(onResolveConflict).not.toHaveBeenCalled();
+  });
+});
+
+describe("row order", () => {
+  it("puts questions first, then failures, then conflicts", () => {
+    renderBand({
+      awaitingReply: [asks()],
+      failed: [failure()],
+      conflicts: [conflict()],
+    });
+    const stamps = screen
+      .getAllByTestId(/desk-(asks-you|failed|conflict)-row/)
+      .map((row) => row.textContent?.slice(0, 8));
+    expect(stamps[0]).toContain("ASKS");
+    expect(stamps[1]).toContain("FAILED");
+    expect(stamps[2]).toContain("CONFLICT");
+  });
+});

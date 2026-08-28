@@ -56,8 +56,14 @@ vi.mock("@/hooks/useBatchSelection", () => ({
   },
 }));
 
-vi.mock("@/components/kanban/Board", () => ({
-  Board: () => <div data-testid="board" />,
+vi.mock("@/components/desk/NowDesk", () => ({
+  NowDesk: () => <div data-testid="board" />,
+}));
+vi.mock("@/components/auto-mode/AutoModeToggle", () => ({
+  AutoModeToggle: () => null,
+}));
+vi.mock("@/components/kanban/RefinementButton", () => ({
+  RefinementButton: () => null,
 }));
 vi.mock("@/components/kanban/EpicDetail", () => ({ EpicDetail: () => null }));
 vi.mock("@/components/monitor/AgentMonitor", () => ({ AgentMonitor: () => null }));

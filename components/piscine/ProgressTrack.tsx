@@ -32,6 +32,12 @@ export interface ProgressTrackProps {
   fillColor?: string;
   /** Track colour, as a `var(--token)` string. */
   trackColor?: string;
+  /**
+   * `data-testid` for the FILL element — the thing whose width encodes the
+   * percentage. Optional and additive; the 8d cap bar is the one caller that
+   * needs to assert its own width.
+   */
+  fillTestId?: string;
   className?: string;
 }
 
@@ -40,6 +46,7 @@ export function ProgressTrack({
   percent,
   fillColor = "var(--strata-live-fill)",
   trackColor = "var(--strata-live-track)",
+  fillTestId,
   className,
 }: ProgressTrackProps) {
   const indeterminate = percent === undefined;
@@ -53,11 +60,13 @@ export function ProgressTrack({
     >
       {indeterminate ? (
         <span
+          data-testid={fillTestId}
           className="piscine-crawl absolute inset-y-0 left-0 w-[28%]"
           style={{ background: fillColor }}
         />
       ) : (
         <span
+          data-testid={fillTestId}
           className="block h-full"
           style={{
             width: `${Math.max(0, Math.min(100, percent))}%`,

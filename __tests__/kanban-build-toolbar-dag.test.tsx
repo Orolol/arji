@@ -104,8 +104,8 @@ vi.mock("@/components/ui/select", () => ({
   }) => <option value={value}>{children}</option>,
 }));
 
-vi.mock("@/components/kanban/Board", () => ({
-  Board: ({
+vi.mock("@/components/desk/NowDesk", () => ({
+  NowDesk: ({
     onToggleSelect,
   }: {
     onToggleSelect: (id: string) => void;
@@ -141,6 +141,13 @@ vi.mock("@/components/chat/UnifiedChatPanel", () => ({
 
 vi.mock("@/components/monitor/AgentMonitor", () => ({
   AgentMonitor: () => null,
+}));
+
+vi.mock("@/components/auto-mode/AutoModeToggle", () => ({
+  AutoModeToggle: () => null,
+}));
+vi.mock("@/components/kanban/RefinementButton", () => ({
+  RefinementButton: () => null,
 }));
 
 vi.mock("@/components/shared/NamedAgentSelect", () => ({

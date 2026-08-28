@@ -2,8 +2,9 @@
 
 import { useEffect, useRef } from "react";
 import Link from "next/link";
-import { CheckCircle2, Loader2, XCircle, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Check, CircleAlert, X } from "lucide-react";
+
+import { BreathingDot, Mono, SurfaceCard } from "@/components/piscine";
 
 interface SpecUpdateProgressProps {
   projectId: string;
@@ -19,10 +20,19 @@ interface SpecUpdateProgressProps {
 }
 
 /**
- * Feedback panel for the "Mettre à jour la spec" run, shown on the Spec view
- * while the session lives: the streaming output while it runs, then the
- * confirmation with the agent's response, or the failure reason (the saved
- * spec is only replaced by a successful run — see lib/workflow/spec-update.ts).
+ * Feedback panel for the "Régénérer par chat" run, shown inside frame 8b's
+ * SUGGESTION D'AGENT band while the session lives: the streaming output while
+ * it runs, then the confirmation with the agent's response, or the failure
+ * reason (the saved spec is only replaced by a successful run — see
+ * lib/workflow/spec-update.ts).
+ *
+ * STATE IS ICON + WORD + MOTION, NEVER A BACKGROUND TINT: running is a
+ * BreathingDot, done a lucide check in the live deep, failed a lucide
+ * circle-alert in the coral. The card itself is never recoloured.
+ *
+ * Every `data-testid`, every sentence, the link's accessible name and the
+ * dismiss `aria-label` are pinned by `__tests__/spec-update-progress.test.tsx`
+ * and `__tests__/spec-page-update-feedback.test.tsx`. Only the styling moved.
  */
 export function SpecUpdateProgress({
   projectId,
@@ -43,56 +53,64 @@ export function SpecUpdateProgress({
   }, [stream, status]);
 
   return (
-    <div
-      className="flex-none px-[26px] pb-[18px]"
-      data-testid="spec-update-progress"
-      data-status={status}
-    >
-      <div className="flex flex-col gap-[10px] rounded-[12px] border border-border bg-card p-[16px]">
-        <div className="flex items-center gap-[9px]">
+    <div data-testid="spec-update-progress" data-status={status}>
+      <SurfaceCard
+        radius={10}
+        className="flex flex-col gap-[9px] px-[11px] py-[9px]"
+      >
+        <div className="flex items-center gap-[8px]">
           {status === "running" ? (
             <>
-              <Loader2 className="h-[14px] w-[14px] animate-spin text-muted-foreground" />
-              <span className="text-[13px] text-muted-foreground">
+              <BreathingDot size={7} tone="live" />
+              <span className="text-[12px] text-muted-foreground">
                 Spec update running
               </span>
             </>
           ) : status === "done" ? (
             <>
-              <CheckCircle2 className="h-[14px] w-[14px] text-agent" />
-              <span className="text-[13px]">Spec updated by agent.</span>
+              <Check
+                size={13}
+                aria-hidden="true"
+                className="shrink-0 text-strata-live-deep"
+              />
+              <span className="text-[12px] text-foreground">
+                Spec updated by agent.
+              </span>
             </>
           ) : (
             <>
-              <XCircle className="h-[14px] w-[14px] text-destructive" />
-              <span className="text-[13px] text-destructive">
+              <CircleAlert
+                size={13}
+                aria-hidden="true"
+                className="shrink-0 text-destructive"
+              />
+              <span className="text-[12px] text-destructive">
                 Spec update failed — the saved spec was left unchanged.
               </span>
             </>
           )}
           <Link
             href={`/projects/${projectId}/sessions/${sessionId}`}
-            className="ml-auto text-[12.5px] text-muted-foreground underline underline-offset-2"
+            className="ml-auto text-[11.5px] font-normal text-strata-next-deep no-underline hover:brightness-[0.92]"
           >
             view session
           </Link>
           {status !== "running" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-[25px] w-[25px] rounded-[6px] p-0 text-muted-foreground"
+            <button
+              type="button"
               onClick={onDismiss}
               aria-label="Dismiss spec update result"
+              className="flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
-              <X className="h-[13px] w-[13px]" />
-            </Button>
+              <X size={12} aria-hidden="true" />
+            </button>
           )}
         </div>
 
         {status === "running" && (
           <pre
             ref={streamRef}
-            className="max-h-[200px] overflow-y-auto rounded-[8px] bg-band p-[12px] font-mono text-[11.5px] leading-[1.5] whitespace-pre-wrap break-words text-muted-foreground"
+            className="max-h-[160px] overflow-y-auto rounded-[8px] bg-muted p-[10px] font-mono text-[11.5px] leading-[1.5] tabular-nums break-words whitespace-pre-wrap text-muted-foreground"
             data-testid="spec-update-stream"
           >
             {stream ? stream : "Waiting for agent output…"}
@@ -100,12 +118,12 @@ export function SpecUpdateProgress({
         )}
 
         {status === "done" && response && (
-          <div className="flex flex-col gap-[6px]">
-            <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
+          <div className="flex flex-col gap-[5px]">
+            <Mono size={9.5} tone="muted" uppercase tracking={0.08}>
               Agent response
-            </span>
+            </Mono>
             <pre
-              className="max-h-[200px] overflow-y-auto rounded-[8px] bg-band p-[12px] font-mono text-[11.5px] leading-[1.5] whitespace-pre-wrap break-words text-muted-foreground"
+              className="max-h-[160px] overflow-y-auto rounded-[8px] bg-muted p-[10px] font-mono text-[11.5px] leading-[1.5] tabular-nums break-words whitespace-pre-wrap text-muted-foreground"
               data-testid="spec-update-response"
             >
               {response}
@@ -115,13 +133,13 @@ export function SpecUpdateProgress({
 
         {status === "failed" && error && (
           <pre
-            className="max-h-[160px] overflow-y-auto rounded-[8px] bg-band p-[12px] font-mono text-[11.5px] leading-[1.5] whitespace-pre-wrap break-words text-destructive/80"
+            className="max-h-[140px] overflow-y-auto rounded-[8px] bg-muted p-[10px] font-mono text-[11.5px] leading-[1.5] tabular-nums break-words whitespace-pre-wrap text-destructive"
             data-testid="spec-update-error"
           >
             {error}
           </pre>
         )}
-      </div>
+      </SurfaceCard>
     </div>
   );
 }

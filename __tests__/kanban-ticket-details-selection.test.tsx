@@ -56,21 +56,24 @@ vi.mock("@/hooks/useBatchSelection", () => ({
   },
 }));
 
-vi.mock("@/components/kanban/Board", () => ({
-  Board: ({
-    onEpicClick,
+// The board is gone; the route renders the project-filtered control desk.
+// `onOpenTicket` is the desk's plain ticket click and `onToggleSelect` its
+// ⌘/Ctrl-click — the same two gestures the board exposed, same page contract.
+vi.mock("@/components/desk/NowDesk", () => ({
+  NowDesk: ({
+    onOpenTicket,
     onToggleSelect,
-    selectedEpics,
+    selectedEpicIds,
   }: {
-    onEpicClick: (id: string) => void;
+    onOpenTicket: (id: string) => void;
     onToggleSelect?: (id: string) => void;
-    selectedEpics: Set<string>;
+    selectedEpicIds: ReadonlySet<string>;
   }) => (
     <div data-testid="board">
-      <button data-testid="primary-epic-1" onClick={() => onEpicClick("epic-1")}>
+      <button data-testid="primary-epic-1" onClick={() => onOpenTicket("epic-1")}>
         Open Epic 1
       </button>
-      <button data-testid="primary-epic-2" onClick={() => onEpicClick("epic-2")}>
+      <button data-testid="primary-epic-2" onClick={() => onOpenTicket("epic-2")}>
         Open Epic 2
       </button>
       <button data-testid="toggle-epic-1" onClick={() => onToggleSelect?.("epic-1")}>
@@ -79,7 +82,7 @@ vi.mock("@/components/kanban/Board", () => ({
       <button data-testid="toggle-epic-2" onClick={() => onToggleSelect?.("epic-2")}>
         Toggle Epic 2
       </button>
-      <span data-testid="board-selected-count">{selectedEpics.size}</span>
+      <span data-testid="board-selected-count">{selectedEpicIds.size}</span>
     </div>
   ),
 }));
@@ -153,6 +156,13 @@ vi.mock("@/components/shared/NamedAgentSelect", () => ({
 
 vi.mock("@/components/kanban/BugCreateDialog", () => ({
   BugCreateDialog: () => null,
+}));
+
+vi.mock("@/components/auto-mode/AutoModeToggle", () => ({
+  AutoModeToggle: () => null,
+}));
+vi.mock("@/components/kanban/RefinementButton", () => ({
+  RefinementButton: () => null,
 }));
 
 import KanbanPage from "@/app/projects/[projectId]/page";

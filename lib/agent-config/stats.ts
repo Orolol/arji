@@ -168,8 +168,13 @@ interface RawDispatchRow {
  * DISPATCH_ROLE_AGENT_TYPES so the grouping the badge shows and the mapping
  * the rest of the app uses can never disagree. Unmapped/legacy agent types
  * fall through to NULL and are filtered out.
+ *
+ * Exported (and only exported — the body is untouched) so the per-agent task
+ * split in lib/agent-config/agent-stats.ts groups by the SAME expression: the
+ * split a user reads and the role mapping the dispatcher uses can never
+ * disagree. Callers must alias agent_sessions as `s`.
  */
-function dispatchRoleCaseExpression(): SQL {
+export function dispatchRoleCaseExpression(): SQL {
   const branches: SQL[] = [];
   for (const role of DISPATCH_ROLES) {
     for (const agentType of DISPATCH_ROLE_AGENT_TYPES[role]) {

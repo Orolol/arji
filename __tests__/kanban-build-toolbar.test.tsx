@@ -28,6 +28,13 @@ vi.mock("@/hooks/useAgentPolling", () => ({
   useAgentPolling: () => mockAgentPolling,
 }));
 
+vi.mock("@/components/auto-mode/AutoModeToggle", () => ({
+  AutoModeToggle: () => null,
+}));
+vi.mock("@/components/kanban/RefinementButton", () => ({
+  RefinementButton: () => null,
+}));
+
 // Mock useBatchSelection using React state so toggle/clear trigger re-renders
 vi.mock("@/hooks/useBatchSelection", () => ({
   useBatchSelection: () => {
@@ -64,10 +71,11 @@ vi.mock("@/hooks/useBatchSelection", () => ({
   },
 }));
 
-// Mock child components to simplify rendering
-vi.mock("@/components/kanban/Board", () => ({
-  Board: ({ selectedEpics, onToggleSelect }: {
-    selectedEpics: Set<string>;
+// Mock child components to simplify rendering. The board is gone; the route
+// renders the cross-project control desk, filtered to this project.
+vi.mock("@/components/desk/NowDesk", () => ({
+  NowDesk: ({ onToggleSelect }: {
+    selectedEpicIds?: ReadonlySet<string>;
     onToggleSelect: (id: string) => void;
   }) => (
     <div data-testid="board">

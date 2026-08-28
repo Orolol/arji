@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { usePolling } from "@/hooks/usePolling";
 import type { AgentType, AgentProvider } from "@/lib/agent-config/constants";
 import type { NamedAgentCliOptions } from "@/lib/providers/options-registry";
 
@@ -333,4 +334,126 @@ export function useNamedAgents() {
     updateNamedAgent,
     deleteNamedAgent,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Named-agent statistics (the /agents workshop)
+// ---------------------------------------------------------------------------
+
+/** Today's figures on a roster card. Mirrors lib/agent-config/agent-stats.ts. */
+export interface AgentDayStats {
+  namedAgentId: string;
+  runsToday: number;
+  /** completed / (completed + failed) today; null when nothing is terminal. */
+  cleanRate: number | null;
+  /** null when no session reported a cost — the card then shows an em-dash. */
+  costTodayUsd: number | null;
+  liveSessions: number;
+}
+
+/**
+ * Today's numbers for EVERY named agent, from one request.
+ *
+ * The roster renders a card per agent; fetching per card would be an N+1 over
+ * the largest table in the database. The route answers every agent in a single
+ * query, keyed here by agent id for O(1) lookup at render time.
+ *
+ * Polled at 10s (the dashboard cadence) so the live dots and today's counters
+ * move without a reload. Do not poll faster: this is a five-column aggregate
+ * over the whole session table.
+ */
+export function useAgentRosterStats(): {
+  data: Record<string, AgentDayStats>;
+  loading: boolean;
+  refresh: () => void;
+} {
+  const [data, setData] = useState<Record<string, AgentDayStats>>({});
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/agent-config/named-agents/all/stats");
+      const json = await res.json();
+      const rows: AgentDayStats[] = json?.data?.agents ?? [];
+      const next: Record<string, AgentDayStats> = {};
+      for (const row of rows) next[row.namedAgentId] = row;
+      setData(next);
+    } catch {
+      // A missing aggregate collapses the card figures to em-dashes; it must
+      // never take the roster down with it.
+    }
+    setLoading(false);
+  }, []);
+
+  usePolling(load, 10_000);
+
+  return { data, loading, refresh: load };
+}
+
+/** One calendar day of the 14-day sparkline. */
+export interface AgentDaySeriesPoint {
+  date: string;
+  runs: number;
+  failed: number;
+}
+
+/** The 14-day payload behind THE NUMBERS. */
+export interface NamedAgentStats {
+  windowDays: number;
+  runCount: number;
+  completedCount: number;
+  failedCount: number;
+  cleanRate: number | null;
+  medianDurationMs: number | null;
+  totalCostUsd: number | null;
+  escalationCount: number | null;
+  /** Exactly `windowDays` entries, oldest first. */
+  days: AgentDaySeriesPoint[];
+  byRole: { role: string; runs: number }[];
+}
+
+/**
+ * The selected agent's 14-day aggregate.
+ *
+ * CANCELLED-FETCH DISCIPLINE: this re-fetches on every roster click. Without
+ * the `cancelled` flag, clicking three agents quickly paints whichever
+ * response happens to land last — which is the slowest one, not the one the
+ * user is looking at.
+ */
+export function useNamedAgentStats(agentId: string | null): {
+  data: NamedAgentStats | null;
+  loading: boolean;
+} {
+  // The payload is STAMPED with the agent it describes, and read back only
+  // when the stamp still matches. That serves two purposes at once: the
+  // previous agent's numbers never flash under the newly selected name, and
+  // `loading` is a derivation rather than a setState the effect has to make
+  // synchronously on every change of selection.
+  const [entry, setEntry] = useState<{
+    agentId: string;
+    data: NamedAgentStats | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!agentId) return;
+
+    let cancelled = false;
+    fetch(`/api/agent-config/named-agents/${agentId}/stats`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled) return;
+        setEntry({ agentId, data: json?.data ?? null });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setEntry({ agentId, data: null });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId]);
+
+  const fresh = agentId !== null && entry?.agentId === agentId;
+  return { data: fresh ? entry.data : null, loading: agentId !== null && !fresh };
 }
