@@ -3,7 +3,11 @@ import { db } from "@/lib/db";
 import { chatAttachments } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { errorResponse } from "@/lib/api/route-helpers";
-import { imageUploadRejectionReason } from "@/lib/uploads/image-attachments";
+import {
+  MAX_IMAGE_UPLOAD_BYTES,
+  imageUploadRejectionReason,
+  oversizedUploadReason,
+} from "@/lib/uploads/image-attachments";
 import path from "path";
 import fs from "fs";
 
@@ -13,7 +17,34 @@ export async function POST(
 ) {
   const { projectId } = await params;
 
-  const formData = await request.formData();
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    // A body over the platform's request cap arrives truncated, so parsing it
+    // throws here — before the size guard below ever sees the file. Left
+    // unhandled this is the one rejection that answers with a bare 500 and an
+    // empty body, which is exactly the case the guard exists to explain, so
+    // the limit is named here as well.
+    const declared = Number(request.headers.get("content-length"));
+    const bodyBytes = Number.isFinite(declared) && declared > 0 ? declared : null;
+
+    if (bodyBytes !== null && bodyBytes <= MAX_IMAGE_UPLOAD_BYTES) {
+      // Small enough to have been delivered whole: unparseable for some other
+      // reason, and blaming the size limit would send the caller after the
+      // wrong thing.
+      return NextResponse.json(
+        { error: "Could not read the upload. Expected a multipart form body." },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: oversizedUploadReason(bodyBytes) },
+      { status: 413 }
+    );
+  }
+
   const file = formData.get("file") as File | null;
 
   if (!file) {

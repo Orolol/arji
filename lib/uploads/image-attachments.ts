@@ -74,6 +74,29 @@ export function imageUploadRejectionReason(file: ImageFileLike): string | null {
   return null;
 }
 
+/**
+ * Why an upload whose multipart body could not be parsed is refused.
+ *
+ * A request body over the platform's cap reaches the route truncated, so
+ * `request.formData()` throws before `imageUploadRejectionReason` ever sees
+ * the file — the size guard above cannot be what answers that caller. This is
+ * the wording used instead, and it names the same limit.
+ *
+ * `bodyBytes` is the request's declared `content-length` when it carried one.
+ * It measures the whole multipart body, not the file alone, which is why the
+ * message says so: a file of exactly the limit still overflows once the form
+ * envelope is added, and "10.0MB. Max: 10MB" would otherwise read as a
+ * contradiction.
+ */
+export function oversizedUploadReason(bodyBytes: number | null): string {
+  if (bodyBytes === null) {
+    return `Upload too large. Max: ${MAX_IMAGE_UPLOAD_LABEL}`;
+  }
+
+  const megabytes = (bodyBytes / 1024 / 1024).toFixed(1);
+  return `Upload too large (${megabytes}MB including form overhead). Max: ${MAX_IMAGE_UPLOAD_LABEL}`;
+}
+
 /** Splits a batch into what may be uploaded and what must be reported back. */
 export function partitionImageFiles(files: Iterable<File>): PartitionedImageFiles {
   const accepted: File[] = [];
