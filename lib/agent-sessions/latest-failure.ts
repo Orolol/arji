@@ -53,7 +53,14 @@ export interface FailureCandidateSession {
   provider?: string | null;
   namedAgentId?: string | null;
   userStoryId?: string | null;
-  lastNonEmptyText?: string | null;
+  /**
+   * Whether the run ever streamed a non-empty output line. Decided in SQL by
+   * the list route: the underlying `last_non_empty_text` is uncapped at the
+   * write side (a CLI that emits one 4 MB line stores 4 MB), and this badge is
+   * the only thing in the list that ever read it — so the column is reduced to
+   * this boolean before it leaves the database.
+   */
+  producedOutput?: boolean;
   createdAt?: string | null;
   endedAt?: string | null;
 }
@@ -97,7 +104,7 @@ export function selectLatestFailures(
       provider: latest.provider ?? null,
       namedAgentId: latest.namedAgentId ?? null,
       userStoryId: latest.userStoryId ?? null,
-      producedOutput: !!latest.lastNonEmptyText?.trim(),
+      producedOutput: latest.producedOutput === true,
     };
   }
   return failed;

@@ -194,44 +194,104 @@ function collectToolNames(
   }
 }
 
+function parseLine(
+  line: string,
+  lineAt: string | null,
+  out: ArijToolCall[],
+  seenIds: Set<string>
+): void {
+  const trimmed = line.trim();
+  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) {
+    return;
+  }
+  try {
+    collectToolNames(JSON.parse(trimmed), out, seenIds, lineAt);
+  } catch {
+    // partial or non-JSON line — skip
+  }
+}
+
 /**
- * Parse mcp__arij__* tool calls out of an ordered raw chunk stream.
+ * How much of an unterminated line the incremental scanner will hold before
+ * giving up on it. Chunk boundaries fall mid-line routinely, so a few KB of
+ * carry is normal; a provider writing one megabyte-scale JSON document with
+ * no newline in it is not, and the scanner is held in a process-local cache
+ * where an unbounded buffer would be a leak.
+ */
+export const ARIJ_SCAN_MAX_PENDING_CHARS = 1024 * 1024;
+
+/**
+ * Incremental counterpart to `extractArijToolCalls`: the same parser, fed one
+ * bounded slice of the stream at a time.
  *
  * Chunks are NDJSON-ish but chunk boundaries can fall mid-line, so lines are
- * reassembled across chunks; a line's timestamp is the timestamp of the chunk
+ * reassembled across pushes; a line's timestamp is the timestamp of the chunk
  * that completed it. Non-JSON lines are skipped (codex human-readable output
  * never produces false positives — only parsed JSON is scanned). Duplicate
  * records of the same tool_use id (content_block_start + assistant message
  * echo) are deduped.
+ *
+ * This exists so the raw stream can be read as bounded pages instead of one
+ * synchronous 113 MB SELECT: the carry between pushes is what keeps a tool
+ * call that straddles a page boundary from being lost.
  */
-export function extractArijToolCalls(chunks: RawChunkLike[]): ArijToolCall[] {
-  const out: ArijToolCall[] = [];
+export interface ArijToolCallScanner {
+  /** Feed the next slice of the stream, in order. */
+  push: (content: string, at: string | null) => void;
+  /**
+   * Everything found so far. Includes a TENTATIVE parse of the trailing
+   * unterminated line, which is deliberately not accumulated: a later push
+   * may complete that line, and re-parsing it then would double-count a call
+   * whose shape carries no id to dedupe on.
+   */
+  snapshot: () => ArijToolCall[];
+  /** Characters currently held waiting for a newline. */
+  pending: () => number;
+}
+
+export function createArijToolCallScanner(
+  options: { maxPendingChars?: number } = {}
+): ArijToolCallScanner {
+  const maxPending = options.maxPendingChars ?? ARIJ_SCAN_MAX_PENDING_CHARS;
+  const calls: ArijToolCall[] = [];
   const seenIds = new Set<string>();
   let buffer = "";
   let at: string | null = null;
 
-  const parseLine = (line: string, lineAt: string | null) => {
-    const trimmed = line.trim();
-    if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) {
-      return;
-    }
-    try {
-      collectToolNames(JSON.parse(trimmed), out, seenIds, lineAt);
-    } catch {
-      // partial or non-JSON line — skip
-    }
+  return {
+    push(content: string, chunkAt: string | null): void {
+      buffer += content;
+      at = chunkAt;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) parseLine(line, at, calls, seenIds);
+      // Nothing can complete a line this long except more of the same; drop
+      // it rather than growing the cached scanner without bound.
+      if (buffer.length > maxPending) buffer = "";
+    },
+    snapshot(): ArijToolCall[] {
+      const out = [...calls];
+      if (buffer) parseLine(buffer, at, out, new Set(seenIds));
+      return out;
+    },
+    pending(): number {
+      return buffer.length;
+    },
   };
+}
 
-  for (const chunk of chunks) {
-    buffer += chunk.content;
-    at = chunk.createdAt;
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) parseLine(line, at);
-  }
-  parseLine(buffer, at);
-
-  return out;
+/**
+ * Parse mcp__arij__* tool calls out of an ordered raw chunk stream, whole.
+ * Kept for the callers that already hold the entire stream (the tests, and
+ * anything summarising a stream server-side); the session detail route reads
+ * it in pages through `createArijToolCallScanner`.
+ */
+export function extractArijToolCalls(chunks: RawChunkLike[]): ArijToolCall[] {
+  const scanner = createArijToolCallScanner({
+    maxPendingChars: Number.POSITIVE_INFINITY,
+  });
+  for (const chunk of chunks) scanner.push(chunk.content, chunk.createdAt);
+  return scanner.snapshot();
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +376,23 @@ export interface CollectArijActionsOptions {
    * "raw" chunks from the shared chunk store.
    */
   chunks?: RawChunkLike[];
+}
+
+/**
+ * The DURABLE half of the list: three indexed, session-scoped reads over
+ * ticket_activity_log, ticket_comments and session_artifacts. Bounded by the
+ * number of effects one run had, which is small — no chunk content is touched.
+ *
+ * This is what the session detail route serves. The chunk-derived supplement
+ * costs a scan of the whole raw stream (3,015 rows / 113.6 MB for the largest
+ * session on the live database, ~280 ms of blocked event loop before any JSON
+ * parsing) and the detail page polls every 3 seconds, so it moved to its own
+ * paged endpoint — see lib/agent-sessions/arij-action-scan.ts.
+ */
+export function collectDurableArijActions(
+  opts: Omit<CollectArijActionsOptions, "chunks">
+): ArijAction[] {
+  return collectArijActions({ ...opts, chunks: [] });
 }
 
 /**

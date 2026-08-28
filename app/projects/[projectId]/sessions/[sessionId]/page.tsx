@@ -32,6 +32,7 @@ import {
   SessionOutputStream,
   type SessionStreamSeed,
 } from "@/components/sessions/SessionOutputStream";
+import { fetchSessionArijActions } from "@/lib/agent-sessions/session-detail";
 import type { AgentSessionStreamType } from "@/lib/agent-sessions/chunks";
 
 interface SessionDetail {
@@ -165,6 +166,11 @@ export default function SessionDetailPage() {
   const [promptState, setPromptState] = useState<
     "idle" | "loading" | "loaded" | "error"
   >("idle");
+  /**
+   * Arij actions, once the raw-stream scan has run. Null until then, so the
+   * list falls back to the durable half the detail payload already carries.
+   */
+  const [arijActions, setArijActions] = useState<ArijActionItem[] | null>(null);
 
   const loadSession = useCallback(async () => {
     const res = await fetch(
@@ -173,6 +179,17 @@ export default function SessionDetailPage() {
     const data = await res.json();
     setSession(data.data);
     setLoading(false);
+
+    // The chunk-derived half of the actions list is its own request: finding
+    // it means scanning the raw stream, which is 113 MB for the worst session
+    // on the live database and would stall the shared connection on every
+    // 3-second poll if it rode along with the payload above. The scan resumes
+    // where it left off server-side, so after the first pass a poll only
+    // covers what the session appended since.
+    const actions = await fetchSessionArijActions(projectId, sessionId, {
+      onPage: (page) => setArijActions(page.actions),
+    });
+    if (actions) setArijActions(actions);
   }, [projectId, sessionId]);
 
   /**
@@ -493,8 +510,10 @@ export default function SessionDetailPage() {
         )}
       </div>
 
-      {/* Structured board effects (MCP tool calls + dispatch artifacts) */}
-      <ArijActionsList actions={session.arijActions} />
+      {/* Structured board effects (MCP tool calls + dispatch artifacts).
+          The payload carries the durable half; the scan above supersedes it
+          with the raw-stream supplement once it lands. */}
+      <ArijActionsList actions={arijActions ?? session.arijActions} />
 
       {/* Error */}
       {session.error && (

@@ -47,7 +47,7 @@ describe("sessions list route (unified)", () => {
       {
         id: "sess-1",
         status: "running",
-        lastNonEmptyText: "Applying migrations",
+        producedOutput: 1,
         createdAt: "2026-02-12T00:00:00.000Z",
       },
     ]);
@@ -60,7 +60,9 @@ describe("sessions list route (unified)", () => {
     expect(response.status).toBe(200);
     expect(json.data).toHaveLength(1);
     expect(json.data[0].kind).toBe("agent_session");
-    expect(json.data[0].lastNonEmptyText).toBe("Applying migrations");
+    // The text itself never leaves the database: the list only ever asked
+    // whether the run had spoken.
+    expect(json.data[0]).not.toHaveProperty("lastNonEmptyText");
   });
 
   it("returns chat conversations with kind='chat_session'", async () => {
@@ -226,6 +228,9 @@ describe("sessions list route (unified)", () => {
     expect(selected).not.toContain("cliCommand");
     expect(selected).not.toContain("cliOptions");
     expect(selected).not.toContain("estimatedPromptBreakdown");
+    // Uncapped at the write side and only ever read as "did the run speak" —
+    // reduced to `producedOutput` in SQL rather than selected.
+    expect(selected).not.toContain("lastNonEmptyText");
     // What the Sessions page, the board's failure badges and the cli-session
     // fallback do read.
     expect(selected).toEqual(
@@ -242,8 +247,9 @@ describe("sessions list route (unified)", () => {
         "endedAt",
         "completedAt",
         "createdAt",
-        "lastNonEmptyText",
+        "producedOutput",
         "error",
+        "errorLength",
         "outcome",
         "totalCostUsd",
         "batchRunId",
@@ -253,6 +259,26 @@ describe("sessions list route (unified)", () => {
         "claudeSessionId",
       ])
     );
+
+    // The two text columns the list keeps are cut in SQL, not in JavaScript:
+    // a value that never crosses into the process cannot blow the budget on
+    // the way in either.
+    const projection = sessionProjection as Record<
+      string,
+      { queryChunks?: unknown[] }
+    >;
+    // Drizzle keeps the literal SQL of a `sql` fragment as StringChunks; the
+    // other chunks are columns and bound params, which carry no text.
+    const sqlOf = (key: string) =>
+      (projection[key]?.queryChunks ?? [])
+        .map((chunk) => {
+          const value = (chunk as { value?: unknown }).value;
+          return Array.isArray(value) ? value.join("") : "";
+        })
+        .join(" ");
+    expect(sqlOf("error")).toContain("substr");
+    expect(sqlOf("errorLength")).toContain("length");
+    expect(sqlOf("producedOutput")).toContain("trim");
   });
 
   it("bounds both list queries to one page", async () => {

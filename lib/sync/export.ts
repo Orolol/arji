@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { projects, epics, userStories, ticketComments } from "@/lib/db/schema";
-import { eq, inArray, or } from "drizzle-orm";
+import { eq, inArray, or, sql } from "drizzle-orm";
 import { writeArjiJson } from "./arji-json";
 import type { ArjiJson, ArjiJsonEpic, ArjiJsonComment } from "./arji-json";
 
@@ -10,8 +10,10 @@ function toJsonComment(c: { id: string; author: string; content: string; created
 
 /**
  * Buckets rows by a nullable foreign key, preserving the order the rows were
- * read in. SQLite returns an unindexed scan in rowid (insertion) order, so a
- * bucket holds exactly what a per-parent `WHERE fk = ?` query used to return.
+ * read in. The queries below order by `rowid` explicitly, so a bucket holds
+ * exactly what a per-parent `WHERE fk = ?` query used to return: insertion
+ * order. Relying on the scan order instead would be a silent dependency on
+ * the query plan — see the comments-query note below.
  */
 function groupBy<T>(rows: T[], key: (row: T) => string | null): Map<string, T[]> {
   const grouped = new Map<string, T[]>();
@@ -59,14 +61,33 @@ export async function exportArjiJson(projectId: string): Promise<void> {
 
   const epicIds = allEpics.map((epic) => epic.id);
 
+  // `ORDER BY rowid`, not the scan order: `user_stories_epic_position_idx`
+  // (migration 0046) makes this an index SEARCH, and an index-driven read is
+  // only incidentally in insertion order. The sort below is stable, so rows
+  // tied on `position` keep exactly the order the per-epic query gave.
   const allStories = epicIds.length
-    ? db.select().from(userStories).where(inArray(userStories.epicId, epicIds)).all()
+    ? db
+        .select()
+        .from(userStories)
+        .where(inArray(userStories.epicId, epicIds))
+        .orderBy(sql`rowid`)
+        .all()
     : [];
 
   const storyIds = allStories.map((story) => story.id);
 
   // A comment carrying both keys belonged to both result sets before, and
   // still lands in both buckets below.
+  //
+  // `ORDER BY rowid` is load-bearing. With `ticket_comments_epic_idx` and
+  // `ticket_comments_user_story_idx` both present (migration 0046) SQLite
+  // answers this OR with MULTI-INDEX OR: it walks the epic index, then the
+  // story index, and de-duplicates by rowid — so a comment carrying BOTH keys
+  // is emitted while the epic branch is running, ahead of story-only comments
+  // that were inserted before it. That reorders the story bucket against the
+  // per-parent queries this replaced, and `arji.json` is a tracked file whose
+  // bytes would churn. Ordering by rowid pins insertion order on both
+  // branches, whatever plan the planner picks.
   const allComments =
     epicIds.length || storyIds.length
       ? db
@@ -78,6 +99,7 @@ export async function exportArjiJson(projectId: string): Promise<void> {
               storyIds.length ? inArray(ticketComments.userStoryId, storyIds) : undefined,
             ),
           )
+          .orderBy(sql`rowid`)
           .all()
       : [];
 

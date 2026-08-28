@@ -374,3 +374,116 @@ describe("listChunks — unchanged for the whole-stream callers", () => {
     expect(all[0]).not.toHaveProperty("contentTruncated");
   });
 });
+
+describe("listChunkPage — what the DATABASE materialises, not just the page", () => {
+  /**
+   * Counts what SQLite actually hands back for the paged read. The response
+   * being bounded is not the whole contract: every row arrives as
+   * `substr(content, 1, maxChunkBytes)`, so a batch sized only by a row count
+   * can allocate megabytes inside the driver before JavaScript gets to refuse
+   * the rows past the byte budget — and blocking the shared synchronous
+   * connection is what this page exists to prevent.
+   */
+  function instrument(database: Database.Database) {
+    const stats = { queries: 0, rows: 0, characters: 0 };
+    const realPrepare = database.prepare.bind(database);
+    (database as unknown as { prepare: unknown }).prepare = (sql: string) => {
+      const stmt = realPrepare(sql);
+      // Only the paged read: `substr(...)` is unique to it.
+      if (!sql.includes("substr")) return stmt;
+      return new Proxy(stmt, {
+        get(target, prop, receiver) {
+          const value = Reflect.get(target, prop, target);
+          if (typeof value !== "function") return value;
+          return (...args: unknown[]) => {
+            const result = (value as (...a: unknown[]) => unknown).apply(
+              target,
+              args
+            );
+            // `.raw()` returns the statement itself for chaining.
+            if (result === target) return receiver;
+            if (prop === "all" && Array.isArray(result)) {
+              stats.queries += 1;
+              stats.rows += result.length;
+              for (const row of result) {
+                // Rows come back raw (positional). The longest text cell is
+                // the `substr(content, ...)` one — the id/stream/timestamp
+                // cells are fixed-size noise.
+                let content = 0;
+                for (const cell of row as unknown[]) {
+                  if (typeof cell === "string" && cell.length > content) {
+                    content = cell.length;
+                  }
+                }
+                stats.characters += content;
+              }
+            }
+            return result;
+          };
+        },
+      });
+    };
+    return stats;
+  }
+
+  it("reads about one byte budget's worth, not one row ceiling's worth", () => {
+    const database = createTestDb();
+    const stats = instrument(database);
+    const store = createSessionChunkStore(database);
+
+    // 64 chunks at the per-chunk cap — the shape that makes a row-count batch
+    // ask SQLite for 64 x 256 KiB = 16 M characters in a single query.
+    const MAX_CHUNK = 256 * 1024;
+    const BUDGET = 1024 * 1024;
+    seed(
+      store,
+      Array.from(
+        { length: 64 },
+        () => ["raw", "x".repeat(MAX_CHUNK)] as const
+      )
+    );
+
+    const page = store.listChunkPage("s1", "raw", {
+      limit: 64,
+      maxBytes: BUDGET,
+      maxChunkBytes: MAX_CHUNK,
+    });
+
+    // The page itself is bounded — that part already held.
+    const pageBytes = page.chunks.reduce(
+      (sum, chunk) => sum + Buffer.byteLength(chunk.content, "utf8"),
+      0
+    );
+    expect(pageBytes).toBeLessThanOrEqual(BUDGET);
+    expect(page.hasMore).toBe(true);
+
+    // And so is what the driver had to allocate to produce it: one budget's
+    // worth plus at most one over-the-line chunk, nowhere near 16 M.
+    expect(stats.characters).toBeLessThanOrEqual(BUDGET + MAX_CHUNK);
+    // No single query asked for a batch that could blow the budget on its own.
+    expect(stats.rows / stats.queries).toBeLessThanOrEqual(
+      BUDGET / MAX_CHUNK + 1
+    );
+  });
+
+  it("still fills a page of ordinary chunks", () => {
+    // The bound must not turn a normal stream into a one-row-per-query walk:
+    // ~5.5 KB is the live average, and a full page of those has to come back
+    // in one page, whatever batching it took underneath.
+    const database = createTestDb();
+    const stats = instrument(database);
+    const store = createSessionChunkStore(database);
+    seed(
+      store,
+      Array.from({ length: 120 }, () => ["raw", "y".repeat(5500)] as const)
+    );
+
+    const page = store.listChunkPage("s1", "raw", { limit: 200 });
+
+    expect(page.chunks).toHaveLength(120);
+    expect(page.hasMore).toBe(false);
+    expect(stats.rows).toBeGreaterThanOrEqual(120);
+    // Cheap because each batch is small, not because there are few of them.
+    expect(stats.characters).toBeLessThanOrEqual(2 * 1024 * 1024);
+  });
+});

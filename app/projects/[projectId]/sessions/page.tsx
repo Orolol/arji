@@ -37,7 +37,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { parseStoredTimestamp } from "@/lib/agent-sessions/last-activity";
-import { fetchUnifiedSessions } from "@/lib/agent-sessions/session-list";
+import {
+  fetchUnifiedSessions,
+  UnifiedSessionListIncompleteError,
+} from "@/lib/agent-sessions/session-list";
 
 // --- Discriminated union types ---
 
@@ -52,7 +55,6 @@ interface AgentSession {
   startedAt?: string;
   endedAt?: string;
   completedAt?: string;
-  lastNonEmptyText?: string;
   error?: string;
   agentType?: string;
   outcome?: string | null;
@@ -152,6 +154,8 @@ export default function SessionsPage() {
   const projectId = params.projectId as string;
   const [items, setItems] = useState<UnifiedSession[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Set when the page loop could not reach the end of the list. */
+  const [incomplete, setIncomplete] = useState<string | null>(null);
   const [stateFilter, setStateFilter] = useState<StateFilter>("all");
   const [providerFilter, setProviderFilter] = useState<ProviderFilter>(null);
   const [ticketQuery, setTicketQuery] = useState("");
@@ -187,14 +191,23 @@ export default function SessionsPage() {
    */
   async function loadSessions() {
     try {
+      setIncomplete(null);
       await fetchUnifiedSessions<UnifiedSession>(projectId, {
         onPage: (rowsSoFar) => {
           setItems([...rowsSoFar]);
           setLoading(false);
         },
       });
-    } catch {
-      // Keep whatever is already on screen rather than blanking the list.
+    } catch (error) {
+      // Keep whatever is already on screen rather than blanking the list —
+      // but never present a prefix as the list. The counts in the synthesis
+      // band and both sort orders are derived from every row, so a missing
+      // tail is wrong data, not just less of it.
+      setIncomplete(
+        error instanceof UnifiedSessionListIncompleteError
+          ? error.message
+          : "Could not load every session; the list below may be incomplete."
+      );
     } finally {
       setLoading(false);
     }
@@ -494,6 +507,15 @@ export default function SessionsPage() {
           if (!open) setSummaryRunId(null);
         }}
       />
+
+      {incomplete && (
+        <p
+          data-testid="sessions-incomplete"
+          className="border-b border-border-soft bg-destructive/10 px-[22px] py-[10px] text-[12.5px] text-destructive"
+        >
+          {incomplete}
+        </p>
+      )}
 
       {items.length === 0 ? (
         <p className="p-6 text-sm text-muted-foreground">No sessions yet</p>

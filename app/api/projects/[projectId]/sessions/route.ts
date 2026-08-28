@@ -13,6 +13,7 @@ import { latestActivityTimestamp } from "@/lib/agent-sessions/last-activity";
 import { getSessionLastActivityAt } from "@/lib/agents/watchdog";
 import {
   SESSION_LIST_DEFAULT_PAGE_SIZE,
+  SESSION_LIST_ERROR_PREVIEW_CHARS,
   SESSION_LIST_MAX_PAGE_SIZE,
 } from "@/lib/agent-sessions/session-list";
 
@@ -28,6 +29,20 @@ import {
  * every 3 seconds. `logs_path`, `worktree_path`, `cli_command`,
  * `cli_options` and the estimated-prompt breakdown are left out for the
  * same reason; the session DETAIL route still serves them.
+ *
+ * The projection also has to bound the columns it DOES keep, or the page is
+ * bounded in rows and not in bytes:
+ *
+ *   - `error` holds the complete terminal failure, deliberately, and nothing
+ *     caps it. The list paints it as one truncated line, so it comes back as
+ *     a `substr` preview plus the stored length; the detail route still has
+ *     all of it.
+ *   - `last_non_empty_text` is written by `appendSessionChunk()` from the
+ *     last non-empty LINE of a chunk, with no cap at the write side — a CLI
+ *     that emits one 4 MB line stores 4 MB. The only consumer of this column
+ *     in the list is `selectLatestFailures`, which asks whether the run ever
+ *     spoke, so the column is reduced to that boolean IN SQL and the text
+ *     itself never leaves the database.
  */
 const sessionListColumns = {
   id: agentSessions.id,
@@ -42,8 +57,23 @@ const sessionListColumns = {
   endedAt: agentSessions.endedAt,
   completedAt: agentSessions.completedAt,
   createdAt: agentSessions.createdAt,
-  lastNonEmptyText: agentSessions.lastNonEmptyText,
-  error: agentSessions.error,
+  // Whether the run ever streamed a non-empty line, decided in SQL. The text
+  // is never selected: see the note above.
+  //
+  // The trim set is explicit because SQLite's one-argument `trim()` strips
+  // SPACES only — a run whose last line is a bare newline would read as
+  // "spoke", where the JavaScript `.trim()` this replaced called it silent.
+  // `char(32,9,10,13,11,12)` is space/tab/LF/CR/VT/FF.
+  producedOutput: sql<number>`(
+    ${agentSessions.lastNonEmptyText} IS NOT NULL
+    AND trim(${agentSessions.lastNonEmptyText}, char(32,9,10,13,11,12)) <> ''
+  )`,
+  error: sql<
+    string | null
+  >`substr(${agentSessions.error}, 1, ${SESSION_LIST_ERROR_PREVIEW_CHARS})`,
+  // `length()` and `substr()` both count characters, so this is the exact
+  // test for "was the preview cut", not an approximation of it.
+  errorLength: sql<number>`coalesce(length(${agentSessions.error}), 0)`,
   outcome: agentSessions.outcome,
   inputTokens: agentSessions.inputTokens,
   outputTokens: agentSessions.outputTokens,
@@ -157,17 +187,26 @@ export async function GET(
     .limit(pageSize)
     .all();
 
-  const normalizedSessions = sessions.map(({ claudeSessionId, ...session }) => ({
-    ...session,
-    kind: "agent_session" as const,
-    status: getSessionStatusForApi(session.status),
-    lastActivityAt: getSessionLastActivityAt(session),
-    // Legacy-row fallback handled inside resolveCliSessionId().
-    cliSessionId: resolveCliSessionId({
-      cliSessionId: session.cliSessionId,
-      claudeSessionId,
-    }),
-  }));
+  const normalizedSessions = sessions.map(
+    ({ claudeSessionId, errorLength, producedOutput, error, ...session }) => ({
+      ...session,
+      kind: "agent_session" as const,
+      status: getSessionStatusForApi(session.status),
+      // The ellipsis rides in the string so a cut preview reads as one
+      // wherever it is shown, not only where a flag is checked.
+      error:
+        error !== null && errorLength > SESSION_LIST_ERROR_PREVIEW_CHARS
+          ? `${error}…`
+          : error,
+      producedOutput: producedOutput === 1,
+      lastActivityAt: getSessionLastActivityAt(session),
+      // Legacy-row fallback handled inside resolveCliSessionId().
+      cliSessionId: resolveCliSessionId({
+        cliSessionId: session.cliSessionId,
+        claudeSessionId,
+      }),
+    })
+  );
 
   // Fetch chat conversations with message count, last message preview, and named agent name
   const conversations = db

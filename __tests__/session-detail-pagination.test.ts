@@ -43,6 +43,9 @@ const { appendSessionChunk } = await import("@/lib/agent-sessions/chunks");
 const { GET } = await import(
   "@/app/api/projects/[projectId]/sessions/[sessionId]/route"
 );
+const { SESSION_LOGS_MAX_SERVED_BYTES } = await import(
+  "@/lib/agent-sessions/session-detail"
+);
 
 const PROJECT = "proj-1";
 const SESSION = "sess-1";
@@ -262,6 +265,45 @@ describe("logs are bounded", () => {
     expect(json.data.logs).toBeNull();
     expect(json.data.logsTruncated).toBe(true);
     expect(json.data.logsUnavailable).toBeUndefined();
+  });
+
+  it("measures the served-bytes ceiling in bytes, not UTF-16 units", async () => {
+    // A legacy array-shaped log, so the `result` cap does not apply and only
+    // the shape-agnostic backstop stands between this and the response.
+    //
+    // Each of these characters is ONE UTF-16 unit and THREE UTF-8 bytes:
+    // 300k of them serialise to ~300k units — comfortably under the 512 KiB
+    // ceiling if you count `.length` — and ~900 KB on the wire. Counting
+    // units let a document nearly twice the ceiling through.
+    const cjk = "漢".repeat(300_000);
+    writeLogs([cjk]);
+    expect(JSON.stringify([cjk]).length).toBeLessThan(
+      SESSION_LOGS_MAX_SERVED_BYTES
+    );
+    expect(
+      Buffer.byteLength(JSON.stringify([cjk]), "utf-8")
+    ).toBeGreaterThan(SESSION_LOGS_MAX_SERVED_BYTES);
+
+    const response = await get();
+    const json = await response.json();
+
+    expect(json.data.logs).toBeNull();
+    expect(json.data.logsTruncated).toBe(true);
+    // And the combined payload keeps its contract, which is a byte contract.
+    expect(
+      Buffer.byteLength(JSON.stringify(json), "utf-8")
+    ).toBeLessThan(2 * 1024 * 1024);
+  });
+
+  it("still serves a multibyte log that fits", async () => {
+    // The bound must not become "no CJK logs": one that fits in bytes comes
+    // through whole.
+    writeLogs({ success: true, result: "漢字".repeat(1000) });
+
+    const json = await (await get()).json();
+
+    expect(json.data.logs.result).toBe("漢字".repeat(1000));
+    expect(json.data.logsTruncated).toBe(false);
   });
 
   it("flags an unreadable logs.json instead of passing it off as empty", async () => {

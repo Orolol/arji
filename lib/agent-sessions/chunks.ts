@@ -49,12 +49,34 @@ export const SESSION_CHUNK_PAGE_MAX_BYTES = 1024 * 1024;
 export const SESSION_CHUNK_MAX_CONTENT_BYTES = 256 * 1024;
 
 /**
- * How many rows one underlying query may materialise. The page is assembled
- * batch by batch so that `limit` — which a client picks — never multiplies
- * with the per-chunk cap into one huge read: the byte budget usually ends the
- * loop after the first batch.
+ * Hard ceiling on how many rows one underlying query may materialise. The
+ * page is assembled batch by batch so that `limit` — which a client picks —
+ * never multiplies with the per-chunk cap into one huge read.
+ *
+ * This is only the ceiling; `batchRows()` below usually asks for far less.
  */
 const CHUNK_PAGE_BATCH_ROWS = 64;
+
+/**
+ * Rows to ask SQLite for, given what is left of the page's byte budget.
+ *
+ * The row ceiling alone does not bound the read: every row comes back as
+ * `substr(content, 1, maxChunkBytes)`, so a full 64-row batch at the 256 KiB
+ * per-chunk cap is ~16 M characters materialised inside the driver — up to
+ * ~64 MB of UTF-8 — before JavaScript gets to refuse the rows past the
+ * budget. The response would still be bounded; the event loop would not be,
+ * and blocking it is the whole reason this page exists.
+ *
+ * Sizing the batch from the REMAINING budget makes the worst case one batch
+ * of about `maxBytes` characters instead. The cost is round trips: at the
+ * default budget this asks for 4 rows at a time, so an average stream (~5.5 KB
+ * per chunk) needs a few dozen small queries to fill a full page rather than
+ * four large ones. Each is an indexed lookup on a prepared statement, and
+ * copying the page's content dominates either way.
+ */
+function batchRows(remainingBytes: number, maxChunkBytes: number): number {
+  return Math.max(1, Math.ceil(remainingBytes / maxChunkBytes));
+}
 
 /** A chunk, or a slice of one, as a bounded page serves it. */
 export interface BoundedSessionChunk extends SessionChunk {
@@ -425,7 +447,11 @@ export function createSessionChunkStore(
 
     let exhausted = false;
     while (chunks.length < limit && !exhausted) {
-      const batchSize = Math.min(limit - chunks.length, CHUNK_PAGE_BATCH_ROWS);
+      const batchSize = Math.min(
+        limit - chunks.length,
+        CHUNK_PAGE_BATCH_ROWS,
+        batchRows(Math.max(1, maxBytes - usedBytes), maxChunkBytes)
+      );
       const rows = pageChunksStmt.all({
         sessionId,
         streamType,

@@ -19,6 +19,7 @@ import {
 } from "@/lib/agent-sessions/chunks";
 import {
   isSessionStreamType,
+  SESSION_ARIJ_ACTIONS_VIEW,
   SESSION_CHUNK_PAGE_MAX_LIMIT,
   SESSION_DETAIL_PREVIEW_BYTES,
   SESSION_DETAIL_PREVIEW_LIMIT,
@@ -29,9 +30,11 @@ import {
   SESSION_STREAM_TYPES,
 } from "@/lib/agent-sessions/session-detail";
 import {
-  collectArijActions,
+  collectDurableArijActions,
+  mergeArijActions,
   type ArijAction,
 } from "@/lib/agent-sessions/arij-actions";
+import { scanArijToolCalls } from "@/lib/agent-sessions/arij-action-scan";
 import {
   getSessionStatusForApi,
   isSessionLifecycleConflictError,
@@ -119,7 +122,15 @@ function readSessionLogs(logsPath: string | null): SessionLogsRead {
     // writes today; it does nothing for a legacy array-shaped log, or one
     // whose bulk sits in some other field. Serving nothing beats reopening
     // the hole this route exists to close — the streams still have the text.
-    if (JSON.stringify(logs).length > SESSION_LOGS_MAX_SERVED_BYTES) {
+    //
+    // Measured in BYTES. A JS string's `.length` is UTF-16 code units, and
+    // the cap is a byte ceiling on a JSON response: a CJK- or emoji-heavy log
+    // encodes to up to ~3-4x its unit count, so counting units would let a
+    // document several times over the limit through this check.
+    if (
+      Buffer.byteLength(JSON.stringify(logs), "utf8") >
+      SESSION_LOGS_MAX_SERVED_BYTES
+    ) {
       return { logs: null, truncated: true, unavailable: false, parsed };
     }
 
@@ -202,6 +213,44 @@ function readChunkPage(
   }
 }
 
+/**
+ * Durable actions plus one bounded page of the raw-stream scan, merged. The
+ * scan resumes where the previous call for this session stopped, so a live
+ * session only ever re-reads what it appended since the last poll.
+ */
+function readArijActions(sessionId: string): {
+  actions: ArijAction[];
+  hasMore: boolean;
+  unavailable: boolean;
+} {
+  let actions: ArijAction[] = [];
+  try {
+    actions = collectDurableArijActions({ sessionId });
+  } catch (error) {
+    console.warn(
+      `[sessions] failed to collect Arij actions for session ${sessionId}:`,
+      error
+    );
+    return { actions: [], hasMore: false, unavailable: true };
+  }
+
+  try {
+    const scan = scanArijToolCalls(sessionId);
+    return {
+      actions: mergeArijActions(actions, scan.toolCalls),
+      hasMore: scan.hasMore,
+      unavailable: false,
+    };
+  } catch (error) {
+    console.warn(
+      `[sessions] failed to scan the raw stream of session ${sessionId} for Arij actions:`,
+      error
+    );
+    // The durable half still stands on its own — flagged, not silently short.
+    return { actions, hasMore: false, unavailable: true };
+  }
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string; sessionId: string }> }
@@ -267,6 +316,33 @@ export async function GET(
     });
   }
 
+  // The Arij-actions list, including the half that only exists in the raw
+  // stream. Its own request, and its own bounded page of that stream: the
+  // combined payload below is polled every 3 seconds, and the largest raw
+  // stream on the live database is 3,015 rows / 113.6 MB. Scanning it there
+  // stalled the shared connection on every poll even though the resulting
+  // list was tiny.
+  if (searchParams.get("view") === SESSION_ARIJ_ACTIONS_VIEW) {
+    const exists = db
+      .select({ id: agentSessions.id })
+      .from(agentSessions)
+      .where(scope)
+      .get();
+    if (!exists) {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    const { actions, hasMore, unavailable } = readArijActions(sessionId);
+    return NextResponse.json({
+      data: {
+        sessionId,
+        actions,
+        hasMore,
+        ...(unavailable ? { arijActionsUnavailable: true } : {}),
+      },
+    });
+  }
+
   const wantsPrompt = include.has("prompt");
   const session = db
     .select(wantsPrompt ? sessionColumnsWithPrompt : sessionColumnsWithoutPrompt)
@@ -294,12 +370,15 @@ export async function GET(
     })
   ) as Record<AgentSessionStreamType, SessionChunkPage>;
 
-  // Structured board effects of this session (MCP tool calls + dispatch
-  // wrapper artifacts) — best-effort, the detail page must not 500 over it.
+  // Structured board effects of this session — the DURABLE half only: three
+  // indexed, session-scoped reads. The chunk-derived supplement is served by
+  // `?view=arij-actions` above, which the detail page follows after its first
+  // paint. Best-effort either way: the page must not 500 over an activity
+  // list.
   let arijActions: ArijAction[] = [];
   let arijActionsUnavailable = false;
   try {
-    arijActions = collectArijActions({ sessionId });
+    arijActions = collectDurableArijActions({ sessionId });
   } catch (error) {
     console.warn(
       `[sessions] failed to collect Arij actions for session ${sessionId}:`,

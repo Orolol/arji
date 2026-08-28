@@ -33,6 +33,13 @@ interface UnifiedSessionRow {
  * `ArijActionsList`; renders nothing when the session recorded no actions
  * (or when there is no agent session yet), so tickets that never ran an
  * agent stay visually unchanged.
+ *
+ * Durable effects only — status changes, comments, questions, findings and
+ * artifacts, all of which come from indexed session-scoped reads. The session
+ * detail page additionally scans the raw stream (`?view=arij-actions`) for
+ * read-only calls and calls the board refused; that scan is worth paging
+ * through on a page dedicated to one session, but not on an ambient block
+ * inside the ticket panel.
  */
 export function WhatTheAgentDid({
   projectId,

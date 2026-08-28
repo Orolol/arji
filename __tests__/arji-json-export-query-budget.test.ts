@@ -268,6 +268,42 @@ describe("arji.json export query budget", () => {
     ).toEqual(["s-t1", "s-t2", "s-t3"]);
   });
 
+  it("keeps per-parent comment order when the OR is answered by two indexes", async () => {
+    // The batched comments query is one `epic_id IN (...) OR user_story_id IN
+    // (...)`. With `ticket_comments_epic_idx` and
+    // `ticket_comments_user_story_idx` both present, SQLite answers it with
+    // MULTI-INDEX OR: the epic branch runs first, so a comment carrying BOTH
+    // keys is emitted ahead of story-only comments inserted before it — and
+    // the story bucket comes out reversed against the per-parent query it
+    // replaced. `arji.json` is tracked, so that is a byte diff on every board
+    // write. The fixture in the byte-identity test above cannot catch it: its
+    // dual-key story holds only the one comment.
+    seedEpic("e-order", { status: "review", position: 0 });
+    seedStory("s-order", "e-order", { position: 0 });
+    seedComment("c-story-only", { userStoryId: "s-order" });
+    seedComment("c-dual", { epicId: "e-order", userStoryId: "s-order" });
+
+    // Vacuity guard: if the planner ever stops using two indexes here, the
+    // ordering assertion below would pass for the wrong reason.
+    const plan = sqlite
+      .prepare(
+        `EXPLAIN QUERY PLAN SELECT * FROM ticket_comments
+           WHERE epic_id IN ('e-order') OR user_story_id IN ('s-order')`,
+      )
+      .all() as Array<{ detail: string }>;
+    expect(plan.map((row) => row.detail).join(" ")).toContain("MULTI-INDEX OR");
+
+    const expected = legacyExportPayload(PROJECT_ID);
+    expect(expected).not.toBeNull();
+
+    const { exportArjiJson } = await import("@/lib/sync/export");
+    const actual = await capture(() => exportArjiJson(PROJECT_ID));
+
+    const story = actual.epics[0].user_stories[0];
+    expect(story.comments!.map((c) => c.id)).toEqual(["c-story-only", "c-dual"]);
+    expect(serialize(actual)).toBe(serialize(expected!));
+  });
+
   it("exports nothing when the project has no repository path", async () => {
     db.update(schema.projects).set({ gitRepoPath: null }).where(eq(schema.projects.id, PROJECT_ID)).run();
 

@@ -103,6 +103,88 @@ export const SESSION_LAST_TEXT_MAX_BYTES = 4 * 1024;
  */
 export const SESSION_CHUNK_MAX_PAGES = 50;
 
+/**
+ * `?view=` value that asks for the Arij-actions list instead of the session
+ * payload. A separate request on purpose: the chunk-derived half of that list
+ * costs a scan of the raw stream, and this route is polled every 3 seconds.
+ */
+export const SESSION_ARIJ_ACTIONS_VIEW = "arij-actions";
+
+/**
+ * Runaway guard for the follow-the-scan loop. Each call advances by
+ * `ARIJ_ACTION_SCAN_MAX_BYTES`, so this covers a raw stream far larger than
+ * the 113 MB worst case on the live database.
+ */
+export const SESSION_ARIJ_ACTIONS_MAX_PAGES = 200;
+
+/** One Arij action, as the client renders it. */
+export interface SessionArijAction {
+  kind:
+    | "status_change"
+    | "comment"
+    | "question"
+    | "findings"
+    | "artifact"
+    | "tool_call";
+  summary: string;
+  detail?: string;
+  at: string | null;
+}
+
+export interface SessionArijActionsResponse {
+  sessionId: string;
+  actions: SessionArijAction[];
+  /** More of the raw stream is still to be scanned; ask again to continue. */
+  hasMore: boolean;
+  /** The scan failed — the list is the durable half only. */
+  arijActionsUnavailable?: boolean;
+}
+
+/**
+ * Read the session's Arij actions, continuing the scan until the raw stream
+ * is exhausted. Each response carries the WHOLE list found so far, so the
+ * caller replaces rather than appends, and can paint after the first page.
+ *
+ * Resolves with the last list it managed to obtain; a failed request stops
+ * the loop rather than rejecting, because this is ambient detail on a page
+ * that must keep working without it.
+ */
+export async function fetchSessionArijActions(
+  projectId: string,
+  sessionId: string,
+  options: {
+    signal?: AbortSignal;
+    onPage?: (response: SessionArijActionsResponse) => void;
+  } = {}
+): Promise<SessionArijAction[] | null> {
+  let latest: SessionArijAction[] | null = null;
+
+  for (let page = 0; page < SESSION_ARIJ_ACTIONS_MAX_PAGES; page++) {
+    const url = new URL(
+      `/api/projects/${projectId}/sessions/${sessionId}`,
+      window.location.origin
+    );
+    url.searchParams.set("view", SESSION_ARIJ_ACTIONS_VIEW);
+
+    const response = await fetch(url.toString(), { signal: options.signal });
+    if (!response.ok) return latest;
+
+    const body = (await response.json()) as {
+      data?: SessionArijActionsResponse;
+    };
+    if (!body.data) return latest;
+
+    latest = body.data.actions ?? [];
+    options.onPage?.(body.data);
+    if (!body.data.hasMore) return latest;
+  }
+
+  console.warn(
+    `[sessions] stopped scanning the raw stream of session ${sessionId} after ${SESSION_ARIJ_ACTIONS_MAX_PAGES} pages; the action list may be partial.`
+  );
+  return latest;
+}
+
 /** One stream page as the route returns it. */
 export interface SessionChunkPageResponse {
   sessionId: string;
