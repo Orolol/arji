@@ -351,6 +351,14 @@ export function EpicCard({
         onDependencyHoverChange?.(epic.id, false);
         onLinkedAgentHoverChange?.(null);
       }}
+      // The DragOverlay copy gets a name of its own rather than a variant of
+      // the card's: it renders the SAME epic while a drag is in flight (and
+      // through the drop animation after it), so anything that shares a
+      // prefix with `epic-card-` makes every card locator ambiguous for
+      // exactly as long as the gesture lasts.
+      data-testid={
+        isOverlay ? `drag-overlay-card-${epic.id}` : `epic-card-${epic.id}`
+      }
       data-selected={selected ? "true" : undefined}
       data-auto-included={autoIncluded ? "true" : undefined}
       className={cn(

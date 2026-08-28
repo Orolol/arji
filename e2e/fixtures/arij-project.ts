@@ -1,7 +1,7 @@
 import { test as base, expect, type APIRequestContext } from "@playwright/test";
 import Database from "better-sqlite3";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -31,27 +31,124 @@ export interface ArijProject {
 function createScratchRepo(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "arij-e2e-"));
 
-  const git = (...args: string[]) =>
-    execFileSync(
-      "git",
-      [
-        "-C",
-        dir,
-        "-c",
-        "user.email=e2e@arij.local",
-        "-c",
-        "user.name=Arij E2E",
-        "-c",
-        "commit.gpgsign=false",
-        ...args,
-      ],
-      { stdio: "ignore" }
-    );
-
-  git("init", "-b", "main");
-  git("commit", "--allow-empty", "-m", "initial");
+  git(dir, "init", "-b", "main");
+  // Written into the repository's own config rather than passed per command:
+  // the merge route commits through simple-git, which knows nothing about
+  // this fixture. Without a local identity that merge fails on a machine
+  // whose global git config has none, and gpg signing would prompt.
+  git(dir, "config", "user.email", "e2e@arij.local");
+  git(dir, "config", "user.name", "Arij E2E");
+  git(dir, "config", "commit.gpgsign", "false");
+  git(dir, "commit", "--allow-empty", "-m", "initial");
 
   return dir;
+}
+
+/** Runs one git command in `repoPath`, throwing on a non-zero exit. */
+function git(repoPath: string, ...args: string[]): string {
+  return execFileSync("git", ["-C", repoPath, ...args], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+/**
+ * Commits `content` on a new branch off the current HEAD and returns to the
+ * base branch — the shape a finished epic worktree leaves behind, which is
+ * what `POST /api/projects/:p/epics/:e/merge` lands.
+ *
+ * The base branch is left checked out because that is where the merge route
+ * expects to work; a branch still checked out would also make
+ * `git branch -D` (which `mergeWorktree` runs after landing) fail.
+ */
+export function commitOnBranch(options: {
+  repoPath: string;
+  branch: string;
+  filePath: string;
+  content: string;
+  message?: string;
+  baseBranch?: string;
+}): void {
+  const {
+    repoPath,
+    branch,
+    filePath,
+    content,
+    message = `Work on ${branch}`,
+    baseBranch = "main",
+  } = options;
+
+  git(repoPath, "checkout", "-b", branch);
+  writeFileSync(path.join(repoPath, filePath), content);
+  git(repoPath, "add", "--", filePath);
+  git(repoPath, "commit", "-m", message);
+  git(repoPath, "checkout", baseBranch);
+}
+
+/** Every local branch of `repoPath`, so a test can assert one is gone. */
+export function localBranches(repoPath: string): string[] {
+  return git(repoPath, "branch", "--format=%(refname:short)")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/** The subject lines of `branch`, newest first. */
+export function commitSubjects(repoPath: string, branch = "main"): string[] {
+  return git(repoPath, "log", "--format=%s", branch)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Records a completed review session on an epic, the way a reviewer that
+ * called `submit_findings` would.
+ *
+ * Written straight to SQLite because there is no other way in: the only
+ * writer of `agent_sessions.review_verdict` is the MCP `submit-findings`
+ * route, whose token is minted for a live provider process — and spawning a
+ * real CLI is out of scope for a browser test (slow, billed, and never twice
+ * the same). Everything the row then unlocks is real: the transition service
+ * reads it through `buildTransitionContext`, and the review gate it opens
+ * (review -> to_merge) is asserted in both directions by the caller.
+ *
+ * The columns are exactly the ones the unverifiable-review rule reads
+ * (lib/pipeline/findings.ts): a completed, answered, ordinary review session
+ * carrying a structured verdict. Drop any of them and the epic stays stuck in
+ * Review — which is the failure this seed is meant to make impossible to
+ * confuse with a broken guard.
+ */
+export function seedCompletedReview(options: {
+  projectId: string;
+  epicId: string;
+  verdict?: string;
+  agentType?: string;
+}): string {
+  const {
+    projectId,
+    epicId,
+    verdict = "approved",
+    agentType = "review_code",
+  } = options;
+  const id = `e2e-review-${Math.random().toString(36).slice(2, 12)}`;
+  const now = new Date().toISOString();
+
+  const db = openDatabase();
+  try {
+    db.prepare(
+      `INSERT INTO agent_sessions
+         (id, project_id, epic_id, status, mode, provider, agent_type,
+          outcome, review_verdict, mcp_channel, started_at, completed_at,
+          ended_at, created_at)
+       VALUES (?, ?, ?, 'completed', 'plan', 'claude-code', ?,
+               'answered', ?, 'injected', ?, ?, ?, ?)`
+    ).run(id, projectId, epicId, agentType, verdict, now, now, now, now);
+  } finally {
+    db.close();
+  }
+
+  return id;
 }
 
 /**
@@ -209,6 +306,113 @@ async function deleteProject(
   } catch (error) {
     return { ok: false, detail: `request failed: ${String(error)}` };
   }
+}
+
+/** An epic as the board fixtures hand it back: enough to address it later. */
+export interface SeededEpic {
+  id: string;
+  title: string;
+  readableId: string | null;
+}
+
+/**
+ * Creates an epic through the real route.
+ *
+ * Board tests need a card to act on, not a creation flow — that one is
+ * covered by `epic-manual-creation.spec.ts`. Going through the API keeps the
+ * arrange step out of the assertions and out of the drag timing.
+ */
+export async function createEpic(
+  request: APIRequestContext,
+  projectId: string,
+  title: string,
+  description = "Created by the e2e suite."
+): Promise<SeededEpic> {
+  const created = await request.post(`/api/projects/${projectId}/epics`, {
+    data: { title, description },
+  });
+  expect(
+    created.ok(),
+    `epic creation failed: ${created.status()} ${await created.text()}`
+  ).toBeTruthy();
+
+  const { data } = (await created.json()) as {
+    data: { id: string; readableId?: string | null };
+  };
+  return { id: data.id, title, readableId: data.readableId ?? null };
+}
+
+/**
+ * The status the server has stored for an epic right now.
+ *
+ * The board moves a card optimistically and only rolls back once the reorder
+ * route answers, so the rendered column is never on its own evidence that a
+ * transition was accepted. This is.
+ */
+export async function storedEpicStatus(
+  request: APIRequestContext,
+  projectId: string,
+  epicId: string
+): Promise<string> {
+  const response = await request.get(`/api/projects/${projectId}/epics`);
+  expect(response.ok(), `epics read failed: ${response.status()}`).toBeTruthy();
+  const { data } = (await response.json()) as {
+    data: { id: string; status: string }[];
+  };
+  return data.find((epic) => epic.id === epicId)?.status ?? "<absent>";
+}
+
+/**
+ * The titles of one column's epics, in the order the server ranks them.
+ *
+ * `epics.position` is the board's execution order, so this — not the rendered
+ * column — is what a reorder has to have changed.
+ */
+export async function storedColumnOrder(
+  request: APIRequestContext,
+  projectId: string,
+  status: string
+): Promise<string[]> {
+  const response = await request.get(`/api/projects/${projectId}/epics`);
+  expect(response.ok(), `epics read failed: ${response.status()}`).toBeTruthy();
+  const { data } = (await response.json()) as {
+    data: { title: string; status: string; position: number }[];
+  };
+  return data
+    .filter((epic) => epic.status === status)
+    .sort((a, b) => a.position - b.position)
+    .map((epic) => epic.title);
+}
+
+/** The branch the epic row still points at, if any. */
+export async function storedEpicBranch(
+  request: APIRequestContext,
+  projectId: string,
+  epicId: string
+): Promise<string | null> {
+  const response = await request.get(`/api/projects/${projectId}/epics`);
+  expect(response.ok(), `epics read failed: ${response.status()}`).toBeTruthy();
+  const { data } = (await response.json()) as {
+    data: { id: string; branchName: string | null }[];
+  };
+  return data.find((epic) => epic.id === epicId)?.branchName ?? null;
+}
+
+/** Points an epic at the branch a build would have produced. */
+export async function attachBranch(
+  request: APIRequestContext,
+  projectId: string,
+  epicId: string,
+  branchName: string
+): Promise<void> {
+  const patched = await request.patch(
+    `/api/projects/${projectId}/epics/${epicId}`,
+    { data: { branchName } }
+  );
+  expect(
+    patched.ok(),
+    `attaching ${branchName} failed: ${patched.status()} ${await patched.text()}`
+  ).toBeTruthy();
 }
 
 export const test = base.extend<{ project: ArijProject }>({

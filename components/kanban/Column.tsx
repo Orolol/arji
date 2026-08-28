@@ -268,6 +268,9 @@ export function Column({
   return (
     <div
       ref={setNodeRef}
+      // The droppable node itself, so an end-to-end drag aims at the box
+      // dnd-kit actually measures rather than at a card that may not be there.
+      data-testid={`column-${status}`}
       className={cn(
         "flex min-w-[196px] max-w-[280px] flex-col gap-[12px]",
         COLUMN_FLEX[status as Exclude<KanbanStatus, "released">] ??

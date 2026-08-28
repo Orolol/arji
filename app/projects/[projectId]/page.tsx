@@ -847,6 +847,8 @@ export default function KanbanPage() {
         {toasts.map((toast) => (
           <div
             key={toast.id}
+            data-testid="board-toast"
+            data-toast-type={toast.type}
             className={cn(
               "flex items-center gap-2 rounded-[11px] border px-[14px] py-[10px] text-[13px] shadow-[0_18px_40px_rgba(58,48,44,.14)]",
               toast.type === "success"
