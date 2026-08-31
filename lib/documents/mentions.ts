@@ -1,5 +1,5 @@
-import path from "path";
 import { listProjectDocuments, type ProjectDocumentRecord } from "@/lib/documents/query";
+import { documentImageAbsolutePath } from "@/lib/documents/document-paths";
 export { formatDocumentMention } from "@/lib/documents/mention-format";
 import { formatDocumentMention } from "@/lib/documents/mention-format";
 
@@ -114,9 +114,11 @@ export function buildMentionContextBlock(documents: ProjectDocumentRecord[]): st
       ].join("\n\n");
     }
 
-    const absolutePath = doc.imagePath
-      ? path.join(process.cwd(), doc.imagePath)
-      : "(missing image path)";
+    // A stored path pointing outside `data/documents/` reads the same as a
+    // missing one: this sentence is an instruction to an agent to open a
+    // file, and the column is not a trusted source of paths.
+    const absolutePath =
+      documentImageAbsolutePath(doc.imagePath) ?? "(missing image path)";
 
     return `- ${mentionToken} references an image available at filesystem path: ${absolutePath}`;
   });

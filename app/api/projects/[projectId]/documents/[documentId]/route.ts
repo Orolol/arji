@@ -3,8 +3,8 @@ import { db } from "@/lib/db";
 import { documents } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { isInternalMemoryDocKind } from "@/lib/documents/memory-constants";
+import { documentImageAbsolutePath } from "@/lib/documents/document-paths";
 import fs from "fs";
-import path from "path";
 
 type Params = {
   params: Promise<{ projectId: string; documentId: string }>;
@@ -40,8 +40,11 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   }
 
   if (doc.kind === "image" && doc.imagePath) {
-    const absolutePath = path.join(process.cwd(), doc.imagePath);
-    if (fs.existsSync(absolutePath)) {
+    // Same boundary the upload column gets: `image_path` is turned into an
+    // `fs.unlink`, so a value that does not name a file under
+    // `data/documents/` is left alone rather than resolved and removed.
+    const absolutePath = documentImageAbsolutePath(doc.imagePath);
+    if (absolutePath && fs.existsSync(absolutePath)) {
       try {
         fs.unlinkSync(absolutePath);
       } catch (error) {

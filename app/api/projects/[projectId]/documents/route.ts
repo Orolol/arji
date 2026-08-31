@@ -5,7 +5,11 @@ import { and, eq, sql } from "drizzle-orm";
 import { createId } from "@/lib/utils/nanoid";
 import { convertToMarkdown } from "@/lib/converters";
 import { isInternalMemoryDocKind } from "@/lib/documents/memory-constants";
-import path from "path";
+import {
+  documentFileAbsolutePath,
+  documentImageRelativePath,
+  projectDocumentsDirectory,
+} from "@/lib/documents/document-paths";
 import fs from "fs";
 
 const IMAGE_MIME_TYPES = new Set([
@@ -38,12 +42,12 @@ function buildImageStoragePath(projectId: string, id: string, fileName: string):
   absolutePath: string;
   relativePath: string;
 } {
-  const dir = path.join(process.cwd(), "data", "documents", projectId);
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(projectDocumentsDirectory(projectId), { recursive: true });
   const diskName = `${id}-${safeFileName(fileName)}`;
-  const relativePath = path.join("data", "documents", projectId, diskName);
-  const absolutePath = path.join(process.cwd(), relativePath);
-  return { absolutePath, relativePath };
+  return {
+    absolutePath: documentFileAbsolutePath(projectId, diskName),
+    relativePath: documentImageRelativePath(projectId, diskName),
+  };
 }
 
 export async function GET(

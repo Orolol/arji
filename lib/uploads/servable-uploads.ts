@@ -17,12 +17,12 @@
  */
 
 import fs from "fs";
-import path from "path";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { chatAttachments } from "@/lib/db/schema";
 import { isAllowedImageMimeType } from "./image-attachments";
 import { isServableUploadFileName, uploadsDirectoryFor } from "./ticket-images";
+import { uploadFileAbsolutePath } from "./upload-paths";
 
 /**
  * Why a name cannot be served.
@@ -90,7 +90,7 @@ export function lookupServableUpload(
     return { servable: false, reason: "not-registered" };
   }
 
-  const absolutePath = path.join(process.cwd(), relativePath);
+  const absolutePath = uploadFileAbsolutePath(projectId, fileName);
 
   if (!fs.existsSync(absolutePath)) {
     return { servable: false, reason: "missing-on-disk" };

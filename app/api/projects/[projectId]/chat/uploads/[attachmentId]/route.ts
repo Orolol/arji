@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { chatAttachments } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { discardStagedUpload } from "@/lib/uploads/attachment-ownership";
-import path from "path";
+import { storedUploadAbsolutePath } from "@/lib/uploads/upload-paths";
 import fs from "fs";
 
 export async function GET(
@@ -22,9 +22,13 @@ export async function GET(
     return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
   }
 
-  const absolutePath = path.join(process.cwd(), attachment.filePath);
+  // `file_path` is a database string and this reads bytes off disk with it, so
+  // it is resolved through the uploads boundary rather than joined onto the
+  // working directory: a row pointing anywhere but `data/uploads/` — including
+  // one that climbs back out of it — reads as absent instead of being served.
+  const absolutePath = storedUploadAbsolutePath(attachment.filePath);
 
-  if (!fs.existsSync(absolutePath)) {
+  if (!absolutePath || !fs.existsSync(absolutePath)) {
     return NextResponse.json({ error: "File not found on disk" }, { status: 404 });
   }
 

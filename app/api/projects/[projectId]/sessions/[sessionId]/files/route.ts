@@ -178,7 +178,9 @@ export async function GET(_request: NextRequest, { params }: Params) {
   if (!project.gitRepoPath) return answer(unavailable("not-a-repo", branchName));
   if (!worktreePath) return answer(unavailable("no-worktree", branchName));
   // Worktrees are pruned when a ticket lands; the session row keeps the path.
-  if (!fs.existsSync(worktreePath)) {
+  // The worktree belongs to the *user's* repository, outside this app's tree,
+  // so there is nothing here for the build to trace.
+  if (!fs.existsSync(/*turbopackIgnore: true*/ worktreePath)) {
     return answer(unavailable("worktree-missing", branchName));
   }
 

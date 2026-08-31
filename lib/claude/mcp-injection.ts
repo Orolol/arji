@@ -56,7 +56,17 @@ export const MCP_TOOLS_ENABLED_SETTING_KEY = "mcp_tools_enabled";
 export const ARIJ_MCP_SERVER_NAME = "arij";
 
 /** Path of the stdio shim, relative to the app root (the server's cwd). */
-export const ARIJ_MCP_SHIM_RELATIVE_PATH = ["bin", "arij-mcp.mjs"] as const;
+/**
+ * Absolute path of the stdio shim the spawned CLI runs.
+ *
+ * The `bin` / `arij-mcp.mjs` segments are written literally at the join rather
+ * than spread from a constant: Turbopack evaluates filesystem joins
+ * statically, and a spread is opaque to it — an unscoped `process.cwd()` join
+ * makes the build trace the whole project into the server output bundle.
+ */
+export function arijMcpShimPath(): string {
+  return path.join(process.cwd(), "bin", "arij-mcp.mjs");
+}
 
 /** The agent tools, as bare names (no server prefix). */
 export const ARIJ_MCP_AGENT_TOOLS = [
@@ -368,7 +378,7 @@ export function buildMcpSpawnConfig({
   const arijChannel: McpStdioServerSpec = {
     name: ARIJ_MCP_SERVER_NAME,
     command: process.execPath,
-    args: [path.join(process.cwd(), ...ARIJ_MCP_SHIM_RELATIVE_PATH)],
+    args: [arijMcpShimPath()],
     env: {
       ARIJ_BASE_URL: getAppBaseUrl(),
       ARIJ_MCP_TOKEN: token,

@@ -8,6 +8,7 @@ import {
   type SessionArtifact,
 } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
+import { resolveSessionsRoot } from "./session-paths";
 
 export const MAX_SESSION_ARTIFACT_BYTES = 5 * 1024 * 1024;
 export const MAX_SESSION_ARTIFACTS = 10;
@@ -228,9 +229,7 @@ export function attachSessionArtifact(
   options: AttachSessionArtifactOptions = {}
 ): SessionArtifact {
   const database = options.database ?? db;
-  const sessionsRoot = path.resolve(
-    options.sessionsRoot ?? path.join(process.cwd(), "data", "sessions")
-  );
+  const sessionsRoot = resolveSessionsRoot(options.sessionsRoot);
   const sourcePath = input.sourcePath.trim();
   const caption = input.caption.trim();
 
