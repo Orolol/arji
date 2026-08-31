@@ -30,8 +30,9 @@ vi.mock("@/components/shared/NamedAgentSelect", () => ({
   }) => (
     <select
       data-testid="agent-select"
-      value={value ?? ""}
+      className={className}
       onChange={(e) => onChange(e.target.value)}
+      value={value ?? ""}
     >
       <option value="">Select agent</option>
       <option value="agent-1">Claude Code</option>
@@ -137,8 +138,8 @@ describe("AgentActionsBar (story target)", () => {
 
     // Called with undefined comment, null namedAgentId (default) and the
     // pipeline flag, which defaults to the effective `pipeline_enabled`
-    // setting (absent here, so false).
-    expect(onSendToDev).toHaveBeenCalledWith(undefined, null, undefined, false);
+    // setting (absent here, so the product default: true).
+    expect(onSendToDev).toHaveBeenCalledWith(undefined, null, undefined, true);
   });
 
   it("calls onSendToDev with selected namedAgentId", async () => {
@@ -154,7 +155,7 @@ describe("AgentActionsBar (story target)", () => {
       undefined,
       "agent-1",
       undefined,
-      false
+      true
     );
   });
 

@@ -72,21 +72,21 @@ describe("AgentActionsBar — pipeline checkbox", () => {
     stubFetch();
   });
 
-  it("is unchecked when no pipeline setting exists", async () => {
-    renderBar(sendToDevSpy());
-    openDialog();
-
-    const checkbox = await screen.findByTestId("pipeline-checkbox");
-    await waitFor(() => expect(checkbox).not.toBeChecked());
-  });
-
-  it("defaults to checked when the global setting is on", async () => {
-    settings = { pipeline_enabled: true };
+  it("is checked when no pipeline setting exists", async () => {
     renderBar(sendToDevSpy());
     openDialog();
 
     const checkbox = await screen.findByTestId("pipeline-checkbox");
     await waitFor(() => expect(checkbox).toBeChecked());
+  });
+
+  it("defaults to unchecked when the global setting is explicitly off", async () => {
+    settings = { pipeline_enabled: false };
+    renderBar(sendToDevSpy());
+    openDialog();
+
+    const checkbox = await screen.findByTestId("pipeline-checkbox");
+    await waitFor(() => expect(checkbox).not.toBeChecked());
   });
 
   it("lets a per-project override turn the default back off", async () => {
@@ -100,14 +100,13 @@ describe("AgentActionsBar — pipeline checkbox", () => {
     expect(checkbox).not.toBeChecked();
   });
 
-  it("passes pipeline=true to onSendToDev when the box is ticked", async () => {
+  it("passes pipeline=true to onSendToDev when the box stays ticked", async () => {
     const onSendToDev = sendToDevSpy();
     renderBar(onSendToDev);
     openDialog();
 
-    const checkbox = await screen.findByTestId("pipeline-checkbox");
-    fireEvent.click(checkbox);
-    expect(checkbox).toBeChecked();
+    // The box is checked by default; dispatch without touching it.
+    await screen.findByTestId("pipeline-checkbox");
 
     fireEvent.click(screen.getByRole("button", { name: /Dispatch Agent/i }));
 
@@ -115,12 +114,14 @@ describe("AgentActionsBar — pipeline checkbox", () => {
     expect(onSendToDev.mock.calls[0]).toEqual([undefined, null, undefined, true]);
   });
 
-  it("passes pipeline=false when the box is left unticked", async () => {
+  it("passes pipeline=false when the box is unticked", async () => {
     const onSendToDev = sendToDevSpy();
     renderBar(onSendToDev);
     openDialog();
 
-    await screen.findByTestId("pipeline-checkbox");
+    const checkbox = await screen.findByTestId("pipeline-checkbox");
+    fireEvent.click(checkbox);
+    expect(checkbox).not.toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: /Dispatch Agent/i }));
 
     await waitFor(() => expect(onSendToDev).toHaveBeenCalled());

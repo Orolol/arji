@@ -72,7 +72,7 @@ describe("Settings page — Autonomous Pipeline band", () => {
       screen.getByRole("heading", { name: "Autonomous Pipeline" })
     ).toBeInTheDocument();
 
-    await waitFor(() => expectSwitch("pipeline-enabled-toggle", false));
+    await waitFor(() => expectSwitch("pipeline-enabled-toggle", true));
     expectSwitch("pipeline-grader-toggle", false);
     expect(screen.getByLabelText("Attempts per stage")).toHaveValue(2);
     expect(screen.getByLabelText("Review → fix cycles")).toHaveValue(2);
@@ -98,13 +98,16 @@ describe("Settings page — Autonomous Pipeline band", () => {
     render(<PipelineSettingsPage />);
     await waitFor(() => screen.getByTestId("pipeline-enabled-toggle"));
 
+    // The default is ON: the flip turns the full pipeline off.
     fireEvent.click(screen.getByTestId("pipeline-enabled-toggle"));
     // Nothing travels until Save: the tab is draft-and-commit.
     expect(patchCalls).toHaveLength(0);
     save();
 
-    await waitFor(() => expect(patchCalls).toContainEqual({ pipeline_enabled: true }));
-    expectSwitch("pipeline-enabled-toggle", true);
+    await waitFor(() =>
+      expect(patchCalls).toContainEqual({ pipeline_enabled: false })
+    );
+    expectSwitch("pipeline-enabled-toggle", false);
   });
 
   it("batches both pipeline flags into a single PATCH", async () => {
@@ -117,7 +120,7 @@ describe("Settings page — Autonomous Pipeline band", () => {
 
     await waitFor(() => expect(patchCalls).toHaveLength(1));
     expect(patchCalls[0]).toEqual({
-      pipeline_enabled: true,
+      pipeline_enabled: false,
       pipeline_grader_enabled: true,
     });
   });
@@ -161,7 +164,7 @@ describe("Settings page — Autonomous Pipeline band", () => {
       expect(screen.getByTestId("settings-message")).toHaveTextContent("nope")
     );
     // Draft-and-commit: the unsaved edit stays, so the user can retry it.
-    expectSwitch("pipeline-enabled-toggle", true);
+    expectSwitch("pipeline-enabled-toggle", false);
   });
 
   it("ignores non-numeric input instead of PATCHing garbage", async () => {
@@ -354,8 +357,11 @@ describe("pipeline setting parsers", () => {
   });
 
   it("resolves the effective enabled default project-first", () => {
-    expect(resolvePipelineEnabledDefault({}, "p1")).toBe(false);
-    expect(resolvePipelineEnabledDefault({ pipeline_enabled: true }, "p1")).toBe(true);
+    expect(resolvePipelineEnabledDefault({}, "p1")).toBe(true);
+    expect(resolvePipelineEnabledDefault(null, "p1")).toBe(true);
+    expect(
+      resolvePipelineEnabledDefault({ pipeline_enabled: false }, "p1")
+    ).toBe(false);
     expect(
       resolvePipelineEnabledDefault(
         { pipeline_enabled: true, "pipeline_enabled:p1": false },
@@ -365,7 +371,6 @@ describe("pipeline setting parsers", () => {
     expect(
       resolvePipelineEnabledDefault({ "pipeline_enabled:p1": "true" }, "p1")
     ).toBe(true);
-    expect(resolvePipelineEnabledDefault(null, "p1")).toBe(false);
     expect(resolvePipelineGraderEnabledDefault({}, "p1")).toBe(false);
     expect(
       resolvePipelineGraderEnabledDefault(

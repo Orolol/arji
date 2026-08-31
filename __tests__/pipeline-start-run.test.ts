@@ -364,19 +364,19 @@ describe("startPipelineRun", () => {
 });
 
 describe("resolvePipelineEnabled", () => {
-  it("defaults OFF, honours the global key, and lets the project key win", () => {
+  it("defaults ON, honours an explicit off, and lets the project key win", () => {
     const { projectId } = seed();
-    expect(resolvePipelineEnabled(projectId)).toBe(false);
-
-    db.insert(settings)
-      .values({ key: "pipeline_enabled", value: "true" })
-      .run();
     expect(resolvePipelineEnabled(projectId)).toBe(true);
 
     db.insert(settings)
-      .values({ key: pipelineEnabledSettingKey(projectId), value: "false" })
+      .values({ key: "pipeline_enabled", value: "false" })
       .run();
     expect(resolvePipelineEnabled(projectId)).toBe(false);
+
+    db.insert(settings)
+      .values({ key: pipelineEnabledSettingKey(projectId), value: "true" })
+      .run();
+    expect(resolvePipelineEnabled(projectId)).toBe(true);
   });
 
   it("keeps grading OFF unless globally or per-project enabled", () => {

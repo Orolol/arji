@@ -37,6 +37,11 @@ vi.mock("@/lib/db", async () => {
   return mod;
 });
 
+vi.mock("@/lib/pipeline", () => ({
+  resolvePipelineEnabled: vi.fn(() => false),
+  startPipelineRun: vi.fn(() => ({ runId: "run-test" })),
+}));
+
 vi.mock("@/lib/workflow/log", () => ({
   logTransition: vi.fn(),
 }));

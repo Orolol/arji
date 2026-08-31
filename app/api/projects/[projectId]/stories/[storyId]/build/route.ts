@@ -63,7 +63,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   const body = await request.json().catch(() => ({}));
   const namedAgentId: string | null = body.namedAgentId || null;
   // Autonomous pipeline flag: an explicit boolean forces on/off; absent, the
-  // pipeline_enabled setting chain decides (default OFF).
+  // pipeline_enabled setting chain decides (default ON).
   const pipelineParam: boolean | undefined =
     typeof body.pipeline === "boolean" ? body.pipeline : undefined;
 
