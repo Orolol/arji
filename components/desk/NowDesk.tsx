@@ -4,12 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Infinity as InfinityIcon } from "lucide-react";
 
-import {
-  Mono,
-  PillButton,
-  SurfaceCard,
-  projectTone,
-} from "@/components/piscine";
+import { PillButton, SurfaceCard, projectTone } from "@/components/piscine";
 import {
   Popover,
   PopoverContent,
@@ -696,7 +691,7 @@ export function NowDesk({
                 switches rather than pretending to be one toggle. The bar's
                 "Auto" pill is the read-only rollup and leads to Réglages; this
                 is where the switches actually live. */}
-            <Popover>
+            <Popover open={autoPopoverOpen} onOpenChange={setAutoPopoverOpen}>
               <PopoverTrigger asChild>
                 <PillButton
                   variant="filled"

@@ -58,10 +58,13 @@ describe("0050_desk_dismissals", () => {
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS `desk_dismissals`/i);
 
     const entry = journal.entries.find((candidate) => candidate.tag === MIGRATION_TAG);
-    // `idx` is contiguous with this branch's journal (the sibling migration
-    // tests assert idx === array index); drizzle never reads it. `when` is the
-    // half that governs whether the migration runs at all.
-    expect(entry).toMatchObject({ idx: 47, when: 1786714700000 });
+    expect(entry).toBeDefined();
+    // `when` is the half that governs whether the migration runs at all, so it
+    // is pinned to a literal. `idx` is asserted as contiguity below instead:
+    // drizzle never reads it, and merging main renumbers this entry every time
+    // one of main's own migrations lands ahead of it. A literal `idx` would
+    // then fail the merge rather than the defect this file exists to pin.
+    expect(entry!.when).toBe(1786714700000);
 
     // The regression this file exists to pin: main took `when` 1786714500000
     // (0048_mcp_servers) and 1786714600000 (0049_mcp_servers_scope_unique)
@@ -77,6 +80,8 @@ describe("0050_desk_dismissals", () => {
     for (const earlier of journal.entries.slice(0, position)) {
       expect(earlier.when).toBeLessThan(entry!.when);
     }
+    // The sibling migration tests' invariant: idx IS the array index.
+    expect(entry!.idx).toBe(position);
     expect(new Set(journal.entries.map((candidate) => candidate.when)).size).toBe(
       journal.entries.length,
     );
