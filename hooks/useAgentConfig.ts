@@ -62,8 +62,12 @@ function fetchList<T>(
       if (!isCancelled()) setLoaded({ key: url, data: (json.data || []) as T[] });
     })
     .catch(() => {
-      // Leave whatever is on screen in place, but mark the request settled.
-      if (!isCancelled()) setLoaded((prev) => ({ key: url, data: prev?.data ?? [] }));
+      // Record the failure against *this* URL and nothing else. Carrying the
+      // previous URL's rows across would re-label another scope's prompts,
+      // assignments and review agents as this scope's own — and the editors
+      // write back to whichever scope is selected now, so a stale row shown
+      // under the new scope is edited into the new scope.
+      if (!isCancelled()) setLoaded({ key: url, data: EMPTY_LIST });
     });
 }
 

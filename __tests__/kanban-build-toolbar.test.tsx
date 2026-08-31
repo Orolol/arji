@@ -131,6 +131,11 @@ vi.mock("@/components/shared/NamedAgentSelect", () => ({
 import KanbanPage from "@/app/projects/[projectId]/page";
 
 describe("Kanban Build Toolbar", () => {
+  const teamCheckbox = () =>
+    screen
+      .getAllByRole("checkbox")
+      .find((cb) => cb.closest("label")?.textContent?.includes("Team mode"))!;
+
   beforeEach(() => {
     vi.restoreAllMocks();
     mockPanelOpenChat.mockClear();
@@ -270,6 +275,52 @@ describe("Kanban Build Toolbar", () => {
     )!;
     fireEvent.click(teamCheckbox);
     expect(screen.getByText("Build as Team")).toBeInTheDocument();
+  });
+
+  it("retires team mode when the selection drops below two", () => {
+    render(<KanbanPage />);
+    fireEvent.click(screen.getByTestId("toggle-epic1"));
+    fireEvent.click(screen.getByTestId("toggle-epic2"));
+    fireEvent.click(teamCheckbox());
+    expect(screen.getByText("Build as Team")).toBeInTheDocument();
+
+    // Deselecting hides the control, which on its own only *masks* the choice.
+    fireEvent.click(screen.getByTestId("toggle-epic2"));
+    expect(screen.queryByText("Team mode")).not.toBeInTheDocument();
+
+    // Re-selecting a second epic must not resurrect a decision the user made
+    // about a selection that no longer exists.
+    fireEvent.click(screen.getByTestId("toggle-epic2"));
+    expect(teamCheckbox()).not.toBeChecked();
+    expect(screen.getByText("Build all")).toBeInTheDocument();
+  });
+
+  it("does not send team: true after a retired team mode is re-selected into range", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ data: { count: 2 } }),
+    });
+    global.fetch = mockFetch;
+
+    render(<KanbanPage />);
+    fireEvent.click(screen.getByTestId("toggle-epic1"));
+    fireEvent.click(screen.getByTestId("toggle-epic2"));
+    fireEvent.click(teamCheckbox());
+
+    // Down to one epic and back up to two, without ever re-checking the box.
+    fireEvent.click(screen.getByTestId("toggle-epic2"));
+    fireEvent.click(screen.getByTestId("toggle-epic3"));
+
+    // Matched loosely on purpose: the label is the symptom, the request body
+    // below is the defect.
+    fireEvent.click(screen.getByRole("button", { name: /Build (all|as Team)/ }));
+
+    await waitFor(() => {
+      const call = mockFetch.mock.calls.find(
+        (c: unknown[]) => typeof c[0] === "string" && c[0].endsWith("/build")
+      );
+      expect(call).toBeTruthy();
+      expect(JSON.parse(call![1].body).team).toBe(false);
+    });
   });
 
   it("build button shows 'Build all' when team mode disabled", () => {

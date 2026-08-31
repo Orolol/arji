@@ -108,8 +108,16 @@ export default function KanbanPage() {
       ? requestedHighlightId
       : null;
 
-  // Team mode needs at least two selected tickets; below that it is simply
-  // not on, which is a derivation rather than a reset.
+  // Team mode is a decision about the selection that was standing when the box
+  // was ticked. Falling below two tickets retires it outright: merely masking
+  // it lets a later re-selection resurrect a `team: true` build the user never
+  // asked for a second time. Adjusting state during render is React's own
+  // answer to "reset when a value changes" — the reset lands in this same pass,
+  // before anything is committed, so no one ever observes the stale value.
+  if (teamModeRequested && batch.allSelected.size < 2) {
+    setTeamMode(false);
+  }
+
   const teamMode = teamModeRequested && batch.allSelected.size >= 2;
 
   const activeAgentActivities = useMemo<Record<string, KanbanEpicAgentActivity>>(
