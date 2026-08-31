@@ -177,6 +177,11 @@ function claudeSubWith(
  * Minimal report: one recorded session so the page renders its lower
  * sections (the Arij 30-day strip in particular, which the codex history
  * strip must stay visually distinct from).
+ *
+ * The `dashboard` block below is the ONLY change this file received for the
+ * frame-8d re-skin: `UsageReport` gained a required ninth key, so the fixture
+ * has to carry one. Not one assertion in this file changed — it is still the
+ * proof that the subscription-card subtree moved verbatim.
  */
 function report(subscriptions: SubscriptionStatus[]): UsageReport {
   return {
@@ -195,6 +200,27 @@ function report(subscriptions: SubscriptionStatus[]): UsageReport {
     },
     subscriptions,
     generatedAt: "2026-08-18T12:00:00.000Z",
+    dashboard: {
+      range: "30d",
+      since: "2026-07-19T12:00:00.000Z",
+      totals: {
+        costUsd: 1,
+        sessions: 1,
+        cleanPercent: 100,
+        ticketsShipped: 0,
+        costPerTicketUsd: null,
+      },
+      cap: { capUsd: null, spentUsd: 1, usedPercent: null, alertPercent: 80 },
+      byAgent: [],
+      byProject: [],
+      byDay: Array.from({ length: 30 }, (_, i) => ({
+        date: `2026-08-${String(i + 1).padStart(2, "0")}`,
+        sessions: i === 29 ? 1 : 0,
+        costUsd: i === 29 ? 1 : null,
+        failedSessions: 0,
+      })),
+      nightYesterdayUsd: null,
+    },
   };
 }
 
@@ -276,9 +302,11 @@ describe("Usage page — claude live quota", () => {
     expect(
       await screen.findByTestId("usage-sub-claude-live-5h-reset")
     ).toHaveTextContent("window expired — data stale");
-    expect(screen.getByTestId("usage-sub-claude-live-5h-fill")).toHaveStyle({
-      opacity: "0.35",
-    });
+    // Dimmed, not recoloured — and flagged on the row so the signal survives
+    // a restyling of the bar itself.
+    expect(screen.getByTestId("usage-sub-claude-live-5h")).toHaveAttribute(
+      "data-dimmed"
+    );
     // The reported utilization is still replayed verbatim.
     expect(
       screen.getByTestId("usage-sub-claude-live-5h-readout")
@@ -425,7 +453,10 @@ describe("Usage page — claude live quota", () => {
 
     const captured = await screen.findByTestId("usage-sub-claude-captured");
     expect(captured).toHaveTextContent("Live · polled 2m ago · claude CLI");
-    expect(captured.className).not.toContain("text-priority-yellow");
+    // Staleness is a word plus an icon, never a colour: a fresh read carries
+    // neither the marker nor the flag the marker is derived from.
+    expect(captured).not.toHaveAttribute("data-stale");
+    expect(captured).not.toHaveTextContent("stale");
   });
 
   it("demotes the Arij meter under an explicit this-machine-only label", async () => {
@@ -480,7 +511,10 @@ describe("Usage page — claude live quota", () => {
 
     const readout = await screen.findByTestId("usage-sub-claude-budget-readout");
     expect(readout).toHaveTextContent("$70.00 / $50.00");
-    expect(readout.className).toContain("text-destructive");
+    // The alarm lives on the `Mono` run inside the readout slot.
+    expect(
+      readout.querySelector('[data-slot="mono"]')?.className
+    ).toContain("text-destructive");
     expect(screen.getByTestId("usage-sub-claude-budget-fill")).toHaveStyle({
       width: "100%",
     });

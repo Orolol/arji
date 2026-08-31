@@ -1,5 +1,7 @@
 # UAT Checklist: Unified Chat Final Cutover
 
+> **Historical record — 2026-08-31.** The UI described below was replaced by the attention-strata control-desk redesign; this file is kept as written on its date and has not been revised. Current UI: `README.md`, `docs/specs.md`.
+
 ## Build Preconditions
 - [ ] App starts with no runtime errors.
 - [ ] Database is backed up.

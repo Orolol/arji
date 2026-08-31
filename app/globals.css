@@ -17,8 +17,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-instrument);
+  --font-mono: var(--font-space-mono);
+  --font-display: var(--font-bricolage);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -58,7 +59,12 @@
   --color-priority-blue: var(--priority-blue);
   --color-priority-yellow: var(--priority-yellow);
   --color-priority-red: var(--priority-red);
-  /* cassette pêche additions */
+  /* cassette pêche additions — KEPT. 61 files outside the redesign still emit
+     these utilities (187 text-meta, 78 bg-band, 66 text-agent, 46
+     border-border-soft, 40 priority-yellow…). Dropping a --color-* here is a
+     SILENT failure: Tailwind stops emitting the utility, the element renders
+     transparent, no build error. The VALUES are remapped onto Piscine below,
+     so those pages drift toward the new palette for free. */
   --color-band: var(--band);
   --color-meta: var(--meta);
   --color-border-soft: var(--border-soft);
@@ -66,101 +72,308 @@
   --color-agent-bg: var(--agent-bg);
   --color-agent-border: var(--agent-border);
   --color-agent-track: var(--agent-track);
+
+  /* ── Piscine additions ────────────────────────────────────────────────
+     One --color-<role> per new palette role. That line is what makes
+     bg-<role> / text-<role> / border-<role> / ring-<role> exist, and it is
+     what makes the /NN opacity modifiers composite correctly. Tailwind
+     resolves the LONGEST matching token, so bg-strata-live and
+     bg-strata-live-deep coexist, as do bg-action and bg-action-foreground.
+     NOTE --shadow-overlay deliberately has NO entry here: the theme
+     namespace for shadows is --shadow-*, so an entry would be named exactly
+     like the palette token and self-reference. Use shadow-[var(--shadow-overlay)]. */
+  --color-border-strong: var(--border-strong);
+  --color-field: var(--field);
+  --color-action: var(--action);
+  --color-action-foreground: var(--action-foreground);
+  --color-action-outline: var(--action-outline);
+  --color-card-translucent: var(--card-translucent);
+  --color-track-idle: var(--track-idle);
+  --color-scrim: var(--scrim);
+  --color-chart-fail: var(--chart-fail);
+
+  --color-strata-live: var(--strata-live);
+  --color-strata-live-deep: var(--strata-live-deep);
+  --color-strata-live-mid: var(--strata-live-mid);
+  --color-strata-live-under: var(--strata-live-under);
+  --color-strata-live-track: var(--strata-live-track);
+  --color-strata-live-fill: var(--strata-live-fill);
+  --color-strata-live-bar: var(--strata-live-bar);
+
+  --color-strata-you: var(--strata-you);
+  --color-strata-you-deep: var(--strata-you-deep);
+  --color-strata-you-mid: var(--strata-you-mid);
+  --color-strata-you-under: var(--strata-you-under);
+  --color-strata-you-stamp: var(--strata-you-stamp);
+  --color-strata-you-stamp2: var(--strata-you-stamp2);
+  --color-strata-you-stamp-text: var(--strata-you-stamp-text);
+
+  --color-strata-land: var(--strata-land);
+  --color-strata-land-deep: var(--strata-land-deep);
+  --color-strata-land-mid: var(--strata-land-mid);
+  --color-strata-land-under: var(--strata-land-under);
+  --color-strata-land-rule: var(--strata-land-rule);
+
+  --color-strata-next: var(--strata-next);
+  --color-strata-next-deep: var(--strata-next-deep);
+  --color-strata-next-mid: var(--strata-next-mid);
+  --color-strata-next-under: var(--strata-next-under);
+  --color-strata-next-alt: var(--strata-next-alt);
+
+  --color-strata-feed: var(--strata-feed);
+  --color-strata-feed-deep: var(--strata-feed-deep);
+  --color-strata-feed-under: var(--strata-feed-under);
+
+  --color-project-1: var(--project-1);
+  --color-project-1-deep: var(--project-1-deep);
+  --color-project-1-mid: var(--project-1-mid);
+  --color-project-2: var(--project-2);
+  --color-project-2-deep: var(--project-2-deep);
+  --color-project-2-mid: var(--project-2-mid);
+  --color-project-3: var(--project-3);
+  --color-project-3-deep: var(--project-3-deep);
+  --color-project-3-mid: var(--project-3-mid);
+  --color-project-4: var(--project-4);
+  --color-project-4-deep: var(--project-4-deep);
+  --color-project-4-mid: var(--project-4-mid);
+
+  --color-prompt-system: var(--prompt-system);
+  --color-prompt-persona: var(--prompt-persona);
+  --color-prompt-docs: var(--prompt-docs);
 }
 
-/* Cassette pêche — Light */
+/* ══ Piscine — Day ═══════════════════════════════════════════════════════
+   Palette source of truth: the design handoff's tokens.css, verbatim, plus
+   the roles the frame readers needed that tokens.css does not define
+   (--card-translucent, --track-idle, --scrim, --shadow-overlay,
+   --strata-land-rule, --prompt-*, --project-*-mid).
+   Everything expressed as var(--other-token) lives ONLY in this block: those
+   aliases resolve per element, and since :root and .dark both match <html>,
+   an alias automatically follows whichever theme won. Only literals are
+   repeated in .dark. */
 :root {
-  --radius: 0.6875rem; /* 11px — card radius; use arbitrary values for 7/8/14px */
-  --background: #f7e9dc;
-  --foreground: #3a302c;
-  --card: #fffaf4;
-  --card-foreground: #3a302c;
-  --popover: #fffaf4;
-  --popover-foreground: #3a302c;
-  --primary: #ad4029;
-  --primary-foreground: #fff8f2;
-  --secondary: #f0dccb;
-  --secondary-foreground: #3a302c;
-  --muted: #f2e0d0;
-  --muted-foreground: #5f5348;
-  --accent: #f2e0d0;            /* shadcn hover surface, NOT the coral action color */
-  --accent-foreground: #3a302c;
-  --destructive: #a13a2a;
-  --border: #e3cdb8;
-  --input: #e3cdb8;
-  --ring: #ad4029;
-  --chart-1: #20685f;
-  --chart-2: #ad4029;
-  --chart-3: #8a6c46;
-  --chart-4: #56707c;
-  --chart-5: #6f6154;
-  --sidebar: #f0dccb;
-  --sidebar-foreground: #3a302c;
-  --sidebar-primary: #ad4029;
-  --sidebar-primary-foreground: #fff8f2;
-  --sidebar-accent: #e9d3bf;
-  --sidebar-accent-foreground: #3a302c;
-  --sidebar-border: #e3cdb8;
-  --sidebar-ring: #ad4029;
-  --priority-blue: #56707c;
-  --priority-yellow: #955f13;
+  color-scheme: light;
+  --radius: 0.875rem; /* 14px — strata/band radius; cards inside bands use 10-12px */
+
+  /* Paper & ink */
+  --background: #fcf8ee;        /* shell paper */
+  --foreground: #2e2d28;        /* ink — all body text */
+  --card: #fffef8;              /* cards on strata grounds */
+  --popover: #fffef8;
+  --muted: #f0ecda;             /* sunken surfaces, disabled pills */
+  --muted-foreground: #676356;  /* dim meta text — AA on card & shell */
+  --border: #e0d8c2;
+  --border-strong: #c0b79e;     /* dashed affordances, empty rings, hover borders */
+  --input: #e4d5ba;             /* intentionally distinct from --border */
+  --field: #fbf7e8;             /* text-field fill */
+  --track-idle: #d6d2c0;        /* pending pipeline ring + untraversed connector */
+  --scrim: rgba(40, 36, 30, .45);
+  --shadow-overlay: 0 60px 120px rgba(30, 27, 22, .5); /* the ONLY shadow in the system */
+
+  /* Actions (never black: filled controls use deep water-green) */
+  --action: #2f4f47;            /* filled button bg */
+  --action-foreground: #fcf8ee; /* filled button text */
+  --action-outline: #56645c;    /* outline button border; label = ink */
+  --destructive: #a63a1a;       /* Retry & failure text (coral deep) */
+  --ring: #24907a;
+
+  /* Strata grounds — colour = which stratum you are in ("verbe") */
+  --strata-live: #cdebe3;        /* turquoise — WORKING / live activity */
+  --strata-live-deep: #146a5a;   /*   labels, chrono numerals */
+  --strata-live-mid: #38635a;    /*   secondary text on the ground */
+  --strata-live-under: #7ccbb8;  /*   3px label underline */
+  --strata-live-track: #b6e0d6;  /*   progress track */
+  --strata-live-fill: #24907a;   /*   progress fill + breathing dot */
+  --strata-live-bar: #54ab96;    /*   chart bars */
+  --strata-you: #ffdccd;         /* coral — YOUR TURN / blocking */
+  --strata-you-deep: #a63a1a;
+  --strata-you-mid: #8a5442;
+  --strata-you-under: #f2a986;
+  --strata-you-stamp: #fcc6ab;   /*   ASKS YOU / CONFLICT stamp fill */
+  --strata-you-stamp2: #f8b294;  /*   FAILED stamp fill */
+  --strata-you-stamp-text: #8f2f12;
+  --strata-land: #f8eebd;        /* sun yellow — READY TO LAND / git / numbers */
+  --strata-land-deep: #756008;
+  --strata-land-mid: #746426;
+  --strata-land-under: #e3cf76;
+  --strata-land-rule: #ead998;   /*   7a THE NUMBERS vertical rules */
+  --strata-next: #d3e6f8;        /* pool blue — UP NEXT / queue / options */
+  --strata-next-deep: #1c5c96;
+  --strata-next-mid: #44688c;
+  --strata-next-under: #8ac0ec;
+  --strata-next-alt: #3e566e;    /*   de-emphasized chip text */
+  --strata-feed: #e9efc8;        /* linden green — FEED / writing (composer, spec, persona) */
+  --strata-feed-deep: #5c611a;   /*   also the linden helper text: 7a/8b have no -mid */
+  --strata-feed-under: #c8d283;
+
+  /* Project identity — pastel chip fill + deep text + mid bar; assigned at
+     project creation from this fixed 4-colour cycle. Colour = WHO, never state. */
+  --project-1: #cfe6f8; --project-1-deep: #1c5c96; --project-1-mid: #77aade;  /* blue   */
+  --project-2: #f4e9b2; --project-2-deep: #756414; --project-2-mid: #ccc06e;  /* butter */
+  --project-3: #fcd9d9; --project-3-deep: #a84040; --project-3-mid: #e0a0a0;  /* rose   */
+  --project-4: #e4dcf8; --project-4-deep: #5946a8; --project-4-mid: #b9aee6;  /* violet */
+
+  /* Prompt-anatomy segments (8b) not covered by a stratum */
+  --prompt-system: #c9c2b2;
+  --prompt-persona: #e0a0a0;
+  --prompt-docs: #bfb2ea;
+
+  /* Charts */
+  --chart-fail: #cc5a36;         /* red bar segments (failed sessions) */
+
+  /* Sidebar ground (shadcn role) */
+  --sidebar: #f4efe0;
+
+  /* ── Aliases — theme-agnostic, defined once ─────────────────────────── */
+  --card-foreground: var(--foreground);
+  --popover-foreground: var(--foreground);
+  --primary: var(--action);
+  --primary-foreground: var(--action-foreground);
+  /* shadcn hover surface, NOT an action color */
+  --secondary: var(--muted);
+  --secondary-foreground: var(--foreground);
+  --accent: var(--muted);
+  --accent-foreground: var(--foreground);
+  --card-translucent: color-mix(in srgb, var(--card) 55%, transparent);
+  --chart-1: var(--strata-live-bar);
+  --chart-2: var(--chart-fail);
+  --chart-3: var(--project-2-mid);
+  --chart-4: var(--project-1-mid);
+  --chart-5: var(--project-4-mid);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--action);
+  --sidebar-primary-foreground: var(--action-foreground);
+  --sidebar-accent: var(--muted);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* ── Legacy roles, remapped onto Piscine (KEEP-AND-REMAP, never drop) ── */
+  --band: var(--muted);
+  --meta: var(--muted-foreground);
+  --border-soft: #ece5d4;                    /* between --border and --card */
+  --agent: var(--strata-live-fill);
+  --agent-bg: var(--strata-live);
+  --agent-border: var(--strata-live-under);
+  --agent-track: var(--strata-live-track);
+  --priority-blue: var(--strata-next-deep);
+  --priority-yellow: var(--strata-land-deep);
   --priority-red: var(--destructive);
-  /* new roles */
-  --band: #f2e0d0;
-  --meta: #6f6154;
-  --border-soft: #efdfd0;
-  --agent: #20685f;
-  --agent-bg: #e6f0ee;
-  --agent-border: #bfd9d5;
-  --agent-track: #dbe9e7;
 }
 
-/* Cassette pêche — Dark */
+/* ══ Piscine — Night ═════════════════════════════════════════════════════
+   Derived from the frame 6c night STUDY (structural neutrals only — 6c's own
+   figure colours predate Piscine and are not copied) plus the Piscine hues
+   lifted for a dark ground. The rules that must hold:
+     1. All five strata grounds collapse to ONE near-neutral warm ink
+        (#2d2c25). Strata are told apart by their label colour + 3px
+        underline, never by the ground.
+     2. Cards (#3a382f) are LIGHTER than their ground — the day relationship
+        (card contrasts with ground) preserved, direction flipped.
+     3. Filled buttons are dark raised ink #3a382f, never the day water-green.
+     4. Colour survives only as FIGURES: chips, chronos, stamps, progress
+        fills, underlines.
+     5. The pastels are never naively inverted.
+   Neutral ramp: #1e1d19 shell · #26251f · #2d2c25 ground · #3a382f card ·
+   #4a4438 border · #5c564a border-strong · #a49d8d dim · #f0ece1 ink. */
 .dark {
-  --background: #241d1a;
-  --foreground: #f2e4d6;
-  --card: #302623;
-  --card-foreground: #f2e4d6;
-  --popover: #302623;
-  --popover-foreground: #f2e4d6;
-  --primary: #e8825f;
-  --primary-foreground: #241d1a;
-  --secondary: #3a2e2a;
-  --secondary-foreground: #f2e4d6;
-  --muted: #2a221f;
-  --muted-foreground: #c0ad9d;
-  --accent: #3a2e2a;
-  --accent-foreground: #f2e4d6;
-  --destructive: #e88070;
-  --border: #453833;
-  --input: #453833;
-  --ring: #e8825f;
-  --chart-1: #7cc0b1;
-  --chart-2: #e8825f;
-  --chart-3: #d9a866;
-  --chart-4: #9db4c0;
-  --chart-5: #ab9787;
-  --sidebar: #2c2320;
-  --sidebar-foreground: #f2e4d6;
-  --sidebar-primary: #e8825f;
-  --sidebar-primary-foreground: #241d1a;
-  --sidebar-accent: #3a2e2a;
-  --sidebar-accent-foreground: #f2e4d6;
-  --sidebar-border: #453833;
-  --sidebar-ring: #e8825f;
-  --priority-blue: #9db4c0;
-  --priority-yellow: #d9a866;
-  --priority-red: var(--destructive);
-  --band: #2a221f;
-  --meta: #ab9787;
-  --border-soft: #3a2e2a;
-  --agent: #7cc0b1;
-  --agent-bg: #26332f;
-  --agent-border: #3f5450;
-  --agent-track: #2f3f3b;
+  color-scheme: dark;
+
+  /* Paper & ink */
+  --background: #1e1d19;
+  --foreground: #f0ece1;
+  --card: #3a382f;              /* LIGHTER than the grounds it sits on */
+  --popover: #3a382f;
+  --muted: #2d2c25;             /* sunken = the ground neutral */
+  --muted-foreground: #a49d8d;
+  --border: #4a4438;
+  --border-strong: #5c564a;
+  --input: #554e40;
+  --field: #322f28;             /* fields sink slightly below the card */
+  --track-idle: #443e33;
+  --scrim: rgba(10, 9, 7, .62);
+  --shadow-overlay: 0 60px 120px rgba(0, 0, 0, .62);
+
+  /* Actions — dark raised ink, never the day water-green */
+  --action: #3a382f;
+  --action-foreground: #f0ece1;
+  --action-outline: #5c564a;
+  --destructive: #e59175;
+  --ring: #6fcbb4;
+
+  /* Strata — every ground is the same warm ink; only the figures differ */
+  --strata-live: #2d2c25;
+  --strata-live-deep: #6fcbb4;
+  --strata-live-mid: #93b3a7;
+  --strata-live-under: #2f7a68;
+  --strata-live-track: #2f4f48;
+  --strata-live-fill: #24907a;
+  --strata-live-bar: #3f9d86;
+  --strata-you: #2d2c25;
+  --strata-you-deep: #e59175;
+  --strata-you-mid: #bf9382;
+  --strata-you-under: #7d3a24;
+  --strata-you-stamp: #4f2716;   /* stamps invert: dark fill, light text */
+  --strata-you-stamp2: #62301a;
+  --strata-you-stamp-text: #f2b096;
+  --strata-land: #2d2c25;
+  --strata-land-deep: #d6c47a;
+  --strata-land-mid: #b0a583;
+  --strata-land-under: #6d5c22;
+  --strata-land-rule: #4d452a;
+  --strata-next: #2d2c25;
+  --strata-next-deep: #8fbfe8;
+  --strata-next-mid: #93a6b8;
+  --strata-next-under: #2f5a80;
+  --strata-next-alt: #7d94a8;
+  --strata-feed: #2d2c25;
+  --strata-feed-deep: #c3cd82;
+  --strata-feed-under: #4f5626;
+
+  /* Project identity — the pastel becomes the TEXT, a 22%-over-ground mix
+     becomes the chip fill, the mid-tone stays the bar. */
+  --project-1: #434c50; --project-1-deep: #cfe6f8; --project-1-mid: #8fbfe8;
+  --project-2: #534e39; --project-2-deep: #f4e9b2; --project-2-mid: #d8c87e;
+  --project-3: #554640; --project-3-deep: #fcd9d9; --project-3-mid: #e5a0a0;
+  --project-4: #4a474e; --project-4-deep: #e4dcf8; --project-4-mid: #b3a5e0;
+
+  /* Prompt-anatomy segments — figures, so mid-tones on the dark ground */
+  --prompt-system: #8a8373;
+  --prompt-persona: #c88585;
+  --prompt-docs: #9b8dcc;
+
+  /* Charts */
+  --chart-fail: #d96a44;
+
+  /* Sidebar ground */
+  --sidebar: #26251f;
+
+  /* Legacy literal + the one legacy alias that needs a night override:
+     text-agent has 66 call sites, and the day fill (#24907a) sits at ~4.2:1
+     on the night shell. The live FIGURE colour is the legible equivalent. */
+  --border-soft: #423d33;
+  --agent: var(--strata-live-deep);
 }
 
-/* Shared ambient-activity animations (single source; do NOT redefine elsewhere) */
+/* ══ Shared ambient-activity animations ══════════════════════════════════
+   Single source; do NOT redefine elsewhere.
+
+   Colour and geometry are read from custom properties whose FALLBACK is the
+   legacy value, so the 13 existing call sites are byte-for-byte unchanged
+   while new ones override without touching this file:
+     --dot-color     .breathing-dot fill         (default var(--agent))
+     --track-color   .progress-track background  (default var(--agent-track))
+     --track-height  .progress-track height      (default 2px)
+     --fill-color    .crawl-fill background      (default var(--agent))
+     --crawl-width   .crawl-fill width           (default 28%)
+   Custom properties inherit, so setting them on any ancestor — e.g. a band
+   carrying .stratum-you — recolours every indicator inside it. The five
+   .stratum-* scopes below do exactly that.
+
+   Dot SIZE stays a call-site concern via w-* / h-* utilities (7px on cards,
+   8px in the rail, 6px in the Piscine header chips). This file must not
+   declare width/height on .breathing-dot: these rules are unlayered and
+   would out-rank the layered Tailwind utilities the 11 call sites use. */
 @keyframes breathe {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: .45; transform: scale(.86); }
@@ -171,30 +384,56 @@
 }
 
 /* Breathing agent dot — size via w-* / h-* utilities at the call site
-   (7px on cards, 8px in the rail). */
+   (7px on cards, 8px in the rail, 6px in header chips). */
 .breathing-dot {
   border-radius: 9999px;
-  background: var(--agent);
+  background: var(--dot-color, var(--agent));
   animation: breathe 2.4s ease-in-out infinite;
 }
-/* Indeterminate 2px progress: <div class="progress-track"><div class="crawl-fill" /></div> */
+/* Indeterminate progress: <div class="progress-track"><div class="crawl-fill" /></div>
+   Default height stays 2px for the two legacy pairs; the Piscine screens opt
+   into a thicker track with one of the size classes below. */
 .progress-track {
   position: relative;
-  height: 2px;
+  height: var(--track-height, 2px);
   overflow: hidden;
   border-radius: 9999px;
-  background: var(--agent-track);
+  background: var(--track-color, var(--agent-track));
 }
 .crawl-fill {
   position: absolute;
   top: 0; bottom: 0; left: 0;
-  width: 28%;
-  background: var(--agent);
+  width: var(--crawl-width, 28%);
+  background: var(--fill-color, var(--agent));
   animation: crawl 3.2s linear infinite;
 }
+/* Track sizes (px, named for the value) */
+.progress-track-2 { --track-height: 2px; }  /* legacy default */
+.progress-track-4 { --track-height: 4px; }  /* 5a session cards, 6a timeline */
+.progress-track-8 { --track-height: 8px; }  /* 8d monthly-cap bar */
+
+/* Stratum colour scopes — put one on a band (or on the indicator itself) and
+   every .breathing-dot / .progress-track / .crawl-fill beneath it adopts that
+   stratum's figure colours, in both themes. */
+.stratum-live { --dot-color: var(--strata-live-fill); --fill-color: var(--strata-live-fill); --track-color: var(--strata-live-track); }
+.stratum-you  { --dot-color: var(--strata-you-deep);  --fill-color: var(--strata-you-deep);  --track-color: var(--strata-you-under); }
+.stratum-land { --dot-color: var(--strata-land-deep); --fill-color: var(--strata-land-deep); --track-color: var(--strata-land-under); }
+.stratum-next { --dot-color: var(--strata-next-deep); --fill-color: var(--strata-next-deep); --track-color: var(--strata-next-under); }
+.stratum-feed { --dot-color: var(--strata-feed-deep); --fill-color: var(--strata-feed-deep); --track-color: var(--strata-feed-under); }
+
+/* Raw animation hooks for the Piscine primitives, which draw their own
+   geometry and only want the motion. */
+.piscine-breathe { animation: breathe 2.4s ease-in-out infinite; }
+.piscine-crawl { animation: crawl 3.2s linear infinite; }
+/* Bands size to their content; an empty stratum collapses to its label line. */
+.piscine-band { transition: height 200ms ease, min-height 200ms ease; }
+
 @media (prefers-reduced-motion: reduce) {
   .breathing-dot { animation: none; }
   .crawl-fill { animation: none; width: 100%; }
+  .piscine-breathe { animation: none; }
+  .piscine-crawl { animation: none; width: 100%; }
+  .piscine-band { transition: none; }
 }
 
 @layer base {

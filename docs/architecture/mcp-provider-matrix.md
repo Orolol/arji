@@ -19,9 +19,11 @@ below as the record of why they went.
 registered provider has the channel, a review session that files neither a
 `submit_findings` verdict nor a finding row is not "a review that found
 nothing" — it is a review whose channel did not work. Such a review is
-*unverifiable*: it does not satisfy `review → done`, does not satisfy the Full
-Auto merge gate, and shows as a blocking reason on the board
-(`lib/pipeline/findings.ts`). A 401 on `submit_findings` is also traced onto
+*unverifiable*: it does not satisfy `review → done` and does not satisfy the
+Full Auto merge gate (`lib/pipeline/findings.ts`); the engine's own refusal
+message says the channel is broken rather than that no review ran, and that
+message is what surfaces on the ticket overlay's status control and merge
+button. A 401 on `submit_findings` is also traced onto
 the ticket (`lib/mcp/review-channel-failure.ts`), because that rejection is
 otherwise invisible — the session still ends `answered`.
 
@@ -43,8 +45,12 @@ by prose rather than refused.
 Known gap: for `oh-my-pi` and `agy` the server entry lives in a user-global
 config file Arij does not own, so `injected` means "Arij handed over the
 environment", not "the CLI loaded it" — and `agy` reports a missing entry as a
-quietly failed server. That case still looks injected; the 401 trace and the
-Review-column badge are what surface it.
+quietly failed server. That case still looks injected. What surfaces it now
+that the Review column is gone: the 401 trace's activity entry and
+notification (`lib/mcp/review-channel-failure.ts`), and the `/qa` screen's
+verdict text — `QA_UNVERIFIABLE_TEXT`, "review unverifiable · findings jamais
+reçues" (`lib/qa/aggregate.ts`). There is no badge on the desk for it; a
+ticket whose review is unverifiable simply never appears in READY TO LAND.
 
 ## The gate
 
@@ -64,15 +70,184 @@ expansion" is.
 
 ### Registered providers (all carry the channel)
 
-| Provider | Binary | Tool spelling | How config is passed |
-|---|---|---|---|
-| claude-code | `claude` | `mcp__arij__<tool>` | `--mcp-config <0600 file>` + `--strict-mcp-config`, tools named in `--allowedTools` |
-| codex | `codex` | `mcp__arij__<tool>` | `-c mcp_servers.arij.*` TOML overrides + `--dangerously-bypass-approvals-and-sandbox` |
-| oh-my-pi | `omp` | `mcp__arij_<tool>` (ONE underscore) | `mcp.json` entry (install.sh) + `ARIJ_*` env vars at spawn; MCP tools orthogonal to `--tools` (see below) |
-| agy | `agy` | `<tool>` (bare, no prefix) | static `agy mcp add arij …` entry (install.sh) + `ARIJ_*` env vars at spawn (see below) |
+| Provider | Binary | Tool spelling | How config is passed | Additional MCP servers |
+|---|---|---|---|---|
+| claude-code | `claude` | `mcp__arij__<tool>` | `--mcp-config <0600 file>` + `--strict-mcp-config`, tools named in `--allowedTools` | **per-spawn** — global + project |
+| codex | `codex` | `mcp__arij__<tool>` | `-c mcp_servers.arij.*` TOML overrides + `--dangerously-bypass-approvals-and-sandbox` | **per-spawn** — global + project |
+| oh-my-pi | `omp` | `mcp__arij_<tool>` (ONE underscore) | `mcp.json` entry (install.sh) + `ARIJ_*` env vars at spawn; MCP tools orthogonal to `--tools` (see below) | **user-global** — global only |
+| agy | `agy` | `<tool>` (bare, no prefix) | static `agy mcp add arij …` entry (install.sh) + `ARIJ_*` env vars at spawn (see below) | **user-global** — global only |
 
 The spelling column is why `arijMcpToolPrefix()` exists: an allowlist entry or
-prompt sentence in the wrong spelling names a tool that does not exist.
+prompt sentence in the wrong spelling names a tool that does not exist. The same
+applies to a third-party server: `extraMcpToolPrefix()` spells `mcp__godot__*`
+for claude/codex, `mcp__godot_*` for omp, and bare names for agy.
+
+## Additional (third-party) MCP servers
+
+Users can declare their own MCP servers — Godot, Confluence, Playwright — either
+globally or scoped to one project (`lib/mcp/servers.ts`, table `mcp_servers`).
+They ride alongside the `arij` control channel through the same wiring point,
+`buildMcpSpawnConfig()`.
+
+This exists because `--strict-mcp-config` deliberately ignores whatever the user
+configured in `~/.claude.json` or `.mcp.json`. That is the right default — a
+build's behaviour must not depend on the machine's local config, and a server
+useful to one project has no business in another project's sessions — but it
+means the only way to get a third-party server into a session is to declare it
+here.
+
+**Resolution order:** `arij` first, then global servers, then the project's own.
+A project entry SHADOWS a global of the same name. A project entry that is
+`enabled: false` shadows the global into absence, which is how "disable this
+inherited server for this project" is expressed. The name `arij` is reserved at
+validation time, and `buildMcpSpawnConfig` filters it again — the control channel
+is never displaceable by a user entry.
+
+**The `mcp_tools_enabled` gate is single and covers everything.** Off means no
+MCP at all: no arij channel, no extras.
+
+### Chat gets them too, on the same rule
+
+CLI chat conversations do not go through `processManager.start()` — they have no
+`agent_sessions` row and wire their own channel in `lib/chat/cli-tool-channel.ts`
+— so they resolve the extras themselves, with agent type `chat`. Same merge
+order, same shadowing, same `agent_types` filter: a server whose `agent_types`
+omits `chat` stays out of a conversation while still reaching builds. Without
+that call the feature would work in build and review and be silently absent from
+chat, which is the asymmetry the epic exists to avoid.
+
+Arij's own `chat` toolset is unchanged by this: the board tools
+(`ARIJ_MCP_CHAT_TOOLS`) are what a chat token gets, and the agent-only tools stay
+agent-only — the routes reject a chat token regardless of the allowlist.
+
+**Resolution timing differs between the two chat paths, and it shows.** A
+one-shot turn builds a channel per turn, so a newly declared server is present on
+the next message. The persistent (warm-process) runner builds one channel when
+the process spawns, and `--strict-mcp-config` freezes that file's server set for
+the life of the process — so a server added or removed later reaches that
+conversation only after the process is reaped or restarted.
+
+The **OpenAI-compatible fast path is not an MCP host** and is deliberately
+untouched. It talks to an HTTP chat-completions endpoint and has its own
+built-in board tools (`lib/chat/board-tools.ts`); there is no place to mount a
+third-party MCP server. The settings screen says so, so its absence there is a
+stated limit rather than a server that looks broken.
+
+### Why the scope column is not the same as the channel column
+
+`extraMcpScope` (`lib/providers/extra-mcp-scope.ts`) is a SEPARATE capability
+from `providerSupportsMcp`. Every registered provider carries the arij channel,
+but only claude-code and codex can be handed a complete, per-session server set:
+
+- **per-spawn** — the CLI takes a full MCP config for this spawn, so Arij can
+  vary the server set per session. Global and project scope both work.
+- **user-global** — the CLI only reads a registry Arij cannot vary per spawn
+  (`~/.omp/agent/mcp.json`; agy's register). The arij channel still works there
+  because its entry expands `${ARIJ_MCP_TOKEN}` from the child's environment, but
+  a third-party server has no such indirection: its definition must be written
+  into the registry ahead of time. Rewriting that registry before every spawn
+  would race two sessions on two different projects against each other, so only
+  GLOBAL servers are honored. Project-scoped servers are dropped, logged at spawn
+  (`excludedProjectScoped`), and flagged per-server in the UI.
+
+omp does read `.omp/mcp.json` relative to its cwd — the worktree — which would
+open the per-project door. Writing agent config INTO a user's worktree is exactly
+what disqualified gemini-cli in the 2026-08 cleanup. Deliberately out of scope.
+
+Reconciliation for the user-global providers happens at CRUD time, not spawn
+time (`lib/mcp/user-global-sync.ts`): it merges rather than overwrites, refuses
+to rewrite a config it cannot parse, never touches the `arij` entry, and tracks
+the names it wrote in `data/mcp-user-global.json` so it only ever removes its
+own. It never throws into a request handler.
+
+Its child processes are awaited rather than run synchronously — Arij is one
+process, and a blocking spawn on the CRUD path stops SSE, chunk persistence, the
+watchdog, pipelines and Full Auto with it. But a GLOBAL write is not
+acknowledged until that reconciliation has landed: the handlers await
+`whenUserGlobalMcpSyncSettles()` before responding. omp and agy freeze a
+session's server set when the CLI starts, so a session launched between the
+response and the end of reconciliation would run the previous set — a deleted
+server still mounted, a rotated credential still the old one — while the
+database and the injected prompt describe the new one. A 2xx therefore means
+"already in the registry", not "queued". Project-scoped writes skip the wait:
+they request no reconciliation, having nothing a user-global registry can
+express.
+
+### Secret exposure differs by provider — this is a decision, not a detail
+
+| Where the value lands | Providers | Who can read it |
+|---|---|---|
+| 0600 `--mcp-config` file in a 0700 temp dir | claude-code | the agent's Bash, if it finds the path |
+| `-c mcp_servers.<name>.env=…` on the argv | codex | any local process, via `/proc/<pid>/cmdline`, while the process runs |
+| `~/.omp/agent/mcp.json`, literal values | oh-my-pi | the agent's Bash |
+| agy's register, plus `agy mcp add --env K=v` argv | agy | the agent's Bash; `/proc` during the short-lived add |
+
+codex's argv exposure was already accepted for the arij token. What is new is
+that a THIRD-PARTY credential now travels the same way. `maskCodexMcpSecret()`
+keys on the TOML field (`env`, `http_headers`) rather than on values containing
+`ARIJ_MCP_TOKEN`, so the persisted `command_display` redacts every server's
+secrets, not just Arij's — but the live argv is still readable locally.
+
+For omp and agy the values are written into the CLI's own config file, which the
+agent can `cat`. This is **assumed, not prevented**, and surfaced in the UI. The
+alternative — putting them in the child's environment — is strictly worse:
+`/proc/self/environ` is one command away from every tool call the agent makes.
+Users who will not accept it should keep credential-bearing servers on
+claude-code or codex.
+
+### Third-party tool descriptions are untrusted input
+
+A declared server's `tools/list` response — every tool name and description —
+lands in the agent's context. That is the **same prompt-injection surface as
+`projects.spec`**: text Arij did not write, arriving where the model reads
+instructions. A malicious or compromised MCP server can attempt to redirect a
+session exactly the way a poisoned spec block does.
+
+Nothing in the injection path can prevent this; the server is trusted by the act
+of declaring it. Treat adding an MCP server as granting it a voice in every
+prompt of every session it is scoped to, and prefer project scope over global
+for anything not fully trusted.
+
+### omp: a large server set can make tools disappear with no error
+
+omp does progressive tool disclosure: past some number of available tools it
+stops inlining every descriptor and puts them behind a search step instead. The
+failure mode this creates for Arij is silent — add one tool-heavy third-party
+server and the **arij tools can drop out of the prompt** with no error anywhere.
+The session runs, files nothing, and its review is judged unverifiable.
+
+**Measured on the installed omp (2026-08-27) — the setting is not what the
+planning notes said.** There is no `tools.discoveryMode` key: `omp config get
+tools` answers `Unknown setting`, and `omp config list` has no
+`discoveryMode` entry. The nearest live key is `inlineToolDescriptors`
+(`auto|on|off`, currently `auto`), and `omp read omp://config-usage.md` lists
+that name under *migrated/legacy settings*, so it has moved at least once.
+Neither `discoveryMode` nor `search_tool_bm25` appears anywhere in omp's 130
+embedded docs. The specific "40 tools" threshold could therefore NOT be
+confirmed on this build and is not restated here as fact.
+
+What is solid is the shape of the risk and what to do about it:
+
+- **Pin the disclosure setting rather than inheriting `auto`.** `auto` is
+  defined by omp's tool count, which changes when omp changes and when a user
+  adds a server — so an Arij session's tool surface silently depends on both.
+  `omp config set inlineToolDescriptors on` keeps descriptors inlined.
+- **Keep the omp server set small.** omp is `user-global` scope, so its extras
+  are shared by every project: the count only grows. Prefer claude-code or codex
+  for tool-heavy servers, where the set is per-spawn and scoped.
+- **Re-probe on upgrade.** This key has been renamed once already. Confirm the
+  current name and default after every omp upgrade, and treat a review that
+  files nothing on omp as a possible tool-visibility failure, not just a quiet
+  reviewer.
+
+### Health checks never gate a build
+
+`POST /api/settings/mcp-servers/:id/test` (and the project-scoped twin) runs a
+real `initialize` + `tools/list` and persists the outcome to `last_check_ok` /
+`last_check_error`. It is a settings-screen affordance only. Spawn-time
+injection never contacts a server: an unreachable third-party server costs the
+session that server's tools and nothing else. Gating the spawn on reachability
+would let someone else's downtime stop a build.
 
 ### Removed 2026-08-26 (no per-spawn MCP surface)
 
@@ -244,10 +419,15 @@ server's own environment when the channel doesn't set one — otherwise a
 stray export would silently hand every agent session the board-wide chat
 toolset (create_ticket, start_build) on an agent token.
 
-Note also `tools.discoveryMode` in `~/.omp/agent/config.yml`: past 40 tools the
-default `auto` mode hides MCP tools behind a `search_tool_bm25` discovery step
-rather than putting them in the prompt. Worth pinning if Arij's five tools ever
-need to be unconditionally visible.
+Note also that omp's progressive tool disclosure can drop the arij tools out of
+the prompt with no error once enough servers are declared — the failure mode
+that makes a tool-heavy extra server dangerous on a `user-global` provider. An
+earlier revision of this note named `tools.discoveryMode`, a `search_tool_bm25`
+step and a 40-tool threshold; **none of the three could be confirmed on the
+installed build (2026-08-27)** — the live key is `inlineToolDescriptors`. See
+[omp: a large server set can make tools disappear with no
+error](#omp-a-large-server-set-can-make-tools-disappear-with-no-error) for what
+was actually measured and for the pinning recommendation.
 
 ### Re-probed on omp 18.0.6 — 2026-08-28: the `--config` overlay is gone
 

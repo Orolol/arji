@@ -157,7 +157,7 @@ describe("SpecPage spec-update feedback", () => {
     const editor = await screen.findByTestId("spec-editor");
     expect(editor).toHaveValue("# Spec\n\nOld content.");
     expect(editor).not.toBeDisabled();
-    const saveButton = screen.getByRole("button", { name: "Save" });
+    const saveButton = screen.getByRole("button", { name: /enregistrer/i });
     expect(saveButton).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId("spec-update-button"));
@@ -327,6 +327,6 @@ describe("SpecPage spec-update feedback", () => {
     );
     // Editor and save button must be re-enabled
     expect(screen.getByTestId("spec-editor")).not.toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: /enregistrer/i })).not.toBeDisabled();
   });
 });

@@ -16,7 +16,6 @@ import {
   PanelRightClose,
   PanelRightOpen,
   EyeOff,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -55,18 +54,10 @@ export interface UnifiedChatPanelHandle {
   hide: () => void;
 }
 
-interface UnifiedSharedPanelView {
-  panelId: string;
-  label: string;
-  content: ReactNode;
-  onClose?: () => void;
-}
-
 interface UnifiedChatPanelProps {
   projectId: string;
   children: ReactNode;
   onEpicCreated?: () => void;
-  sharedPanelView?: UnifiedSharedPanelView | null;
   /**
    * Fires whenever the panel occupies board width (expanded on desktop).
    * The board uses it to hide the Released digest and reclaim the space.
@@ -76,12 +67,11 @@ interface UnifiedChatPanelProps {
 
 export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPanelProps>(
   function UnifiedChatPanel(
-    { projectId, children, onEpicCreated, sharedPanelView, onExpandedChange },
+    { projectId, children, onEpicCreated, onExpandedChange },
     ref,
   ) {
     const router = useRouter();
     const [, forceConversationRefresh] = useState(0);
-    const previousSharedPanelIdRef = useRef<string | null>(null);
 
     const {
       conversations,
@@ -104,34 +94,6 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       sendMessage: rawSendMessage,
       answerQuestions,
     } = useChat(projectId, activeId);
-
-    // A shared view opens on its own content; the Chat/Details tabs then let
-    // the user switch. Storing that choice *against the panel it was made for*
-    // derives the default — a new shared panel shows itself, no shared panel
-    // shows chat — so the effect that used to flip `activePanelContent`
-    // whenever `panelId` changed is gone, and the two can no longer disagree.
-    const sharedPanelId = sharedPanelView?.panelId ?? null;
-    const [contentChoice, setContentChoice] = useState<{
-      panelId: string | null;
-      content: "chat" | "shared";
-    } | null>(null);
-
-    const activePanelContent: "chat" | "shared" =
-      contentChoice?.panelId === sharedPanelId
-        ? contentChoice.content
-        : sharedPanelId
-          ? "shared"
-          : "chat";
-
-    const setActivePanelContent = useCallback(
-      (content: "chat" | "shared") =>
-        setContentChoice({ panelId: sharedPanelId, content }),
-      [sharedPanelId],
-    );
-
-    const hasSharedPanelView = Boolean(sharedPanelView);
-    const isSharedPanelActive = hasSharedPanelView && activePanelContent === "shared";
-    const panelContentMode = isSharedPanelActive ? "shared" : "chat";
 
     const {
       containerRef,
@@ -229,7 +191,6 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     );
 
     const openChatConversation = useCallback(async () => {
-      setActivePanelContent("chat");
       setPanelState("expanded");
 
       if (activeId) {
@@ -243,14 +204,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       }
 
       await createNewConversationTab({ type: "brainstorm", label: "Brainstorm" });
-    }, [
-      activeId,
-      tabConversations,
-      setActiveId,
-      setPanelState,
-      setActivePanelContent,
-      createNewConversationTab,
-    ]);
+    }, [activeId, tabConversations, setActiveId, setPanelState, createNewConversationTab]);
 
     useImperativeHandle(
       ref,
@@ -259,7 +213,6 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
           void openChatConversation();
         },
         openNewEpic() {
-          setActivePanelContent("chat");
           setPanelState("expanded");
           void createNewConversationTab({ type: "epic_creation", label: "New Epic" });
         },
@@ -270,52 +223,19 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
           setPanelState("hidden");
         },
       }),
-      [
-        openChatConversation,
-        createNewConversationTab,
-        setPanelState,
-        setActivePanelContent,
-      ],
+      [openChatConversation, createNewConversationTab, setPanelState],
     );
-
-    // Opening a shared view expands the panel; closing it collapses again.
-    // Only the panel *size* is synchronised here — which content shows is
-    // derived above — and the size lives in localStorage, not React state.
-    useEffect(() => {
-      const nextSharedPanelId = sharedPanelView?.panelId ?? null;
-      const previousSharedPanelId = previousSharedPanelIdRef.current;
-
-      if (!nextSharedPanelId) {
-        if (previousSharedPanelId) {
-          setPanelState("collapsed");
-        }
-        previousSharedPanelIdRef.current = null;
-        return;
-      }
-
-      if (previousSharedPanelId !== nextSharedPanelId) {
-        setPanelState("expanded");
-      }
-
-      previousSharedPanelIdRef.current = nextSharedPanelId;
-    }, [sharedPanelView, setPanelState]);
 
     useEffect(() => {
       function onEscape(event: KeyboardEvent) {
         if (event.key !== "Escape") return;
         if (panelState !== "expanded") return;
-
-        if (panelContentMode === "shared") {
-          sharedPanelView?.onClose?.();
-          return;
-        }
-
         setPanelState("collapsed");
       }
 
       window.addEventListener("keydown", onEscape);
       return () => window.removeEventListener("keydown", onEscape);
-    }, [panelContentMode, panelState, setPanelState, sharedPanelView]);
+    }, [panelState, setPanelState]);
 
     // Board seam: the Released digest hides while the panel eats board width.
     useEffect(() => {
@@ -434,11 +354,10 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     );
 
     if (panelState === "expanded") {
-      // On mobile the panel becomes a full-width Sheet in BOTH views (chat
-      // and shared ticket). The shared view must not fall through to the
-      // desktop split below the breakpoint: its width clamps assume a
-      // container of ~706px+ and would compute an unusable panel width
-      // (or a negative one), pushing the ticket out of the board row.
+      // On mobile the panel becomes a full-width Sheet. It must not fall
+      // through to the desktop split below the breakpoint: the width clamps
+      // there assume a container of ~706px+ and would compute an unusable
+      // panel width (or a negative one).
       if (isMobile) {
         return (
           <div ref={containerRef} className="relative h-full w-full overflow-hidden">
@@ -447,14 +366,8 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
               open
               onOpenChange={(open) => {
                 if (open) return;
-                // Mirror the desktop Escape handling: dismissing the shared
-                // view closes the ticket (the parent syncs back to chat and
-                // collapses the panel); dismissing chat collapses the panel.
-                if (panelContentMode === "shared") {
-                  sharedPanelView?.onClose?.();
-                } else {
-                  setPanelState("collapsed");
-                }
+                // Mirrors the desktop Escape handling: dismissing collapses.
+                setPanelState("collapsed");
               }}
             >
               <SheetContent
@@ -463,17 +376,13 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
                 className="w-full max-w-none p-0 sm:max-w-none"
                 data-testid="unified-panel-mobile-sheet"
               >
-                {panelContentMode === "shared"
-                  ? sharedPanelView?.content
-                  : chatWorkspace}
+                {chatWorkspace}
               </SheetContent>
             </Sheet>
           </div>
         );
       }
 
-      // Chat and shared ticket views are the same container: one width for
-      // both, so back-and-forth switching never changes the layout.
       const panelWidth = panelWidthPx;
       const boardWidthStyle = {
         width: `calc(100% - ${panelWidth}px - ${DIVIDER_WIDTH}px)`,
@@ -503,108 +412,33 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
           <aside
             className="h-full min-h-0 shrink-0 border-l border-border bg-card transition-[width] duration-200 motion-reduce:transition-none"
             style={{ width: panelWidth }}
-            data-testid={
-              panelContentMode === "shared"
-                ? "unified-panel-shared"
-                : "unified-panel-expanded"
-            }
+            data-testid="unified-panel-expanded"
           >
             <div className="flex h-full min-h-0 flex-col">
-              {hasSharedPanelView && (
-                <div className="flex shrink-0 items-center gap-[8px] border-b border-border px-[18px] py-[14px]">
-                  <button
-                    type="button"
-                    onClick={() => setActivePanelContent("chat")}
-                    className={cn(
-                      "rounded-[7px] px-[10px] py-[4px] text-[13px] transition-colors",
-                      panelContentMode === "chat"
-                        ? "bg-band font-medium text-foreground"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    Chat
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActivePanelContent("shared")}
-                    className={cn(
-                      "rounded-[7px] px-[10px] py-[4px] text-[13px] transition-colors",
-                      panelContentMode === "shared"
-                        ? "bg-band font-medium text-foreground"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {sharedPanelView?.label ?? "Details"}
-                  </button>
-
-                  <div className="ml-auto flex items-center gap-[2px]">
-                    {panelContentMode === "shared" ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-meta"
-                        onClick={() => sharedPanelView?.onClose?.()}
-                        aria-label="Close detail panel"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    ) : (
-                      <>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-meta"
-                          onClick={() => setPanelState("collapsed")}
-                          aria-label="Collapse panel"
-                        >
-                          <PanelRightClose className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-meta"
-                          onClick={() => setPanelState("hidden")}
-                          aria-label="Hide panel"
-                        >
-                          <EyeOff className="h-4 w-4" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {!hasSharedPanelView && (
-                <div className="flex shrink-0 items-center justify-end gap-[2px] border-b border-border px-[18px] py-[10px]">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-meta"
-                    onClick={() => setPanelState("collapsed")}
-                    aria-label="Collapse panel"
-                  >
-                    <PanelRightClose className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-meta"
-                    onClick={() => setPanelState("hidden")}
-                    aria-label="Hide panel"
-                  >
-                    <EyeOff className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
-
-              <div className="min-h-0 flex-1">
-                {panelContentMode === "shared" ? sharedPanelView?.content : chatWorkspace}
+              <div className="flex shrink-0 items-center justify-end gap-[2px] border-b border-border px-[18px] py-[10px]">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-meta"
+                  onClick={() => setPanelState("collapsed")}
+                  aria-label="Collapse panel"
+                >
+                  <PanelRightClose className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-meta"
+                  onClick={() => setPanelState("hidden")}
+                  aria-label="Hide panel"
+                >
+                  <EyeOff className="h-4 w-4" />
+                </Button>
               </div>
+
+              <div className="min-h-0 flex-1">{chatWorkspace}</div>
             </div>
           </aside>
         </div>

@@ -16,6 +16,17 @@ class MockEventSource {
 const routerReplace = vi.fn();
 let searchParams = new URLSearchParams();
 
+/**
+ * A consumed deep link leaves the address bar, and it does so without a
+ * navigation: `router.replace()` is a server round-trip that keeps the spent
+ * parameter live in the URL for seconds. The page now rewrites history
+ * directly, so "strips the param" is asserted on the address bar rather than
+ * on a router spy. See __tests__/ticket-deep-link-consumption.test.tsx.
+ */
+function currentUrl() {
+  return window.location.pathname + window.location.search;
+}
+
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "proj1" }),
   useRouter: () => ({ replace: routerReplace }),
@@ -26,6 +37,13 @@ vi.mock("next/navigation", () => ({
 const mockAgentPolling = { activities: [] };
 vi.mock("@/hooks/useAgentPolling", () => ({
   useAgentPolling: () => mockAgentPolling,
+}));
+
+vi.mock("@/components/auto-mode/AutoModeToggle", () => ({
+  AutoModeToggle: () => null,
+}));
+vi.mock("@/components/kanban/RefinementButton", () => ({
+  RefinementButton: () => null,
 }));
 
 // Mock useBatchSelection using React state so toggle/clear trigger re-renders
@@ -64,10 +82,11 @@ vi.mock("@/hooks/useBatchSelection", () => ({
   },
 }));
 
-// Mock child components to simplify rendering
-vi.mock("@/components/kanban/Board", () => ({
-  Board: ({ selectedEpics, onToggleSelect }: {
-    selectedEpics: Set<string>;
+// Mock child components to simplify rendering. The board is gone; the route
+// renders the cross-project control desk, filtered to this project.
+vi.mock("@/components/desk/NowDesk", () => ({
+  NowDesk: ({ onToggleSelect }: {
+    selectedEpicIds?: ReadonlySet<string>;
     onToggleSelect: (id: string) => void;
   }) => (
     <div data-testid="board">
@@ -84,8 +103,8 @@ vi.mock("@/components/kanban/Board", () => ({
   ),
 }));
 
-vi.mock("@/components/kanban/EpicDetail", () => ({
-  EpicDetail: () => null,
+vi.mock("@/components/ticket/TicketOverlay", () => ({
+  TicketOverlay: () => null,
 }));
 
 const mockPanelOpenChat = vi.fn();
@@ -142,6 +161,7 @@ describe("Kanban Build Toolbar", () => {
     mockPanelOpenNewEpic.mockClear();
     routerReplace.mockClear();
     searchParams = new URLSearchParams();
+    window.history.replaceState(null, "", "/projects/proj1?pending=1");
     global.fetch = vi.fn().mockResolvedValue({
       json: () => Promise.resolve({ data: { count: 1 } }),
     });
@@ -153,7 +173,7 @@ describe("Kanban Build Toolbar", () => {
 
     await waitFor(() => expect(mockPanelOpenChat).toHaveBeenCalledTimes(1));
     expect(mockPanelOpenNewEpic).not.toHaveBeenCalled();
-    expect(routerReplace).toHaveBeenCalledWith("/projects/proj1");
+    expect(currentUrl()).toBe("/projects/proj1");
   });
 
   it("?panel=new-epic calls openNewEpic on UnifiedChatPanel ref", async () => {
@@ -173,7 +193,7 @@ describe("Kanban Build Toolbar", () => {
     // between them. Without this, either side could be renamed and the whole
     // manual entry would go dead with every other test still green.
     await screen.findByTestId("epic-create-dialog");
-    expect(routerReplace).toHaveBeenCalledWith("/projects/proj1");
+    expect(currentUrl()).toBe("/projects/proj1");
   });
 
   it("?panel=new-epic-manual never reaches for the chat panel", async () => {

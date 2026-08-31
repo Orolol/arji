@@ -31,6 +31,34 @@ interface LogSyncOperationInput {
   detail?: string | Record<string, unknown> | null;
 }
 
+/**
+ * `git_sync_log.project_id` carries the table's only foreign key, so a
+ * violation on this insert can mean exactly one thing: the referenced project
+ * row is gone. That happens on a routine race — the audit row is written after
+ * the git command returns, so a project deleted while a push/pull is in flight
+ * lands between the two.
+ */
+function isDeletedProjectViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "SQLITE_CONSTRAINT_FOREIGNKEY"
+  );
+}
+
+/**
+ * The retained row loses its project link, so the deleted id is folded into
+ * the detail payload — without it an orphaned row is indistinguishable from a
+ * pre-project clone audit, which legitimately carries a null `projectId`.
+ */
+function orphanedDetail(
+  detail: string | null,
+  deletedProjectId: string
+): string {
+  return JSON.stringify({ deletedProjectId, detail });
+}
+
 export function logSyncOperation(input: LogSyncOperationInput): void {
   const now = new Date().toISOString();
   const detail =
@@ -40,20 +68,49 @@ export function logSyncOperation(input: LogSyncOperationInput): void {
         ? input.detail
         : JSON.stringify(input.detail);
 
+  const id = createId();
+  const row = {
+    id,
+    projectId: input.projectId ?? null,
+    operation: input.operation,
+    status: input.status,
+    branch: input.branch ?? null,
+    detail,
+    createdAt: now,
+  };
+
   try {
-    db.insert(gitSyncLog)
-      .values({
-        id: createId(),
-        projectId: input.projectId ?? null,
-        operation: input.operation,
-        status: input.status,
-        branch: input.branch ?? null,
-        detail,
-        createdAt: now,
-      })
-      .run();
+    db.insert(gitSyncLog).values(row).run();
   } catch (error) {
-    console.warn("[git/sync-log] failed to write audit row", error);
+    // Chosen behaviour for the deleted-project race: RETAIN, don't skip. The
+    // operation really happened and the spec makes `git_sync_log` the record of
+    // it, so the row is rewritten with a null `projectId` (the column is
+    // already nullable for pre-project operations) rather than dropped. It is
+    // then invisible to `getRecentSyncLogs`, which is correct — the project it
+    // belonged to no longer exists — but the trail keeps the entry.
+    if (input.projectId != null && isDeletedProjectViolation(error)) {
+      try {
+        db.insert(gitSyncLog)
+          .values({
+            ...row,
+            projectId: null,
+            detail: orphanedDetail(detail, input.projectId),
+          })
+          .run();
+        console.debug(
+          "[git/sync-log] project deleted mid-operation; audit row retained without project link",
+          { operation: input.operation, deletedProjectId: input.projectId }
+        );
+      } catch (retentionError) {
+        console.error(
+          "[git/sync-log] failed to retain orphaned audit row",
+          retentionError
+        );
+      }
+      return;
+    }
+
+    console.error("[git/sync-log] failed to write audit row", error);
   }
 }
 

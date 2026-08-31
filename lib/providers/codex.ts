@@ -104,34 +104,85 @@ function codexApprovalArgs(): string[] {
   return ["--dangerously-bypass-approvals-and-sandbox"];
 }
 
-function buildCodexMcpOverrideArgs(mcp: McpSpawnConfig): string[] {
-  const prefix = `mcp_servers.${mcp.serverName}`;
-  // All env keys ride the inline table (base URL, token, and the optional
-  // toolset selector) — JSON.stringify of each value is a valid TOML string.
-  const envTable = Object.entries(mcp.env)
+/** A TOML inline table from a string map, `{}` when empty. */
+function codexInlineTable(map: Record<string, string> | undefined): string {
+  const body = Object.entries(map ?? {})
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
     .join(",");
-  return [
-    "-c",
-    `${prefix}.command=${JSON.stringify(mcp.command)}`,
-    "-c",
-    `${prefix}.args=${JSON.stringify(mcp.args)}`,
-    "-c",
-    `${prefix}.env={${envTable}}`,
-  ];
+  return `{${body}}`;
 }
 
 /**
- * The `-c mcp_servers.<name>.env=…` override value carries the per-session
- * bearer token — never let it reach the persisted display command or the
- * console spawn log.
+ * `-c mcp_servers.<name>.*` overrides for every server of the spawn — the
+ * Arij control channel first, then the user's own declared servers
+ * (lib/mcp/servers.ts). codex has no allowlist flag, so a server present here
+ * is a server the agent can call.
+ *
+ * A user's own `~/.codex/config.toml` may define `[mcp_servers]` entries of
+ * its own; a `-c` override replaces the same-named key and leaves the rest
+ * alone. That is the one place where codex differs from claude's
+ * `--strict-mcp-config`, which suppresses the user's config wholesale.
  */
-function maskCodexMcpSecret(arg: string): string {
-  if (arg.startsWith("mcp_servers.") && arg.includes("ARIJ_MCP_TOKEN")) {
-    return `${arg.slice(0, arg.indexOf("="))}=<redacted>`;
+function buildCodexMcpOverrideArgs(mcp: McpSpawnConfig): string[] {
+  const args: string[] = [];
+  for (const server of mcp.servers) {
+    const prefix = `mcp_servers.${server.name}`;
+    if (server.command !== undefined) {
+      // All env keys ride the inline table (base URL, token, the optional
+      // toolset selector, and a third-party server's own variables) —
+      // JSON.stringify of each value is a valid TOML string.
+      args.push(
+        "-c",
+        `${prefix}.command=${JSON.stringify(server.command)}`,
+        "-c",
+        `${prefix}.args=${JSON.stringify(server.args)}`,
+        "-c",
+        `${prefix}.env=${codexInlineTable(server.env)}`,
+      );
+    } else {
+      args.push(
+        "-c",
+        `${prefix}.url=${JSON.stringify(server.url)}`,
+        "-c",
+        `${prefix}.http_headers=${codexInlineTable(server.headers)}`,
+      );
+    }
   }
-  return arg;
+  return args;
+}
+
+/**
+ * Secret-bearing `-c mcp_servers.<name>.*` override values must never reach
+ * the persisted display command or the console spawn log.
+ *
+ * Codex passes MCP config on the COMMAND LINE, so every one of these values
+ * is also visible in `/proc/<pid>/cmdline` while the process runs — that
+ * residual exposure is accepted and documented at the top of this file. What
+ * is NOT acceptable is persisting it: `command_display` is stored on the
+ * session row and rendered in the UI.
+ *
+ * The mask keys on the FIELD, not on the value: it used to fire only when the
+ * override contained `ARIJ_MCP_TOKEN`, which was exhaustive back when `arij`
+ * was the only server codex was ever handed. Now that a user can declare a
+ * Confluence or Godot server with its own API token, a value-based test would
+ * silently let every third-party secret through. `env` and `http_headers` are
+ * the two secret-bearing fields; `command`, `args` and `url` are not masked,
+ * so the display command still says which server was wired.
+ */
+const CODEX_MCP_SECRET_FIELDS = ["env", "http_headers"];
+
+function maskCodexMcpSecret(arg: string): string {
+  if (!arg.startsWith("mcp_servers.")) return arg;
+  // Split on the FIRST "=" only: everything before it is the dotted TOML key,
+  // everything after is the value. Searching the whole string for ".env="
+  // would also match inside an `args` value that happens to contain one.
+  const eq = arg.indexOf("=");
+  if (eq === -1) return arg;
+  const key = arg.slice(0, eq);
+  const field = key.slice(key.lastIndexOf(".") + 1);
+  if (!CODEX_MCP_SECRET_FIELDS.includes(field)) return arg;
+  return `${key}=<redacted>`;
 }
 
 export class CodexProvider extends BaseCliProvider {

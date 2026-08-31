@@ -16,7 +16,11 @@ import {
   MCP_CHANNEL_INJECTED,
   MCP_CHANNEL_UNAVAILABLE,
 } from "./mcp-injection";
-import { arijToolsSection } from "./prompt-sections";
+import { arijToolsSection, extraMcpServersSection } from "./prompt-sections";
+import {
+  resolveExtraMcpServers,
+  type ResolvedExtraMcpServers,
+} from "@/lib/mcp/servers";
 import { isMcpExemptAgentType } from "@/lib/workflow/dreaming-constants";
 import {
   mintMcpToken,
@@ -271,14 +275,53 @@ class ClaudeProcessManager {
             userStoryId: row.userStoryId,
             agentType: row.agentType,
           });
+          // User-declared servers ride alongside the arij channel. Resolution
+          // (scope, enabled, agent_types, provider capability) lives in
+          // lib/mcp/servers.ts; a failure here is caught by the same
+          // best-effort try/catch as the rest of injection, so a broken extra
+          // can cost the session its tools but never its spawn.
+          let extras: ResolvedExtraMcpServers = {
+            servers: [],
+            excludedProjectScoped: [],
+          };
+          try {
+            extras = resolveExtraMcpServers({
+              projectId: row.projectId,
+              provider,
+              agentType: row.agentType ?? null,
+            });
+          } catch (error) {
+            // Its OWN catch, inside the outer one: a user's third-party server
+            // list must never cost the session the arij CONTROL channel. The
+            // outer handler drops `options.mcp` entirely, which would leave the
+            // agent with no board tools and mark the review unverifiable — far
+            // too much to pay for a malformed extra. Degrade to arij-only.
+            console.warn(
+              `[process-manager] extra MCP servers skipped for session ${sessionId}:`,
+              error instanceof Error ? error.message : error,
+            );
+          }
+          if (extras.excludedProjectScoped.length > 0) {
+            // Not silent: `${provider}` reads a user-global MCP registry that
+            // Arij cannot vary per spawn, so these project-scoped servers
+            // cannot reach it. The UI states the same limitation per server.
+            console.info(
+              `[process-manager] session ${sessionId}: provider "${provider}" ` +
+                "cannot honor project-scoped MCP servers " +
+                `(${extras.excludedProjectScoped.join(", ")}) — ` +
+                "only global servers are injected for it",
+            );
+          }
           options.mcp = buildMcpSpawnConfig({
             token,
             agentType: row.agentType,
             provider,
+            extraServers: extras.servers,
           });
           options.prompt +=
             "\n" +
-            arijToolsSection(row.agentType ?? null, arijMcpToolPrefix(provider));
+            arijToolsSection(row.agentType ?? null, arijMcpToolPrefix(provider)) +
+            extraMcpServersSection(extras.servers, provider);
           // Re-persist the prompt WITH the appended section — same display
           // argument as the persona re-persist above, plus a hard requirement
           // of its own: resolveSessionOutput's echo scrub matches

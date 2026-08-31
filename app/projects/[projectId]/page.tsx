@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Board } from "@/components/kanban/Board";
-import { EpicDetail } from "@/components/kanban/EpicDetail";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { NowDesk } from "@/components/desk/NowDesk";
+import { TicketOverlay } from "@/components/ticket/TicketOverlay";
 import { UnifiedChatPanel, type UnifiedChatPanelHandle } from "@/components/chat/UnifiedChatPanel";
 import { AgentMonitor } from "@/components/monitor/AgentMonitor";
 import { useAgentPolling } from "@/hooks/useAgentPolling";
@@ -23,7 +23,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Hammer, Layers, Loader2, X, CheckCircle2, XCircle, Plus, Users, Search, GitMerge, Bot, TriangleAlert } from "lucide-react";
+import { Hammer, Layers, Loader2, X, CheckCircle2, XCircle, Users, Search, GitMerge, Bot, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BugCreateDialog } from "@/components/kanban/BugCreateDialog";
 import { EpicCreateDialog } from "@/components/kanban/EpicCreateDialog";
@@ -32,11 +32,26 @@ import { NightRunSummaryDialog } from "@/components/night/NightRunSummaryDialog"
 import { AutoModeDialog } from "@/components/auto-mode/AutoModeDialog";
 import { AutoModeToggle } from "@/components/auto-mode/AutoModeToggle";
 import { RefinementButton } from "@/components/kanban/RefinementButton";
-import { QuickCapture } from "@/components/kanban/QuickCapture";
-import type { KanbanEpicAgentActivity } from "@/lib/types/kanban";
 import { getActiveDetailTicketId, selectOnlyTicket } from "@/lib/kanban/selection";
-import { buildRetryDispatch } from "@/lib/agent-sessions/retry-dispatch";
+import { consumeQueryParam } from "@/lib/navigation/deep-link";
 import { useProjectEvents } from "@/hooks/useProjectEvents";
+
+/**
+ * `/projects/:id` — the SAME control desk as "/", pre-filtered to one project.
+ *
+ * The route stays alive because every deep link the project chrome produces
+ * lands here (`?ticket=`, `?panel=`, `?night=`, `?nightRun=`, `?deleted=` —
+ * see app/projects/[projectId]/layout.tsx), and because the ticket panel, the
+ * night dialogs and the batch dispatch toolbar are project-scoped by nature.
+ *
+ * What this page owns, and the desk does not:
+ * - the toast stack (the desk forwards into it through `onToast`);
+ * - the URL deep links, each consumed once per value so a re-render cannot
+ *   re-fire an imperative open;
+ * - batch dispatch — build / review / merge over a multi-selection, reachable
+ *   from the desk by ⌘/Ctrl-clicking tickets. The toolbar only exists while
+ *   something is selected, so at rest the route is the desk and nothing else.
+ */
 
 interface Toast {
   id: string;
@@ -46,9 +61,8 @@ interface Toast {
   actionLabel?: string;
 }
 
-export default function KanbanPage() {
+export default function ProjectDeskPage() {
   const params = useParams();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
   const batch = useBatchSelection(projectId);
@@ -68,18 +82,16 @@ export default function KanbanPage() {
   const [autoModeDialogOpen, setAutoModeDialogOpen] = useState(false);
   const [nightSummaryRunId, setNightSummaryRunId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [requestedHighlightId, setHighlightedActivityId] = useState<string | null>(null);
-  // Session completions detected during render (see below); both feed
-  // `boardRefreshKey` and the completion toasts.
+  // Session completions are spotted during render (see below); the tick feeds
+  // `refreshKey` and the id list feeds the completion toasts.
   const [completionTick, setCompletionTick] = useState(0);
   const [completedSessionIds, setCompletedSessionIds] = useState<string[]>([]);
-  // The Released digest yields its width to the side panel while it is open
-  // (the panel reports its own expanded state — see UnifiedChatPanel).
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(0);
-  // Real-time events via SSE — auto-refresh board on ticket/session changes
-  // pollTick increments on fallback polling when SSE is disconnected
-  const { status: sseStatus, pollTick } = useProjectEvents(projectId, {
+  const panelRef = useRef<UnifiedChatPanelHandle>(null);
+
+  // Real-time events via SSE — the desk polls /api/control-desk on its own, but
+  // the surfaces this page still owns (agent monitor, ticket panel) refresh on
+  // the project's own event stream. pollTick increments when SSE is down.
+  const { pollTick } = useProjectEvents(projectId, {
     "ticket:moved": () => setRefreshTrigger((t) => t + 1),
     "ticket:created": () => setRefreshTrigger((t) => t + 1),
     "ticket:updated": () => setRefreshTrigger((t) => t + 1),
@@ -92,21 +104,12 @@ export default function KanbanPage() {
     "release:created": () => setRefreshTrigger((t) => t + 1),
   });
 
-  // Fallback: refresh the board when SSE is down and polling kicks in. All
-  // three counters only ever mean "something changed, reload", so the board
-  // key is their sum rather than an effect copying one into another.
-  const boardRefreshKey = refreshTrigger + pollTick + completionTick;
+  // Fallback for when SSE is down and polling takes over. All three counters
+  // only ever mean "something changed, reload", so the refresh key is their
+  // sum rather than an effect copying one into another.
+  const refreshKey = refreshTrigger + pollTick + completionTick;
 
-  const { activities, failedSessions } = useAgentPolling(projectId, 3000, boardRefreshKey);
-  const panelRef = useRef<UnifiedChatPanelHandle>(null);
-
-  // A highlight only means something while the activity it points at is live,
-  // so the effective id is derived rather than cleared by an effect.
-  const highlightedActivityId =
-    requestedHighlightId &&
-    activities.some((activity) => activity.id === requestedHighlightId)
-      ? requestedHighlightId
-      : null;
+  const { activities } = useAgentPolling(projectId, 3000, refreshKey);
 
   // Team mode is a decision about the selection that was standing when the box
   // was ticked. Falling below two tickets retires it outright: merely masking
@@ -120,67 +123,6 @@ export default function KanbanPage() {
 
   const teamMode = teamModeRequested && batch.allSelected.size >= 2;
 
-  const activeAgentActivities = useMemo<Record<string, KanbanEpicAgentActivity>>(
-    () => {
-      const map: Record<string, KanbanEpicAgentActivity> = {};
-
-      for (const activity of activities) {
-        if (!activity.epicId) continue;
-        // Queued sessions surface in the AgentMonitor; the kanban agent
-        // chip stays reserved for agents that are actually running.
-        if (activity.status !== "running") continue;
-        if (!["build", "review", "merge"].includes(activity.type)) continue;
-
-        map[activity.epicId] = {
-          sessionId: activity.id,
-          actionType: activity.type as KanbanEpicAgentActivity["actionType"],
-          agentName: activity.namedAgentName || `Agent ${activity.id.slice(0, 6)}`,
-          provider: activity.provider,
-          startedAt: activity.startedAt,
-        };
-      }
-
-      return map;
-    },
-    [activities]
-  );
-  /**
-   * Epics an agent still owns — QUEUED included, unlike `runningEpicIds`.
-   *
-   * The board uses this to withhold the Merge button: merging removes the
-   * epic's worktree, so doing it over a queued build drops that build into a
-   * directory that no longer exists. Matches what the approve route refuses
-   * on (`getRunningSessionForTarget`), which is any active session on the
-   * epic regardless of its type.
-   */
-  const busyEpicIds = useMemo(
-    () =>
-      new Set(
-        activities
-          .filter(
-            (session) =>
-              session.epicId &&
-              (session.status === "running" || session.status === "queued")
-          )
-          .map((session) => session.epicId as string)
-      ),
-    [activities]
-  );
-
-  const runningEpicIds = useMemo(
-    () =>
-      new Set(
-        activities
-          .filter(
-            (session) =>
-              session.status === "running" &&
-              session.epicId &&
-              ["build", "review", "merge"].includes(session.type)
-          )
-          .map((session) => session.epicId as string)
-      ),
-    [activities]
-  );
   const activeDetailTicketId = getActiveDetailTicketId(batch.selectedTicketIds);
 
   function handlePrimaryTicketClick(epicId: string) {
@@ -191,8 +133,7 @@ export default function KanbanPage() {
     batch.clear();
   }
 
-
-  // Refresh board when layout triggers a sync from arji.json
+  // Refresh when the project layout imports arji.json.
   useEffect(() => {
     const onSynced = () => setRefreshTrigger((t) => t + 1);
     window.addEventListener("arji:synced", onSynced);
@@ -222,60 +163,12 @@ export default function KanbanPage() {
 
   /**
    * A refinement pass reshapes columns, priorities and dependency edges
-   * without emitting one event per write, so the board is reloaded once when
+   * without emitting one event per write, so everything is reloaded once when
    * the pass ends rather than trusting the incremental SSE stream.
    */
   const handleRefinementFinished = useCallback(() => {
     setRefreshTrigger((t) => t + 1);
     addToast("success", "Board refinement finished — see the notification for the summary");
-  }, [addToast]);
-
-  /**
-   * A retry is a second attempt at the same work by the same agent: it reuses
-   * the failed session's named agent and resumes that session rather than
-   * restarting cold on whatever the default chain resolves to. The card can
-   * be badged by a review or a story build as well as by an epic build, so
-   * which of those two things it is safe to carry over is decided in
-   * lib/agent-sessions/retry-dispatch.ts.
-   */
-  const handleRetryBuild = useCallback(async (epicId: string) => {
-    try {
-      const { url, body } = buildRetryDispatch(
-        projectId,
-        epicId,
-        failedSessions[epicId],
-        namedAgentId
-      );
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        addToast("error", data.error || "Failed to retry build");
-      } else {
-        addToast("success", `Retrying build for epic`);
-        setRefreshTrigger((t) => t + 1);
-      }
-    } catch {
-      addToast("error", "Failed to retry build");
-    }
-  }, [projectId, namedAgentId, failedSessions, addToast]);
-
-  // A Review card merged itself through the approve route; the Board already
-  // reloaded the columns, so this only has to move the surrounding surfaces
-  // (agent activity, monitor) and say so.
-  const handleBoardMergeSuccess = useCallback(() => {
-    addToast("success", "Merged into the base branch");
-    setRefreshTrigger((t) => t + 1);
-  }, [addToast]);
-
-  const handleBoardMergeAgentDispatched = useCallback(() => {
-    addToast("success", "Merge conflict — resolution agent dispatched");
-    setRefreshTrigger((t) => t + 1);
   }, [addToast]);
 
   // ?deleted=story|epic — the notice the deleted ticket's own page hands over.
@@ -317,32 +210,38 @@ export default function KanbanPage() {
 
   useEffect(() => {
     if (!searchParams.get("deleted")) return;
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("deleted");
-    const query = next.toString();
-    router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
-  }, [projectId, router, searchParams]);
+    consumeQueryParam(searchParams, "deleted", `/projects/${projectId}`);
+  }, [projectId, searchParams]);
 
   // Deep link: /projects/<id>?ticket=<epicId> opens the ticket detail
   // (used by "Agent asked a question" notifications), then strips the param.
+  //
+  // Consumed once per value, like ?panel= and ?night= below, and for a sharper
+  // reason: `useRouter()` is memoised on the closest CacheNode's bfcache id, so
+  // every committed navigation hands this effect a new `router` and re-runs it.
+  // Without the ref that re-opens the overlay the user has just closed.
+  const handledTicketParam = useRef<string | null>(null);
+
   useEffect(() => {
     const ticket = searchParams.get("ticket");
-    if (!ticket) return;
+    if (!ticket) {
+      handledTicketParam.current = null;
+      return;
+    }
+    if (handledTicketParam.current === ticket) return;
+    handledTicketParam.current = ticket;
 
     batch.setSelectedTicketIds(selectOnlyTicket(ticket));
 
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("ticket");
-    const query = next.toString();
-    router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
-  }, [batch.setSelectedTicketIds, projectId, router, searchParams]);
+    consumeQueryParam(searchParams, "ticket", `/projects/${projectId}`);
+  }, [batch.setSelectedTicketIds, projectId, searchParams]);
 
   // Header actions live in the project chrome (a layout that outlives this
-  // page), so they reach the board through the URL rather than through a
-  // shared event bus: ?panel=chat|new-epic|new-bug, stripped once handled.
-  // Consumed once per value: opening the chat is an imperative act, and the
-  // ref keeps a re-render (or a replace() that has not landed yet) from
-  // firing it a second time or re-opening a dialog the user just closed.
+  // page), so they reach this route through the URL rather than through a
+  // shared event bus: ?panel=chat|new-epic|new-epic-manual|new-bug, stripped
+  // once handled. Consumed once per value: opening the chat is an imperative
+  // act, and the ref keeps a re-render (or a replace() that has not landed
+  // yet) from firing it a second time or re-opening a dialog just closed.
   const handledPanelParam = useRef<string | null>(null);
 
   // The two dialogs this can open are plain state of this component, so they
@@ -375,13 +274,12 @@ export default function KanbanPage() {
       panelRef.current?.openNewEpic();
     }
 
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("panel");
-    const query = next.toString();
-    router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
-  }, [projectId, router, searchParams]);
+    consumeQueryParam(searchParams, "panel", `/projects/${projectId}`);
+  }, [projectId, searchParams]);
 
-  // Same mechanism for the header's Night run button: ?night=start.
+  // Same mechanism for the header's Night run button: ?night=start. The dialog
+  // is this component's state, so it opens during render and only the URL
+  // rewrite is left to an effect.
   const nightParam = searchParams.get("night");
   const [handledNight, setHandledNight] = useState<string | null>(null);
 
@@ -394,11 +292,8 @@ export default function KanbanPage() {
 
   useEffect(() => {
     if (searchParams.get("night") !== "start") return;
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("night");
-    const query = next.toString();
-    router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
-  }, [projectId, router, searchParams]);
+    consumeQueryParam(searchParams, "night", `/projects/${projectId}`);
+  }, [projectId, searchParams]);
 
   // Deep link: /projects/<id>?nightRun=<runId> opens the morning summary
   // (used by the "Night run finished" notification), then strips the param.
@@ -414,17 +309,13 @@ export default function KanbanPage() {
 
   useEffect(() => {
     if (!searchParams.get("nightRun")) return;
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("nightRun");
-    const query = next.toString();
-    router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
-  }, [projectId, router, searchParams]);
+    consumeQueryParam(searchParams, "nightRun", `/projects/${projectId}`);
+  }, [projectId, searchParams]);
 
-
-  // Detect session completions for notifications + board refresh. The
-  // disappearance is spotted during render — keyed on the joined id list, a
-  // primitive, so the comparison cannot differ on every render — and the
-  // per-session lookup that turns it into a toast stays in the effect below.
+  // Detect session completions for notifications + refresh. The disappearance
+  // is spotted during render — keyed on the joined id list, a primitive, so the
+  // comparison cannot differ on every render — and the per-session lookup that
+  // turns it into a toast stays in the effect below.
   const activityIdsKey = activities.map((a) => a.id).join("|");
   const [seenActivities, setSeenActivities] = useState<{
     key: string;
@@ -609,69 +500,31 @@ export default function KanbanPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-hidden">
+        {/* The ticket is a modal over a still-live desk now (frame 6a), not a
+            column beside the chat: it is rendered below, outside the chat
+            panel, so the desk keeps receiving SSE and keeps ticking behind
+            the scrim. The chat panel keeps its own view to itself. */}
         <UnifiedChatPanel
           projectId={projectId}
           ref={panelRef}
           onEpicCreated={() => setRefreshTrigger((t) => t + 1)}
-          onExpandedChange={setPanelOpen}
-          sharedPanelView={
-            activeDetailTicketId
-              ? {
-                  panelId: activeDetailTicketId,
-                  label: "Ticket",
-                  onClose: handleCloseDetailPanel,
-                  content: (
-                    <EpicDetail
-                      projectId={projectId}
-                      epicId={activeDetailTicketId}
-                      open
-                      refreshTrigger={boardRefreshKey}
-                      onClose={handleCloseDetailPanel}
-                      onAgentConflict={({ message, sessionUrl }) =>
-                        addToast(
-                          "error",
-                          message,
-                          sessionUrl
-                            ? { href: sessionUrl, label: "Open active session" }
-                            : undefined
-                        )
-                      }
-                      onMerged={() => {
-                        setRefreshTrigger((t) => t + 1);
-                        addToast("success", "Branch merged into main");
-                      }}
-                      onDeleted={() => {
-                        setRefreshTrigger((t) => t + 1);
-                        addToast("success", "Epic deleted permanently");
-                      }}
-                    />
-                  ),
-                }
-              : null
-          }
         >
           <div className="flex h-full flex-col">
-            {/* Quick capture bar */}
+            {/* Project-scoped controls the desk's own chrome does not carry:
+                the Full Auto CONFIGURATION dialog (the header pill is an on/off
+                switch) and the Refinement pass. */}
             <div
               className="flex h-[46px] shrink-0 items-center gap-[12px] border-b border-border bg-card px-[22px]"
               data-testid="board-capture-bar"
             >
-              <Plus className="h-[13px] w-[13px] shrink-0 text-meta" aria-hidden />
-              <div className="flex max-w-[420px] flex-1 items-center">
-                <QuickCapture
-                  projectId={projectId}
-                  onCreated={() => setRefreshTrigger((t) => t + 1)}
-                  onError={(message) => addToast("error", message)}
-                />
-              </div>
               <AutoModeToggle
                 projectId={projectId}
                 onOpen={() => setAutoModeDialogOpen(true)}
-                refreshTrigger={boardRefreshKey}
+                refreshTrigger={refreshKey}
               />
               <RefinementButton
                 projectId={projectId}
-                refreshTrigger={boardRefreshKey}
+                refreshTrigger={refreshKey}
                 onError={(message) => addToast("error", message)}
                 onNotice={(message) => addToast("success", message)}
                 onStarted={() =>
@@ -683,12 +536,11 @@ export default function KanbanPage() {
                 onFinished={handleRefinementFinished}
               />
               <span className="ml-auto truncate text-[12.5px] text-muted-foreground">
-                {visibleCount} ticket{visibleCount === 1 ? "" : "s"} visible
-                {panelOpen && " · Done & Released return when the panel closes"}
+                ⌘-clic sur un ticket pour le sélectionner
               </span>
             </div>
 
-            {/* Batch action toolbar */}
+            {/* Batch action toolbar — only while something is selected. */}
             {totalSelected > 0 && (
               <div className="flex min-h-[48px] shrink-0 flex-wrap items-center gap-[10px] border-b border-border bg-card px-[22px] py-[8px]">
                 <span className="text-[13px] font-medium">
@@ -863,55 +715,56 @@ export default function KanbanPage() {
               </div>
             )}
 
-            <div className="flex-1 overflow-hidden relative">
-              {sseStatus !== "connected" && (
-                <div
-                  className="absolute top-[10px] right-[10px] z-10 flex items-center gap-1.5 rounded-full border border-border bg-card px-[10px] py-[3px] text-[11.5px] text-muted-foreground"
-                  title={sseStatus === "connecting" ? "Connecting to real-time updates..." : "Offline — reconnecting..."}
-                >
-                  <span
-                    className={cn(
-                      "h-2 w-2 rounded-full",
-                      sseStatus === "connecting"
-                        ? "bg-priority-yellow animate-pulse motion-reduce:animate-none"
-                        : "bg-destructive"
-                    )}
-                  />
-                  {sseStatus === "connecting" ? "Connecting..." : "Offline"}
-                </div>
-              )}
-              <Board
+            <div className="relative min-h-0 flex-1 overflow-hidden">
+              <NowDesk
                 projectId={projectId}
-                onEpicClick={handlePrimaryTicketClick}
-                selectedEpics={batch.allSelected}
-                autoIncludedEpics={batch.autoIncluded}
+                onToast={addToast}
+                onChanged={() => setRefreshTrigger((t) => t + 1)}
+                selectedEpicIds={batch.allSelected}
                 onToggleSelect={batch.toggle}
-                refreshTrigger={boardRefreshKey}
-                runningEpicIds={runningEpicIds}
-                activeAgentActivities={activeAgentActivities}
-                onLinkedAgentHoverChange={setHighlightedActivityId}
-                onMoveError={(error) => addToast("error", error)}
-                onMoveWarning={(message) => addToast("warning", message)}
-                failedSessions={failedSessions}
-                onRetryBuild={handleRetryBuild}
-                busyEpicIds={busyEpicIds}
-                hideReleased={panelOpen}
-                hideDone={panelOpen}
-                onVisibleCountChange={setVisibleCount}
-                onMergeSuccess={handleBoardMergeSuccess}
-                onMergeAgentDispatched={handleBoardMergeAgentDispatched}
+                onOpenTicket={handlePrimaryTicketClick}
               />
             </div>
 
             {/* Agent monitor bar */}
-            <AgentMonitor
-              projectId={projectId}
-              activities={activities}
-              highlightedActivityId={highlightedActivityId}
-            />
+            {/* No `highlightedActivityId`: the linked-agent hover that used to
+                feed it belonged to the board this desk replaced, so the monitor
+                keeps its own default of "nothing highlighted". */}
+            <AgentMonitor projectId={projectId} activities={activities} />
           </div>
         </UnifiedChatPanel>
       </div>
+
+      {/* The ticket overlay. `?ticket=<epicId>` and a plain desk click both
+          land in the batch selection, and the selection's active ticket is
+          what opens here — one source of truth for "which ticket is open",
+          so closing the overlay clears the selection and vice versa. */}
+      {activeDetailTicketId && (
+        <TicketOverlay
+          projectId={projectId}
+          epicId={activeDetailTicketId}
+          open
+          refreshTrigger={refreshKey}
+          onClose={handleCloseDetailPanel}
+          onAgentConflict={({ message, sessionUrl }) =>
+            addToast(
+              "error",
+              message,
+              sessionUrl
+                ? { href: sessionUrl, label: "Open active session" }
+                : undefined
+            )
+          }
+          onMerged={() => {
+            setRefreshTrigger((t) => t + 1);
+            addToast("success", "Branch merged into main");
+          }}
+          onDeleted={() => {
+            setRefreshTrigger((t) => t + 1);
+            addToast("success", "Epic deleted permanently");
+          }}
+        />
+      )}
 
       {/* Toast notifications */}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
@@ -919,11 +772,11 @@ export default function KanbanPage() {
           <div
             key={toast.id}
             className={cn(
-              "flex items-center gap-2 rounded-[11px] border px-[14px] py-[10px] text-[13px] shadow-[0_18px_40px_rgba(58,48,44,.14)]",
+              "flex items-center gap-2 rounded-[11px] border px-[14px] py-[10px] text-[13px]",
               toast.type === "success"
                 ? "border-agent-border bg-agent-bg text-agent"
                 : toast.type === "warning"
-                  ? "border-amber-500/40 bg-card text-amber-600 dark:text-amber-400"
+                  ? "border-border-strong bg-card text-strata-land-deep"
                   : "border-destructive/40 bg-card text-destructive"
             )}
           >

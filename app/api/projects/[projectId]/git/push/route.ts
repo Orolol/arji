@@ -5,7 +5,9 @@ import {
   errorResponse,
 } from "@/lib/api/route-helpers";
 import {
+  assertRemoteConfigured,
   getCurrentGitBranch,
+  GitRemoteNotConfiguredError,
   pushGitBranch,
   PushValidationError,
   validatePushPreconditions,
@@ -39,6 +41,10 @@ export async function POST(request: NextRequest, { params }: Params) {
   const branch = requestedBranch.trim() || (await getCurrentGitBranch(project.gitRepoPath));
 
   try {
+    // Checked before the working-tree/behind validation: a project with no
+    // remote cannot be "behind" one, and git's own failure for this state is a
+    // transport-shaped error that reads as a server fault.
+    await assertRemoteConfigured(project.gitRepoPath, remote, "push");
     await validatePushPreconditions(project.gitRepoPath, branch, remote);
     const result = await pushGitBranch(
       project.gitRepoPath,
@@ -70,6 +76,36 @@ export async function POST(request: NextRequest, { params }: Params) {
       },
     });
   } catch (error) {
+    // An unconfigured remote is a precondition the user can fix, not a fault:
+    // 409 with the code and the repository's real remotes so the client can
+    // offer them, matching git/detect-remote's 4xx for the same state.
+    if (error instanceof GitRemoteNotConfiguredError) {
+      writeGitSyncLog({
+        projectId,
+        operation: "push",
+        status: "failed",
+        branch,
+        detail: {
+          remote,
+          setUpstream,
+          code: error.code,
+          operation: error.operation,
+          error: error.message,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code,
+          remote: error.remote,
+          operation: error.operation,
+          configuredRemotes: error.configuredRemotes,
+        },
+        { status: 409 }
+      );
+    }
+
     if (error instanceof PushValidationError) {
       writeGitSyncLog({
         projectId,

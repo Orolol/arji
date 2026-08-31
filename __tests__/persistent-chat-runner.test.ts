@@ -124,14 +124,18 @@ describe("persistent chat runner — Claude Code", () => {
     vi.clearAllMocks();
     mocks.createChannel.mockReturnValue({
       mcp: {
-        serverName: "arij",
-        command: process.execPath,
-        args: ["bin/arij-mcp.mjs"],
-        env: {
-          ARIJ_BASE_URL: "http://localhost:3000",
-          ARIJ_MCP_TOKEN: "secret",
-          ARIJ_MCP_TOOLSET: "chat",
-        },
+        servers: [
+          {
+            name: "arij",
+            command: process.execPath,
+            args: ["bin/arij-mcp.mjs"],
+            env: {
+              ARIJ_BASE_URL: "http://localhost:3000",
+              ARIJ_MCP_TOKEN: "secret",
+              ARIJ_MCP_TOOLSET: "chat",
+            },
+          },
+        ],
         allowedToolNames: ["mcp__arij__get_ticket"],
       },
       release: mocks.release,
@@ -371,14 +375,18 @@ describe("persistent chat runner — Oh My Pi RPC", () => {
     vi.clearAllMocks();
     mocks.createChannel.mockReturnValue({
       mcp: {
-        serverName: "arij",
-        command: process.execPath,
-        args: ["bin/arij-mcp.mjs"],
-        env: {
-          ARIJ_BASE_URL: "http://localhost:3000",
-          ARIJ_MCP_TOKEN: "omp-secret",
-          ARIJ_MCP_TOOLSET: "chat",
-        },
+        servers: [
+          {
+            name: "arij",
+            command: process.execPath,
+            args: ["bin/arij-mcp.mjs"],
+            env: {
+              ARIJ_BASE_URL: "http://localhost:3000",
+              ARIJ_MCP_TOKEN: "omp-secret",
+              ARIJ_MCP_TOOLSET: "chat",
+            },
+          },
+        ],
         allowedToolNames: ["mcp__arij_get_ticket"],
       },
       release: mocks.release,

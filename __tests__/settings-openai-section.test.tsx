@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import SettingsPage from "@/app/settings/page";
+import SettingsPage from "@/app/settings/integrations/page";
 
 let mockSettings: Record<string, unknown> = {};
 let patchCalls: Array<Record<string, unknown>> = [];

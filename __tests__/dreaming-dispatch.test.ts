@@ -93,9 +93,10 @@ const {
   getProjectMemoryContent,
   saveProjectMemory,
 } = await import("@/lib/documents/memory");
-const { PROJECT_MEMORY_MAX_CHARS } = await import(
-  "@/lib/documents/memory-constants"
-);
+const {
+  PROJECT_MEMORY_MAX_CHARS,
+  PROJECT_MEMORY_MAX_TOKENS,
+} = await import("@/lib/documents/memory-constants");
 const {
   DREAMING_AFTER_NIGHT_RUN_SETTING_KEY,
   DREAMING_AGENT_TYPE,
@@ -389,7 +390,7 @@ describe("dispatchDreamingSession", () => {
     expect(getProjectMemoryContent(projectId)).toHaveLength(
       PROJECT_MEMORY_MAX_CHARS
     );
-    expect(PROJECT_MEMORY_MAX_CHARS).toBe(12000);
+    expect(PROJECT_MEMORY_MAX_TOKENS).toBe(10_000);
   });
 
   /**
@@ -446,7 +447,10 @@ describe("dispatchDreamingSession", () => {
       success: true,
       result: claudeEnvelope(
         DREAMING_MEMORY_SECTIONS.map(
-          (title) => `## ${title}\n\n${"- a long rule\n".repeat(400)}`
+          (title) =>
+            `## ${title}\n\n${"- a long rule\n".repeat(
+              Math.ceil(PROJECT_MEMORY_MAX_CHARS / "- a long rule\n".length)
+            )}`
         ).join("\n")
       ),
       duration: 1000,

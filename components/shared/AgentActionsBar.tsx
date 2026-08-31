@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import { Badge } from "@/components/ui/badge";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -15,6 +14,7 @@ import {
   ClipboardCheck,
 } from "lucide-react";
 import { AgentDispatchDialog } from "@/components/shared/AgentDispatchDialog";
+import { SendToDevDialog } from "@/components/shared/SendToDevDialog";
 import { ReviewTypesPicker } from "@/components/shared/ReviewTypesPicker";
 import {
   PROVIDER_LABELS,
@@ -22,7 +22,6 @@ import {
   isChatProvider,
   type BuiltinReviewType,
 } from "@/lib/agent-config/constants";
-import { resolvePipelineEnabledDefault } from "@/lib/pipeline/constants";
 import { pipelineChipLabel, usePipelineRuns } from "@/hooks/usePipelineRuns";
 
 interface ReviewResolutionPreview {
@@ -122,17 +121,14 @@ export function AgentActionsBar({
   const [sendToDevOpen, setSendToDevOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [gradingOpen, setGradingOpen] = useState(false);
-  const [devComment, setDevComment] = useState("");
   const [devAgentId, setDevAgentId] = useState<string | null>(null);
   const [reviewAgentId, setReviewAgentId] = useState<string | null>(null);
   const [gradingAgentId, setGradingAgentId] = useState<string | null>(null);
   const [reviewTypes, setReviewTypes] = useState<Set<string>>(new Set(["feature_review"]));
   const [approving, setApproving] = useState(false);
-  const [resumeSessionId, setResumeSessionId] = useState<string | undefined>();
   const [reviewResumeSessionId, setReviewResumeSessionId] = useState<string | undefined>();
   const [reviewResolution, setReviewResolution] =
     useState<ReviewResolutionPreview | null>(null);
-  const [pipeline, setPipeline] = useState(false);
 
   // Explains a session the user did not dispatch by hand: while an agent is
   // running, check whether it belongs to an autonomous pipeline run.
@@ -194,35 +190,6 @@ export function AgentActionsBar({
     sessionUserStoryId,
   ]);
 
-  // The pipeline checkbox defaults to the effective setting (per-project key
-  // first, then the global one, then OFF). Re-read each time the dialog
-  // opens so a settings change is picked up without a reload.
-  useEffect(() => {
-    if (!sendToDevOpen) return;
-    let cancelled = false;
-    try {
-      fetch("/api/settings")
-        .then((r) => r.json())
-        .then((json) => {
-          if (cancelled) return;
-          setPipeline(
-            resolvePipelineEnabledDefault(
-              json?.data as Record<string, unknown> | undefined,
-              projectId
-            )
-          );
-        })
-        .catch(() => {
-          // best-effort — the checkbox simply stays off
-        });
-    } catch {
-      // ignore (no fetch in some test environments)
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [sendToDevOpen, projectId]);
-
   const segregationNotice =
     reviewResolution?.segregated && reviewResolution.builderProvider
       ? `Review by ${providerLabel(reviewResolution.provider)} (builder was ${providerLabel(reviewResolution.builderProvider)})`
@@ -246,36 +213,21 @@ export function AgentActionsBar({
         ? `Another agent is already running for this ${config.noun}.`
         : null;
 
-  // Send to Dev (from backlog/todo/in_progress — optional comment)
-  async function handleSendToDev() {
+  // Send to Dev — the shared dialog supplies the comment, the agent choice,
+  // the resumable session, and the pipeline flag (defaulted from the
+  // `pipeline_enabled` setting chain inside the dialog).
+  async function handleSendToDevConfirm(
+    comment: string | undefined,
+    namedAgentId: string | null,
+    sessionId: string | undefined,
+    // undefined = no readable default and no user choice: omit the flag and
+    // let the build route resolve `pipeline_enabled` itself.
+    pipeline: boolean | undefined
+  ) {
+    setDevAgentId(namedAgentId);
     try {
-      await onSendToDev(
-        devComment.trim() || undefined,
-        devAgentId,
-        resumeSessionId,
-        pipeline
-      );
+      await onSendToDev(comment, namedAgentId, sessionId, pipeline);
       setSendToDevOpen(false);
-      setDevComment("");
-      setResumeSessionId(undefined);
-    } catch (error) {
-      onActionError?.(error);
-    }
-  }
-
-  // Send to Dev from Review (mandatory comment)
-  async function handleSendToDevFromReview() {
-    if (!devComment.trim()) return;
-    try {
-      await onSendToDev(
-        devComment.trim(),
-        devAgentId,
-        resumeSessionId,
-        pipeline
-      );
-      setSendToDevOpen(false);
-      setDevComment("");
-      setResumeSessionId(undefined);
     } catch (error) {
       onActionError?.(error);
     }
@@ -358,10 +310,7 @@ export function AgentActionsBar({
         <Button
           size="sm"
           variant="outline"
-          onClick={() => {
-            setDevComment("");
-            setSendToDevOpen(true);
-          }}
+          onClick={() => setSendToDevOpen(true)}
           disabled={actionsLocked}
           className="h-7 text-xs"
         >
@@ -419,85 +368,30 @@ export function AgentActionsBar({
         </Button>
       )}
 
-      {/* Send to Dev Dialog */}
-      <AgentDispatchDialog
+      {/* Send to Dev Dialog (shared with the ticket overlay) */}
+      <SendToDevDialog
         open={sendToDevOpen}
-        onOpenChange={(open) => { setSendToDevOpen(open); if (!open) setResumeSessionId(undefined); }}
+        onOpenChange={setSendToDevOpen}
+        projectId={projectId}
         title={config.devDialogTitle}
         description={
           canSendToDevFromReview
             ? "Explain what needs to be fixed. This comment is required."
             : "Optionally add a comment for the agent before dispatching."
         }
-        projectId={projectId}
-        agentProps={{
-          value: devAgentId,
-          onChange: setDevAgentId,
-          dispatchRole: "build",
-        }}
-        sessionPicker={{
-          epicId: sessionEpicId,
-          userStoryId: sessionUserStoryId,
-          agentType: config.buildAgentType,
-          namedAgentId: devAgentId,
-          provider: "claude-code",
-          selectedSessionId: resumeSessionId,
-          onSelect: setResumeSessionId,
-        }}
-        promptEstimateTarget={{
-          epicId: sessionEpicId,
-          userStoryId: sessionUserStoryId,
-          dispatchType: "build",
-          comment: devComment,
-        }}
-        extraContent={
-          <>
-            <MentionTextarea
-              projectId={projectId}
-              value={devComment}
-              onValueChange={setDevComment}
-              placeholder={
-                canSendToDevFromReview
-                  ? "Describe what needs to be fixed..."
-                  : "Optional instructions for the agent..."
-              }
-              rows={4}
-              className=""
-            />
-            <label className="flex items-start gap-2 text-sm cursor-pointer">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                data-testid="pipeline-checkbox"
-                checked={pipeline}
-                onChange={(e) => setPipeline(e.target.checked)}
-              />
-              <span>
-                <span className="font-medium">
-                  Run full pipeline (build → review → auto-fix)
-                </span>
-                <span className="block text-xs text-muted-foreground">
-                  After the build, Arij runs a code review and dispatches fix
-                  agents until the review is clean. Stopping the running
-                  session stops the pipeline.
-                </span>
-              </span>
-            </label>
-          </>
-        }
-        confirmLabel="Dispatch Agent"
-        confirmIcon={<Hammer className="h-4 w-4 mr-1" />}
-        busy={dispatching}
-        confirmDisabled={
-          actionsLocked ||
-          (canSendToDevFromReview && !devComment.trim())
-        }
-        onConfirm={
+        epicId={sessionEpicId}
+        userStoryId={sessionUserStoryId}
+        buildAgentType={config.buildAgentType}
+        initialAgentId={devAgentId}
+        commentRequired={canSendToDevFromReview}
+        commentPlaceholder={
           canSendToDevFromReview
-            ? handleSendToDevFromReview
-            : handleSendToDev
+            ? "Describe what needs to be fixed..."
+            : "Optional instructions for the agent..."
         }
-        onCancel={() => setSendToDevOpen(false)}
+        busy={dispatching}
+        locked={actionsLocked}
+        onConfirm={handleSendToDevConfirm}
       />
 
       {/* Agent Review Dialog */}

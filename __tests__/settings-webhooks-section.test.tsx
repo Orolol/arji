@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import SettingsPage from "@/app/settings/page";
+import SettingsPage from "@/app/settings/integrations/page";
 
 let webhookRows: Array<{ projectId: string; projectName: string; url: string }> =
   [];

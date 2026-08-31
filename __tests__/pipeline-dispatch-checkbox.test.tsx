@@ -66,27 +66,32 @@ function openDialog() {
   fireEvent.click(screen.getByRole("button", { name: /Send to Dev/i }));
 }
 
+/** Re-queried every time: the dialog re-renders as the settings read lands. */
+function confirmButton() {
+  return screen.getByRole("button", { name: /Dispatch Agent/i });
+}
+
 describe("AgentActionsBar — pipeline checkbox", () => {
   beforeEach(() => {
     settings = {};
     stubFetch();
   });
 
-  it("is unchecked when no pipeline setting exists", async () => {
-    renderBar(sendToDevSpy());
-    openDialog();
-
-    const checkbox = await screen.findByTestId("pipeline-checkbox");
-    await waitFor(() => expect(checkbox).not.toBeChecked());
-  });
-
-  it("defaults to checked when the global setting is on", async () => {
-    settings = { pipeline_enabled: true };
+  it("is checked when no pipeline setting exists", async () => {
     renderBar(sendToDevSpy());
     openDialog();
 
     const checkbox = await screen.findByTestId("pipeline-checkbox");
     await waitFor(() => expect(checkbox).toBeChecked());
+  });
+
+  it("defaults to unchecked when the global setting is explicitly off", async () => {
+    settings = { pipeline_enabled: false };
+    renderBar(sendToDevSpy());
+    openDialog();
+
+    const checkbox = await screen.findByTestId("pipeline-checkbox");
+    await waitFor(() => expect(checkbox).not.toBeChecked());
   });
 
   it("lets a per-project override turn the default back off", async () => {
@@ -95,36 +100,221 @@ describe("AgentActionsBar — pipeline checkbox", () => {
     openDialog();
 
     const checkbox = await screen.findByTestId("pipeline-checkbox");
-    // Let the settings fetch settle before asserting the (unchanged) state.
-    await waitFor(() => expect(screen.getByTestId("pipeline-checkbox")).toBeInTheDocument());
-    expect(checkbox).not.toBeChecked();
+    await waitFor(() => expect(checkbox).not.toBeChecked());
   });
 
-  it("passes pipeline=true to onSendToDev when the box is ticked", async () => {
+  it("passes pipeline=true to onSendToDev when the box stays ticked", async () => {
+    const onSendToDev = sendToDevSpy();
+    renderBar(onSendToDev);
+    openDialog();
+
+    // The box is checked by default; dispatch without touching it — but only
+    // once the settings read has lifted the confirm gate.
+    await screen.findByTestId("pipeline-checkbox");
+    await waitFor(() => expect(confirmButton()).toBeEnabled());
+
+    fireEvent.click(confirmButton());
+
+    await waitFor(() => expect(onSendToDev).toHaveBeenCalled());
+    expect(onSendToDev.mock.calls[0]).toEqual([undefined, null, undefined, true]);
+  });
+
+  it("passes pipeline=false when the box is unticked", async () => {
     const onSendToDev = sendToDevSpy();
     renderBar(onSendToDev);
     openDialog();
 
     const checkbox = await screen.findByTestId("pipeline-checkbox");
     fireEvent.click(checkbox);
-    expect(checkbox).toBeChecked();
-
-    fireEvent.click(screen.getByRole("button", { name: /Dispatch Agent/i }));
-
-    await waitFor(() => expect(onSendToDev).toHaveBeenCalled());
-    expect(onSendToDev.mock.calls[0]).toEqual([undefined, null, undefined, true]);
-  });
-
-  it("passes pipeline=false when the box is left unticked", async () => {
-    const onSendToDev = sendToDevSpy();
-    renderBar(onSendToDev);
-    openDialog();
-
-    await screen.findByTestId("pipeline-checkbox");
-    fireEvent.click(screen.getByRole("button", { name: /Dispatch Agent/i }));
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(confirmButton());
 
     await waitFor(() => expect(onSendToDev).toHaveBeenCalled());
     expect(onSendToDev.mock.calls[0][3]).toBe(false);
+  });
+});
+
+/**
+ * The dialog is interactive before `GET /api/settings` answers. Until it
+ * does, the checkbox is only an optimistic product default — dispatching it
+ * as an explicit `pipeline: true` would override a project or global
+ * `pipeline_enabled: false`. These tests pin the three ways out of that
+ * window: gate, user choice wins, and omit the flag when the read fails.
+ */
+describe("AgentActionsBar — pipeline default while the settings read is in flight", () => {
+  interface DeferredSettings {
+    /** Answer the pending GET /api/settings with this settings map. */
+    resolve: (settings: Record<string, unknown>) => void;
+    /** Make the pending read fail (network error or a non-OK response). */
+    fail: (mode?: "reject" | "not-ok") => void;
+  }
+
+  /** Stubs fetch so only `/api/settings` hangs until the test releases it. */
+  function stubDeferredSettings(): DeferredSettings {
+    let release!: (
+      value: { settings: Record<string, unknown> } | { notOk: true }
+    ) => void;
+    let rejectRead!: (error: unknown) => void;
+    const gate = new Promise<
+      { settings: Record<string, unknown> } | { notOk: true }
+    >((res, rej) => {
+      release = res;
+      rejectRead = rej;
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input) !== "/api/settings") {
+          return { ok: true, json: async () => ({ data: [] }) };
+        }
+        const outcome = await gate;
+        if ("notOk" in outcome) {
+          return { ok: false, status: 500, json: async () => ({}) };
+        }
+        return { ok: true, json: async () => ({ data: outcome.settings }) };
+      })
+    );
+
+    return {
+      resolve: (s) => release({ settings: s }),
+      fail: (mode = "reject") =>
+        mode === "reject" ? rejectRead(new Error("offline")) : release({ notOk: true }),
+    };
+  }
+
+  it("refuses to dispatch until the read lands, then honours an explicit false", async () => {
+    const onSendToDev = sendToDevSpy();
+    const deferred = stubDeferredSettings();
+    renderBar(onSendToDev);
+    openDialog();
+
+    // The optimistic box is on, but confirming it now would send an explicit
+    // `pipeline: true` over a setting that has not been read yet.
+    await screen.findByTestId("pipeline-checkbox");
+    fireEvent.click(confirmButton());
+    expect(onSendToDev).not.toHaveBeenCalled();
+    expect(confirmButton()).toBeDisabled();
+
+    await act(async () => {
+      deferred.resolve({ "pipeline_enabled:proj-1": false });
+    });
+
+    await waitFor(() => expect(confirmButton()).toBeEnabled());
+    expect(screen.getByTestId("pipeline-checkbox")).not.toBeChecked();
+
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(onSendToDev).toHaveBeenCalled());
+    expect(onSendToDev.mock.calls[0][3]).toBe(false);
+  });
+
+  it("keeps a choice the user made before the response, and dispatches it", async () => {
+    const onSendToDev = sendToDevSpy();
+    const deferred = stubDeferredSettings();
+    renderBar(onSendToDev);
+    openDialog();
+
+    // Untick while the read is still in flight: an explicit choice, which
+    // also lifts the gate — there is nothing left to wait for.
+    const checkbox = await screen.findByTestId("pipeline-checkbox");
+    fireEvent.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+    expect(confirmButton()).toBeEnabled();
+
+    // A late "pipeline is on" must not re-tick it under the user.
+    await act(async () => {
+      deferred.resolve({ pipeline_enabled: true });
+    });
+    expect(screen.getByTestId("pipeline-checkbox")).not.toBeChecked();
+
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(onSendToDev).toHaveBeenCalled());
+    expect(onSendToDev.mock.calls[0][3]).toBe(false);
+  });
+
+  it.each(["reject", "not-ok"] as const)(
+    "omits the flag when the settings read fails (%s), leaving the route authoritative",
+    async (mode) => {
+      const onSendToDev = sendToDevSpy();
+      const deferred = stubDeferredSettings();
+      renderBar(onSendToDev);
+      openDialog();
+
+      await screen.findByTestId("pipeline-checkbox");
+      await act(async () => {
+        deferred.fail(mode);
+      });
+
+      // Dispatch is possible again — the dialog just stops claiming to know
+      // the mode, and says so.
+      await waitFor(() => expect(confirmButton()).toBeEnabled());
+      expect(
+        screen.getByTestId("pipeline-setting-unresolved")
+      ).toBeInTheDocument();
+
+      fireEvent.click(confirmButton());
+      await waitFor(() => expect(onSendToDev).toHaveBeenCalled());
+      expect(onSendToDev.mock.calls[0][3]).toBeUndefined();
+    }
+  );
+
+  it("sends the flag explicitly once the user chooses after a failed read", async () => {
+    const onSendToDev = sendToDevSpy();
+    const deferred = stubDeferredSettings();
+    renderBar(onSendToDev);
+    openDialog();
+
+    const checkbox = await screen.findByTestId("pipeline-checkbox");
+    await act(async () => {
+      deferred.fail();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("pipeline-setting-unresolved")).toBeInTheDocument()
+    );
+
+    fireEvent.click(checkbox);
+    fireEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+    expect(
+      screen.queryByTestId("pipeline-setting-unresolved")
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(onSendToDev).toHaveBeenCalled());
+    expect(onSendToDev.mock.calls[0][3]).toBe(true);
+  });
+
+  it("re-reads on re-open and drops the previous choice's ownership", async () => {
+    const onSendToDev = sendToDevSpy();
+    let deferred = stubDeferredSettings();
+    renderBar(onSendToDev);
+    openDialog();
+
+    const checkbox = await screen.findByTestId("pipeline-checkbox");
+    fireEvent.click(checkbox);
+    await act(async () => {
+      deferred.resolve({});
+    });
+    expect(screen.getByTestId("pipeline-checkbox")).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: /Cancel/i }));
+    deferred = stubDeferredSettings();
+    openDialog();
+
+    // Second open: the stale choice no longer shields the value, and the
+    // gate is back until the fresh read lands.
+    await screen.findByTestId("pipeline-checkbox");
+    expect(confirmButton()).toBeDisabled();
+    await act(async () => {
+      deferred.resolve({ pipeline_enabled: true });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("pipeline-checkbox")).toBeChecked()
+    );
+
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(onSendToDev).toHaveBeenCalled());
+    expect(onSendToDev.mock.calls[0][3]).toBe(true);
   });
 });
 

@@ -35,7 +35,7 @@
  * approximate merge gate today.
  */
 
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { type ArijDatabase } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { sessionAtSql } from "@/lib/agent-sessions/session-time";
@@ -259,18 +259,42 @@ function epicSessionFactColumns(rows: EpicSessionRows) {
  * definition that would let the two callers drift.
  *
  * Left-join it on `epic_id`, and pass `supersessionAt` to `blocksMergeSql`.
+ *
+ * CROSS-PROJECT USE. Pass `null` for `projectId` and the CTE spans every
+ * project — that is what the "Now" control desk needs, and it works because
+ * the level-one scope was always a free `SQL` predicate. It is NOT free of
+ * cost: `agent_sessions` is indexed on `(project_id, created_at)`, so dropping
+ * the project drops the leading key and the scan becomes a full table scan on
+ * the ONE synchronous better-sqlite3 connection every other request (SSE
+ * heartbeats included) shares. So a `null` project MUST be paired with
+ * `scope.epicIds`, which puts the scan back on `agent_sessions_epic_idx`.
+ *
+ * `epicIds` rather than a `created_at` cutoff, deliberately: every fact in
+ * here is a MAX over the epic's whole history, and truncating that history
+ * silently CHANGES the answers — a `changes_requested` verdict older than the
+ * cutoff would vanish and the epic would read as ready to merge. Narrowing the
+ * SET OF EPICS keeps each epic's answer exact.
+ *
+ * @param projectId `null` = every project (see the warning above).
+ * @param scope.epicIds Restrict to these epics. An empty array matches none.
  */
 export function epicSessionFactsCte(
   database: ArijDatabase,
-  projectId: string
+  projectId: string | null,
+  scope?: { epicIds?: readonly string[] }
 ) {
-  const rows = epicSessionRows(
-    database,
-    and(
-      eq(agentSessions.projectId, projectId),
-      sql`${agentSessions.epicId} IS NOT NULL`
-    ) as SQL
-  );
+  const predicates: SQL[] = [sql`${agentSessions.epicId} IS NOT NULL`];
+  if (projectId !== null) {
+    predicates.unshift(eq(agentSessions.projectId, projectId) as SQL);
+  }
+  if (scope?.epicIds !== undefined) {
+    predicates.push(
+      scope.epicIds.length === 0
+        ? sql`1 = 0`
+        : (inArray(agentSessions.epicId, [...scope.epicIds]) as SQL)
+    );
+  }
+  const rows = epicSessionRows(database, and(...predicates) as SQL);
   const columns = epicSessionFactColumns(rows);
   return database.$with("epic_session_facts").as(
     database

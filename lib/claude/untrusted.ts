@@ -32,12 +32,15 @@
  *
  * The same two defences cover a second kind of content: the *evidence* a
  * builder reasons over rather than describes — a finished session's own last
- * message, the cross-session Dreaming digest, the grouped telescope payload.
- * That text is agent output too, and because the memory a distill or a dream
- * writes from it is injected into every later prompt, a directive smuggled
- * through it is the stored-spec incident with one extra hop. It gets its own
- * notice (`fenceAgentOutput`), because "what another agent said" is a
- * different claim from "stored project content".
+ * message, the cross-session Dreaming digest, the grouped telescope payload,
+ * the final branch diff the Full Auto merge gate reads. That text is agent
+ * output too, and because the memory a distill or a dream writes from it is
+ * injected into every later prompt, a directive smuggled through it is the
+ * stored-spec incident with one extra hop. The diff has no hop at all: it is
+ * the build agent's own committed work, read by the session that decides
+ * whether the branch merges. It gets its own notice (`fenceAgentOutput`),
+ * because "what another agent said" is a different claim from "stored
+ * project content".
  */
 
 /**

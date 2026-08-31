@@ -1,6 +1,16 @@
+/**
+ * The GitHub PAT card (Settings → Intégrations) and the global prompt
+ * (Settings → Pipeline).
+ *
+ * They used to share one 1862-line page; they now live on the two tabs whose
+ * save model each of them needs. The PAT is a masked secret with its own
+ * buttons — batching it would offer to save an always-empty field. The global
+ * prompt is an ordinary batched key and rides the tab footer.
+ */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import SettingsPage from "@/app/settings/page";
+import IntegrationsSettingsPage from "@/app/settings/integrations/page";
+import PipelineSettingsPage from "@/app/settings/pipeline/page";
 
 let mockSettings: Record<string, unknown> = {};
 let patchCalls: Array<{ body: Record<string, unknown> }> = [];
@@ -42,6 +52,13 @@ beforeEach(() => {
         });
       }
 
+      if (url === "/api/settings/webhooks") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ data: { webhooks: [] } }),
+        });
+      }
+
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({ data: mockSettings }),
@@ -49,64 +66,26 @@ beforeEach(() => {
     });
 });
 
-describe("Settings Page", () => {
-  it("renders global prompt controls", () => {
-    render(<SettingsPage />);
-    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByText("Global Prompt")).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText("Enter global instructions for Claude Code...")
-    ).toBeInTheDocument();
-  });
-
+describe("Settings → Intégrations — GitHub", () => {
   it("renders GitHub PAT input with validate and save actions", () => {
-    render(<SettingsPage />);
+    render(<IntegrationsSettingsPage />);
     expect(screen.getByRole("heading", { name: "GitHub" })).toBeInTheDocument();
     expect(screen.getByLabelText("GitHub PAT")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Validate Token" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save Token" })).toBeInTheDocument();
   });
 
-  it("loads existing global_prompt value", async () => {
-    mockSettings = { global_prompt: "Be concise" };
-    render(<SettingsPage />);
-
-    await waitFor(() => {
-      const textarea = screen.getByPlaceholderText(
-        "Enter global instructions for Claude Code..."
-      ) as HTMLTextAreaElement;
-      expect(textarea.value).toBe("Be concise");
-    });
-  });
-
   it("shows saved token indicator when github_pat exists", async () => {
     mockSettings = { github_pat: { hasToken: true } };
-    render(<SettingsPage />);
+    render(<IntegrationsSettingsPage />);
 
     expect(
       await screen.findByText("A GitHub token is already saved for this workspace.")
     ).toBeInTheDocument();
   });
 
-  it("saves global_prompt when Save Settings is clicked", async () => {
-    render(<SettingsPage />);
-
-    const textarea = screen.getByPlaceholderText(
-      "Enter global instructions for Claude Code..."
-    );
-    fireEvent.change(textarea, { target: { value: "Use strict TypeScript." } });
-
-    fireEvent.click(screen.getByText("Save Settings"));
-
-    await waitFor(() => {
-      expect(patchCalls).toHaveLength(1);
-      expect(patchCalls[0].body).toEqual({ global_prompt: "Use strict TypeScript." });
-    }
-    );
-  });
-
   it("validates and saves GitHub token", async () => {
-    render(<SettingsPage />);
+    render(<IntegrationsSettingsPage />);
     const tokenInput = screen.getByLabelText("GitHub PAT");
 
     fireEvent.change(tokenInput, { target: { value: "ghp_123" } });
@@ -121,11 +100,13 @@ describe("Settings Page", () => {
     await waitFor(() => {
       expect(patchCalls).toContainEqual({ body: { github_pat: "ghp_123" } });
     });
+    // The masked secret never round-trips: the field empties on success.
+    expect(screen.getByLabelText("GitHub PAT")).toHaveValue("");
   });
 
   it("shows actionable validation failure message", async () => {
     validateShouldFail = true;
-    render(<SettingsPage />);
+    render(<IntegrationsSettingsPage />);
     const tokenInput = screen.getByLabelText("GitHub PAT");
 
     fireEvent.change(tokenInput, { target: { value: "ghp_bad" } });
@@ -136,7 +117,7 @@ describe("Settings Page", () => {
 
   it("shows actionable save failure message", async () => {
     patchShouldFail = true;
-    render(<SettingsPage />);
+    render(<IntegrationsSettingsPage />);
     const tokenInput = screen.getByLabelText("GitHub PAT");
 
     fireEvent.change(tokenInput, { target: { value: "ghp_bad" } });
@@ -145,5 +126,45 @@ describe("Settings Page", () => {
     expect(
       await screen.findByText("Save failed: permission denied")
     ).toBeInTheDocument();
+  });
+});
+
+describe("Settings → Pipeline — global prompt", () => {
+  it("renders the global prompt control", async () => {
+    render(<PipelineSettingsPage />);
+    expect(
+      await screen.findByPlaceholderText(
+        "Enter global instructions for Claude Code..."
+      )
+    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("settings-save")).toBeDisabled());
+  });
+
+  it("loads existing global_prompt value", async () => {
+    mockSettings = { global_prompt: "Be concise" };
+    render(<PipelineSettingsPage />);
+
+    await waitFor(() => {
+      const textarea = screen.getByPlaceholderText(
+        "Enter global instructions for Claude Code..."
+      ) as HTMLTextAreaElement;
+      expect(textarea.value).toBe("Be concise");
+    });
+  });
+
+  it("saves global_prompt through the tab footer", async () => {
+    render(<PipelineSettingsPage />);
+
+    const textarea = screen.getByPlaceholderText(
+      "Enter global instructions for Claude Code..."
+    );
+    fireEvent.change(textarea, { target: { value: "Use strict TypeScript." } });
+
+    fireEvent.click(screen.getByTestId("settings-save"));
+
+    await waitFor(() => {
+      expect(patchCalls).toHaveLength(1);
+      expect(patchCalls[0].body).toEqual({ global_prompt: "Use strict TypeScript." });
+    });
   });
 });

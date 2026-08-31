@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Sparkles } from "lucide-react";
+
+import { PillButton } from "@/components/piscine";
+import { DocsCard } from "@/components/spec/DocsCard";
 import { MemoryPanel } from "@/components/spec/MemoryPanel";
-import { SpecEditor } from "@/components/spec/SpecEditor";
-import { SpecUpdateProgress } from "@/components/spec/SpecUpdateProgress";
-import { SpecPreview } from "@/components/spec/SpecPreview";
+import { PromptAnatomyBand } from "@/components/spec/PromptAnatomyBand";
+import { SpecBand } from "@/components/spec/SpecBand";
 import { SpecUpdateDialog } from "@/components/spec/SpecUpdateDialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { timeAgo } from "@/lib/utils/format-date";
+import { SuggestionBand } from "@/components/spec/SuggestionBand";
 import { fetchSessionStream } from "@/lib/agent-sessions/session-detail";
 
 interface SessionDetailResponse {
@@ -22,6 +22,18 @@ interface SessionDetailResponse {
   error?: string;
 }
 
+/**
+ * Spec & Memory — frame 8b.
+ *
+ * SPEC (linden, 7/10) beside a rail of MEMORY (turquoise, the one growing
+ * band), SUGGESTION D'AGENT (pool) and DOCS (white), with ANATOMIE DU PROMPT
+ * (sun) across the bottom. The page owns every piece of state and every
+ * effect; the bands are presentation.
+ *
+ * The default-export signature is pinned: three suites construct this page
+ * with `params={Promise.resolve({projectId})}` and one drives
+ * `pollIntervalMs`.
+ */
 export default function SpecPage({
   pollIntervalMs = 2000,
   params: propsParams,
@@ -47,6 +59,7 @@ export default function SpecPage({
   const projectId = (hookParams?.projectId as string) || resolvedProjectId || "";
   const [spec, setSpec] = useState("");
   const [savedSpec, setSavedSpec] = useState("");
+  const [specLoaded, setSpecLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
@@ -70,6 +83,7 @@ export default function SpecPage({
         if (d.data?.spec !== undefined) {
           setSpec(d.data.spec ?? "");
           setSavedSpec(d.data.spec ?? "");
+          setSpecLoaded(true);
         }
         if (d.data?.updatedAt) {
           setSavedAt(d.data.updatedAt);
@@ -117,6 +131,7 @@ export default function SpecPage({
         if (d.data?.spec !== undefined) {
           setSpec(d.data.spec ?? "");
           setSavedSpec(d.data.spec ?? "");
+          setSpecLoaded(true);
         }
         if (d.data?.updatedAt) {
           setSavedAt(d.data.updatedAt);
@@ -229,104 +244,72 @@ export default function SpecPage({
     }
   }
 
-  return (
-    <Tabs
-      value={tab}
-      onValueChange={(value) => setTab(value as "edit" | "preview")}
-      className="flex h-full min-h-0 flex-col gap-0"
+  /**
+   * Frame 8b drew "Régénérer par chat" in the project's 60px header. That
+   * header is gone (frame 13a — the global bar is the only one now), and with
+   * it the `#project-header-actions` node `HeaderActionSlot` used to portal
+   * into: the slot could never find a host again, so the portal was deleted and
+   * the pill renders where the fallback already put it — the right end of the
+   * SPEC band's own header row, which IS this screen's second row.
+   */
+  const regenerateAction = (
+    <PillButton
+      variant="filled"
+      size="md"
+      icon={Sparkles}
+      data-testid="spec-update-button"
+      onClick={() => setUpdateDialogOpen(true)}
+      disabled={updateStatus === "running"}
     >
-      <div className="flex flex-none flex-wrap items-start justify-between gap-[16px] px-[26px] pb-[18px] pt-[24px]">
-        <div className="flex flex-col gap-[4px]">
-          <h2 className="text-[19px] font-semibold tracking-[-0.01em]">Spec &amp; Memory</h2>
-          <p className="text-[13px] text-muted-foreground">
-            The project context injected into every build, review, and chat prompt.
-          </p>
-        </div>
-        <div className="flex items-center gap-[9px]">
-          <TabsList className="h-[31px] rounded-[8px] bg-band p-[3px]">
-            <TabsTrigger
-              value="edit"
-              className="h-[25px] rounded-[6px] px-[12px] text-[13px]"
-            >
-              Edit
-            </TabsTrigger>
-            <TabsTrigger
-              value="preview"
-              className="h-[25px] rounded-[6px] px-[12px] text-[13px]"
-            >
-              Preview
-            </TabsTrigger>
-          </TabsList>
-          <Button
-            variant="outline"
-            onClick={() => setUpdateDialogOpen(true)}
-            disabled={updateStatus === "running"}
-            className="h-[31px] rounded-[8px] px-[13px] text-[13px]"
-            data-testid="spec-update-button"
-          >
-            <Sparkles className="h-[14px] w-[14px] mr-[6px]" />
-            Mettre à jour la spec
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={saving || updateStatus === "running"}
-            className="h-[31px] rounded-[8px] px-[13px] text-[13px]"
-          >
-            {saving ? "Saving..." : "Save"}
-          </Button>
-        </div>
-      </div>
+      Régénérer par chat
+    </PillButton>
+  );
 
-      {updateSessionId && updateStatus && (
-        <SpecUpdateProgress
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-[12px] px-[14px] pb-[14px] max-[1099px]:h-auto max-[1099px]:overflow-y-auto">
+      <div className="flex min-h-0 flex-1 gap-[12px] max-[1099px]:flex-none max-[1099px]:flex-col">
+        <SpecBand
+          className="min-w-0 flex-[7]"
           projectId={projectId}
-          sessionId={updateSessionId}
-          status={updateStatus}
-          stream={updateStream}
-          response={updateResponse}
-          error={updateError}
-          onDismiss={handleUpdateDismissed}
+          spec={spec}
+          onSpecChange={setSpec}
+          tab={tab}
+          onTabChange={setTab}
+          loaded={specLoaded}
+          savedSpec={savedSpec}
+          savedAt={savedAt}
+          saving={saving}
+          updateRunning={updateStatus === "running"}
+          onSave={handleSave}
+          headerAction={regenerateAction}
         />
-      )}
 
-      {/* 2 equal peer panels side-by-side on desktop, vertically stacked on mobile */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2 gap-[24px] px-[26px] pb-[26px] overflow-y-auto">
-        {/* Specification Panel */}
-        <div
-          data-testid="spec-card"
-          className="flex min-w-0 flex-col rounded-[12px] border border-border bg-card p-[24px] md:p-[28px] overflow-y-auto"
-        >
-          <div className="flex flex-none items-center justify-between gap-2 pb-[14px]">
-            <h3 className="text-[15px] font-semibold tracking-[-0.01em]">Specification</h3>
-            <span className="font-mono text-[11.5px] text-meta">
-              SPEC.md
-              {savedAt ? ` · saved ${timeAgo(savedAt)}` : ""}
-              {spec !== savedSpec ? " · unsaved" : ""}
-            </span>
-          </div>
-          <p className="flex-none text-[12.5px] leading-[1.55] text-muted-foreground pb-[14px]">
-            The durable software specification — architecture, contracts, constraints, and requirements.
-          </p>
-          <TabsContent value="edit" className="mt-0 flex-1 flex flex-col min-h-[300px]">
-            <SpecEditor
-              projectId={projectId}
-              value={spec}
-              onChange={setSpec}
-              disabled={updateStatus === "running"}
-            />
-          </TabsContent>
-          <TabsContent value="preview" className="mt-0 flex-1 overflow-y-auto min-h-[300px]">
-            <SpecPreview markdown={spec} />
-          </TabsContent>
-        </div>
-
-        {/* Project Memory Panel */}
-        <div
-          className="flex min-w-0 flex-col rounded-[12px] border border-border bg-card p-[24px] md:p-[28px] overflow-y-auto"
-        >
-          <MemoryPanel projectId={projectId} mode={tab} />
+        <div className="flex min-w-0 flex-[3] flex-col gap-[12px]">
+          {/* The one growing band on this screen. */}
+          <MemoryPanel
+            projectId={projectId}
+            mode={tab}
+            className="max-[1099px]:min-h-[320px] max-[1099px]:flex-none"
+          />
+          <SuggestionBand
+            projectId={projectId}
+            sessionId={updateSessionId}
+            status={updateStatus}
+            stream={updateStream}
+            response={updateResponse}
+            error={updateError}
+            onDismiss={handleUpdateDismissed}
+          />
+          <DocsCard projectId={projectId} />
         </div>
       </div>
+
+      {/*
+        The 24px gap under the columns row is intentional: this band's own
+        margin-top stacks with the wrapper's 12px gap. The anatomy is a
+        different register from the three editable regions above it.
+      */}
+      <PromptAnatomyBand projectId={projectId} className="mt-[12px]" />
 
       <SpecUpdateDialog
         projectId={projectId}
@@ -335,6 +318,6 @@ export default function SpecPage({
         onStarted={handleUpdateStarted}
         onBeforeStart={handleBeforeUpdateStart}
       />
-    </Tabs>
+    </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { AgentDispatchDialog } from "@/components/shared/AgentDispatchDialog";
+import { FieldKicker } from "@/components/piscine";
 import { Textarea } from "@/components/ui/textarea";
 
 interface SpecUpdateDialogProps {
@@ -14,7 +15,7 @@ interface SpecUpdateDialogProps {
   onError?: (message: string) => void;
 }
 /**
- * "Mettre à jour la spec" dialog: pick an agent (the same global
+ * "Régénérer par chat" dialog: pick an agent (the same global
  * NamedAgentSelect used across the app — empty selection resolves to the
  * project's default agent at dispatch time) and optionally type an
  * instruction that steers the update. The instruction is optional; without
@@ -92,18 +93,24 @@ export function SpecUpdateDialog({
         className: "w-56 h-[34px] rounded-[8px] text-[13px]",
       }}
       extraContent={
-        <div className="flex flex-col gap-2 mb-2">
-          <span className="text-sm text-muted-foreground">Instruction</span>
+        <div className="mb-2 flex flex-col gap-[7px]">
+          <FieldKicker stratum="card">Instruction</FieldKicker>
           <Textarea
             value={instruction}
             onChange={(event) => setInstruction(event.target.value)}
             placeholder="Optional — e.g. “update the architecture section after the Full Auto mode”. Leave empty to let the agent refresh the spec from the current project state."
             rows={4}
-            className="rounded-[10px] text-[13.5px] leading-[1.6]"
+            className="rounded-[10px] border-[1.5px] text-[13px] leading-[1.6] shadow-none"
             data-testid="spec-update-instruction"
           />
+          {/*
+            The 409 path: POST /spec/update answers SPEC_UPDATE_PENDING when a
+            rewrite is already queued, because two concurrent rewrites of one
+            document race last-write-wins. The message lands here and
+            `onStarted` is deliberately NOT called.
+          */}
           {error && (
-            <p className="text-xs text-destructive" role="alert">
+            <p className="text-[12px] text-destructive" role="alert">
               {error}
             </p>
           )}

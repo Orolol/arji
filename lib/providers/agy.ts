@@ -50,6 +50,7 @@
  */
 
 import { BaseCliProvider } from "./base-provider";
+import { arijChannelSpec } from "./types";
 import { buildProviderOptionArgs } from "./options-registry";
 import type {
   BaseProviderChunkCallbacks,
@@ -158,8 +159,12 @@ export class AgyProvider extends BaseCliProvider {
   buildEnv(options: ProviderSpawnOptions): NodeJS.ProcessEnv {
     const env = super.buildEnv(options);
     if (!options.mcp) return env;
-    const merged = { ...env, ...options.mcp.env };
-    if (!("ARIJ_MCP_TOOLSET" in options.mcp.env)) {
+    // Only the ARIJ control channel's env — agy's extra servers come from its
+    // user-global register (`agy mcp add`), never from the child environment,
+    // which the agent's own shell can read.
+    const arijEnv = arijChannelSpec(options.mcp).env;
+    const merged = { ...env, ...arijEnv };
+    if (!("ARIJ_MCP_TOOLSET" in arijEnv)) {
       delete merged.ARIJ_MCP_TOOLSET;
     }
     return merged;
