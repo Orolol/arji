@@ -47,6 +47,14 @@ export interface SegmentedControlProps<T extends string> {
   chrome?: "bordered" | "filled";
   /** `md` = h34 / r10 (7a fields). `sm` = h30 / pill (8b, 8d). */
   size?: "sm" | "md";
+  /**
+   * Below `sm`, let the segments keep their label and flow onto a second row
+   * instead of being squeezed until the nowrap labels overlap each other —
+   * six EFFORT levels need ~380px and a phone card has ~326. From `sm` up the
+   * rail is byte-for-byte the one-line control it has always been: the
+   * breakpoint restores `basis-0`, `flex-nowrap` and the fixed height.
+   */
+  wrap?: boolean;
   className?: string;
 }
 
@@ -56,6 +64,7 @@ export function SegmentedControl<T extends string>({
   onChange,
   chrome = "bordered",
   size = "md",
+  wrap = false,
   className,
 }: SegmentedControlProps<T>) {
   return (
@@ -64,7 +73,10 @@ export function SegmentedControl<T extends string>({
       role="group"
       className={cn(
         "flex overflow-hidden font-sans",
-        size === "md" ? "h-[34px] rounded-[10px]" : "h-[30px] rounded-full",
+        wrap && "flex-wrap sm:flex-nowrap",
+        size === "md"
+          ? cn("rounded-[10px]", wrap ? "min-h-[34px] sm:h-[34px]" : "h-[34px]")
+          : cn("rounded-full", wrap ? "min-h-[30px] sm:h-[30px]" : "h-[30px]"),
         chrome === "bordered"
           ? "border-[1.5px] border-border bg-transparent"
           : "border-0 bg-card",
@@ -86,12 +98,20 @@ export function SegmentedControl<T extends string>({
               if (!option.disabled && !active) onChange(option.value);
             }}
             style={{
-              flex: option.flex ?? 1,
+              // A wrapping rail sizes each segment from its label (the
+              // `basis-auto` below); the shorthand would reset that basis to
+              // 0 and squeeze the row back onto one line.
+              ...(wrap
+                ? { flexGrow: option.flex ?? 1, flexShrink: 1 }
+                : { flex: option.flex ?? 1 }),
               // Inactive colour is overridable per host ground; see the file header.
               color: active ? undefined : "var(--segment-inactive, var(--muted-foreground))",
             }}
             className={cn(
-              "flex h-full min-w-0 items-center justify-center whitespace-nowrap px-[13px]",
+              "flex min-w-0 items-center justify-center whitespace-nowrap px-[13px]",
+              wrap
+                ? "min-h-[30px] basis-auto py-[5px] sm:h-full sm:min-h-0 sm:basis-0 sm:py-0"
+                : "h-full",
               "text-[12px] leading-none outline-none",
               "transition-[background-color,color,opacity] duration-150 motion-reduce:transition-none",
               "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",

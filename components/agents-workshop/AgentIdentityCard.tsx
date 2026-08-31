@@ -101,8 +101,11 @@ export function AgentIdentityCard({
 
   return (
     <SurfaceCard className="shrink-0 rounded-[14px] px-[18px] py-[14px]">
-      <div className="flex items-end gap-[22px]">
-        <div className="flex w-[280px] flex-col gap-[5px]">
+      {/* Wraps: the four fields need ~800px side by side, so below `lg` they
+          reflow onto as many lines as the viewport affords instead of
+          pushing the model field past the right edge. */}
+      <div className="flex flex-wrap items-end gap-x-[22px] gap-y-[14px]">
+        <div className="flex min-w-[180px] flex-1 flex-col gap-[5px] lg:w-[280px] lg:flex-none">
           <FieldKicker stratum="card" size={10}>
             NAME
           </FieldKicker>
@@ -116,7 +119,7 @@ export function AgentIdentityCard({
           />
         </div>
 
-        <div className="flex w-[200px] flex-col gap-[5px]">
+        <div className="flex min-w-[150px] flex-1 flex-col gap-[5px] lg:w-[200px] lg:flex-none">
           <FieldKicker stratum="card" size={10}>
             CLI
           </FieldKicker>
@@ -138,7 +141,7 @@ export function AgentIdentityCard({
           </span>
         </div>
 
-        <div className="flex w-[220px] flex-col gap-[5px]">
+        <div className="flex min-w-[150px] flex-1 flex-col gap-[5px] lg:w-[220px] lg:flex-none">
           <FieldKicker stratum="card" size={10}>
             MODEL
           </FieldKicker>
@@ -153,7 +156,7 @@ export function AgentIdentityCard({
           />
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-[5px]">
+        <div className="flex min-w-[240px] flex-1 flex-col gap-[5px]">
           <FieldKicker stratum="card" size={10}>
             RETRY ESCALATION
           </FieldKicker>
@@ -172,6 +175,7 @@ export function AgentIdentityCard({
               }}
               chrome="bordered"
               size="md"
+              wrap
               className="min-w-0 flex-1 self-stretch"
             />
             {retryMode === "stronger" && candidates.length > 0 ? (

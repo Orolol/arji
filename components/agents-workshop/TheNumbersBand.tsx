@@ -88,8 +88,8 @@ export function TheNumbersBand({ stats }: TheNumbersBandProps) {
         }
       />
 
-      <div className="flex items-stretch gap-5">
-        <div className="flex shrink-0 gap-5">
+      <div className="flex flex-wrap items-stretch gap-5">
+        <div className="flex min-w-0 flex-wrap gap-x-5 gap-y-3 lg:shrink-0 lg:flex-nowrap">
           <StatNumeral
             size={22}
             captionStratum="land"

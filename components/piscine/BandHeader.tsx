@@ -107,7 +107,9 @@ export function BandHeader({
       data-slot="band-header"
       data-stratum={stratum}
       className={cn(
-        "flex gap-[12px]",
+        // Wraps so a long `meta` line or the `right` slot drops to a second
+        // line on a narrow viewport rather than widening the whole band.
+        "flex flex-wrap gap-[12px]",
         align === "center" ? "items-center" : "items-baseline",
         standalone && "self-start",
         className,

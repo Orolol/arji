@@ -119,7 +119,9 @@ export function WhereHeWorksBand({
       />
 
       <div className="min-h-0 overflow-y-auto">
-        <div className="grid grid-cols-5 gap-[10px]">
+        {/* Five role tiles need ~800px; a phone gets one column, a tablet
+            two, and the frame's row of five returns at `xl`. */}
+        <div className="grid grid-cols-1 gap-[10px] sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {TILES.map(({ kicker, agentType }) => {
             const assignment = byRole.get(agentType);
             const owned =
