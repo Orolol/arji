@@ -35,9 +35,10 @@ vi.mock("@/lib/workflow/memory-distill", async () => {
 
 const { db } = await import("@/lib/db");
 const { projects, agentSessions } = await import("@/lib/db/schema");
-const { PROJECT_MEMORY_MAX_CHARS } = await import(
-  "@/lib/documents/memory-constants"
-);
+const {
+  PROJECT_MEMORY_MAX_CHARS,
+  PROJECT_MEMORY_MAX_TOKENS,
+} = await import("@/lib/documents/memory-constants");
 const { GET, PUT } = await import(
   "@/app/api/projects/[projectId]/memory/route"
 );
@@ -158,6 +159,12 @@ describe("PUT /api/projects/[projectId]/memory (edit round-trip)", () => {
       mockRouteContext({ projectId })
     );
     expect(res.status).toBe(400);
+
+    // The rejection names the cap in its unit of account: estimated tokens.
+    const err = await res.json();
+    expect(err.details.content[0]).toContain(
+      `${PROJECT_MEMORY_MAX_TOKENS} tokens`
+    );
 
     const getRes = await GET(
       mockNextRequest(),

@@ -7,7 +7,10 @@ import {
   getProjectMemoryArchiveDoc,
   saveProjectMemory,
 } from "@/lib/documents/memory";
-import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
+import {
+  PROJECT_MEMORY_MAX_CHARS,
+  PROJECT_MEMORY_MAX_TOKENS,
+} from "@/lib/documents/memory-constants";
 import {
   getMemoryWriteProvenance,
   recordMemoryWriteProvenance,
@@ -74,7 +77,7 @@ const putMemorySchema = z.object({
     .string()
     .max(
       PROJECT_MEMORY_MAX_CHARS,
-      `Project memory must stay under ${PROJECT_MEMORY_MAX_CHARS} characters`
+      `Project memory must stay under ${PROJECT_MEMORY_MAX_TOKENS} tokens (about ${PROJECT_MEMORY_MAX_CHARS} characters)`
     ),
 });
 
