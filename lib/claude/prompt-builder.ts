@@ -1716,6 +1716,15 @@ export function buildSecondOpinionPrompt(
     parts.push(userStoriesSection(userStories, { checkmark: false }));
   }
 
+  // The diff is the *build agent's own committed work*: every source file,
+  // test fixture and comment on the branch reaches this gate verbatim, and
+  // this gate is the last thing between Full Auto and the base branch. So it
+  // gets the evidence-channel treatment — neutralised, and fenced with a run
+  // longer than anything it contains. A bare ```diff fence is closed by the
+  // first Markdown file the branch touches, and everything after it reads as
+  // prompt rather than as diff.
+  const trimmedDiff = finalDiff?.trim();
+
   parts.push(`## Independent Second Opinion
 
 Branch: \`${branchName}\`
@@ -1727,9 +1736,7 @@ read-only pass over the **final branch diff** before Full Auto merges it.
 The exact output of \`git diff ${baseBranch}...HEAD\` is embedded below. Read
 only the surrounding code needed to validate it; do not edit files.
 
-\`\`\`diff
-${finalDiff?.trim() || "(no committed diff)"}
-\`\`\`
+${trimmedDiff ? fenceAgentOutput(trimmedDiff, "diff") : "(no committed diff)"}
 
 1. Inspect the embedded final diff and read only the surrounding code needed to validate it.
 2. Look only for merge-blocking defects: correctness regressions, security issues, destructive behaviour, or an acceptance criterion that the diff plainly does not implement. Do not restyle working code and do not edit files.
