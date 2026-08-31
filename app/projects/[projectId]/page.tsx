@@ -55,7 +55,7 @@ export default function KanbanPage() {
   const [buildMode, setBuildMode] = useState<"parallel" | "sequential" | "dag">(
     "parallel"
   );
-  const [teamMode, setTeamMode] = useState(false);
+  const [teamModeRequested, setTeamMode] = useState(false);
   const [autoMergeAgent, setAutoMergeAgent] = useState(false);
   const [namedAgentId, setNamedAgentId] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
@@ -68,15 +68,15 @@ export default function KanbanPage() {
   const [autoModeDialogOpen, setAutoModeDialogOpen] = useState(false);
   const [nightSummaryRunId, setNightSummaryRunId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [highlightedActivityId, setHighlightedActivityId] = useState<string | null>(null);
+  const [requestedHighlightId, setHighlightedActivityId] = useState<string | null>(null);
+  // Session completions detected during render (see below); both feed
+  // `boardRefreshKey` and the completion toasts.
+  const [completionTick, setCompletionTick] = useState(0);
+  const [completedSessionIds, setCompletedSessionIds] = useState<string[]>([]);
   // The Released digest yields its width to the side panel while it is open
   // (the panel reports its own expanded state — see UnifiedChatPanel).
   const [panelOpen, setPanelOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(0);
-  const { activities, failedSessions } = useAgentPolling(projectId, 3000, refreshTrigger);
-  const prevSessionIds = useRef<Set<string>>(new Set());
-  const panelRef = useRef<UnifiedChatPanelHandle>(null);
-
   // Real-time events via SSE — auto-refresh board on ticket/session changes
   // pollTick increments on fallback polling when SSE is disconnected
   const { status: sseStatus, pollTick } = useProjectEvents(projectId, {
@@ -92,12 +92,25 @@ export default function KanbanPage() {
     "release:created": () => setRefreshTrigger((t) => t + 1),
   });
 
-  // Fallback: refresh board when SSE is down and polling kicks in
-  useEffect(() => {
-    if (pollTick > 0) {
-      setRefreshTrigger((t) => t + 1);
-    }
-  }, [pollTick]);
+  // Fallback: refresh the board when SSE is down and polling kicks in. All
+  // three counters only ever mean "something changed, reload", so the board
+  // key is their sum rather than an effect copying one into another.
+  const boardRefreshKey = refreshTrigger + pollTick + completionTick;
+
+  const { activities, failedSessions } = useAgentPolling(projectId, 3000, boardRefreshKey);
+  const panelRef = useRef<UnifiedChatPanelHandle>(null);
+
+  // A highlight only means something while the activity it points at is live,
+  // so the effective id is derived rather than cleared by an effect.
+  const highlightedActivityId =
+    requestedHighlightId &&
+    activities.some((activity) => activity.id === requestedHighlightId)
+      ? requestedHighlightId
+      : null;
+
+  // Team mode needs at least two selected tickets; below that it is simply
+  // not on, which is a derivation rather than a reset.
+  const teamMode = teamModeRequested && batch.allSelected.size >= 2;
 
   const activeAgentActivities = useMemo<Record<string, KanbanEpicAgentActivity>>(
     () => {
@@ -170,12 +183,6 @@ export default function KanbanPage() {
     batch.clear();
   }
 
-  useEffect(() => {
-    if (!highlightedActivityId) return;
-    if (!activities.some((activity) => activity.id === highlightedActivityId)) {
-      setHighlightedActivityId(null);
-    }
-  }, [activities, highlightedActivityId]);
 
   // Refresh board when layout triggers a sync from arji.json
   useEffect(() => {
@@ -263,21 +270,50 @@ export default function KanbanPage() {
     setRefreshTrigger((t) => t + 1);
   }, [addToast]);
 
-  useEffect(() => {
-    const deleted = searchParams.get("deleted");
-    if (!deleted) return;
+  // ?deleted=story|epic — the notice the deleted ticket's own page hands over.
+  //
+  // It is raised during render rather than through `addToast` in an effect:
+  // `addToast` also schedules the dismissal timer, and scheduling a timer is a
+  // side effect that must not run from a render pass. This notice therefore
+  // carries its own dismissal effect and is appended to the rendered list.
+  const deletedParam = searchParams.get("deleted");
+  const [handledDeleted, setHandledDeleted] = useState<string | null>(null);
+  const [deletedNotice, setDeletedNotice] = useState<string | null>(null);
 
-    if (deleted === "story") {
-      addToast("success", "User story deleted permanently");
-    } else if (deleted === "epic") {
-      addToast("success", "Epic deleted permanently");
+  if (deletedParam !== handledDeleted) {
+    setHandledDeleted(deletedParam);
+    if (deletedParam === "story") {
+      setDeletedNotice("User story deleted permanently");
+    } else if (deletedParam === "epic") {
+      setDeletedNotice("Epic deleted permanently");
     }
+  }
 
+  useEffect(() => {
+    if (!deletedNotice) return;
+    const timer = setTimeout(() => setDeletedNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [deletedNotice]);
+
+  const visibleToasts: Toast[] = deletedNotice
+    ? [
+        ...toasts,
+        {
+          id: "deleted-notice",
+          type: "success",
+          message: deletedNotice,
+          actionLabel: "Open session",
+        },
+      ]
+    : toasts;
+
+  useEffect(() => {
+    if (!searchParams.get("deleted")) return;
     const next = new URLSearchParams(searchParams.toString());
     next.delete("deleted");
     const query = next.toString();
     router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
-  }, [addToast, projectId, router, searchParams]);
+  }, [projectId, router, searchParams]);
 
   // Deep link: /projects/<id>?ticket=<epicId> opens the ticket detail
   // (used by "Agent asked a question" notifications), then strips the param.
@@ -300,7 +336,21 @@ export default function KanbanPage() {
   // ref keeps a re-render (or a replace() that has not landed yet) from
   // firing it a second time or re-opening a dialog the user just closed.
   const handledPanelParam = useRef<string | null>(null);
-  const handledNightParam = useRef<string | null>(null);
+
+  // The two dialogs this can open are plain state of this component, so they
+  // are opened during render; the imperative panel calls and the URL rewrite
+  // remain side effects and stay in the effect below.
+  const panelParam = searchParams.get("panel");
+  const [handledPanel, setHandledPanel] = useState<string | null>(null);
+
+  if (panelParam !== handledPanel) {
+    setHandledPanel(panelParam);
+    if (panelParam === "new-epic-manual") {
+      setEpicDialogOpen(true);
+    } else if (panelParam === "new-bug") {
+      setBugDialogOpen(true);
+    }
+  }
 
   useEffect(() => {
     const panel = searchParams.get("panel");
@@ -315,10 +365,6 @@ export default function KanbanPage() {
       panelRef.current?.openChat();
     } else if (panel === "new-epic") {
       panelRef.current?.openNewEpic();
-    } else if (panel === "new-epic-manual") {
-      setEpicDialogOpen(true);
-    } else if (panel === "new-bug") {
-      setBugDialogOpen(true);
     }
 
     const next = new URLSearchParams(searchParams.toString());
@@ -328,17 +374,18 @@ export default function KanbanPage() {
   }, [projectId, router, searchParams]);
 
   // Same mechanism for the header's Night run button: ?night=start.
-  useEffect(() => {
-    const night = searchParams.get("night");
-    if (night !== "start") {
-      handledNightParam.current = null;
-      return;
+  const nightParam = searchParams.get("night");
+  const [handledNight, setHandledNight] = useState<string | null>(null);
+
+  if (nightParam !== handledNight) {
+    setHandledNight(nightParam);
+    if (nightParam === "start") {
+      setNightDialogOpen(true);
     }
-    if (handledNightParam.current === night) return;
-    handledNightParam.current = night;
+  }
 
-    setNightDialogOpen(true);
-
+  useEffect(() => {
+    if (searchParams.get("night") !== "start") return;
     const next = new URLSearchParams(searchParams.toString());
     next.delete("night");
     const query = next.toString();
@@ -347,55 +394,71 @@ export default function KanbanPage() {
 
   // Deep link: /projects/<id>?nightRun=<runId> opens the morning summary
   // (used by the "Night run finished" notification), then strips the param.
+  const nightRunParam = searchParams.get("nightRun");
+  const [handledNightRun, setHandledNightRun] = useState<string | null>(null);
+
+  if (nightRunParam !== handledNightRun) {
+    setHandledNightRun(nightRunParam);
+    if (nightRunParam) {
+      setNightSummaryRunId(nightRunParam);
+    }
+  }
+
   useEffect(() => {
-    const nightRun = searchParams.get("nightRun");
-    if (!nightRun) return;
-
-    setNightSummaryRunId(nightRun);
-
+    if (!searchParams.get("nightRun")) return;
     const next = new URLSearchParams(searchParams.toString());
     next.delete("nightRun");
     const query = next.toString();
     router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
   }, [projectId, router, searchParams]);
 
-  // Reset team mode when selection drops below 2
-  useEffect(() => {
-    if (batch.allSelected.size < 2) {
-      setTeamMode(false);
-    }
-  }, [batch.allSelected.size]);
 
-  // Detect session completions for notifications + board refresh
-  useEffect(() => {
+  // Detect session completions for notifications + board refresh. The
+  // disappearance is spotted during render — keyed on the joined id list, a
+  // primitive, so the comparison cannot differ on every render — and the
+  // per-session lookup that turns it into a toast stays in the effect below.
+  const activityIdsKey = activities.map((a) => a.id).join("|");
+  const [seenActivities, setSeenActivities] = useState<{
+    key: string;
+    ids: Set<string>;
+  }>(() => ({ key: activityIdsKey, ids: new Set(activities.map((a) => a.id)) }));
+
+  if (seenActivities.key !== activityIdsKey) {
     const currentIds = new Set(activities.map((a) => a.id));
-    let hasCompleted = false;
-    for (const prevId of prevSessionIds.current) {
-      if (!currentIds.has(prevId)) {
-        hasCompleted = true;
-        fetch(`/api/projects/${projectId}/sessions/${prevId}`)
-          .then((r) => r.json())
-          .then((d) => {
-            if (d.data) {
-              const s = d.data;
-              if (s.status === "completed") {
-                addToast("success", `Agent #${prevId.slice(0, 6)} completed`);
-              } else if (s.status === "failed") {
-                addToast(
-                  "error",
-                  `Agent #${prevId.slice(0, 6)} failed: ${s.error || "Unknown error"}`
-                );
-              }
-            }
-          })
-          .catch(() => {});
-      }
+    const gone = [...seenActivities.ids].filter((id) => !currentIds.has(id));
+    setSeenActivities({ key: activityIdsKey, ids: currentIds });
+    if (gone.length > 0) {
+      setCompletedSessionIds(gone);
+      setCompletionTick((t) => t + 1);
     }
-    if (hasCompleted) {
-      setRefreshTrigger((t) => t + 1);
+  }
+
+  useEffect(() => {
+    if (completedSessionIds.length === 0) return;
+    let cancelled = false;
+
+    for (const prevId of completedSessionIds) {
+      fetch(`/api/projects/${projectId}/sessions/${prevId}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (cancelled || !d.data) return;
+          const s = d.data;
+          if (s.status === "completed") {
+            addToast("success", `Agent #${prevId.slice(0, 6)} completed`);
+          } else if (s.status === "failed") {
+            addToast(
+              "error",
+              `Agent #${prevId.slice(0, 6)} failed: ${s.error || "Unknown error"}`
+            );
+          }
+        })
+        .catch(() => {});
     }
-    prevSessionIds.current = currentIds;
-  }, [activities, projectId]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [completedSessionIds, projectId, addToast]);
 
   async function handleBuild() {
     if (batch.allSelected.size === 0) return;
@@ -554,7 +617,7 @@ export default function KanbanPage() {
                       projectId={projectId}
                       epicId={activeDetailTicketId}
                       open
-                      refreshTrigger={refreshTrigger}
+                      refreshTrigger={boardRefreshKey}
                       onClose={handleCloseDetailPanel}
                       onAgentConflict={({ message, sessionUrl }) =>
                         addToast(
@@ -596,11 +659,11 @@ export default function KanbanPage() {
               <AutoModeToggle
                 projectId={projectId}
                 onOpen={() => setAutoModeDialogOpen(true)}
-                refreshTrigger={refreshTrigger}
+                refreshTrigger={boardRefreshKey}
               />
               <RefinementButton
                 projectId={projectId}
-                refreshTrigger={refreshTrigger}
+                refreshTrigger={boardRefreshKey}
                 onError={(message) => addToast("error", message)}
                 onNotice={(message) => addToast("success", message)}
                 onStarted={() =>
@@ -815,7 +878,7 @@ export default function KanbanPage() {
                 selectedEpics={batch.allSelected}
                 autoIncludedEpics={batch.autoIncluded}
                 onToggleSelect={batch.toggle}
-                refreshTrigger={refreshTrigger}
+                refreshTrigger={boardRefreshKey}
                 runningEpicIds={runningEpicIds}
                 activeAgentActivities={activeAgentActivities}
                 onLinkedAgentHoverChange={setHighlightedActivityId}
@@ -844,7 +907,7 @@ export default function KanbanPage() {
 
       {/* Toast notifications */}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-        {toasts.map((toast) => (
+        {visibleToasts.map((toast) => (
           <div
             key={toast.id}
             className={cn(

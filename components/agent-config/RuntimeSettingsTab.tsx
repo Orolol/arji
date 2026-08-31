@@ -89,10 +89,9 @@ export function RuntimeSettingsTab({
     };
   }, [projectId]);
 
-  // Re-seed the input whenever the loaded value or the scope changes, and drop
-  // the previous save feedback with it — switching scope shows a different
-  // setting. Adjusting state during render rather than in an effect keeps the
-  // input from showing the outgoing scope's value for one commit.
+  // Re-seed the input whenever the loaded value or the scope changes.
+  // Adjusting state during render rather than in an effect keeps the input from
+  // showing the outgoing value for one commit.
   // Unlimited round-trips as 0 — "Infinity" is not a number-input value.
   const seed: [number | null, string] = [savedMaxConcurrent, maxConcurrentKey];
   const [seededFrom, setSeededFrom] = useState(seed);
@@ -105,6 +104,14 @@ export function RuntimeSettingsTab({
           ? String(savedMaxConcurrent)
           : "0"
     );
+  }
+
+  // Switching scope shows a different setting — drop the previous feedback.
+  // Keyed on the scope alone: a successful save also changes
+  // `savedMaxConcurrent`, and must keep showing its own "saved" badge.
+  const [statusScope, setStatusScope] = useState(maxConcurrentKey);
+  if (statusScope !== maxConcurrentKey) {
+    setStatusScope(maxConcurrentKey);
     setMaxConcurrentStatus("idle");
   }
 
