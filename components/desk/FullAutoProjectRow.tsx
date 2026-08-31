@@ -60,7 +60,7 @@ export function FullAutoProjectRow({
         aria-checked={project.autoModeEnabled}
         onClick={() => void onToggle(project.id, !project.autoModeEnabled)}
         className={cn(
-          "flex w-full cursor-pointer items-center gap-2 rounded-[10px] px-2 py-[6px] text-left",
+          "flex w-full items-center gap-2 rounded-[10px] px-2 py-[6px] text-left",
           "outline-none hover:bg-muted",
           "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         )}

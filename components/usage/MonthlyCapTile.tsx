@@ -134,7 +134,7 @@ export function MonthlyCapTile({ cap, onSaved }: MonthlyCapTileProps) {
             type="button"
             onClick={startEditing}
             data-testid="usage-cap-readout"
-            className="ml-auto cursor-pointer border-0 bg-transparent p-0 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            className="ml-auto border-0 bg-transparent p-0 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             {/*
               Over the cap is one of the design's two sanctioned alarms.

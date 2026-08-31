@@ -448,7 +448,15 @@ export default function GitSyncPage() {
             </div>
 
             {message && <p className="text-[13px] text-agent">{message}</p>}
-            {error && <p className="text-[13px] text-destructive">{error}</p>}
+            {/*
+              Missing configuration is not an error. With no repository path
+              the band above already names what is missing and how to supply
+              it; repeating that in coral would make an unconfigured project
+              look broken.
+            */}
+            {error && project?.gitRepoPath !== null && (
+              <p className="text-[13px] text-destructive">{error}</p>
+            )}
           </div>
 
           {conflictDiffs.length > 0 && (

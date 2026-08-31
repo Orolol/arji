@@ -171,7 +171,7 @@ export function UpNextBand({
                   className={cn(
                     CHIP_BASE,
                     CHIP_RANK[rank],
-                    "cursor-pointer border-0 font-sans outline-none",
+                    "border-0 font-sans outline-none",
                     selectedEpicIds?.has(ticket.epicId) &&
                       "ring-2 ring-foreground",
                     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",

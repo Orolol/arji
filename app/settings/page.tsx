@@ -1815,7 +1815,7 @@ export default function SettingsPage() {
               <span>An API key is already saved for this workspace.</span>
               <button
                 type="button"
-                className="text-xs text-destructive hover:underline cursor-pointer bg-transparent border-0 p-0 disabled:opacity-50"
+                className="text-xs text-destructive hover:underline bg-transparent border-0 p-0 disabled:opacity-50"
                 onClick={handleClearOpenAiKey}
                 disabled={clearingOpenAiKey || savingOpenAi}
                 data-testid="openai-clear-key-button"
