@@ -34,6 +34,25 @@ interface RefinementButtonProps {
 }
 
 /**
+ * Narrows a status response body to a {@link RefinementStatus}.
+ *
+ * `{ data }` alone is not enough to go on. This component POSTs to the same
+ * URL it polls, and the POST answers `{ data: { started, sessionId } }` — no
+ * `running` field. Cast blindly, that reads as `running: undefined`, which is
+ * indistinguishable from "the pass ended": the button goes back to idle
+ * mid-pass and `onFinished` reloads the board for nothing. A body that does
+ * not carry a boolean `running` is not evidence about the pass either way, so
+ * it is ignored rather than believed.
+ */
+function asRefinementStatus(payload: unknown): RefinementStatus | null {
+  const data = (payload as { data?: unknown } | null | undefined)?.data;
+  if (!data || typeof data !== "object") return null;
+  return typeof (data as RefinementStatus).running === "boolean"
+    ? (data as RefinementStatus)
+    : null;
+}
+
+/**
  * Board-toolbar entry point for the Agent Refinement re-pass.
  *
  * The in-flight state is read from the server rather than kept locally: a
@@ -73,8 +92,9 @@ export function RefinementButton({
       fetch(`/api/projects/${projectId}/refinement`)
         .then((r) => r.json())
         .then((d) => {
-          if (cancelled || !d?.data) return;
-          const next = d.data as RefinementStatus;
+          if (cancelled) return;
+          const next = asRefinementStatus(d);
+          if (!next) return;
           const finished = wasRunning.current && !next.running;
           wasRunning.current = next.running;
           setStatus(next);
