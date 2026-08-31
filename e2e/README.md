@@ -66,8 +66,18 @@ The symptom is not an error — it is a page that renders and does nothing: the
 server markup is there, hydration never runs, and every spec waiting on
 something the client fetches fails. The strata labels paint, the bands stay
 empty, nothing ever goes live. Only the static-markup smoke tests pass — the
-title, the band names. If you point the suite somewhere by hand, keep it on
-`localhost`.
+title, the band names.
+
+`next.config.ts` now lists `127.0.0.1` and `[::1]` in `allowedDevOrigins`, so
+browsing the app on a loopback IP works too. The base URL stays on `localhost`
+regardless: that is what Next trusts with no config at all, so the suite does
+not depend on that setting being right. If you point it somewhere by hand,
+keep it on `localhost`.
+
+`__tests__/next-config-dev-origins.test.ts` pins the two layers together —
+every loopback host `middleware.ts` accepts for `/api/*` must also be served
+`/_next/*`. A Next upgrade that changes the rule fails that test rather than
+this suite.
 
 ## Reuse a dev server that is already running
 
@@ -85,6 +95,53 @@ spawn entirely:
 ```
 E2E_PORT=3199 npm run test:e2e
 ```
+
+## Never wait for `networkidle`
+
+A project-scoped page opens a Server-Sent Events stream and holds it open for
+the life of the page. `useProjectEvents` connects an `EventSource` to
+`/api/projects/:id/events`; the route keeps the response open, writes a
+`: heartbeat` comment every 30s, and the hook reconnects with backoff whenever
+it drops. Playwright calls a page idle only after 500ms with no network
+connection in flight, so on the board, a ticket detail, or the spec page there
+is always one and it never gets there.
+
+Both of these therefore burn the full test timeout and then fail:
+
+```ts
+await page.goto(project.boardUrl, { waitUntil: "networkidle" });  // don't
+await page.waitForLoadState("networkidle");                       // don't
+```
+
+**The symptom is a test that times out with no failed assertion.** Playwright
+reports `Test timeout of 90000ms exceeded` and points at the navigation line —
+there is no expect failure, no console error, and the trace shows a page that
+rendered fine. It reads like a slow board or a stuck fixture, so the reflex is
+to raise the timeout, which only makes the next run take longer to fail.
+
+Wait for the document, then assert on what you actually need:
+
+```ts
+await page.goto(project.boardUrl, { waitUntil: "domcontentloaded" });
+await expect(page.getByTestId("header-new-button")).toBeVisible();
+```
+
+`domcontentloaded` returns as soon as the markup parses, and the explicit
+assertion on an element that only exists once the page is interactive is what
+makes the wait mean something — auto-retried up to the `expect` timeout, and
+failing with the selector it gave up on rather than with a stopwatch. The
+suite's plain `page.goto(url)` is fine too: its default `load` fires on the
+document's own resources and settles normally. `networkidle` is the one wait
+that never does.
+
+Measured on this branch against `next dev`, three runs each: with the stream
+live, `waitForLoadState("networkidle")` on a hydrated board never settled — it
+threw at its 15s cap every time. With
+`page.route("**/api/projects/*/events", r => r.abort())` aborting that one
+request and nothing else changed, the same call returned in ~1.7s (1660 ms,
+1684 ms, 1750 ms). One request is the whole difference.
+`__tests__/e2e-networkidle-doc.test.ts` keeps this note in place and fails if a
+spec reintroduces the wait.
 
 ## Test data
 
