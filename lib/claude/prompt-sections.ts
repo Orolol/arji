@@ -153,8 +153,8 @@ export const PROJECT_MEMORY_HEADING =
  * Learned project memory block. Empty string when the project has no
  * memory document (or it is empty) — the section is simply omitted, so
  * prompts for projects without memory are byte-identical to before.
- * Token-cheap by construction: the content is hard-capped on write
- * (PROJECT_MEMORY_MAX_CHARS in lib/documents/memory-constants.ts).
+ * Token-budgeted by construction: the content is hard-capped on write at
+ * PROJECT_MEMORY_MAX_TOKENS estimated tokens (lib/documents/memory-constants.ts).
  */
 export function memorySection(memory: string | null | undefined): string {
   if (!memory || memory.trim().length === 0) return "";

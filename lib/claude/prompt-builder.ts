@@ -39,7 +39,10 @@ export {
   REVIEW_BOUNDARY_SECTION,
 } from "./prompt-sections";
 import { getProjectMemoryContent } from "@/lib/documents/memory";
-import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
+import {
+  PROJECT_MEMORY_MAX_CHARS,
+  PROJECT_MEMORY_MAX_TOKENS,
+} from "@/lib/documents/memory-constants";
 // The prompt asks for these headings and the workflow refuses to store a
 // document without them — one contract, one definition.
 import { DREAMING_MEMORY_SECTIONS } from "@/lib/workflow/dreaming-constants";
@@ -1845,7 +1848,7 @@ Rewrite the ENTIRE memory document, merging anything durable the just-finished s
 - MERGE, don't append: deduplicate against the current memory, rewrite entries to stay general, and drop entries the session proved wrong or obsolete.
 - If the session revealed nothing durable, return the current memory (cleaned up if useful) unchanged in substance.
 - Prefer short bullet points grouped under a few \`##\` headings.
-- HARD LIMIT: the document must stay under ${PROJECT_MEMORY_MAX_CHARS} characters. Cut the least valuable entries first if space runs out.
+- HARD LIMIT: the document must stay under ${PROJECT_MEMORY_MAX_TOKENS} tokens (about ${PROJECT_MEMORY_MAX_CHARS} characters). Cut the least valuable entries first if space runs out.
 
 ### Output Format
 
@@ -1972,7 +1975,7 @@ ${DREAMING_MEMORY_SECTIONS.map((title) => `## ${title}`).join("\n")}
 - NEVER include per-ticket trivia: ticket titles, ids, session ids, dates, costs, provider names, or one-off incident details. Every line must be true for the NEXT session too.
 - Prefer short, imperative bullet points. Give the reason when it is not obvious ("X, because Y").
 - If the digest supports nothing new for a section, keep whatever the current memory already had under it rather than inventing filler.
-- HARD LIMIT: the document must stay under ${PROJECT_MEMORY_MAX_CHARS} characters. Cut the least valuable entries first if space runs out.
+- HARD LIMIT: the document must stay under ${PROJECT_MEMORY_MAX_TOKENS} tokens (about ${PROJECT_MEMORY_MAX_CHARS} characters). Cut the least valuable entries first if space runs out.
 
 ### Output Format
 

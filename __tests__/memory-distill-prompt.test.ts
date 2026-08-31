@@ -18,7 +18,10 @@ import {
   type PromptProject,
 } from "@/lib/claude/prompt-builder";
 import { PROJECT_MEMORY_HEADING } from "@/lib/claude/prompt-sections";
-import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
+import {
+  PROJECT_MEMORY_MAX_CHARS,
+  PROJECT_MEMORY_MAX_TOKENS,
+} from "@/lib/documents/memory-constants";
 
 const project: PromptProject = { name: "Arij", spec: "The spec" };
 
@@ -57,8 +60,9 @@ describe("buildMemoryDistillPrompt", () => {
     expect(prompt).toContain("NEVER include per-ticket trivia");
     expect(prompt).toContain("MERGE, don't append");
     expect(prompt).toContain(
-      `must stay under ${PROJECT_MEMORY_MAX_CHARS} characters`
+      `must stay under ${PROJECT_MEMORY_MAX_TOKENS} tokens`
     );
+    expect(prompt).toContain(`about ${PROJECT_MEMORY_MAX_CHARS} characters`);
   });
 
   it("demands the raw document body as the only output", () => {
