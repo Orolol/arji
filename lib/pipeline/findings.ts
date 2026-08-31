@@ -602,10 +602,18 @@ export function cleanReviewVerdictSql(database: ArijDatabase = defaultDb) {
  * for the newest delivered epic-scoped review per epic, and one `IN` lookup
  * that drops the sessions which did file rows. Callers that already hold a
  * single session id should still use readReviewChannelState.
+ *
+ * @param projectId `null` spans every project (the "Now" control desk).
+ *                  `agent_sessions` is indexed on `(project_id, created_at)`,
+ *                  so a `null` project drops the leading key — pass
+ *                  `scope.epicIds` with it so the scan stays bounded by
+ *                  `agent_sessions_epic_idx`.
+ * @param scope.epicIds Restrict to these epics. An empty array matches none.
  */
 export function listUnverifiableReviewEpicIds(
-  projectId: string,
-  database: ArijDatabase = defaultDb
+  projectId: string | null,
+  database: ArijDatabase = defaultDb,
+  scope?: { epicIds?: readonly string[] }
 ): Set<string> {
   const mcpToolsEnabled = isMcpToolsEnabled(database);
 
@@ -624,7 +632,17 @@ export function listUnverifiableReviewEpicIds(
     .from(agentSessions)
     .where(
       and(
-        eq(agentSessions.projectId, projectId),
+        // `null` = every project. Only legal alongside `scope.epicIds`: the
+        // project id is the leading key of the one index on this table, and
+        // the "Now" desk is the caller that needs both.
+        ...(projectId === null ? [] : [eq(agentSessions.projectId, projectId)]),
+        ...(scope?.epicIds === undefined
+          ? []
+          : [
+              scope.epicIds.length === 0
+                ? sql`1 = 0`
+                : inArray(agentSessions.epicId, [...scope.epicIds]),
+            ]),
         sql`${agentSessions.epicId} IS NOT NULL`,
         sql`${agentSessions.userStoryId} IS NULL`,
         eq(agentSessions.status, "completed"),

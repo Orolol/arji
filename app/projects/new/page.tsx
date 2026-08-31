@@ -6,17 +6,27 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
+const NAME_REQUIRED = "Project name is required.";
+
 export default function NewProjectPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [gitRepoPath, setGitRepoPath] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // The submit button is disabled until the name is filled; without a
+  // spoken reason that state is invisible to assistive technology.
+  const nameInvalid = nameTouched && !name.trim();
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      setNameTouched(true);
+      return;
+    }
 
     setLoading(true);
     setError("");
@@ -51,25 +61,50 @@ export default function NewProjectPage() {
     <div className="p-6 max-w-lg mx-auto">
       <h1 className="text-2xl font-bold mb-6">New Project</h1>
       {error && (
-        <div className="bg-destructive/10 text-destructive p-3 rounded-md mb-4 text-sm">
+        <div
+          role="alert"
+          className="bg-destructive/10 text-destructive p-3 rounded-md mb-4 text-sm"
+        >
           {error}
         </div>
       )}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium mb-1">
+          <label
+            htmlFor="project-name"
+            className="block text-sm font-medium mb-1"
+          >
             Project Name *
           </label>
           <Input
+            id="project-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            onBlur={() => setNameTouched(true)}
             placeholder="My Awesome Project"
             required
+            aria-invalid={nameInvalid || undefined}
+            aria-describedby={nameInvalid ? "project-name-error" : undefined}
           />
+          {nameInvalid && (
+            <p
+              id="project-name-error"
+              role="alert"
+              className="text-xs text-destructive mt-1"
+            >
+              {NAME_REQUIRED}
+            </p>
+          )}
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Description</label>
+          <label
+            htmlFor="project-description"
+            className="block text-sm font-medium mb-1"
+          >
+            Description
+          </label>
           <Textarea
+            id="project-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What is this project about?"
@@ -77,15 +112,23 @@ export default function NewProjectPage() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">
+          <label
+            htmlFor="project-git-repo-path"
+            className="block text-sm font-medium mb-1"
+          >
             Git Repository Path
           </label>
           <Input
+            id="project-git-repo-path"
             value={gitRepoPath}
             onChange={(e) => setGitRepoPath(e.target.value)}
             placeholder="/path/to/your/repo (optional)"
+            aria-describedby="project-git-repo-path-hint"
           />
-          <p className="text-xs text-muted-foreground mt-1">
+          <p
+            id="project-git-repo-path-hint"
+            className="text-xs text-muted-foreground mt-1"
+          >
             Path to an existing local git repository
           </p>
         </div>

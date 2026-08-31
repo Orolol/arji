@@ -1,6 +1,9 @@
 /**
- * Settings page: the two night-run defaults (circuit breaker, cost cap)
+ * Settings → Workspace: the two night-run defaults (circuit breaker, cost cap)
  * round-trip through /api/settings.
+ *
+ * They now save through the tab's shared Discard / Save footer instead of a
+ * per-card button, so only the keys the user actually edited travel.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,7 +14,7 @@ import {
   NIGHT_COST_CAP_SETTING_KEY,
 } from "@/lib/night/constants";
 
-function mockSettings(stored: Record<string, unknown>) {
+function mockSettings(stored: Record<string, unknown>, patchOk = true) {
   const fetchMock = vi.fn(
     async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -19,7 +22,17 @@ function mockSettings(stored: Record<string, unknown>) {
         return { ok: true, json: async () => ({ data: { webhooks: [] } }) };
       }
       if (url === "/api/settings" && init?.method === "PATCH") {
-        return { ok: true, json: async () => ({ data: { updated: true } }) };
+        return {
+          ok: patchOk,
+          json: async () =>
+            patchOk ? { data: { updated: true } } : { error: "nope" },
+        };
+      }
+      if (url === "/api/projects") {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url === "/api/usage") {
+        return { ok: true, json: async () => ({ data: {} }) };
       }
       return { ok: true, json: async () => ({ data: stored }) };
     }
@@ -83,12 +96,10 @@ describe("Settings — night run defaults", () => {
     fireEvent.change(screen.getByTestId("night-cost-cap-setting"), {
       target: { value: "15" },
     });
-    fireEvent.click(screen.getByTestId("night-settings-save"));
+    fireEvent.click(screen.getByTestId("settings-save"));
 
     await waitFor(() =>
-      expect(screen.getByTestId("night-settings-message")).toHaveTextContent(
-        "Night run defaults saved."
-      )
+      expect(screen.getByTestId("settings-message")).toHaveTextContent("Saved")
     );
     expect(lastPatchBody(fetchMock)).toEqual({
       [NIGHT_CIRCUIT_BREAKER_SETTING_KEY]: 2,
@@ -110,42 +121,78 @@ describe("Settings — night run defaults", () => {
     fireEvent.change(screen.getByTestId("night-cost-cap-setting"), {
       target: { value: "" },
     });
-    fireEvent.click(screen.getByTestId("night-settings-save"));
+    fireEvent.click(screen.getByTestId("settings-save"));
 
-    await waitFor(() =>
-      expect(screen.getByTestId("night-settings-message")).toBeInTheDocument()
-    );
+    await waitFor(() => expect(lastPatchBody(fetchMock)).toBeTruthy());
+    // Empty CLEARS the cap — it is written as null, never omitted, and the
+    // untouched breaker does not ride along.
     expect(lastPatchBody(fetchMock)).toEqual({
-      [NIGHT_CIRCUIT_BREAKER_SETTING_KEY]: 4,
       [NIGHT_COST_CAP_SETTING_KEY]: null,
     });
   });
 
-  it("reports a failed save without pretending it worked", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-        const url = String(input);
-        if (url === "/api/settings/webhooks") {
-          return { ok: true, json: async () => ({ data: { webhooks: [] } }) };
-        }
-        if (init?.method === "PATCH") {
-          return { ok: false, json: async () => ({ error: "nope" }) };
-        }
-        return { ok: true, json: async () => ({ data: {} }) };
-      })
-    );
+  it("refuses an unparseable circuit breaker without calling the API", async () => {
+    const fetchMock = mockSettings({});
     render(<SettingsPage />);
 
     await waitFor(() =>
       expect(screen.getByTestId("night-settings")).toBeInTheDocument()
     );
-    fireEvent.click(screen.getByTestId("night-settings-save"));
+    fireEvent.change(screen.getByTestId("night-circuit-breaker-setting"), {
+      target: { value: "2.5" },
+    });
+    fireEvent.click(screen.getByTestId("settings-save"));
 
     await waitFor(() =>
-      expect(screen.getByTestId("night-settings-message")).toHaveTextContent(
-        "Failed to save the night run defaults."
+      expect(screen.getByTestId("settings-message")).toHaveTextContent(
+        "Circuit breaker must be a whole number between 0 and 10."
       )
     );
+    const patches = fetchMock.mock.calls.filter(
+      (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === "PATCH"
+    );
+    expect(patches).toHaveLength(0);
+  });
+
+  it("writes back the clamped breaker after a successful save", async () => {
+    const fetchMock = mockSettings({});
+    render(<SettingsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("night-settings")).toBeInTheDocument()
+    );
+    fireEvent.change(screen.getByTestId("night-circuit-breaker-setting"), {
+      target: { value: "99" },
+    });
+    fireEvent.click(screen.getByTestId("settings-save"));
+
+    await waitFor(() =>
+      expect(lastPatchBody(fetchMock)).toEqual({
+        [NIGHT_CIRCUIT_BREAKER_SETTING_KEY]: 10,
+      })
+    );
+    // What is stored is what is shown: the field snaps to the clamped value.
+    await waitFor(() =>
+      expect(screen.getByTestId("night-circuit-breaker-setting")).toHaveValue(10)
+    );
+  });
+
+  it("reports a failed save without pretending it worked", async () => {
+    mockSettings({}, false);
+    render(<SettingsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("night-settings")).toBeInTheDocument()
+    );
+    fireEvent.change(screen.getByTestId("night-cost-cap-setting"), {
+      target: { value: "12" },
+    });
+    fireEvent.click(screen.getByTestId("settings-save"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("settings-message")).toHaveTextContent("nope")
+    );
+    // The edit stays on screen: nothing was persisted.
+    expect(screen.getByTestId("night-cost-cap-setting")).toHaveValue(12);
   });
 });

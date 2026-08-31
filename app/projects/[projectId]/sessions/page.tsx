@@ -128,7 +128,20 @@ type StateFilter = "all" | "running" | "failed" | "night";
 type ProviderFilter = "claude-code" | "codex" | null;
 type SortOption = "created" | "last_activity";
 
-const TABLE_GRID = "grid-cols-[1.5fr_0.9fr_0.75fr_0.8fr_0.55fr_0.4fr]";
+/**
+ * Six tracks need ~700px. A phone gets the two that carry the row — what the
+ * session is, and how it is doing; duration, activity, cost and the "Open"
+ * affordance are `DESKTOP_CELL` and leave the flow entirely below `sm`, so
+ * the remaining tracks are readable instead of six 20px slivers.
+ */
+const TABLE_GRID =
+  "grid-cols-[1.4fr_1fr] sm:grid-cols-[1.5fr_0.9fr_0.75fr_0.8fr_0.55fr_0.4fr]";
+
+/** A column the phone layout drops. `hidden` removes it from the grid flow. */
+const DESKTOP_CELL = "hidden sm:block";
+
+/** Row padding and gutter, tightened on a phone. */
+const TABLE_ROW_PADDING = "gap-[10px] px-[14px] sm:gap-[14px] sm:px-[22px]";
 
 function isToday(iso: string | null | undefined): boolean {
   if (!iso) return false;
@@ -312,11 +325,14 @@ export default function SessionsPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Synthesis band */}
+      {/* Four cells side by side need ~470px of min-content, so a phone gets
+          them two by two and the 72px row returns at `sm`. */}
       <div
         data-testid="sessions-band"
-        className="flex h-[72px] shrink-0 border-b border-border bg-band"
+        className="grid grid-cols-2 shrink-0 border-b border-border bg-band sm:flex sm:h-[72px]"
       >
         <BandCell
+          index={0}
           label="RUNNING"
           testId="sessions-band-running"
           value={
@@ -326,6 +342,7 @@ export default function SessionsPage() {
           }
         />
         <BandCell
+          index={1}
           label="TODAY"
           testId="sessions-band-today"
           value={
@@ -337,6 +354,7 @@ export default function SessionsPage() {
           }
         />
         <BandCell
+          index={2}
           label="SUCCESS RATE"
           testId="sessions-band-success"
           value={
@@ -346,6 +364,7 @@ export default function SessionsPage() {
           }
         />
         <BandCell
+          index={3}
           label="QUEUE"
           testId="sessions-band-queue"
           last
@@ -354,8 +373,9 @@ export default function SessionsPage() {
         />
       </div>
 
-      {/* Filter bar */}
-      <div className="flex h-[46px] shrink-0 items-center gap-[7px] border-b border-border px-[22px]">
+      {/* Filter bar — wraps at every width. The eight controls need ~740px
+          side by side, which no phone and no half-width window has. */}
+      <div className="flex min-h-[46px] shrink-0 flex-wrap items-center gap-[7px] border-b border-border px-[14px] py-[7px] sm:px-[22px]">
         <FilterChip
           testId="sessions-filter-all"
           active={stateFilter === "all" && providerFilter === null}
@@ -393,7 +413,7 @@ export default function SessionsPage() {
         >
           Night run
         </FilterChip>
-        <span className="mx-[5px] h-4 w-px bg-border" />
+        <span className="mx-[5px] hidden h-4 w-px bg-border sm:block" />
         <FilterChip
           testId="sessions-filter-claude-code"
           active={providerFilter === "claude-code"}
@@ -411,7 +431,7 @@ export default function SessionsPage() {
           Codex
         </FilterChip>
 
-        <div className="ml-auto flex items-center gap-[7px] text-[12.5px] text-muted-foreground">
+        <div className="flex items-center gap-[7px] text-[12.5px] text-muted-foreground sm:ml-auto">
           <ArrowUpDown className="h-[13px] w-[13px] shrink-0" />
           <Select
             value={sortBy}
@@ -432,9 +452,11 @@ export default function SessionsPage() {
           </Select>
         </div>
 
-        <span className="mx-[5px] h-4 w-px bg-border" />
+        <span className="mx-[5px] hidden h-4 w-px bg-border sm:block" />
 
-        <label className="flex items-center gap-[7px] text-[12.5px] text-muted-foreground">
+        {/* `w-full` gives the field its own wrapped line on a phone: sharing
+            one with the sort control squeezed the input to nothing. */}
+        <label className="flex w-full min-w-0 items-center gap-[7px] text-[12.5px] text-muted-foreground sm:w-auto">
           <Search className="h-[13px] w-[13px] shrink-0" />
           <span className="sr-only">Filter by ticket</span>
           <input
@@ -442,7 +464,7 @@ export default function SessionsPage() {
             value={ticketQuery}
             onChange={(e) => setTicketQuery(e.target.value)}
             placeholder="Filter by ticket"
-            className="w-[150px] bg-transparent text-[12.5px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+            className="w-full min-w-0 bg-transparent text-[12.5px] text-foreground placeholder:text-muted-foreground focus:outline-none sm:w-[150px]"
           />
         </label>
       </div>
@@ -453,7 +475,7 @@ export default function SessionsPage() {
       {nightFilterActive && (
         <div
           data-testid="night-runs-list"
-          className="shrink-0 border-b border-border bg-band px-[22px] py-[14px]"
+          className="shrink-0 border-b border-border bg-band px-[14px] py-[14px] sm:px-[22px]"
         >
           <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
             Night runs
@@ -511,7 +533,7 @@ export default function SessionsPage() {
       {incomplete && (
         <p
           data-testid="sessions-incomplete"
-          className="border-b border-border-soft bg-destructive/10 px-[22px] py-[10px] text-[12.5px] text-destructive"
+          className="border-b border-border-soft bg-destructive/10 px-[14px] py-[10px] text-[12.5px] text-destructive sm:px-[22px]"
         >
           {incomplete}
         </p>
@@ -523,7 +545,8 @@ export default function SessionsPage() {
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div
             className={cn(
-              "grid shrink-0 items-center gap-[14px] border-b border-border px-[22px] py-[12px]",
+              "grid shrink-0 items-center border-b border-border py-[12px]",
+              TABLE_ROW_PADDING,
               TABLE_GRID
             )}
           >
@@ -533,21 +556,36 @@ export default function SessionsPage() {
             <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
               State
             </span>
-            <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
+            <span
+              className={cn(
+                "text-[11.5px] uppercase tracking-[.08em] text-meta",
+                DESKTOP_CELL
+              )}
+            >
               Duration
             </span>
-            <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
+            <span
+              className={cn(
+                "text-[11.5px] uppercase tracking-[.08em] text-meta",
+                DESKTOP_CELL
+              )}
+            >
               Activity
             </span>
-            <span className="text-[11.5px] uppercase tracking-[.08em] text-meta">
+            <span
+              className={cn(
+                "text-[11.5px] uppercase tracking-[.08em] text-meta",
+                DESKTOP_CELL
+              )}
+            >
               Cost
             </span>
-            <span />
+            <span className={DESKTOP_CELL} />
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             {visible.length === 0 ? (
-              <p className="px-[22px] py-[18px] text-[13px] text-muted-foreground">
+              <p className="px-[14px] py-[18px] text-[13px] text-muted-foreground sm:px-[22px]">
                 No sessions match these filters.
               </p>
             ) : (
@@ -575,13 +613,21 @@ export default function SessionsPage() {
   );
 }
 
+/**
+ * `index` places the rules: in the 2 × 2 phone grid only the left-hand cells
+ * carry a right rule (a right rule on cell 1 or 3 would sit on the viewport
+ * edge) and the top pair carries a bottom one. From `sm` the band is one row
+ * again and every cell but the last has its rule back.
+ */
 function BandCell({
+  index,
   label,
   value,
   testId,
   last = false,
   valueClassName,
 }: {
+  index: number;
   label: string;
   value: string;
   testId: string;
@@ -591,11 +637,17 @@ function BandCell({
   return (
     <div
       className={cn(
-        "flex flex-1 flex-col justify-center gap-[5px] px-[22px]",
-        !last && "border-r border-border"
+        "flex min-w-0 flex-col justify-center gap-[5px] px-[14px] py-[10px] sm:flex-1 sm:px-[22px] sm:py-0",
+        !last &&
+          (index % 2 === 0
+            ? "border-r border-border"
+            : "border-border sm:border-r"),
+        index < 2 && "border-b border-border sm:border-b-0"
       )}
     >
-      <span className="text-[11.5px] tracking-[.08em] text-meta">{label}</span>
+      <span className="truncate text-[11.5px] tracking-[.08em] text-meta">
+        {label}
+      </span>
       <span
         data-testid={testId}
         className={cn("truncate text-[13.5px]", valueClassName)}
@@ -725,7 +777,8 @@ function AgentSessionRow({
       href={`/projects/${projectId}/sessions/${session.id}`}
       data-testid={`session-row-${session.id}`}
       className={cn(
-        "grid items-center gap-[14px] border-b border-border-soft px-[22px] py-[14px] transition-colors hover:bg-card",
+        "grid items-center border-b border-border-soft py-[14px] transition-colors hover:bg-card",
+        TABLE_ROW_PADDING,
         TABLE_GRID
       )}
     >
@@ -758,17 +811,30 @@ function AgentSessionRow({
         )}
       </div>
 
-      <span className="truncate font-mono text-[12px] text-muted-foreground">
+      <span
+        className={cn(
+          "truncate font-mono text-[12px] text-muted-foreground",
+          DESKTOP_CELL
+        )}
+      >
         {getDuration(session)}
       </span>
       <LastActivity value={session.lastActivityAt} sessionId={session.id} />
       <span
-        className="truncate font-mono text-[12px] text-muted-foreground"
+        className={cn(
+          "truncate font-mono text-[12px] text-muted-foreground",
+          DESKTOP_CELL
+        )}
         title="Session cost (when reported by the provider)"
       >
         {formatCostUsd(session.totalCostUsd) ?? "—"}
       </span>
-      <span className="justify-self-end text-[12.5px] text-muted-foreground">
+      <span
+        className={cn(
+          "justify-self-end text-[12.5px] text-muted-foreground",
+          DESKTOP_CELL
+        )}
+      >
         Open
       </span>
     </Link>
@@ -796,7 +862,8 @@ function ChatSessionRow({
       href={`/projects/${projectId}/sessions/chat/${session.id}`}
       data-testid={`session-row-${session.id}`}
       className={cn(
-        "grid items-center gap-[14px] border-b border-border-soft px-[22px] py-[14px] transition-colors hover:bg-card",
+        "grid items-center border-b border-border-soft py-[14px] transition-colors hover:bg-card",
+        TABLE_ROW_PADDING,
         TABLE_GRID
       )}
     >
@@ -829,10 +896,23 @@ function ChatSessionRow({
       >
         {isGenerating ? "Generating" : "Chat"}
       </span>
-      <span className="font-mono text-[12px] text-muted-foreground">—</span>
+      <span
+        className={cn("font-mono text-[12px] text-muted-foreground", DESKTOP_CELL)}
+      >
+        —
+      </span>
       <LastActivity value={session.lastActivityAt} sessionId={session.id} />
-      <span className="font-mono text-[12px] text-muted-foreground">—</span>
-      <span className="justify-self-end text-[12.5px] text-muted-foreground">
+      <span
+        className={cn("font-mono text-[12px] text-muted-foreground", DESKTOP_CELL)}
+      >
+        —
+      </span>
+      <span
+        className={cn(
+          "justify-self-end text-[12.5px] text-muted-foreground",
+          DESKTOP_CELL
+        )}
+      >
         Open
       </span>
     </Link>
@@ -849,7 +929,10 @@ function LastActivity({
   return (
     <span
       data-testid={`session-activity-${sessionId}`}
-      className="truncate font-mono text-[12px] text-muted-foreground"
+      className={cn(
+        "truncate font-mono text-[12px] text-muted-foreground",
+        DESKTOP_CELL
+      )}
       title={value ?? undefined}
     >
       {value ? formatTime(value) : "—"}

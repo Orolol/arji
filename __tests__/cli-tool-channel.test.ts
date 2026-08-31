@@ -8,6 +8,7 @@
  * project-scoped with agentType "chat" and no epic, dead after release(),
  * release idempotent.
  */
+import { arijChannelSpec } from "@/lib/providers/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dbMockState, resetDbMockState } from "@/__tests__/helpers/db-mock";
 
@@ -20,6 +21,7 @@ import { createChatCliToolChannel } from "@/lib/chat/cli-tool-channel";
 import {
   ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
   ARIJ_MCP_SERVER_NAME,
+  buildClaudeMcpConfigJson,
 } from "@/lib/claude/mcp-injection";
 import {
   _resetMcpTokenStoreForTests,
@@ -45,13 +47,13 @@ describe("createChatCliToolChannel", () => {
       });
 
       expect(channel).not.toBeNull();
-      expect(channel!.mcp.serverName).toBe(ARIJ_MCP_SERVER_NAME);
-      expect(channel!.mcp.env.ARIJ_MCP_TOOLSET).toBe("chat");
+      expect(arijChannelSpec(channel!.mcp).name).toBe(ARIJ_MCP_SERVER_NAME);
+      expect(arijChannelSpec(channel!.mcp).env.ARIJ_MCP_TOOLSET).toBe("chat");
       expect(channel!.mcp.allowedToolNames).toEqual([
         ...ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
       ]);
 
-      const record = resolveMcpToken(channel!.mcp.env.ARIJ_MCP_TOKEN);
+      const record = resolveMcpToken(arijChannelSpec(channel!.mcp).env.ARIJ_MCP_TOKEN);
       expect(record).toMatchObject({
         projectId: "proj1",
         epicId: null,
@@ -78,7 +80,7 @@ describe("createChatCliToolChannel", () => {
       provider: "claude-code",
       conversationType: null,
     })!;
-    const token = channel.mcp.env.ARIJ_MCP_TOKEN;
+    const token = arijChannelSpec(channel.mcp).env.ARIJ_MCP_TOKEN;
 
     expect(resolveMcpToken(token)).not.toBeNull();
     channel.release();
@@ -99,10 +101,10 @@ describe("createChatCliToolChannel", () => {
       conversationType: null,
     })!;
 
-    expect(first.mcp.env.ARIJ_MCP_TOKEN).not.toBe(second.mcp.env.ARIJ_MCP_TOKEN);
+    expect(arijChannelSpec(first.mcp).env.ARIJ_MCP_TOKEN).not.toBe(arijChannelSpec(second.mcp).env.ARIJ_MCP_TOKEN);
     // releasing one turn must not kill the other's token
     first.release();
-    expect(resolveMcpToken(second.mcp.env.ARIJ_MCP_TOKEN)).not.toBeNull();
+    expect(resolveMcpToken(arijChannelSpec(second.mcp).env.ARIJ_MCP_TOKEN)).not.toBeNull();
   });
 
   it("builds an omp chat channel with the single-underscore tool spelling", () => {
@@ -113,7 +115,7 @@ describe("createChatCliToolChannel", () => {
     });
 
     expect(channel).not.toBeNull();
-    expect(channel!.mcp.env.ARIJ_MCP_TOOLSET).toBe("chat");
+    expect(arijChannelSpec(channel!.mcp).env.ARIJ_MCP_TOOLSET).toBe("chat");
     expect(channel!.mcp.allowedToolNames).toContain("mcp__arij_create_ticket");
     expect(channel!.mcp.allowedToolNames).not.toContain(
       "mcp__arij__create_ticket",
@@ -157,5 +159,174 @@ describe("createChatCliToolChannel", () => {
         conversationType: null,
       }),
     ).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Story "Parité du canal chat"                                         */
+/* ------------------------------------------------------------------ */
+
+describe("user-declared MCP servers reach a chat turn too", () => {
+  it("injects the servers resolved for the conversation's project", () => {
+    // Without this the feature would be present in build and review and
+    // silently missing in chat — the chat channel does not go through
+    // processManager.start(), so it needs its own resolution call.
+    dbMockState.allRows = [
+      {
+        id: "srv-1",
+        projectId: null,
+        name: "godot",
+        enabled: true,
+        transport: "stdio",
+        command: "/usr/bin/godot-mcp",
+        args: "[]",
+        env: "{}",
+        url: null,
+        headers: "{}",
+        agentTypes: null,
+        toolAllowlist: null,
+        usageHint: "scenes and nodes",
+        lastCheckedAt: null,
+        lastCheckOk: null,
+        lastCheckError: null,
+        createdAt: "2026-08-27",
+      },
+    ];
+
+    const channel = createChatCliToolChannel({
+      projectId: "proj1",
+      provider: "claude-code",
+      conversationType: null,
+    });
+
+    expect(channel).not.toBeNull();
+    expect(channel!.mcp.servers.map((s) => s.name)).toEqual([
+      ARIJ_MCP_SERVER_NAME,
+      "godot",
+    ]);
+    // The arij toolset is untouched by this story: no agent-only tool appears.
+    expect(channel!.mcp.allowedToolNames).toEqual([
+      ...ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES,
+      "mcp__godot",
+    ]);
+    expect(channel!.mcp.allowedToolNames).not.toContain("mcp__arij__ask_question");
+    expect(channel!.mcp.allowedToolNames).not.toContain("mcp__arij__submit_findings");
+  });
+
+  it("excludes a server whose agent_types omit chat", () => {
+    dbMockState.allRows = [
+      {
+        id: "srv-1",
+        projectId: null,
+        name: "godot",
+        enabled: true,
+        transport: "stdio",
+        command: "/usr/bin/godot-mcp",
+        args: "[]",
+        env: "{}",
+        url: null,
+        headers: "{}",
+        agentTypes: JSON.stringify(["ticket_build"]),
+        toolAllowlist: null,
+        usageHint: null,
+        lastCheckedAt: null,
+        lastCheckOk: null,
+        lastCheckError: null,
+        createdAt: "2026-08-27",
+      },
+    ];
+
+    const channel = createChatCliToolChannel({
+      projectId: "proj1",
+      provider: "claude-code",
+      conversationType: null,
+    });
+
+    expect(channel!.mcp.servers.map((s) => s.name)).toEqual([
+      ARIJ_MCP_SERVER_NAME,
+    ]);
+  });
+
+  it("keeps the arij channel when extras resolution blows up", () => {
+    // Best-effort, like the rest of this function: a bad extra must cost the
+    // turn that server, never its board tools.
+    dbMockState.allRows = null as unknown as [];
+
+    const channel = createChatCliToolChannel({
+      projectId: "proj1",
+      provider: "claude-code",
+      conversationType: null,
+    });
+
+    expect(channel).not.toBeNull();
+    expect(arijChannelSpec(channel!.mcp).name).toBe(ARIJ_MCP_SERVER_NAME);
+  });
+});
+
+/**
+ * The criterion is that a CLI chat conversation *receives* the servers, and on
+ * claude-code what it receives is exactly the `--mcp-config` file: both chat
+ * paths pass `--strict-mcp-config` (the one-shot spawn and
+ * lib/chat/persistent-runner.ts claudeArgs), which makes that file the CLI's
+ * COMPLETE server set. Asserting the channel object alone would stop one step
+ * short of the artifact the CLI actually reads.
+ */
+describe("what a claude-code chat spawn is actually handed", () => {
+  function godotRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "srv-1",
+      projectId: null,
+      name: "godot",
+      enabled: true,
+      transport: "stdio",
+      command: "/usr/bin/godot-mcp",
+      args: JSON.stringify(["--headless"]),
+      env: "{}",
+      url: null,
+      headers: "{}",
+      agentTypes: null,
+      toolAllowlist: null,
+      usageHint: null,
+      lastCheckedAt: null,
+      lastCheckOk: null,
+      lastCheckError: null,
+      createdAt: "2026-08-27",
+      ...overrides,
+    };
+  }
+
+  it("writes the resolved extras into the strict config alongside arij", () => {
+    dbMockState.allRows = [godotRow()];
+
+    const channel = createChatCliToolChannel({
+      projectId: "proj1",
+      provider: "claude-code",
+      conversationType: null,
+    });
+
+    const config = JSON.parse(buildClaudeMcpConfigJson(channel!.mcp));
+    expect(Object.keys(config.mcpServers)).toEqual([ARIJ_MCP_SERVER_NAME, "godot"]);
+    expect(config.mcpServers.godot).toMatchObject({
+      type: "stdio",
+      command: "/usr/bin/godot-mcp",
+      args: ["--headless"],
+    });
+  });
+
+  it("omits a chat-ineligible server from the strict config entirely", () => {
+    // Under --strict-mcp-config "not in the file" is the only way to be absent:
+    // there is no second source the CLI could still load it from.
+    dbMockState.allRows = [
+      godotRow({ agentTypes: JSON.stringify(["ticket_build", "review_code"]) }),
+    ];
+
+    const channel = createChatCliToolChannel({
+      projectId: "proj1",
+      provider: "claude-code",
+      conversationType: null,
+    });
+
+    const config = JSON.parse(buildClaudeMcpConfigJson(channel!.mcp));
+    expect(Object.keys(config.mcpServers)).toEqual([ARIJ_MCP_SERVER_NAME]);
   });
 });

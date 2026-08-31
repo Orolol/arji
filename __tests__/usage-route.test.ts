@@ -180,6 +180,7 @@ describe("GET /api/usage", () => {
       "byDay",
       "byProject",
       "byProvider",
+      "dashboard",
       "generatedAt",
       "subscriptions",
       "totals",

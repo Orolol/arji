@@ -1,14 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { AlertTriangle, FileText, Moon, RotateCcw, Sparkles } from "lucide-react";
+import {
+  BandHeader,
+  Mono,
+  PillButton,
+  QuietLink,
+  StrataBand,
+  SurfaceCard,
+  type MonoTone,
+} from "@/components/piscine";
 import { SpecPreview } from "@/components/spec/SpecPreview";
-import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { useProjectEvents } from "@/hooks/useProjectEvents";
-import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
+import { PROJECT_MEMORY_MAX_TOKENS } from "@/lib/documents/memory-constants";
+import { estimateTokens } from "@/lib/tokens/estimator";
 import type {
   MemoryWriteProvenance,
   MemoryWriteSource,
@@ -57,6 +66,8 @@ interface MemoryPanelProps {
   projectId?: string;
   /** Edit or preview mode, shared with the spec editor or switched locally. */
   mode: "edit" | "preview";
+  /** Applied to the band wrapper — the page uses it for the stacked layout. */
+  className?: string;
 }
 
 function sourceLabel(source: MemoryWriteSource | null | undefined): string {
@@ -78,7 +89,7 @@ function sourceLabel(source: MemoryWriteSource | null | undefined): string {
  *
  * - pairs as an equal peer next to the spec editor;
  * - edit/preview modes driven by the section's tab;
- * - character cap indicator and approaching warning;
+ * - token cap indicator and approaching warning;
  * - template skeleton for the 4 Dreaming sections when empty/non-conforming;
  * - last write provenance in header (manual / Dreaming / distillation) + timestamp;
  * - 1-click pre-dream snapshot restore with explicit confirmation;
@@ -86,8 +97,25 @@ function sourceLabel(source: MemoryWriteSource | null | undefined): string {
  * - live sync via SSE on memory:changed events;
  * - `id="memory-panel"`: notification deep links (/projects/[id]/spec#memory-panel)
  *   scroll straight to this panel.
+ *
+ * FRAME 8b, AND THE GAP IT DRAWS. The frame shows discrete white "entry" cards,
+ * one learned fact each, with a per-entry mono provenance and inline
+ * `garder` / `jeter` actions. THERE IS NO SUCH STORE: memory is a single
+ * markdown document behind app/api/projects/[projectId]/memory/*, with ONE
+ * document-level provenance record. Per-entry text, per-entry source session
+ * and a kept/discarded flag would all be new columns on a new table.
+ *
+ * So this band renders the document as ONE editable white card and omits
+ * `garder` / `jeter` entirely. Splitting the markdown into pseudo-entries by
+ * parsing bullets was considered and rejected: `jeter` would then have to
+ * rewrite the whole document by string surgery, and a wrong split silently
+ * deletes learned conventions.
  */
-export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProps) {
+export function MemoryPanel({
+  projectId: propsProjectId,
+  mode,
+  className,
+}: MemoryPanelProps) {
   const hookParams = useParams();
   const router = useRouter();
   const projectId = propsProjectId || (hookParams?.projectId as string) || "";
@@ -111,9 +139,10 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
   const panelRef = useRef<HTMLDivElement>(null);
 
   const safeContent = content;
-  const overCap = safeContent.length > PROJECT_MEMORY_MAX_CHARS;
+  const estimatedTokens = estimateTokens(safeContent);
+  const overCap = estimatedTokens > PROJECT_MEMORY_MAX_TOKENS;
   const approachingCap =
-    !overCap && safeContent.length >= Math.floor(PROJECT_MEMORY_MAX_CHARS * 0.85);
+    !overCap && estimatedTokens >= Math.floor(PROJECT_MEMORY_MAX_TOKENS * 0.85);
   const dirty = safeContent !== savedContent;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -341,268 +370,357 @@ export function MemoryPanel({ projectId: propsProjectId, mode }: MemoryPanelProp
     }
   }
 
+  // The cap indicator is the one numeral on this band that changes tone, and
+  // it changes it for a NUMBER crossing a threshold, not for a UI state.
+  //
+  // Amber is not a Piscine colour, so "approaching" borrows the SAND deep —
+  // `land-deep` (#756008). It used to say `you-deep`, which the comment
+  // already called the sand deep but which actually resolves to the coral
+  // #a63a1a — the very same value as `danger`, in BOTH themes. The middle
+  // step of a three-step ramp rendered identically to its last step, so
+  // "approaching the cap" was invisible until the cap was already blown.
+  const capTone: MonoTone = overCap
+    ? "danger"
+    : approachingCap
+      ? "land-deep"
+      : "live-mid";
+
+  const provenanceStamp = provenance?.at ?? updatedAt;
+
   return (
     <div
       ref={panelRef}
       id="memory-panel"
       data-testid="memory-card"
-      className="flex h-full min-h-0 flex-1 flex-col gap-[14px]"
+      className={cn("flex min-h-0 flex-1 flex-col", className)}
     >
-      {/* Header with Title and Cap Indicator */}
-      <div className="flex flex-none items-center justify-between gap-[9px]">
-        <div className="flex items-center gap-[8px]">
-          <h3 className="text-[15px] font-semibold tracking-[-0.01em]">Project memory</h3>
-        </div>
-        <span
-          data-testid="memory-cap-indicator"
-          className={`font-mono text-[11.5px] ${
-            overCap
-              ? "font-semibold text-destructive"
-              : approachingCap
-                ? "font-medium text-amber-500"
-                : "text-meta"
-          }`}
-        >
-          {safeContent.length} / {PROJECT_MEMORY_MAX_CHARS}
-        </span>
-      </div>
-
-      <p className="flex-none text-[12.5px] leading-[1.55] text-muted-foreground">
-        What agents learn about this project — injected into every build, review, and chat prompt.
-      </p>
-
-      {/* Story 3: Last write provenance */}
-      <div
-        data-testid="memory-provenance-bar"
-        className="flex flex-none flex-wrap items-center gap-[8px] rounded-[8px] bg-band px-[12px] py-[8px] text-[12px] text-muted-foreground"
+      <StrataBand
+        stratum="live"
+        density="rail"
+        gap={9}
+        grow
+        className="px-[16px] py-[14px]"
       >
-        <span className="font-medium uppercase tracking-[.06em] text-meta">Last write:</span>
-        <span className="font-medium text-foreground">{sourceLabel(provenance?.source)}</span>
-        {provenance?.at && (
-          <span className="font-mono text-[11px] text-meta">
-            · {new Date(provenance.at).toLocaleString()}
-          </span>
-        )}
-        {provenance?.sessionId && (
-          <Link
-            className="ml-auto text-primary underline underline-offset-2 hover:opacity-80"
-            href={`/projects/${projectId}/sessions/${provenance.sessionId}`}
-          >
-            view session
-          </Link>
-        )}
-      </div>
+        {/*
+          The band label reads MEMORY; screen readers still get a real
+          document heading, which is also what pins the accessible structure
+          the existing suite asserts.
+        */}
+        <h3 className="sr-only">Project memory</h3>
 
-      {/* Story 4: Active Writer Banner (Read-only mode) */}
-      {pendingWriter && (
-        <div
-          data-testid="memory-pending-writer-banner"
-          className="flex flex-none flex-wrap items-center gap-[8px] rounded-[8px] border border-primary/30 bg-primary/5 px-[12px] py-[9px] text-[12.5px]"
-        >
-          <Sparkles className="h-4 w-4 shrink-0 text-primary" />
-          <span className="font-medium text-foreground">
-            A {pendingWriter.agentType === "memory_distill" ? "distillation" : "Dreaming"} rewrite is currently in progress.
-          </span>
-          <span className="text-muted-foreground">The editor is in read-only mode.</span>
-          <Link
-            className="ml-auto font-medium text-primary underline underline-offset-2 hover:opacity-80"
-            href={`/projects/${projectId}/sessions/${pendingWriter.sessionId}`}
-          >
-            View session
-          </Link>
-        </div>
-      )}
+        <BandHeader
+          stratum="live"
+          label="Memory"
+          labelSize={12}
+          meta="ce que les agents ont appris"
+          right={
+            <span data-testid="memory-cap-indicator">
+              <Mono size={10.5} tone={capTone}>
+                {`${estimatedTokens} / ${PROJECT_MEMORY_MAX_TOKENS}`}
+              </Mono>
+            </span>
+          }
+        />
 
-      {/* Background update notice when user was editing */}
-      {backgroundUpdateConflict && dirty && (
-        <div
-          data-testid="memory-conflict-notice"
-          className="flex flex-none items-start gap-[8px] rounded-[8px] border border-amber-500/30 bg-amber-500/10 px-[12px] py-[8px] text-[12px] text-amber-600 dark:text-amber-400"
-        >
-          <AlertTriangle className="h-4 w-4 shrink-0 mt-[1px]" />
-          <div>
-            The memory was updated in the background while you were editing. Your unsaved changes are preserved. You can review and save them, or click Discard to reload the latest version.
-          </div>
-        </div>
-      )}
-
-      {/* Main Content Area */}
-      {loading ? (
-        <p className="text-[13px] text-muted-foreground">Loading project memory...</p>
-      ) : !loaded ? (
-        <p className="text-[13px] text-destructive">
-          {error ?? "Failed to load project memory."} Reload the page to try again.
-        </p>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-[10px]">
-          {/* Skeleton suggestion banner when empty or missing required sections in edit mode */}
-          {mode === "edit" && hasMissingSections && !pendingWriter && (
-            <div
-              data-testid="memory-skeleton-suggestion"
-              className="flex flex-none items-center justify-between gap-[8px] rounded-[8px] border border-dashed border-border bg-band/50 px-[12px] py-[8px] text-[12px] text-muted-foreground"
+        {/* An agent is rewriting this document: the editor goes read-only. */}
+        {pendingWriter && (
+          <div data-testid="memory-pending-writer-banner" className="flex-none">
+            <SurfaceCard
+              radius={10}
+              className="flex flex-wrap items-center gap-[8px] px-[11px] py-[9px]"
             >
-              <div className="flex items-center gap-[6px]">
-                <FileText className="h-3.5 w-3.5 text-meta" />
-                <span>
+              <Sparkles
+                size={13}
+                aria-hidden="true"
+                className="shrink-0 text-strata-live-deep"
+              />
+              <span className="text-[12px] text-foreground">
+                A{" "}
+                {pendingWriter.agentType === "memory_distill"
+                  ? "distillation"
+                  : "Dreaming"}{" "}
+                rewrite is currently in progress.
+              </span>
+              <span className="text-[12px] text-muted-foreground">
+                The editor is in read-only mode.
+              </span>
+              <QuietLink
+                tone="live"
+                size={11.5}
+                className="ml-auto"
+                href={`/projects/${projectId}/sessions/${pendingWriter.sessionId}`}
+              >
+                View session
+              </QuietLink>
+            </SurfaceCard>
+          </div>
+        )}
+
+        {/* The document moved under the user's feet while they were editing. */}
+        {backgroundUpdateConflict && dirty && (
+          <div data-testid="memory-conflict-notice" className="flex-none">
+            <SurfaceCard
+              radius={10}
+              className="flex items-start gap-[8px] px-[11px] py-[9px]"
+            >
+              <AlertTriangle
+                size={13}
+                aria-hidden="true"
+                className="mt-[2px] shrink-0 text-destructive"
+              />
+              <span className="text-[12px] text-foreground">
+                The memory was updated in the background while you were editing.
+                Your unsaved changes are preserved. You can review and save them,
+                or click Discard to reload the latest version.
+              </span>
+            </SurfaceCard>
+          </div>
+        )}
+
+        {loading ? (
+          <p className="text-[12.5px] text-muted-foreground">
+            Loading project memory...
+          </p>
+        ) : !loaded ? (
+          <p className="text-[12.5px] text-destructive">
+            {error ?? "Failed to load project memory."} Reload the page to try
+            again.
+          </p>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col gap-[9px]">
+            {/* Empty or non-conforming memory: offer the 4 Dreaming sections. */}
+            {mode === "edit" && hasMissingSections && !pendingWriter && (
+              <div
+                data-testid="memory-skeleton-suggestion"
+                className="flex flex-none items-center gap-[8px] rounded-[10px] border-[1.5px] border-dashed border-border-strong px-[11px] py-[9px]"
+              >
+                <FileText
+                  size={13}
+                  aria-hidden="true"
+                  className="shrink-0 text-muted-foreground"
+                />
+                <span className="min-w-0 text-[12px] text-muted-foreground">
                   {!safeContent.trim()
                     ? "No project memory yet. Start with the 4 Dreaming sections:"
                     : `Missing Dreaming section(s): ${missingSections.join(", ")}.`}
                 </span>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-[24px] rounded-[6px] px-[9px] text-[11.5px]"
-                onClick={handleInsertSkeleton}
-              >
-                {!safeContent.trim() ? "Use 4-sections template" : "Append missing sections"}
-              </Button>
-            </div>
-          )}
-          {mode === "edit" ? (
-            <Textarea
-              data-testid="memory-editor"
-              value={content}
-              onChange={(event) => {
-                setContent(event.target.value);
-                setMessage(null);
-              }}
-              disabled={!!pendingWriter || saving || restoring}
-              placeholder="No project memory yet. Write durable conventions here, or distill them from a completed session."
-              className="min-h-[220px] flex-1 resize-y rounded-[10px] border border-border bg-card font-mono text-[12.5px] leading-[1.6] focus-visible:ring-1"
-            />
-          ) : (
-            <div data-testid="memory-preview" className="min-h-[220px] flex-1 overflow-y-auto rounded-[10px] border border-border bg-card p-[16px]">
-              {safeContent.trim() ? (
-                <SpecPreview markdown={safeContent} />
-              ) : (
-                <p className="text-[13px] text-muted-foreground">
-                  No project memory yet.
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Story 3: Pre-dream snapshot restore bar with confirmation */}
-          {archive && (
-            <div
-              data-testid="memory-archive-bar"
-              className="flex flex-none flex-wrap items-center justify-between gap-[8px] rounded-[8px] border border-dashed border-border bg-band/30 px-[12px] py-[8px] text-[12px] text-muted-foreground"
-            >
-              <span>
-                A pre-dream snapshot exists
-                {archive.updatedAt ? ` (from ${new Date(archive.updatedAt).toLocaleString()})` : ""}.
-              </span>
-              {confirmingRestore ? (
-                <div className="flex items-center gap-[6px]">
-                  <span className="text-[11.5px] font-medium text-foreground">Replace with snapshot?</span>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="h-[25px] rounded-[6px] px-[8px] text-[11.5px]"
-                    onClick={handleRestore}
-                    disabled={restoring || saving || dirty}
-                  >
-                    {restoring ? "Restoring..." : "Confirm"}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-[25px] rounded-[6px] px-[8px] text-[11.5px]"
-                    onClick={() => setConfirmingRestore(false)}
-                    disabled={restoring}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <Button
+                <PillButton
                   variant="outline"
+                  outlineTone="action"
                   size="sm"
-                  className="h-[25px] rounded-[6px] px-[9px] text-[11.5px]"
-                  onClick={() => setConfirmingRestore(true)}
-                  disabled={restoring || saving || dirty || !!pendingWriter}
+                  className="ml-auto"
+                  onClick={handleInsertSkeleton}
+                >
+                  {!safeContent.trim()
+                    ? "Use 4-sections template"
+                    : "Append missing sections"}
+                </PillButton>
+              </div>
+            )}
+
+            {mode === "edit" ? (
+              <SurfaceCard
+                radius={10}
+                className="flex min-h-0 flex-1 flex-col overflow-hidden px-[12px] py-[10px]"
+              >
+                <Textarea
+                  data-testid="memory-editor"
+                  value={content}
+                  onChange={(event) => {
+                    setContent(event.target.value);
+                    setMessage(null);
+                  }}
+                  disabled={!!pendingWriter || saving || restoring}
+                  placeholder="No project memory yet. Write durable conventions here, or distill them from a completed session."
+                  className="h-full min-h-0 flex-1 resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 font-mono text-[12.5px] leading-[1.6] shadow-none focus-visible:border-0 focus-visible:ring-0"
+                />
+              </SurfaceCard>
+            ) : (
+              <div
+                data-testid="memory-preview"
+                className="flex min-h-0 flex-1 flex-col"
+              >
+                <SurfaceCard
+                  radius={10}
+                  className="min-h-0 flex-1 overflow-y-auto px-[12px] py-[10px]"
+                >
+                  {safeContent.trim() ? (
+                    <SpecPreview markdown={safeContent} />
+                  ) : (
+                    <p className="text-[12.5px] text-muted-foreground">
+                      No project memory yet.
+                    </p>
+                  )}
+                </SurfaceCard>
+              </div>
+            )}
+
+            {/* Pre-dream snapshot restore, behind an explicit confirmation. */}
+            {archive && (
+              <div
+                data-testid="memory-archive-bar"
+                className="flex flex-none flex-wrap items-center gap-[8px] rounded-[10px] border-[1.5px] border-dashed border-border-strong px-[11px] py-[9px]"
+              >
+                <span className="text-[12px] text-muted-foreground">
+                  A pre-dream snapshot exists
+                  {archive.updatedAt
+                    ? ` (from ${new Date(archive.updatedAt).toLocaleString()})`
+                    : ""}
+                  .
+                </span>
+                {confirmingRestore ? (
+                  <div className="ml-auto flex items-center gap-[6px]">
+                    <span className="text-[11.5px] font-semibold text-foreground">
+                      Replace with snapshot?
+                    </span>
+                    <PillButton
+                      variant="filled"
+                      size="sm"
+                      onClick={handleRestore}
+                      disabled={restoring || saving || dirty}
+                      pending={restoring}
+                      pendingLabel="Restoring..."
+                    >
+                      Confirm
+                    </PillButton>
+                    <PillButton
+                      variant="outline"
+                      outlineTone="neutral"
+                      size="sm"
+                      onClick={() => setConfirmingRestore(false)}
+                      disabled={restoring}
+                    >
+                      Cancel
+                    </PillButton>
+                  </div>
+                ) : (
+                  <PillButton
+                    variant="outline"
+                    outlineTone="action"
+                    size="sm"
+                    icon={RotateCcw}
+                    className="ml-auto"
+                    onClick={() => setConfirmingRestore(true)}
+                    disabled={restoring || saving || dirty || !!pendingWriter}
+                    title={
+                      dirty
+                        ? "Save or discard your edits first — restoring replaces the memory with the snapshot"
+                        : "Restore the memory to the pre-dream snapshot"
+                    }
+                  >
+                    Restore snapshot
+                  </PillButton>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-none items-center gap-[8px]">
+              {/*
+                One document-level provenance line replaces the frame's
+                per-entry `session #b2 · 2d ago` stamps: memory is a single
+                markdown document here, with one write provenance record.
+              */}
+              <div
+                data-testid="memory-provenance-bar"
+                className="flex min-w-0 items-center gap-[6px]"
+              >
+                {/*
+                  11px, not 9.5: this is mixed-case prose ("Manual edit ·
+                  18/08/2026 14:02"), and the 9.5px floor exemption covers
+                  UPPERCASE TRACKED mono labels only.
+                */}
+                <Mono size={11} tone="live-mid" clamp={1}>
+                  {`${sourceLabel(provenance?.source)}${
+                    provenanceStamp
+                      ? ` · ${new Date(provenanceStamp).toLocaleString()}`
+                      : ""
+                  }`}
+                </Mono>
+                {provenance?.sessionId && (
+                  <QuietLink
+                    tone="live"
+                    size={11.5}
+                    className="shrink-0"
+                    href={`/projects/${projectId}/sessions/${provenance.sessionId}`}
+                  >
+                    view session
+                  </QuietLink>
+                )}
+              </div>
+
+              <div className="ml-auto flex flex-none items-center gap-[8px]">
+                {dirty && (
+                  <PillButton
+                    variant="outline"
+                    outlineTone="neutral"
+                    size="sm"
+                    onClick={() => {
+                      setContent(savedContent);
+                      setMessage(null);
+                      setBackgroundUpdateConflict(false);
+                    }}
+                    disabled={saving}
+                    title="Restore the saved memory, discarding your edits"
+                  >
+                    Discard
+                  </PillButton>
+                )}
+                <PillButton
+                  variant="outline"
+                  outlineTone="action"
+                  size="sm"
+                  icon={Moon}
+                  onClick={handleDream}
+                  disabled={dreaming || saving || dirty || !!pendingWriter}
+                  pending={dreaming}
+                  pendingLabel="Dreaming..."
                   title={
                     dirty
-                      ? "Save or discard your edits first — restoring replaces the memory with the snapshot"
-                      : "Restore the memory to the pre-dream snapshot"
+                      ? "Save or discard your edits first — the agent rewrites the SAVED memory"
+                      : "Rewrite this memory from the recent sessions of every ticket"
                   }
                 >
-                  <RotateCcw className="mr-1 h-3 w-3" />
-                  Restore snapshot
-                </Button>
-              )}
-            </div>
-          )}
-
-          {/* Bottom Controls */}
-          <div className="flex flex-none flex-wrap items-center justify-between gap-2 pt-[2px]">
-            <span className="min-w-0 truncate font-mono text-[11px] text-meta">
-              {updatedAt
-                ? `last updated ${new Date(updatedAt).toLocaleString()}`
-                : "never updated"}
-            </span>
-            <div className="ml-auto flex items-center gap-2">
-              {dirty && (
-                <Button
-                  variant="ghost"
+                  Dream
+                </PillButton>
+                {/* The one filled button in this row. */}
+                <PillButton
+                  variant="filled"
                   size="sm"
-                  className="h-[29px] rounded-[8px] text-[12.5px]"
-                  onClick={() => {
-                    setContent(savedContent);
-                    setMessage(null);
-                    setBackgroundUpdateConflict(false);
-                  }}
-                  disabled={saving}
-                  title="Restore the saved memory, discarding your edits"
+                  onClick={handleSave}
+                  disabled={saving || overCap || !dirty || !!pendingWriter}
+                  pending={saving}
+                  pendingLabel="Saving..."
                 >
-                  Discard
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-[29px] rounded-[8px] text-[12.5px]"
-                onClick={handleDream}
-                disabled={dreaming || saving || dirty || !!pendingWriter}
-                title={
-                  dirty
-                    ? "Save or discard your edits first — the agent rewrites the SAVED memory"
-                    : "Rewrite this memory from the recent sessions of every ticket"
-                }
-              >
-                <Moon className="mr-1 h-3.5 w-3.5" />
-                {dreaming ? "Dreaming..." : "Dream"}
-              </Button>
-              <Button
-                size="sm"
-                className="h-[29px] rounded-[8px] text-[12.5px]"
-                onClick={handleSave}
-                disabled={saving || overCap || !dirty || !!pendingWriter}
-              >
-                {saving ? "Saving..." : "Save memory"}
-              </Button>
+                  Save memory
+                </PillButton>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Warnings and Status Messages */}
-      {approachingCap && (
-        <p className="text-[12px] font-medium text-amber-600 dark:text-amber-400">
-          Approaching the {PROJECT_MEMORY_MAX_CHARS}-character cap ({safeContent.length}/{PROJECT_MEMORY_MAX_CHARS}).
-        </p>
-      )}
-      {overCap && (
-        <p className="text-[12px] font-medium text-destructive">
-          Over the {PROJECT_MEMORY_MAX_CHARS}-character cap ({safeContent.length}/{PROJECT_MEMORY_MAX_CHARS}). Trim the content to save.
-        </p>
-      )}
-      {message && <p className="text-[12px] text-primary">{message}</p>}
-      {error && loaded && (
-        <p className="text-[12px] text-destructive">{error}</p>
-      )}
+        {/* The sentence tracks the numeral's ramp: sand deep for approaching,
+            coral for over. It said `text-strata-you-deep` here too, which is
+            the same #a63a1a as `text-destructive` below it. */}
+        {approachingCap && (
+          <p className="flex-none text-[12px] text-strata-land-deep">
+            Approaching the {PROJECT_MEMORY_MAX_TOKENS}-token cap (
+            {estimatedTokens}/{PROJECT_MEMORY_MAX_TOKENS}).
+          </p>
+        )}
+        {overCap && (
+          <p className="flex-none text-[12px] text-destructive">
+            Over the {PROJECT_MEMORY_MAX_TOKENS}-token cap (
+            {estimatedTokens}/{PROJECT_MEMORY_MAX_TOKENS}). Trim the content to
+            save.
+          </p>
+        )}
+        {message && (
+          <p className="flex-none text-[12px] text-strata-live-deep">{message}</p>
+        )}
+        {error && loaded && (
+          <p className="flex-none text-[12px] text-destructive">{error}</p>
+        )}
+      </StrataBand>
     </div>
   );
 }

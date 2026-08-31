@@ -5,9 +5,8 @@ Arij is a local, AI-first project orchestrator. It provides a web interface for 
 
 ## Stack
 - **Framework**: Next.js 16 (App Router, Turbopack)
-- **UI**: Tailwind CSS v4 + shadcn/ui
+- **UI**: Tailwind CSS v4 + shadcn/ui, under the Piscine design system (below)
 - **Database**: SQLite via better-sqlite3 + Drizzle ORM
-- **Kanban DnD**: dnd-kit
 - **Claude Code**: CLI `claude` spawned as child process
 
 ## Conventions
@@ -15,13 +14,44 @@ Arij is a local, AI-first project orchestrator. It provides a web interface for 
 - Use `nanoid` for all IDs (`lib/utils/nanoid.ts`)
 - API routes return JSON with consistent `{ data }` or `{ error }` shape
 - Database schema in `lib/db/schema.ts`, connection in `lib/db/index.ts`
-- Dark mode is default (class-based via Tailwind)
+- Dark mode — "night" in Piscine terms — is default (class-based via Tailwind)
 - Components use shadcn/ui primitives from `components/ui/`
 
+## Piscine design system
+Read `components/piscine/index.ts` first — it is the shared vocabulary
+(`stratum` / `fill` / `tone` / `size`) and the one import surface.
+- Tokens live in `app/globals.css` (`:root` = day, `.dark` = night); raw colour
+  strings for SVG/canvas/`style` come from `lib/piscine/tokens.ts`. Never a hex.
+- Compose from `@/components/piscine`. Do not re-style a shadcn primitive into
+  a lookalike, and do not add a new one before checking the barrel.
+- Colour is the **stratum** you are on or the **project identity**
+  (`projectTone`) — never state. State is a word, an icon, or motion.
+- Filled controls are `--action` (deep water-green), never black.
+- `components/piscine/TopBar.tsx` is mounted once by `app/layout.tsx` and is the
+  app's only chrome. A screen renders **no page header of its own** — no logo,
+  no nav, no ⌘K. There is no left rail.
+- No drag and drop anywhere. `@dnd-kit/*` is still listed in `package.json`, but
+  no source file imports it; re-ordering happens in the ticket overlay or
+  Refinement.
+
 ## File Structure
-- `app/` — Next.js routes and layouts
-- `components/` — React components (kanban, chat, dashboard, etc.)
-- `lib/` — Server-side utilities (db, claude, converters)
+- `app/` — Next.js routes and layouts. `/` is the cross-project control desk
+  (five attention strata, not columns); `/projects/:id` is that same desk
+  scoped to one project. Then `/agents`, `/chat`, `/qa`, `/tickets` (the
+  exhaustive registry, the only table view), `/usage`, `/settings`, `/inbox`,
+  and per-project `spec`, `releases`, `sessions`.
+- `components/` — `piscine/` (shared primitives + tokens), then one directory
+  per surface: `desk/`, `ticket/` (the modal overlay), `qa/`,
+  `tickets-registry/`, `chat-page/`, `agents-workshop/`, `session-live/`,
+  `spec/`, `releases/`, `usage/`, `settings-piscine/`, plus `ui/` (shadcn) and
+  older shared pieces (`chat/`, `epic/`, `night/`, `monitor/`, …).
+  `components/kanban/` no longer holds a board — only dialogs and small
+  controls (create, quick capture, refinement).
+- `lib/` — Server-side utilities (db, claude, converters). `lib/kanban/` is
+  live logic, not dead code: queue ranks, merge readiness, status transitions,
+  filters. Ticket state still moves backlog → todo → in_progress → review →
+  to_merge → done → released; those statuses are data, they are just no longer
+  drawn as columns.
 - `hooks/` — Client-side React hooks
 - `data/` — Local data (SQLite DB, session logs) — gitignored
 - `projects/` — App-managed clones of repositories imported from GitHub

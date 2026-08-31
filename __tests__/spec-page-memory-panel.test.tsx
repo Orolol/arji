@@ -3,7 +3,7 @@
  * - Equal peer layout (Spec next to Memory)
  * - Empty state and 4-sections skeleton template
  * - Edit and preview modes
- * - Character cap indicator and approaching warning
+ * - Token cap indicator and approaching warning
  * - Provenance display
  * - Pre-dream snapshot restore with explicit confirmation
  * - Read-only mode and banner during active agent rewrite (pendingWriter)
@@ -13,7 +13,11 @@ import * as React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import SpecPage from "@/app/projects/[projectId]/spec/page";
 import { MemoryPanel, hasAllDreamingSections } from "@/components/spec/MemoryPanel";
-import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
+import {
+  PROJECT_MEMORY_MAX_CHARS,
+  PROJECT_MEMORY_MAX_TOKENS,
+} from "@/lib/documents/memory-constants";
+import { estimateTokens } from "@/lib/tokens/estimator";
 
 let activeMockEventSources: MockEventSource[] = [];
 
@@ -105,7 +109,7 @@ describe("spec page — paired memory card structure (Story 1 & 2)", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("memory-cap-indicator")).toHaveTextContent(
-        `0 / ${PROJECT_MEMORY_MAX_CHARS}`
+        `0 / ${PROJECT_MEMORY_MAX_TOKENS}`
       );
     });
 
@@ -213,7 +217,7 @@ describe("MemoryPanel component (Story 2, 3 & 4)", () => {
   });
 
   it("displays warning when approaching the cap and blocks save when over cap", async () => {
-    const approachingContent = "x".repeat(11000);
+    const approachingContent = "x".repeat(35000);
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -233,17 +237,65 @@ describe("MemoryPanel component (Story 2, 3 & 4)", () => {
     render(<MemoryPanel projectId="proj-1" mode="edit" />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Approaching the 12000-character cap/i)).toBeDefined();
+      expect(screen.getByText(new RegExp(`Approaching the ${PROJECT_MEMORY_MAX_TOKENS}-token cap`))).toBeDefined();
     });
 
     // Type more to exceed the cap
     const editor = screen.getByTestId("memory-editor");
-    fireEvent.change(editor, { target: { value: "x".repeat(12050) } });
+    fireEvent.change(editor, { target: { value: "x".repeat(40050) } });
 
     await waitFor(() => {
-      expect(screen.getByText(/Over the 12000-character cap/i)).toBeDefined();
+      expect(screen.getByText(new RegExp(`Over the ${PROJECT_MEMORY_MAX_TOKENS}-token cap`))).toBeDefined();
     });
     expect(screen.getByRole("button", { name: "Save memory" })).toBeDisabled();
+  });
+
+  /**
+   * The cap indicator is a three-step ramp: under → approaching → over. The
+   * middle step used to be `you-deep`, which resolves to the SAME #a63a1a as
+   * `danger` in both themes, so "approaching" rendered identically to "over"
+   * and the warning step was invisible. Each step must be its own colour.
+   */
+  it("gives the approaching-cap step its own colour, distinct from the over-cap one", async () => {
+    async function capToneClass(content: string): Promise<string> {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            content,
+            exists: true,
+            updatedAt: null,
+            maxChars: PROJECT_MEMORY_MAX_CHARS,
+            provenance: null,
+            archive: null,
+            pendingWriter: null,
+          },
+        }),
+      });
+      const view = render(<MemoryPanel projectId="proj-1" mode="edit" />);
+      await waitFor(() => {
+        expect(screen.getByTestId("memory-cap-indicator")).toHaveTextContent(
+          `${estimateTokens(content)} / ${PROJECT_MEMORY_MAX_TOKENS}`
+        );
+      });
+      const className =
+        screen
+          .getByTestId("memory-cap-indicator")
+          .querySelector('[data-slot="mono"]')?.className ?? "";
+      view.unmount();
+      return className;
+    }
+
+    const under = await capToneClass("x".repeat(1_000));
+    const approaching = await capToneClass("x".repeat(35_000));
+    const over = await capToneClass("x".repeat(40_050));
+
+    expect(new Set([under, approaching, over]).size).toBe(3);
+    expect(over).toContain("text-destructive");
+    expect(approaching).not.toContain("text-destructive");
+    // `--strata-you-deep` IS `--destructive`; the middle step must not use it.
+    expect(approaching).not.toContain("text-strata-you-deep");
   });
 
   it("requires explicit confirmation before restoring pre-dream snapshot", async () => {

@@ -39,16 +39,6 @@
       "count": 1
     }
   },
-  "components/agent-config/RuntimeSettingsTab.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 2
-    }
-  },
-  "components/agent-config/StatsTab.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
   "components/chat/UnifiedChatPanel.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
@@ -80,11 +70,6 @@
   "components/kanban/EpicCard.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 2
-    }
-  },
-  "components/kanban/epic-detail/WhatTheAgentDid.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
     }
   },
   "components/layout/RepoStatusBar.tsx": {

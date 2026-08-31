@@ -37,7 +37,28 @@ describe("chat upload route limits", () => {
 
   function uploadRequest(file: File | null): NextRequest {
     return {
+      headers: new Headers(),
       formData: async () => ({ get: () => file }),
+    } as unknown as NextRequest;
+  }
+
+  /**
+   * A body the platform truncated at its own request cap: the multipart
+   * stream is cut short, so `formData()` rejects with the same TypeError Next
+   * throws in production. `content-length` still describes what the client
+   * tried to send.
+   */
+  function truncatedRequest(contentLength: number | null): NextRequest {
+    const headers = new Headers();
+    if (contentLength !== null) {
+      headers.set("content-length", String(contentLength));
+    }
+
+    return {
+      headers,
+      formData: async () => {
+        throw new TypeError("Failed to parse body as FormData.");
+      },
     } as unknown as NextRequest;
   }
 
@@ -68,7 +89,9 @@ describe("chat upload route limits", () => {
       mockRouteContext({ projectId: "proj-1" })
     );
 
-    expect(res.status).toBe(400);
+    // 413, like a body the platform refused to deliver: one status for "too
+    // big" whichever side of the platform cap the upload landed on.
+    expect(res.status).toBe(413);
     await expect(res.json()).resolves.toEqual({
       error: "File too large (11.0MB). Max: 10MB",
     });
@@ -86,6 +109,45 @@ describe("chat upload route limits", () => {
     expect(body.data.mimeType).toBe("image/png");
     expect(body.data.filePath).toMatch(/^data\/uploads\/proj-1\/.+shot\.png$/);
     expect(fsMock.writeFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers an oversized truncated body with 413 and names the limit", async () => {
+    const res = await POST(
+      truncatedRequest(12 * 1024 * 1024),
+      mockRouteContext({ projectId: "proj-1" })
+    );
+
+    expect(res.status).toBe(413);
+    const raw = await res.text();
+    expect(raw).not.toBe("");
+    expect(JSON.parse(raw)).toEqual({
+      error: "Upload too large (12.0MB including form overhead). Max: 10MB",
+    });
+    expect(fsMock.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("still names the limit when the truncated body declared no length", async () => {
+    const res = await POST(
+      truncatedRequest(null),
+      mockRouteContext({ projectId: "proj-1" })
+    );
+
+    expect(res.status).toBe(413);
+    await expect(res.json()).resolves.toEqual({
+      error: "Upload too large. Max: 10MB",
+    });
+  });
+
+  it("does not blame the size limit for a small unparseable body", async () => {
+    const res = await POST(
+      truncatedRequest(2048),
+      mockRouteContext({ projectId: "proj-1" })
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: "Could not read the upload. Expected a multipart form body.",
+    });
   });
 
   it("still rejects when no file is provided", async () => {

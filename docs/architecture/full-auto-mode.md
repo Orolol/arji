@@ -29,11 +29,33 @@ an auto-mode agent from one you launched by hand.
 
 ## Turning it on
 
-**Board toolbar → Auto.** The dialog carries an enable switch, a build agent +
-build concurrency row, a review agent + review concurrency row, and a live count
-of what the next sweep would pick up.
+Four surfaces, and they are not equivalent — the 2026-08 UI rebuild removed the
+board toolbar this section used to name:
 
-Activation is **per project**. There is no global "all projects" switch.
+- **The desk's `Full Auto · n/N` pill** (`components/desk/NowDesk.tsx`, the
+  `desk-full-auto` popover) is where the per-project switches actually live: one
+  checkbox row per project, each `PUT /api/projects/:projectId/auto-mode`.
+- **The project route's capture bar** (`board-capture-bar` in
+  `app/projects/[projectId]/page.tsx`) draws `AutoModeToggle`, which opens
+  `AutoModeDialog` — the CONFIGURATION dialog: an enable switch, a build agent +
+  build concurrency row, a review agent + review concurrency row, and a live
+  count of what the next sweep would pick up.
+- **The top bar's `Auto` pill** (`components/piscine/TopBar.tsx`) is a
+  read-only rollup — turquoise when any project is armed, neutral otherwise and
+  until the settings read lands — and it is a `<Link>` to `/settings`, not a
+  toggle.
+- **`/settings` → FULL AUTO** (`components/settings-piscine/FullAutoBand.tsx`)
+  writes the BARE keys only — the workspace-wide `auto_mode_enabled`, two
+  other global booleans (`auto_mode_smart_dispatch`, the Full Auto second
+  opinion) and the global agent concurrency. It deliberately never writes an
+  `<key>:<projectId>` override; that is `AutoModeDialog`'s job.
+
+Arming is **per project** in every normal case, and the desk's popover is the
+control that does it. The one exception is the bare `auto_mode_enabled` key
+`/settings` writes: `listAutoModeEnabledProjectIds` reads a global `true` as
+"every project except those that stored an explicit `false`", so that switch
+arms the whole workspace. `FullAutoBand` says as much in place; treat it as a
+blast radius, not a default.
 
 ### Settings keys
 
@@ -123,8 +145,8 @@ Two things are re-checked continuously rather than once per sweep:
   mean off *now*, not "after the work already selected finishes".
 - **The dispatch target's status**, immediately before `launchStage`, through
   the driver's own `checkGuards`. The board snapshot is milliseconds old, but a
-  human approving, releasing, or dragging a ticket back to Backlog in that
-  window must win — otherwise the build closure would drag it straight back to
+  human landing, releasing, or moving a ticket back to Backlog in that
+  window must win — otherwise the build closure would pull it straight back to
   `in_progress`. The check reads the selector's own `BUILDABLE_*_STATUSES`
   sets, so it can never be laxer than selection. Story-scoped builds
   additionally check the parent epic against `BUILDABLE_EPIC_STATUSES`,
@@ -150,8 +172,11 @@ the board's own rules rather than scheduler-private heuristics.
 
 **Column first, then position.** `compareEpics` (`lib/auto-mode/select.ts`)
 sorts by column rank, then `position ASC`, and never by priority. Priority 0–3
-is a badge and a filter, not a scheduling key: within a column, the card at
-the top is the next one built, which is exactly what the board shows.
+is a badge and a filter, not a scheduling key: within a column, the ticket at
+the top is the next one built. That order is on screen: the desk's UP NEXT band
+sorts with `compareExecutionOrder` (`lib/kanban/queue.ts`), and
+`compareEpics` in `lib/auto-mode/select.ts` IS that function — one definition,
+so the band shows the supervisor's own order rather than a lookalike.
 
 The column rank exists because `position` is written **per column** — creation
 uses `MAX(position) + 1` scoped to the target status, and the reorder route
@@ -160,22 +185,26 @@ position alone cannot order a candidate set that spans two of them. **In
 Progress ranks before To Do**: a ticket sitting there came back from a negative
 review, and finishing work already started beats opening a new front. Without
 that explicit rule the cross-column tie would fall through to SQLite's row
-order, i.e. creation order, which is invisible on the board and unreachable by
-dragging.
+order, i.e. creation order, which nothing surfaces and nothing can reach.
 
-**Sort by priority** in the Backlog and To Do headers is how priority reaches
-the scheduler — it rewrites the column's positions in bulk through the
-existing reorder route (priority DESC, ties keeping their current order), so
-the new display order *is* the new execution order. It is disabled while a
-filter is active, because it writes positions for the whole column and a
-filtered view is a subset. It also sends `reorderOnly`, so a card the server
-has moved on from is left alone rather than transitioned: sorting is never a
-move.
+**How priority reaches the scheduler.** It has to be turned into `position` by
+something, and since the rebuild the only live writer is the agent: the
+refinement pass calls `set_priority` and then `reorder_tickets`
+(`app/api/mcp/reorder-tickets/route.ts`), which re-ranks Backlog / To do
+through the shared core `lib/workflow/reorder.ts` — the same core, with
+`reorderOnly`, so a ticket the server has moved on from is skipped rather than
+transitioned. The old "Sort by priority" column-header action is **gone**: it
+lived in `hooks/useKanban.sortColumnByPriority`, and no screen mounts that hook
+any more. `POST /api/projects/:projectId/epics/reorder` still exists and still
+runs the same core, but it currently has no caller in the UI. A human who wants
+a different execution order re-ranks through Refinement, or changes the
+ticket's status/priority from the 6a overlay.
 
 **Only To Do and In Progress are buildable.** `BUILDABLE_EPIC_STATUSES` is
-`{todo, in_progress}` — Backlog is the staging area, not the queue, and
-dragging a ticket back to it is the "not yet" gesture that takes it out of
-Full Auto's reach. The same exported set is what `defaultDispatch` re-checks
+`{todo, in_progress}` — Backlog is the staging area, not the queue, and moving
+a ticket back to it (the ticket overlay's status control, or a `promote_ticket`
+demotion) is the "not yet" gesture that takes it out of Full Auto's reach. The
+same exported set is what `defaultDispatch` re-checks
 at launch time, so the selector and the last-moment guard cannot disagree.
 
 One deliberate exception, `STORY_PARENT_BUILDABLE_STATUSES` (`{todo,
@@ -323,9 +352,12 @@ ready — skip". Its own selector is still *stricter* than the engine's (the
 engine accepts any completed, verifiable review ever; the mode wants one newer
 than the last code change).
 
-`POST .../approve` is deliberately **not** reused anywhere in this code path: it
-bulk-resolves every open review comment before transitioning, which would
-steamroll exactly the blocking findings that must stop an auto-merge.
+The epic-level `POST .../approve` route this section used to warn against was
+**removed** in the 2026-08-27 workflow refonte (the merge is the approval); see
+`ticket-state-machine.md`. Nothing in this code path ever reused it, and the
+reason still holds for the story-level approve route that remains: it
+bulk-resolves open review comments before transitioning, which would steamroll
+exactly the blocking findings that must stop an auto-merge.
 
 ### 4. Double-counted budgets
 
@@ -365,7 +397,9 @@ This is the one path where an agent modifies `main` with nobody watching, so it
 is spelled out in full:
 
 1. The mode merges with `mergeWorktree(...)` — the same primitive the manual
-   Merge button uses. The workflow guards are validated **before** git runs, so
+   merge affordances reach through the merge route: the desk's READY TO LAND
+   **Land** / **Land all** and the ticket overlay's **Merge into main**. The
+   workflow guards are validated **before** git runs, so
    a merge can never land on `main` while the ticket refuses to move.
    Before git runs, the current `main` and branch tips are captured as a
    **rollback checkpoint**.
@@ -439,7 +473,10 @@ auto-distillation trigger are composed there rather than overwriting each other.
 | `lib/auto-mode/engine.ts` | The sweep, the budgets, the timer, the kicks |
 | `lib/auto-mode/status.ts` | Frozen GET/PUT response shape shared with the UI |
 | `app/api/projects/[projectId]/auto-mode/route.ts` | GET status / PUT settings (+ immediate sweep) |
-| `components/auto-mode/AutoModeDialog.tsx` | Configuration dialog |
-| `components/auto-mode/AutoModeToggle.tsx` | Board toolbar button + live badge |
+| `components/auto-mode/AutoModeDialog.tsx` | Configuration dialog, opened from the project route's capture bar |
+| `components/auto-mode/AutoModeToggle.tsx` | That capture-bar button + live badge (`board-capture-bar` in `app/projects/[projectId]/page.tsx`) |
+| `components/desk/NowDesk.tsx` | The desk's `Full Auto · n/N` popover — the per-project on/off switches |
+| `components/piscine/TopBar.tsx` | The `Auto` pill: a read-only rollup linking to `/settings` |
+| `components/settings-piscine/FullAutoBand.tsx` | `/settings` → FULL AUTO; writes the BARE (workspace-wide) keys only |
 
 Tests: `__tests__/auto-mode-{constants,select,engine,merge,route,dialog,instrumentation,e2e}.test.ts(x)`.

@@ -19,9 +19,19 @@ export const ALLOWED_IMAGE_MIME_TYPES = [
 /** Value for an `<input type="file">` accept attribute. */
 export const IMAGE_UPLOAD_ACCEPT = ALLOWED_IMAGE_MIME_TYPES.join(",");
 
+/**
+ * The application's own limit on one attached image.
+ *
+ * It must stay strictly below `experimental.proxyClientMaxBodySize` in
+ * `next.config.ts`: `middleware.ts` matches `/api/:path*`, so Next buffers the
+ * request body up to that cap, and a file at the same number overflows it once
+ * the multipart envelope is added — the body then reaches the route truncated
+ * and `imageUploadRejectionReason` never sees the file at all.
+ */
 export const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
 
-export const MAX_IMAGE_UPLOAD_LABEL = "10MB";
+/** Derived, so the wording of the limit cannot drift away from the limit. */
+export const MAX_IMAGE_UPLOAD_LABEL = `${MAX_IMAGE_UPLOAD_BYTES / 1024 / 1024}MB`;
 
 /**
  * How many screenshots one ticket may carry.
@@ -58,20 +68,69 @@ export function isAllowedImageMimeType(type: string): boolean {
 }
 
 /**
+ * Why an upload is refused, split by kind.
+ *
+ * The two kinds are not the same answer over HTTP: a file that is too big is
+ * `413 Payload Too Large`, while a file of the wrong type is a `400`. Callers
+ * that only need the wording use `imageUploadRejectionReason` below; the
+ * upload route needs the distinction to pick a status.
+ */
+export type ImageUploadRejectionCode = "unsupported_type" | "too_large";
+
+export interface ImageUploadRejection {
+  code: ImageUploadRejectionCode;
+  reason: string;
+}
+
+/**
  * Why this file cannot be uploaded, or `null` when it is acceptable.
  * The wording is what the upload route returns to API callers.
  */
-export function imageUploadRejectionReason(file: ImageFileLike): string | null {
+export function imageUploadRejection(file: ImageFileLike): ImageUploadRejection | null {
   if (!isAllowedImageMimeType(file.type)) {
-    return `Unsupported file type: ${file.type || "unknown"}. Allowed: ${ALLOWED_EXTENSIONS_LABEL}`;
+    return {
+      code: "unsupported_type",
+      reason: `Unsupported file type: ${file.type || "unknown"}. Allowed: ${ALLOWED_EXTENSIONS_LABEL}`,
+    };
   }
 
   if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
     const megabytes = (file.size / 1024 / 1024).toFixed(1);
-    return `File too large (${megabytes}MB). Max: ${MAX_IMAGE_UPLOAD_LABEL}`;
+    return {
+      code: "too_large",
+      reason: `File too large (${megabytes}MB). Max: ${MAX_IMAGE_UPLOAD_LABEL}`,
+    };
   }
 
   return null;
+}
+
+/** The rejection wording alone — one source of truth with the route's. */
+export function imageUploadRejectionReason(file: ImageFileLike): string | null {
+  return imageUploadRejection(file)?.reason ?? null;
+}
+
+/**
+ * Why an upload whose multipart body could not be parsed is refused.
+ *
+ * A request body over the platform's cap reaches the route truncated, so
+ * `request.formData()` throws before `imageUploadRejectionReason` ever sees
+ * the file — the size guard above cannot be what answers that caller. This is
+ * the wording used instead, and it names the same limit.
+ *
+ * `bodyBytes` is the request's declared `content-length` when it carried one.
+ * It measures the whole multipart body, not the file alone, which is why the
+ * message says so: a file of exactly the limit still overflows once the form
+ * envelope is added, and "10.0MB. Max: 10MB" would otherwise read as a
+ * contradiction.
+ */
+export function oversizedUploadReason(bodyBytes: number | null): string {
+  if (bodyBytes === null) {
+    return `Upload too large. Max: ${MAX_IMAGE_UPLOAD_LABEL}`;
+  }
+
+  const megabytes = (bodyBytes / 1024 / 1024).toFixed(1);
+  return `Upload too large (${megabytes}MB including form overhead). Max: ${MAX_IMAGE_UPLOAD_LABEL}`;
 }
 
 /** Splits a batch into what may be uploaded and what must be reported back. */

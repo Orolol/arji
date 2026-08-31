@@ -27,6 +27,18 @@ class MockEventSource {
 const routerReplace = vi.fn();
 let searchParams = new URLSearchParams();
 
+/**
+ * A consumed deep link leaves the address bar, and it does so without a
+ * navigation: `router.replace()` is a server round-trip that keeps the spent
+ * parameter live in the URL for seconds — long enough for a close-and-reload
+ * to replay it. The page now rewrites history directly, so what these tests
+ * assert is the address bar rather than a spy on the router.
+ * See __tests__/ticket-deep-link-consumption.test.tsx.
+ */
+function currentUrl() {
+  return window.location.pathname + window.location.search;
+}
+
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "proj1" }),
   useRouter: () => ({ replace: routerReplace }),
@@ -56,10 +68,16 @@ vi.mock("@/hooks/useBatchSelection", () => ({
   },
 }));
 
-vi.mock("@/components/kanban/Board", () => ({
-  Board: () => <div data-testid="board" />,
+vi.mock("@/components/desk/NowDesk", () => ({
+  NowDesk: () => <div data-testid="board" />,
 }));
-vi.mock("@/components/kanban/EpicDetail", () => ({ EpicDetail: () => null }));
+vi.mock("@/components/auto-mode/AutoModeToggle", () => ({
+  AutoModeToggle: () => null,
+}));
+vi.mock("@/components/kanban/RefinementButton", () => ({
+  RefinementButton: () => null,
+}));
+vi.mock("@/components/ticket/TicketOverlay", () => ({ TicketOverlay: () => null }));
 vi.mock("@/components/monitor/AgentMonitor", () => ({ AgentMonitor: () => null }));
 vi.mock("@/components/shared/NamedAgentSelect", () => ({
   NamedAgentSelect: () => null,
@@ -108,6 +126,7 @@ describe("Project board — night run wiring", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     searchParams = new URLSearchParams();
+    window.history.replaceState(null, "", "/projects/proj1?pending=1");
     startedHandler = null;
     global.fetch = vi
       .fn()
@@ -127,7 +146,7 @@ describe("Project board — night run wiring", () => {
     await waitFor(() =>
       expect(screen.getByTestId("night-dialog-open")).toBeInTheDocument()
     );
-    expect(routerReplace).toHaveBeenCalledWith("/projects/proj1");
+    expect(currentUrl()).toBe("/projects/proj1");
   });
 
   it("ignores an unrelated night param value", async () => {
@@ -166,7 +185,7 @@ describe("Project board — night run wiring", () => {
         "night_abc"
       )
     );
-    expect(routerReplace).toHaveBeenCalledWith("/projects/proj1");
+    expect(currentUrl()).toBe("/projects/proj1");
   });
 
   it("does not open the summary without the param", async () => {

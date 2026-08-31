@@ -34,8 +34,10 @@ import {
   MEMORY_DOC_FILENAME,
   MEMORY_DOC_KIND,
   PROJECT_MEMORY_MAX_CHARS,
+  PROJECT_MEMORY_MAX_TOKENS,
   isInternalMemoryDocKind,
 } from "@/lib/documents/memory-constants";
+import { estimateTokens } from "@/lib/tokens/estimator";
 
 type TestDb = ReturnType<typeof createTestDb>["db"];
 
@@ -87,6 +89,18 @@ describe("saveProjectMemory / getProjectMemoryDoc", () => {
     expect(truncated).toBe(true);
     expect(doc.markdownContent).toHaveLength(PROJECT_MEMORY_MAX_CHARS);
     expect(doc.sizeBytes).toBe(PROJECT_MEMORY_MAX_CHARS);
+    expect(estimateTokens(doc.markdownContent)).toBe(PROJECT_MEMORY_MAX_TOKENS);
+  });
+
+  it("keeps a document under the token cap intact even past the old 12000-char limit", () => {
+    // 30 000 chars = 7 500 estimated tokens: inside the 10k-token budget and
+    // 2.5x the old 12000-char cap — must survive a save untouched.
+    const inBudget = "a".repeat(30000);
+    const { doc, truncated } = saveProjectMemory(PROJECT_ID, inBudget, db);
+
+    expect(truncated).toBe(false);
+    expect(doc.markdownContent).toBe(inBudget);
+    expect(estimateTokens(doc.markdownContent)).toBe(7500);
   });
 
   it("keeps memory docs per-project", () => {
@@ -109,6 +123,19 @@ describe("enforceMemoryCap", () => {
   it("cuts at exactly the cap", () => {
     const over = "z".repeat(PROJECT_MEMORY_MAX_CHARS + 1);
     expect(enforceMemoryCap(over)).toHaveLength(PROJECT_MEMORY_MAX_CHARS);
+  });
+
+  it("truncates to exactly the token budget, never over it", () => {
+    const over = "b".repeat(PROJECT_MEMORY_MAX_CHARS + 4096);
+    const capped = enforceMemoryCap(over);
+
+    expect(estimateTokens(over)).toBeGreaterThan(PROJECT_MEMORY_MAX_TOKENS);
+    expect(capped).toHaveLength(PROJECT_MEMORY_MAX_CHARS);
+    expect(estimateTokens(capped)).toBe(PROJECT_MEMORY_MAX_TOKENS);
+  });
+
+  it("keeps the char budget in lockstep with the token budget (1 token = 4 chars)", () => {
+    expect(PROJECT_MEMORY_MAX_CHARS).toBe(PROJECT_MEMORY_MAX_TOKENS * 4);
   });
 });
 

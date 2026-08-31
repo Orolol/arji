@@ -11,23 +11,9 @@ import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RefinementButton } from "@/components/kanban/RefinementButton";
+import { mockFetchSequence } from "@/__tests__/helpers/mock-fetch";
 
 const originalFetch = global.fetch;
-
-/** Queue of responses, consumed in order; the last one repeats. */
-function mockFetchSequence(responses: Array<{ ok: boolean; body: unknown }>) {
-  let index = 0;
-  const fetchMock = vi.fn(async () => {
-    const response = responses[Math.min(index, responses.length - 1)];
-    index += 1;
-    return {
-      ok: response.ok,
-      json: async () => response.body,
-    } as Response;
-  });
-  global.fetch = fetchMock as unknown as typeof fetch;
-  return fetchMock;
-}
 
 function idle(ticketCount = 5) {
   return {
@@ -75,6 +61,11 @@ describe("RefinementButton", () => {
         ok: true,
         body: { data: { started: true, sessionId: "s-42", ticketCount: 5 } },
       },
+      // The dispatch flips the button to running, which re-runs its status
+      // effect. That read is a GET and needs a status body: answering it with
+      // the POST payload above leaves `running` undefined, which the button
+      // reads as "the pass ended".
+      running("s-42"),
     ]);
     const onStarted = vi.fn();
 
@@ -105,6 +96,11 @@ describe("RefinementButton", () => {
         ok: true,
         body: { data: { started: true, sessionId: "s-42", ticketCount: 5 } },
       },
+      // The dispatch flips the button to running, which re-runs its status
+      // effect. That read is a GET and needs a status body: answering it with
+      // the POST payload above leaves `running` undefined, which the button
+      // reads as "the pass ended".
+      running("s-42"),
     ]);
 
     render(
@@ -239,7 +235,9 @@ describe("RefinementButton", () => {
   it("polls slowly while idle and fast while a pass runs", async () => {
     vi.useFakeTimers();
     try {
-      const fetchMock = mockFetchSequence([idle()]);
+      // Every tick is another status read of the same idle board, so the
+      // steady state is the point here — hence the explicit opt-in.
+      const fetchMock = mockFetchSequence([idle()], { repeatLast: true });
       render(
         <RefinementButton
           projectId="proj-1"
@@ -342,6 +340,59 @@ describe("RefinementButton", () => {
 
     await waitFor(() => expect(onFinished).toHaveBeenCalled());
     expect(onFinished).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Regression: a status read that does not answer with a status must not be
+   * mistaken for one. The button POSTs to the same URL it polls, so the
+   * dispatch payload can come back as the answer to a status read — from a
+   * queued mock, or from anything in front of the route that echoes the last
+   * body. That payload has no `running` field, and reading it as a status
+   * made `running` undefined, i.e. "the pass ended": the button dropped its
+   * spinner and badge mid-pass and fired a spurious board reload.
+   *
+   * That is the mechanism behind the flake in "disables itself with a spinner
+   * and badge once a pass is under way" — there the stray read is the effect
+   * re-run that the running flag itself triggers, which is what this drives.
+   */
+  it("ignores a status read whose payload is not a status", async () => {
+    const fetchMock = mockFetchSequence([
+      running(),
+      // Learning it is running re-runs the button's status effect. This is
+      // that second read, answered with the dispatch payload.
+      {
+        ok: true,
+        body: { data: { started: true, sessionId: "session-1", ticketCount: 5 } },
+      },
+    ]);
+    const onFinished = vi.fn();
+
+    render(
+      <RefinementButton
+        projectId="proj-1"
+        onError={vi.fn()}
+        onFinished={onFinished}
+        pollIntervalMs={0}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("refinement-button")).toBeDisabled()
+    );
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2)
+    );
+    // A settled window. Without the guard the bogus payload collapses the
+    // state within a microtask of that read, so 100ms is a wide margin.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Nothing said the pass ended, so nothing about the button may change.
+    expect(screen.getByTestId("refinement-button")).toBeDisabled();
+    expect(screen.getByTestId("refinement-button-spinner")).toBeTruthy();
+    expect(screen.getByTestId("refinement-button-badge")).toHaveTextContent(
+      "running"
+    );
+    expect(onFinished).not.toHaveBeenCalled();
   });
 
   it("stays usable when the status read fails", async () => {

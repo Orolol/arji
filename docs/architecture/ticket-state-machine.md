@@ -23,37 +23,83 @@ The epic lifecycle has exactly one human decision point, the merge:
 There is no manual approve step: `POST .../approve` (epic) was removed, and
 `→ done` is only reachable with `source: "merge"`.
 
+## Where a human transition comes from (2026-08 UI rebuild)
+
+The state machine below is unchanged. What changed is the gesture: **there is
+no drag-and-drop any more** — no screen imports dnd-kit (the only remaining
+mention is a comment in `components/spec/DocsCard.tsx` explaining that its drop
+zone is an HTML5 file target and not a sortable), and statuses are no longer
+presented as columns you drop a card into. They are still the same data:
+`KANBAN_COLUMNS`, `epics.status`, `epics.position`.
+
+The human-driven edges in the table now originate from:
+
+- **the ticket overlay's status control** — `components/ticket/StatusControl.tsx`,
+  rendered in the overlay's PIPELINE card, → `useEpicDetail.updateEpic` →
+  `PATCH /api/projects/:projectId/epics/:epicId`, which calls `applyTransition`
+  with `actor: "user"`, `source: "api"`. The menu lists every column and
+  disables the unreachable ones with the engine's own reason
+  (`lib/kanban/status-transitions.ts`); a guard the client cannot evaluate
+  surfaces as an inline error under the pipeline chain.
+- **the desk's READY TO LAND band** — `components/desk/ReadyToLandBand.tsx`'s
+  Land / Land all, wired to `NowDesk.landOne`, which POSTs
+  `…/epics/:epicId/merge`. The overlay's "Merge into main"
+  (`components/ticket/GitBand.tsx`) posts the same route.
+- **YOUR TURN's Retry and Resolve conflict** — `components/desk/AttentionRow.tsx`
+  through `NowDesk.handleRetry` / `handleResolveConflict`, which POST the build
+  and `resolve-merge` routes; the transitions are the automatic ones those
+  routes already own.
+- **MCP** — `update_ticket_status`, plus the refinement pair `promote_ticket`
+  (the only refinement tool that changes a column) and `reorder_tickets`.
+- **`arji.json` reconciliation** — `lib/sync/import.ts`, guarded.
+
+`POST /api/projects/:projectId/epics/reorder` still exists and still shares its
+transactional core, `lib/workflow/reorder.ts`, with the agent-facing
+`reorder_tickets` MCP tool — that core is live and is why agent ordering and
+any future UI ordering cannot drift. The HTTP route itself, however, has no
+caller left in the app: its one client was `hooks/useKanban.ts`
+(`moveEpic`, `sortColumnByPriority`), and no component mounts that hook any
+more. Both are exercised only by tests. So the surviving writers of
+`epics.position` today are the refinement tool and `MAX(position) + 1` at
+creation; the route's doc comment still describes drag-and-drop and
+"Sort by priority", neither of which the UI offers.
+
 ## Resulting state machine
 
 | From | To | Trigger/reason | Production source |
 |---|---|---|---|
-| `backlog` | `todo` | planning / drag | epic PATCH, reorder, MCP |
+| `backlog` | `todo` | planning promotion: the ticket overlay's status control, the refinement `promote_ticket`, or reconciliation | epic PATCH, MCP (`promote_ticket`, `update_ticket_status`), reorder core, sync import |
 | `backlog` or `todo` | `in_progress` | build accepted; transition completes **before** `queued` session insert. Full Auto is the exception on the source side: it selects and dispatches only from `todo`/`in_progress` (`BUILDABLE_EPIC_STATUSES`), so a `backlog` build comes from a manual dispatch, a batch/night run or a pipeline | `automatic-transitions.ts` via manual build, batch/night, pipeline and Full Auto |
 | `review` or `to_merge` | `in_progress` | story-scoped build of a story left behind (added mid-build, or added to an epic already past In Progress); the epic reopens to finish it. Full Auto allows these parent statuses beyond its buildable set (`STORY_PARENT_BUILDABLE_STATUSES`) and refuses to merge an epic with such a story | `automatic-transitions.ts` via `transitionBuildStarted` |
 | `in_progress` | `review` | successful build (`answered` and legacy successful outcomes); epic scope advances only stories already `in_progress` (a story added mid-build stays `todo`), story scope only promotes the parent after every story is `review`/`done` | `automatic-transitions.ts` |
 | current | current | failed build, unanswered question, successful story with siblings remaining, or refused terminal promotion; no status write, explicit activity reason, terminal handlers continue posting agent output. A refusal persists `transition_refused`, settles pipeline/wave work as failed, emits failure feedback, and counts toward Full Auto parking | terminal outcome helper / question handler |
 | `review`, `to_merge` or `done` | `in_progress` | negative review / requested changes; the review session is already terminal | `automatic-transitions.ts` via review routes and pipeline (`transitionReviewRejected`) |
-| `review` | `to_merge` | PASSING review verdict (structured `submit_findings` verdict, or the prose scan for MCP-less providers). Requires a completed review that delivered evidence; a review on an MCP-capable provider that filed neither a verdict nor a finding row is *unverifiable*, leaves the ticket in `review`, and earns another review. A human may also drag/select this edge — the same completed-review guard applies | `automatic-transitions.ts` via `transitionReviewPassed` (pipeline `finalizeReviewSession`, epic review route); drag/API for humans |
-| `to_merge` | `done` | successful merge ONLY (`source: "merge"`), and refused while a `changes_requested` verdict still stands (see below). The merge bulk-resolves the epic's remaining open review comments — the merge IS the approval. Conflicts dispatch a merge-fix agent whose retry finalizes the same way | merge / resolve-merge routes, Full Auto merge |
+| `review` | `to_merge` | PASSING review verdict (structured `submit_findings` verdict, or the prose scan for MCP-less providers). Requires a completed review that delivered evidence; a review on an MCP-capable provider that filed neither a verdict nor a finding row is *unverifiable*, leaves the ticket in `review`, and earns another review. A human may also select this edge from the ticket overlay's status control — the same completed-review guard applies | `automatic-transitions.ts` via `transitionReviewPassed` (pipeline `finalizeReviewSession`, epic review route); epic PATCH for humans |
+| `to_merge` | `done` | successful merge ONLY (`source: "merge"`), and refused while a `changes_requested` verdict still stands (see below). The merge bulk-resolves the epic's remaining open review comments — the merge IS the approval. Conflicts dispatch a merge-fix agent whose retry finalizes the same way | merge / resolve-merge routes — reached from the desk's READY TO LAND (Land / Land all), the overlay's "Merge into main", YOUR TURN's Resolve conflict — and Full Auto merge |
 | story `review` | story `done` | explicit human story approval (`source: "approve"`, no separate review-agent session required) or the parent epic's merge cascade (`completeReviewedStories`). Story approval never merges or closes the epic | story approve route; merge cascade |
 | `done` | `released` | release creation, system actor only | releases route |
-| any structurally allowed edge | target | manual drag/API/MCP or guarded `arji.json` reconciliation | epic/story PATCH, reorder, MCP, sync import |
+| any structurally allowed edge | target | manual status change (ticket overlay), API, MCP, or guarded `arji.json` reconciliation | epic/story PATCH, reorder core, MCP, sync import |
 
 The structural edge lists live in `lib/workflow/engine.ts` — `EPIC_TRANSITIONS`
 (with `to_merge` between `review` and `done`) and `STORY_TRANSITIONS` (no
 `to_merge`: stories have no branch of their own; the engine's `targetKind`
-selects the graph). `released` is terminal. `→ done` cannot be achieved by
-drag/API for epics; its source must be `merge` (stories: `approve` or
-`merge`). Agents cannot reach `to_merge` through `update_ticket_status`
-(source `api` is refused; only source `review` — the review drivers — or a
-human). An `in_progress` ticket cannot leave the column while a `build`,
-`ticket_build`, or `team_build` session is queued/running; review, chat,
-merge and auxiliary sessions do not own that column. Full Auto deliberately
-excludes backlog: only todo/in-progress are candidates (plus a leftover story
-under a `review`/`to_merge` parent), ordered by column rank then board
-`position` — In Progress drains before To Do — and the driver owns the move
-to `in_progress`. A rejected review returning to `in_progress` remains
-automatically buildable.
+selects the graph). `released` is terminal. `→ done` cannot be achieved by a
+manual status change for epics; its source must be `merge` (stories: `approve`
+or `merge`) — which is why the overlay's status menu shows Done and disables it
+with "Done requires a merge — use the Merge action."
+(`REASON_MERGE_REQUIRED`). Agents cannot reach `to_merge` through
+`update_ticket_status` (source `api` is refused; only source `review` — the
+review drivers — or a human). An `in_progress` ticket cannot leave that status
+while a `build`, `ticket_build`, or `team_build` session is queued/running;
+review, chat, merge and auxiliary sessions do not own it — the status control
+disables every target with `REASON_SESSION_RUNNING` for exactly that window.
+Full Auto deliberately excludes backlog: only todo/in-progress are candidates
+(plus a leftover story under a `review`/`to_merge` parent), ordered by column
+rank then board `position` — In Progress drains before To Do — and the driver
+owns the move to `in_progress`. That order is what the desk's UP NEXT band
+renders (`compareExecutionOrder` in `lib/kanban/queue.ts` is `compareEpics` in
+`lib/auto-mode/select.ts`), which is why UP NEXT is not re-orderable by hand.
+A rejected review returning to `in_progress` remains automatically buildable.
 
 ### Findings lifecycle
 
@@ -79,7 +125,7 @@ verdict at all.
 
 Normally the rejection also moves the epic out of `to_merge`, so the guard is a
 backstop for the cases where it did not: a second reviewer landing after the
-promotion, a refused rejection transition, a human drag. `to_merge → done` with
+promotion, a refused rejection transition, a human status change. `to_merge → done` with
 `source: "merge"` is refused while it stands, and with the epic approve route
 gone there is no override — the way out is a fix and a fresh review.
 
@@ -115,8 +161,10 @@ Full Auto itself does not write status: `lib/auto-mode/select.ts` selects and
 ### Manual, approval, merge and reconciliation calls
 
 - `app/api/mcp/update-ticket-status/route.ts` — MCP/manual agent request (enum: backlog/todo/in_progress/review only).
-- `app/api/projects/[projectId]/epics/[epicId]/route.ts` — epic PATCH.
-- `app/api/projects/[projectId]/epics/reorder/route.ts` — drag preflight and apply.
+- `app/api/mcp/promote-ticket/route.ts` — the refinement tool's Backlog ⇄ To do move, `source: "refinement"` (the engine refuses that source anywhere else).
+- `app/api/mcp/reorder-tickets/route.ts` — the refinement re-rank; positions only, through the shared core.
+- `app/api/projects/[projectId]/epics/[epicId]/route.ts` — epic PATCH; this is what the ticket overlay's status and priority control writes.
+- `app/api/projects/[projectId]/epics/reorder/route.ts` — bulk position write plus whatever transitions the submitted statuses imply, through `lib/workflow/reorder.ts`. The core is live (`reorder_tickets` calls it); the HTTP route's only caller, `hooks/useKanban.ts`, is no longer mounted by any screen, so this endpoint is currently reachable but unused by the UI.
 - `app/api/projects/[projectId]/stories/[storyId]/route.ts` and `user-stories/route.ts` — story PATCH variants.
 - `app/api/projects/[projectId]/stories/[storyId]/approve/route.ts` — explicit story approval; never merges nor closes the epic (a decision line records when the last story closed).
 - `app/api/projects/[projectId]/epics/[epicId]/merge/route.ts` — manual merge preflight/finalization (resolves open findings on success) and merge-fix finalization.
@@ -144,7 +192,7 @@ requests.
 | successful/`answered` build promotion; incomplete siblings stay with a reason | `automatic-transition-invariants.test.ts` — “deterministic build completion” |
 | terminal refusal is non-throwing, preserves output, persists `transition_refused`, settles pipeline work as failed, and cannot revive a released ticket | `automatic-transition-invariants.test.ts`; `pipeline-stages-dispatch.test.ts`; `epic-build-asked-question.test.ts` |
 | one refused team-build promotion does not abort later epics | `automatic-transition-invariants.test.ts` — team-build isolation regression |
-| stories added mid-build stay todo; the merge cascade returns/logs non-review children and delivered cards warn while they remain unfinished | `automatic-transition-invariants.test.ts`; `workflow-approval-regressions.test.ts`; `epic-card.test.tsx` |
+| stories added mid-build stay todo; the merge cascade returns/logs non-review children | `automatic-transition-invariants.test.ts`; `workflow-approval-regressions.test.ts` |
 | story approval is explicit human review, closes only the story, and never merges the epic | `workflow-approval-regressions.test.ts` |
 | refused import statuses preserve content, are returned in `statusesSkipped`, and transaction rollback emits no phantom move | `arji-json-sync-roundtrip.test.ts` — guarded reconciliation regressions |
 | error and `asked_question` terminal branches | `automatic-transition-invariants.test.ts` terminal tests; `epic-build-asked-question.test.ts` route regression |
@@ -162,6 +210,14 @@ requests.
 | terminal hook cannot re-dispatch before promotion is attempted | `auto-mode-engine.test.ts` — kick deferral |
 | refused terminal promotions feed the Full Auto failure/parking ladder instead of clearing it | `auto-mode-engine.test.ts` — `transition_refused` parking regression |
 
+One UI-side row of this table lost its test with the kanban board: the epic
+card that warned about unfinished stories on a delivered epic, and
+`__tests__/epic-card.test.tsx` with it (commit 99e2de3). The server-side half
+of that invariant is unchanged and still covered above; the surviving display
+of the same fact is the `usDone/usCount` figure the desk's READY TO LAND row
+prints (`lib/control-desk/types.ts`, `components/desk/ReadyToLandBand.tsx`) and
+the registry's own row. No replacement UI test was added.
+
 ## Audit findings and B-arij-104
 
 The audit found four concrete bypass classes: direct SQL in build/review
@@ -178,8 +234,10 @@ what removes the orphan regardless of the source column.
 The eligibility half of that fix was later reversed on purpose: Backlog is a
 staging area, not an execution queue, so Full Auto builds only `todo` and
 `in_progress` (`BUILDABLE_EPIC_STATUSES` in `lib/auto-mode/select.ts`, re-read
-by the last-moment dispatch guard in `lib/auto-mode/engine.ts`). Dragging a
-ticket to Backlog is the supported way to take it out of the supervisor's
+by the last-moment dispatch guard in `lib/auto-mode/engine.ts`). Moving a
+ticket back to Backlog — the ticket overlay's status control, or a
+`promote_ticket` demotion, which additionally posts the missing question as a
+ticket comment — is the supported way to take it out of the supervisor's
 reach. Manual builds, batch/night runs and pipelines still accept `backlog`.
 Note the consequence: tickets created directly in Backlog — agent-filed bugs
 via `create_bug`, imported GitHub issues, QA-generated epics — wait for a human

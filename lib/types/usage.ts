@@ -155,6 +155,76 @@ export interface SubscriptionStatus {
   codexLive: CodexLiveQuota | null;  // NEW — non-null only for codex + live-cli
 }
 
+/* ----- The 8d dashboard block (range-scoped; the screen reads ONLY this) ----- */
+
+/**
+ * The three windows the header's segmented control offers. `all` means "no
+ * cutoff at all", NOT "a very long window" — `UsageDashboard.since` is null
+ * for it so a reader can tell the two apart.
+ */
+export type UsageRange = "7d" | "30d" | "all";
+
+/** One name/value bar in BY AGENT or BY PROJECT. */
+export interface UsageBar {
+  key: string;                 // stable react key: "name|provider" or projectId
+  label: string;               // display label, already resolved
+  costUsd: number | null;      // null = the group never reported a cost
+  sessions: number;
+  /** 0-100, share of the band's total cost; null when the band total is null/0. */
+  sharePercent: number | null;
+}
+
+export interface UsageProjectBar extends UsageBar {
+  projectId: string;
+  /**
+   * `projects.color_index` when that column exists; null on every row today
+   * (the column is not in the schema yet — see lib/usage/aggregate.ts). The UI
+   * falls back to a stable hash of `projectId`, never to array position.
+   */
+  colorIndex: number | null;
+}
+
+export interface UsageDayBar {
+  date: string;                // local "YYYY-MM-DD"
+  sessions: number;
+  costUsd: number | null;
+  /**
+   * `status='failed'` sessions that ENDED that day; 0 is a fact, not a claim.
+   * A failed session that never received an `ended_at` is invisible here,
+   * exactly as it is invisible to `byDay` — usage is written once, at the
+   * terminal transition.
+   */
+  failedSessions: number;
+}
+
+export interface UsageMonthlyCap {
+  capUsd: number | null;       // settings key; null = never configured
+  spentUsd: number | null;     // month-to-date spend; null = nothing reported
+  usedPercent: number | null;  // UNCLAMPED, integer-rounded; null without a cap
+  alertPercent: number;        // always 80 — the frame's documented threshold
+}
+
+export interface UsageDashboard {
+  range: UsageRange;
+  /** ISO cutoff used for every figure in this block; null for "all". */
+  since: string | null;
+  totals: {
+    costUsd: number | null;
+    sessions: number;
+    /** 0-100. completed+answered over sessions with a non-null outcome; null when no terminal session exists. */
+    cleanPercent: number | null;
+    /** Distinct epics that reached done/released in the window; null when the log is empty for it. */
+    ticketsShipped: number | null;
+    costPerTicketUsd: number | null;
+  };
+  cap: UsageMonthlyCap;
+  byAgent: UsageBar[];          // cost desc, nulls last
+  byProject: UsageProjectBar[]; // cost desc, nulls last
+  byDay: UsageDayBar[];         // min(rangeDays, 30) entries, oldest first, zero-filled
+  /** Yesterday's night-run spend (batch_run_id LIKE 'night\_%'); null when none ran. */
+  nightYesterdayUsd: number | null;
+}
+
 export interface UsageReport {
   totals: UsageTotals;
   byAgent: AgentUsageRow[];     // sorted cost desc, nulls last, then sessions desc
@@ -164,7 +234,21 @@ export interface UsageReport {
   windows: { last5h: WindowUsage; last7d: WindowUsage };
   subscriptions: SubscriptionStatus[];
   generatedAt: string;          // ISO UTC
+  /**
+   * The range-scoped block frame 8d renders. The eight keys above keep their
+   * pre-existing all-time / 30-day / rolling semantics untouched — they still
+   * feed `subscriptions` and the legacy consumers.
+   */
+  dashboard: UsageDashboard;
 }
 
 /** Global settings key (no project suffix): optional weekly Claude budget in USD. */
 export const CLAUDE_WEEKLY_BUDGET_SETTING_KEY = "usage_budget_usd_7d_claude";
+
+/**
+ * Global settings key: optional monthly spend cap in USD (frame 8d, PLAFOND
+ * MENSUEL). Lives in the generic `settings` key/value table — deliberately NOT
+ * a new column or table. Distinct from CLAUDE_WEEKLY_BUDGET_SETTING_KEY, which
+ * is a WEEKLY CLAUDE budget: different window, different population.
+ */
+export const MONTHLY_CAP_SETTING_KEY = "usage_budget_usd_month";

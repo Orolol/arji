@@ -17,6 +17,19 @@ export interface PromptTokenBreakdown {
   documents: number;
   system: number;
   other: number;
+  /**
+   * Named-agent persona, prepended to the whole prompt by
+   * processManager.start() AFTER the dispatch-time estimate is taken (see
+   * lib/claude/process-manager.ts) — so a STORED breakdown never carries it
+   * and `system` never double-counts it.
+   *
+   * OPTIONAL, and only ever emitted when the caller supplied
+   * `sections.persona`: the eight-key shape is a wire format several suites
+   * pin exactly (`Object.values(breakdown)` must stay length 8), and
+   * app/api/projects/[projectId]/prompt-estimate/route.ts builds an eight-key
+   * literal. A required ninth key would break both.
+   */
+  persona?: number;
 }
 
 export interface EstimatedPromptTokens {
@@ -40,6 +53,14 @@ export interface PromptSectionTexts {
   findings?: string | null;
   documents?: string | null;
   other?: string | null;
+  /**
+   * The named agent's persona block. Deliberately NOT a
+   * {@link PromptContextSectionKey}: it is not a budgetable context section,
+   * it is agent configuration prepended at spawn time. Supplying it here is
+   * how a caller that already knows the persona (the prompt-anatomy route)
+   * gets a `persona` entry in the breakdown.
+   */
+  persona?: string | null;
 }
 
 export const SECTION_LABELS: Record<PromptContextSectionKey, string> = {
@@ -79,6 +100,13 @@ export function estimatePromptTokensBySections(
     system: estimateTokens(sections.system),
     other: estimateTokens(sections.other),
   };
+
+  // The ninth key materialises ONLY when a persona was supplied, so the
+  // eight-key wire shape (and `Object.values(breakdown).length === 8`) is
+  // unchanged for every existing caller.
+  if (typeof sections.persona === "string" && sections.persona.length > 0) {
+    breakdown.persona = estimateTokens(sections.persona);
+  }
 
   const total = fullPromptText
     ? estimateTokens(fullPromptText)
@@ -180,5 +208,67 @@ export function findLargestContextSection(
     label: SECTION_LABELS[maxKey] ?? maxKey,
     tokens: maxTokens,
     percentage,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Prompt anatomy — the six segments of frame 8b's stacked token bar
+// ---------------------------------------------------------------------------
+
+/**
+ * The six segments of the ANATOMIE DU PROMPT bar, in their fixed paint order.
+ *
+ * Deliberately NOT the same vocabulary as {@link PromptContextSectionKey}:
+ * the estimator stores eight budgetable sections, the design draws six bands.
+ * The folding between the two lives in {@link toPromptAnatomySegments} and
+ * nowhere else, so the route and the band can never disagree about it.
+ */
+export type PromptAnatomySegment =
+  | "system"
+  | "persona"
+  | "spec"
+  | "memory"
+  | "ticket"
+  | "docs";
+
+export const PROMPT_ANATOMY_ORDER: PromptAnatomySegment[] = [
+  "system",
+  "persona",
+  "spec",
+  "memory",
+  "ticket",
+  "docs",
+];
+
+/**
+ * Folds a stored eight-key breakdown onto the six drawn segments.
+ *
+ * - `ticket + comments + findings` → TICKET / DIFF (one blue band: they are
+ *   all "what this particular piece of work is about").
+ * - `other` → SYSTEM. `other` is the builder's general instructions; giving it
+ *   its own colour would need a seventh legend entry the design does not have.
+ * - PERSONA comes from the caller, not from the row: the persona is prepended
+ *   after the estimate is taken, so a stored breakdown never contains it.
+ *   Passing `undefined` falls back to an explicitly-supplied `breakdown.persona`
+ *   (the case where the estimate was computed WITH `sections.persona`).
+ */
+export function toPromptAnatomySegments(
+  breakdown: PromptTokenBreakdown,
+  personaTokens?: number,
+): Record<PromptAnatomySegment, number> {
+  const safe = (value: number | undefined) =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+
+  const persona =
+    personaTokens === undefined ? safe(breakdown.persona) : safe(personaTokens);
+
+  return {
+    system: safe(breakdown.system) + safe(breakdown.other),
+    persona,
+    spec: safe(breakdown.spec),
+    memory: safe(breakdown.memory),
+    ticket:
+      safe(breakdown.ticket) + safe(breakdown.comments) + safe(breakdown.findings),
+    docs: safe(breakdown.documents),
   };
 }

@@ -38,9 +38,10 @@ export function useGitHubConfig(projectId: string | undefined) {
         if (cancelled) return;
 
         const repo = projectData.data?.githubOwnerRepo ?? null;
-        const hasToken =
-          typeof settingsData.data?.github_pat === "string" &&
-          settingsData.data.github_pat.length > 0;
+        // GET /api/settings never returns the PAT: it masks `github_pat`
+        // down to `{ hasToken: boolean }`. Testing it as a string made
+        // `tokenSet`/`isConfigured` permanently false.
+        const hasToken = settingsData.data?.github_pat?.hasToken === true;
 
         setOwnerRepo(repo);
         setTokenSet(hasToken);

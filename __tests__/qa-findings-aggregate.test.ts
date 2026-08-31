@@ -1,0 +1,333 @@
+/**
+ * The pure half of frame 11b: severity stamps, verdict prose, coverage and the
+ * rubric extraction. No database, no rendering — every rule this file pins is a
+ * rule the route and the screen inherit rather than restate.
+ */
+
+import { describe, expect, it } from "vitest";
+
+import {
+  QA_UNVERIFIABLE_TEXT,
+  compareFindings,
+  deriveCoverage,
+  deriveQueued,
+  deriveRuns,
+  deriveVerdicts,
+  outcomeArrow,
+  rubricItemsFromChecklist,
+  runLastLine,
+  severityOf,
+  stripSeverityPrefix,
+  type QaSessionRow,
+  type QaVerdictEpic,
+  type QaVerdictSessionRow,
+} from "@/lib/qa/aggregate";
+import { REVIEW_CHECKLISTS } from "@/lib/claude/prompt-sections";
+import type { QaRun } from "@/lib/qa/types";
+
+describe("severityOf", () => {
+  it("prints BLOCKING, never CRITICAL, for the top tier", () => {
+    expect(severityOf("[critical] token logged in clear", "agent")).toEqual({
+      severity: "critical",
+      severityLabel: "BLOCKING",
+      tier: "blocking",
+    });
+  });
+
+  it("weighs [major] as the MAJOR stamp — which still blocks the merge", () => {
+    expect(severityOf("[major] no test", "agent")).toEqual({
+      severity: "major",
+      severityLabel: "MAJOR",
+      tier: "major",
+    });
+  });
+
+  it("weighs [minor] and [info] as the light stamp", () => {
+    expect(severityOf("[minor] naming", "agent").tier).toBe("minor");
+    expect(severityOf("[minor] naming", "agent").severityLabel).toBe("MINOR");
+    expect(severityOf("[info] fyi", "agent").tier).toBe("minor");
+    expect(severityOf("[info] fyi", "agent").severityLabel).toBe("INFO");
+  });
+
+  it("is CASE-SENSITIVE: [MAJOR] is unclassified, deliberately", () => {
+    expect(severityOf("[MAJOR] shouting", "agent")).toEqual({
+      severity: "unclassified",
+      severityLabel: "UNCLASSIFIED",
+      tier: "blocking",
+    });
+  });
+
+  it("treats an agent row with no recognised prefix as unclassified, and blocking", () => {
+    expect(severityOf("just a worry", "agent").severityLabel).toBe("UNCLASSIFIED");
+    expect(severityOf("just a worry", "agent").tier).toBe("blocking");
+  });
+
+  it("treats an empty or null body the same way", () => {
+    expect(severityOf("", "agent").severity).toBe("unclassified");
+    expect(severityOf(null, "agent").severity).toBe("unclassified");
+  });
+
+  it("marks any non-agent author HUMAN, which always blocks", () => {
+    expect(severityOf("[minor] still a hold", "user")).toEqual({
+      severity: "human",
+      severityLabel: "HUMAN",
+      tier: "blocking",
+    });
+    expect(severityOf("anything", null).severityLabel).toBe("HUMAN");
+  });
+});
+
+describe("stripSeverityPrefix", () => {
+  it("removes exactly one known prefix and its space", () => {
+    expect(stripSeverityPrefix("[critical] boom")).toBe("boom");
+    expect(stripSeverityPrefix("[minor] naming")).toBe("naming");
+  });
+
+  it("leaves an unknown bracket token untouched", () => {
+    expect(stripSeverityPrefix("[foo] bar")).toBe("[foo] bar");
+    expect(stripSeverityPrefix("[MAJOR] bar")).toBe("[MAJOR] bar");
+  });
+
+  it("strips only the first prefix", () => {
+    expect(stripSeverityPrefix("[major] [major] twice")).toBe("[major] twice");
+  });
+
+  it("answers the empty string for a missing body", () => {
+    expect(stripSeverityPrefix(null)).toBe("");
+  });
+});
+
+describe("compareFindings", () => {
+  it("orders heaviest stamp first, newest first inside a tier", () => {
+    const rows = [
+      { tier: "minor" as const, filedAt: "2026-08-30T10:00:00.000Z" },
+      { tier: "major" as const, filedAt: "2026-08-30T08:00:00.000Z" },
+      { tier: "major" as const, filedAt: "2026-08-30T09:00:00.000Z" },
+      { tier: "blocking" as const, filedAt: "2026-08-30T07:00:00.000Z" },
+    ];
+    expect([...rows].sort(compareFindings).map((row) => row.tier)).toEqual([
+      "blocking",
+      "major",
+      "major",
+      "minor",
+    ]);
+    expect([...rows].sort(compareFindings)[1].filedAt).toBe(
+      "2026-08-30T09:00:00.000Z",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+
+function session(overrides: Partial<QaSessionRow> = {}): QaSessionRow {
+  return {
+    id: "s1",
+    projectId: "p1",
+    epicId: "e1",
+    status: "running",
+    namedAgentName: "Security CC",
+    agentType: "review_security",
+    startedAt: "2026-08-30T09:00:00.000Z",
+    createdAt: "2026-08-30T09:00:00.000Z",
+    lastLine: "checking migration rollback",
+    epicTitle: "Named agents: per-task defaults",
+    epicReadableId: "ARJ-113",
+    ...overrides,
+  };
+}
+
+describe("deriveRuns / deriveQueued", () => {
+  it("splits running from queued and never invents an agent name", () => {
+    const rows = [
+      session(),
+      session({ id: "s2", status: "queued", epicReadableId: "ARJ-122" }),
+      session({ id: "s3", namedAgentName: null, agentType: "review_code" }),
+    ];
+    const runs = deriveRuns(rows, new Map());
+    expect(runs.map((run) => run.sessionId)).toEqual(["s1", "s3"]);
+    expect(runs[1].agentName).toBe("review_code");
+    expect(deriveQueued(rows).map((run) => run.sessionId)).toEqual(["s2"]);
+  });
+
+  it("carries the filing counts of a live reviewer", () => {
+    const runs = deriveRuns(
+      [session()],
+      new Map([["s1", { findings: 2, blocking: 1 }]]),
+    );
+    expect(runs[0].findingsFiled).toBe(2);
+    expect(runs[0].blockingFiled).toBe(1);
+  });
+
+  it("reports null — never 0 — for a reviewer that has filed nothing", () => {
+    const runs = deriveRuns([session()], new Map());
+    expect(runs[0].findingsFiled).toBeNull();
+    expect(runs[0].blockingFiled).toBeNull();
+  });
+});
+
+describe("runLastLine", () => {
+  const base: QaRun = {
+    sessionId: "s1",
+    projectId: "p1",
+    epicId: "e1",
+    readableId: "ARJ-113",
+    title: "t",
+    agentName: "Security CC",
+    startedAt: "2026-08-30T09:00:00.000Z",
+    lastLine: "checking migration rollback",
+    findingsFiled: null,
+    blockingFiled: null,
+  };
+
+  it("prefers the filing count over the log line", () => {
+    expect(runLastLine({ ...base, findingsFiled: 2, blockingFiled: 1 })).toBe(
+      "› 2 findings filed, 1 blocking",
+    );
+    expect(runLastLine({ ...base, findingsFiled: 1, blockingFiled: 0 })).toBe(
+      "› 1 finding filed, 0 blocking",
+    );
+  });
+
+  it("falls back to the log line, then to an ellipsis — never to prose", () => {
+    expect(runLastLine(base)).toBe("› checking migration rollback");
+    expect(runLastLine({ ...base, lastLine: null })).toBe("› …");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+
+const EPICS = new Map<string, QaVerdictEpic>([
+  ["e1", { readableId: "ARJ-107", title: "One", status: "done" }],
+  ["e2", { readableId: "LDG-83", title: "Two", status: "to_merge" }],
+  ["e3", { readableId: "ARJ-110", title: "Three", status: "review" }],
+]);
+
+function verdictRow(
+  overrides: Partial<QaVerdictSessionRow> = {},
+): QaVerdictSessionRow {
+  return {
+    sessionId: "v1",
+    epicId: "e1",
+    projectId: "p1",
+    reviewVerdict: "approved",
+    at: "2026-08-30T09:00:00.000Z",
+    findingsFiled: 0,
+    ...overrides,
+  };
+}
+
+describe("deriveVerdicts", () => {
+  it("says 'review clean · 0 findings' for an approval that filed nothing", () => {
+    const [row] = deriveVerdicts([verdictRow()], EPICS, new Set());
+    expect(row.verdictText).toBe("review clean · 0 findings");
+    expect(row.kind).toBe("clean");
+    expect(row.outcome).toBe("→ landed");
+  });
+
+  it("counts what an approval did file", () => {
+    const [row] = deriveVerdicts(
+      [verdictRow({ reviewVerdict: "approved_with_minor_issues", findingsFiled: 2 })],
+      EPICS,
+      new Set(),
+    );
+    expect(row.verdictText).toBe("clean après review · 2 findings filed");
+    expect(row.kind).toBe("clean");
+  });
+
+  it("names changes_requested and its count", () => {
+    const [row] = deriveVerdicts(
+      [verdictRow({ epicId: "e2", reviewVerdict: "changes_requested", findingsFiled: 1 })],
+      EPICS,
+      new Set(),
+    );
+    expect(row.verdictText).toBe("changes requested · 1 finding");
+    expect(row.kind).toBe("attention");
+    expect(row.outcome).toBe("→ ready");
+  });
+
+  it("never draws an unverifiable review as clean", () => {
+    const [row] = deriveVerdicts(
+      [verdictRow({ epicId: "e3", reviewVerdict: null })],
+      EPICS,
+      new Set(["e3"]),
+    );
+    expect(row.verdictText).toBe(QA_UNVERIFIABLE_TEXT);
+    expect(row.kind).toBe("attention");
+    expect(row.outcome).toBe("→ your turn");
+  });
+
+  it("says so when a provider filed no structured verdict and is not unverifiable", () => {
+    const [row] = deriveVerdicts(
+      [verdictRow({ reviewVerdict: null })],
+      EPICS,
+      new Set(),
+    );
+    expect(row.verdictText).toBe("review sans verdict structuré");
+    expect(row.kind).toBe("clean");
+  });
+
+  it("keeps only the newest session per epic and caps the list", () => {
+    const rows = [
+      verdictRow({ sessionId: "old", at: "2026-08-01T00:00:00.000Z", findingsFiled: 9 }),
+      verdictRow({ sessionId: "new", at: "2026-08-30T00:00:00.000Z" }),
+    ];
+    const derived = deriveVerdicts(rows, EPICS, new Set());
+    expect(derived).toHaveLength(1);
+    expect(derived[0].verdictText).toBe("review clean · 0 findings");
+
+    const many = Array.from({ length: 9 }, (_, index) =>
+      verdictRow({ sessionId: `s${index}`, epicId: `e${index}` }),
+    );
+    expect(deriveVerdicts(many, EPICS, new Set())).toHaveLength(6);
+  });
+});
+
+describe("outcomeArrow", () => {
+  it("names the destination stratum, verbatim", () => {
+    expect(outcomeArrow("done")).toBe("→ landed");
+    expect(outcomeArrow("released")).toBe("→ landed");
+    expect(outcomeArrow("to_merge")).toBe("→ ready");
+    expect(outcomeArrow("review")).toBe("→ your turn");
+    expect(outcomeArrow("")).toBe("→ your turn");
+  });
+});
+
+describe("deriveCoverage", () => {
+  it("answers null — never 0 — for an empty denominator", () => {
+    expect(deriveCoverage(0, 0)).toBeNull();
+    expect(deriveCoverage(3, 0)).toBeNull();
+  });
+
+  it("still answers 0 when nothing shipped was reviewed", () => {
+    expect(deriveCoverage(0, 4)).toBe(0);
+  });
+
+  it("rounds the same way in both directions", () => {
+    expect(deriveCoverage(1, 3)).toBe(33);
+    expect(deriveCoverage(2, 3)).toBe(67);
+    expect(deriveCoverage(1, 2)).toBe(50);
+    expect(deriveCoverage(23, 25)).toBe(92);
+  });
+});
+
+describe("rubricItemsFromChecklist", () => {
+  it("extracts the bold headings of the real feature-review checklist, and nothing else", () => {
+    const items = rubricItemsFromChecklist(REVIEW_CHECKLISTS.feature_review);
+    expect(items).toEqual([
+      "Acceptance Criteria Verification",
+      "Functional Completeness",
+      "Integration",
+      "Tests",
+    ]);
+  });
+
+  it("ignores bold text that is not a numbered heading", () => {
+    expect(
+      rubricItemsFromChecklist("- **Severity**: high\n1. **Kept**: yes\ntext"),
+    ).toEqual(["Kept"]);
+  });
+
+  it("answers an empty list rather than fabricating one", () => {
+    expect(rubricItemsFromChecklist("")).toEqual([]);
+  });
+});
