@@ -257,10 +257,16 @@ describe("desk mutations", () => {
     expect(document.querySelector('input[type="checkbox"]')).toBeNull();
 
     fireEvent.click(row);
-    await waitFor(() =>
-      expect(calls(fetchMock, "/auto-mode").length).toBeGreaterThan(0),
-    );
-    const [, init] = calls(fetchMock, "/auto-mode")[0];
+    // The popover also GETs each project's effective agents when it opens, so
+    // the toggle is identified by its method, not by call order.
+    const puts = () =>
+      calls(fetchMock, "/auto-mode").filter(
+        ([, init]) => init?.method === "PUT",
+      );
+    await waitFor(() => expect(puts().length).toBeGreaterThan(0));
+    const [, init] = puts()[0];
+    // Only `enabled`: the route keys off `"buildAgent" in payload`, so the
+    // on/off box must not carry — and therefore cannot clobber — the agents.
     expect(JSON.parse(String(init!.body))).toEqual({ enabled: true });
   });
 

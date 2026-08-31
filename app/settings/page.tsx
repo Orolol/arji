@@ -26,6 +26,11 @@ import {
   parseNightCostCap,
 } from "@/lib/night/constants";
 import {
+  AUTO_MODE_BUILD_AGENT_SETTING_KEY,
+  AUTO_MODE_REVIEW_AGENT_SETTING_KEY,
+} from "@/lib/auto-mode/constants";
+import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
+import {
   BUG_REGRESSION_CHECK_SETTING_KEY,
   BUG_REGRESSION_COMMAND_SETTING_KEY,
   TEST_FILE_PATTERNS_SETTING_KEY,
@@ -150,6 +155,12 @@ export default function SettingsPage() {
   const [nightCostCap, setNightCostCap] = useState("");
   const [savingNight, setSavingNight] = useState(false);
   const [nightMessage, setNightMessage] = useState<string | null>(null);
+  // Workspace-wide Full Auto agents. "" is the "Default" row — the absence of
+  // a workspace default, not an agent named "".
+  const [autoBuildAgent, setAutoBuildAgent] = useState("");
+  const [autoReviewAgent, setAutoReviewAgent] = useState("");
+  const [savingAutoAgents, setSavingAutoAgents] = useState(false);
+  const [autoAgentsMessage, setAutoAgentsMessage] = useState<string | null>(null);
   // Optional weekly Claude budget, in USD, for the Usage page gauge. Raw
   // string: empty means "no budget", which no number state can express.
   const [usageBudget, setUsageBudget] = useState("");
@@ -204,6 +215,12 @@ export default function SettingsPage() {
         setOpenAiReasoningEffort(
           parseOpenAiReasoningEffort(d.data?.[OPENAI_REASONING_EFFORT_SETTING_KEY]),
         );
+        // Bare keys only: the suffixed ones are per-project overrides and are
+        // not this page's to read or write.
+        const buildAgent = d.data?.[AUTO_MODE_BUILD_AGENT_SETTING_KEY];
+        setAutoBuildAgent(typeof buildAgent === "string" ? buildAgent : "");
+        const reviewAgent = d.data?.[AUTO_MODE_REVIEW_AGENT_SETTING_KEY];
+        setAutoReviewAgent(typeof reviewAgent === "string" ? reviewAgent : "");
         const autoDistill = d.data?.memory_auto_distill;
         setMemoryAutoDistill(autoDistill === true || autoDistill === "true");
         // Dreaming after a night run: OFF unless explicitly enabled globally
@@ -461,6 +478,41 @@ export default function SettingsPage() {
    * Saves the two night-run defaults. Empty inputs are stored as null: the
    * breaker falls back to the engine default, the cost cap to unlimited.
    */
+  /**
+   * Workspace-wide Full Auto agents.
+   *
+   * These write the BARE keys. `lib/auto-mode/config.ts` resolves
+   * `auto_mode_build_agent:<projectId>` first and falls back to the bare key,
+   * so writing a suffixed key from this page would silently turn a workspace
+   * default into one project's state. Per-project overrides belong to the
+   * project's own Full Auto dialog.
+   */
+  async function handleSaveAutoModeAgents() {
+    setSavingAutoAgents(true);
+    setAutoAgentsMessage(null);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // "" is the "Default" row: it clears the workspace default and lets
+          // the project → global → built-in chain resolve as before.
+          [AUTO_MODE_BUILD_AGENT_SETTING_KEY]: autoBuildAgent || null,
+          [AUTO_MODE_REVIEW_AGENT_SETTING_KEY]: autoReviewAgent || null,
+        }),
+      });
+      if (!response.ok) {
+        setAutoAgentsMessage("Failed to save the Full Auto agents.");
+        return;
+      }
+      setAutoAgentsMessage("Full Auto agents saved.");
+    } catch {
+      setAutoAgentsMessage("Failed to save the Full Auto agents.");
+    } finally {
+      setSavingAutoAgents(false);
+    }
+  }
+
   async function handleSaveNightDefaults() {
     setSavingNight(true);
     setNightMessage(null);
@@ -1392,6 +1444,79 @@ export default function SettingsPage() {
         {pipelineMessage && (
           <p className="text-xs text-muted-foreground">{pipelineMessage}</p>
         )}
+      </section>
+
+      <section
+        className="space-y-3 rounded-md border border-border p-4"
+        data-testid="full-auto-settings"
+      >
+        <div>
+          <h2 className="text-lg font-semibold">Full Auto Mode</h2>
+          <p className="text-sm text-muted-foreground">
+            Which agents the standing supervisor dispatches when a project does
+            not name its own. A project&apos;s Full Auto dialog overrides these.
+          </p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label
+              id="auto-build-agent-label"
+              className="block text-sm font-medium"
+            >
+              Build agent
+            </label>
+            <NamedAgentSelect
+              value={autoBuildAgent || null}
+              onChange={setAutoBuildAgent}
+              allowClear
+              clearLabel="Default"
+              dispatchRole="build"
+              aria-labelledby="auto-build-agent-label"
+              className="h-9 w-full text-sm"
+            />
+          </div>
+          <div className="space-y-1">
+            <label
+              id="auto-review-agent-label"
+              className="block text-sm font-medium"
+            >
+              Review agent
+            </label>
+            <NamedAgentSelect
+              value={autoReviewAgent || null}
+              onChange={setAutoReviewAgent}
+              allowClear
+              clearLabel="Default"
+              dispatchRole="review"
+              aria-labelledby="auto-review-agent-label"
+              className="h-9 w-full text-sm"
+            />
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          &quot;Default&quot; leaves the role unassigned: Full Auto then resolves
+          it per project, then globally, then falls back to Claude Code. Smart
+          dispatch — choosing the agent from its measured record — only applies
+          to roles left unassigned here, so naming an agent above turns it off
+          for that role.
+        </p>
+
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={handleSaveAutoModeAgents}
+            disabled={savingAutoAgents}
+            data-testid="save-full-auto-agents"
+          >
+            {savingAutoAgents ? "Saving..." : "Save Full Auto agents"}
+          </Button>
+          {autoAgentsMessage && (
+            <span className="text-sm text-muted-foreground">
+              {autoAgentsMessage}
+            </span>
+          )}
+        </div>
       </section>
 
       <section

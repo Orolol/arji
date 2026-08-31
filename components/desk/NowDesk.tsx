@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 
 import {
-  CheckMark,
   DeskHeader,
   Mono,
   PillButton,
@@ -37,6 +36,7 @@ import type {
 import { cn } from "@/lib/utils";
 
 import { DeskCommandPalette } from "./DeskCommandPalette";
+import { FullAutoProjectRow } from "./FullAutoProjectRow";
 import { DeskComposer } from "./DeskComposer";
 import { DeskProjectRail } from "./DeskProjectRail";
 import { ReadyToLandBand } from "./ReadyToLandBand";
@@ -584,6 +584,80 @@ export function NowDesk({
     [raise, reportFailure, changed],
   );
 
+  /**
+   * Effective Full Auto agents per project, as the auto-mode route resolves
+   * them. Read only while the popover is open — one request per project, on
+   * open, not on the 4s desk poll.
+   */
+  const [autoPopoverOpen, setAutoPopoverOpen] = React.useState(false);
+  const [autoAgents, setAutoAgents] = React.useState<
+    Record<string, { buildAgent: string | null; reviewAgent: string | null }>
+  >({});
+
+  React.useEffect(() => {
+    if (!autoPopoverOpen || projects.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const entries = await Promise.all(
+        projects.map(async (project) => {
+          try {
+            const res = await fetch(`/api/projects/${project.id}/auto-mode`);
+            const json = await res.json();
+            return [
+              project.id,
+              {
+                buildAgent: json?.data?.buildAgent ?? null,
+                reviewAgent: json?.data?.reviewAgent ?? null,
+              },
+            ] as const;
+          } catch {
+            return [project.id, { buildAgent: null, reviewAgent: null }] as const;
+          }
+        }),
+      );
+      if (!cancelled) setAutoAgents(Object.fromEntries(entries));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [autoPopoverOpen, projects]);
+
+  /**
+   * Write ONE per-project override. The PUT route keys off `"buildAgent" in
+   * payload`, so a body carrying only the agent leaves the enabled flag
+   * untouched — the on/off box and these pills cannot clobber each other.
+   */
+  const setAutoModeAgent = React.useCallback(
+    async (
+      targetProjectId: string,
+      role: "buildAgent" | "reviewAgent",
+      namedAgentId: string | null,
+    ) => {
+      try {
+        const res = await fetch(`/api/projects/${targetProjectId}/auto-mode`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [role]: namedAgentId }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body?.error) {
+          raise("error", "Failed to change the Full Auto agent");
+          return;
+        }
+        setAutoAgents((current) => ({
+          ...current,
+          [targetProjectId]: {
+            buildAgent: body?.data?.buildAgent ?? null,
+            reviewAgent: body?.data?.reviewAgent ?? null,
+          },
+        }));
+      } catch {
+        raise("error", "Failed to change the Full Auto agent");
+      }
+    },
+    [raise],
+  );
+
   const toggleAutoMode = React.useCallback(
     async (targetProjectId: string, enabled: boolean) => {
       try {
@@ -668,7 +742,7 @@ export function NowDesk({
           {/* Full Auto is PER PROJECT — there is no global flag, so the pill
               reports how many projects are armed and opens the per-project
               switches rather than pretending to be one toggle. */}
-          <Popover>
+          <Popover open={autoPopoverOpen} onOpenChange={setAutoPopoverOpen}>
             <PopoverTrigger asChild>
               <PillButton
                 variant="filled"
@@ -681,7 +755,7 @@ export function NowDesk({
             </PopoverTrigger>
             <PopoverContent
               align="end"
-              className="w-[260px] rounded-[12px] border-[1.5px] border-border bg-card p-2 shadow-none"
+              className="w-[320px] rounded-[12px] border-[1.5px] border-border bg-card p-2 shadow-none"
             >
               <div className="flex flex-col gap-1">
                 {/*
@@ -692,28 +766,13 @@ export function NowDesk({
                   was off the 10/12/14/9999 scale the system allows.
                 */}
                 {projects.map((project) => (
-                  <button
+                  <FullAutoProjectRow
                     key={project.id}
-                    type="button"
-                    role="checkbox"
-                    aria-checked={project.autoModeEnabled}
-                    onClick={() =>
-                      void toggleAutoMode(project.id, !project.autoModeEnabled)
-                    }
-                    className={cn(
-                      "flex w-full cursor-pointer items-center gap-2 rounded-[10px] px-2 py-[6px] text-left",
-                      "outline-none hover:bg-muted",
-                      "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                    )}
-                  >
-                    <CheckMark checked={project.autoModeEnabled} />
-                    <span className="min-w-0 flex-1 truncate font-sans text-[12.5px] text-foreground">
-                      {project.name}
-                    </span>
-                    <Mono size={10.5} tone="muted">
-                      {project.activeAgents > 0 ? `${project.activeAgents} live` : "—"}
-                    </Mono>
-                  </button>
+                    project={project}
+                    onToggle={toggleAutoMode}
+                    onSetAgent={setAutoModeAgent}
+                    agents={autoAgents[project.id]}
+                  />
                 ))}
               </div>
             </PopoverContent>
