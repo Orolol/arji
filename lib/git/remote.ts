@@ -1,4 +1,8 @@
-import simpleGit, { type SimpleGit } from "simple-git";
+import simpleGit, {
+  CheckRepoActions,
+  GitConstructError,
+  type SimpleGit,
+} from "simple-git";
 import {
   isSafeRepoSegment,
   matchGitHubRemoteUrl,
@@ -98,6 +102,66 @@ export class GitRemoteNotConfiguredError extends Error {
   }
 }
 
+export type GitRepositoryUnavailableCode =
+  | "GIT_REPO_NOT_A_REPOSITORY"
+  | "GIT_REPO_PATH_MISSING";
+
+/**
+ * "The configured `gitRepoPath` is not a usable repository" is a precondition
+ * the user can fix, exactly like `GitRemoteNotConfiguredError`'s missing
+ * remote. Without it, git's `fatal: not a git repository ...` prose reached
+ * `errorResponse(...)` and every caller answered 500 — including the detect
+ * route the connect banner hits on every project page load.
+ */
+export class GitRepositoryUnavailableError extends Error {
+  readonly code: GitRepositoryUnavailableCode;
+  readonly repoPath: string;
+
+  constructor(code: GitRepositoryUnavailableCode, repoPath: string) {
+    super(
+      code === "GIT_REPO_PATH_MISSING"
+        ? `The configured repository path does not exist: ${repoPath}`
+        : `The configured repository path is not a git repository: ${repoPath}`
+    );
+    this.name = "GitRepositoryUnavailableError";
+    this.code = code;
+    this.repoPath = repoPath;
+  }
+}
+
+/**
+ * Guard for the operations that need the path to be a repository before they
+ * start. Decided from git's own answer rather than from a failed command's
+ * stderr: `checkIsRepo()` resolves `false` for a plain directory, and
+ * simple-git raises a typed `GitConstructError` when the directory is absent,
+ * so neither branch depends on message prose that varies by git version.
+ *
+ * The bare check is not redundant: `checkIsRepo()` asks "inside a work tree",
+ * which a bare repository answers `false` to even though `git remote -v` reads
+ * from it perfectly well. Without it this guard would refuse a repository the
+ * callers used to handle.
+ */
+export async function assertGitRepository(repoPath: string): Promise<void> {
+  let usable: boolean;
+  try {
+    // `getGit` stays inside the try: simple-git validates the directory in its
+    // constructor and throws there, synchronously, for a path that is gone.
+    const git = getGit(repoPath);
+    usable =
+      (await git.checkIsRepo()) ||
+      (await git.checkIsRepo(CheckRepoActions.BARE));
+  } catch (error) {
+    if (error instanceof GitConstructError) {
+      throw new GitRepositoryUnavailableError("GIT_REPO_PATH_MISSING", repoPath);
+    }
+    throw error;
+  }
+
+  if (!usable) {
+    throw new GitRepositoryUnavailableError("GIT_REPO_NOT_A_REPOSITORY", repoPath);
+  }
+}
+
 function normalizeRemoteUrl(raw: string): string {
   return raw.trim();
 }
@@ -151,6 +215,11 @@ function defaultRemote(remote?: string): string {
 export async function detectGitHubRemote(
   repoPath: string
 ): Promise<DetectedGitHubRemote | null> {
+  // Checked before reading remotes so the two answers stay distinguishable:
+  // `null` means "a repository with nothing GitHub-shaped on it", which is an
+  // ordinary 200 for the callers, while an unusable path is a refusal.
+  await assertGitRepository(repoPath);
+
   const git = getGit(repoPath);
   const remotes = await git.getRemotes(true);
   if (remotes.length === 0) return null;

@@ -4,7 +4,10 @@ import {
   isErrorResponse,
   errorResponse,
 } from "@/lib/api/route-helpers";
-import { detectGitHubRemote } from "@/lib/git/remote";
+import {
+  detectGitHubRemote,
+  GitRepositoryUnavailableError,
+} from "@/lib/git/remote";
 import { writeGitSyncLog } from "@/lib/github/sync-log";
 
 type Params = { params: Promise<{ projectId: string }> };
@@ -62,6 +65,27 @@ export async function GET(_request: Request, { params }: Params) {
       },
     });
   } catch (error) {
+    // A path that is not a usable repository is a configuration state, not a
+    // fault: the banner fetches this route on mount, so the previous 500 was a
+    // console error on every project page. 400 with the code matches the
+    // no-remote 400 `git/detect-remote` already answers.
+    if (error instanceof GitRepositoryUnavailableError) {
+      writeGitSyncLog({
+        projectId,
+        operation: "detect",
+        status: "failed",
+        detail: {
+          code: error.code,
+          error: error.message,
+        },
+      });
+
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: 400 }
+      );
+    }
+
     writeGitSyncLog({
       projectId,
       operation: "detect",
