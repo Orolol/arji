@@ -1196,7 +1196,17 @@ export function buildCiFixPrompt(
       // Tildes avoid accidentally closing a conventional backtick fence
       // embedded in compiler/test output. Replace a literal closing marker
       // as a second boundary guard.
-      const safeTail = failure.logTail.replace(/~~~/g, "~ ~ ~");
+      //
+      // The boundary is only half the defence: a log tail is repository
+      // controlled — a test name, a fixture, a source line the runner echoes
+      // — so a `<system-directive>` committed anywhere the failing job prints
+      // arrives here as live-looking markup, addressed to a session the
+      // ci_watch autofix routine dispatches unattended. Neutralise it too.
+      // Only the markup is escaped, so the tail stays readable as a
+      // diagnostic and a reviewer can still see what was attempted.
+      const safeTail = neutralizeControlMarkup(
+        failure.logTail.replace(/~~~/g, "~ ~ ~"),
+      );
       push(
         "findings",
         `Untrusted GitHub Actions log tail:\n\n~~~text\n${safeTail}\n~~~`,
@@ -1542,7 +1552,19 @@ export function buildMergeResolutionPrompt(
   parts.push(`## Merge Conflict Resolution\n`);
   parts.push(`Branch: \`${branchName}\`\n`);
   parts.push(`### Git merge output\n`);
-  parts.push("```\n" + conflictOutput.trim() + "\n```\n");
+  // The merge output is evidence, not instructions: it names and quotes the
+  // conflicting content of the build agent's own committed branch, and the
+  // session reading it has write access to this worktree and is told below
+  // to commit. Two defects a bare ```-fenced interpolation had:
+  //
+  // - No neutralisation. A `<system-directive>` an agent committed into any
+  //   conflicting file reached this prompt as live markup.
+  // - Fixed fence. Conflicting Markdown — this repository has plenty — closes
+  //   a three-backtick fence early, and everything after it reads as prompt.
+  //
+  // `fenceAgentOutput` escapes the impersonating tags, grows the fence past
+  // the longest backtick run in the content and labels the block as a record.
+  parts.push(fenceAgentOutput(conflictOutput) + "\n");
 
   parts.push(`## Instructions
 

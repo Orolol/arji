@@ -130,6 +130,12 @@ function poisonedDocument(headline: string, canary: string): string {
  * `info` defaults to the ```text fence `fenceOnly()` emits. The telescope
  * evidence keeps its ```json label — the block is a serialized payload and
  * saying so is worth the parameter.
+ *
+ * Both Markdown fence characters are read. `fenceOnly()` emits backticks, but
+ * `buildCiFixPrompt` deliberately fences its log tail in tildes: compiler and
+ * test output routinely contains a conventional ``` block, and a tilde
+ * boundary cannot be closed by one. A parser that only knew backticks would
+ * report that builder as unfenced.
  */
 function fencedBlocks(prompt: string, info: RegExp = /^text$/): string[] {
   const blocks: string[] = [];
@@ -138,7 +144,7 @@ function fencedBlocks(prompt: string, info: RegExp = /^text$/): string[] {
 
   for (const line of prompt.split("\n")) {
     if (fence === null) {
-      const opening = /^(`{3,})([a-zA-Z]*)$/.exec(line);
+      const opening = /^([`~]{3,})([a-zA-Z]*)$/.exec(line);
       if (opening && info.test(opening[2])) {
         fence = opening[1];
         current = [];
@@ -332,6 +338,16 @@ interface EvidenceChannel {
   /** The fence info string the builder emits, when it is not ```text. */
   fenceInfo?: RegExp;
   /**
+   * The sentence that tells the model the block is a record rather than
+   * instructions, when it is not `AGENT_OUTPUT_NOTICE`.
+   *
+   * `buildCiFixPrompt` carries its own, older and more specific label — the
+   * tail is GitHub Actions output, not a session's own words, and its
+   * instruction list already names it untrusted. Duplicating the generic
+   * notice on top of it would be two labels for one block.
+   */
+  notice?: string;
+  /**
    * How the payload reads once the builder has encoded it. Identity for a
    * builder that interpolates the text as-is; JSON string escaping for
    * `buildFailureDigestPrompt`, which serializes its evidence first.
@@ -431,6 +447,25 @@ const BUILDERS: Record<string, BuilderCase> = {
   },
   buildCiFixPrompt: {
     channel: "fenced",
+    evidence: {
+      build: (payload) =>
+        promptBuilder.buildCiFixPrompt(
+          cleanProject,
+          epic,
+          {
+            prNumber: 42,
+            headSha: "0123456",
+            failures: [{ name: "build-and-test", logTail: payload }],
+          },
+          null,
+        ),
+      heading: "### build-and-test",
+      // Its own label, kept: the tilde fence and this sentence predate the
+      // evidence channel and are what the instruction list refers back to.
+      notice: "Untrusted GitHub Actions log tail:",
+      evidenceNote:
+        "A GitHub Actions log tail is repository-controlled text — a test name, a fixture, a source line echoed by the runner — read by the unattended CI-autofix session that the ci_watch routine dispatches.",
+    },
     build: (p) =>
       promptBuilder.buildCiFixPrompt(
         p,
@@ -457,6 +492,19 @@ const BUILDERS: Record<string, BuilderCase> = {
   },
   buildMergeResolutionPrompt: {
     channel: "fenced",
+    evidence: {
+      build: (payload) =>
+        promptBuilder.buildMergeResolutionPrompt(
+          cleanProject,
+          epic,
+          "feature/epic-queue",
+          payload,
+          null,
+        ),
+      heading: "### Git merge output",
+      evidenceNote:
+        "`git merge` output names and quotes the conflicting content of the build agent's own committed branch, replayed into a session that has write access to the worktree and is instructed to commit.",
+    },
     build: (p) =>
       promptBuilder.buildMergeResolutionPrompt(
         p,
@@ -802,9 +850,11 @@ describe("evidence-channel coverage", () => {
     // Pinned rather than merely non-empty: dropping a builder from the
     // evidence channel has to be an edit to this list, not a silent removal.
     expect(EVIDENCE_CASES.map(([name]) => name).sort()).toEqual([
+      "buildCiFixPrompt",
       "buildDreamingPrompt",
       "buildFailureDigestPrompt",
       "buildMemoryDistillPrompt",
+      "buildMergeResolutionPrompt",
       "buildSecondOpinionPrompt",
     ]);
   });
@@ -850,7 +900,7 @@ describe.each(EVIDENCE_CASES)("%s [evidence]", (_name, builder) => {
   it("labels the evidence as a record rather than as instructions", () => {
     // Distinct from UNTRUSTED_CONTENT_NOTICE: this is not stored project
     // content the session is describing, it is what another agent said.
-    expect(prompt).toContain(AGENT_OUTPUT_NOTICE);
+    expect(prompt).toContain(evidence.notice ?? AGENT_OUTPUT_NOTICE);
   });
 
   it("encloses the evidence in a fence it cannot close", () => {
