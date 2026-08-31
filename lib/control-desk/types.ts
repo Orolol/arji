@@ -193,4 +193,14 @@ export interface ControlDeskPayload {
   /** Tickets in `to_merge` that a blocker keeps out of `readyToLand`. */
   heldBackCount: number;
   upNext: DeskUpNextProject[];
+  /**
+   * Badge count for the Inbox tile — epics with an unread agent comment,
+   * counted BEFORE `applyDeskDismissals`.
+   *
+   * Deliberately not `yourTurn.awaitingReply.length`. Dismissing a coral row
+   * hides it from this desk only; `/inbox` is a different surface and applies
+   * no such filter. Deriving the badge from the filtered rows made it read "2"
+   * while the page it links to still listed 3.
+   */
+  inboxUnread: number;
 }

@@ -359,6 +359,51 @@ describe("GET /api/control-desk", () => {
     expect(after.yourTurn.awaitingReply[0].question).toBe("Et pour les tests ?");
   });
 
+  /**
+   * The Inbox badge counts UNREAD AGENT COMMENTS, and a dismissal marks
+   * nothing read. `/api/inbox` — the page the badge links to — applies no
+   * dismissal filter, so a badge derived from the filtered rows read "2" over
+   * a destination that still listed 3.
+   */
+  it("keeps the Inbox badge steady when a question is dismissed", async () => {
+    db.insert(epics)
+      .values({ id: "e1", projectId: "p1", title: "Renderer", readableId: "ARJ-24", status: "in_progress" })
+      .run();
+    db.insert(agentSessions)
+      .values({
+        id: "s1",
+        projectId: "p1",
+        epicId: "e1",
+        status: "completed",
+        outcome: "asked_question",
+        endedAt: today(8),
+        createdAt: today(8),
+      })
+      .run();
+    db.insert(ticketComments)
+      .values({ id: "c1", epicId: "e1", author: "agent", content: "Flag ou suppression ?", createdAt: today(9) })
+      .run();
+
+    const before = await payload();
+    expect(before.yourTurn.awaitingReply).toHaveLength(1);
+    expect(before.inboxUnread).toBe(1);
+
+    db.insert(deskDismissals)
+      .values({
+        epicId: "e1",
+        kind: "asks",
+        signalAt: before.yourTurn.awaitingReply[0].askedAt,
+        dismissedAt: today(10),
+      })
+      .run();
+
+    const after = await payload();
+    // The coral row is gone from THIS desk...
+    expect(after.yourTurn.awaitingReply).toHaveLength(0);
+    // ...but the comment is still unread, and /inbox still lists it.
+    expect(after.inboxUnread).toBe(1);
+  });
+
   it("does not let an asks dismissal hide a failure on the same epic", async () => {
     db.insert(epics)
       .values({ id: "e1", projectId: "p1", title: "Worker pool", readableId: "ARJ-9", status: "in_progress" })

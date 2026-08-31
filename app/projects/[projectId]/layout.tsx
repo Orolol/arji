@@ -105,7 +105,6 @@ export default function ProjectLayout({
   }, [projectId]);
 
   const boardHref = `/projects/${projectId}`;
-  const isBoard = pathname === boardHref;
 
   const primaryTabs = [
     { href: boardHref, label: "Board", exact: true },

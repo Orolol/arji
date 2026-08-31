@@ -269,6 +269,36 @@ describe("row order", () => {
 });
 
 /**
+ * Give the coral stratum's scroll container a fold, and its rows a height.
+ *
+ * jsdom has no layout: every height is 0, so the band measures "nothing
+ * overflows". These tests install the one thing a viewport would provide —
+ * a container whose rect ends at `foldPx` and rows of `ROW_HEIGHT` each.
+ */
+const ROW_HEIGHT = 96;
+
+function stubLayout(foldPx: number) {
+  const list = screen.getByTestId("desk-your-turn-rows");
+  const rows = Array.from(list.children) as HTMLElement[];
+
+  Object.defineProperty(list, "clientHeight", { value: foldPx, configurable: true });
+  Object.defineProperty(list, "scrollHeight", {
+    value: rows.length * ROW_HEIGHT,
+    configurable: true,
+  });
+  list.getBoundingClientRect = () => ({ top: 0, bottom: foldPx }) as DOMRect;
+  rows.forEach((row, index) => {
+    row.getBoundingClientRect = () =>
+      ({
+        top: index * ROW_HEIGHT,
+        bottom: (index + 1) * ROW_HEIGHT,
+      }) as DOMRect;
+  });
+  // Re-run the component's measure(): the effect subscribes to scroll.
+  fireEvent.scroll(list);
+}
+
+/**
  * The coral stratum used to spread one or two rows over 40vh (`justify-around`)
  * and crush READY TO LAND / UP NEXT underneath. It now sizes to its content and
  * admits when it is hiding rows.
@@ -307,22 +337,27 @@ describe("band sizing", () => {
     expect(screen.getByTestId("desk-your-turn-rows").className).toContain("overflow-y-auto");
   });
 
-  it("signals overflow past three rows, and stays quiet at three", () => {
+  it("stays quiet when nothing is cut off", () => {
     renderBand({ awaitingReply: manyAsks(3) });
+    stubLayout(4 * ROW_HEIGHT);
     expect(screen.queryByTestId("desk-your-turn-overflow")).not.toBeInTheDocument();
   });
 
   it("counts the hidden rows in the overflow line", () => {
     renderBand({ awaitingReply: manyAsks(6) });
+    stubLayout(3 * ROW_HEIGHT);
     expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+3 de plus");
   });
 
   it("counts overflow across all three families, not just one", () => {
+    // Four rows spanning the three families; the fold sits after three, so the
+    // count must span families rather than counting one list.
     renderBand({
       awaitingReply: [asks({ epicId: "a1" }), asks({ epicId: "a2" })],
       failed: [failure({ epicId: "f1" })],
       conflicts: [conflict({ epicId: "c1" })],
     });
+    stubLayout(3 * ROW_HEIGHT);
     expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+1 de plus");
   });
 });
@@ -400,5 +435,59 @@ describe("dismiss", () => {
       onDismiss: vi.fn(),
     });
     expect(screen.getByRole("button", { name: "Écarter cette question" })).toBeDisabled();
+  });
+});
+
+/**
+ * The overflow marker states a COUNT, so the count has to be true.
+ *
+ * It used to be `count - 3` on the assumption that three rows fit. jsdom has no
+ * layout, so these tests install one: a fold at a chosen height and rows of a
+ * known height, which is exactly what a viewport gives the real component.
+ */
+describe("YourTurnBand overflow marker", () => {
+  function renderRows(n: number, foldPx: number) {
+    const rows = Array.from({ length: n }, (_, i) =>
+      asks({ epicId: `e${i}`, readableId: `PXB-${i}` }),
+    );
+    render(
+      <YourTurnBand
+        awaitingReply={rows}
+        failed={[]}
+        conflicts={[]}
+        projectsById={projectsById}
+        onReply={vi.fn()}
+        onSendToDev={vi.fn()}
+        onRetry={vi.fn()}
+        onOpenLog={vi.fn()}
+        onResolveConflict={vi.fn()}
+        onOpenDiff={vi.fn()}
+      />,
+    );
+    stubLayout(foldPx);
+  }
+
+  it("counts the rows past the fold on a short viewport", () => {
+    // 30vh of 950px ≈ 285px ≈ 3 rows of 96px. 6 rows ⇒ 3 hidden.
+    renderRows(6, 3 * ROW_HEIGHT);
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+3 de plus");
+  });
+
+  it("says +2, not +3, on the taller viewport where a fourth row fits", () => {
+    // The measured regression: at 1440x1300 the band grows to ~390px and shows
+    // a fourth row, but the old fixed VISIBLE_ROWS = 3 still claimed "+3".
+    renderRows(6, 4 * ROW_HEIGHT);
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+2 de plus");
+  });
+
+  it("stays silent when every row is on screen", () => {
+    renderRows(3, 4 * ROW_HEIGHT);
+    expect(screen.queryByTestId("desk-your-turn-overflow")).toBeNull();
+  });
+
+  it("keeps the marker outside the scroll container", () => {
+    renderRows(6, 3 * ROW_HEIGHT);
+    const marker = screen.getByTestId("desk-your-turn-overflow");
+    expect(screen.getByTestId("desk-your-turn-rows").contains(marker)).toBe(false);
   });
 });

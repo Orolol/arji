@@ -34,6 +34,24 @@
 -- index covers that lookup, so no separate index is created here.
 --
 -- IF NOT EXISTS keeps the migration replay-safe.
+--
+-- RENUMBERED from 0048/when 1786714500000. While this branch was in review main
+-- landed 0048_mcp_servers and 0049_mcp_servers_scope_unique, taking that tag AND
+-- that timestamp. The `when` IS the migrator's identity (drizzle reads only
+-- `tag` and `when` from the journal, never `idx`), and it applies a migration
+-- only when its `when` EXCEEDS the last one recorded in the database — so at an
+-- equal `when` this file was silently skipped on every database that had run
+-- main's 0048, leaving `desk_dismissals` missing while the control-desk route
+-- selects from it unguarded. Same fix as the 0027 collision noted in
+-- lib/db/init.ts: move to a fresh tag past main's high-water mark.
+--
+-- `idx` stays 47 — contiguous with this branch's own journal, which the
+-- migration tests assert (idx === array index). It is deliberately NOT
+-- pre-set to its post-merge value: drizzle never reads `idx`, so it changes
+-- nothing at apply time, and leaving it contiguous keeps that invariant green
+-- here while making the merge resolution fail loudly until whoever merges
+-- renumbers it to 49. The `when` is the half that matters, and it is already
+-- correct on both sides of the merge.
 CREATE TABLE IF NOT EXISTS `desk_dismissals` (
 	`epic_id` text NOT NULL,
 	`kind` text NOT NULL,

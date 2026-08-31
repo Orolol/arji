@@ -179,10 +179,11 @@ export function NowDesk({
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
   );
-  const unreadCount = React.useMemo(
-    () => (data?.yourTurn.awaitingReply ?? []).filter((row) => row.unreadAi).length,
-    [data],
-  );
+  // Straight from the server, which counts it BEFORE the dismissal filter.
+  // Deriving it from `yourTurn.awaitingReply` — which IS filtered — made
+  // dismissing a coral row decrement a badge whose destination (`/inbox`)
+  // had not changed: the tile read "2", the page it opens listed 3.
+  const unreadCount = data?.inboxUnread ?? 0;
   const autoOn = projects.filter((project) => project.autoModeEnabled).length;
 
   const handleOpenTicket = React.useCallback(

@@ -27,6 +27,14 @@ import { isNightRunId } from "@/lib/night/constants";
  * COLOUR IS NOT STATE. AgentMonitor painted the wave chip sky-blue and the
  * night chip indigo; here both are mono in the stratum's own tone and the ICON
  * plus the WORD carry the distinction, per the system's rule.
+ *
+ * POLLING IS NOT GATED ON LIVE WORK. It briefly was (`active` = "WORKING has a
+ * running or queued session"), which matched AgentMonitor's own mount
+ * condition — but it took "Stop night run" off screen exactly when a run had
+ * no session in flight: between two epics, and in the seconds after a failure,
+ * which is the moment a user most wants to stop it. The endpoint reads an
+ * in-process Map and answers `[]` when idle, so polling on `projectId` alone
+ * costs nothing and the chips already render nothing on an empty list.
  */
 
 /** Subset of DagBatchSnapshot the indicator renders. */
@@ -39,11 +47,9 @@ interface WaveBatch {
 export interface WaveRunChipsProps {
   /** Omit on the cross-project desk: there is no single registry to read. */
   projectId?: string;
-  /** Poll only while the desk shows live work. */
-  active?: boolean;
 }
 
-export function WaveRunChips({ projectId, active = true }: WaveRunChipsProps) {
+export function WaveRunChips({ projectId }: WaveRunChipsProps) {
   const [batches, setBatches] = React.useState<WaveBatch[]>([]);
   /** Night run ids the user already asked to stop (local echo). */
   const [stopped, setStopped] = React.useState<string[]>([]);
@@ -60,7 +66,7 @@ export function WaveRunChips({ projectId, active = true }: WaveRunChipsProps) {
     }
   }, [projectId]);
 
-  usePolling(poll, 3000, Boolean(projectId) && active);
+  usePolling(poll, 3000, Boolean(projectId));
 
   if (!projectId || batches.length === 0) return null;
 

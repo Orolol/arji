@@ -783,14 +783,18 @@ export async function GET() {
 
   // Derive first, then subtract what the user has waved off: the dismissal is
   // a read-side filter and must never change how a signal is computed.
-  const yourTurn = applyDeskDismissals(
-    {
-      awaitingReply: deriveAwaitingReply(deskEpics),
-      failed: deriveFailures(failureSessions, epicsById, runningEpicIds),
-      conflicts: deriveConflicts(deskEpics),
-    },
-    dismissals,
-  );
+  const derived = {
+    awaitingReply: deriveAwaitingReply(deskEpics),
+    failed: deriveFailures(failureSessions, epicsById, runningEpicIds),
+    conflicts: deriveConflicts(deskEpics),
+  };
+  const yourTurn = applyDeskDismissals(derived, dismissals);
+
+  // Counted on the UNFILTERED rows on purpose. A dismissal hides a row from
+  // this desk's coral stratum; it does not mark anything read, and `/api/inbox`
+  // applies no such filter. Counting the filtered rows made the badge say "2"
+  // and its destination list 3.
+  const inboxUnread = derived.awaitingReply.filter((row) => row.unreadAi).length;
 
   const payload: ControlDeskPayload = {
     generatedAt: now.toISOString(),
@@ -808,6 +812,7 @@ export async function GET() {
     readyToLand,
     heldBackCount,
     upNext: deriveUpNext(deskProjects, deskEpics, edges, busyEpicIds),
+    inboxUnread,
   };
 
   console.debug("[control-desk/GET] query profile", {

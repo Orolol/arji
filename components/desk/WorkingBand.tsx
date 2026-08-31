@@ -82,10 +82,7 @@ export function WorkingBand({
         meta={meta}
         right={
           projectId ? (
-            <WaveRunChips
-              projectId={projectId}
-              active={working.length > 0 || queued.length > 0}
-            />
+            <WaveRunChips projectId={projectId} />
           ) : undefined
         }
       />

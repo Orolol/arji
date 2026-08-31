@@ -89,6 +89,7 @@ const payload: ControlDeskPayload = {
     },
   ],
   heldBackCount: 0,
+  inboxUnread: 0,
   upNext: [],
 };
 

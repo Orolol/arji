@@ -135,3 +135,39 @@ describe("WaveRunChips", () => {
     expect(screen.getByTestId("desk-night-stop")).toBeDisabled();
   });
 });
+
+/**
+ * The stop control has to be reachable in ONE action, which means it must not
+ * depend on WORKING having a session in flight.
+ *
+ * The chips briefly took an `active` prop wired to
+ * `working.length > 0 || queued.length > 0`. That matched AgentMonitor's old
+ * mount condition, so it was parity — but it hid "Stop night run" between two
+ * epics of a run and right after a failure, which is when a user most wants it.
+ */
+describe("WaveRunChips polling is not gated on live work", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("keeps 'Stop night run' on screen while no session is running or queued", async () => {
+    // The registry still holds the run; WORKING is momentarily empty.
+    mockWaves(`${NIGHT_RUN_ID_PREFIX}run-9`);
+    render(<WaveRunChips projectId="proj-1" />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("desk-night-stop")).toBeInTheDocument(),
+    );
+    expect(global.fetch).toHaveBeenCalledWith("/api/projects/proj-1/build/waves");
+  });
+
+  it("still polls the registry when the desk has nothing live to show", async () => {
+    // An empty registry answer is the idle case: the component must keep
+    // asking, because the run can reappear on the very next tick.
+    global.fetch = vi.fn().mockResolvedValue({ json: () => Promise.resolve({ data: [] }) });
+    render(<WaveRunChips projectId="proj-1" />);
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    expect(global.fetch).toHaveBeenCalledWith("/api/projects/proj-1/build/waves");
+  });
+});

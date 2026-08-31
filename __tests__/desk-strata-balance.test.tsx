@@ -49,6 +49,7 @@ function payload(overrides: Partial<ControlDeskPayload> = {}): ControlDeskPayloa
     yourTurn: { awaitingReply: [], failed: [], conflicts: [] },
     readyToLand: [],
     heldBackCount: 0,
+    inboxUnread: 0,
     upNext: [],
     ...overrides,
   };
@@ -102,8 +103,10 @@ describe("desk strata balance", () => {
   it("keeps the floor under a crowded Your turn", async () => {
     await renderDesk(payload({ yourTurn: { awaitingReply: asks(6), failed: [], conflicts: [] } }));
     expect(landGrid().className).toContain("min-h-[168px]");
-    // And the coral band admits it is hiding rows rather than growing.
-    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+3 de plus");
+    // The overflow marker itself is measured from the scroll container, so it
+    // needs a real layout; jsdom has none. Its count is pinned against a
+    // stubbed fold in desk-your-turn.test.tsx ("overflow marker") instead —
+    // what matters here is that a crowded coral band never eats the floor.
   });
 
   it("leaves WORKING as the desk's only growing band, whatever Your turn holds", async () => {
