@@ -14,6 +14,7 @@ import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { RegistryRow, TicketsRegistryPayload } from "@/lib/tickets-registry/types";
+import { mockFetchSequence } from "@/__tests__/helpers/mock-fetch";
 
 const openTicket = vi.fn();
 
@@ -143,21 +144,6 @@ function makePayload(rows: RegistryRow[]): TicketsRegistryPayload {
 }
 
 const originalFetch = global.fetch;
-
-/** Queue of responses, consumed in order; the last one repeats. */
-function mockFetchSequence(responses: Array<{ ok: boolean; body: unknown }>) {
-  let index = 0;
-  const fetchMock = vi.fn(async () => {
-    const response = responses[Math.min(index, responses.length - 1)];
-    index += 1;
-    return {
-      ok: response.ok,
-      json: async () => response.body,
-    } as Response;
-  });
-  global.fetch = fetchMock as unknown as typeof fetch;
-  return fetchMock;
-}
 
 const idle = () => ({
   ok: true,
@@ -293,8 +279,9 @@ describe("unscoped registry", () => {
 
   it("pulls the registry back in as soon as a finished pass reshapes the board", async () => {
     // Mount status, the dispatch answer, then the reload that sees the pass
-    // idle again — the running→idle edge is what fires onFinished.
-    mockFetchSequence([idle(), started(), idle()]);
+    // idle again — the running→idle edge is what fires onFinished, and it
+    // also re-runs the status effect, hence the fourth response.
+    mockFetchSequence([idle(), started(), idle(), idle()]);
     render(<TicketsRegistryView projectId="p1" />);
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
