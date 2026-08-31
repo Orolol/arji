@@ -93,7 +93,7 @@ const mockPanelOpenNewEpic = vi.fn();
 
 vi.mock("@/components/chat/UnifiedChatPanel", () => ({
   UnifiedChatPanel: forwardRef(
-    ({ children }: { children: ReactNode }, ref) => {
+    function UnifiedChatPanelMock({ children }: { children: ReactNode }, ref) {
       useImperativeHandle(ref, () => ({
         openChat: mockPanelOpenChat,
         openNewEpic: mockPanelOpenNewEpic,

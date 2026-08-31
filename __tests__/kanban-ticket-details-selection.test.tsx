@@ -103,7 +103,7 @@ vi.mock("@/components/kanban/EpicDetail", () => ({
 
 vi.mock("@/components/chat/UnifiedChatPanel", () => ({
   UnifiedChatPanel: forwardRef(
-    (
+    function UnifiedChatPanelMock(
       {
         children,
         sharedPanelView,
@@ -115,7 +115,7 @@ vi.mock("@/components/chat/UnifiedChatPanel", () => ({
         } | null;
       },
       ref
-    ) => {
+    ) {
       useImperativeHandle(ref, () => ({
         openChat: vi.fn(),
         openNewEpic: vi.fn(),

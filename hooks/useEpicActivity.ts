@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { usePolling } from "@/hooks/usePolling";
 
 /** One kanban transition from the ticket activity log (newest first from the API). */
@@ -15,6 +15,8 @@ export interface EpicActivityEntry {
   sessionId: string | null;
   createdAt: string | null;
 }
+
+const EMPTY_ENTRIES: EpicActivityEntry[] = [];
 
 /**
  * Loads and polls (5s) the transition activity log of an epic.
@@ -32,8 +34,14 @@ export function useEpicActivity(
     ? `/api/projects/${projectId}/epics/${epicId}/activity`
     : null;
 
-  const [entries, setEntries] = useState<EpicActivityEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadedEntries, setEntries] = useState<EpicActivityEntry[]>([]);
+  const [isLoading, setLoading] = useState(true);
+
+  // A null epicId has an empty, settled feed. Deriving that beats the reset
+  // effect it replaces: correct on the first render rather than one commit
+  // later, and re-opening an epic still shows its cached feed.
+  const entries = activityUrl ? loadedEntries : EMPTY_ENTRIES;
+  const loading = activityUrl ? isLoading : false;
 
   const loadActivity = useCallback(async () => {
     if (!activityUrl) return;
@@ -47,14 +55,6 @@ export function useEpicActivity(
       // silently fail on poll
     }
     setLoading(false);
-  }, [activityUrl]);
-
-  // Reset to an empty, non-loading feed when there is no target URL
-  useEffect(() => {
-    if (!activityUrl) {
-      setEntries([]);
-      setLoading(false);
-    }
   }, [activityUrl]);
 
   // Initial load + 5s polling while visible

@@ -19,6 +19,8 @@ interface WhatTheAgentDidProps {
   refreshToken?: string | null;
 }
 
+const EMPTY_ACTIONS: ArijActionItem[] = [];
+
 interface UnifiedSessionRow {
   id: string;
   kind?: string;
@@ -46,13 +48,21 @@ export function WhatTheAgentDid({
   epicId,
   refreshToken,
 }: WhatTheAgentDidProps) {
-  const [actions, setActions] = useState<ArijActionItem[]>([]);
+  // Keyed by the request it belongs to, so switching ticket (or bumping the
+  // refresh token) shows nothing at once instead of the previous ticket's
+  // actions until the fetch lands. That reset used to be a setState at the top
+  // of the effect, which cost an extra commit and only cleared one render late.
+  const requestKey = `${projectId}|${epicId ?? ""}|${refreshToken ?? ""}`;
+  const [loaded, setLoaded] = useState<{
+    key: string;
+    actions: ArijActionItem[];
+  } | null>(null);
+  const actions = loaded?.key === requestKey ? loaded.actions : EMPTY_ACTIONS;
 
   useEffect(() => {
     let cancelled = false;
 
     if (!epicId) {
-      setActions([]);
       return;
     }
 
@@ -71,19 +81,23 @@ export function WhatTheAgentDid({
         if (!detailRes.ok) return;
         const detailJson = await detailRes.json();
         const next = (detailJson?.data?.arijActions ?? []) as ArijActionItem[];
-        if (!cancelled) setActions(Array.isArray(next) ? next : []);
+        if (!cancelled) {
+          setLoaded({
+            key: requestKey,
+            actions: Array.isArray(next) ? next : [],
+          });
+        }
       } catch {
         // Best-effort ambient detail — the block simply stays hidden.
       }
     }
 
-    setActions([]);
     void load(epicId);
 
     return () => {
       cancelled = true;
     };
-  }, [projectId, epicId, refreshToken]);
+  }, [projectId, epicId, refreshToken, requestKey]);
 
   if (actions.length === 0) return null;
 

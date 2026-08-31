@@ -37,29 +37,51 @@ export function useConversations(projectId: string) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Applying the payload is shared by the mount fetch and by `refresh`; keeping
+  // it out of the effect body is what lets the effect update state only from a
+  // promise callback rather than synchronously.
+  const applyConversations = useCallback((json: { data?: unknown }) => {
+    const data = sortConversationsForLegacyParity((json.data || []) as Conversation[]);
+    setConversations(data);
+
+    // Set active to first conversation if none selected or current is gone
+    if (data.length > 0) {
+      setActiveId((prev) => {
+        if (prev && data.some((c) => c.id === prev)) return prev;
+        return data[0].id;
+      });
+    }
+  }, []);
+
+  const conversationsUrl = `/api/projects/${projectId}/conversations`;
+
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/conversations`);
-      const json = await res.json();
-      const data = sortConversationsForLegacyParity((json.data || []) as Conversation[]);
-      setConversations(data);
-
-      // Set active to first conversation if none selected or current is gone
-      if (data.length > 0) {
-        setActiveId((prev) => {
-          if (prev && data.some((c) => c.id === prev)) return prev;
-          return data[0].id;
-        });
-      }
+      const res = await fetch(conversationsUrl);
+      applyConversations(await res.json());
     } catch {
       // ignore
     }
     setLoading(false);
-  }, [projectId]);
+  }, [conversationsUrl, applyConversations]);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let cancelled = false;
+    fetch(conversationsUrl)
+      .then((res) => res.json())
+      .then((json) => {
+        if (!cancelled) applyConversations(json);
+      })
+      .catch(() => {
+        // ignore
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationsUrl, applyConversations]);
 
   const createConversation = useCallback(
     async (input: CreateConversationInput = {}) => {

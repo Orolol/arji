@@ -28,28 +28,48 @@ export function useStoryDetail(projectId: string, storyId: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const storyUrl = `/api/projects/${projectId}/stories/${storyId}`;
+
+  // Shared by the mount fetch and by `loadData`, so the effect only ever
+  // updates state from a promise callback instead of synchronously.
+  const applyStory = useCallback((data: { error?: string; data?: StoryDetail }) => {
+    if (data.error) {
+      setError(data.error);
+    } else {
+      setError(null);
+      setStory(data.data ?? null);
+    }
+    setLoading(false);
+  }, []);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/projects/${projectId}/stories/${storyId}`
-      );
-      const data = await res.json();
-      if (data.error) {
-        setError(data.error);
-      } else {
-        setStory(data.data);
-      }
+      const res = await fetch(storyUrl);
+      applyStory(await res.json());
     } catch {
       setError("Failed to load story");
+      setLoading(false);
     }
-    setLoading(false);
-  }, [projectId, storyId]);
+  }, [storyUrl, applyStory]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    let cancelled = false;
+    fetch(storyUrl)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) applyStory(data);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError("Failed to load story");
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [storyUrl, applyStory]);
 
   const updateStory = useCallback(
     async (updates: Partial<StoryDetail>) => {
