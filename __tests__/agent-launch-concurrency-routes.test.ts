@@ -61,6 +61,11 @@ vi.mock("@/lib/db", () => {
   return { db: chain };
 });
 
+vi.mock("@/lib/pipeline", () => ({
+  resolvePipelineEnabled: vi.fn(() => false),
+  startPipelineRun: vi.fn(() => ({ runId: "run-test" })),
+}));
+
 vi.mock("@/lib/db/schema", () => ({
   projects: { id: "id", gitRepoPath: "gitRepoPath" },
   epics: {

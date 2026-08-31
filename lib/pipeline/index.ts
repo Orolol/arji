@@ -84,8 +84,10 @@ function readSettingValue(key: string): string | null {
 
 /**
  * Effective "run the pipeline by default" answer for a project:
- * `pipeline_enabled:<projectId>` → `pipeline_enabled` → OFF. An explicit
- * request flag beats both (handled by the routes).
+ * `pipeline_enabled:<projectId>` → `pipeline_enabled` → ON. An explicit
+ * request flag beats both (handled by the routes). The full pipeline is the
+ * default build mode: builds chain build → review → fix unless a setting or
+ * the request itself opts out.
  */
 export function resolvePipelineEnabled(projectId: string): boolean {
   for (const key of [
@@ -95,7 +97,7 @@ export function resolvePipelineEnabled(projectId: string): boolean {
     const parsed = parsePipelineEnabledSetting(readSettingValue(key));
     if (parsed !== null) return parsed;
   }
-  return false;
+  return true;
 }
 
 /** Effective grader option: project override → global → OFF. */

@@ -28,6 +28,11 @@ vi.mock("@/lib/db", async () => {
   return { db: created.db, sqlite: created.sqlite, ensureDbReady: vi.fn() };
 });
 
+vi.mock("@/lib/pipeline", () => ({
+  resolvePipelineEnabled: vi.fn(() => false),
+  startPipelineRun: vi.fn(() => ({ runId: "run-test" })),
+}));
+
 vi.mock("@/lib/git/manager", () => ({
   attachWorktree: vi.fn(async (_repo: string, branchName: string) => ({
     worktreePath: `/tmp/worktree-${branchName.replace(/\//g, "-")}`,

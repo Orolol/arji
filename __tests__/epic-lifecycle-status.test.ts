@@ -144,9 +144,14 @@ vi.mock("@/lib/db/schema", () => ({
     projectId: "projectId",
     epicId: "epicId",
   },
-  // Read by resolvePipelineEnabled (build routes); get() returns null for
-  // this table, so the pipeline stays OFF in these tests.
   settings: { _name: "settings", key: "key", value: "value" },
+}));
+
+// These tests exercise the build lifecycle, not the pipeline: keep the
+// pipeline off so the real engine cannot start against the mock chain.
+vi.mock("@/lib/pipeline", () => ({
+  resolvePipelineEnabled: vi.fn(() => false),
+  startPipelineRun: vi.fn(() => ({ runId: "run-test" })),
 }));
 
 vi.mock("@/lib/utils/nanoid", () => ({ createId: vi.fn(() => "test-id") }));

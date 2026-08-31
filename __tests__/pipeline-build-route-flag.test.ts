@@ -4,7 +4,8 @@
  *   - epic build route: body.pipeline true forces the run on (settle wrapper
  *     + startPipelineRun with the pinned input, response gains
  *     pipeline.runId), false forces it off without consulting settings,
- *     absent falls back to resolvePipelineEnabled (default OFF),
+ *     absent falls back to resolvePipelineEnabled (default ON unless a
+ *     setting opts out),
  *   - the settled promise handed to startPipelineRun resolves with the
  *     build's terminal {sessionId, success, outcome, error},
  *   - story build route: same wiring with scope 'story',
@@ -159,7 +160,7 @@ beforeEach(() => {
 });
 
 describe("epic build route — pipeline flag", () => {
-  it("default: pipeline off, response carries pipeline: null, setting consulted", async () => {
+  it("setting off: response carries pipeline: null, setting consulted", async () => {
     const { projectId, epicId } = seed();
     const res = await epicBuildPost(
       mockJsonRequest({}),
@@ -301,7 +302,7 @@ describe("story build route — pipeline flag", () => {
     await flushBackground();
   });
 
-  it("default off: response carries pipeline: null", async () => {
+  it("setting off: response carries pipeline: null", async () => {
     const { projectId, storyId } = seed();
     const res = await storyBuildPost(
       mockJsonRequest({}),

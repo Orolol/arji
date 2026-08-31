@@ -193,7 +193,7 @@ export const CHAT_BOARD_TOOL_DEFINITIONS: OpenAiToolDefinition[] = [
     function: {
       name: "start_build",
       description:
-        "Launch a coding agent on a ticket (creates a git worktree and a build session). Only for buildable columns (backlog/todo/in_progress/review); fails with 409 if an agent is already working on the ticket. Ask the user before using this unless they clearly requested a build.",
+        "Launch a coding agent on a ticket (creates a git worktree and a build session). Only for buildable columns (backlog/todo/in_progress/review); fails with 409 if an agent is already working on the ticket. Unless the project's pipeline setting opts out, the build then runs the full pipeline: code review and fix cycles until the review is clean. Ask the user before using this unless they clearly requested a build.",
       parameters: {
         type: "object",
         properties: {

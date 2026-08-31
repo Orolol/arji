@@ -264,7 +264,7 @@ const SPECS: readonly SettingFieldSpec[] = [
   {
     key: PIPELINE_ENABLED_SETTING_KEY,
     read: (data) =>
-      parsePipelineEnabledSetting(data[PIPELINE_ENABLED_SETTING_KEY]) ?? false,
+      parsePipelineEnabledSetting(data[PIPELINE_ENABLED_SETTING_KEY]) ?? true,
     parse: (editor) => ({ value: bool(editor) }),
   },
   {

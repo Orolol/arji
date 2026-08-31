@@ -23,6 +23,7 @@ import * as React from "react";
 import { ArrowLeft, Trash2, Wrench } from "lucide-react";
 
 import { AgentDispatchDialog } from "@/components/shared/AgentDispatchDialog";
+import { SendToDevDialog } from "@/components/shared/SendToDevDialog";
 import { PermanentDeleteDialog } from "@/components/shared/PermanentDeleteDialog";
 import { DiffViewer } from "@/components/review/DiffViewer";
 import { PillButton, QuietDangerAction } from "@/components/piscine";
@@ -80,6 +81,9 @@ export function TicketOverlay({
     null,
   );
   const [stopping, setStopping] = React.useState(false);
+  const [rebuildOpen, setRebuildOpen] = React.useState(false);
+  const [backToDevOpen, setBackToDevOpen] = React.useState(false);
+  const [backToDevSeed, setBackToDevSeed] = React.useState("");
 
   const data = useTicketOverlayData(projectId, epicId, open, {
     refreshTrigger,
@@ -154,13 +158,17 @@ export function TicketOverlay({
     setStatusError(null);
     setDraft("");
     setCommentError(null);
+    setRebuildOpen(false);
+    setBackToDevOpen(false);
+    setBackToDevSeed("");
     setDiffView(false);
     setMergeError(null);
   }
 
   /* ---------------- close semantics --------------------------------- */
 
-  const escapeBlocked = deleteDialogOpen || resolveMergeOpen;
+  const escapeBlocked =
+    deleteDialogOpen || resolveMergeOpen || rebuildOpen || backToDevOpen;
 
   React.useEffect(() => {
     function onEscape(event: KeyboardEvent) {
@@ -284,13 +292,10 @@ export function TicketOverlay({
     }
   }
 
-  async function handleRebuild() {
-    try {
-      await sendToDev(undefined, selectedAgentId);
-      refresh();
-    } catch (error) {
-      reportConflict(error);
-    }
+  function handleRebuild() {
+    // The dispatch contract (comment, agent, resumable session, pipeline
+    // mode) lives in the shared dialog; the band's agent seeds its picker.
+    setRebuildOpen(true);
   }
 
   async function handleGrade() {
@@ -305,8 +310,30 @@ export function TicketOverlay({
   }
 
   async function handleBackToDev(reviewComment: string) {
-    await sendToDev(reviewComment);
-    refresh();
+    // The review comment seeds the shared dispatch dialog, where the user
+    // confirms it (it stays editable) and the pipeline mode.
+    setBackToDevSeed(reviewComment);
+    setBackToDevOpen(true);
+  }
+
+  /** Shared confirm for both dev dispatch dialogs (rebuild, back-to-dev). */
+  async function handleDispatchDev(
+    comment: string | undefined,
+    namedAgentId: string | null,
+    sessionId: string | undefined,
+    // undefined = no readable default and no user choice: omit the flag and
+    // let the build route resolve `pipeline_enabled` itself.
+    pipeline: boolean | undefined,
+  ) {
+    setSelectedAgentId(namedAgentId);
+    try {
+      await sendToDev(comment, namedAgentId, sessionId, pipeline);
+      refresh();
+      setRebuildOpen(false);
+      setBackToDevOpen(false);
+    } catch (error) {
+      reportConflict(error);
+    }
   }
 
   async function handleSend() {
@@ -559,6 +586,34 @@ export function TicketOverlay({
         onCancel={() => setResolveMergeOpen(false)}
       />
 
+      <SendToDevDialog
+        open={rebuildOpen}
+        onOpenChange={setRebuildOpen}
+        projectId={projectId}
+        title="Re-build this epic"
+        description="Dispatch a build agent on this epic's branch."
+        epicId={epicId ?? undefined}
+        initialAgentId={selectedAgentId}
+        busy={dispatching}
+        locked={dispatching || isRunning}
+        onConfirm={handleDispatchDev}
+      />
+
+      <SendToDevDialog
+        open={backToDevOpen}
+        onOpenChange={setBackToDevOpen}
+        projectId={projectId}
+        title="Send back to dev"
+        description="Explain what needs to be fixed. This comment is required."
+        epicId={epicId ?? undefined}
+        initialAgentId={selectedAgentId}
+        defaultComment={backToDevSeed}
+        commentRequired
+        commentPlaceholder="Describe what needs to be fixed..."
+        busy={dispatching}
+        locked={dispatching || isRunning}
+        onConfirm={handleDispatchDev}
+      />
       <PermanentDeleteDialog
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
