@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { NowDesk } from "@/components/desk/NowDesk";
 import { TicketOverlay } from "@/components/ticket/TicketOverlay";
 import { UnifiedChatPanel, type UnifiedChatPanelHandle } from "@/components/chat/UnifiedChatPanel";
@@ -33,6 +33,7 @@ import { AutoModeDialog } from "@/components/auto-mode/AutoModeDialog";
 import { AutoModeToggle } from "@/components/auto-mode/AutoModeToggle";
 import { RefinementButton } from "@/components/kanban/RefinementButton";
 import { getActiveDetailTicketId, selectOnlyTicket } from "@/lib/kanban/selection";
+import { consumeQueryParam } from "@/lib/navigation/deep-link";
 import { useProjectEvents } from "@/hooks/useProjectEvents";
 
 /**
@@ -62,7 +63,6 @@ interface Toast {
 
 export default function ProjectDeskPage() {
   const params = useParams();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
   const batch = useBatchSelection(projectId);
@@ -174,25 +174,31 @@ export default function ProjectDeskPage() {
       addToast("success", "Epic deleted permanently");
     }
 
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("deleted");
-    const query = next.toString();
-    router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
-  }, [addToast, projectId, router, searchParams]);
+    consumeQueryParam(searchParams, "deleted", `/projects/${projectId}`);
+  }, [addToast, projectId, searchParams]);
 
   // Deep link: /projects/<id>?ticket=<epicId> opens the ticket detail
   // (used by "Agent asked a question" notifications), then strips the param.
+  //
+  // Consumed once per value, like ?panel= and ?night= below, and for a sharper
+  // reason: `useRouter()` is memoised on the closest CacheNode's bfcache id, so
+  // every committed navigation hands this effect a new `router` and re-runs it.
+  // Without the ref that re-opens the overlay the user has just closed.
+  const handledTicketParam = useRef<string | null>(null);
+
   useEffect(() => {
     const ticket = searchParams.get("ticket");
-    if (!ticket) return;
+    if (!ticket) {
+      handledTicketParam.current = null;
+      return;
+    }
+    if (handledTicketParam.current === ticket) return;
+    handledTicketParam.current = ticket;
 
     batch.setSelectedTicketIds(selectOnlyTicket(ticket));
 
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("ticket");
-    const query = next.toString();
-    router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
-  }, [batch.setSelectedTicketIds, projectId, router, searchParams]);
+    consumeQueryParam(searchParams, "ticket", `/projects/${projectId}`);
+  }, [batch.setSelectedTicketIds, projectId, searchParams]);
 
   // Header actions live in the project chrome (a layout that outlives this
   // page), so they reach this route through the URL rather than through a
@@ -222,11 +228,8 @@ export default function ProjectDeskPage() {
       setBugDialogOpen(true);
     }
 
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("panel");
-    const query = next.toString();
-    router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
-  }, [projectId, router, searchParams]);
+    consumeQueryParam(searchParams, "panel", `/projects/${projectId}`);
+  }, [projectId, searchParams]);
 
   // Same mechanism for the header's Night run button: ?night=start.
   useEffect(() => {
@@ -240,11 +243,8 @@ export default function ProjectDeskPage() {
 
     setNightDialogOpen(true);
 
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("night");
-    const query = next.toString();
-    router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
-  }, [projectId, router, searchParams]);
+    consumeQueryParam(searchParams, "night", `/projects/${projectId}`);
+  }, [projectId, searchParams]);
 
   // Deep link: /projects/<id>?nightRun=<runId> opens the morning summary
   // (used by the "Night run finished" notification), then strips the param.
@@ -254,11 +254,8 @@ export default function ProjectDeskPage() {
 
     setNightSummaryRunId(nightRun);
 
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("nightRun");
-    const query = next.toString();
-    router.replace(query ? `/projects/${projectId}?${query}` : `/projects/${projectId}`);
-  }, [projectId, router, searchParams]);
+    consumeQueryParam(searchParams, "nightRun", `/projects/${projectId}`);
+  }, [projectId, searchParams]);
 
   // Reset team mode when selection drops below 2
   useEffect(() => {
