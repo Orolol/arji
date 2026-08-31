@@ -257,6 +257,7 @@ async function defaultDispatch(
   if (
     input.stage === "review" &&
     targetStatus !== "review" &&
+    targetStatus !== "to_merge" &&
     targetStatus !== "done"
   ) {
     return {
@@ -938,7 +939,7 @@ function returnTicketToInProgress(
           .get()?.status) ?? "unknown";
 
   const before = readStatus();
-  if (before !== "review" && before !== "done") {
+  if (before !== "review" && before !== "to_merge" && before !== "done") {
     return { moved: false, status: before };
   }
 

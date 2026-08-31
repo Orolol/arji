@@ -1,0 +1,35 @@
+-- Index agent_sessions by the named agent that ran each session.
+--
+-- The /agents workshop polls `getAgentDayStats()` (lib/agent-config/agent-stats.ts)
+-- every 10s for as long as the page is open. That aggregate filters and groups
+-- by `named_agent_id`, which 0046 did not cover: it indexed (project_id,
+-- created_at) and (epic_id), so the roster aggregate fell through to a full
+-- SCAN of agent_sessions. That table is the widest in the database — the
+-- `prompt` column pushes the average row into overflow pages — so the scan
+-- pays for row payload it never reads.
+--
+-- COVERING, and PARTIAL, on purpose:
+--
+--   * the four indexed columns are exactly the ones the aggregate reads
+--     (named_agent_id, created_at, status, total_cost_usd), so SQLite answers
+--     it from the index alone and never touches an overflow page;
+--   * `WHERE named_agent_id IS NOT NULL` matches the aggregate's own WHERE
+--     clause, which is what lets SQLite use the partial index, and keeps the
+--     index off the majority of rows that carry no named agent at all.
+--
+-- EXPLAIN QUERY PLAN on the roster aggregate goes from
+--   SCAN agent_sessions / USE TEMP B-TREE FOR GROUP BY
+-- to
+--   SEARCH agent_sessions USING COVERING INDEX agent_sessions_named_agent_activity_idx (named_agent_id>?)
+--
+-- Measured on a copy of the development database (761 sessions, 962 MB file):
+-- 12.4 ms -> 0.08 ms per poll. better-sqlite3 is synchronous on one shared
+-- connection, so that 12 ms was blocking every other request and every SSE
+-- heartbeat, once per open workshop tab per 10 s.
+--
+-- The per-agent 14-day queries in the same module gain the leading-key search
+-- for free; they read started_at/ended_at as well, so they are not covered.
+--
+-- IF NOT EXISTS keeps the migration a no-op on databases that already carry
+-- the index, which is what makes it safe to replay.
+CREATE INDEX IF NOT EXISTS `agent_sessions_named_agent_activity_idx` ON `agent_sessions` (`named_agent_id`, `created_at`, `status`, `total_cost_usd`) WHERE `named_agent_id` IS NOT NULL;

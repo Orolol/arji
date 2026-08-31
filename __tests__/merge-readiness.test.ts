@@ -2,8 +2,8 @@
  * The shared "ready to merge" predicate (lib/kanban/merge-readiness.ts).
  *
  * Pure by design, so these tests are the specification: they pin the blocker
- * precedence the Review cards render, the timestamp normalisation that makes
- * ISO and SQLite stamps comparable, and the review-column ordering the board
+ * precedence the To Merge cards render, the timestamp normalisation that makes
+ * ISO and SQLite stamps comparable, and the To Merge ordering the board
  * relies on to keep its two sections contiguous.
  */
 import { describe, it, expect } from "vitest";
@@ -15,12 +15,12 @@ import {
   hasFreshCleanReview,
   isMergeReady,
   isMergeReadyEpic,
-  sortReviewColumn,
+  sortMergeColumn,
   type MergeReadinessFacts,
 } from "@/lib/kanban/merge-readiness";
 
 const READY: MergeReadinessFacts = {
-  status: "review",
+  status: "to_merge",
   branchName: "feature/epic-1",
   openFindings: 0,
   lastCleanReviewAt: "2026-08-20T12:00:00.000Z",
@@ -28,7 +28,7 @@ const READY: MergeReadinessFacts = {
 };
 
 describe("evaluateMergeReadiness", () => {
-  it("clears an epic reviewed after its last code change with no open findings", () => {
+  it("clears a To Merge epic with a branch and no live conflict", () => {
     expect(evaluateMergeReadiness(READY)).toEqual({
       ready: true,
       blocker: null,
@@ -37,37 +37,46 @@ describe("evaluateMergeReadiness", () => {
     expect(isMergeReady(READY)).toBe(true);
   });
 
-  it("refuses anything outside the review column", () => {
-    for (const status of ["backlog", "todo", "in_progress", "done", "released"]) {
+  it("refuses anything outside the To Merge column", () => {
+    for (const status of [
+      "backlog",
+      "todo",
+      "in_progress",
+      "review",
+      "done",
+      "released",
+    ]) {
       expect(evaluateMergeReadiness({ ...READY, status })).toMatchObject({
         ready: false,
-        blocker: "not_in_review",
+        blocker: "not_to_merge",
       });
     }
   });
 
-  it("reports open findings, and how many", () => {
+  it("echoes open findings as information, never as a blocker", () => {
+    // The merge IS the approval: whatever stayed open is resolved by the
+    // merge itself, so the count rides along for the card to show.
     expect(evaluateMergeReadiness({ ...READY, openFindings: 2 })).toEqual({
-      ready: false,
-      blocker: "open_findings",
+      ready: true,
+      blocker: null,
       openFindings: 2,
     });
   });
 
-  it("reports a review that predates the last code change as stale", () => {
+  it("ignores review freshness — the to_merge status carries the verdict", () => {
+    // A review that predates the last code change used to be a blocker;
+    // now the review agent's promotion to `to_merge` is the approval, and a
+    // later code session earns a re-review upstream, not a blocked card.
     expect(
       evaluateMergeReadiness({
         ...READY,
         lastCleanReviewAt: "2026-08-20T11:00:00.000Z",
         lastTerminalCodeAt: "2026-08-20T12:00:00.000Z",
       })
-    ).toMatchObject({ ready: false, blocker: "stale_review" });
-  });
-
-  it("distinguishes 'never reviewed' from 'reviewed, then superseded'", () => {
+    ).toMatchObject({ ready: true, blocker: null });
     expect(
       evaluateMergeReadiness({ ...READY, lastCleanReviewAt: null })
-    ).toMatchObject({ blocker: "no_review" });
+    ).toMatchObject({ ready: true, blocker: null });
   });
 
   it("refuses an epic with nothing to land", () => {
@@ -81,6 +90,7 @@ describe("evaluateMergeReadiness", () => {
       evaluateMergeReadiness({
         ...READY,
         openFindings: 3,
+        branchName: null,
         lastMergeConflictAt: "2026-08-20T13:00:00.000Z",
       })
     ).toMatchObject({ blocker: "merge_conflict", openFindings: 3 });
@@ -96,10 +106,21 @@ describe("evaluateMergeReadiness", () => {
     ).toMatchObject({ ready: false, blocker: "conflict_markers" });
   });
 
-  it("treats a review with no recorded code session as fresh", () => {
+  it("reports the NEWER trace when a conflict and markers are both current", () => {
     expect(
-      evaluateMergeReadiness({ ...READY, lastTerminalCodeAt: null })
-    ).toMatchObject({ ready: true });
+      evaluateMergeReadiness({
+        ...READY,
+        lastMergeConflictAt: "2026-08-20T13:00:00.000Z",
+        lastConflictMarkersAt: "2026-08-20T14:00:00.000Z",
+      })
+    ).toMatchObject({ blocker: "conflict_markers" });
+    expect(
+      evaluateMergeReadiness({
+        ...READY,
+        lastMergeConflictAt: "2026-08-20T14:00:00.000Z",
+        lastConflictMarkersAt: "2026-08-20T13:00:00.000Z",
+      })
+    ).toMatchObject({ blocker: "merge_conflict" });
   });
 
   it("compares SQLite timestamps against ISO ones correctly", () => {
@@ -166,35 +187,32 @@ describe("hasCurrentMergeConflict and hasCurrentConflictMarkers", () => {
     expect(hasCurrentConflictMarkers({ lastTerminalCodeAt: null })).toBe(false);
   });
 
-  it("a repaired conflict falls through to the stale review it invalidated", () => {
+  it("a repaired conflict makes the epic ready again", () => {
     expect(
       evaluateMergeReadiness({
         ...READY,
         lastMergeConflictAt: "2026-08-20T11:30:00.000Z",
-        // The merge-fix agent rewrote the branch after both the review and
-        // the failed merge.
+        // The merge-fix agent rewrote the branch after the failed merge:
+        // the conflict is no longer the branch's current state.
         lastTerminalCodeAt: "2026-08-20T13:00:00.000Z",
       })
-    ).toMatchObject({ blocker: "stale_review" });
+    ).toMatchObject({ ready: true, blocker: null });
   });
 });
 
 describe("describeMergeBlocker", () => {
-  it("says nothing for a ready epic or one outside review", () => {
+  it("says nothing for a ready epic or one outside To Merge", () => {
     expect(describeMergeBlocker({ ready: true, blocker: null, openFindings: 0 })).toBeNull();
     expect(
-      describeMergeBlocker({ ready: false, blocker: "not_in_review", openFindings: 0 })
+      describeMergeBlocker({ ready: false, blocker: "not_to_merge", openFindings: 0 })
     ).toBeNull();
     expect(describeMergeBlocker(undefined)).toBeNull();
   });
 
-  it("counts findings, singular and plural", () => {
+  it("says nothing about open findings — they are information, not a blocker", () => {
     expect(
-      describeMergeBlocker({ ready: false, blocker: "open_findings", openFindings: 1 })
-    ).toBe("1 open finding");
-    expect(
-      describeMergeBlocker({ ready: false, blocker: "open_findings", openFindings: 4 })
-    ).toBe("4 open findings");
+      describeMergeBlocker({ ready: true, blocker: null, openFindings: 4 })
+    ).toBeNull();
   });
 
   it("names the cause for each remaining blocker", () => {
@@ -205,30 +223,24 @@ describe("describeMergeBlocker", () => {
       describeMergeBlocker({ ready: false, blocker: "conflict_markers", openFindings: 0 })
     ).toBe("Branch contains unresolved conflict markers");
     expect(
-      describeMergeBlocker({ ready: false, blocker: "stale_review", openFindings: 0 })
-    ).toMatch(/outdated/i);
-    expect(
-      describeMergeBlocker({ ready: false, blocker: "no_review", openFindings: 0 })
-    ).toMatch(/review/i);
-    expect(
       describeMergeBlocker({ ready: false, blocker: "no_branch", openFindings: 0 })
     ).toMatch(/branch/i);
   });
 });
 
-describe("sortReviewColumn", () => {
+describe("sortMergeColumn", () => {
   const epic = (id: string, position: number, ready: boolean) => ({
     id,
     position,
     mergeReadiness: {
       ready,
-      blocker: ready ? null : ("open_findings" as const),
-      openFindings: ready ? 0 : 1,
+      blocker: ready ? null : ("merge_conflict" as const),
+      openFindings: 0,
     },
   });
 
   it("floats ready tickets to the top, keeping board position within groups", () => {
-    const sorted = sortReviewColumn([
+    const sorted = sortMergeColumn([
       epic("a", 0, false),
       epic("b", 1, true),
       epic("c", 2, false),
@@ -239,12 +251,12 @@ describe("sortReviewColumn", () => {
 
   it("does not mutate its input", () => {
     const input = [epic("a", 0, false), epic("b", 1, true)];
-    sortReviewColumn(input);
+    sortMergeColumn(input);
     expect(input.map((e) => e.id)).toEqual(["a", "b"]);
   });
 
   it("treats a missing signal as not ready rather than throwing", () => {
-    const sorted = sortReviewColumn([
+    const sorted = sortMergeColumn([
       { id: "a", position: 0 },
       epic("b", 1, true),
     ]);

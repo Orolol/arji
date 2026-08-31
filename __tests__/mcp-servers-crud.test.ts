@@ -1,7 +1,7 @@
 /**
  * Story "Schéma, migration et CRUD des serveurs MCP".
  *
- * Covers migration 0045 and its hand-written journal entry, the cascade that
+ * Covers migration 0048 and its hand-written journal entry, the cascade that
  * makes project deletion clean up its servers, and the validation contract:
  * the reserved `arij` name, the name grammar, per-scope uniqueness, the
  * transport-dependent shape rules, and — the one that is easy to get wrong —
@@ -37,13 +37,13 @@ import {
 } from "@/lib/mcp/servers";
 
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "lib", "db", "migrations");
-const MIGRATION_TAG = "0045_mcp_servers";
-const MIGRATION_WHEN = 1786714200000;
-// The scope-uniqueness indexes ship as their own migration: 0045 is already
+const MIGRATION_TAG = "0048_mcp_servers";
+const MIGRATION_WHEN = 1786714500000;
+// The scope-uniqueness indexes ship as their own migration: 0048 is already
 // applied on any database that ran this branch earlier, so the indexes cannot
 // be folded back into it.
-const SCOPE_UNIQUE_TAG = "0046_mcp_servers_scope_unique";
-const SCOPE_UNIQUE_WHEN = 1786714300000;
+const SCOPE_UNIQUE_TAG = "0049_mcp_servers_scope_unique";
+const SCOPE_UNIQUE_WHEN = 1786714600000;
 
 const journal = JSON.parse(
   fs.readFileSync(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf-8"),
@@ -67,7 +67,7 @@ const stdio = (name: string, extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-describe("0045_mcp_servers — migration bookkeeping", () => {
+describe("0048_mcp_servers — migration bookkeeping", () => {
   it.each([
     [MIGRATION_TAG, MIGRATION_WHEN],
     [SCOPE_UNIQUE_TAG, SCOPE_UNIQUE_WHEN],
@@ -85,8 +85,8 @@ describe("0045_mcp_servers — migration bookkeeping", () => {
     const idxs = journal.entries.map((e) => e.idx);
     expect(idxs.every((v, i) => i === 0 || v > idxs[i - 1])).toBe(true);
 
-    // The two migrations are adjacent and last, in order. 0046 creates indexes
-    // ON the table 0045 creates, so the relative order is load-bearing, not
+    // The two migrations are adjacent and last, in order. 0049 creates indexes
+    // ON the table 0048 creates, so the relative order is load-bearing, not
     // just tidy.
     expect(journal.entries.slice(-2).map((e) => e.tag)).toEqual([
       MIGRATION_TAG,
@@ -106,7 +106,7 @@ describe("0045_mcp_servers — migration bookkeeping", () => {
       .readdirSync(path.join(MIGRATIONS_FOLDER, "meta"))
       .filter((n) => n.endsWith("_snapshot.json"))
       .sort();
-    expect(snapshots).not.toContain("0045_snapshot.json");
+    expect(snapshots).not.toContain("0048_snapshot.json");
     expect(snapshots[snapshots.length - 1]).toBe("0013_snapshot.json");
   });
 

@@ -322,6 +322,27 @@ class ClaudeProcessManager {
             "\n" +
             arijToolsSection(row.agentType ?? null, arijMcpToolPrefix(provider)) +
             extraMcpServersSection(extras.servers, provider);
+          // Re-persist the prompt WITH the appended section — same display
+          // argument as the persona re-persist above, plus a hard requirement
+          // of its own: resolveSessionOutput's echo scrub matches
+          // agent_sessions.prompt as an exact substring of the session's
+          // output, and a CLI that echoes its prompt echoes the SPAWNED
+          // prompt, tools section included. A stored prompt that stops short
+          // left the section behind in ticket comments (measured on
+          // E-arij-138, 2026-08-27). Own try/catch: a failed write must not
+          // be mistaken for a failed injection by the outer catch, which
+          // would drop the channel that was just built.
+          try {
+            db.update(agentSessions)
+              .set({ prompt: options.prompt })
+              .where(eq(agentSessions.id, sessionId))
+              .run();
+          } catch (error) {
+            console.warn(
+              `[process-manager] Failed to persist the tools section for session ${sessionId}:`,
+              error instanceof Error ? error.message : error,
+            );
+          }
         }
       }
     } catch (error) {

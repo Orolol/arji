@@ -314,14 +314,35 @@
       "idx": 44,
       "version": "6",
       "when": 1786714200000,
-      "tag": "0045_mcp_servers",
+      "tag": "0045_agent_session_estimated_tokens",
       "breakpoints": true
     },
     {
       "idx": 45,
       "version": "6",
       "when": 1786714300000,
-      "tag": "0046_mcp_servers_scope_unique",
+      "tag": "0046_core_table_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1786714400000,
+      "tag": "0047_agent_sessions_named_agent_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1786714500000,
+      "tag": "0048_mcp_servers",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1786714600000,
+      "tag": "0049_mcp_servers_scope_unique",
       "breakpoints": true
     }
   ]

@@ -9,7 +9,6 @@
  * ended on a model error still exits 0 — so success has to be downgraded from
  * the stream, not the exit code.
  */
-import { readFileSync } from "fs";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const { mockSpawn } = vi.hoisted(() => ({
@@ -283,6 +282,52 @@ describe("PiProvider", () => {
       );
     });
 
+    // The E-arij-138 leak (2026-08-27): a run that died on a model error had
+    // its whole inter-tool-call narration joined into a "result" and posted
+    // as a ticket comment.
+    it("returns nothing when the final turn errored — narration is not a result", () => {
+      const stdout = [
+        sessionHeader,
+        assistantMessageEnd("Now let me look at the remaining unknowns.", {
+          stopReason: "toolUse",
+        }),
+        assistantMessageEnd("I have a good picture now.", {
+          stopReason: "toolUse",
+        }),
+        assistantMessageEnd("", {
+          stopReason: "error",
+          errorMessage: "400 Vision is disabled for this server",
+        }),
+      ].join("\n");
+
+      expect(provider.extractResult(stdout, "")).toBe("");
+    });
+
+    it("returns nothing for an aborted run with earlier narration", () => {
+      const stdout = [
+        assistantMessageEnd("Let me start by reading the code.", {
+          stopReason: "toolUse",
+        }),
+        assistantMessageEnd("", { stopReason: "aborted" }),
+      ].join("\n");
+
+      expect(provider.extractResult(stdout, "")).toBe("");
+    });
+
+    it("keeps the final turn's own text when it errored mid-message", () => {
+      const stdout = [
+        sessionHeader,
+        assistantMessageEnd("Partial explanation before dying.", {
+          stopReason: "error",
+          errorMessage: "Context window exceeded",
+        }),
+      ].join("\n");
+
+      expect(provider.extractResult(stdout, "")).toBe(
+        "Partial explanation before dying.",
+      );
+    });
+
     it("returns an empty string for empty output", () => {
       expect(provider.extractResult("   ", "")).toBe("");
     });
@@ -378,6 +423,30 @@ describe("PiProvider", () => {
       expect(result.cliSessionId).toBe(SESSION_ID);
     });
 
+    it("drops narration and raw stream from a zero-exit run whose final turn errored", async () => {
+      const session = provider.spawn(baseOptions());
+      fakeChild.emitStdout(
+        [
+          sessionHeader,
+          assistantMessageEnd("Now let me explore the codebase.", {
+            stopReason: "toolUse",
+          }),
+          assistantMessageEnd("", {
+            stopReason: "error",
+            errorMessage: "400 Vision is disabled for this server",
+          }),
+        ].join("\n"),
+      );
+      fakeChild.emitClose(0);
+
+      const result = await session.promise;
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("400 Vision is disabled for this server");
+      // Neither the joined narration nor the base class's raw-stdout
+      // backstop may pose as the failed run's deliverable.
+      expect(result.result).toBeUndefined();
+    });
+
     it("redacts the prompt from the display command", () => {
       const session = provider.spawn(baseOptions());
       expect(session.command).toContain("pi --mode json");
@@ -415,26 +484,29 @@ describe("OhMyPiProvider", () => {
     expect(args[args.indexOf("--tools") + 1]).toBe("read,grep,glob");
   });
 
-  it("adds the xdev-off overlay in read-only modes — omp's allowlist alone leaves write mounted", () => {
+  it("needs no config overlay in read-only modes — omp 18.0.6's allowlist strips write on its own", () => {
+    // Was: an `--config` overlay carrying `tools.xdev: false`, needed on omp
+    // 17.2.1 because the device system force-mounted `write` through the
+    // allowlist. Re-measured on 18.0.6 with a live MCP server: the tool
+    // surface is identical with and without it, and the flag can displace
+    // the user's whole config. See __tests__/omp-user-config-not-displaced.
     for (const mode of ["plan", "chat"] as const) {
       const args = provider.buildArgs(baseOptions({ mode }));
-      const overlayPath = args[args.indexOf("--config") + 1];
-      expect(overlayPath).toMatch(/arij-omp-readonly-\d+\.yml$/);
-      expect(readFileSync(overlayPath, "utf-8")).toBe("tools:\n  xdev: false\n");
+      expect(args).not.toContain("--config");
     }
   });
 
-  it("allows reads and one write tool in analyze mode with the xdev overlay", () => {
+  it("allows reads and one write tool in analyze mode", () => {
     const args = provider.buildArgs(baseOptions({ mode: "analyze" }));
     expect(args[args.indexOf("--tools") + 1]).toBe(
       "read,grep,glob,write",
     );
-    expect(args).toContain("--config");
+    expect(args).not.toContain("--config");
     expect(args.join(" ")).not.toContain("edit");
     expect(args.join(" ")).not.toContain("bash");
   });
 
-  it("keeps the full tool set in code mode: no --tools, no overlay", () => {
+  it("keeps the full tool set in code mode: no --tools", () => {
     const args = provider.buildArgs(baseOptions({ mode: "code" }));
     expect(args).not.toContain("--tools");
     expect(args).not.toContain("--config");

@@ -5,7 +5,8 @@ const mockEpic = {
   id: "epic1",
   branchName: "feature/epic1",
   projectId: "proj1",
-  status: "review",
+  // At the merge boundary — the only column the merge route accepts.
+  status: "to_merge",
 };
 const mockProject = {
   id: "proj1",
@@ -28,7 +29,8 @@ vi.mock("@/lib/db", () => ({
     }),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
-    run: vi.fn(),
+    // resolveOpenReviewComments reads `.changes` off the run() result.
+    run: vi.fn(() => ({ changes: 0 })),
     insert: vi.fn().mockReturnThis(),
     values: vi.fn().mockReturnThis(),
   },
@@ -118,9 +120,8 @@ vi.mock("@/lib/workflow/engine", () => ({
 vi.mock("@/lib/workflow/context", () => ({
   buildTransitionContext: vi.fn(() => ({
     epicId: "epic-1",
-    fromStatus: "review",
+    fromStatus: "to_merge",
     toStatus: "done",
-    hasOpenReviewComments: false,
     hasCompletedReview: true,
     hasRunningSession: false,
     actor: "user",
@@ -178,6 +179,14 @@ describe("POST /api/projects/[projectId]/epics/[epicId]/merge", () => {
     expect(res.status).toBe(200);
     expect(json.data.merged).toBe(true);
     expect(json.data.commitHash).toBe("abc123");
+
+    // The merge is the approval: whatever review comments were still open
+    // are bulk-resolved by the successful merge (resolveOpenReviewComments).
+    const chain = db as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    const resolvedUpdates = chain.set.mock.calls
+      .map(([payload]) => payload as Record<string, unknown>)
+      .filter((p) => p?.status === "resolved");
+    expect(resolvedUpdates).toHaveLength(1);
   });
 
   it("returns 500 when merge fails without autoAgent", async () => {
@@ -293,8 +302,8 @@ describe("POST /api/projects/[projectId]/epics/[epicId]/merge", () => {
       expect.objectContaining({
         projectId: "proj1",
         epicId: "epic1",
-        fromStatus: "review",
-        toStatus: "review",
+        fromStatus: "to_merge",
+        toStatus: "to_merge",
         actor: "system",
         reason: expect.stringContaining("Merge blocked: merge of feature/epic1 failed"),
       })

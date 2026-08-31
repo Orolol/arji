@@ -13,8 +13,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import UsagePage from "@/app/usage/page";
 import type {
   AgentUsageRow,
-  DayUsageRow,
   SubscriptionStatus,
+  UsageBar,
+  UsageDashboard,
+  UsageDayBar,
+  UsageProjectBar,
   UsageReport,
 } from "@/lib/types/usage";
 
@@ -32,13 +35,92 @@ const DAY_KEYS: string[] = [
 ];
 
 function makeDays(
-  overrides: Record<string, { sessions: number; costUsd: number | null }> = {}
-): DayUsageRow[] {
+  overrides: Record<
+    string,
+    { sessions: number; costUsd: number | null; failedSessions?: number }
+  > = {}
+): UsageDayBar[] {
   return DAY_KEYS.map((date) => ({
     date,
     sessions: overrides[date]?.sessions ?? 0,
     costUsd: overrides[date]?.costUsd ?? null,
+    failedSessions: overrides[date]?.failedSessions ?? 0,
   }));
+}
+
+/** The legacy 8-key `byDay`, which the 8d screen no longer reads. */
+const LEGACY_DAYS = DAY_KEYS.map((date) => ({
+  date,
+  sessions: 0,
+  costUsd: null,
+}));
+
+const DASH_AGENTS: UsageBar[] = [
+  {
+    key: "Builder|claude-code",
+    label: "Builder",
+    costUsd: 40.5,
+    sessions: 4,
+    sharePercent: 75.1,
+  },
+  {
+    key: "Reviewer|claude-code",
+    label: "Reviewer",
+    costUsd: 13.41,
+    sessions: 2,
+    sharePercent: 24.9,
+  },
+  {
+    key: "|codex",
+    label: "Unnamed",
+    costUsd: null,
+    sessions: 1,
+    sharePercent: null,
+  },
+];
+
+const DASH_PROJECTS: UsageProjectBar[] = [
+  {
+    key: "p1",
+    projectId: "p1",
+    label: "Arij",
+    colorIndex: null,
+    costUsd: 53.91,
+    sessions: 6,
+    sharePercent: 100,
+  },
+  {
+    key: "p2",
+    projectId: "p2",
+    label: "p2",
+    colorIndex: null,
+    costUsd: null,
+    sessions: 1,
+    sharePercent: null,
+  },
+];
+
+function makeDashboard(overrides: Partial<UsageDashboard> = {}): UsageDashboard {
+  return {
+    range: "30d",
+    since: "2026-07-19T12:00:00.000Z",
+    totals: {
+      costUsd: 53.91,
+      sessions: 7,
+      cleanPercent: 86,
+      ticketsShipped: 12,
+      costPerTicketUsd: 0.45,
+    },
+    cap: { capUsd: null, spentUsd: 53.91, usedPercent: null, alertPercent: 80 },
+    byAgent: DASH_AGENTS,
+    byProject: DASH_PROJECTS,
+    byDay: makeDays({
+      "2026-08-10": { sessions: 5, costUsd: 8 },
+      "2026-08-18": { sessions: 3, costUsd: 4 },
+    }),
+    nightYesterdayUsd: null,
+    ...overrides,
+  };
 }
 
 const CODEX_SUB: SubscriptionStatus = {
@@ -166,10 +248,7 @@ function baseReport(overrides: Partial<UsageReport> = {}): UsageReport {
         costUsd: null,
       },
     ],
-    byDay: makeDays({
-      "2026-08-10": { sessions: 5, costUsd: 8 },
-      "2026-08-18": { sessions: 3, costUsd: 4 },
-    }),
+    byDay: LEGACY_DAYS,
     windows: {
       last5h: {
         sessions: 1,
@@ -186,6 +265,7 @@ function baseReport(overrides: Partial<UsageReport> = {}): UsageReport {
     },
     subscriptions: [CODEX_SUB, CLAUDE_SUB],
     generatedAt: "2026-08-18T12:00:00.000Z",
+    dashboard: makeDashboard(),
     ...overrides,
   };
 }
@@ -208,39 +288,66 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Usage page — synthesis band", () => {
-  it("summarizes today, the rolling week, and all-time totals", async () => {
+describe("Usage page — tile row", () => {
+  it("carries the four KPI figures of the range", async () => {
     mockUsage(baseReport());
     render(<UsagePage />);
 
-    expect(await screen.findByTestId("usage-band-today")).toHaveTextContent(
-      "3 sessions · $4.00"
+    expect(await screen.findByTestId("usage-stat-cost")).toHaveTextContent(
+      "$53.91"
     );
-    expect(screen.getByTestId("usage-band-7d")).toHaveTextContent(
-      "5 sessions · $30.00"
+    expect(screen.getByTestId("usage-stat-sessions")).toHaveTextContent("7");
+    expect(screen.getByTestId("usage-stat-clean")).toHaveTextContent("86%");
+    expect(screen.getByTestId("usage-stat-per-ticket")).toHaveTextContent(
+      "$0.45"
     );
-    expect(screen.getByTestId("usage-band-total")).toHaveTextContent("7");
-    expect(screen.getByTestId("usage-band-cost")).toHaveTextContent("$53.91");
+    expect(screen.getByText("30 DERNIERS JOURS")).toBeInTheDocument();
   });
 
-  it("says so plainly when nothing ran today instead of showing $0", async () => {
-    mockUsage(baseReport({ byDay: makeDays() }));
-    render(<UsagePage />);
-
-    expect(await screen.findByTestId("usage-band-today")).toHaveTextContent(
-      "No sessions today"
-    );
-  });
-
-  it("drops the cost half rather than faking $0 when cost is unknown", async () => {
+  it("shows an em-dash, not $0, when no cost was ever reported", async () => {
     mockUsage(
-      baseReport({ byDay: makeDays({ "2026-08-18": { sessions: 2, costUsd: null } }) })
+      baseReport({
+        dashboard: makeDashboard({
+          totals: {
+            costUsd: null,
+            sessions: 7,
+            cleanPercent: 86,
+            ticketsShipped: 0,
+            costPerTicketUsd: null,
+          },
+        }),
+      })
     );
     render(<UsagePage />);
 
-    const today = await screen.findByTestId("usage-band-today");
-    expect(today).toHaveTextContent("2 sessions");
-    expect(today.textContent).not.toContain("$");
+    const cost = await screen.findByTestId("usage-stat-cost");
+    expect(cost).toHaveTextContent("—");
+    expect(cost.textContent).not.toContain("$");
+    // Nothing shipped is not a $0 ticket: division by zero is not a figure.
+    expect(screen.getByTestId("usage-stat-per-ticket")).toHaveTextContent("—");
+    // A run counter's zero IS a fact, so SESSIONS keeps its number.
+    expect(screen.getByTestId("usage-stat-sessions")).toHaveTextContent("7");
+  });
+
+  it("reads CLEAN as an em-dash when no terminal session exists", async () => {
+    mockUsage(
+      baseReport({
+        dashboard: makeDashboard({
+          totals: {
+            costUsd: 53.91,
+            sessions: 7,
+            cleanPercent: null,
+            ticketsShipped: 12,
+            costPerTicketUsd: 0.45,
+          },
+        }),
+      })
+    );
+    render(<UsagePage />);
+
+    const clean = await screen.findByTestId("usage-stat-clean");
+    expect(clean).toHaveTextContent("—");
+    expect(clean.textContent).not.toContain("0%");
   });
 });
 
@@ -286,7 +393,9 @@ describe("Usage page — provider-reported gauges (codex)", () => {
 
     const captured = await screen.findByTestId("usage-sub-codex-captured");
     expect(captured).toHaveTextContent("Captured 2h ago · ~/.codex/sessions");
-    expect(captured.className).not.toContain("text-priority-yellow");
+    // Staleness is a word plus an icon, never a colour.
+    expect(captured).not.toHaveAttribute("data-stale");
+    expect(captured).not.toHaveTextContent("stale");
   });
 
   it("flags a snapshot older than a day", async () => {
@@ -302,7 +411,11 @@ describe("Usage page — provider-reported gauges (codex)", () => {
 
     const captured = await screen.findByTestId("usage-sub-codex-captured");
     expect(captured).toHaveTextContent("Captured 61d ago");
-    expect(captured.className).toContain("text-priority-yellow");
+    // Said in words (and an icon), not in `text-priority-yellow`: colour
+    // encodes the stratum, never a state.
+    expect(captured).toHaveAttribute("data-stale");
+    expect(captured).toHaveTextContent("— stale");
+    expect(captured.className).not.toContain("text-priority-yellow");
   });
 
   it("marks an elapsed window stale instead of extrapolating it forward", async () => {
@@ -322,9 +435,10 @@ describe("Usage page — provider-reported gauges (codex)", () => {
     expect(
       await screen.findByTestId("usage-sub-codex-primary-reset")
     ).toHaveTextContent("window expired — data stale");
-    expect(screen.getByTestId("usage-sub-codex-primary-fill")).toHaveStyle({
-      opacity: "0.35",
-    });
+    // Dimmed, not recoloured — flagged on the row, not on the bar's styling.
+    expect(screen.getByTestId("usage-sub-codex-primary")).toHaveAttribute(
+      "data-dimmed"
+    );
     // The reported percentage itself is still replayed verbatim.
     expect(
       screen.getByTestId("usage-sub-codex-primary-readout")
@@ -452,7 +566,10 @@ describe("Usage page — metered gauge (claude)", () => {
 
     const readout = await screen.findByTestId("usage-sub-claude-budget-readout");
     expect(readout).toHaveTextContent("$70.00 / $50.00");
-    expect(readout.className).toContain("text-destructive");
+    // The alarm lives on the `Mono` run inside the readout slot.
+    expect(
+      readout.querySelector('[data-slot="mono"]')?.className
+    ).toContain("text-destructive");
     expect(screen.getByTestId("usage-sub-claude-budget-fill")).toHaveStyle({
       width: "100%",
     });
@@ -505,23 +622,24 @@ describe("Usage page — 30 day strip", () => {
     });
   });
 
-  it("dims empty days to a baseline sliver instead of hiding them", async () => {
+  it("draws an empty day as a 2px stub instead of hiding it", async () => {
     mockUsage(baseReport());
     render(<UsagePage />);
 
-    const idle = await screen.findByTestId("usage-day-2026-08-05");
-    expect(idle).toHaveStyle({ height: "0%", opacity: "0.25" });
-    expect(screen.getByTestId("usage-day-2026-08-10")).toHaveStyle({
-      opacity: "0.75",
+    // The axis has to read continuously: a zero day is a stub, not a hole.
+    expect(await screen.findByTestId("usage-day-2026-08-05")).toHaveStyle({
+      height: "2px",
     });
   });
 
   it("falls back to session counts when no cost was ever reported", async () => {
     mockUsage(
       baseReport({
-        byDay: makeDays({
-          "2026-08-10": { sessions: 4, costUsd: null },
-          "2026-08-18": { sessions: 1, costUsd: null },
+        dashboard: makeDashboard({
+          byDay: makeDays({
+            "2026-08-10": { sessions: 4, costUsd: null },
+            "2026-08-18": { sessions: 1, costUsd: null },
+          }),
         }),
       })
     );
@@ -535,17 +653,30 @@ describe("Usage page — 30 day strip", () => {
     });
   });
 
-  it("labels the range with local calendar dates", async () => {
-    mockUsage(baseReport());
+  it("caps a day that had a failed session, and only that day", async () => {
+    mockUsage(
+      baseReport({
+        dashboard: makeDashboard({
+          byDay: makeDays({
+            "2026-08-10": { sessions: 5, costUsd: 8 },
+            "2026-08-18": { sessions: 3, costUsd: 4, failedSessions: 2 },
+          }),
+        }),
+      })
+    );
     render(<UsagePage />);
 
     await screen.findByTestId("usage-day-strip");
-    expect(screen.getByText("Jul 20")).toBeInTheDocument();
-    expect(screen.getByText("Aug 18")).toBeInTheDocument();
+    expect(screen.getByTestId("usage-day-2026-08-18-fail")).toHaveStyle({
+      height: "8px",
+    });
+    expect(
+      screen.queryByTestId("usage-day-2026-08-10-fail")
+    ).not.toBeInTheDocument();
   });
 });
 
-describe("Usage page — per-agent and per-project tables", () => {
+describe("Usage page — per-agent and per-project bands", () => {
   it("keeps the API's cost-desc order with unpriced agents last", async () => {
     mockUsage(baseReport());
     render(<UsagePage />);
@@ -559,14 +690,13 @@ describe("Usage page — per-agent and per-project tables", () => {
     expect(screen.getByTestId("usage-agent-row-2")).toHaveTextContent("Unnamed");
   });
 
-  it("renders unreported codex tokens and cost as em-dashes", async () => {
+  it("renders an unreported codex cost as an em-dash, never $0", async () => {
     mockUsage(baseReport());
     render(<UsagePage />);
 
     const row = await screen.findByTestId("usage-agent-row-2");
-    expect(row).toHaveTextContent("Codex");
-    expect(row.textContent).not.toContain("$0");
-    expect(row.textContent?.match(/—/g)).toHaveLength(3);
+    expect(row).toHaveTextContent("—");
+    expect(row.textContent).not.toContain("$");
   });
 
   it("falls back to the project id when the project name is gone", async () => {
@@ -578,7 +708,7 @@ describe("Usage page — per-agent and per-project tables", () => {
     );
     const orphan = screen.getByTestId("usage-project-p2");
     expect(orphan).toHaveTextContent("p2");
-    expect(orphan).toHaveTextContent("1 session · —");
+    expect(orphan).toHaveTextContent("—");
   });
 });
 
@@ -617,7 +747,19 @@ describe("Usage page — states", () => {
         byAgent: [],
         byProvider: [],
         byProject: [],
-        byDay: makeDays(),
+        byDay: LEGACY_DAYS,
+        dashboard: makeDashboard({
+          totals: {
+            costUsd: null,
+            sessions: 0,
+            cleanPercent: null,
+            ticketsShipped: null,
+            costPerTicketUsd: null,
+          },
+          byAgent: [],
+          byProject: [],
+          byDay: makeDays(),
+        }),
         windows: {
           last5h: {
             sessions: 0,
@@ -674,9 +816,9 @@ describe("Usage page — states", () => {
     );
     expect(screen.queryByTestId("usage-day-strip")).not.toBeInTheDocument();
     expect(screen.queryByTestId("usage-agent-table")).not.toBeInTheDocument();
-    // The band and both subscription cards survive; the cost reads as unknown.
-    expect(screen.getByTestId("usage-band-total")).toHaveTextContent("0");
-    expect(screen.getByTestId("usage-band-cost")).toHaveTextContent("—");
+    // The tile row and both subscription cards survive; cost reads as unknown.
+    expect(screen.getByTestId("usage-stat-sessions")).toHaveTextContent("0");
+    expect(screen.getByTestId("usage-stat-cost")).toHaveTextContent("—");
     expect(screen.getByTestId("usage-sub-codex-empty")).toBeInTheDocument();
     expect(screen.getByTestId("usage-sub-claude-disclaimer")).toBeInTheDocument();
   });

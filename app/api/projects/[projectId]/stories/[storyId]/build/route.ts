@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { loadPromptComments } from "@/lib/claude/prompt-comments";
 import {
   epics,
   ticketComments,
@@ -16,9 +15,7 @@ import { createId } from "@/lib/utils/nanoid";
 import { createWorktree, isGitRepo } from "@/lib/git/manager";
 import { processManager } from "@/lib/claude/process-manager";
 import { waitForProcessCompletion } from "@/lib/agent-sessions/wait-for-completion";
-import { buildTicketBuildPrompt } from "@/lib/claude/prompt-builder";
-import { isVisualProofEnabled } from "@/lib/claude/visual-proof";
-import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
+import { assembleStoryBuildPrompt } from "@/lib/tokens";
 import {
   classifySessionOutcome,
   extractSessionUsage,
@@ -38,10 +35,6 @@ import {
   markSessionRunning,
   markSessionTerminal,
 } from "@/lib/agent-sessions/lifecycle";
-import {
-  enrichPromptWithDocumentMentions,
-  userAuthoredTexts,
-} from "@/lib/documents/mentions";
 import {
   buildEpicTargetUrl,
   createUnresolvedMentionsNotification,
@@ -120,14 +113,6 @@ export async function POST(request: NextRequest, { params }: Params) {
       .run();
   }
 
-  // Load context
-  const comments = loadPromptComments({ userStoryId: storyId });
-
-  const ticketBuildSystemPrompt = await resolveAgentPrompt(
-    "ticket_build",
-    projectId
-  );
-
   // Create worktree (reuses existing)
   const { worktreePath, branchName } = await createWorktree(
     gitRepoPath,
@@ -136,33 +121,23 @@ export async function POST(request: NextRequest, { params }: Params) {
     { defaultBranch: project.defaultBranch }
   );
 
-  // Build prompt
-  const prompt = buildTicketBuildPrompt(
+  const assembled = await assembleStoryBuildPrompt({
+    projectId,
+    epicId: epic.id,
+    storyId,
     project,
-    [],
     epic,
     story,
-    comments,
-
-    ticketBuildSystemPrompt,
-    { visualProofEnabled: isVisualProofEnabled() }
-  );
-
-  // Only user-written text can reference an Arij document; an agent comment
-  // mentioning a codebase file must neither resolve nor block the build.
-  const mentionEnrichment = enrichPromptWithDocumentMentions({
-    projectId,
-    prompt,
-    textSources: [body.comment, ...userAuthoredTexts(comments)],
+    comment: body.comment,
+    commentAlreadyPersisted: true,
   });
-  const enrichedPrompt = mentionEnrichment.prompt;
+  const enrichedPrompt = assembled.prompt;
   createUnresolvedMentionsNotification({
     projectId,
-    missing: mentionEnrichment.missing,
+    missing: assembled.missingDocuments ?? [],
     agentType: "ticket_build",
     targetUrl: buildEpicTargetUrl(projectId, epic.id),
   });
-
   const resolvedAgent = resolveAgentByNamedId("ticket_build", projectId, namedAgentId);
 
   // Resume support — scope-guarded
@@ -238,6 +213,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     mode: "code",
     provider: resolvedAgent.provider,
     prompt: enrichedPrompt,
+    estimatedPromptTokens: assembled.tokens.total,
+    estimatedPromptBreakdown: JSON.stringify(assembled.tokens.breakdown),
     logsPath,
     branchName,
     worktreePath,

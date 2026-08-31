@@ -47,7 +47,9 @@ const { isReviewSessionUnverifiable } = await import(
   "@/lib/pipeline/findings"
 );
 const { autoModeRegistry } = await import("@/lib/auto-mode/registry");
-const { loadAutoModeBoard } = await import("@/lib/auto-mode/select");
+const { hasFreshCleanReview, loadAutoModeBoard } = await import(
+  "@/lib/auto-mode/select"
+);
 const {
   AUTO_MODE_REASON_PREFIX,
   AUTO_MODE_MAX_REVIEW_REJECTIONS,
@@ -912,7 +914,9 @@ describe("parking", () => {
 
 describe("merge step", () => {
   function seedMergeable(id = "m1"): void {
-    addEpic({ id, status: "review", branchName: `feat/${id}` });
+    // A mergeable epic sits in `to_merge`: the approving review verdict
+    // already promoted it there, and only such epics are merge candidates.
+    addEpic({ id, status: "to_merge", branchName: `feat/${id}` });
     addSession({
       epicId: id,
       status: "completed",
@@ -924,9 +928,9 @@ describe("merge step", () => {
       epicId: id,
       status: "completed",
       agentType: "review_code",
-      // The merge gate only counts a review whose verdict reached the
-      // database; a verdict-less claude-code row is unverifiable and would
-      // never be a merge candidate (lib/pipeline/findings.ts).
+      // The review that promoted the epic: its verdict reached the database.
+      // A verdict-less claude-code row would have been unverifiable and never
+      // promoted anything (lib/pipeline/findings.ts).
       reviewVerdict: "approved",
       createdAt: at(3),
       endedAt: at(4),
@@ -1829,8 +1833,8 @@ describe("mid-sweep disable", () => {
   it("stops merging mid-sweep too", async () => {
     const fakes = makeFakes();
     fakes.setConfig({ buildConcurrency: 0, reviewConcurrency: 0 });
-    addEpic({ id: "m1", status: "review", branchName: "feat/m1", position: 0 });
-    addEpic({ id: "m2", status: "review", branchName: "feat/m2", position: 1 });
+    addEpic({ id: "m1", status: "to_merge", branchName: "feat/m1", position: 0 });
+    addEpic({ id: "m2", status: "to_merge", branchName: "feat/m2", position: 1 });
     for (const epicId of ["m1", "m2"]) {
       addSession({
         epicId,
@@ -1924,14 +1928,14 @@ describe("silent reviews", () => {
 
   /**
    * The divergence trap: findings.ts judges a review whose channel Arij could
-   * not wire by prose (so nothing charges it), and the merge gate must reach
-   * the same conclusion. If it does not, `needsReview` stays true forever and
-   * the epic is re-reviewed every sweep with no budget to stop it.
+   * not wire by prose (so nothing charges it), and the SQL freshness rule
+   * feeding `needsReview` must reach the same conclusion. If it does not,
+   * `needsReview` stays true forever and the epic is re-reviewed every sweep
+   * with no budget to stop it.
    */
   it("does not loop on a review whose channel was never wired", async () => {
     const fakes = makeFakes();
     fakes.setConfig({ buildConcurrency: 0, reviewConcurrency: 1 });
-    fakes.mergeOutcome({ status: "merged", commitHash: "c1", sessionId: null });
     addEpic({ id: "r1", status: "review", branchName: "feat/r1" });
     addSession({
       epicId: "r1",
@@ -1951,8 +1955,14 @@ describe("silent reviews", () => {
 
     const result = await sweepProject(PROJECT_ID, fakes.deps);
 
+    // The verdict-less review is CLEAN (the channel was never wired, so its
+    // silence is not evidence), which is exactly what stops the re-review
+    // loop. It does not merge either: promotion to to_merge belongs to the
+    // review drivers, and the Review column is never a merge candidate.
     expect(result.reviewsDispatched).toEqual([]);
-    expect(result.merged).toEqual(["r1"]);
+    expect(result.merged).toEqual([]);
+    const board = loadAutoModeBoard(PROJECT_ID);
+    expect(hasFreshCleanReview(board.sessionFactsByEpic.get("r1"))).toBe(true);
   });
 
   it("does not charge a review that delivered its verdict", async () => {

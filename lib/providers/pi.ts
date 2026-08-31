@@ -135,15 +135,28 @@ export function collectPiAssistantMessages(stdout: string): PiAssistantMessage[]
  * The final answer of a pi run: the last assistant message, matching what
  * pi's own text mode prints. Falls back to every assistant message and then
  * to the raw output, so an unrecognised stream is never silently dropped.
+ *
+ * Neither fallback applies to a run whose final turn ended in error/abort:
+ * such a run delivered nothing, and its earlier assistant turns are
+ * pre-tool-call narration — joining them manufactures a "result" out of the
+ * model's thinking-out-loud (measured 2026-08-27: a failed omp build posted
+ * its entire session narration as a ticket comment on E-arij-138, which the
+ * comment history then feeds back into every later prompt). The failure
+ * itself reaches callers through findPiRunFailure → result.error.
  */
 export function extractPiResult(stdout: string): string {
   const trimmed = stdout.trim();
   if (!trimmed) return "";
 
   const messages = collectPiAssistantMessages(trimmed);
+  const last = messages[messages.length - 1];
 
-  const last = messages[messages.length - 1]?.text.trim();
-  if (last) return last;
+  const lastText = last?.text.trim();
+  if (lastText) return lastText;
+
+  if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
+    return "";
+  }
 
   const all = messages.map((m) => m.text.trim()).filter(Boolean);
   if (all.length > 0) return all.join("\n\n");
@@ -205,16 +218,6 @@ export abstract class PiProvider extends BaseCliProvider {
     return ["--session", cliSessionId];
   }
 
-  /**
-   * Extra argv appended alongside a restricted tool allowlist. On pi the
-   * allowlist genuinely strips the mutating built-ins (verified on 0.84.2:
-   * write is unavailable under `--tools read,grep,find,ls`), so there is
-   * nothing to add; omp needs an overlay on top — see OhMyPiProvider.
-   */
-  protected restrictedToolsExtraArgs(): string[] {
-    return [];
-  }
-
   protected notAuthenticatedMessage(): string {
     return "Pi is not authenticated. Run `pi` and use /login, or set the provider API key.";
   }
@@ -234,6 +237,31 @@ export abstract class PiProvider extends BaseCliProvider {
     removePromptFile((spawnContext as PiSpawnContext | undefined)?.promptFilePath);
   }
 
+  /**
+   * The `--tools` allowlist for a mode, or undefined when the mode restricts
+   * nothing (code mode passes no flag and gets the CLI's full tool set).
+   *
+   * Plan/chat runs must not touch the working tree. Analyze adds only the
+   * write primitive required to create arji.json; edit and bash stay absent.
+   * The allowlist is the WHOLE isolation mechanism for both CLIs — verified on
+   * pi 0.84.2 and re-verified on omp 18.0.6, where `write` no longer survives
+   * it. MCP tool names must NEVER be added here: omp validates --tools against
+   * built-in names only, and an unknown name is a fatal argv error that kills
+   * the spawn. Its MCP tools are orthogonal to this allowlist and stay mounted
+   * regardless — see lib/providers/oh-my-pi.ts.
+   *
+   * This is the single source of truth for both the argv and the version gate
+   * that guarantees the CLI honours it: a mode is gated exactly when this
+   * returns a list. Adding a restricted mode therefore cannot forget the gate.
+   */
+  protected toolAllowlist(
+    mode: ProviderSpawnOptions["mode"],
+  ): string[] | undefined {
+    if (mode === "plan" || mode === "chat") return this.readonlyTools();
+    if (mode === "analyze") return [...this.readonlyTools(), WRITE_TOOL];
+    return undefined;
+  }
+
   buildArgs(
     options: ProviderSpawnOptions,
     spawnContext?: ProviderSpawnContext,
@@ -245,18 +273,9 @@ export abstract class PiProvider extends BaseCliProvider {
 
     const args: string[] = ["--mode", "json"];
 
-    // Plan/chat runs must not touch the working tree. Analyze adds only the
-    // write primitive required to create arji.json; edit and bash stay absent.
-    // MCP tool names must NEVER be added here: omp validates --tools against
-    // built-in names only, and an unknown name is a fatal argv error that
-    // kills the spawn. Its MCP tools are orthogonal to this allowlist and
-    // stay mounted regardless — see lib/providers/oh-my-pi.ts.
-    if (mode === "plan" || mode === "chat") {
-      args.push("--tools", this.readonlyTools().join(","));
-      args.push(...this.restrictedToolsExtraArgs());
-    } else if (mode === "analyze") {
-      args.push("--tools", [...this.readonlyTools(), WRITE_TOOL].join(","));
-      args.push(...this.restrictedToolsExtraArgs());
+    const allowlist = this.toolAllowlist(mode);
+    if (allowlist) {
+      args.push("--tools", allowlist.join(","));
     }
 
     if (cliSessionId && resumeSession) {
@@ -326,6 +345,13 @@ export abstract class PiProvider extends BaseCliProvider {
    * A zero exit code is not proof of success in `--mode json`: pi only maps a
    * failed run to exit 1 in text mode. Downgrade when the event stream says
    * the last turn errored out.
+   *
+   * The downgrade also re-derives `result.result`: the base success branch
+   * backstops an empty extraction with raw stdout, but for a run the stream
+   * itself declared failed that backstop would hand the whole NDJSON event
+   * log to whoever posts the output (ticket comments included). Re-running
+   * extractResult keeps the final turn's text when it had any and yields
+   * undefined otherwise.
    */
   protected handleExit(
     info: ProviderExitInfo,
@@ -338,6 +364,12 @@ export abstract class PiProvider extends BaseCliProvider {
     const failure = findPiRunFailure(info.stdout, this.cliDisplayName);
     if (!failure) return result;
 
-    return { ...result, success: false, error: failure };
+    const deliverable = this.extractResult(info.stdout);
+    return {
+      ...result,
+      success: false,
+      error: failure,
+      result: deliverable || undefined,
+    };
   }
 }

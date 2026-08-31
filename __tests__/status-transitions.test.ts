@@ -1,14 +1,15 @@
 /**
  * Tests for the ticket status option rules (lib/kanban/status-transitions):
  * the status control must mirror the workflow engine — only structural
- * transitions are selectable, review → done is approval-gated, released is
- * system-only, and a live session locks in_progress.
+ * transitions are selectable, to_merge → done is merge-gated (the merge IS
+ * the approval), released is system-only, and a live session locks
+ * in_progress.
  */
 import { describe, it, expect } from "vitest";
 import {
   ticketStatusOptions,
   isTicketTransitionSelectable,
-  REASON_APPROVAL_REQUIRED,
+  REASON_MERGE_REQUIRED,
   REASON_RELEASED_SYSTEM_ONLY,
   REASON_SESSION_RUNNING,
 } from "@/lib/kanban/status-transitions";
@@ -36,22 +37,37 @@ describe("ticketStatusOptions", () => {
     ]);
   });
 
-  it("disables review → done with the approval reason (workflow engine rule)", () => {
+  it("enables exactly the review transitions (in_progress, to_merge)", () => {
     const options = ticketStatusOptions("review");
     const done = options.find((option) => option.status === "done");
-    const inProgress = options.find((option) => option.status === "in_progress");
 
+    // Done is no longer structurally reachable from review — the merge
+    // boundary (to_merge) sits between.
     expect(done?.enabled).toBe(false);
-    expect(done?.disabledReason).toBe(REASON_APPROVAL_REQUIRED);
-    expect(inProgress?.enabled).toBe(true);
-    // Everything else from review is structurally unreachable.
+    expect(done?.disabledReason).toBe("No direct transition from Review");
     expect(options.filter((o) => o.enabled).map((o) => o.status)).toEqual([
       "in_progress",
+      "to_merge",
     ]);
   });
 
-  it("keeps done reachable from review only through approval, not the dropdown", () => {
+  it("disables to_merge → done with the merge reason (workflow engine rule)", () => {
+    const options = ticketStatusOptions("to_merge");
+    const done = options.find((option) => option.status === "done");
+
+    expect(done?.enabled).toBe(false);
+    expect(done?.disabledReason).toBe(REASON_MERGE_REQUIRED);
+    // Send-back edges stay selectable; Done only opens through the merge.
+    expect(options.filter((o) => o.enabled).map((o) => o.status)).toEqual([
+      "in_progress",
+      "review",
+    ]);
+  });
+
+  it("keeps done reachable only through the merge, never the dropdown", () => {
     expect(isTicketTransitionSelectable("review", "done")).toBe(false);
+    expect(isTicketTransitionSelectable("to_merge", "done")).toBe(false);
+    expect(isTicketTransitionSelectable("review", "to_merge")).toBe(true);
     expect(isTicketTransitionSelectable("review", "in_progress")).toBe(true);
   });
 
@@ -89,7 +105,7 @@ describe("ticketStatusOptions", () => {
   });
 
   it("marks the current column as current and never selectable", () => {
-    for (const status of ["backlog", "todo", "in_progress", "review", "done", "released"]) {
+    for (const status of ["backlog", "todo", "in_progress", "review", "to_merge", "done", "released"]) {
       const current = ticketStatusOptions(status).find(
         (option) => option.status === status
       );
@@ -104,6 +120,7 @@ describe("ticketStatusOptions", () => {
       "todo",
       "in_progress",
       "review",
+      "to_merge",
       "done",
       "released",
     ]);
@@ -111,7 +128,7 @@ describe("ticketStatusOptions", () => {
 
   it("tolerates an unknown current status without crashing", () => {
     const options = ticketStatusOptions("mystery");
-    expect(options).toHaveLength(6);
+    expect(options).toHaveLength(7);
     expect(options.every((option) => !option.enabled || option.isCurrent)).toBe(
       true
     );

@@ -90,7 +90,7 @@ describe("NightRunSummaryDialog", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("night-summary-counts")).toHaveTextContent(
-        "5 in review"
+        "5 to merge"
       )
     );
     expect(screen.getByTestId("night-summary-duration")).toHaveTextContent(
@@ -119,7 +119,7 @@ describe("NightRunSummaryDialog", () => {
 
     // Labels come from NIGHT_RUN_STATUS_LABELS, one tile each.
     await waitFor(() =>
-      expect(screen.getByText("in review")).toBeInTheDocument()
+      expect(screen.getByText("to merge")).toBeInTheDocument()
     );
     expect(screen.getByText("paused")).toBeInTheDocument();
     expect(screen.getByText("failed")).toBeInTheDocument();
@@ -162,7 +162,7 @@ describe("NightRunSummaryDialog", () => {
     );
     expect(banner).toHaveTextContent("after wave 2");
     expect(screen.getByTestId("night-summary-counts")).toHaveTextContent(
-      "1 in review, 3 failed, 4 skipped"
+      "1 to merge, 3 failed, 4 skipped"
     );
   });
 
@@ -277,7 +277,7 @@ describe("NightRunSummaryDialog", () => {
     expect(screen.getByTestId("night-epic-e4")).toHaveTextContent(
       "skipped: dependency ARJ-2 failed"
     );
-    expect(screen.getByTestId("night-epic-e1")).toHaveTextContent("in review");
+    expect(screen.getByTestId("night-epic-e1")).toHaveTextContent("to merge");
   });
 
   it("hides the stop control for a run that already finished", async () => {
@@ -420,8 +420,8 @@ describe("night-run formatters", () => {
       formatNightRunCounts(
         counts({ done: 5, asked: 1, failed: 2, skipped: 1 })
       )
-    ).toBe("5 in review, 1 paused, 2 failed, 1 skipped");
-    expect(formatNightRunCounts(counts({ done: 3 }))).toBe("3 in review");
+    ).toBe("5 to merge, 1 paused, 2 failed, 1 skipped");
+    expect(formatNightRunCounts(counts({ done: 3 }))).toBe("3 to merge");
     expect(formatNightRunCounts(counts({}))).toBe("no epics");
     expect(formatNightRunCounts(null)).toBe("no epics");
   });

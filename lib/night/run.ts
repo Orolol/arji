@@ -147,7 +147,7 @@ export function resolveNightCostCap(
 /**
  * Fixed pipeline-terminal → wave-ticket mapping (the night composition
  * contract):
- *   succeeded       → success/answered   (wave "done"; epic sits in review)
+ *   succeeded       → success/answered   (wave "done"; epic sits in To Merge)
  *   paused_question → success/asked_question (wave "asked"; blocks dependents)
  *   failed          → failure with the pipeline's reason
  *   cancelled       → failure "stopped by user" (a user stop blocks dependents)

@@ -47,7 +47,7 @@ describe("sessions list route (unified)", () => {
       {
         id: "sess-1",
         status: "running",
-        lastNonEmptyText: "Applying migrations",
+        producedOutput: 1,
         createdAt: "2026-02-12T00:00:00.000Z",
       },
     ]);
@@ -60,7 +60,9 @@ describe("sessions list route (unified)", () => {
     expect(response.status).toBe(200);
     expect(json.data).toHaveLength(1);
     expect(json.data[0].kind).toBe("agent_session");
-    expect(json.data[0].lastNonEmptyText).toBe("Applying migrations");
+    // The text itself never leaves the database: the list only ever asked
+    // whether the run had spoken.
+    expect(json.data[0]).not.toHaveProperty("lastNonEmptyText");
   });
 
   it("returns chat conversations with kind='chat_session'", async () => {
@@ -203,6 +205,95 @@ describe("sessions list route (unified)", () => {
     // This route is polled by the board. Last activity must not turn that
     // polling path into a project-independent scan of the whole chunk table.
     expect(getDbChainMock().groupBy).not.toHaveBeenCalled();
+  });
+
+  it("selects an explicit projection that leaves the prompt behind", async () => {
+    setupSessionsChain([{ id: "sess-1", status: "completed", createdAt: null }]);
+    setupConversationsChain([]);
+
+    const { GET } = await import("@/app/api/projects/[projectId]/sessions/route");
+    await GET(mockNextRequest(), mockRouteContext({ projectId: "proj-1" }));
+
+    // `select()` with no argument is what made this route read every column of
+    // every session — on the live board that was ~40 MB per request, 99% of it
+    // `prompt`, materialised synchronously on the one shared connection.
+    const [sessionProjection] = getDbChainMock().select.mock.calls[0];
+    expect(sessionProjection).toBeTypeOf("object");
+
+    const selected = Object.keys(sessionProjection as Record<string, unknown>);
+    expect(selected).not.toContain("prompt");
+    // Fat columns the list has never rendered; the detail route still has them.
+    expect(selected).not.toContain("logsPath");
+    expect(selected).not.toContain("worktreePath");
+    expect(selected).not.toContain("cliCommand");
+    expect(selected).not.toContain("cliOptions");
+    expect(selected).not.toContain("estimatedPromptBreakdown");
+    // Uncapped at the write side and only ever read as "did the run speak" —
+    // reduced to `producedOutput` in SQL rather than selected.
+    expect(selected).not.toContain("lastNonEmptyText");
+    // What the Sessions page, the board's failure badges and the cli-session
+    // fallback do read.
+    expect(selected).toEqual(
+      expect.arrayContaining([
+        "id",
+        "epicId",
+        "userStoryId",
+        "status",
+        "mode",
+        "provider",
+        "agentType",
+        "branchName",
+        "startedAt",
+        "endedAt",
+        "completedAt",
+        "createdAt",
+        "producedOutput",
+        "error",
+        "errorLength",
+        "outcome",
+        "totalCostUsd",
+        "batchRunId",
+        "namedAgentId",
+        "namedAgentName",
+        "cliSessionId",
+        "claudeSessionId",
+      ])
+    );
+
+    // The two text columns the list keeps are cut in SQL, not in JavaScript:
+    // a value that never crosses into the process cannot blow the budget on
+    // the way in either.
+    const projection = sessionProjection as Record<
+      string,
+      { queryChunks?: unknown[] }
+    >;
+    // Drizzle keeps the literal SQL of a `sql` fragment as StringChunks; the
+    // other chunks are columns and bound params, which carry no text.
+    const sqlOf = (key: string) =>
+      (projection[key]?.queryChunks ?? [])
+        .map((chunk) => {
+          const value = (chunk as { value?: unknown }).value;
+          return Array.isArray(value) ? value.join("") : "";
+        })
+        .join(" ");
+    expect(sqlOf("error")).toContain("substr");
+    expect(sqlOf("errorLength")).toContain("length");
+    expect(sqlOf("producedOutput")).toContain("trim");
+  });
+
+  it("bounds both list queries to one page", async () => {
+    setupSessionsChain([]);
+    setupConversationsChain([]);
+
+    const { GET } = await import("@/app/api/projects/[projectId]/sessions/route");
+    await GET(
+      mockNextRequest({ searchParams: { limit: "50" } }),
+      mockRouteContext({ projectId: "proj-1" })
+    );
+
+    // One row beyond the page, on both streams: that extra row is how an
+    // exhausted stream is told apart from a full one.
+    expect(getDbChainMock().limit.mock.calls).toEqual([[51], [51]]);
   });
 
   it("keeps the list available when the chunk store cannot be read", async () => {

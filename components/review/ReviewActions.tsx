@@ -12,7 +12,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Hammer, CheckCircle2, Loader2, MessageSquare, CheckCheck } from "lucide-react";
+import { Hammer, GitMerge, Loader2, MessageSquare, CheckCheck } from "lucide-react";
 import type { ReviewComment } from "@/hooks/useReviewComments";
 
 interface ReviewActionsProps {
@@ -22,7 +22,8 @@ interface ReviewActionsProps {
   openCount: number;
   comments: ReviewComment[];
   onBackToDev: (comment: string) => Promise<unknown>;
-  onApprove: () => Promise<unknown>;
+  /** Merge the epic's branch — the merge IS the approval (POST .../merge). */
+  onMerge: () => Promise<unknown>;
   onResolveAll: () => Promise<unknown>;
   dispatching?: boolean;
   isRunning?: boolean;
@@ -35,7 +36,7 @@ export function ReviewActions({
   openCount,
   comments,
   onBackToDev,
-  onApprove,
+  onMerge,
   onResolveAll,
   dispatching,
   isRunning,
@@ -43,12 +44,12 @@ export function ReviewActions({
   const [backToDevOpen, setBackToDevOpen] = useState(false);
   const [additionalComment, setAdditionalComment] = useState("");
   const [sendingBack, setSendingBack] = useState(false);
-  const [approving, setApproving] = useState(false);
+  const [merging, setMerging] = useState(false);
   const [resolvingAll, setResolvingAll] = useState(false);
 
   const actionsLocked = dispatching || isRunning;
-  const canBackToDev = ["review", "in_progress", "todo", "backlog"].includes(epicStatus);
-  const canApprove = epicStatus === "review";
+  const canBackToDev = ["review", "to_merge", "in_progress", "todo", "backlog"].includes(epicStatus);
+  const canMerge = epicStatus === "to_merge";
 
   async function handleBackToDev() {
     setSendingBack(true);
@@ -89,16 +90,14 @@ export function ReviewActions({
     }
   }
 
-  async function handleApprove() {
-    setApproving(true);
+  async function handleMerge() {
+    setMerging(true);
     try {
-      // Resolve all open comments before approving
-      if (openCount > 0) {
-        await onResolveAll();
-      }
-      await onApprove();
+      // The merge is the approval: the route resolves whatever comments
+      // remain open as part of the same action.
+      await onMerge();
     } finally {
-      setApproving(false);
+      setMerging(false);
     }
   }
 
@@ -156,19 +155,19 @@ export function ReviewActions({
           </Button>
         )}
 
-        {canApprove && (
+        {canMerge && (
           <Button
             size="sm"
-            onClick={handleApprove}
-            disabled={approving || actionsLocked}
+            onClick={handleMerge}
+            disabled={merging || actionsLocked}
             className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white"
           >
-            {approving ? (
+            {merging ? (
               <Loader2 className="h-3 w-3 animate-spin mr-1" />
             ) : (
-              <CheckCircle2 className="h-3 w-3 mr-1" />
+              <GitMerge className="h-3 w-3 mr-1" />
             )}
-            Approve
+            Merge
           </Button>
         )}
       </div>

@@ -28,6 +28,45 @@ PLAYWRIGHT_CHANNEL=chrome npm run test:e2e
 Any Playwright channel name works (`chrome`, `msedge`, `chrome-beta`, …); the
 value is passed straight through to the `chromium` project.
 
+## Dev server here, production server on CI
+
+Locally the suite drives `next dev`. On CI it drives `next start`, because
+`next dev` compiles each route on first request: cold, the board took ~12s to
+go from navigation to a hydrated heading, past the 5s an `expect` waits. That
+makes the first spec to touch a route fail and every later one pass — an
+order-dependent red that does not reproduce warm. A production server has no
+per-route compile, so the suite also exercises the bundle that ships.
+
+CI therefore runs `npm run build` before `npm run test:e2e`. Force either mode
+anywhere with `E2E_SERVER`:
+
+```
+E2E_SERVER=start npm run test:e2e   # needs npm run build first
+E2E_SERVER=dev npm run test:e2e
+```
+
+If you pick `start` without a build, `next start` says so and exits — the suite
+does not hang.
+
+Dev mode stays the local default, and absorbs those compiles with a longer
+`expect` timeout (30s instead of 5s) and test timeout (90s instead of 30s). The
+allowance is attached to the mode, not to the assertions, so a production run
+keeps the tight defaults and reports a real failure in seconds.
+
+## The host is `localhost`, not `127.0.0.1`
+
+Next 16.3 blocks cross-site requests to `/_next/*` dev resources, and its
+default allowlist is `localhost` (plus whatever `--hostname` bound). Chrome
+labels the chunk `<script>` loads of a page served from an IP literal
+`Sec-Fetch-Site: cross-site`, so served from `127.0.0.1` every
+`/_next/static/chunks/*.js` returns 403.
+
+The symptom is not an error — it is a page that renders and does nothing: the
+server markup is there, hydration never runs, and specs fail on a skeleton
+(`h1` stuck at `...`, `0 tickets visible`, SSE `Offline`). Only the
+static-markup smoke tests pass. If you point the suite somewhere by hand, keep
+it on `localhost`.
+
 ## Reuse a dev server that is already running
 
 Next 16 holds a lock on `.next/dev`, so a second `next dev` in the same

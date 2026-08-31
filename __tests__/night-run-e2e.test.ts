@@ -17,9 +17,10 @@
  * Scenarios:
  *   (a) 5-epic diamond (a → b,c → d → e), every pipeline clean → waves run
  *       in dependency order gated at PIPELINE terminal (a's review precedes
- *       b/c's builds), every epic parks in Review, counts right, exactly one
- *       summary notification + one night_run.completed webhook, every
- *       session row tagged batch_run_id, GET list/detail serve the run;
+ *       b/c's builds), every epic parks in To Merge (the passing verdict
+ *       promoted it), counts right, exactly one summary notification + one
+ *       night_run.completed webhook, every session row tagged batch_run_id,
+ *       GET list/detail serve the run;
  *   (b) one epic's pipeline fails → its transitive dependents are skipped,
  *       independent branches finish, forensic ran, and the breaker at the
  *       default threshold 3 does NOT trip;
@@ -606,7 +607,7 @@ afterEach(() => {
 /* ------------------------------------------------------------------ */
 
 describe("night run e2e — clean diamond", () => {
-  it("runs 4 waves gated at pipeline terminal, parks everything in review, one notification + one webhook", async () => {
+  it("runs 4 waves gated at pipeline terminal, parks everything in to_merge, one notification + one webhook", async () => {
     const { projectId, a, b, c, d, e } = seedDiamond();
     for (const epic of [a, b, c, d, e]) {
       scriptRun(`build-${epic.title}`, codeStage(epic.title), cliOk("Implemented."));
@@ -643,9 +644,10 @@ describe("night run e2e — clean diamond", () => {
     expect(at(`review-${c.title}`)).toBeLessThan(at(`build-${d.title}`));
     expect(at(`review-${d.title}`)).toBeLessThan(at(`build-${e.title}`));
 
-    // Success end-state is REVIEW for every epic: nothing auto-approves.
+    // Success end-state is TO MERGE for every epic: the passing verdict is
+    // the approval, and the merge itself stays with the user.
     for (const epic of [a, b, c, d, e]) {
-      expect(epicRow(epic.id).status).toBe("review");
+      expect(epicRow(epic.id).status).toBe("to_merge");
     }
 
     // Every session of the run (5 builds + 5 reviews) is tagged.
@@ -660,7 +662,7 @@ describe("night run e2e — clean diamond", () => {
     const summaries = nightNotifications(projectId);
     expect(summaries).toHaveLength(1);
     expect(summaries[0]).toMatchObject({
-      title: "Night run finished: 5 in review",
+      title: "Night run finished: 5 to merge",
       status: "completed",
       sessionId: null,
       agentType: "build",
@@ -673,7 +675,7 @@ describe("night run e2e — clean diamond", () => {
     expect(hooks[0][0]).toBe(projectId);
     expect(hooks[0][1]).toMatchObject({
       event: "night_run.completed",
-      summary: "Night run finished: 5 in review",
+      summary: "Night run finished: 5 to merge",
       error: null,
       path: `/projects/${projectId}?nightRun=${runId}`,
     });
@@ -775,10 +777,11 @@ describe("night run e2e — single failure under halt", () => {
     expect(startLabels().some((l) => l.includes(d.title))).toBe(false);
     expect(startLabels().some((l) => l.includes(e.title))).toBe(false);
 
-    // Board state: a and c delivered to review, b stranded in progress
-    // (failed build never advances a ticket), d/e untouched.
-    expect(epicRow(a.id).status).toBe("review");
-    expect(epicRow(c.id).status).toBe("review");
+    // Board state: a and c delivered to To Merge (their reviews passed),
+    // b stranded in progress (failed build never advances a ticket), d/e
+    // untouched.
+    expect(epicRow(a.id).status).toBe("to_merge");
+    expect(epicRow(c.id).status).toBe("to_merge");
     expect(epicRow(b.id).status).toBe("in_progress");
     expect(epicRow(d.id).status).toBe("todo");
     expect(epicRow(e.id).status).toBe("todo");
@@ -837,7 +840,7 @@ describe("night run e2e — single failure under halt", () => {
     const summaries = nightNotifications(projectId);
     expect(summaries).toHaveLength(1);
     expect(summaries[0]).toMatchObject({
-      title: "Night run finished: 2 in review, 1 failed, 2 skipped",
+      title: "Night run finished: 2 to merge, 1 failed, 2 skipped",
       status: "failed",
     });
     expect(nightWebhookCalls()).toHaveLength(1);
@@ -880,10 +883,10 @@ describe("night run e2e — circuit breaker", () => {
     await waitForNightFinished(runId);
 
     // Wave 2 never launched; the in-flight wave settled completely (s's
-    // pipeline finished: epic delivered to review).
+    // pipeline finished: epic delivered to To Merge).
     expect(unconsumedScripts()).toEqual([]);
     expect(startLabels().some((l) => l.includes(g.title))).toBe(false);
-    expect(epicRow(s.id).status).toBe("review");
+    expect(epicRow(s.id).status).toBe("to_merge");
     expect(epicRow(g.id).status).toBe("todo");
 
     const breakerReason = "circuit breaker: 3 consecutive pipeline failures";
@@ -917,7 +920,7 @@ describe("night run e2e — circuit breaker", () => {
     expect(summaries).toHaveLength(1);
     expect(summaries[0]).toMatchObject({
       title:
-        "Night run finished: 1 in review, 3 failed, 1 skipped — circuit breaker tripped",
+        "Night run finished: 1 to merge, 3 failed, 1 skipped — circuit breaker tripped",
       status: "failed",
     });
 
@@ -964,8 +967,9 @@ describe("night run e2e — asked question", () => {
     expect(qReview.outcome).toBe("asked_question");
     expect(activityReasons(q.id)).toContain(AGENT_ASKED_QUESTION_REASON);
 
-    // Independent branch finished; the dependent never launched.
-    expect(epicRow(i.id).status).toBe("review");
+    // Independent branch finished (promoted by its passing review); the
+    // dependent never launched.
+    expect(epicRow(i.id).status).toBe("to_merge");
     expect(epicRow(r.id).status).toBe("todo");
     expect(startLabels().some((l) => l.includes(r.title))).toBe(false);
 
@@ -999,7 +1003,7 @@ describe("night run e2e — asked question", () => {
     const summaries = nightNotifications(projectId);
     expect(summaries).toHaveLength(1);
     expect(summaries[0]).toMatchObject({
-      title: "Night run finished: 1 in review, 1 paused, 1 skipped",
+      title: "Night run finished: 1 to merge, 1 paused, 1 skipped",
       status: "completed",
     });
     expect(nightWebhookCalls()).toHaveLength(1);
@@ -1071,7 +1075,7 @@ describe("night run e2e — cost cap", () => {
     const summaries = nightNotifications(projectId);
     expect(summaries).toHaveLength(1);
     expect(summaries[0].title).toBe(
-      "Night run finished: 1 in review, 1 skipped — $5.75 — cost cap reached"
+      "Night run finished: 1 to merge, 1 skipped — $5.75 — cost cap reached"
     );
     expect(summaries[0].status).toBe("failed");
     expect(
@@ -1304,10 +1308,10 @@ describe("night run e2e — user stop", () => {
     await waitForNightFinished(runId);
 
     // p's ENTIRE pipeline ran (build AND review consumed) — a stop never
-    // force-cancels in-flight work, so p still lands in Review.
+    // force-cancels in-flight work, so p still lands in To Merge.
     expect(unconsumedScripts()).toEqual([]);
     expect(startLabels()).toEqual([`build-${p.title}`, `review-${p.title}`]);
-    expect(epicRow(p.id).status).toBe("review");
+    expect(epicRow(p.id).status).toBe("to_merge");
     // q and r never launched and never moved.
     expect(epicRow(q.id).status).toBe("todo");
     expect(epicRow(r.id).status).toBe("todo");

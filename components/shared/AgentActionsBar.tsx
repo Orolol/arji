@@ -9,6 +9,7 @@ import {
   Hammer,
   Search,
   CheckCircle2,
+  GitMerge,
   Loader2,
   Workflow,
   ClipboardCheck,
@@ -98,7 +99,11 @@ interface AgentActionsBarProps {
   ) => Promise<unknown>;
   onSendToReview: (types: string[], namedAgentId?: string | null, resumeSessionId?: string) => Promise<unknown>;
   onSendToGrading?: (namedAgentId?: string | null) => Promise<unknown>;
-  onApprove: () => Promise<unknown>;
+  /**
+   * The action that closes the ticket. Epic: merge the branch (the merge IS
+   * the approval, shown from To Merge). Story: approve the story's review.
+   */
+  onComplete: () => Promise<unknown>;
   onActionError?: (error: unknown) => void;
 }
 
@@ -111,7 +116,7 @@ export function AgentActionsBar({
   onSendToDev,
   onSendToReview,
   onSendToGrading,
-  onApprove,
+  onComplete,
   onActionError,
 }: AgentActionsBarProps) {
   const [sendToDevOpen, setSendToDevOpen] = useState(false);
@@ -225,10 +230,14 @@ export function AgentActionsBar({
 
   const status = item.status;
   const canSendToDev = config.sendToDevStatuses.includes(status);
-  const canSendToDevFromReview = status === "review";
-  const canReview = status === "review" || status === "done";
+  const canSendToDevFromReview = status === "review" || status === "to_merge";
+  const canReview =
+    status === "review" || status === "to_merge" || status === "done";
   const canGrade = target.kind === "epic" && canReview && !!onSendToGrading;
-  const canApprove = status === "review";
+  // Epic: the merge closes the ticket, offered from the To Merge column.
+  // Story: an explicit human approval is the review verdict for that story.
+  const canComplete =
+    target.kind === "epic" ? status === "to_merge" : status === "review";
   const actionsLocked = dispatching || isRunning;
   const lockMessage =
     isRunning && activeSessionId
@@ -307,11 +316,11 @@ export function AgentActionsBar({
     }
   }
 
-  // Approve
-  async function handleApprove() {
+  // Merge (epic) / Approve (story)
+  async function handleComplete() {
     setApproving(true);
     try {
-      await onApprove();
+      await onComplete();
     } catch (error) {
       onActionError?.(error);
     } finally {
@@ -391,20 +400,22 @@ export function AgentActionsBar({
         </Button>
       )}
 
-      {/* Approve button */}
-      {canApprove && (
+      {/* Merge (epic) / Approve (story) button */}
+      {canComplete && (
         <Button
           size="sm"
-          onClick={handleApprove}
+          onClick={handleComplete}
           disabled={approving || actionsLocked}
           className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white"
         >
           {approving ? (
             <Loader2 className="h-3 w-3 animate-spin mr-1" />
+          ) : target.kind === "epic" ? (
+            <GitMerge className="h-3 w-3 mr-1" />
           ) : (
             <CheckCircle2 className="h-3 w-3 mr-1" />
           )}
-          Approve
+          {target.kind === "epic" ? "Merge" : "Approve"}
         </Button>
       )}
 
@@ -432,6 +443,12 @@ export function AgentActionsBar({
           provider: "claude-code",
           selectedSessionId: resumeSessionId,
           onSelect: setResumeSessionId,
+        }}
+        promptEstimateTarget={{
+          epicId: sessionEpicId,
+          userStoryId: sessionUserStoryId,
+          dispatchType: "build",
+          comment: devComment,
         }}
         extraContent={
           <>
@@ -504,6 +521,12 @@ export function AgentActionsBar({
           selectedSessionId: reviewResumeSessionId,
           onSelect: setReviewResumeSessionId,
         }}
+        promptEstimateTarget={{
+          epicId: sessionEpicId,
+          userStoryId: sessionUserStoryId,
+          dispatchType: "review",
+          reviewTypes: Array.from(reviewTypes),
+        }}
         notice={segregationNotice}
         extraContent={
           <ReviewTypesPicker selected={reviewTypes} onToggle={toggleReviewType} />
@@ -526,6 +549,11 @@ export function AgentActionsBar({
           value: gradingAgentId,
           onChange: setGradingAgentId,
           dispatchRole: "review",
+        }}
+        promptEstimateTarget={{
+          epicId: sessionEpicId,
+          userStoryId: sessionUserStoryId,
+          dispatchType: "grading",
         }}
         confirmLabel="Run Grading"
         confirmIcon={<ClipboardCheck className="h-4 w-4 mr-1" />}

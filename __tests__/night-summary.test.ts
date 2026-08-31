@@ -406,18 +406,18 @@ describe("buildNightRunSummaryTitle", () => {
         false,
         null
       )
-    ).toBe("Night run finished: 5 in review, 1 paused, 2 failed, 1 skipped — $4.20");
+    ).toBe("Night run finished: 5 to merge, 1 paused, 2 failed, 1 skipped — $4.20");
   });
 
   it("omits zero buckets and the cost suffix when nothing was spent", () => {
     expect(buildNightRunSummaryTitle(fullCounts({ done: 3 }), 0, false, null)).toBe(
-      "Night run finished: 3 in review"
+      "Night run finished: 3 to merge"
     );
   });
 
   it("marks partial costs with ≥", () => {
     expect(buildNightRunSummaryTitle(fullCounts({ done: 3 }), 1.1, true, null)).toBe(
-      "Night run finished: 3 in review — ≥$1.10"
+      "Night run finished: 3 to merge — ≥$1.10"
     );
   });
 
@@ -437,7 +437,7 @@ describe("buildNightRunSummaryTitle", () => {
         false,
         "cost cap reached: $9.00 of $5.00"
       )
-    ).toBe("Night run finished: 1 in review, 1 skipped — $9.00 — cost cap reached");
+    ).toBe("Night run finished: 1 to merge, 1 skipped — $9.00 — cost cap reached");
     // Other abort reasons add no marker.
     expect(
       buildNightRunSummaryTitle(fullCounts({ failed: 1 }), 0, false, "night engine error")
@@ -449,7 +449,7 @@ describe("webhook payload extension", () => {
   it("carries night_run.completed and copies the summary when non-empty", () => {
     const payload = buildWebhookPayload("p1", "Proj", {
       event: "night_run.completed",
-      summary: "Night run finished: 2 in review — $1.00",
+      summary: "Night run finished: 2 to merge — $1.00",
       durationMs: 1234,
       error: null,
       path: "/projects/p1?nightRun=night_x",
@@ -458,7 +458,7 @@ describe("webhook payload extension", () => {
       event: "night_run.completed",
       projectId: "p1",
       projectName: "Proj",
-      summary: "Night run finished: 2 in review — $1.00",
+      summary: "Night run finished: 2 to merge — $1.00",
       durationMs: 1234,
     });
     expect(payload.url.endsWith("/projects/p1?nightRun=night_x")).toBe(true);

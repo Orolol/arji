@@ -4,7 +4,17 @@ on:
   push:
   pull_request:
 
+# A new push to the same ref makes the in-flight run obsolete. Cancelling it
+# keeps queue time down without weakening any gate: the superseding run checks
+# out the newer commit and re-runs everything.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Fast feedback: the unit suite alone, unblocked by the slower type/lint/build
+  # gates. Kept as a separate job so a test failure surfaces without waiting for
+  # a production build.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -16,3 +26,105 @@ jobs:
       - run: npm ci
       - run: npm audit --audit-level=high
       - run: npm test
+
+  # The verification gates the project expects but did not previously enforce:
+  # type check, lint, and a production build.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Restored before `npm ci` on purpose: afterwards `node_modules` exists and
+      # a `**/*.ts` hash glob would walk it, costing more than the cache saves.
+      - name: Restore Next.js build cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'components/**', 'hooks/**', 'lib/**', 'middleware.ts', 'next.config.ts', 'tsconfig.json') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            nextjs-${{ runner.os }}-
+
+      - run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      # ESLint runs against eslint-suppressions.json, which records the
+      # violations that already existed when this gate was introduced. Every rule
+      # stays at `error` for new code: a new violation is not in the baseline and
+      # fails here.
+      - name: Lint
+        id: lint
+        run: npm run lint
+
+      - name: Explain a suppressions-related lint failure
+        if: ${{ failure() && steps.lint.outcome == 'failure' }}
+        run: |
+          echo "::notice::If the failure above is 'unused suppressions', a tracked lint violation was fixed. Run 'npm run lint:prune' and commit the updated eslint-suppressions.json."
+
+      # NODE_ENV is deliberately left unset: `next build` sets production itself,
+      # while exporting it here would make `npm ci` skip devDependencies.
+      - name: Production build
+        run: npm run build
+
+  # Browser regressions. A separate job with no `needs:`, so it runs alongside
+  # `test` rather than after it: a Playwright run takes minutes (it boots the
+  # app and drives real routes), and making unit feedback wait on that would
+  # undo the reason `test` and `verify` were split in the first place.
+  e2e:
+    # Pinned, not `ubuntu-latest`. Playwright 1.58 ships browser builds for
+    # ubuntu24.04 and nothing newer, so `playwright install` refuses on a newer
+    # image ("Playwright does not support chromium on ubuntu26.04-x64" — the
+    # failure this project already hits on its development host). While
+    # `ubuntu-latest` points at 24.04 the two are the same runner; when the
+    # label rolls forward, this pin is what keeps the job green until Playwright
+    # supports the new image and the version here is bumped deliberately.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # The bundled chromium, which is what playwright.config.ts uses when
+      # PLAYWRIGHT_CHANNEL is unset. Version-locked to @playwright/test, so the
+      # browser under test does not drift with whatever the runner image ships.
+      # `--with-deps` pulls the shared libraries headless chromium needs.
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+
+      # The suite runs against a production server on CI (see SERVER_MODE in
+      # playwright.config.ts), so the build has to exist before Playwright
+      # starts it. Its own step rather than part of the webServer command: a
+      # broken build then reports as a broken build, not as a web server that
+      # never came up.
+      #
+      # This repeats the `verify` build instead of depending on that job, so a
+      # slow build cannot serialise the two — and `verify` gates the build on
+      # its own.
+      - name: Production build
+        run: npm run build
+
+      # Playwright starts and stops the server itself (see webServer in
+      # playwright.config.ts); CI=true makes it spawn its own rather than reuse
+      # anything, and selects the production server.
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      # Only on failure: a green run's report says nothing the log doesn't, and
+      # the report carries the traces/screenshots that make a red one
+      # diagnosable. `playwright-report/` is where the html reporter writes.
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

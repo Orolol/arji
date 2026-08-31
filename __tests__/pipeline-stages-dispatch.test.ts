@@ -12,8 +12,9 @@
  *     and cross-provider mismatch (fresh uuid),
  *   - review stage: agentType review_code in plan mode via
  *     resolveAgentForDispatch purpose 'review', labeled '**Code Review**'
- *     comment, negative-prose revert to in_progress, output cached for the
- *     driver's prose-fallback assessment,
+ *     comment, negative-prose revert to in_progress, positive-verdict
+ *     promotion to to_merge, output cached for the driver's prose-fallback
+ *     assessment,
  *   - review verdict channels: a structured submit_findings verdict on the
  *     session row outranks the prose scan in BOTH directions, and the
  *     activity trail records which channel decided,
@@ -99,6 +100,7 @@ vi.mock("@/lib/verify/runner", () => ({
 }));
 
 vi.mock("@/lib/documents/mentions", () => ({
+  buildMentionContextBlock: vi.fn(() => ""),
   enrichPromptWithDocumentMentions: vi.fn(
     ({ prompt }: { prompt: string }) => ({ prompt, missing: [] })
   ),
@@ -302,6 +304,17 @@ describe("fix stage dispatch (epic scope)", () => {
     expect(row.prompt).toContain("## Code Review Feedback");
     expect(row.prompt).toContain("[critical] Token never expires");
     expect(row.prompt).toContain(PIPELINE_FIX_INSTRUCTIONS_SECTION);
+    expect(row.estimatedPromptTokens).toBeGreaterThan(0);
+    expect(row.estimatedPromptBreakdown).not.toBeNull();
+    const estimatedBreakdown = JSON.parse(row.estimatedPromptBreakdown!);
+    expect(estimatedBreakdown.findings).toBeGreaterThan(0);
+    expect(estimatedBreakdown.other).toBeGreaterThan(0);
+    const estimatedSum = Object.values(
+      estimatedBreakdown as Record<string, number>,
+    ).reduce((sum, tokens) => sum + tokens, 0);
+    expect(
+      Math.abs(estimatedSum - row.estimatedPromptTokens!),
+    ).toBeLessThanOrEqual(8);
 
     const spawn = startOpts();
     expect(spawn.sessionId).toBe(handle.sessionId);
@@ -707,10 +720,11 @@ describe("review stage dispatch", () => {
     expect(comment.content).toBe(
       "**Code Review**\n\n**Overall Verdict: Complete** — all good."
     );
-    // Positive verdict: the ticket stays in review.
+    // Positive verdict: the review is the approval, so the ticket is
+    // promoted to the merge boundary (review → to_merge).
     expect(
       db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
-    ).toBe("review");
+    ).toBe("to_merge");
   });
 
   it("injects one compact line per passing command into the reviewer prompt", async () => {
@@ -771,9 +785,10 @@ describe("review stage dispatch", () => {
 
   it("carries still-open findings and the convergence rules into the review prompt", async () => {
     const { projectId, epicId } = seed("review");
+    const priorId = `rc-prior-${counter}`;
     db.insert(reviewComments)
       .values({
-        id: `rc-prior-${counter}`,
+        id: priorId,
         epicId,
         filePath: "src/auth.ts",
         lineNumber: 7,
@@ -811,14 +826,21 @@ describe("review stage dispatch", () => {
       .get()!.prompt!;
 
     expect(prompt).toContain("## Findings Still Open From Previous Reviews");
-    // The reviewer sees the finding itself, anchored.
+    // The reviewer sees the finding itself, anchored and carrying its
+    // resolvable [RC:id] token.
     expect(prompt).toContain("[critical] Token never expires");
     expect(prompt).toContain("src/auth.ts");
     expect(prompt).toContain("**Line 7**");
+    expect(prompt).toContain(`[RC:${priorId}]`);
     // fixCycle is zero-based; the prompt speaks in human cycle numbers.
     expect(prompt).toContain("This is review cycle 3");
-    // The two rules that make the loop terminate.
-    expect(prompt).toContain("FIXED or STILL OPEN");
+    // The two rules that make the loop terminate: resolve what is filed
+    // (structured prior_findings, with the prose fallback lines), then bound
+    // new findings to the branch diff.
+    expect(prompt).toContain(
+      '`prior_findings` array as `{id, status: "fixed" | "still_open"}`'
+    );
+    expect(prompt).toContain("`[RC:id] FIXED` or `[RC:id] STILL OPEN`");
     expect(prompt).toContain("bound new findings to what this branch changed");
 
     await handle.settled;
@@ -1140,7 +1162,7 @@ describe("review stage dispatch", () => {
     });
   });
 
-  it("holds the ticket in review on a structured approved verdict even when the prose reads negative", async () => {
+  it("promotes the ticket to to_merge on a structured approved verdict even when the prose reads negative", async () => {
     const { projectId, epicId, storyId } = seed("review");
     processManagerState.result = {
       success: true,
@@ -1175,10 +1197,12 @@ describe("review stage dispatch", () => {
     });
     await handle.settled;
 
-    // No revert: the prose scan does not get a vote here.
+    // No revert: the prose scan does not get a vote here. The structured
+    // approval promotes the epic to the merge boundary; the story holds its
+    // column until the merge cascade closes it.
     expect(
       db.select().from(epics).where(eq(epics.id, epicId)).get()!.status
-    ).toBe("review");
+    ).toBe("to_merge");
     expect(
       db.select().from(userStories).where(eq(userStories.id, storyId)).get()!
         .status
@@ -1189,8 +1213,13 @@ describe("review stage dispatch", () => {
       .where(eq(ticketActivityLog.epicId, epicId))
       .all()
       .map((a) => a.reason);
+    // Traceability: the promotion names the channel that decided, and no
+    // rejection was ever recorded.
+    expect(reasons).toContain(
+      "Review verdict: passed (Code Review) [verdict source: structured]"
+    );
     expect(
-      reasons.some((reason) => reason?.startsWith("Review verdict:"))
+      reasons.some((reason) => reason?.includes("changes requested"))
     ).toBe(false);
 
     const assessment = await driver.assessReview({

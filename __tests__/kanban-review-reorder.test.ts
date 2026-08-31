@@ -2,11 +2,12 @@
  * What a drag persists into `epics.position` when the column it touches is
  * displayed in a DERIVED order.
  *
- * Review is drawn merge-ready-first, so its display index is not its
+ * To Merge is drawn merge-ready-first, so its display index is not its
  * position. Persisting the display index would encode a transient signal into
  * the board's durable ordering contract — and would reorder cards nobody
  * dragged, which only becomes visible later, when one of them stops being
- * ready and the column falls back to position order.
+ * ready and the column falls back to position order. Review, by contrast, is
+ * an ordinary position-ordered column again since the to_merge refonte.
  *
  * Two layers are covered: the pure translation (`persistedColumnOrder`) and
  * the hook that actually builds the reorder payload (`useKanban.moveEpic`),
@@ -22,8 +23,8 @@ import type { MergeReadiness } from "@/lib/kanban/merge-readiness";
 const READY: MergeReadiness = { ready: true, blocker: null, openFindings: 0 };
 const BLOCKED: MergeReadiness = {
   ready: false,
-  blocker: "open_findings",
-  openFindings: 1,
+  blocker: "merge_conflict",
+  openFindings: 0,
 };
 
 describe("persistedColumnOrder", () => {
@@ -130,6 +131,27 @@ function epic(overrides: Partial<KanbanEpic> & { id: string }): KanbanEpic {
 
 let epicsPayload: KanbanEpic[] = [];
 let fetchMock: ReturnType<typeof vi.fn>;
+/**
+ * Arm to leave every later board GET in flight. The hook refetches once a
+ * reorder is accepted, so this is how a test says "the user dragged again
+ * before that refetch landed" — the case the local-position mirroring exists
+ * for, and the one the hook's mutation guard discards the refetch in.
+ */
+let holdBoardGets = false;
+
+/** The fake server stores an accepted reorder, as the real route does. */
+function applyReorder(
+  rows: KanbanEpic[],
+  items: Array<{ id: string; status: string; position: number }>
+): KanbanEpic[] {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return rows.map((row) => {
+    const item = byId.get(row.id);
+    return item
+      ? { ...row, status: item.status as KanbanEpic["status"], position: item.position }
+      : row;
+  });
+}
 
 /** Every reorder POST body seen so far, newest last. */
 function reorderPayloads(): Array<{
@@ -143,8 +165,15 @@ function reorderPayloads(): Array<{
 }
 
 beforeEach(() => {
-  fetchMock = vi.fn(async (url: string) => {
+  holdBoardGets = false;
+  fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url).includes("/epics/reorder")) {
+      const { items } = JSON.parse(String(init?.body));
+      epicsPayload = applyReorder(epicsPayload, items);
+      return { ok: true, json: async () => ({ data: {} }) };
+    }
     if (String(url).endsWith("/epics")) {
+      if (holdBoardGets) return new Promise<never>(() => {});
       return { ok: true, json: async () => ({ data: epicsPayload }) };
     }
     if (String(url).endsWith("/releases")) {
@@ -165,25 +194,31 @@ async function mountBoard() {
   return hook;
 }
 
-describe("useKanban.moveEpic — Review keeps its derived order out of `position`", () => {
-  it("does not swap two Review tickets when a third is dragged in", async () => {
-    // A is in review (position 0); B is ready (position 1), so B is DISPLAYED
-    // first. X arrives from To Do.
+describe("useKanban.moveEpic — column order and reorder payloads", () => {
+  it("sorts To Merge ready-first while Review stays in plain position order", async () => {
+    // Review is an ordinary column again: a readiness signal on one of its
+    // cards must not float it. Only To Merge is drawn merge-ready-first.
     epicsPayload = [
       epic({ id: "a", position: 0, mergeReadiness: BLOCKED }),
       epic({ id: "b", position: 1, mergeReadiness: READY }),
+      epic({ id: "m1", status: "to_merge", position: 0, mergeReadiness: BLOCKED }),
+      epic({ id: "m2", status: "to_merge", position: 1, mergeReadiness: READY }),
       epic({ id: "x", status: "todo", position: 0 }),
     ];
 
     const { result } = await mountBoard();
     expect(result.current.board.columns.review.map((e) => e.id)).toEqual([
-      "b",
       "a",
+      "b",
+    ]);
+    expect(result.current.board.columns.to_merge.map((e) => e.id)).toEqual([
+      "m2",
+      "m1",
     ]);
 
-    // Dropped at the very bottom of the displayed column (after A).
+    // Dropped between A and B: Review persists exactly the displayed order.
     await act(async () => {
-      await result.current.moveEpic("x", "todo", "review", 2);
+      await result.current.moveEpic("x", "todo", "review", 1);
     });
 
     await waitFor(() => expect(reorderPayloads()).toHaveLength(1));
@@ -192,9 +227,41 @@ describe("useKanban.moveEpic — Review keeps its derived order out of `position
       .sort((p, q) => p.position - q.position)
       .map((item) => item.id);
 
-    // The regression: A and B must keep their stored relative order. Persisting
-    // display indices would have written B=0, A=1 and swapped them.
-    expect(review.indexOf("a")).toBeLessThan(review.indexOf("b"));
+    expect(review).toEqual(["a", "x", "b"]);
+  });
+
+  it("never swaps To Merge cards nobody dragged (display order ≠ position order)", async () => {
+    // Stored: m1(blocked, pos 0), m2(ready, pos 1). Displayed ready-first:
+    // [m2, m1]. Persisting display indices here would write m2=0, m1=2 and
+    // silently swap two cards the user never touched — the exact leak
+    // lib/kanban/reorder.ts exists to prevent, on the column that is now the
+    // derived-order one.
+    epicsPayload = [
+      epic({ id: "m1", status: "to_merge", position: 0, mergeReadiness: BLOCKED }),
+      epic({ id: "m2", status: "to_merge", position: 1, mergeReadiness: READY }),
+      epic({ id: "x", status: "todo", position: 0 }),
+    ];
+
+    const { result } = await mountBoard();
+    expect(result.current.board.columns.to_merge.map((e) => e.id)).toEqual([
+      "m2",
+      "m1",
+    ]);
+
+    // Dropped between m2 and m1 as displayed.
+    await act(async () => {
+      await result.current.moveEpic("x", "todo", "to_merge", 1);
+    });
+
+    await waitFor(() => expect(reorderPayloads()).toHaveLength(1));
+    const toMerge = reorderPayloads()[0]
+      .filter((item) => item.status === "to_merge")
+      .sort((p, q) => p.position - q.position)
+      .map((item) => item.id);
+
+    // Survivors keep their stored order (m1 before m2); the dragged card is
+    // anchored after its display predecessor m2. No untouched card moved.
+    expect(toMerge).toEqual(["m1", "m2", "x"]);
   });
 
   it("still persists plain display order for an ordinary column", async () => {
@@ -249,6 +316,10 @@ describe("useKanban.moveEpic — Review keeps its derived order out of `position
     ];
 
     const { result } = await mountBoard();
+    // No board GET may land between the two drags: the second one must be
+    // carried by the positions the first mirrored onto the local rows, not by
+    // a server round-trip.
+    holdBoardGets = true;
 
     await act(async () => {
       await result.current.moveEpic("x", "todo", "review", 0);

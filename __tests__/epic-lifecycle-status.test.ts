@@ -248,7 +248,6 @@ vi.mock("@/lib/workflow/context", () => ({
     epicId: "epic-1",
     fromStatus: "in_progress",
     toStatus: "review",
-    hasOpenReviewComments: false,
     hasCompletedReview: true,
     hasRunningSession: false,
     actor: "agent",
@@ -543,7 +542,7 @@ describe("Epic review — status gate", () => {
 
     const json = await res.json();
     expect(res.status).toBe(400);
-    expect(json.error).toContain("review or done");
+    expect(json.error).toContain("review, to merge or done");
   });
 });
 

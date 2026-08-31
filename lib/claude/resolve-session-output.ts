@@ -19,11 +19,17 @@ import { wasQuestionAskedViaMcp } from "@/lib/mcp/token-store";
  * The resolution order is:
  * 1. Parse `result.result` via `parseClaudeOutput()` — works when the agent
  *    produced a final text message.
- * 2. If the parsed output is one of the "no textual output" fallback messages,
- *    look up `lastNonEmptyText` from the `agent_sessions` table — this field
- *    is populated by streaming chunks (non-CC providers) or by the process
+ * 2. For a FAILED run with no final text, stop at `result.error`: the
+ *    streamed `lastNonEmptyText` of a run that died mid-task is whatever the
+ *    model said last before dying — pre-tool-call narration ("Now let me
+ *    look at…"), not a deliverable. Posted to a ticket it reads as leaked
+ *    thinking, and the comment history then feeds it back into every later
+ *    prompt (measured 2026-08-27 on E-arij-138).
+ * 3. Otherwise (success, or no result envelope at all), look up
+ *    `lastNonEmptyText` from the `agent_sessions` table — this field is
+ *    populated by streaming chunks (non-CC providers) or by the process
  *    manager's result-chunk persistence (CC provider).
- * 3. Fall back to `result.error` or a generic default message.
+ * 4. Fall back to `result.error` or a generic default message.
  */
 export function resolveSessionOutput(
   result: ClaudeResult | undefined | null,
@@ -37,6 +43,12 @@ export function resolveSessionOutput(
       const parsed = stripPromptEcho(raw, sessionId);
       if (parsed) return parsed;
     }
+  }
+
+  // A failed run with no final text delivered nothing — report the failure,
+  // not the mid-stream narration (see the resolution-order contract above).
+  if (result && !result.success) {
+    return result.error || defaultMessage;
   }
 
   // Try lastNonEmptyText from DB

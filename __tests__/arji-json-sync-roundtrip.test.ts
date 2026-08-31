@@ -483,9 +483,11 @@ describe("arji.json sync roundtrip", () => {
           epicId: "e-guarded",
           status: "completed",
           agentType: "review_code",
-          // A review that delivered its verdict: without one, an
-          // MCP-capable reviewer is unverifiable and review → done is
-          // refused for that reason instead (lib/pipeline/findings.ts).
+          // A completed, verdict-bearing review. review → done is refused
+          // STRUCTURALLY now (the edge is review → to_merge → done and only
+          // the merge reaches done), so this seed proves the skip is not for
+          // lack of a review — even a fully reviewed epic cannot be imported
+          // straight to done.
           reviewVerdict: "approved",
           mode: "plan",
         })
@@ -530,7 +532,9 @@ describe("arji.json sync roundtrip", () => {
             epicId: "e-guarded",
             fromStatus: "review",
             toStatus: "done",
-            reason: expect.stringContaining("manual approval"),
+            reason: expect.stringContaining(
+              'cannot move from "review" to "done"'
+            ),
           },
           {
             target: "story",

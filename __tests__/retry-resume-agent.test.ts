@@ -43,7 +43,7 @@ function session(
     provider: "oh-my-pi",
     namedAgentId: "agent-omp",
     userStoryId: null,
-    lastNonEmptyText: "done",
+    producedOutput: true,
     createdAt: "2026-08-21 10:00:00",
     endedAt: "2026-08-21 10:00:30",
     ...overrides,
@@ -265,17 +265,19 @@ describe("selectLatestFailures — carries what the retry needs", () => {
     expect(spoke.e1.producedOutput).toBe(true);
 
     const mute = selectLatestFailures(
-      [session({ id: "f1", lastNonEmptyText: null })],
+      [session({ id: "f1", producedOutput: false })],
       new Set()
     );
     expect(mute.e1.producedOutput).toBe(false);
   });
 
-  it("treats whitespace-only output as no output", () => {
-    const failed = selectLatestFailures(
-      [session({ id: "f1", lastNonEmptyText: "   \n  " })],
-      new Set()
-    );
+  it("treats a row without the flag as no output, never as output", () => {
+    // The flag replaced `lastNonEmptyText` on the list payload: the column is
+    // uncapped at the write side, and this badge only ever asked whether the
+    // run spoke, so the list route now decides that in SQL (including the
+    // whitespace-only case, covered in sessions-list-response-budget.test.ts).
+    // A row that predates the flag must not be read as "spoke".
+    const failed = selectLatestFailures([session({ id: "f1", producedOutput: undefined })], new Set());
     expect(failed.e1.producedOutput).toBe(false);
   });
 

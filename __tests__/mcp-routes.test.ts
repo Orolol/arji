@@ -175,11 +175,10 @@ beforeEach(() => {
         agentType: "developer",
         createdAt: now,
       },
-      // Completed review on the review epic, so review→done rejections come
-      // from the approval guard, not the missing-review guard. The verdict
-      // matters: without one, a reviewer on an MCP-capable provider is
-      // unverifiable and the refusal would come from that guard instead
-      // (lib/pipeline/findings.ts).
+      // Completed, verdict-bearing review on the review epic. "done" and
+      // "to_merge" are rejected at the schema boundary regardless, so this
+      // seed proves the rejection is not for lack of a review — and the
+      // verdict-scoping test below relies on this row existing.
       {
         id: createId(),
         projectId,
@@ -736,17 +735,14 @@ describe("POST /api/mcp/update-ticket-status", () => {
     expect(logs).toHaveLength(0);
   });
 
-  it("409s review→done — approval stays human even with a completed review", async () => {
+  it("rejects 'done' at validation — Done comes from the merge, even with a completed review", async () => {
     const res = await call(
       updateStatusPost,
       { status: "done", ticket_id: reviewEpicId },
       token
     );
-    const json = await res.json();
 
-    expect(res.status).toBe(409);
-    expect(json.code).toBe("INVALID_TRANSITION");
-    expect(json.error).toContain("approval");
+    expect(res.status).toBe(400);
 
     const epic = db()
       .select()
@@ -756,10 +752,27 @@ describe("POST /api/mcp/update-ticket-status", () => {
     expect(epic?.status).toBe("review");
   });
 
-  it("409s structurally invalid transitions (todo→done)", async () => {
+  it("rejects 'to_merge' at validation — only a passing review verdict promotes there", async () => {
     const res = await call(
       updateStatusPost,
-      { status: "done", ticket_id: todoEpicId },
+      { status: "to_merge", ticket_id: reviewEpicId },
+      token
+    );
+
+    expect(res.status).toBe(400);
+
+    const epic = db()
+      .select()
+      .from(epics)
+      .where(eq(epics.id, reviewEpicId))
+      .get();
+    expect(epic?.status).toBe("review");
+  });
+
+  it("409s structurally invalid transitions (todo→review)", async () => {
+    const res = await call(
+      updateStatusPost,
+      { status: "review", ticket_id: todoEpicId },
       token
     );
     const json = await res.json();
@@ -1342,6 +1355,7 @@ describe("POST /api/mcp/submit-findings", () => {
 
     expect(res.status).toBe(200);
     expect(json.data.findingIds).toEqual([]);
+    expect(json.data.resolvedIds).toEqual([]);
 
     expect(db().select().from(reviewComments).all()).toHaveLength(0);
     const comments = db().select().from(ticketComments).all();
@@ -1349,6 +1363,136 @@ describe("POST /api/mcp/submit-findings", () => {
     expect(comments[0]?.content).toContain(
       "**Review findings (approved with minor issues)**"
     );
+  });
+
+  it("resolves prior findings marked fixed — and only those in scope", async () => {
+    // The reviewer's structured word on EARLIER cycles' findings: "fixed"
+    // resolves the row, "still_open" keeps it, and the resolution is scoped
+    // to open agent-authored rows on the token's own epic.
+    const now = new Date().toISOString();
+    const fixedId = createId();
+    const stillOpenId = createId();
+    const humanId = createId();
+    const foreignId = createId();
+    const alreadyResolvedId = createId();
+    db()
+      .insert(reviewComments)
+      .values([
+        {
+          id: fixedId,
+          epicId,
+          filePath: "lib/parser.ts",
+          lineNumber: 12,
+          body: "[critical] Possible null dereference on `input`",
+          author: "agent",
+          status: "open",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: stillOpenId,
+          epicId,
+          filePath: "lib/format.ts",
+          lineNumber: 3,
+          body: "[minor] Typo in identifier",
+          author: "agent",
+          status: "open",
+          createdAt: now,
+          updatedAt: now,
+        },
+        // Human-authored comments are not the reviewer's to close.
+        {
+          id: humanId,
+          epicId,
+          filePath: "lib/a.ts",
+          lineNumber: 1,
+          body: "please rename this",
+          author: "user",
+          status: "open",
+          createdAt: now,
+          updatedAt: now,
+        },
+        // Another ticket's findings are out of scope.
+        {
+          id: foreignId,
+          epicId: todoEpicId,
+          filePath: "lib/b.ts",
+          lineNumber: 1,
+          body: "[major] Foreign finding",
+          author: "agent",
+          status: "open",
+          createdAt: now,
+          updatedAt: now,
+        },
+        // Already-resolved rows are not re-reported as resolved.
+        {
+          id: alreadyResolvedId,
+          epicId,
+          filePath: "lib/c.ts",
+          lineNumber: 9,
+          body: "[info] Closed in an earlier cycle",
+          author: "agent",
+          status: "resolved",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ])
+      .run();
+
+    const res = await call(
+      submitFindingsPost,
+      {
+        verdict: "approved",
+        summary: "Verified the earlier blockers.",
+        findings: [],
+        prior_findings: [
+          { id: fixedId, status: "fixed" },
+          { id: stillOpenId, status: "still_open" },
+          { id: humanId, status: "fixed" },
+          { id: foreignId, status: "fixed" },
+          { id: alreadyResolvedId, status: "fixed" },
+          { id: "rc-does-not-exist", status: "fixed" },
+        ],
+      },
+      token
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.resolvedIds).toEqual([fixedId]);
+
+    const byId = new Map(
+      db()
+        .select()
+        .from(reviewComments)
+        .all()
+        .map((row) => [row.id, row.status])
+    );
+    expect(byId.get(fixedId)).toBe("resolved");
+    expect(byId.get(stillOpenId)).toBe("open");
+    expect(byId.get(humanId)).toBe("open");
+    expect(byId.get(foreignId)).toBe("open");
+    expect(byId.get(alreadyResolvedId)).toBe("resolved");
+  });
+
+  it("400s past 100 prior findings", async () => {
+    const prior = Array.from({ length: 101 }, (_, i) => ({
+      id: `rc-${i}`,
+      status: "fixed",
+    }));
+
+    const res = await call(
+      submitFindingsPost,
+      {
+        verdict: "approved",
+        summary: "ok",
+        findings: [],
+        prior_findings: prior,
+      },
+      token
+    );
+
+    expect(res.status).toBe(400);
   });
 
   it("always targets the token's own ticket — ticket_id is rejected", async () => {

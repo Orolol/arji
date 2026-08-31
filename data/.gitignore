@@ -14,3 +14,4 @@ arij.db.backup-*
 # server names Arij last wrote into omp's mcp.json and agy's register. Machine
 # state, not project state — it records what is on THIS box.
 mcp-user-global.json
+backups/

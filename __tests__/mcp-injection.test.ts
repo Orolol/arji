@@ -563,12 +563,15 @@ describe("arijToolsSection", () => {
       "submit_findings is the channel your review is read from"
     );
     expect(text).toContain(
-      "its verdict decides whether the ticket goes back for changes"
+      "a passing verdict moves it to To Merge"
     );
-    // ...open blocking findings still veto an approval (findings prime).
     expect(text).toContain(
-      "an 'approved' verdict alongside an open [critical] or [major] finding still blocks"
+      "'changes_requested' sends it back to In Progress"
     );
+    // ...prior findings are verified through the same structured channel...
+    expect(text).toContain("prior_findings");
+    expect(text).toContain("'fixed' resolves it in Arij");
+    expect(text).toContain("a finding you do not mention stays open");
     // ...and the prose verdict survives, explicitly as the fallback, because
     // providers without MCP injection have no other channel.
     expect(text).toContain(

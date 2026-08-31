@@ -186,6 +186,8 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       inputTokens: "input_tokens",
       outputTokens: "output_tokens",
       totalCostUsd: "total_cost_usd",
+      estimatedPromptTokens: "estimated_prompt_tokens",
+      estimatedPromptBreakdown: "estimated_prompt_breakdown",
       batchRunId: "batch_run_id",
       claudeSessionId: "claude_session_id",
       cliSessionId: "cli_session_id",
@@ -781,6 +783,47 @@ describe("db schema: nullable columns", () => {
 type IndexSpec = { name: string; unique: boolean; columns: string[] };
 
 const INDEXES: Record<string, IndexSpec[]> = {
+  epics: [
+    {
+      // Board reads: project-scoped, bucketed by status, ordered by position.
+      name: "epics_project_status_position_idx",
+      unique: false,
+      columns: ["project_id", "status", "position"],
+    },
+  ],
+  userStories: [
+    {
+      name: "user_stories_epic_position_idx",
+      unique: false,
+      columns: ["epic_id", "position"],
+    },
+  ],
+  agentSessions: [
+    {
+      name: "agent_sessions_project_created_at_idx",
+      unique: false,
+      columns: ["project_id", "created_at"],
+    },
+    {
+      name: "agent_sessions_epic_idx",
+      unique: false,
+      columns: ["epic_id"],
+    },
+  ],
+  ticketComments: [
+    {
+      // Two single-column indexes, not one composite: a comment hangs off
+      // exactly one of the two targets and each side is queried on its own.
+      name: "ticket_comments_epic_idx",
+      unique: false,
+      columns: ["epic_id"],
+    },
+    {
+      name: "ticket_comments_user_story_idx",
+      unique: false,
+      columns: ["user_story_id"],
+    },
+  ],
   routines: [
     {
       name: "routines_project_kind_unique",

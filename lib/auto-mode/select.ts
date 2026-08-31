@@ -13,15 +13,14 @@ import {
   loadProjectGraph,
 } from "@/lib/dependencies/validation";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
+import { compareExecutionOrder } from "@/lib/kanban/queue";
 import {
   evaluateMergeReadiness,
   hasFreshCleanReview,
   type MergeReadinessFacts,
 } from "@/lib/kanban/merge-readiness";
-import {
-  lastCleanReviewAtSql,
-  lastTerminalCodeAtSql,
-} from "@/lib/workflow/review-freshness";
+import { epicSessionFactsCte } from "@/lib/workflow/review-freshness";
+import { blocksMergeSql } from "@/lib/workflow/blocking-findings";
 import { isDeliveredStatus } from "@/lib/types/kanban";
 import { normalizeAt } from "@/lib/agent-sessions/session-time";
 import { isPipelineRunActive } from "@/lib/pipeline/constants";
@@ -41,9 +40,10 @@ import { AUTO_MODE_MAX_REVIEW_REJECTIONS } from "./constants";
  * what that split is for.
  *
  * Every selector shares one board snapshot built from a FIXED number of
- * queries (ten), never one lookup per ticket: the sweep runs every 15s on a
- * board that can hold hundreds of tickets, so an N+1 here would be a
- * per-sweep table scan storm.
+ * queries (nine — the session facts and the blocking-findings count share
+ * one), never one lookup per ticket: the sweep runs every 15s on a board that
+ * can hold hundreds of tickets, so an N+1 here would be a per-sweep table
+ * scan storm.
  *
  * The exclusions, in the order they matter:
  *
@@ -124,6 +124,7 @@ export const STORY_PARENT_BUILDABLE_STATUSES: ReadonlySet<string> = new Set([
   "todo",
   "in_progress",
   "review",
+  "to_merge",
 ]);
 
 // normalizeAt lives in lib/agent-sessions/session-time.ts alongside the SQL
@@ -218,6 +219,13 @@ interface SessionFacts {
    * build commits to the epic's branch, so a review that predates it is stale.
    */
   lastTerminalCodeAt: string | null;
+  /**
+   * The two facts behind `hasStandingNegativeVerdict`. The engine refuses a
+   * merge while a rejection stands unanswered, so the selector must not offer
+   * one — `tryAutoMerge` runs git before it validates.
+   */
+  lastNegativeVerdictReviewAt: string | null;
+  supersessionAt: string | null;
 }
 
 interface AwaitingFacts {
@@ -369,36 +377,76 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     if (row.userStoryId) busyStoryIds.add(row.userStoryId);
   }
 
-  // 4. Review/code freshness facts per epic (conditional aggregation).
+  // 4 + 9. Review/code freshness facts per epic, and the blocking open
+  // findings that go with them.
+  //
+  // One statement, because the two read the SAME per-epic aggregate over
+  // `agent_sessions`: the facts land on the epic row, and the findings count
+  // joins the supersession cutoff per candidate row. Split across two
+  // statements the sweep scanned that unindexed table twice for one set of
+  // numbers — every 15 seconds, forever. The CTE is referenced twice inside
+  // one statement, so SQLite materialises it once (`MATERIALIZE
+  // epic_session_facts`).
   //
   // Shared with the board list query — see lib/workflow/review-freshness.ts
-  // for what each branch includes, and lib/pipeline/findings.ts
-  // (`cleanReviewVerdictSql`) for the per-row verdict rule it defers to: a
-  // review whose deposit channel Arij could not wire is NOT clean, so the
-  // supervisor and the card judge it the same way.
-  const factRows = db
+  // for what each branch includes and why, lib/pipeline/findings.ts
+  // (`cleanReviewVerdictSql`) for the per-row verdict rule it defers to (a
+  // review whose deposit channel Arij could not wire is NOT clean), and
+  // lib/workflow/blocking-findings.ts for which open rows still count. The
+  // supervisor and the card must not hold different opinions about any of it.
+  //
+  // Driven from `epics` rather than the aggregate so an epic with review
+  // comments but no session at all still gets a row.
+  const epicSessionFacts = epicSessionFactsCte(db, projectId);
+
+  const openFindingCounts = db
     .select({
-      epicId: agentSessions.epicId,
-      lastCleanReviewAt: lastCleanReviewAtSql(),
-      lastTerminalCodeAt: lastTerminalCodeAtSql(),
+      epicId: reviewComments.epicId,
+      openFindings: sql<number>`COUNT(*)`.as("open_findings"),
     })
-    .from(agentSessions)
+    .from(reviewComments)
+    .innerJoin(epics, eq(reviewComments.epicId, epics.id))
+    .leftJoin(
+      epicSessionFacts,
+      eq(epicSessionFacts.epicId, reviewComments.epicId)
+    )
     .where(
       and(
-        eq(agentSessions.projectId, projectId),
-        sql`${agentSessions.epicId} IS NOT NULL`
+        eq(epics.projectId, projectId),
+        eq(reviewComments.status, "open"),
+        blocksMergeSql(epicSessionFacts.supersessionAt)
       )
     )
-    .groupBy(agentSessions.epicId)
+    .groupBy(reviewComments.epicId)
+    .as("open_finding_counts");
+
+  const factRows = db
+    .with(epicSessionFacts)
+    .select({
+      epicId: epics.id,
+      lastCleanReviewAt: epicSessionFacts.lastCleanReviewAt,
+      lastTerminalCodeAt: epicSessionFacts.lastTerminalCodeAt,
+      lastNegativeVerdictReviewAt: epicSessionFacts.lastNegativeVerdictReviewAt,
+      supersessionAt: epicSessionFacts.supersessionAt,
+      openFindings: openFindingCounts.openFindings,
+    })
+    .from(epics)
+    .leftJoin(epicSessionFacts, eq(epics.id, epicSessionFacts.epicId))
+    .leftJoin(openFindingCounts, eq(epics.id, openFindingCounts.epicId))
+    .where(eq(epics.projectId, projectId))
     .all();
 
   const sessionFactsByEpic = new Map<string, SessionFacts>();
+  const openReviewCommentsByEpic = new Map<string, number>();
   for (const row of factRows) {
     if (!row.epicId) continue;
     sessionFactsByEpic.set(row.epicId, {
       lastCleanReviewAt: row.lastCleanReviewAt ?? null,
       lastTerminalCodeAt: row.lastTerminalCodeAt ?? null,
+      lastNegativeVerdictReviewAt: row.lastNegativeVerdictReviewAt ?? null,
+      supersessionAt: row.supersessionAt ?? null,
     });
+    openReviewCommentsByEpic.set(row.epicId, Number(row.openFindings ?? 0));
   }
 
   // 5 + 6. Latest session per epic / per story (the awaiting-reply verdict).
@@ -540,25 +588,6 @@ export function loadAutoModeBoard(projectId: string): AutoModeBoard {
     });
   }
 
-  // 9. Open review comments per epic — the merge gate's blocking findings.
-  const openReviewRows = db
-    .select({
-      epicId: reviewComments.epicId,
-      openCount: sql<number>`COUNT(*)`,
-    })
-    .from(reviewComments)
-    .innerJoin(epics, eq(reviewComments.epicId, epics.id))
-    .where(
-      and(eq(epics.projectId, projectId), eq(reviewComments.status, "open"))
-    )
-    .groupBy(reviewComments.epicId)
-    .all();
-
-  const openReviewCommentsByEpic = new Map<string, number>();
-  for (const row of openReviewRows) {
-    openReviewCommentsByEpic.set(row.epicId, Number(row.openCount ?? 0));
-  }
-
   // 10. The dependency graph, for the build selector's prerequisite gate:
   // findTicketsBlockedByDependencies walks it in memory, applying the same
   // stop-at-delivered rule the batch route applies — with no query per
@@ -672,60 +701,34 @@ function isEpicSelectable(board: AutoModeBoard, epic: EpicRow): boolean {
 /**
  * Execution order of the candidate set: column rank, then position ASC.
  *
- * `position` is written PER COLUMN — creation uses `MAX(position) + 1`
- * scoped to the target status, and the reorder route rewrites each column as
- * 0..n-1 — so every column has its own position 0 and position alone is not
- * a total order over a set that spans two columns. The build selector spans
- * exactly two (To Do and unoccupied In Progress), so the column is the
- * primary key and position the secondary one. Without that rule the
- * cross-column tie would fall through to `epicRows`, which query 1 reads
- * with no ORDER BY — i.e. to creation order, which is invisible on the board
- * and unreachable by dragging.
+ * The rule itself lives in `compareExecutionOrder`
+ * (lib/kanban/queue.ts) — client-safe, pure, and therefore readable by the
+ * screens that CLAIM to show this queue. Two copies of "the order Full Auto
+ * picks in" is precisely the divergence the desk's UP NEXT column would
+ * otherwise reproduce; the supervisor and the UI now sort with one function.
  *
- * In Progress ranks before To Do: a ticket sitting there came back from a
- * negative review, and finishing work already started beats opening a new
- * front. Within a column, position ASC is the column's visual reading order
- * — position is the single source of truth for execution order, so what the
- * user sees is what the supervisor runs (WYSIWYG). Priority stays a badge
- * and a filter, never a scheduling criterion; the "Sort by priority" button
- * makes it visible in the order by rewriting positions in bulk.
- *
- * The `id` tiebreak only fires on a malformed board (two rows sharing a
- * position after a partial write). It is arbitrary but deterministic, which
- * beats "whatever SQLite returned first".
+ * The cross-column rule matters here because the build selector spans two
+ * columns (To Do and unoccupied In Progress). Without it the tie would fall
+ * through to `epicRows`, which query 1 reads with no ORDER BY — i.e. to
+ * creation order, which is invisible on the board.
  */
-const EXECUTION_COLUMN_RANK: Readonly<Record<string, number>> = {
-  in_progress: 0,
-  todo: 1,
-};
-
-/** Columns the build selector does not span sort last, among themselves. */
-const UNRANKED_COLUMN = 2;
-
-function compareEpics(a: EpicRow, b: EpicRow): number {
-  const byColumn =
-    (EXECUTION_COLUMN_RANK[a.status ?? ""] ?? UNRANKED_COLUMN) -
-    (EXECUTION_COLUMN_RANK[b.status ?? ""] ?? UNRANKED_COLUMN);
-  if (byColumn !== 0) return byColumn;
-
-  const byPosition = (a.position ?? 0) - (b.position ?? 0);
-  if (byPosition !== 0) return byPosition;
-
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-}
+const compareEpics = compareExecutionOrder;
 
 /**
  * The infinite-re-review guard.
  *
- * A review that PASSES leaves the epic in `review` (the pipeline never
- * auto-approves), so a naive "everything in review" selector would review the
- * same epic forever. The gate is temporal at its core — "has a review been
- * attempted since the last terminal code change?" is a fact, not a guess —
- * plus the verdict rule: for a reviewer that HAD the submit_findings channel,
- * only an explicitly positive verdict is clean — `changes_requested` and
- * silence alike earn a fresh review (see lastCleanReviewAt). The prose
- * fallback for MCP-less providers is deliberately NOT parsed here; their rows
- * stay NULL and stay clean.
+ * A review that PASSES now promotes the epic to `to_merge` (the verdict IS
+ * the approval), so the common case leaves the Review column on its own. The
+ * guard still matters for the cases that do NOT move the ticket — a review
+ * whose promotion was refused, or an epic dragged back into Review with its
+ * clean review intact — where a naive "everything in review" selector would
+ * review the same epic forever. The gate is temporal at its core — "has a
+ * review been attempted since the last terminal code change?" is a fact, not
+ * a guess — plus the verdict rule: for a reviewer that HAD the
+ * submit_findings channel, only an explicitly positive verdict is clean —
+ * `changes_requested` and silence alike earn a fresh review (see
+ * lastCleanReviewAt). The prose fallback for MCP-less providers is
+ * deliberately NOT parsed here; their rows stay NULL and stay clean.
  *
  * "A review" means a completed, epic-scoped review that delivered a verdict —
  * see SessionFacts.lastCleanReviewAt for what is deliberately excluded and
@@ -874,6 +877,8 @@ function mergeReadinessFacts(
     openFindings: board.openReviewCommentsByEpic.get(epic.id) ?? 0,
     lastCleanReviewAt: facts?.lastCleanReviewAt ?? null,
     lastTerminalCodeAt: facts?.lastTerminalCodeAt ?? null,
+    lastNegativeVerdictReviewAt: facts?.lastNegativeVerdictReviewAt ?? null,
+    supersessionAt: facts?.supersessionAt ?? null,
   };
 }
 
@@ -911,23 +916,17 @@ function hasStoryStillToBuild(board: AutoModeBoard, epic: EpicRow): boolean {
 }
 
 /**
- * Epics whose review came back clean and whose branch can land: in `review`,
- * with a branch, reviewed since the last code change, with zero open review
- * comments, and with no story the build selector would still pick up.
+ * Epics whose branch can land: in `to_merge` (the review verdict already
+ * promoted them there), with a branch, and with no story the build selector
+ * would still pick up.
  *
  * The readiness half is `evaluateMergeReadiness` — the same call the board
- * API makes, so a "Ready to merge" card and a supervisor merge candidate agree
- * on what "reviewed and landable" means by construction. What stays here are
- * the exclusions that are the SUPERVISOR's alone: the runtime ones (busy,
- * owned, parked, backed off), which are about whether it may act right now,
- * and `hasStoryStillToBuild`, which refuses the unattended merge of a
- * half-built epic a human is still allowed to land by hand.
- *
- * This gate is STRICTER than the workflow engine's `→ done` guards on
- * purpose. The engine still has the last word — `applyTransition` refuses
- * unless `hasCompletedReview` and no open comments — but the engine's
- * freshness is lax, so the temporal check is what makes "review is OK" mean
- * something without inventing a new boolean.
+ * API makes, so a To Merge card and a supervisor merge candidate agree on
+ * what "landable" means by construction. What stays here are the exclusions
+ * that are the SUPERVISOR's alone: the runtime ones (busy, owned, parked,
+ * backed off), which are about whether it may act right now, and
+ * `hasStoryStillToBuild`, which refuses the unattended merge of a half-built
+ * epic a human is still allowed to land by hand.
  */
 export function selectMergeCandidates(
   projectId: string,

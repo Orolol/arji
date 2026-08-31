@@ -60,7 +60,9 @@ describe("manual epic merge story cascade", () => {
         id: "epic-manual",
         projectId: "project-manual",
         title: "Merge me",
-        status: "review",
+        // At the merge boundary: only a to_merge epic can land (the
+        // to_merge → done edge requires source "merge").
+        status: "to_merge",
         branchName: "feature/manual",
       })
       .run();
@@ -97,11 +99,11 @@ describe("manual epic merge story cascade", () => {
           worktreePath: "/worktrees/manual",
         },
         {
-          // Approving structured verdict, not just `answered`: a review that
-          // filed nothing through a `submit_findings` channel it had is
-          // unverifiable and the merge guard refuses it
-          // (lib/pipeline/findings.ts). The cascade under test needs a review
-          // that actually delivered.
+          // Approving structured verdict, not just `answered`: a verifiable
+          // completed review is what promotes a ticket to `to_merge` in
+          // production (review → to_merge guard, lib/workflow/engine.ts), so
+          // the fixture keeps the state's provenance honest even though the
+          // merge itself no longer re-checks review evidence.
           id: "review-manual",
           projectId: "project-manual",
           epicId: "epic-manual",
@@ -164,7 +166,7 @@ describe("manual epic merge story cascade", () => {
     expect(activity).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          fromStatus: "review",
+          fromStatus: "to_merge",
           toStatus: "done",
           actor: "user",
           reason: "Branch merged successfully",

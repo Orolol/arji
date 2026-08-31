@@ -275,6 +275,25 @@ describe("processManager.start() — MCP injection gating", () => {
     expect(record!.agentType).toBe("build");
   });
 
+  it("re-persists the prompt WITH the appended tools section (echo-scrub contract)", () => {
+    pmState.sessionRow = sessionRow();
+
+    processManager.start("s-persist", { mode: "code", prompt: "BASE PROMPT" });
+
+    const spawned = pmState.spawnedOptions[0].prompt as string;
+    expect(spawned).toContain("## Arij tools");
+
+    // resolveSessionOutput's echo scrub matches agent_sessions.prompt as an
+    // exact substring of the session's output, so the stored prompt must be
+    // byte-identical to the SPAWNED prompt — a stored prompt that stops
+    // before the tools section leaves an echoed section behind in ticket
+    // comments (measured on E-arij-138, 2026-08-27).
+    const promptUpdates = pmState.updates
+      .filter((payload) => "prompt" in payload)
+      .map((payload) => payload.prompt);
+    expect(promptUpdates).toContain(spawned);
+  });
+
   it("review agent types get the submit_findings + Overall Verdict sentence", () => {
     pmState.sessionRow = sessionRow({ agentType: "review_security" });
 

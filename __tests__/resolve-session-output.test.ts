@@ -90,6 +90,44 @@ describe("resolveSessionOutput", () => {
     expect(output).not.toBe(NO_TEXTUAL_OUTPUT_FALLBACK);
   });
 
+  // The E-arij-138 leak (2026-08-27): a failed run must not surface its
+  // streamed narration ("Now let me look at…") as if it were a deliverable —
+  // the ticket comment would read as leaked thinking and feed back into
+  // later prompts through the comment history.
+  it("prefers the error over streamed narration when the run failed", () => {
+    const result = {
+      success: false,
+      error: "400 Vision is disabled for this server",
+      duration: 5000,
+    };
+    dbMockState.getQueue = [
+      { lastNonEmptyText: "Now let me look at the remaining unknowns." },
+    ];
+    const output = resolveSessionOutput(result, "test-session-8");
+    expect(output).toBe("400 Vision is disabled for this server");
+  });
+
+  it("keeps a failed run's genuine final text when the envelope has one", () => {
+    const result = {
+      success: false,
+      error: "exit code 1",
+      result: JSON.stringify({
+        type: "result",
+        subtype: "success",
+        result: "I could not finish: the migration conflicts with 0042.",
+      }),
+      duration: 5000,
+    };
+    const output = resolveSessionOutput(result, "test-session-9");
+    expect(output).toBe("I could not finish: the migration conflicts with 0042.");
+  });
+
+  it("returns the default message for a failed run with no error text", () => {
+    const result = { success: false, duration: 5000 };
+    const output = resolveSessionOutput(result, "test-session-10");
+    expect(output).toBe("Agent session completed without output.");
+  });
+
   it("handles result with content-array in result field", () => {
     const result = {
       success: true,

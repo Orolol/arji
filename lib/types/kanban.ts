@@ -6,6 +6,7 @@ export const KANBAN_COLUMNS = [
   "todo",
   "in_progress",
   "review",
+  "to_merge",
   "done",
   "released",
 ] as const;
@@ -17,6 +18,7 @@ export const COLUMN_LABELS: Record<KanbanStatus, string> = {
   todo: "To Do",
   in_progress: "In Progress",
   review: "Review",
+  to_merge: "To Merge",
   done: "Done",
   released: "Released",
 };
@@ -38,6 +40,7 @@ export const BUILDABLE_STATUSES = [
   "todo",
   "in_progress",
   "review",
+  "to_merge",
 ] as const;
 
 export type BuildableStatus = (typeof BUILDABLE_STATUSES)[number];
@@ -153,8 +156,9 @@ export interface KanbanEpic {
   /**
    * Derived "can this land on main?" signal, computed by the board API from
    * the same predicate Full Auto's merge step uses
-   * (lib/kanban/merge-readiness.ts). Derived, never stored: there is no
-   * `to_merge` status, so nothing has to keep this in sync with the board.
+   * (lib/kanban/merge-readiness.ts). The `to_merge` status says a review
+   * passed; this signal adds the git-side facts (branch present, no live
+   * conflict) that only the board API can see.
    */
   mergeReadiness?: MergeReadiness | null;
 }

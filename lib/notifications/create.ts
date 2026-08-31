@@ -1123,12 +1123,13 @@ export interface NightRunSummaryNotificationInput {
  * Title for the single morning-summary notification of a night run.
  *
  * Examples:
- *   "Night run finished: 5 in review, 1 paused, 2 failed, 1 skipped — $4.20"
- *   "Night run finished: 3 in review — ≥$1.10"
+ *   "Night run finished: 5 to merge, 1 paused, 2 failed, 1 skipped — $4.20"
+ *   "Night run finished: 3 to merge — ≥$1.10"
  *   "Night run finished: 2 failed, 4 skipped — circuit breaker tripped"
  *
- * Zero buckets are omitted; wave status "done" reads "in review" (the
- * pipeline never auto-approves) and "asked" reads "paused". The cost suffix
+ * Zero buckets are omitted; wave status "done" reads "to merge" (the night
+ * run never merges; the passing review already promoted the ticket to To
+ * Merge, awaiting the morning merge) and "asked" reads "paused". The cost suffix
  * appears only when > 0, prefixed "≥" when partial (non-Claude providers
  * report no cost). A breaker/cost-cap abort appends its marker.
  */
@@ -1139,7 +1140,7 @@ export function buildNightRunSummaryTitle(
   abortReason: string | null
 ): string {
   const parts: string[] = [];
-  if (counts.done > 0) parts.push(`${counts.done} in review`);
+  if (counts.done > 0) parts.push(`${counts.done} to merge`);
   if (counts.asked > 0) parts.push(`${counts.asked} paused`);
   if (counts.failed > 0) parts.push(`${counts.failed} failed`);
   if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`);

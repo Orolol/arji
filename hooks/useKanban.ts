@@ -11,7 +11,7 @@ import {
   type TicketDependencyEdge,
   type ReorderItem,
 } from "@/lib/types/kanban";
-import { sortReviewColumn } from "@/lib/kanban/merge-readiness";
+import { sortMergeColumn } from "@/lib/kanban/merge-readiness";
 import { persistedColumnOrder } from "@/lib/kanban/reorder";
 
 interface ReleaseRow {
@@ -33,6 +33,7 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       todo: [],
       in_progress: [],
       review: [],
+      to_merge: [],
       done: [],
       released: [],
     },
@@ -49,12 +50,41 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
    */
   const boardRef = useRef(board);
 
+  /**
+   * Ordering guards for board GETs.
+   *
+   * `loadEpics` runs on a cadence that has nothing to do with the user's
+   * drags: the project page bumps its refresh trigger on every SSE event
+   * (`ticket:moved`, `session:progress`, …) and on every poll tick of the
+   * SSE-down fallback. A GET issued before a drop can therefore still be in
+   * flight when the drop lands, and it carries the PRE-move order. Applying
+   * it repaints the board with the order the user just changed — the card
+   * appears to snap back — even though the reorder was stored, and nothing
+   * else was scheduled to correct it.
+   *
+   * - `requestSeq` numbers each issued request, `appliedSeq` records the
+   *   newest one that reached the board: an older response resolving late is
+   *   dropped.
+   * - `mutationSeq` counts local optimistic writes: a response issued before
+   *   the most recent one describes a world the user has already moved past,
+   *   so it is dropped too even if it is the newest request in flight.
+   *
+   * The other half of the fix is in `postReorder`, which refetches once the
+   * server confirms the write — that is what lets the board reconcile after a
+   * response is discarded here.
+   */
+  const requestSeqRef = useRef(0);
+  const appliedSeqRef = useRef(0);
+  const mutationSeqRef = useRef(0);
+
   useEffect(() => {
     onMoveErrorRef.current = options?.onMoveError;
     boardRef.current = board;
   });
 
   const loadEpics = useCallback(async () => {
+    const requestSeq = ++requestSeqRef.current;
+    const issuedAtMutation = mutationSeqRef.current;
     try {
       const [epicsRes, releasesRes, depsRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/epics`),
@@ -94,6 +124,20 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       } catch {
         // leave null — the previous edges stand
       }
+
+      // Last await is behind us: from here to `setBoard` nothing can slip in,
+      // so this single check decides the whole response. Edges and columns are
+      // dropped together — a response that lost the race describes the same
+      // stale world for both.
+      if (
+        requestSeq <= appliedSeqRef.current ||
+        mutationSeqRef.current !== issuedAtMutation
+      ) {
+        setLoading(false);
+        return;
+      }
+      appliedSeqRef.current = requestSeq;
+
       if (depEdges !== null) setDependencies(depEdges);
 
       const epics: KanbanEpic[] = epicsData.data || [];
@@ -104,6 +148,7 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
         todo: [],
         in_progress: [],
         review: [],
+        to_merge: [],
         done: [],
         released: [],
       };
@@ -126,14 +171,15 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
         columns[col].sort((a, b) => a.position - b.position);
       }
 
-      // Review is the one column whose order is not purely `position`:
-      // merge-ready tickets float to the top so the column's two sections are
-      // contiguous slices of ONE array. Sorting here rather than in the
-      // column component keeps a single order in play — drag indices, the
-      // optimistic splice in `moveEpic` and the persisted positions all agree
-      // with what the user sees, and section membership stays derived (a card
-      // dropped into the other section keeps its new position and snaps back).
-      columns.review = sortReviewColumn(columns.review);
+      // To Merge is the one column whose order is not purely `position`:
+      // merge-ready tickets float to the top (conflicted branches sink) so
+      // the column's two sections are contiguous slices of ONE array. Sorting
+      // here rather than in the column component keeps a single order in play
+      // — drag indices, the optimistic splice in `moveEpic` and the persisted
+      // positions all agree with what the user sees, and section membership
+      // stays derived (a card dropped into the other section keeps its new
+      // position and snaps back).
+      columns.to_merge = sortMergeColumn(columns.to_merge);
 
       const releaseGroups: ReleaseGroup[] = releaseRows.map((rel) => {
         let epicIds: string[] = [];
@@ -175,8 +221,13 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
    * `reorderOnly` says "never move anything" — see the route. Drag-and-drop
    * does not set it, because moving a card between columns is the whole
    * point there. A sort does, and the route then reports how many stale rows
-   * it left alone; any such row means the optimistic board is out of date,
-   * so re-read it.
+   * it left alone; any such row means the optimistic board is out of date.
+   *
+   * Either way the accepted write is followed by a refetch: it re-reads the
+   * rows the route refused to move, and — the reason it is unconditional —
+   * it is the one board GET whose timing is tied to the write, so it is what
+   * reconciles a board left stale by a response `loadEpics` discarded (or by
+   * SSE being down between poll ticks).
    */
   const postReorder = useCallback(
     (
@@ -202,7 +253,7 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
           // confirmed, so post-move side effects may run. A refused
           // transition took the error path above and reloaded instead.
           options?.onAccepted?.();
-          if ((data?.data?.skipped ?? 0) > 0) loadEpics();
+          loadEpics();
         })
         .catch(() => {
           loadEpics();
@@ -254,13 +305,13 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       for (const col of DRAGGABLE_COLUMNS) {
         if (!touched.has(col)) continue;
 
-        // Review is DISPLAYED merge-ready-first, so its display index is not
-        // its position; persisting the index would write that derived signal
-        // into `epics.position` and reorder cards nobody dragged. Every other
-        // column is drawn in position order, where the two coincide. See
-        // lib/kanban/reorder.ts.
+        // To Merge is DISPLAYED merge-ready-first, so its display index is
+        // not its position; persisting the index would write that derived
+        // signal into `epics.position` and reorder cards nobody dragged.
+        // Every other column is drawn in position order, where the two
+        // coincide. See lib/kanban/reorder.ts.
         const persisted =
-          col === "review"
+          col === "to_merge"
             ? persistedColumnOrder(
                 next.columns[col],
                 col === toColumn ? epicId : null
@@ -286,17 +337,22 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
         });
       }
 
-      // Re-establish Review's ready-first order NOW, with the fresh
+      // Re-establish To Merge's ready-first order NOW, with the fresh
       // positions. The Board renders this exact array and derives drop
       // indices from it, so leaving it in drop order while the Board re-split
       // the sections for display would make the next drag anchor against a
       // different sequence than the user is looking at.
-      if (touched.has("review")) {
-        next.columns.review = sortReviewColumn(next.columns.review);
+      if (touched.has("to_merge")) {
+        next.columns.to_merge = sortMergeColumn(next.columns.to_merge);
       }
 
       boardRef.current = next;
       setBoard(next);
+      // Every board GET already in flight was issued against the pre-drop
+      // order; none of them may land on this board. Bumped before the POST so
+      // the refetch that follows the accepted write is not caught by its own
+      // guard.
+      mutationSeqRef.current += 1;
 
       postReorder(reorderItems, "Failed to move epic", {
         onAccepted: onMoveAccepted,
@@ -334,18 +390,21 @@ export function useKanban(projectId: string, options?: UseKanbanOptions) {
       );
 
       // Optimistic half: the reorder route rewrites the same positions.
-      // Review is DISPLAYED merge-ready-first, so the priority ranking lands
-      // in `position` while the column keeps showing its two sections — the
-      // sort reorders within each, which is what the user is looking at.
+      // To Merge is DISPLAYED merge-ready-first, so the priority ranking
+      // lands in `position` while the column keeps showing its two sections —
+      // the sort reorders within each, which is what the user is looking at.
       setBoard((prev) => {
         const next = {
           columns: { ...prev.columns },
           releaseGroups: prev.releaseGroups,
         };
         next.columns[column] =
-          column === "review" ? sortReviewColumn(repositioned) : repositioned;
+          column === "to_merge" ? sortMergeColumn(repositioned) : repositioned;
         return next;
       });
+      // Same reason as in `moveEpic`: a GET issued before the click carries
+      // the pre-sort ranking and must not repaint the column.
+      mutationSeqRef.current += 1;
 
       postReorder(
         repositioned.map((epic) => ({

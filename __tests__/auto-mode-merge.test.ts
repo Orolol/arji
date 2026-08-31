@@ -4,15 +4,15 @@
  * scheduler, lifecycle and workflow engine in the loop:
  *
  *   - a clean merge is pure git (no session row, no scheduler slot), moves the
- *     epic to done through applyTransition(source: 'merge'), clears the branch
- *     and re-exports arji.json,
- *   - the engine's `→ done` guards ARE the "review is OK" gate: an open review
- *     comment or a missing completed review blocks the merge, is logged, and
- *     leaves the epic UNPARKED (it retries once the comment is resolved),
+ *     epic from `to_merge` to done through applyTransition(source: 'merge'),
+ *     clears the branch and re-exports arji.json,
+ *   - the `to_merge` STATUS is the "review is OK" gate: only a passing review
+ *     verdict promotes an epic there, so an epic still in `review` is refused,
+ *     logged, and left UNPARKED (it retries once the verdict lands),
+ *   - the merge IS the approval: open review comments no longer block it —
+ *     they are bulk-resolved by the merge itself (merge-approval.ts),
  *   - a conflict dispatches one merge-fix agent and retries once; a second
- *     failure parks the epic and raises a notification,
- *   - POST .../approve is never involved (it would bulk-resolve the very
- *     findings that must stop an auto-merge).
+ *     failure parks the epic and raises a notification.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
@@ -138,7 +138,10 @@ function seed(options: { withCompletedReview?: boolean } = {}): void {
       id: EPIC_ID,
       projectId: PROJECT_ID,
       title: "Landable epic",
-      status: "review",
+      // A mergeable epic sits in `to_merge`: the review verdict already
+      // promoted it there (review → to_merge, source "review"), and only such
+      // epics are merge candidates.
+      status: "to_merge",
       branchName: "feature/landable",
       position: 0,
       readableId: "E-merge-1",
@@ -172,10 +175,10 @@ function seed(options: { withCompletedReview?: boolean } = {}): void {
         status: "completed",
         agentType: "review_code",
         outcome: "answered",
-        // A review that actually delivered: the merge gate only counts a
-        // reviewer's verdict when it reached the database (see
-        // lib/pipeline/findings.ts). A verdict-less claude-code row would be
-        // unverifiable, which is a different test's subject.
+        // The review that promoted the epic to to_merge: its verdict reached
+        // the database (see lib/pipeline/findings.ts). A verdict-less
+        // claude-code row would be unverifiable, which is a different test's
+        // subject.
         reviewVerdict: "approved",
         worktreePath: "/tmp/worktrees/landable",
         createdAt: isoAt(3),
@@ -297,7 +300,7 @@ describe("tryAutoMerge — clean merge", () => {
       .all()
       .find((row) => row.reason === AUTO_MODE_REASONS.merged);
     expect(entry).toMatchObject({
-      fromStatus: "review",
+      fromStatus: "to_merge",
       toStatus: "done",
       actor: "agent",
     });
@@ -377,8 +380,8 @@ describe("tryAutoMerge — clean merge", () => {
 /* The gate                                                            */
 /* ------------------------------------------------------------------ */
 
-describe("tryAutoMerge — the workflow guards ARE the review gate", () => {
-  it("never merges an epic with an open review comment", async () => {
+describe("tryAutoMerge — the to_merge status IS the review gate", () => {
+  it("resolves the epic's remaining open review comments with the merge", async () => {
     seed();
     db.insert(reviewComments)
       .values({
@@ -386,7 +389,7 @@ describe("tryAutoMerge — the workflow guards ARE the review gate", () => {
         epicId: EPIC_ID,
         filePath: "lib/x.ts",
         lineNumber: 3,
-        body: "[critical] nope",
+        body: "[minor] leftover note",
         author: "agent",
         status: "open",
       })
@@ -395,30 +398,28 @@ describe("tryAutoMerge — the workflow guards ARE the review gate", () => {
 
     const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
 
-    expect(outcome.status).toBe("skipped");
-    expect(gitMocks.mergeWorktree).not.toHaveBeenCalled();
+    // The merge IS the approval: whatever stayed open is accepted with it,
+    // in the same action (lib/workflow/merge-approval.ts).
+    expect(outcome.status).toBe("merged");
+    expect(
+      db.select().from(reviewComments).where(eq(reviewComments.id, "rc-1")).get()!
+        .status
+    ).toBe("resolved");
     expect(
       db.select().from(epics).where(eq(epics.id, EPIC_ID)).get()!.status
-    ).toBe("review");
+    ).toBe("done");
   });
 
   it("logs the refusal and leaves the epic UNPARKED so it retries later", async () => {
     seed();
-    db.insert(reviewComments)
-      .values({
-        id: "rc-1",
-        epicId: EPIC_ID,
-        filePath: "lib/x.ts",
-        lineNumber: 3,
-        body: "[major] nope",
-        author: "agent",
-        status: "open",
-      })
-      .run();
+    // The review has not passed yet: the ticket is still in Review, so the
+    // `to_merge → done` preflight refuses.
+    db.update(epics).set({ status: "review" }).run();
     gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
 
     await tryAutoMerge(PROJECT_ID, EPIC_ID);
 
+    expect(gitMocks.mergeWorktree).not.toHaveBeenCalled();
     expect(
       activityReasons().some((reason) =>
         reason.startsWith("Auto mode skipped merge:")
@@ -426,14 +427,57 @@ describe("tryAutoMerge — the workflow guards ARE the review gate", () => {
     ).toBe(true);
     expect(autoModeRegistry.isParked(PROJECT_ID, EPIC_ID)).toBe(false);
 
-    // Resolve the finding → the very next attempt merges.
-    db.update(reviewComments).set({ status: "resolved" }).run();
+    // The review verdict promotes the ticket → the very next attempt merges.
+    db.update(epics).set({ status: "to_merge" }).run();
     const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
     expect(outcome.status).toBe("merged");
   });
 
-  it("never merges an epic with no completed review", async () => {
+  it("leaves findings open when the POST-merge guard refuses", async () => {
+    // The ordering pin. `resolveOpenReviewComments` runs AFTER the guarded
+    // transition, and this is the case that proves it has to: the epic
+    // bounced mid-merge — the settling-review race `rollbackRefusedMerge`
+    // exists for — so the caller rolls main back. A resolve hoisted above
+    // `applyTransition` would have closed a finding the next sweep still
+    // needs to read. See lib/workflow/merge-approval.ts.
+    seed();
+    db.insert(reviewComments)
+      .values({
+        id: "rc-minor-raced",
+        epicId: EPIC_ID,
+        filePath: "lib/x.ts",
+        lineNumber: 3,
+        body: "[minor] tidy later",
+        author: "agent",
+        status: "open",
+      })
+      .run();
+    gitMocks.mergeWorktree.mockImplementation(async () => {
+      db.update(epics).set({ status: "in_progress" }).run();
+      return { merged: true, commitHash: "raced" };
+    });
+
+    const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
+
+    // Proof the pre-flight passed and the refusal came from the POST-merge
+    // guard: git ran, and the merge was rolled back.
+    expect(gitMocks.mergeWorktree).toHaveBeenCalled();
+    expect(gitMocks.rollbackMerge).toHaveBeenCalled();
+    expect(outcome.status).toBe("skipped");
+    expect(
+      db
+        .select()
+        .from(reviewComments)
+        .where(eq(reviewComments.epicId, EPIC_ID))
+        .all()
+        .map((row) => row.status)
+    ).toEqual(["open"]);
+  });
+
+  it("never merges an epic the review verdict has not promoted", async () => {
     seed({ withCompletedReview: false });
+    // No review ever ran, so nothing promoted the epic out of Review.
+    db.update(epics).set({ status: "review" }).run();
     gitMocks.mergeWorktree.mockResolvedValue({ merged: true });
 
     const outcome = await tryAutoMerge(PROJECT_ID, EPIC_ID);
@@ -523,7 +567,7 @@ describe("tryAutoMerge — merge conflict", () => {
     expect(autoModeRegistry.isParked(PROJECT_ID, EPIC_ID)).toBe(true);
     expect(
       db.select().from(epics).where(eq(epics.id, EPIC_ID)).get()!.status
-    ).toBe("review");
+    ).toBe("to_merge");
 
     const notification = db.select().from(notifications).all()[0];
     expect(notification).toMatchObject({
@@ -865,7 +909,7 @@ describe("tryAutoMerge — merge conflict", () => {
     const localProjectId = "proj-merge-lock-retry";
     const localEpicId = "epic-merge-lock-retry";
     db.insert(projects).values({ id: localProjectId, name: "LockRetry", gitRepoPath: "/repos/merge" }).run();
-    db.insert(epics).values({ id: localEpicId, projectId: localProjectId, title: "Landable", status: "review", branchName: "feature/landable", position: 0, readableId: "E-lock", createdAt: isoAt(0), updatedAt: isoAt(0) }).run();
+    db.insert(epics).values({ id: localEpicId, projectId: localProjectId, title: "Landable", status: "to_merge", branchName: "feature/landable", position: 0, readableId: "E-lock", createdAt: isoAt(0), updatedAt: isoAt(0) }).run();
     db.insert(agentSessions).values({ id: `build-lock-${seq++}`, projectId: localProjectId, epicId: localEpicId, status: "completed", agentType: "build", worktreePath: "/tmp/worktrees/landable", createdAt: isoAt(1), endedAt: isoAt(2) }).run();
     db.insert(agentSessions).values({ id: `review-lock-${seq++}`, projectId: localProjectId, epicId: localEpicId, status: "completed", agentType: "review_code", outcome: "answered", worktreePath: "/tmp/worktrees/landable", createdAt: isoAt(3), endedAt: isoAt(4) }).run();
     let mergeCall = 0;
@@ -978,7 +1022,7 @@ describe("tryAutoMerge — the deterministic-verification gate", () => {
       expect.stringMatching(/Auto mode skipped merge.*never run/i)
     );
     // Not parked: the next passing report unlocks the merge.
-    expect(db.select().from(epics).get()!.status).toBe("review");
+    expect(db.select().from(epics).get()!.status).toBe("to_merge");
   });
 
   it("merges when a passing report is newer than the last build session", async () => {
@@ -1142,7 +1186,7 @@ describe("tryAutoMerge — the deterministic-verification gate", () => {
     // This is the one path where agent-written code reaches the default
     // branch with no second review. It must fail closed.
     expect(merges).toBe(1);
-    expect(db.select().from(epics).get()!.status).toBe("review");
+    expect(db.select().from(epics).get()!.status).toBe("to_merge");
     expect(autoModeRegistry.isParked(PROJECT_ID, EPIC_ID)).toBe(true);
     expect(db.select().from(notifications).all()).toHaveLength(1);
   });

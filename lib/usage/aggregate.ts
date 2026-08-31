@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { providerUsageSnapshots, settings } from "@/lib/db/schema";
 import {
   CLAUDE_WEEKLY_BUDGET_SETTING_KEY,
+  MONTHLY_CAP_SETTING_KEY,
   type AgentUsageRow,
   type ClaudeQuota,
   type CodexLiveQuota,
@@ -10,6 +11,12 @@ import {
   type ProjectUsageRow,
   type ProviderUsageRow,
   type SubscriptionStatus,
+  type UsageBar,
+  type UsageDashboard,
+  type UsageDayBar,
+  type UsageMonthlyCap,
+  type UsageProjectBar,
+  type UsageRange,
   type UsageReport,
   type UsageTotals,
   type WindowUsage,
@@ -502,6 +509,417 @@ function getSubscriptions(
 }
 
 // ---------------------------------------------------------------------------
+// Dashboard block (frame 8d) — range-scoped, additive, reads nothing above
+// ---------------------------------------------------------------------------
+
+/**
+ * TIMESTAMP DISCIPLINE FOR EVERYTHING BELOW.
+ *
+ * Every cutoff is computed in JS and bound as a parameter — never
+ * `date('now')` in SQL. `getByDay` above does use SQLite's clock, and that is
+ * precisely why its tests cannot freeze time: `vi.setSystemTime` does not
+ * reach SQLite. The dashboard queries must stay fake-timer-controllable, so
+ * the only date function they call is `date(<column>,'localtime')`, which is a
+ * formatter, not a clock read.
+ *
+ * Attribution is `ended_at`, never `created_at`: usage is written exactly once,
+ * at the terminal transition, so queued/running rows carry NULL usage and
+ * would dilute a window with zeros.
+ */
+
+/** Rolling window length per range. `all` = no cutoff whatsoever. */
+const RANGE_MS: Record<UsageRange, number | null> = {
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+  all: null,
+};
+
+/** How many BY DAY bars a range draws. Capped at 30: a bar per day since the
+ *  first session ever is unreadable, so `all` still shows the last 30 days. */
+const RANGE_DAY_BARS: Record<UsageRange, number> = {
+  "7d": 7,
+  "30d": DAY_STRIP_LENGTH,
+  all: DAY_STRIP_LENGTH,
+};
+
+/** The frame's documented alert threshold on the monthly cap. */
+const CAP_ALERT_PERCENT = 80;
+
+/** Anything unrecognised is the default window — same tolerance as `?fresh`. */
+export function parseUsageRange(value: string | null | undefined): UsageRange {
+  return value === "7d" || value === "all" ? value : "30d";
+}
+
+/** ISO instant of local midnight, `daysAgo` local calendar days back. */
+function localMidnightIso(daysAgo: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  date.setHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
+/** ISO instant of the first moment of the current LOCAL month. */
+function localMonthStartIso(): string {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+}
+
+interface RawDashboardTotals {
+  sessions: number;
+  cost_usd: number | null;
+}
+
+function getDashboardTotals(since: string | null): {
+  sessions: number;
+  costUsd: number | null;
+} {
+  const row = db.all<RawDashboardTotals>(sql`
+    SELECT
+      COUNT(*) AS sessions,
+      SUM(total_cost_usd) AS cost_usd
+    FROM agent_sessions
+    WHERE ended_at IS NOT NULL
+      AND (${since} IS NULL OR ended_at >= ${since})
+  `)[0];
+
+  return { sessions: count(row?.sessions), costUsd: num(row?.cost_usd) };
+}
+
+/**
+ * `status='completed' AND outcome='answered'` is the codebase's own "delivered"
+ * predicate (lib/pipeline/findings.ts, lib/workflow/review-freshness.ts) —
+ * deliberately not a new definition.
+ *
+ * The denominator is sessions with a NON-NULL outcome. `agent_sessions.outcome`
+ * is NULL while queued/running, for user-cancelled sessions and on legacy rows;
+ * counting those would drag the percentage down for reasons that have nothing
+ * to do with cleanliness. No terminal session at all => null => em-dash.
+ */
+function getCleanPercent(since: string | null): number | null {
+  const row = db.all<{ clean: number | null; terminal: number }>(sql`
+    SELECT
+      SUM(CASE WHEN status = 'completed' AND outcome = 'answered' THEN 1 ELSE 0 END) AS clean,
+      COUNT(*) AS terminal
+    FROM agent_sessions
+    WHERE outcome IS NOT NULL
+      AND ended_at IS NOT NULL
+      AND (${since} IS NULL OR ended_at >= ${since})
+  `)[0];
+
+  const terminal = count(row?.terminal);
+  if (terminal === 0) return null;
+  return ((num(row?.clean) ?? 0) / terminal) * 100;
+}
+
+/**
+ * Distinct epics that crossed INTO a terminal column in the window.
+ *
+ * `COUNT(DISTINCT epic_id)` plus the `from_status` guard stops one ticket being
+ * counted twice as it walks `review -> done -> released`. `ticket_activity_log`
+ * is unindexed on `to_status` and never pruned, so the window cutoff is not an
+ * optimisation, it is what keeps this off a full-table scan.
+ *
+ * `datetime()` on BOTH sides, unlike every `ended_at` comparison in this file.
+ * `agent_sessions.ended_at` is uniformly ISO-8601-with-Z, so raw string order
+ * is chronological order there; `ticket_activity_log.created_at` is NOT — rows
+ * written through `logTransition` are ISO, rows that fell back to the column's
+ * `CURRENT_TIMESTAMP` default are `YYYY-MM-DD HH:MM:SS`, and both formats are
+ * present in live databases. A raw compare drops the space-separated rows on
+ * the cutoff day, because ' ' sorts before 'T'. `datetime()` reads a clock
+ * ONLY for the literal 'now', which is never passed here, so this stays
+ * fake-timer-controllable.
+ */
+function getTicketsShipped(since: string | null): number {
+  const row = db.all<{ shipped: number }>(sql`
+    SELECT COUNT(DISTINCT epic_id) AS shipped
+    FROM ticket_activity_log
+    WHERE to_status IN ('done', 'released')
+      AND from_status NOT IN ('done', 'released')
+      AND (${since} IS NULL OR datetime(created_at) >= datetime(${since}))
+  `)[0];
+
+  return count(row?.shipped);
+}
+
+/**
+ * Optional monthly spend cap (global settings key). Same defensive parse as
+ * `getClaudeWeeklyBudget`: absent, null, 0, a string or corrupt JSON all mean
+ * "no cap", never a cap of zero — which is what keeps "no cap" and "a cap of
+ * zero" distinguishable after the inline editor writes `null` to clear it.
+ */
+function getMonthlyCapUsd(): number | null {
+  const row = db
+    .select()
+    .from(settings)
+    .where(eq(settings.key, MONTHLY_CAP_SETTING_KEY))
+    .get();
+  if (!row) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.value);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "number" || !Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+/**
+ * The cap is a CALENDAR-month figure, unlike every rolling window on this
+ * screen: a "plafond mensuel" that slid would never reset. The month start is
+ * built from local getters for the same reason `localDateKey` exists.
+ */
+function getMonthlyCap(): UsageMonthlyCap {
+  const capUsd = getMonthlyCapUsd();
+  const monthStart = localMonthStartIso();
+  const row = db.all<{ cost_usd: number | null }>(sql`
+    SELECT SUM(total_cost_usd) AS cost_usd
+    FROM agent_sessions
+    WHERE ended_at IS NOT NULL
+      AND ended_at >= ${monthStart}
+  `)[0];
+  const spentUsd = num(row?.cost_usd);
+
+  return {
+    capUsd,
+    spentUsd,
+    // Unclamped on purpose, mirroring `budgetUsedPercent`: going over the cap
+    // must read as "142%", not a gauge quietly pinned at 100. The BAR clamps;
+    // the readout never does.
+    usedPercent:
+      capUsd !== null && spentUsd !== null
+        ? Math.round((spentUsd / capUsd) * 100)
+        : null,
+    alertPercent: CAP_ALERT_PERCENT,
+  };
+}
+
+interface RawBarRow {
+  key_a: string | null;
+  key_b: string | null;
+  label: string | null;
+  sessions: number;
+  cost_usd: number | null;
+  color_index?: number | null;
+}
+
+/**
+ * Share of the BAND TOTAL (not of the max) — verified against the frame:
+ * $96/$52/$22/$14 over a $184 total renders 52/28/12/8%. When the band total
+ * is null or 0 every share is null and the row draws a track with no fill.
+ */
+function withSharePercent<T extends { costUsd: number | null }>(
+  rows: T[],
+): (T & { sharePercent: number | null })[] {
+  const total = rows.reduce((sum, row) => sum + (row.costUsd ?? 0), 0);
+  return rows.map((row) => ({
+    ...row,
+    sharePercent:
+      total > 0 && row.costUsd !== null ? (row.costUsd / total) * 100 : null,
+  }));
+}
+
+/**
+ * Same grouping key as `getByAgent` — `named_agent_name x normalized provider`,
+ * which is also the key the Agent Config Stats tab uses, so the three surfaces
+ * can never disagree on a run count.
+ */
+function getDashboardByAgent(since: string | null): UsageBar[] {
+  const rows = db.all<RawBarRow>(sql`
+    SELECT
+      named_agent_name AS key_a,
+      COALESCE(provider, 'claude-code') AS key_b,
+      named_agent_name AS label,
+      COUNT(*) AS sessions,
+      SUM(total_cost_usd) AS cost_usd
+    FROM agent_sessions
+    WHERE ended_at IS NOT NULL
+      AND (${since} IS NULL OR ended_at >= ${since})
+    GROUP BY named_agent_name, COALESCE(provider, 'claude-code')
+    ORDER BY
+      (SUM(total_cost_usd) IS NULL),
+      SUM(total_cost_usd) DESC,
+      COUNT(*) DESC
+  `);
+
+  return withSharePercent(
+    rows.map((row) => ({
+      key: `${str(row.key_a) ?? ""}|${str(row.key_b) ?? CLAUDE_PROVIDER}`,
+      label: str(row.label) ?? "Unnamed",
+      costUsd: num(row.cost_usd),
+      sessions: count(row.sessions),
+    })),
+  );
+}
+
+/**
+ * `projects.color_index` does not exist in the schema yet (the redesign ships
+ * no migration). The column is probed rather than assumed so the identity
+ * colour becomes real the day it lands, and until then every row reports
+ * `colorIndex: null` and the UI hashes the project id instead — never the
+ * array position, which reshuffles whenever any project is touched.
+ */
+function projectsHaveColorIndex(): boolean {
+  try {
+    return db
+      .all<{ name: string }>(sql`PRAGMA table_info(projects)`)
+      .some((column) => column.name === "color_index");
+  } catch {
+    return false;
+  }
+}
+
+/** LEFT JOIN, not INNER: a session whose project row was deleted still spent
+ *  real money and must keep showing up. */
+function getDashboardByProject(since: string | null): UsageProjectBar[] {
+  const withColor = projectsHaveColorIndex();
+  const rows = db.all<RawBarRow>(sql`
+    SELECT
+      s.project_id AS key_a,
+      p.name AS label,
+      ${withColor ? sql`p.color_index` : sql`NULL`} AS color_index,
+      COUNT(*) AS sessions,
+      SUM(s.total_cost_usd) AS cost_usd
+    FROM agent_sessions s
+    LEFT JOIN projects p ON p.id = s.project_id
+    WHERE s.ended_at IS NOT NULL
+      AND (${since} IS NULL OR s.ended_at >= ${since})
+    GROUP BY s.project_id
+    ORDER BY
+      (SUM(s.total_cost_usd) IS NULL),
+      SUM(s.total_cost_usd) DESC,
+      COUNT(*) DESC
+  `);
+
+  return withSharePercent(
+    rows.map((row) => {
+      const projectId = str(row.key_a) ?? "";
+      return {
+        key: projectId,
+        projectId,
+        // The raw id when the project row was deleted, and an explicit label
+        // when the session carried no project at all — never a blank cell.
+        label: str(row.label) ?? (projectId || "No project"),
+        colorIndex: num(row.color_index),
+        costUsd: num(row.cost_usd),
+        sessions: count(row.sessions),
+      };
+    }),
+  );
+}
+
+interface RawDashboardDayRow {
+  day: string;
+  sessions: number;
+  cost_usd: number | null;
+  failed: number | null;
+}
+
+/**
+ * Same zero-fill discipline as `getByDay`: days with no terminal session are
+ * `{ sessions: 0, costUsd: null, failedSessions: 0 }` — zero runs is a fact,
+ * zero dollars would be a claim.
+ *
+ * The cutoff is local midnight `bars - 1` days ago, computed in JS, so the
+ * whole query is fake-timer-controllable.
+ */
+function getDashboardByDay(bars: number): UsageDayBar[] {
+  const cutoff = localMidnightIso(bars - 1);
+  const rows = db.all<RawDashboardDayRow>(sql`
+    SELECT
+      date(ended_at, 'localtime') AS day,
+      COUNT(*) AS sessions,
+      SUM(total_cost_usd) AS cost_usd,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+    FROM agent_sessions
+    WHERE ended_at IS NOT NULL
+      AND ended_at >= ${cutoff}
+    GROUP BY day
+  `);
+
+  const byDate = new Map<string, RawDashboardDayRow>();
+  for (const row of rows) {
+    if (typeof row.day === "string") byDate.set(row.day, row);
+  }
+
+  const result: UsageDayBar[] = [];
+  for (let offset = bars - 1; offset >= 0; offset--) {
+    const date = new Date();
+    date.setDate(date.getDate() - offset);
+    const key = localDateKey(date);
+    const hit = byDate.get(key);
+    result.push(
+      hit
+        ? {
+            date: key,
+            sessions: count(hit.sessions),
+            costUsd: num(hit.cost_usd),
+            failedSessions: count(hit.failed),
+          }
+        : { date: key, sessions: 0, costUsd: null, failedSessions: 0 },
+    );
+  }
+  return result;
+}
+
+/**
+ * Yesterday's night-run spend.
+ *
+ * Night runs have NO table — `lib/night/registry.ts` is in-process state a
+ * restart wipes — but `agent_sessions.batch_run_id` is durable and every night
+ * run id carries the `night_` prefix (lib/night/constants.ts). The underscore
+ * is escaped: unescaped it is a LIKE wildcard and `nightXrun` would match.
+ *
+ * null (no night sessions yesterday, or none reported a cost) drops the
+ * footnote's tail rather than printing "$0".
+ */
+function getNightYesterdayUsd(): number | null {
+  const yesterdayStart = localMidnightIso(1);
+  const todayStart = localMidnightIso(0);
+  const row = db.all<{ cost_usd: number | null }>(sql`
+    SELECT SUM(total_cost_usd) AS cost_usd
+    FROM agent_sessions
+    WHERE batch_run_id LIKE 'night!_%' ESCAPE '!'
+      AND ended_at >= ${yesterdayStart}
+      AND ended_at < ${todayStart}
+  `)[0];
+
+  return num(row?.cost_usd);
+}
+
+/** The whole 8d block, in one place, for one range. */
+function getDashboard(range: UsageRange): UsageDashboard {
+  const windowMs = RANGE_MS[range];
+  const since = windowMs === null ? null : cutoffIso(windowMs);
+
+  const { sessions, costUsd } = getDashboardTotals(since);
+  const ticketsShipped = getTicketsShipped(since);
+
+  return {
+    range,
+    since,
+    totals: {
+      costUsd,
+      sessions,
+      cleanPercent: getCleanPercent(since),
+      ticketsShipped,
+      // Division by zero is not a dollar figure: nothing shipped => null =>
+      // em-dash. Never Infinity, never 0.
+      costPerTicketUsd:
+        costUsd !== null && ticketsShipped > 0 ? costUsd / ticketsShipped : null,
+    },
+    cap: getMonthlyCap(),
+    byAgent: getDashboardByAgent(since),
+    byProject: getDashboardByProject(since),
+    byDay: getDashboardByDay(RANGE_DAY_BARS[range]),
+    nightYesterdayUsd: getNightYesterdayUsd(),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Report
 // ---------------------------------------------------------------------------
 
@@ -512,8 +930,15 @@ function getSubscriptions(
  * inside `subscriptions[codex].codexLive` — `byDay` stays Arij-metered
  * (exactly 30 zero-filled local days), the two histories are different
  * populations (all devices vs this machine) and must never merge.
+ *
+ * `range` scopes ONLY the additive `dashboard` block; the eight original keys
+ * keep their all-time / 30-day / rolling semantics byte-for-byte. It defaults
+ * to "30d" so a zero-arg `getUsageReport()` stays exactly today's call.
  */
-export function getUsageReport(live: LiveQuotaInputs = NO_LIVE): UsageReport {
+export function getUsageReport(
+  live: LiveQuotaInputs = NO_LIVE,
+  range: UsageRange = "30d",
+): UsageReport {
   const byProvider = getByProvider();
   const windows = {
     last5h: getWindowUsage(cutoffIso(FIVE_HOURS_MS), null),
@@ -529,5 +954,6 @@ export function getUsageReport(live: LiveQuotaInputs = NO_LIVE): UsageReport {
     windows,
     subscriptions: getSubscriptions(byProvider, live),
     generatedAt: new Date().toISOString(),
+    dashboard: getDashboard(range),
   };
 }

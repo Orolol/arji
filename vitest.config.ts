@@ -7,6 +7,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Several agent sessions run this suite concurrently on the same
+    // machine; without a cap each run grabs one worker per core and the
+    // runs starve each other (and the dev server).
+    maxWorkers: 4,
     setupFiles: ["./vitest.setup.ts"],
     include: ["**/*.test.{ts,tsx,mjs}"],
     // The checkout hosts foreign trees that carry their own test copies:

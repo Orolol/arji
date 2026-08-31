@@ -37,6 +37,10 @@ vi.mock("@/lib/db", () => {
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
+    // `buildTransitionContext` reads the epic's session facts through a
+    // projected subquery (`.as`) that it then groups.
+    groupBy: vi.fn().mockReturnThis(),
+    as: vi.fn().mockReturnThis(),
     get: vi.fn(() => {
       getCallCount++;
       // Call 1: project lookup → return project
@@ -87,7 +91,18 @@ vi.mock("@/lib/db/schema", () => ({
   userStories: { _name: "userStories", id: "id", epicId: "epicId", position: "position", status: "status" },
   documents: { projectId: "projectId" },
   agentSessions: { id: "id", epicId: "epicId", userStoryId: "userStoryId", mode: "mode", status: "status", agentType: "agentType" },
-  reviewComments: { epicId: "epicId", status: "status" },
+  reviewComments: {
+    epicId: "epicId",
+    status: "status",
+    // Read by `cleanReviewVerdictSql`: findings rows of a session's own prove
+    // its submit_findings channel worked.
+    agentSessionId: "agentSessionId",
+  },
+  // Same rule reads the mcp_tools_enabled toggle to reconstruct the channel
+  // of session rows written before `agent_sessions.mcp_channel` existed. It
+  // is read while the facts query is BUILT, so it fires on every
+  // buildTransitionContext, not only when a row needs the fallback.
+  settings: { _name: "settings", key: "key", value: "value" },
   ticketActivityLog: { _name: "ticketActivityLog" },
   ticketComments: { userStoryId: "userStoryId", createdAt: "createdAt" },
 }));

@@ -5,7 +5,9 @@ import { usePolling } from "@/hooks/usePolling";
 import {
   selectLatestFailures,
   type FailedSessionInfo,
+  type FailureCandidateSession,
 } from "@/lib/agent-sessions/latest-failure";
+import { fetchUnifiedSessions } from "@/lib/agent-sessions/session-list";
 
 export interface UnifiedActivity {
   id: string;
@@ -42,15 +44,15 @@ export function useAgentPolling(projectId: string, intervalMs = 3000, refreshTri
 
   const poll = useCallback(async () => {
     try {
-      const [activeRes, allRes] = await Promise.all([
+      // "Latest session wins" is a per-epic verdict, so the badge needs the
+      // whole list, not its first page — fetchUnifiedSessions follows the
+      // route's cursor to the end.
+      const [activeRes, sessions] = await Promise.all([
         fetch(`/api/projects/${projectId}/sessions/active`),
-        fetch(`/api/projects/${projectId}/sessions`),
+        fetchUnifiedSessions<FailureCandidateSession>(projectId),
       ]);
       const activeData = await activeRes.json();
       setActivities(activeData.data || []);
-
-      const allData = await allRes.json();
-      const sessions = allData.data || [];
 
       // Build a set of epicIds that currently have a running agent
       const runningEpicIds = new Set<string>(

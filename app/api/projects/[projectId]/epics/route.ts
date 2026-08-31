@@ -50,10 +50,8 @@ import {
   CONFLICT_MARKERS_REASON_LIKE_PATTERNS,
   MERGE_FAILURE_REASON_LIKE_PATTERNS,
 } from "@/lib/workflow/merge-failure";
-import {
-  lastCleanReviewAtSql,
-  lastTerminalCodeAtSql,
-} from "@/lib/workflow/review-freshness";
+import { epicSessionFactsCte } from "@/lib/workflow/review-freshness";
+import { blocksMergeSql } from "@/lib/workflow/blocking-findings";
 
 class FrictionConversionConflict extends Error {}
 
@@ -162,31 +160,15 @@ export async function GET(
 
   // One pass over `agent_sessions` for everything the board reads from it:
   // the cumulative reported cost (NULL, not 0, when nothing ever reported one)
-  // and the two review/code freshness aggregates behind merge readiness.
+  // and the review/code freshness aggregates behind merge readiness.
   //
-  // Deliberately one subquery rather than two identical scans grouped on the
+  // Deliberately one scan rather than several identical ones grouped on the
   // same key — `agent_sessions` carries no index, and this endpoint is
-  // refetched on every `session:*` SSE event. Scoped by project for the same
-  // reason `latestMergeFailures` is; the outer join to `epics` already made
-  // the result project-local, so this only narrows what SQLite has to read.
-  const epicSessionFacts = db
-    .select({
-      epicId: agentSessions.epicId,
-      sessionsCostUsd: sql<number | null>`SUM(${agentSessions.totalCostUsd})`.as(
-        "sessions_cost_usd"
-      ),
-      lastCleanReviewAt: lastCleanReviewAtSql().as("last_clean_review_at"),
-      lastTerminalCodeAt: lastTerminalCodeAtSql().as("last_terminal_code_at"),
-    })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.projectId, projectId),
-        sql`${agentSessions.epicId} IS NOT NULL`
-      )
-    )
-    .groupBy(agentSessions.epicId)
-    .as("epic_session_facts");
+  // refetched on every `session:*` SSE event. A CTE rather than a subquery
+  // because the blocking-findings count below needs the same columns a second
+  // time and drizzle inlines a `.as()` subquery at every reference; see
+  // `epicSessionFactsCte`.
+  const epicSessionFacts = epicSessionFactsCte(db, projectId);
 
   const rankedGradingReports = db
     .select({
@@ -222,6 +204,18 @@ export async function GET(
   // Open review findings per epic — the merge gate's blocking half.
   // Scoped to the project via `epics` so SQLite does not scan review_comments
   // across every project on an un-indexed status column.
+  //
+  // `blocksMergeSql` narrows "open" to "still standing in the way": see
+  // lib/workflow/blocking-findings.ts for why a [minor] the approving review
+  // filed, or a [major] a later verdict superseded, must not park a reviewed
+  // ticket outside "Ready to merge" forever.
+  //
+  // The cutoff is joined, not correlated. As a per-row scalar subquery it
+  // re-scanned the unindexed `agent_sessions` once per candidate finding and
+  // took this query from 0.16 ms to 102 ms on a 120-epic board; hoisted it
+  // costs 1.67 ms for identical results, which matters because the client
+  // refetches this route on every `session:*` SSE event. It joins the SAME
+  // CTE the epic row reads, so the scan is shared rather than repeated.
   const openFindingCounts = db
     .select({
       epicId: reviewComments.epicId,
@@ -229,10 +223,15 @@ export async function GET(
     })
     .from(reviewComments)
     .innerJoin(epics, eq(reviewComments.epicId, epics.id))
+    .leftJoin(
+      epicSessionFacts,
+      eq(epicSessionFacts.epicId, reviewComments.epicId)
+    )
     .where(
       and(
         eq(epics.projectId, projectId),
-        eq(reviewComments.status, "open")
+        eq(reviewComments.status, "open"),
+        blocksMergeSql(epicSessionFacts.supersessionAt)
       )
     )
     .groupBy(reviewComments.epicId)
@@ -307,6 +306,7 @@ export async function GET(
     .as("latest_user_epic_comments");
 
   const result = db
+    .with(epicSessionFacts)
     .select({
       id: epics.id,
       projectId: epics.projectId,
@@ -347,6 +347,8 @@ export async function GET(
       openFindings: openFindingCounts.openFindings,
       lastCleanReviewAt: epicSessionFacts.lastCleanReviewAt,
       lastTerminalCodeAt: epicSessionFacts.lastTerminalCodeAt,
+      lastNegativeVerdictReviewAt: epicSessionFacts.lastNegativeVerdictReviewAt,
+      supersessionAt: epicSessionFacts.supersessionAt,
       lastMergeConflictAt: latestMergeFailures.lastMergeConflictAt,
       lastConflictMarkersAt: latestMergeFailures.lastConflictMarkersAt,
     })
@@ -386,6 +388,8 @@ export async function GET(
       openFindings,
       lastCleanReviewAt,
       lastTerminalCodeAt,
+      lastNegativeVerdictReviewAt,
+      supersessionAt,
       lastMergeConflictAt,
       lastConflictMarkersAt,
       ...epic
@@ -401,6 +405,8 @@ export async function GET(
         openFindings,
         lastCleanReviewAt,
         lastTerminalCodeAt,
+        lastNegativeVerdictReviewAt,
+        supersessionAt,
         lastMergeConflictAt,
         lastConflictMarkersAt,
       }),
