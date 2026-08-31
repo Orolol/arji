@@ -50,6 +50,15 @@ export interface IdentityChipProps {
   tone: ProjectTone;
   /** `sm` (default) = mono id chip. `md` = the header filter chip. */
   size?: "sm" | "md";
+  /**
+   * What the chip paints itself.
+   *
+   * `identity` (default) = the project pastel behind the deep text.
+   * `none` = transparent, deep text only — frame 13a's INACTIVE top-bar project
+   * chips, where the pastel fill is reserved for the active project. The
+   * fill/deep pair still comes from one tone, so the text stays AA on paper.
+   */
+  fill?: "identity" | "none";
   /** Appends a 6px breathing dot in the project deep colour. `md` only. */
   live?: boolean;
   /** Swaps the fill to the card colour, keeping the deep text (6a DependencyRow). */
@@ -62,6 +71,7 @@ export function IdentityChip({
   label,
   tone,
   size = "sm",
+  fill = "identity",
   live = false,
   onGround = false,
   onClick,
@@ -70,7 +80,8 @@ export function IdentityChip({
   const classes = cn(
     identityChipVariants({ size }),
     CHIP_TONE[tone],
-    // Lands after the tone so twMerge keeps the card fill and the deep text.
+    // Both land after the tone so twMerge keeps the new fill and the deep text.
+    fill === "none" && "bg-transparent",
     onGround && "bg-card",
     className,
   );

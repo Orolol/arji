@@ -3,25 +3,39 @@
 import * as React from "react";
 import { Search } from "lucide-react";
 
-import { IdentityChip, Mono, projectTone } from "@/components/piscine";
+/*
+ * Leaf imports, NOT the `@/components/piscine` barrel: the barrel exports
+ * `TopBar`, `TopBar` mounts this palette, and importing the barrel back from
+ * here would close an import cycle.
+ */
+import { IdentityChip } from "@/components/piscine/IdentityChip";
+import { Mono } from "@/components/piscine/Mono";
+import { projectTone } from "@/lib/piscine/tokens";
 import type { ControlDeskPayload, DeskProject } from "@/lib/control-desk/types";
 import { cn } from "@/lib/utils";
 
 /**
- * ⌘K over the desk payload — and NOTHING else.
+ * ⌘K over the control-desk payload — and NOTHING else.
  *
- * Arij has no command palette and no global command registry, so this is
- * deliberately scoped to what the desk already holds in memory: its projects,
- * its live sessions, and every ticket in any stratum. Enter opens the ticket
- * overlay or filters to the project. Building a global command system is a
- * different piece of work and would have to invent its own registry.
+ * Arij has no global command registry, so this is deliberately scoped to what
+ * the desk aggregate already holds: its projects, its live sessions, and every
+ * ticket in any stratum. Building a general command system is a different piece
+ * of work and would have to invent that registry first.
+ *
+ * IT IS MOUNTED BY THE TOP BAR, not by the desk. It still lives in
+ * `components/desk/` because the desk payload is its whole vocabulary, but the
+ * bar is the only thing on every route, so the bar owns the ⌘K binding and this
+ * component's one instance. What a result DOES is the caller's decision:
+ * `onOpenTicket` receives the owning project so a host outside the desk can
+ * turn it into a URL.
  */
 export interface DeskCommandPaletteProps {
   open: boolean;
   onClose: () => void;
   payload: ControlDeskPayload | null;
-  onOpenTicket: (epicId: string) => void;
-  onSelectProject: (projectId: string | null) => void;
+  /** The project id is passed too — a host outside the desk needs it to route. */
+  onOpenTicket: (epicId: string, projectId: string) => void;
+  onSelectProject: (projectId: string) => void;
 }
 
 interface Entry {
@@ -75,7 +89,7 @@ export function DeskCommandPalette({
         key: `project:${project.id}`,
         kind: "project",
         label: project.name,
-        hint: "filtrer le poste",
+        hint: "ouvrir le projet",
         project,
         run: () => onSelectProject(project.id),
       });
@@ -88,7 +102,7 @@ export function DeskCommandPalette({
         label: session.title,
         hint: `${session.taskType} en cours`,
         project: projectsById.get(session.projectId),
-        run: () => session.epicId && onOpenTicket(session.epicId),
+        run: () => session.epicId && onOpenTicket(session.epicId, session.projectId),
       });
     }
 
@@ -107,7 +121,7 @@ export function DeskCommandPalette({
         label: `${readableId ? `${readableId} ` : ""}${title}`,
         hint,
         project: projectsById.get(projectId),
-        run: () => onOpenTicket(epicId),
+        run: () => onOpenTicket(epicId, projectId),
       });
     };
 

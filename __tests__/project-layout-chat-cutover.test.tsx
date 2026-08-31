@@ -1,3 +1,20 @@
+/**
+ * The project shell after the frame-13a retrofit.
+ *
+ * `app/projects/[projectId]/layout.tsx` used to draw a 54px header — project
+ * name, Board/Spec/Sessions tabs, a "More" dropdown, and a right cluster of
+ * New / Night run / Chat. The global top bar owns every navigational half of
+ * that now, so the header is gone and this file's job changed with it:
+ *
+ *  - it asserts the chrome is GONE (no tabs, no More, no name heading), which
+ *    is the whole point of the pass;
+ *  - it keeps the New-menu and night-run wiring, which survived because those
+ *    three controls push a `?panel=` / `?night=` param only the BOARD page
+ *    consumes — so they are drawn on the board route and nowhere else;
+ *  - it keeps the original chat-cutover assertion: the shell never fetches the
+ *    legacy conversation list.
+ */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -33,6 +50,7 @@ describe("project layout chrome", () => {
     nav.pathname = "/projects/proj-1";
     nav.push = vi.fn();
     global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
       json: () =>
         Promise.resolve({
           data: {
@@ -50,87 +68,40 @@ describe("project layout chrome", () => {
         <div data-testid="project-content">content</div>
       </ProjectLayout>,
     );
+    // The shell's only load is the project summary; wait for it so the
+    // repo-dependent controls have settled before anything is asserted.
     await waitFor(() => {
-      expect(screen.getByText("Project One")).toBeInTheDocument();
+      expect(global.fetch).toHaveBeenCalledWith("/api/projects/proj-1");
     });
   }
 
-  it("renders the project name, children and the connect banner", async () => {
+  it("renders children and the connect banner", async () => {
     await renderLayout();
 
     expect(screen.getByTestId("project-content")).toBeInTheDocument();
     expect(screen.getByTestId("github-connect-banner")).toBeInTheDocument();
   });
 
-  it("routes the header Chat button to the board panel instead of opening a legacy panel", async () => {
-    const user = userEvent.setup();
+  it("draws no header of its own — the global bar is the only one", async () => {
     await renderLayout();
 
-    await user.click(screen.getByTestId("header-chat-button"));
-
-    expect(nav.push).toHaveBeenCalledWith("/projects/proj-1?panel=chat");
+    // The 54px bar and everything that lived in it.
+    expect(screen.queryByRole("banner")).not.toBeInTheDocument();
+    expect(screen.queryByText("Project One")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("project-nav-more")).not.toBeInTheDocument();
+    for (const label of ["Board", "Spec & Memory", "Sessions"]) {
+      expect(screen.queryByRole("link", { name: label })).not.toBeInTheDocument();
+    }
+    // Chat has the board's own collapsed strip; the duplicate pill is gone.
+    expect(screen.queryByTestId("header-chat-button")).not.toBeInTheDocument();
   });
 
-  it("does not fetch conversation count for removed legacy chat pathways", async () => {
-    const user = userEvent.setup();
+  it("does not fetch the conversation list the legacy chat pathway used", async () => {
     await renderLayout();
-
-    await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith("/api/projects/proj-1");
-    });
-
-    await user.click(screen.getByTestId("header-chat-button"));
 
     expect(global.fetch).not.toHaveBeenCalledWith(
       "/api/projects/proj-1/conversations",
     );
-  });
-
-  it("keeps the secondary pages reachable from the More menu", async () => {
-    const user = userEvent.setup();
-    await renderLayout();
-
-    expect(screen.queryByRole("link", { name: /QA/i })).not.toBeInTheDocument();
-
-    await user.click(screen.getByTestId("project-nav-more"));
-
-    await waitFor(() => {
-      expect(screen.getByRole("menuitem", { name: /QA/i })).toBeInTheDocument();
-    });
-    expect(screen.getByRole("menuitem", { name: /QA/i })).toHaveAttribute(
-      "href",
-      "/projects/proj-1/qa",
-    );
-    expect(screen.getByRole("menuitem", { name: /Git Sync/i })).toHaveAttribute(
-      "href",
-      "/projects/proj-1/git-sync",
-    );
-  });
-
-  it("exposes the three primary tabs as links", async () => {
-    await renderLayout();
-
-    expect(screen.getByRole("link", { name: "Board" })).toHaveAttribute(
-      "href",
-      "/projects/proj-1",
-    );
-    expect(screen.getByRole("link", { name: "Spec & Memory" })).toHaveAttribute(
-      "href",
-      "/projects/proj-1/spec",
-    );
-    expect(screen.getByRole("link", { name: "Sessions" })).toHaveAttribute(
-      "href",
-      "/projects/proj-1/sessions",
-    );
-  });
-
-  it("starts a night run through the board URL param", async () => {
-    const user = userEvent.setup();
-    await renderLayout();
-
-    await user.click(screen.getByTestId("night-run-button"));
-
-    expect(nav.push).toHaveBeenCalledWith("/projects/proj-1?night=start");
   });
 
   it("offers manual epic, chat epic and bug in the New menu", async () => {
@@ -151,78 +122,7 @@ describe("project layout chrome", () => {
     expect(screen.getByRole("menuitem", { name: /New Bug/i })).toBeInTheDocument();
   });
 
-  it("opens the manual epic dialog through its own panel param", async () => {
-    const user = userEvent.setup();
-    await renderLayout();
-
-    await user.click(screen.getByTestId("header-new-button"));
-    await waitFor(() => {
-      expect(screen.getByTestId("header-new-epic-manual")).toBeInTheDocument();
-    });
-    await user.click(screen.getByTestId("header-new-epic-manual"));
-
-    expect(nav.push).toHaveBeenCalledWith(
-      "/projects/proj-1?panel=new-epic-manual",
-    );
-  });
-
-  it("emits no agent-provider call when the manual epic entry is chosen", async () => {
-    const user = userEvent.setup();
-    await renderLayout();
-
-    await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith("/api/projects/proj-1");
-    });
-    (global.fetch as ReturnType<typeof vi.fn>).mockClear();
-
-    await user.click(screen.getByTestId("header-new-button"));
-    await waitFor(() => {
-      expect(screen.getByTestId("header-new-epic-manual")).toBeInTheDocument();
-    });
-    await user.click(screen.getByTestId("header-new-epic-manual"));
-
-    // The whole point of the manual entry is that it costs nothing: picking it
-    // must stay a pure navigation. Asserting the exact call set rather than a
-    // denylist of agent routes means any request added here — an agent warm-up,
-    // a conversation prefetch, a model probe — fails this test.
-    expect(
-      (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map(([url]) => url),
-    ).toEqual([]);
-  });
-
-  it("keeps the chat epic entry on the untouched new-epic panel", async () => {
-    const user = userEvent.setup();
-    await renderLayout();
-
-    await user.click(screen.getByTestId("header-new-button"));
-    await waitFor(() => {
-      expect(screen.getByTestId("header-new-epic-chat")).toBeInTheDocument();
-    });
-    await user.click(screen.getByTestId("header-new-epic-chat"));
-
-    expect(nav.push).toHaveBeenCalledWith("/projects/proj-1?panel=new-epic");
-  });
-
-  it("opens the new-bug panel from the New menu", async () => {
-    const user = userEvent.setup();
-    await renderLayout();
-
-    await user.click(screen.getByTestId("header-new-button"));
-    await waitFor(() => {
-      expect(screen.getByTestId("header-new-bug")).toBeInTheDocument();
-    });
-    await user.click(screen.getByTestId("header-new-bug"));
-    expect(nav.push).toHaveBeenCalledWith("/projects/proj-1?panel=new-bug");
-  });
-
-  it("sends every New menu entry to the board even from a secondary tab", async () => {
-    // The menu lives in the chrome, which outlives the board page, so an entry
-    // only works if it navigates to the *board* URL — nothing on Spec or
-    // Sessions consumes ?panel=. Every other menu test runs at the board
-    // pathname, where the current route and the board href are the same string,
-    // so none of them can tell the two apart: routing through the pathname
-    // instead leaves the manual entry silently dead on five of the eight tabs.
-    nav.pathname = "/projects/proj-1/spec";
+  it("sends each New entry to the board panel it names", async () => {
     const user = userEvent.setup();
     await renderLayout();
 
@@ -239,6 +139,27 @@ describe("project layout chrome", () => {
 
       expect(nav.push).toHaveBeenCalledWith(`/projects/proj-1?panel=${panel}`);
     }
+  });
+
+  it("emits no agent-provider call when the manual epic entry is chosen", async () => {
+    const user = userEvent.setup();
+    await renderLayout();
+
+    (global.fetch as ReturnType<typeof vi.fn>).mockClear();
+
+    await user.click(screen.getByTestId("header-new-button"));
+    await waitFor(() => {
+      expect(screen.getByTestId("header-new-epic-manual")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("header-new-epic-manual"));
+
+    // The whole point of the manual entry is that it costs nothing: picking it
+    // must stay a pure navigation. Asserting the exact call set rather than a
+    // denylist of agent routes means any request added here — an agent warm-up,
+    // a conversation prefetch, a model probe — fails this test.
+    expect(
+      (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map(([url]) => url),
+    ).toEqual([]);
   });
 
   it("drives the New menu from the keyboard", async () => {
@@ -271,17 +192,59 @@ describe("project layout chrome", () => {
     await user.keyboard("{Enter}");
 
     expect(nav.push).toHaveBeenCalledWith("/projects/proj-1?panel=new-epic");
+  });
 
-    // And Enter straight after opening picks the manual entry.
-    await user.keyboard("{Enter}");
-    await waitFor(() => {
-      expect(screen.getByTestId("header-new-epic-manual")).toBeInTheDocument();
+  it("starts a night run through the board URL param", async () => {
+    const user = userEvent.setup();
+    await renderLayout();
+
+    await user.click(screen.getByTestId("night-run-button"));
+
+    expect(nav.push).toHaveBeenCalledWith("/projects/proj-1?night=start");
+  });
+
+  it("keeps the arji.json sync action available", async () => {
+    const user = userEvent.setup();
+    await renderLayout();
+
+    const sync = await screen.findByRole("button", {
+      name: "Sync from arji.json",
     });
-    await user.keyboard("{Enter}");
+    await user.click(sync);
 
-    expect(nav.push).toHaveBeenCalledWith(
-      "/projects/proj-1?panel=new-epic-manual",
-    );
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        "/api/projects/proj-1/sync",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
+  it("hides the sync action for a project with no repo on disk", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: { name: "Project One" } }),
+    });
+    await renderLayout();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("night-run-button")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole("button", { name: "Sync from arji.json" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the board-only controls off every other project route", async () => {
+    nav.pathname = "/projects/proj-1/spec";
+    await renderLayout();
+
+    // Those three act by pushing a param only the board consumes, so drawing
+    // them anywhere else would be a second bar that navigates away to work.
+    expect(screen.queryByTestId("project-action-row")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("header-new-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("night-run-button")).not.toBeInTheDocument();
+    expect(screen.getByTestId("project-content")).toBeInTheDocument();
   });
 
   it("mounts the repo bar on the board route only", async () => {
@@ -298,12 +261,5 @@ describe("project layout chrome", () => {
     await renderLayout();
 
     expect(screen.queryByTestId("repo-status-bar")).not.toBeInTheDocument();
-  });
-
-  it("keeps the arji.json sync action available", async () => {
-    await renderLayout();
-
-    const sync = screen.getByRole("button", { name: "Sync from arji.json" });
-    expect(sync).toBeInTheDocument();
   });
 });

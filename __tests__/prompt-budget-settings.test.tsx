@@ -47,6 +47,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// The global half lives in the BUDGET band of Settings -> Workspace and
+// saves through that tab's shared footer. The project half below still
+// targets app/projects/[projectId]/settings/page.tsx and is untouched.
 describe("Prompt Token Budget in SettingsPage", () => {
   it("renders the prompt token budget input with loaded setting", async () => {
     render(<SettingsPage />);
@@ -55,8 +58,12 @@ describe("Prompt Token Budget in SettingsPage", () => {
       expect(screen.getByTestId("prompt-budget-settings")).toBeInTheDocument();
     });
 
-    const input = screen.getByTestId("prompt-token-budget-setting") as HTMLInputElement;
-    expect(input.value).toBe("50000");
+    await waitFor(() => {
+      const input = screen.getByTestId(
+        "prompt-token-budget-setting"
+      ) as HTMLInputElement;
+      expect(input.value).toBe("50000");
+    });
   });
 
   it("updates and saves the prompt token budget", async () => {
@@ -69,11 +76,10 @@ describe("Prompt Token Budget in SettingsPage", () => {
     const input = screen.getByTestId("prompt-token-budget-setting");
     fireEvent.change(input, { target: { value: "75k" } });
 
-    const saveButton = screen.getByTestId("prompt-token-budget-save");
-    fireEvent.click(saveButton);
+    fireEvent.click(screen.getByTestId("settings-save"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("prompt-token-budget-message")).toHaveTextContent("Saved");
+      expect(screen.getByTestId("settings-message")).toHaveTextContent("Saved");
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
@@ -85,6 +91,29 @@ describe("Prompt Token Budget in SettingsPage", () => {
         }),
       })
     );
+  });
+
+  it("refuses a non-numeric threshold without PATCHing", async () => {
+    render(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("prompt-budget-settings")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId("prompt-token-budget-setting"), {
+      target: { value: "lots" },
+    });
+    fireEvent.click(screen.getByTestId("settings-save"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-message")).toHaveTextContent(
+        "Budget must be a positive integer token count (e.g. 50000 or 50k)."
+      );
+    });
+    const patches = (global.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+      (c) => (c[1] as RequestInit | undefined)?.method === "PATCH"
+    );
+    expect(patches).toHaveLength(0);
   });
 });
 

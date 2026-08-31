@@ -1,18 +1,30 @@
 /**
- * The usage observatory's entry point in the rail's bottom utility cluster.
+ * The usage observatory's entry point — REWRITTEN FOR THE GLOBAL TOP BAR.
  *
- * The rail now hides itself on routes that ship their own Piscine header
- * ("/", "/agents", "/usage"), so this renders at a legacy route — which is
- * where the rail is still the only navigation.
+ * This file used to assert that the left rail's bottom cluster carried a link
+ * to /usage. Frame 13a retired the rail (`components/layout/Sidebar.tsx` is
+ * gone): navigation is now the bar's three category menus, and Usage is the
+ * last entry of the turquoise **Agents** menu. The assertion that mattered is
+ * unchanged — the usage screen has an entry point, and it points at /usage —
+ * it is just made against the surface that now owns it.
+ *
+ * The old companion assertion ("sits right after the dashboard link") was
+ * about the rail's vertical order; its equivalent here is the entry's position
+ * inside its category, which the shared nav model owns, so it is asserted
+ * against `NAV_CATEGORIES` rather than against pixels.
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+
+import { NAV_CATEGORIES } from "@/lib/piscine/nav";
+
+const routerState = vi.hoisted(() => ({ push: vi.fn(), pathname: "/projects/p1" }));
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/projects/p1/settings",
+  usePathname: () => routerState.pathname,
   useParams: () => ({}),
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: routerState.push }),
 }));
 
 vi.mock("@/hooks/useProjects", () => ({
@@ -38,30 +50,54 @@ vi.mock("@/hooks/useInbox", () => ({
   }),
 }));
 
-// Frozen rail mounts — stubbed so this test stays about the rail itself.
-vi.mock("@/components/ThemeToggle", () => ({
-  ThemeToggle: () => <button type="button">Theme</button>,
+vi.mock("@/hooks/useAutoModeArmed", () => ({
+  useAutoModeArmed: () => ({
+    armed: new Map(),
+    globalDefault: false,
+    loaded: true,
+    refresh: vi.fn(),
+  }),
+  isProjectArmed: () => false,
 }));
-vi.mock("@/components/layout/NotificationBell", () => ({
-  NotificationBell: () => <button type="button">Notifications</button>,
+
+// The menu owns the desk read; nothing here is about the desk payload.
+vi.mock("@/hooks/useControlDesk", () => ({
+  useControlDesk: () => ({ data: null, loading: false, error: null, refresh: vi.fn() }),
 }));
 
-import { Sidebar } from "@/components/layout/Sidebar";
+import { TopBar } from "@/components/piscine/TopBar";
 
-describe("Rail — usage link", () => {
-  it("links to the usage page", () => {
-    render(<Sidebar />);
+describe("Top bar — usage entry point", () => {
+  it("links to the usage page from the Agents menu", () => {
+    render(<TopBar />);
 
-    const link = screen.getByTestId("rail-usage-link");
+    // Focus opens the menu immediately; hover opens it after the intent delay.
+    fireEvent.focus(screen.getByTestId("top-bar-bubble-agents"));
+
+    const link = screen.getByTestId("top-bar-entry-usage");
     expect(link).toHaveAttribute("href", "/usage");
-    expect(link).toHaveAttribute("title", "Usage");
+    expect(link).toHaveTextContent("Usage");
   });
 
-  it("sits in the bottom cluster, right after the dashboard link", () => {
-    render(<Sidebar />);
+  it("is reachable with no project in the URL — it is a global screen", () => {
+    routerState.pathname = "/";
+    render(<TopBar />);
 
-    const link = screen.getByTestId("rail-usage-link");
-    const dashboard = screen.getByTitle("All projects");
-    expect(dashboard.nextElementSibling).toBe(link);
+    fireEvent.focus(screen.getByTestId("top-bar-bubble-agents"));
+
+    const link = screen.getByTestId("top-bar-entry-usage");
+    expect(link).toHaveAttribute("href", "/usage");
+    expect(link).not.toHaveAttribute("data-disabled");
+    routerState.pathname = "/projects/p1";
+  });
+
+  it("sits last in the Agents category, after Named agents · Sessions · Chat", () => {
+    const agents = NAV_CATEGORIES.find((category) => category.id === "agents");
+    expect(agents?.entries.map((entry) => entry.id)).toEqual([
+      "named-agents",
+      "sessions",
+      "chat",
+      "usage",
+    ]);
   });
 });

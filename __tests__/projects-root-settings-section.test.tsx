@@ -1,7 +1,11 @@
 /**
- * Settings page: the "Projects Directory" section round-trips the
- * `projects_root` override through /api/settings and shows the server-resolved
- * default as placeholder when no override is stored.
+ * Settings → Workspace: the WORKSPACE band round-trips the `projects_root`
+ * override through /api/settings and shows the server-resolved default as
+ * placeholder when no override is stored.
+ *
+ * Saving goes through the tab's shared footer; the server's own error string
+ * lands verbatim in the footer message, which is how a rejected path reaches
+ * the user.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +33,12 @@ function mockSettings(
             patchOk ? { data: { updated: true } } : { error: patchError },
         };
       }
+      if (url === "/api/projects") {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url === "/api/usage") {
+        return { ok: true, json: async () => ({ data: {} }) };
+      }
       return {
         ok: true,
         json: async () => ({
@@ -53,7 +63,7 @@ function lastPatchBody(fetchMock: ReturnType<typeof vi.fn>) {
 async function renderSettings() {
   render(<SettingsPage />);
   await waitFor(() =>
-    expect(screen.getByTestId("projects-root-settings")).toBeInTheDocument()
+    expect(screen.getByTestId("projects-root-setting")).toBeInTheDocument()
   );
 }
 
@@ -68,7 +78,9 @@ describe("Settings — projects directory", () => {
 
     const input = screen.getByTestId("projects-root-setting");
     expect(input).toHaveValue("");
-    expect(input).toHaveAttribute("placeholder", DEFAULT_ROOT);
+    await waitFor(() =>
+      expect(input).toHaveAttribute("placeholder", DEFAULT_ROOT)
+    );
   });
 
   it("prefills the input from the stored override", async () => {
@@ -76,9 +88,7 @@ describe("Settings — projects directory", () => {
     await renderSettings();
 
     await waitFor(() =>
-      expect(screen.getByTestId("projects-root-setting")).toHaveValue(
-        "/srv/clones"
-      )
+      expect(screen.getByTestId("projects-root-setting")).toHaveValue("/srv/clones")
     );
   });
 
@@ -89,12 +99,10 @@ describe("Settings — projects directory", () => {
     fireEvent.change(screen.getByTestId("projects-root-setting"), {
       target: { value: "  /srv/clones  " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save Directory" }));
+    fireEvent.click(screen.getByTestId("settings-save"));
 
     await waitFor(() =>
-      expect(screen.getByTestId("projects-root-message")).toHaveTextContent(
-        "Projects directory saved."
-      )
+      expect(screen.getByTestId("settings-message")).toHaveTextContent("Saved")
     );
     expect(lastPatchBody(fetchMock)).toEqual({
       [PROJECTS_ROOT_SETTING_KEY]: "/srv/clones",
@@ -108,23 +116,16 @@ describe("Settings — projects directory", () => {
     await renderSettings();
 
     await waitFor(() =>
-      expect(screen.getByTestId("projects-root-setting")).toHaveValue(
-        "/srv/clones"
-      )
+      expect(screen.getByTestId("projects-root-setting")).toHaveValue("/srv/clones")
     );
     fireEvent.change(screen.getByTestId("projects-root-setting"), {
       target: { value: "" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save Directory" }));
+    fireEvent.click(screen.getByTestId("settings-save"));
 
     await waitFor(() =>
-      expect(screen.getByTestId("projects-root-message")).toHaveTextContent(
-        "Projects directory reset to the default."
-      )
+      expect(lastPatchBody(fetchMock)).toEqual({ [PROJECTS_ROOT_SETTING_KEY]: "" })
     );
-    expect(lastPatchBody(fetchMock)).toEqual({
-      [PROJECTS_ROOT_SETTING_KEY]: "",
-    });
     // The default is still offered as placeholder once the override is gone.
     expect(screen.getByTestId("projects-root-setting")).toHaveAttribute(
       "placeholder",
@@ -133,21 +134,26 @@ describe("Settings — projects directory", () => {
   });
 
   it("surfaces the server error when the save is rejected", async () => {
-    mockSettings({}, {
-      patchOk: false,
-      patchError: "Projects directory must be saved as a string value.",
-    });
+    mockSettings(
+      {},
+      {
+        patchOk: false,
+        patchError: "Projects directory must be saved as a string value.",
+      }
+    );
     await renderSettings();
 
     fireEvent.change(screen.getByTestId("projects-root-setting"), {
       target: { value: "/srv/clones" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save Directory" }));
+    fireEvent.click(screen.getByTestId("settings-save"));
 
     await waitFor(() =>
-      expect(screen.getByTestId("projects-root-message")).toHaveTextContent(
+      expect(screen.getByTestId("settings-message")).toHaveTextContent(
         "Projects directory must be saved as a string value."
       )
     );
+    // The rejected value stays on screen: it was never persisted.
+    expect(screen.getByTestId("projects-root-setting")).toHaveValue("/srv/clones");
   });
 });

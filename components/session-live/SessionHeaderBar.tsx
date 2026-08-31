@@ -13,19 +13,35 @@ import {
 } from "@/components/piscine";
 import { formatCostUsd } from "@/lib/utils/format-usage";
 import { formatElapsed } from "@/lib/utils/format-elapsed";
+import { cn } from "@/lib/utils";
 
 import { AGENT_TYPE_LABELS, projectShortLabel, statusStamp } from "./labels";
 import type { SessionDetail, SessionFilesProject, SessionFilesTicket } from "./types";
 
 /**
- * The 60px identity + liveness bar.
+ * The live session's SECOND ROW — identity on the left, liveness on the right.
  *
- * Identity on the left (back, project, ticket, state, title), liveness on the
- * right (chrono, cost, Stop). NEITHER control is filled: this screen has no
- * filled button by design, so the Stop pill is an `--action` OUTLINE and not
- * the coral destructive button the old page used — a red border was state
- * painted as colour, which the system forbids. The word "Stop session" and
- * the confirmation of what happens carry the weight instead.
+ * Frame 8a drew this as a 60px page header. Frame 13a made the top bar global,
+ * so this is no longer a header at all: it is the screen's own row, inside the
+ * content area, on the body's 14px gutter rather than the retired header's
+ * 24px. Nothing was dropped in the move — the back pill, the two chips, the
+ * state stamp, the title, the chrono, the cost and Stop are all still here,
+ * because none of them is something the bar can say.
+ *
+ * WHERE THE BACK PILL GOES, AND WHY IT CHANGED. It used to read "Now" and lead
+ * to `/projects/:id`. The bar now carries BOTH of those: its "A · Now" pill is
+ * the way to the desk and the project's own chip is the way to its board. Two
+ * controls a few pixels apart, both reading "Now", leading to two different
+ * places, is exactly the duplication 13a exists to remove. So the pill keeps
+ * its job — go up one level — and names the level that is actually above a
+ * session: the project's session list, which nothing else on this screen
+ * reaches.
+ *
+ * NEITHER CONTROL IS FILLED: this screen has no filled button by design, so the
+ * Stop pill is an `--action` OUTLINE and not the coral destructive button the
+ * old page used — a red border was state painted as colour, which the system
+ * forbids. The word "Stop session" and the confirmation of what happens carry
+ * the weight instead.
  */
 
 export interface SessionHeaderBarProps {
@@ -67,21 +83,26 @@ export function SessionHeaderBar({
     ticket?.title ?? `${providerLabel} · ${typeLabel}`;
 
   return (
-    <header className="flex h-[60px] shrink-0 items-center gap-[11px] px-[24px]">
+    <div
+      data-testid="session-controls"
+      className="flex h-[44px] shrink-0 items-center gap-[11px] px-[14px]"
+    >
       {/* The pill recipe applied to the anchor itself rather than a
           <button> nested inside it: a button inside a link is invalid HTML and
-          axe flags it, and `pillButtonVariants` is exported for exactly this.
-          Frame 5a replaces the project board, so the board IS "Now". */}
+          axe flags it, and `pillButtonVariants` is exported for exactly this. */}
       <Link
-        href={`/projects/${projectId}`}
-        className={pillButtonVariants({
-          variant: "outline",
-          outlineTone: "neutral",
-          size: "md",
-        })}
+        href={`/projects/${projectId}/sessions`}
+        className={cn(
+          pillButtonVariants({
+            variant: "outline",
+            outlineTone: "neutral",
+            size: "md",
+          }),
+          "no-underline",
+        )}
       >
         <ArrowLeft size={13} aria-hidden="true" />
-        Now
+        Sessions
       </Link>
 
       {/* Colour here is PROJECT IDENTITY, never the stratum that shares the
@@ -158,7 +179,7 @@ export function SessionHeaderBar({
           </PillButton>
         )}
       </div>
-    </header>
+    </div>
   );
 }
 
