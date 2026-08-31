@@ -238,4 +238,83 @@ describe("GitSyncPage with no usable remote", () => {
       )
     ).toBeInTheDocument();
   });
+
+  /**
+   * The two halves of the error line on a project with NO local repository.
+   *
+   * The Piscine relocation put a Repository band above this page, which says
+   * in prose that no directory is attached — so the status read's inevitable
+   * failure must not be repeated in coral underneath it. The first version of
+   * that guard hid EVERY error while `gitRepoPath` was null, which also
+   * swallowed the 409 the test above asserts. Both halves are pinned here so
+   * neither can be restored by widening the other.
+   */
+  /**
+   * A project with no local repository, plus the 400 its status route answers.
+   * Returned for BOTH `/api/projects/:id` and `/git/status` so `project` is a
+   * resolved object with `gitRepoPath: null` — the state the guard keys off.
+   */
+  function unconfiguredProject(url: string, _init?: RequestInit): Response | undefined {
+    if (url.includes("/git/status")) {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({ error: "Project has no git repository path" }),
+      } as Response;
+    }
+    if (/\/api\/projects\/[^/]+$/.test(url)) {
+      return {
+        ok: true,
+        json: async () => ({
+          data: { gitRepoPath: null, githubOwnerRepo: null, defaultBranch: null },
+        }),
+      } as Response;
+    }
+    return undefined;
+  }
+
+  describe("the error line on an unconfigured project", () => {
+    it("stays silent for the status read the band already explains", async () => {
+      mockPageFetch(() => CONFIGURED, unconfiguredProject);
+
+      render(<GitSyncPage />);
+      await waitFor(() => {
+        expect(screen.getByTestId("repo-not-configured")).toBeInTheDocument();
+      });
+      // The paragraph specifically — the toast stack is a different surface
+      // and carries its own copy of an action's message.
+      expect(screen.queryByTestId("git-sync-error")).not.toBeInTheDocument();
+    });
+
+    it("still shows an action's own failure", async () => {
+      mockPageFetch(() => CONFIGURED, (url) => {
+        if (url.includes("/git/pull")) {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({ error: "Pull exploded" }),
+          } as Response;
+        }
+        return unconfiguredProject(url);
+      });
+
+      const user = userEvent.setup();
+      render(<GitSyncPage />);
+      // Wait for the PROJECT read, not just the band: the guard cannot hide
+      // anything until `project` has landed, so asserting before it would
+      // pass against the broken guard too.
+      await waitFor(() => {
+        expect(screen.getByTestId("repo-not-configured")).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("button", { name: "Pull" }));
+
+      // The user asked for this one, so it is theirs to read — IN THE
+      // PARAGRAPH. Asserting `getByText` would pass on the toast alone, which
+      // the broken guard never hid.
+      await waitFor(() => {
+        expect(screen.getByTestId("git-sync-error")).toHaveTextContent("Pull exploded");
+      });
+    });
+  });
 });

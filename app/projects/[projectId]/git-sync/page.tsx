@@ -135,7 +135,31 @@ export default function GitSyncPage() {
   const [pulling, setPulling] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * The error line, plus WHERE it came from.
+   *
+   * On a project with no local repository the status read cannot succeed, and
+   * the Repository band above already says so in prose — so that one failure
+   * is not repeated in coral underneath it. Every other error is the answer to
+   * something the user asked for and is always shown.
+   *
+   * The provenance is bundled with the message rather than kept beside it: as
+   * two independent `useState`s the flag survived an action's `setError(null)`
+   * and went on suppressing the action's own failure. Set them together and
+   * that cannot drift — `setError` is the ordinary path and always clears the
+   * flag; only `refreshStatus` reaches for `setStatusReadError`.
+   */
+  const [errorState, setErrorState] = useState<{
+    message: string | null;
+    fromStatusRead: boolean;
+  }>({ message: null, fromStatusRead: false });
+  const error = errorState.message;
+  const setError = useCallback((message: string | null) => {
+    setErrorState({ message, fromStatusRead: false });
+  }, []);
+  const setStatusReadError = useCallback((message: string) => {
+    setErrorState({ message, fromStatusRead: true });
+  }, []);
   const [namedAgentId, setNamedAgentId] = useState<string | null>(null);
   const [resumeSessionId, setResumeSessionId] = useState<string | undefined>(undefined);
   const { agents } = useNamedAgentsList();
@@ -168,7 +192,7 @@ export default function GitSyncPage() {
       const res = await fetch(statusUrl);
       const json = (await res.json()) as StatusResponse;
       if (!res.ok || !json.data) {
-        setError(json.error || "Failed to fetch git status");
+        setStatusReadError(json.error || "Failed to fetch git status");
         return;
       }
 
@@ -192,11 +216,14 @@ export default function GitSyncPage() {
       setLastFetchedAt(json.data.lastFetchedAt ?? null);
       setLastFetchError(json.data.lastFetchError ?? null);
     } catch {
-      setError("Failed to fetch git status");
+      setStatusReadError("Failed to fetch git status");
     } finally {
       setLoadingStatus(false);
     }
-  }, [statusUrl]);
+    // Both setters are useCallback([]) and so never change; listed because the
+    // exhaustive-deps rule cannot see that, and a silenced warning here is how
+    // a real missing dependency gets in later.
+  }, [statusUrl, setError, setStatusReadError]);
 
   useEffect(() => {
     refreshStatus();
@@ -229,6 +256,8 @@ export default function GitSyncPage() {
   async function reportMissingRemote(json: { error?: string }) {
     showToast("error", "No git remote configured");
     await refreshStatus();
+    // The user pressed Push; this is their answer, not the status read's, and
+    // `setError` marks it as such.
     setError(json?.error || "No git remote is configured for this repository.");
   }
 
@@ -597,12 +626,19 @@ export default function GitSyncPage() {
             {message && <p className="text-[13px] text-agent">{message}</p>}
             {/*
               Missing configuration is not an error. With no repository path
-              the band above already names what is missing and how to supply
-              it; repeating that in coral would make an unconfigured project
-              look broken.
+              the status read cannot succeed, and the band above already names
+              what is missing and how to supply it; repeating that in coral
+              would make an unconfigured project look broken.
+
+              ONLY the status read is silenced. An action's failure is the
+              user's own request answering back — a mid-session 409 from Push
+              on a repository whose remote disappeared has to be visible, and
+              suppressing every error on an unconfigured project swallowed it.
             */}
-            {error && project?.gitRepoPath !== null && (
-              <p className="text-[13px] text-destructive">{error}</p>
+            {error && !(errorState.fromStatusRead && project?.gitRepoPath === null) && (
+              <p data-testid="git-sync-error" className="text-[13px] text-destructive">
+                {error}
+              </p>
             )}
           </div>
 
