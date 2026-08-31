@@ -18,7 +18,6 @@ import { ReleasedColumn } from "./ReleasedColumn";
 import { EpicCard, type EpicCardView } from "./EpicCard";
 import {
   FilterBar,
-  EMPTY_FILTERS,
   countActiveFilters,
   epicMatchesFilters,
   parseStoredFilters,
@@ -42,6 +41,7 @@ import {
   type KanbanEpicAgentActivity,
 } from "@/lib/types/kanban";
 import { useKanban } from "@/hooks/useKanban";
+import { useStoredValue, writeStoredValue } from "@/hooks/useStoredValue";
 import { useBoardMerge } from "@/hooks/useBoardMerge";
 import { isAwaitingReply } from "@/lib/kanban/awaiting-reply";
 import { isMergeReadyEpic } from "@/lib/kanban/merge-readiness";
@@ -200,9 +200,9 @@ export function Board({
   >({});
 
   // Client-side filters + focus mode, persisted per project in localStorage
-  // (house pattern: the arij.unified-chat-panel.* keys).
-  const [filters, setFilters] = useState<KanbanFilters>(EMPTY_FILTERS);
-  const [focusMode, setFocusMode] = useState(false);
+  // (house pattern: the arij.unified-chat-panel.* keys). localStorage is the
+  // owner — see hooks/useStoredValue — so there is no mount-read effect to
+  // race the write-back effects that used to follow it.
   const filtersStorageKey = useMemo(
     () => `arij.kanban-board.filters.${projectId}`,
     [projectId]
@@ -212,33 +212,18 @@ export function Board({
     [projectId]
   );
 
-  // Read persisted filters/focus on mount (before the write effects below run
-  // with fresh state, so the stored value is captured first).
-  useEffect(() => {
-    try {
-      setFilters(parseStoredFilters(window.localStorage.getItem(filtersStorageKey)));
-      setFocusMode(window.localStorage.getItem(focusStorageKey) === "true");
-    } catch {
-      setFilters(EMPTY_FILTERS);
-      setFocusMode(false);
-    }
-  }, [filtersStorageKey, focusStorageKey]);
+  const storedFilters = useStoredValue(filtersStorageKey);
+  const filters = useMemo(() => parseStoredFilters(storedFilters), [storedFilters]);
+  const setFilters = useCallback(
+    (next: KanbanFilters) => writeStoredValue(filtersStorageKey, JSON.stringify(next)),
+    [filtersStorageKey]
+  );
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(filtersStorageKey, JSON.stringify(filters));
-    } catch {
-      // ignore storage write failures
-    }
-  }, [filters, filtersStorageKey]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(focusStorageKey, focusMode ? "true" : "false");
-    } catch {
-      // ignore storage write failures
-    }
-  }, [focusMode, focusStorageKey]);
+  const focusMode = useStoredValue(focusStorageKey) === "true";
+  const setFocusMode = useCallback(
+    (next: boolean) => writeStoredValue(focusStorageKey, next ? "true" : "false"),
+    [focusStorageKey]
+  );
 
   useEffect(() => {
     if (refreshTrigger) refresh();

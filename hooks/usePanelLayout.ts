@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useStoredValue, writeStoredValue } from "@/hooks/useStoredValue";
 
 const DEFAULT_PANEL_RATIO = 0.4;
 const MIN_PANEL_WIDTH = 300;
@@ -46,6 +47,24 @@ function fallbackContainerWidth() {
 
 export type UnifiedPanelState = "collapsed" | "expanded" | "hidden";
 
+// The ratio and the panel state are owned by localStorage (see
+// hooks/useStoredValue): subscribing to it removes the mount-read effect that
+// used to set state synchronously, and the write-back effect that mirrored it.
+
+function parseStoredRatio(raw: string | null) {
+  if (!raw) {
+    return DEFAULT_PANEL_RATIO;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : DEFAULT_PANEL_RATIO;
+}
+
+function parseStoredPanelState(raw: string | null): UnifiedPanelState {
+  return raw === "expanded" || raw === "collapsed" || raw === "hidden"
+    ? raw
+    : "collapsed";
+}
+
 interface UsePanelLayoutOptions {
   projectId: string;
   /** Conversations used to validate the persisted active conversation id. */
@@ -71,8 +90,6 @@ export function usePanelLayout({
   setActiveId,
 }: UsePanelLayoutOptions) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [panelState, setPanelState] = useState<UnifiedPanelState>("collapsed");
-  const [panelRatio, setPanelRatio] = useState(DEFAULT_PANEL_RATIO);
   const [isDragging, setIsDragging] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   // The container's own width, measured after layout. Reading
@@ -95,6 +112,18 @@ export function usePanelLayout({
   const activeStorageKey = useMemo(
     () => `arij.unified-chat-panel.active.${projectId}`,
     [projectId],
+  );
+
+  const panelRatio = parseStoredRatio(useStoredValue(storageKey));
+  const setPanelRatio = useCallback(
+    (ratio: number) => writeStoredValue(storageKey, ratio.toFixed(4)),
+    [storageKey],
+  );
+
+  const panelState = parseStoredPanelState(useStoredValue(stateStorageKey));
+  const setPanelState = useCallback(
+    (state: UnifiedPanelState) => writeStoredValue(stateStorageKey, state),
+    [stateStorageKey],
   );
 
   useEffect(() => {
@@ -138,45 +167,6 @@ export function usePanelLayout({
     containerWidth ?? fallbackContainerWidth(),
     panelRatio,
   );
-
-  // Persist panelRatio — read on mount
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) {
-      return;
-    }
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) {
-      return;
-    }
-    setPanelRatio(parsed);
-  }, [storageKey]);
-
-  // Persist panelRatio — write on change
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(storageKey, panelRatio.toFixed(4));
-  }, [panelRatio, storageKey]);
-
-  // Persist panelState — read on mount
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const raw = window.localStorage.getItem(stateStorageKey);
-    if (raw === "expanded" || raw === "collapsed" || raw === "hidden") {
-      setPanelState(raw);
-    }
-  }, [stateStorageKey]);
-
-  // Persist panelState — write on change
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(stateStorageKey, panelState);
-  }, [panelState, stateStorageKey]);
 
   // Persist activeId — read on mount (with guard to avoid overriding user switches)
   const activeIdRestoredRef = useRef(false);
@@ -224,7 +214,7 @@ export function usePanelLayout({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [isDragging, panelState, getContainerWidth]);
+  }, [isDragging, panelState, getContainerWidth, setPanelRatio]);
 
   const startDrag = useCallback(() => {
     setIsDragging(true);
@@ -232,7 +222,7 @@ export function usePanelLayout({
 
   const resetPanelRatio = useCallback(() => {
     setPanelRatio(DEFAULT_PANEL_RATIO);
-  }, []);
+  }, [setPanelRatio]);
 
   return {
     containerRef,

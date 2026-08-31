@@ -312,9 +312,13 @@ describe("UnifiedChatPanel panel state persistence", () => {
       </UnifiedChatPanel>,
     );
 
-    // Default state is collapsed
+    // Default state is collapsed, and nothing is persisted until the user
+    // actually changes it: localStorage now *owns* the panel state rather than
+    // mirroring it, so an untouched panel leaves no stored value behind and a
+    // future default change still reaches existing users.
     const stateKey = "arij.unified-chat-panel.state.proj1";
-    expect(window.localStorage.getItem(stateKey)).toBe("collapsed");
+    expect(screen.getByTestId("collapsed-chat-strip")).toBeInTheDocument();
+    expect(window.localStorage.getItem(stateKey)).toBeNull();
 
     // Expand the panel
     fireEvent.click(screen.getByTestId("collapsed-chat-strip"));
