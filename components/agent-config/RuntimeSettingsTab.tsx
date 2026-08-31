@@ -89,9 +89,15 @@ export function RuntimeSettingsTab({
     };
   }, [projectId]);
 
-  // Re-seed the input whenever the loaded values or the scope change.
+  // Re-seed the input whenever the loaded value or the scope changes, and drop
+  // the previous save feedback with it — switching scope shows a different
+  // setting. Adjusting state during render rather than in an effect keeps the
+  // input from showing the outgoing scope's value for one commit.
   // Unlimited round-trips as 0 — "Infinity" is not a number-input value.
-  useEffect(() => {
+  const seed: [number | null, string] = [savedMaxConcurrent, maxConcurrentKey];
+  const [seededFrom, setSeededFrom] = useState(seed);
+  if (seededFrom[0] !== seed[0] || seededFrom[1] !== seed[1]) {
+    setSeededFrom(seed);
     setMaxConcurrentInput(
       savedMaxConcurrent === null
         ? ""
@@ -99,12 +105,8 @@ export function RuntimeSettingsTab({
           ? String(savedMaxConcurrent)
           : "0"
     );
-  }, [savedMaxConcurrent, maxConcurrentKey]);
-
-  // Switching scope shows a different setting — drop the previous feedback.
-  useEffect(() => {
     setMaxConcurrentStatus("idle");
-  }, [maxConcurrentKey]);
+  }
 
   async function toggleSegregation(next: boolean) {
     const previous = segregation;

@@ -80,7 +80,6 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     ref,
   ) {
     const router = useRouter();
-    const [activePanelContent, setActivePanelContent] = useState<"chat" | "shared">("chat");
     const [, forceConversationRefresh] = useState(0);
     const previousSharedPanelIdRef = useRef<string | null>(null);
 
@@ -105,6 +104,30 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       sendMessage: rawSendMessage,
       answerQuestions,
     } = useChat(projectId, activeId);
+
+    // A shared view opens on its own content; the Chat/Details tabs then let
+    // the user switch. Storing that choice *against the panel it was made for*
+    // derives the default — a new shared panel shows itself, no shared panel
+    // shows chat — so the effect that used to flip `activePanelContent`
+    // whenever `panelId` changed is gone, and the two can no longer disagree.
+    const sharedPanelId = sharedPanelView?.panelId ?? null;
+    const [contentChoice, setContentChoice] = useState<{
+      panelId: string | null;
+      content: "chat" | "shared";
+    } | null>(null);
+
+    const activePanelContent: "chat" | "shared" =
+      contentChoice?.panelId === sharedPanelId
+        ? contentChoice.content
+        : sharedPanelId
+          ? "shared"
+          : "chat";
+
+    const setActivePanelContent = useCallback(
+      (content: "chat" | "shared") =>
+        setContentChoice({ panelId: sharedPanelId, content }),
+      [sharedPanelId],
+    );
 
     const hasSharedPanelView = Boolean(sharedPanelView);
     const isSharedPanelActive = hasSharedPanelView && activePanelContent === "shared";
@@ -220,7 +243,14 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       }
 
       await createNewConversationTab({ type: "brainstorm", label: "Brainstorm" });
-    }, [activeId, tabConversations, setActiveId, setPanelState, createNewConversationTab]);
+    }, [
+      activeId,
+      tabConversations,
+      setActiveId,
+      setPanelState,
+      setActivePanelContent,
+      createNewConversationTab,
+    ]);
 
     useImperativeHandle(
       ref,
@@ -240,16 +270,23 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
           setPanelState("hidden");
         },
       }),
-      [openChatConversation, createNewConversationTab, setPanelState],
+      [
+        openChatConversation,
+        createNewConversationTab,
+        setPanelState,
+        setActivePanelContent,
+      ],
     );
 
+    // Opening a shared view expands the panel; closing it collapses again.
+    // Only the panel *size* is synchronised here — which content shows is
+    // derived above — and the size lives in localStorage, not React state.
     useEffect(() => {
       const nextSharedPanelId = sharedPanelView?.panelId ?? null;
       const previousSharedPanelId = previousSharedPanelIdRef.current;
 
       if (!nextSharedPanelId) {
-        if (previousSharedPanelId && activePanelContent === "shared") {
-          setActivePanelContent("chat");
+        if (previousSharedPanelId) {
           setPanelState("collapsed");
         }
         previousSharedPanelIdRef.current = null;
@@ -257,12 +294,11 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       }
 
       if (previousSharedPanelId !== nextSharedPanelId) {
-        setActivePanelContent("shared");
         setPanelState("expanded");
       }
 
       previousSharedPanelIdRef.current = nextSharedPanelId;
-    }, [activePanelContent, sharedPanelView, setPanelState]);
+    }, [sharedPanelView, setPanelState]);
 
     useEffect(() => {
       function onEscape(event: KeyboardEvent) {
