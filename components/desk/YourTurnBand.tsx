@@ -22,9 +22,17 @@ import { AsksYouRow, ConflictRow, FailedRow } from "./AttentionRow";
  * That is the design's own promise: "un matin sans blocage, l'abricot se
  * replie en une ligne."
  *
- * OVERFLOW: past three rows the row list scrolls and the band caps at 40vh, so
- * a backlog of questions can never push WORKING off the screen.
+ * OVERFLOW: the band caps at 30vh and the row list scrolls. Past VISIBLE_ROWS
+ * a mono "+N de plus" line under the list says so, because an overflow marker
+ * inside a scroll container is only visible once you have already scrolled.
+ *
+ * SIZING: the list is `justify-start`, NOT `justify-around`. With space-around
+ * one or two rows spread across the whole 40vh, which is why an almost-empty
+ * coral stratum still crushed READY TO LAND and UP NEXT underneath it.
  */
+
+/** Rows the band shows before it admits to hiding some. */
+const VISIBLE_ROWS = 3;
 export interface YourTurnBandProps {
   awaitingReply: readonly DeskAwaitingReply[];
   failed: readonly DeskFailure[];
@@ -61,10 +69,9 @@ export function YourTurnBand({
       stratum="you"
       density="full"
       gap={11}
-      // Past three rows the band caps and its row list scrolls: a backlog of
-      // questions must never push WORKING — the only band that grows — off
-      // the screen.
-      className={cn("mx-[14px] mt-[10px] max-h-[40vh]", className)}
+      // The band caps and its row list scrolls: a backlog of questions must
+      // never push WORKING — the only band that grows — off the screen.
+      className={cn("mx-[14px] mt-[10px] max-h-[30vh]", className)}
     >
       <BandHeader
         label="Your turn"
@@ -83,7 +90,7 @@ export function YourTurnBand({
       {count > 0 ? (
         <div
           data-testid="desk-your-turn-rows"
-          className="flex min-h-0 flex-1 flex-col justify-around gap-2 overflow-y-auto"
+          className="flex min-h-0 flex-col justify-start gap-2 overflow-y-auto"
         >
           {awaitingReply.map((item) => (
             <AsksYouRow
@@ -115,6 +122,16 @@ export function YourTurnBand({
               pending={pendingIds?.has(item.epicId)}
             />
           ))}
+        </div>
+      ) : null}
+
+      {count > VISIBLE_ROWS ? (
+        // Mono takes no DOM props of its own (closed prop type, no rest
+        // spread), so the test hook lives on the wrapper.
+        <div data-testid="desk-your-turn-overflow" className="shrink-0">
+          <Mono size={11} tone="you-mid">
+            {`+${count - VISIBLE_ROWS} de plus`}
+          </Mono>
         </div>
       ) : null}
     </StrataBand>

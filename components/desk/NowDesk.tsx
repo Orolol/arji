@@ -716,7 +716,12 @@ export function NowDesk({
         onOpenDiff={(item) => handleOpenTicket(item.epicId)}
       />
 
-      <div className="mx-[14px] mt-[10px] grid shrink-0 grid-cols-2 gap-3">
+      {/*
+        A floor, not a growth rule: the grid stays `shrink-0` (WORKING remains
+        the desk's only growing band) but can no longer be squeezed to nothing
+        by a tall YOUR TURN above it.
+      */}
+      <div className="mx-[14px] mt-[10px] grid min-h-[168px] shrink-0 grid-cols-2 gap-3">
         <ReadyToLandBand
           rows={data?.readyToLand ?? []}
           heldBackCount={data?.heldBackCount ?? 0}

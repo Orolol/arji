@@ -266,3 +266,62 @@ describe("row order", () => {
     expect(stamps[2]).toContain("CONFLICT");
   });
 });
+
+/**
+ * The coral stratum used to spread one or two rows over 40vh (`justify-around`)
+ * and crush READY TO LAND / UP NEXT underneath. It now sizes to its content and
+ * admits when it is hiding rows.
+ */
+describe("band sizing", () => {
+  const band = () => document.querySelector('[data-slot="strata-band"]');
+
+  function manyAsks(n: number): DeskAwaitingReply[] {
+    return Array.from({ length: n }, (_, i) =>
+      asks({ epicId: `e-${i}`, title: `Ticket ${i}` }),
+    );
+  }
+
+  it("keeps an empty band folded to its header — no floor, no filler", () => {
+    renderBand();
+    expect(screen.queryByTestId("desk-your-turn-rows")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("desk-your-turn-overflow")).not.toBeInTheDocument();
+    // Never grows: WORKING is the desk's only growing band.
+    expect(band()!.className).toContain("shrink-0");
+    expect(band()!.className).not.toContain("flex-1");
+  });
+
+  it("stops spreading rows over the whole band", () => {
+    renderBand({ awaitingReply: [asks()] });
+    const rows = screen.getByTestId("desk-your-turn-rows");
+    expect(rows.className).toContain("justify-start");
+    // The regression this whole story is about.
+    expect(rows.className).not.toContain("justify-around");
+    expect(rows.className).not.toContain("flex-1");
+  });
+
+  it("caps at 30vh and scrolls rather than pushing WORKING off screen", () => {
+    renderBand({ awaitingReply: manyAsks(6) });
+    expect(band()!.className).toContain("max-h-[30vh]");
+    expect(band()!.className).not.toContain("max-h-[40vh]");
+    expect(screen.getByTestId("desk-your-turn-rows").className).toContain("overflow-y-auto");
+  });
+
+  it("signals overflow past three rows, and stays quiet at three", () => {
+    renderBand({ awaitingReply: manyAsks(3) });
+    expect(screen.queryByTestId("desk-your-turn-overflow")).not.toBeInTheDocument();
+  });
+
+  it("counts the hidden rows in the overflow line", () => {
+    renderBand({ awaitingReply: manyAsks(6) });
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+3 de plus");
+  });
+
+  it("counts overflow across all three families, not just one", () => {
+    renderBand({
+      awaitingReply: [asks({ epicId: "a1" }), asks({ epicId: "a2" })],
+      failed: [failure({ epicId: "f1" })],
+      conflicts: [conflict({ epicId: "c1" })],
+    });
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+1 de plus");
+  });
+});

@@ -43,8 +43,9 @@ export interface UpNextBandProps {
   className?: string;
 }
 
-/** Chips per row. The frame draws three columns and pads short rows. */
-const SLOTS = 3;
+/** Chips per row. The frame drew three; the fourth is the height YOUR TURN
+ *  gave back when it stopped spreading its rows over 40vh. Short rows pad. */
+const SLOTS = 4;
 
 const PROJECT_LABEL_CLASS: Record<ProjectTone, string> = {
   1: "text-project-1-deep",
