@@ -92,7 +92,7 @@ export function SegmentedControl<T extends string>({
             }}
             className={cn(
               "flex h-full min-w-0 items-center justify-center whitespace-nowrap px-[13px]",
-              "text-[12px] leading-none outline-none",
+              "cursor-pointer text-[12px] leading-none outline-none",
               "transition-[background-color,color,opacity] duration-150 motion-reduce:transition-none",
               "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
               "disabled:pointer-events-none disabled:opacity-45",

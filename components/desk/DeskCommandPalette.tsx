@@ -219,7 +219,7 @@ export function DeskCommandPalette({
                   onClose();
                 }}
                 className={cn(
-                  "flex items-center gap-2 rounded-[10px] border-0 px-2 py-[7px] text-left",
+                  "flex cursor-pointer items-center gap-2 rounded-[10px] border-0 px-2 py-[7px] text-left",
                   "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                   index === cursor ? "bg-muted" : "bg-transparent",
                 )}

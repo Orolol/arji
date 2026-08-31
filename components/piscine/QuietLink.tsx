@@ -54,7 +54,7 @@ export function QuietLink({
 }: QuietLinkProps) {
   const classes = cn(
     "inline-flex items-center gap-1 border-0 bg-transparent p-0",
-    "font-sans leading-none no-underline shadow-none outline-none",
+    "cursor-pointer font-sans leading-none no-underline shadow-none outline-none",
     "hover:brightness-[0.92] dark:hover:brightness-[1.12]",
     "transition-[filter,opacity] duration-150 motion-reduce:transition-none",
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
