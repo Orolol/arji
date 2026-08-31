@@ -1,8 +1,8 @@
-import simpleGit, {
-  CheckRepoActions,
-  GitConstructError,
-  type SimpleGit,
-} from "simple-git";
+import { execFile } from "node:child_process";
+import { stat } from "node:fs/promises";
+import { promisify } from "node:util";
+
+import simpleGit, { type SimpleGit } from "simple-git";
 import {
   isSafeRepoSegment,
   matchGitHubRemoteUrl,
@@ -24,6 +24,8 @@ export interface DetectedGitHubRemote extends ParsedGitHubRemote {
 // can share it; re-exported here so server callers keep one import site.
 export type { ParsedGitHubRepoInput } from "@/lib/git/github-url";
 export { parseGitHubRepoInput } from "@/lib/git/github-url";
+
+const execFileAsync = promisify(execFile);
 
 export interface BranchSyncStatus {
   branch: string;
@@ -130,35 +132,82 @@ export class GitRepositoryUnavailableError extends Error {
 }
 
 /**
- * Guard for the operations that need the path to be a repository before they
- * start. Decided from git's own answer rather than from a failed command's
- * stderr: `checkIsRepo()` resolves `false` for a plain directory, and
- * simple-git raises a typed `GitConstructError` when the directory is absent,
- * so neither branch depends on message prose that varies by git version.
+ * git's exit status is the same in every language; its prose is not. Running
+ * the probe under the C locale makes the one message we do read deterministic,
+ * so classification cannot depend on which translation the machine's git was
+ * built with.
  *
- * The bare check is not redundant: `checkIsRepo()` asks "inside a work tree",
- * which a bare repository answers `false` to even though `git remote -v` reads
- * from it perfectly well. Without it this guard would refuse a repository the
- * callers used to handle.
+ * `LANGUAGE` is blanked as well: gettext consults it ahead of `LC_ALL`, and
+ * only ignores it once the locale resolves to C/POSIX. Blanking it costs
+ * nothing and removes the ordering question entirely.
+ */
+function cLocaleEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, LC_ALL: "C", LANGUAGE: "" };
+}
+
+/**
+ * True only for git's "this is not a repository" refusal, read under the
+ * locale we pinned above. Exit 128 is git's generic fatal — it also covers a
+ * corrupt object store and a dubious-ownership refusal — so the status alone
+ * would mislabel a broken repository as an unconfigured one. Anything else
+ * stays an unexpected fault and keeps reaching the caller as a 500.
+ */
+function isNotARepositoryFailure(error: unknown): boolean {
+  const failure = error as { code?: unknown; stderr?: unknown };
+  if (failure.code !== 128) return false;
+  return /not a git repository/i.test(String(failure.stderr ?? ""));
+}
+
+/**
+ * Guard for the operations that need the path to be a repository before they
+ * start.
+ *
+ * Deliberately spawns git directly instead of going through simple-git.
+ * `checkIsRepo()` converts exit 128 into `false` only when stderr matches
+ * `/Not a git repository|Kein Git-Repository/i`, so on a git speaking any
+ * third language it rejects with a generic `GitError` — which is how a plain
+ * directory used to escape this guard and reach the routes as a 500. Pinning
+ * the locale on a `SimpleGit` instance is not an option either: `.env()`
+ * replaces the whole environment, and simple-git 3.36 rejects a spread of
+ * `process.env` outright on any machine that sets `EDITOR`, `PAGER`,
+ * `GIT_SSH_COMMAND` or a credential helper. Spawning git ourselves is what
+ * lets us choose the locale and read the exit status.
+ *
+ * `--is-inside-work-tree` exits 0 for every shape callers legitimately pass —
+ * a work tree, a subdirectory of one, a linked worktree, a bare repository and
+ * the `.git` directory itself — so success is the whole membership test and no
+ * separate bare-repository probe is needed. Only a genuine non-repository
+ * exits 128.
  */
 export async function assertGitRepository(repoPath: string): Promise<void> {
-  let usable: boolean;
+  // Checked first so the ENOENT below can only mean a missing git binary,
+  // which is an unexpected fault rather than a path the user can fix.
   try {
-    // `getGit` stays inside the try: simple-git validates the directory in its
-    // constructor and throws there, synchronously, for a path that is gone.
-    const git = getGit(repoPath);
-    usable =
-      (await git.checkIsRepo()) ||
-      (await git.checkIsRepo(CheckRepoActions.BARE));
+    if (!(await stat(repoPath)).isDirectory()) {
+      throw new GitRepositoryUnavailableError("GIT_REPO_PATH_MISSING", repoPath);
+    }
   } catch (error) {
-    if (error instanceof GitConstructError) {
+    if (error instanceof GitRepositoryUnavailableError) throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
       throw new GitRepositoryUnavailableError("GIT_REPO_PATH_MISSING", repoPath);
     }
     throw error;
   }
 
-  if (!usable) {
-    throw new GitRepositoryUnavailableError("GIT_REPO_NOT_A_REPOSITORY", repoPath);
+  try {
+    await execFileAsync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: repoPath,
+      env: cLocaleEnv(),
+    });
+  } catch (error) {
+    if (isNotARepositoryFailure(error)) {
+      throw new GitRepositoryUnavailableError(
+        "GIT_REPO_NOT_A_REPOSITORY",
+        repoPath
+      );
+    }
+    throw error;
   }
 }
 
