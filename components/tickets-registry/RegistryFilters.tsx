@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Search } from "lucide-react";
 
 import { BreathingDot, GhostInputPill, Mono, PillButton, SelectPill } from "@/components/piscine";
@@ -64,6 +65,12 @@ export interface RegistryFiltersProps {
   focusKey?: number;
   sort: RegistrySort;
   onSortChange: (sort: RegistrySort) => void;
+  /**
+   * Screen-level actions rendered at the head of the right cluster, before
+   * the sort pill. The view's refinement entry point lives here: it is an
+   * action on the screen, not a filter on the rows.
+   */
+  actions?: ReactNode;
   className?: string;
 }
 
@@ -84,6 +91,7 @@ export function RegistryFilters({
   focusKey,
   sort,
   onSortChange,
+  actions,
   className,
 }: RegistryFiltersProps) {
   const statePill = (
@@ -181,7 +189,8 @@ export function RegistryFilters({
         High+
       </PillButton>
 
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-[7px]">
+        {actions}
         {/* `SelectPill`'s mono tone forces font-bold; `font-normal` wins through
             twMerge, and Space Mono ships 400 — a mono element never carries a
             synthesised weight. */}
