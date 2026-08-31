@@ -736,6 +736,7 @@ export function NowDesk({
         projectsById={projectsById}
         onOpenTicket={handleOpenTicket}
         onStopSession={handleStopSession}
+        projectId={projectId ?? undefined}
       />
 
       <YourTurnBand

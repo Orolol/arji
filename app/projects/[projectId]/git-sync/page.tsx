@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
+import { RepoStrataBand } from "@/components/github/RepoStrataBand";
 import { SessionPicker } from "@/components/shared/SessionPicker";
 import {
   Tooltip,
@@ -72,6 +73,38 @@ function diffLineTone(line: string): string {
 export default function GitSyncPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+
+  /**
+   * The project record, for the band below: ahead/behind must be measured
+   * against the STORED default branch (the one worktrees are cut from), not
+   * against whatever branch this page currently has typed in its input.
+   */
+  const [project, setProject] = useState<{
+    gitRepoPath: string | null;
+    githubOwnerRepo: string | null;
+    defaultBranch: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/projects/${projectId}`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled || !json?.data) return;
+        setProject({
+          gitRepoPath: json.data.gitRepoPath ?? null,
+          githubOwnerRepo: json.data.githubOwnerRepo ?? null,
+          defaultBranch: json.data.defaultBranch ?? null,
+        });
+      })
+      .catch(() => {
+        // The band renders its own "not connected" state; a failed project
+        // read must not blank the rest of the page.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const [remote, setRemote] = useState("origin");
   const [branch, setBranch] = useState("");
@@ -300,7 +333,22 @@ export default function GitSyncPage() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 gap-[22px] overflow-y-auto px-[26px] pb-[26px]">
+      <div className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-y-auto px-[26px] pb-[26px]">
+        {/*
+          Repository state, relocated from the pre-redesign RepoStatusBar that
+          used to hang under the project board. Full width above the two
+          columns: it is the headline of this page.
+        */}
+        {project ? (
+          <RepoStrataBand
+            projectId={projectId}
+            ownerRepo={project.githubOwnerRepo}
+            gitRepoPath={project.gitRepoPath}
+            defaultBranch={project.defaultBranch}
+          />
+        ) : null}
+
+        <div className="flex min-h-0 gap-[22px]">
         <div className="flex min-w-0 flex-1 flex-col gap-[18px]">
           <div className="flex flex-col gap-[18px] rounded-[12px] border border-border bg-card p-[20px]">
             <div className="flex flex-wrap gap-[16px]">
@@ -511,6 +559,7 @@ export default function GitSyncPage() {
             </span>
           </div>
         </aside>
+        </div>
       </div>
 
       {toasts.length > 0 && (

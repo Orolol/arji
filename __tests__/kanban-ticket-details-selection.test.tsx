@@ -126,9 +126,6 @@ vi.mock("@/components/chat/UnifiedChatPanel", () => ({
   ),
 }));
 
-vi.mock("@/components/monitor/AgentMonitor", () => ({
-  AgentMonitor: () => null,
-}));
 
 vi.mock("@/components/shared/NamedAgentSelect", () => ({
   NamedAgentSelect: () => <div data-testid="named-agent-select" />,

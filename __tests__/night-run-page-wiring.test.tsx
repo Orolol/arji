@@ -66,7 +66,6 @@ vi.mock("@/components/kanban/RefinementButton", () => ({
   RefinementButton: () => null,
 }));
 vi.mock("@/components/ticket/TicketOverlay", () => ({ TicketOverlay: () => null }));
-vi.mock("@/components/monitor/AgentMonitor", () => ({ AgentMonitor: () => null }));
 vi.mock("@/components/shared/NamedAgentSelect", () => ({
   NamedAgentSelect: () => null,
 }));

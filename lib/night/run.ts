@@ -63,7 +63,7 @@ import { isNightRunCostPartial, sumNightRunCost } from "./summary";
  *     the cap aborts the rest. Claude-only blind spot: other providers report
  *     no cost, so the total is a lower bound.
  *
- * Bookkeeping goes to BOTH registries: dagBatchRegistry (the AgentMonitor
+ * Bookkeeping goes to BOTH registries: dagBatchRegistry (the desk wave
  * wave chip keeps working unchanged) and nightRunRegistry (run snapshot +
  * terminal ring for the morning summary).
  */
@@ -275,7 +275,7 @@ export function startNightRun(input: StartNightRunInput): StartNightRunHandle {
     abortedAtWave: null,
   });
 
-  // The AgentMonitor wave chip polls the DAG registry — night runs feed it
+  // The desk wave chip polls the DAG registry — night runs feed it
   // exactly like plain DAG batches (batchId = the night runId).
   dagBatchRegistry.start({
     batchId: runId,

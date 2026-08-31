@@ -29,7 +29,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ProjectSourceBadge } from "@/components/layout/ProjectSourceBadge";
-import { RepoStatusBar } from "@/components/layout/RepoStatusBar";
 
 interface ProjectSummary {
   gitRepoPath: string | null;
@@ -304,15 +303,6 @@ export default function ProjectLayout({
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 overflow-auto">{children}</div>
       </div>
-
-      {isBoard && (
-        <RepoStatusBar
-          projectId={projectId}
-          ownerRepo={projectSummary.githubOwnerRepo}
-          gitRepoPath={projectSummary.gitRepoPath}
-          defaultBranch={projectSummary.defaultBranch}
-        />
-      )}
     </div>
   );
 }

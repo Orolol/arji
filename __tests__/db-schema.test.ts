@@ -504,6 +504,15 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       updatedAt: "updated_at",
     },
   },
+  deskDismissals: {
+    sqlName: "desk_dismissals",
+    columns: {
+      epicId: "epic_id",
+      kind: "kind",
+      signalAt: "signal_at",
+      dismissedAt: "dismissed_at",
+    },
+  },
   providerUsageSnapshots: {
     sqlName: "provider_usage_snapshots",
     columns: {
