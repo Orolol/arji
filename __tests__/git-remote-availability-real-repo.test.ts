@@ -20,6 +20,7 @@ let bareRemote: string;
 let noRemote: string;
 let withOrigin: string;
 let withOtherRemote: string;
+let pushOnlyOrigin: string;
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf-8" });
@@ -47,6 +48,9 @@ beforeAll(() => {
 
   withOtherRemote = makeRepo("other-remote");
   git(withOtherRemote, "remote", "add", "upstream", bareRemote);
+
+  pushOnlyOrigin = makeRepo("push-only-origin");
+  git(pushOnlyOrigin, "config", "remote.origin.pushurl", bareRemote);
 });
 
 afterAll(() => {
@@ -59,9 +63,17 @@ describe("remote availability against real repositories", () => {
       remote: "origin",
       configured: false,
       configuredRemotes: [],
+      fetchConfigured: false,
+      pushConfigured: false,
+      fetchRemotes: [],
+      pushRemotes: [],
     });
 
-    const error = await assertRemoteConfigured(noRemote).catch((e) => e);
+    const error = await assertRemoteConfigured(
+      noRemote,
+      "origin",
+      "fetch"
+    ).catch((e) => e);
     expect(error).toBeInstanceOf(GitRemoteNotConfiguredError);
     expect(error.code).toBe("remote_not_configured");
   });
@@ -71,8 +83,14 @@ describe("remote availability against real repositories", () => {
       remote: "origin",
       configured: true,
       configuredRemotes: ["origin"],
+      fetchConfigured: true,
+      pushConfigured: true,
+      fetchRemotes: ["origin"],
+      pushRemotes: ["origin"],
     });
-    await expect(assertRemoteConfigured(withOrigin)).resolves.toBeUndefined();
+    await expect(
+      assertRemoteConfigured(withOrigin, "origin", "fetch")
+    ).resolves.toBeUndefined();
   });
 
   it("offers the remote the repository does have when origin is missing", async () => {
@@ -80,10 +98,34 @@ describe("remote availability against real repositories", () => {
       remote: "origin",
       configured: false,
       configuredRemotes: ["upstream"],
+      fetchConfigured: false,
+      pushConfigured: false,
+      fetchRemotes: ["upstream"],
+      pushRemotes: ["upstream"],
     });
     // ...and answers about that remote when it is the one asked for.
     expect(
       await getRemoteAvailability(withOtherRemote, "upstream")
     ).toMatchObject({ remote: "upstream", configured: true });
+  });
+
+  it("distinguishes a push-only origin from a remote that pull can fetch", async () => {
+    expect(await getRemoteAvailability(pushOnlyOrigin)).toMatchObject({
+      remote: "origin",
+      fetchConfigured: false,
+      pushConfigured: true,
+      fetchRemotes: [],
+      pushRemotes: ["origin"],
+    });
+
+    await expect(
+      assertRemoteConfigured(pushOnlyOrigin, "origin", "fetch")
+    ).rejects.toMatchObject({
+      code: "remote_not_configured",
+      operation: "fetch",
+    });
+    await expect(
+      assertRemoteConfigured(pushOnlyOrigin, "origin", "push")
+    ).resolves.toBeUndefined();
   });
 });

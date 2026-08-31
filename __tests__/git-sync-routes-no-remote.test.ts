@@ -41,11 +41,17 @@ const MockGitRemoteNotConfiguredError = vi.hoisted(
       readonly code = "remote_not_configured";
       readonly remote: string;
       readonly configuredRemotes: string[];
-      constructor(remote: string, configuredRemotes: string[]) {
-        super(`No git remote named '${remote}' is configured for this repository.`);
+      readonly operation: "fetch" | "push";
+      constructor(
+        remote: string,
+        configuredRemotes: string[],
+        operation: "fetch" | "push"
+      ) {
+        super(`No ${operation} URL is configured for git remote '${remote}'.`);
         this.name = "GitRemoteNotConfiguredError";
         this.remote = remote;
         this.configuredRemotes = configuredRemotes;
+        this.operation = operation;
       }
     }
 );
@@ -101,14 +107,22 @@ vi.mock("@/lib/github/sync-log", () => ({
 }));
 
 /** Makes the shared remote guard reject exactly as the real one would. */
-function noRemoteConfigured(remote = "origin", configuredRemotes: string[] = []) {
+function noRemoteConfigured(
+  remote = "origin",
+  configuredRemotes: string[] = [],
+  operation: "fetch" | "push" = "fetch"
+) {
   mockAssertRemoteConfigured.mockRejectedValue(
-    new MockGitRemoteNotConfiguredError(remote, configuredRemotes)
+    new MockGitRemoteNotConfiguredError(remote, configuredRemotes, operation)
   );
   mockGetRemoteAvailability.mockResolvedValue({
     remote,
     configured: false,
     configuredRemotes,
+    fetchConfigured: false,
+    pushConfigured: false,
+    fetchRemotes: configuredRemotes,
+    pushRemotes: configuredRemotes,
   });
 }
 
@@ -123,6 +137,10 @@ describe("git push/pull with no usable remote", () => {
       remote: "origin",
       configured: true,
       configuredRemotes: ["origin"],
+      fetchConfigured: true,
+      pushConfigured: true,
+      fetchRemotes: ["origin"],
+      pushRemotes: ["origin"],
     });
     mockPullGitBranchWithConflictSupport.mockReset();
     mockGetConflictFileDiffs.mockReset();
@@ -138,7 +156,7 @@ describe("git push/pull with no usable remote", () => {
 
   it("POST push answers 409 with a structured payload instead of a 500", async () => {
     dbMockState.getQueue = [{ id: "proj-1", gitRepoPath: "/repo" }];
-    noRemoteConfigured("origin", ["upstream"]);
+    noRemoteConfigured("origin", ["upstream"], "push");
 
     const { POST } = await import(
       "@/app/api/projects/[projectId]/git/push/route"
@@ -167,9 +185,9 @@ describe("git push/pull with no usable remote", () => {
     );
   });
 
-  it("POST pull answers 409 with a structured payload instead of a 500", async () => {
+  it("POST pull answers 409 when origin is push-only instead of attempting transport", async () => {
     dbMockState.getQueue = [{ id: "proj-1", gitRepoPath: "/repo" }];
-    noRemoteConfigured("origin", []);
+    noRemoteConfigured("origin", [], "fetch");
 
     const { POST } = await import(
       "@/app/api/projects/[projectId]/git/pull/route"
@@ -183,6 +201,11 @@ describe("git push/pull with no usable remote", () => {
     expect(res.status).toBe(409);
     expect(json.code).toBe("remote_not_configured");
     expect(json.remote).toBe("origin");
+    expect(mockAssertRemoteConfigured).toHaveBeenCalledWith(
+      "/repo",
+      "origin",
+      "fetch"
+    );
     expect(json.configuredRemotes).toEqual([]);
     expect(mockPullGitBranchWithConflictSupport).not.toHaveBeenCalled();
     expect(mockWriteGitSyncLog).toHaveBeenCalledWith(
@@ -198,7 +221,7 @@ describe("git push/pull with no usable remote", () => {
 
   it("honours a non-default remote name from the request body", async () => {
     dbMockState.getQueue = [{ id: "proj-1", gitRepoPath: "/repo" }];
-    noRemoteConfigured("fork", ["origin"]);
+    noRemoteConfigured("fork", ["origin"], "push");
 
     const { POST } = await import(
       "@/app/api/projects/[projectId]/git/push/route"
@@ -209,7 +232,11 @@ describe("git push/pull with no usable remote", () => {
     );
     const json = await res.json();
 
-    expect(mockAssertRemoteConfigured).toHaveBeenCalledWith("/repo", "fork");
+    expect(mockAssertRemoteConfigured).toHaveBeenCalledWith(
+      "/repo",
+      "fork",
+      "push"
+    );
     expect(res.status).toBe(409);
     expect(json.remote).toBe("fork");
     expect(json.configuredRemotes).toEqual(["origin"]);
@@ -304,12 +331,18 @@ describe("GET git status remote configuration", () => {
       remote: "origin",
       configured: false,
       configuredRemotes: ["upstream"],
+      fetchConfigured: false,
+      pushConfigured: false,
+      fetchRemotes: ["upstream"],
+      pushRemotes: ["upstream"],
     });
 
     const { res, json } = await callStatus("/repo-no-remote");
 
     expect(res.status).toBe(200);
     expect(json.data.remoteConfigured).toBe(false);
+    expect(json.data.remoteFetchConfigured).toBe(false);
+    expect(json.data.remotePushConfigured).toBe(false);
     expect(json.data.configuredRemotes).toEqual(["upstream"]);
     // Fetching a remote that does not exist only yields a misleading
     // `lastFetchError`; the precondition is the honest answer.
@@ -322,14 +355,39 @@ describe("GET git status remote configuration", () => {
       remote: "origin",
       configured: true,
       configuredRemotes: ["origin"],
+      fetchConfigured: true,
+      pushConfigured: true,
+      fetchRemotes: ["origin"],
+      pushRemotes: ["origin"],
     });
 
     const { res, json } = await callStatus("/repo-with-remote");
 
     expect(res.status).toBe(200);
     expect(json.data.remoteConfigured).toBe(true);
+    expect(json.data.remoteFetchConfigured).toBe(true);
+    expect(json.data.remotePushConfigured).toBe(true);
     expect(json.data.configuredRemotes).toEqual(["origin"]);
     expect(mockFetchGitRemote).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a push-only remote per operation and does not try to fetch it", async () => {
+    mockGetRemoteAvailability.mockResolvedValue({
+      remote: "origin",
+      configured: true,
+      configuredRemotes: ["origin"],
+      fetchConfigured: false,
+      pushConfigured: true,
+      fetchRemotes: [],
+      pushRemotes: ["origin"],
+    });
+
+    const { res, json } = await callStatus("/repo-push-only");
+
+    expect(res.status).toBe(200);
+    expect(json.data.remoteFetchConfigured).toBe(false);
+    expect(json.data.remotePushConfigured).toBe(true);
+    expect(mockFetchGitRemote).not.toHaveBeenCalled();
   });
 
   it("leaves the state unknown rather than guessing when the remote list is unreadable", async () => {

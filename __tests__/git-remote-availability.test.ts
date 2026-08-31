@@ -39,6 +39,10 @@ describe("getRemoteAvailability", () => {
       remote: "origin",
       configured: true,
       configuredRemotes: ["origin"],
+      fetchConfigured: true,
+      pushConfigured: false,
+      fetchRemotes: ["origin"],
+      pushRemotes: [],
     });
   });
 
@@ -92,7 +96,9 @@ describe("assertRemoteConfigured", () => {
       { name: "origin", refs: { fetch: "https://github.com/owner/repo.git" } },
     ]);
 
-    await expect(assertRemoteConfigured("/repo", "origin")).resolves.toBeUndefined();
+    await expect(
+      assertRemoteConfigured("/repo", "origin", "fetch")
+    ).resolves.toBeUndefined();
   });
 
   it("throws a machine-readable GitRemoteNotConfiguredError when it does not", async () => {
@@ -100,12 +106,17 @@ describe("assertRemoteConfigured", () => {
       { name: "upstream", refs: { fetch: "https://github.com/owner/repo.git" } },
     ]);
 
-    const error = await assertRemoteConfigured("/repo", "origin").catch((e) => e);
+    const error = await assertRemoteConfigured(
+      "/repo",
+      "origin",
+      "fetch"
+    ).catch((e) => e);
 
     expect(error).toBeInstanceOf(GitRemoteNotConfiguredError);
     expect(error.code).toBe("remote_not_configured");
     expect(error.remote).toBe("origin");
     expect(error.configuredRemotes).toEqual(["upstream"]);
+    expect(error.operation).toBe("fetch");
     expect(error.message).toContain("origin");
   });
 });

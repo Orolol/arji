@@ -44,7 +44,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     // Checked before the working-tree/behind validation: a project with no
     // remote cannot be "behind" one, and git's own failure for this state is a
     // transport-shaped error that reads as a server fault.
-    await assertRemoteConfigured(project.gitRepoPath, remote);
+    await assertRemoteConfigured(project.gitRepoPath, remote, "push");
     await validatePushPreconditions(project.gitRepoPath, branch, remote);
     const result = await pushGitBranch(
       project.gitRepoPath,
@@ -89,6 +89,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           remote,
           setUpstream,
           code: error.code,
+          operation: error.operation,
           error: error.message,
         },
       });
@@ -98,6 +99,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           error: error.message,
           code: error.code,
           remote: error.remote,
+          operation: error.operation,
           configuredRemotes: error.configuredRemotes,
         },
         { status: 409 }

@@ -106,7 +106,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   // Fetching a remote that does not exist can only produce a misleading
   // `lastFetchError`; the missing remote is the honest answer.
   const freshness =
-    availability && !availability.configured
+    availability && !availability.fetchConfigured
       ? { lastFetchedAt: null, lastFetchError: null }
       : await refreshRemoteIfStale(project.gitRepoPath, remote);
 
@@ -127,6 +127,14 @@ export async function GET(request: NextRequest, { params }: Params) {
         hasRemoteBranch: status.hasRemoteBranch,
         remoteConfigured: availability ? availability.configured : null,
         configuredRemotes: availability ? availability.configuredRemotes : null,
+        remoteFetchConfigured: availability
+          ? availability.fetchConfigured
+          : null,
+        remotePushConfigured: availability
+          ? availability.pushConfigured
+          : null,
+        fetchRemotes: availability ? availability.fetchRemotes : null,
+        pushRemotes: availability ? availability.pushRemotes : null,
         lastFetchedAt: freshness.lastFetchedAt,
         lastFetchError: freshness.lastFetchError,
       },

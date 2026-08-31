@@ -112,6 +112,10 @@ describe("Project git sync routes", () => {
       remote: "origin",
       configured: true,
       configuredRemotes: ["origin"],
+      fetchConfigured: true,
+      pushConfigured: true,
+      fetchRemotes: ["origin"],
+      pushRemotes: ["origin"],
     });
     mockPullGitBranchWithConflictSupport.mockReset();
     mockGetConflictFileDiffs.mockReset();
@@ -278,6 +282,10 @@ describe("GET git status implicit fetch (TTL)", () => {
       remote: "origin",
       configured: true,
       configuredRemotes: ["origin"],
+      fetchConfigured: true,
+      pushConfigured: true,
+      fetchRemotes: ["origin"],
+      pushRemotes: ["origin"],
     });
     mockGetBranchSyncStatus.mockReset();
     mockGetCurrentGitBranch.mockReset();

@@ -50,6 +50,38 @@ const dbFixture = vi.hoisted(() => ({
   rows: new Map<string, unknown[]>(),
 }));
 
+interface MockQueryChain {
+  where(...args: unknown[]): MockQueryChain;
+  orderBy(...args: unknown[]): MockQueryChain;
+  limit(...args: unknown[]): MockQueryChain;
+  offset(...args: unknown[]): MockQueryChain;
+  groupBy(...args: unknown[]): MockQueryChain;
+  having(...args: unknown[]): MockQueryChain;
+  leftJoin(...args: unknown[]): MockQueryChain;
+  innerJoin(...args: unknown[]): MockQueryChain;
+  rightJoin(...args: unknown[]): MockQueryChain;
+  fullJoin(...args: unknown[]): MockQueryChain;
+  as(...args: unknown[]): MockQueryChain;
+  set(...args: unknown[]): MockQueryChain;
+  values(...args: unknown[]): MockQueryChain;
+  returning(...args: unknown[]): MockQueryChain;
+  onConflictDoNothing(...args: unknown[]): MockQueryChain;
+  onConflictDoUpdate(...args: unknown[]): MockQueryChain;
+  from(table: unknown): MockQueryChain;
+  get(): unknown;
+  all(): unknown[];
+  run(): { changes: number };
+}
+
+interface MockDb {
+  select(...args: unknown[]): MockQueryChain;
+  selectDistinct(...args: unknown[]): MockQueryChain;
+  insert(table: unknown): MockQueryChain;
+  update(table: unknown): MockQueryChain;
+  delete(table: unknown): MockQueryChain;
+  transaction<T>(fn: (tx: MockDb) => T): T;
+}
+
 vi.mock("@/lib/db", async () => {
   const { getTableName } = await import("drizzle-orm");
   const { rows } = dbFixture;
@@ -62,47 +94,44 @@ vi.mock("@/lib/db", async () => {
     }
   };
 
-  const makeChain = (initialTable: unknown): any => {
+  const makeChain = (initialTable: unknown): MockQueryChain => {
     let table = initialTable;
-    const chain: any = {};
-    for (const name of [
-      "where",
-      "orderBy",
-      "limit",
-      "offset",
-      "groupBy",
-      "having",
-      "leftJoin",
-      "innerJoin",
-      "rightJoin",
-      "fullJoin",
-      "as",
-      "set",
-      "values",
-      "returning",
-      "onConflictDoNothing",
-      "onConflictDoUpdate",
-    ]) {
-      chain[name] = vi.fn(() => chain);
-    }
-    chain.from = vi.fn((t: unknown) => {
-      table = t;
-      return chain;
-    });
     const rowsForTable = (): unknown[] => rows.get(tableNameOf(table) ?? "") ?? [];
-    chain.get = vi.fn(() => rowsForTable()[0] ?? null);
-    chain.all = vi.fn(() => rowsForTable());
-    chain.run = vi.fn(() => ({ changes: 1 }));
+    const chain: MockQueryChain = {
+      where: vi.fn(() => chain),
+      orderBy: vi.fn(() => chain),
+      limit: vi.fn(() => chain),
+      offset: vi.fn(() => chain),
+      groupBy: vi.fn(() => chain),
+      having: vi.fn(() => chain),
+      leftJoin: vi.fn(() => chain),
+      innerJoin: vi.fn(() => chain),
+      rightJoin: vi.fn(() => chain),
+      fullJoin: vi.fn(() => chain),
+      as: vi.fn(() => chain),
+      set: vi.fn(() => chain),
+      values: vi.fn(() => chain),
+      returning: vi.fn(() => chain),
+      onConflictDoNothing: vi.fn(() => chain),
+      onConflictDoUpdate: vi.fn(() => chain),
+      from: vi.fn((nextTable: unknown) => {
+        table = nextTable;
+        return chain;
+      }),
+      get: vi.fn(() => rowsForTable()[0] ?? null),
+      all: vi.fn(() => rowsForTable()),
+      run: vi.fn(() => ({ changes: 1 })),
+    };
     return chain;
   };
 
-  const db: any = {
+  const db: MockDb = {
     select: vi.fn(() => makeChain(null)),
     selectDistinct: vi.fn(() => makeChain(null)),
     insert: vi.fn((t: unknown) => makeChain(t)),
     update: vi.fn((t: unknown) => makeChain(t)),
     delete: vi.fn((t: unknown) => makeChain(t)),
-    transaction: vi.fn((fn: (tx: unknown) => unknown) => fn(db)),
+    transaction: <T>(fn: (tx: MockDb) => T) => fn(db),
   };
 
   return { db, sqlite: {}, ensureDbReady: vi.fn() };
@@ -191,6 +220,7 @@ const EPIC_ID = "epic-convention";
 
 /** A repository with no remote at all — created in `beforeAll`. */
 let repoPath = "";
+let pushOnlyRepoPath = "";
 
 const EXERCISED: ExercisedRoute[] = [
   {
@@ -431,6 +461,13 @@ beforeAll(() => {
     "-m",
     "initial"
   );
+
+  pushOnlyRepoPath = path.join(tmpRoot, "push-only-origin");
+  fs.cpSync(repoPath, pushOnlyRepoPath, { recursive: true });
+  const bareRemote = path.join(tmpRoot, "push-target.git");
+  fs.mkdirSync(bareRemote, { recursive: true });
+  git(bareRemote, "init", "--bare");
+  git(pushOnlyRepoPath, "config", "remote.origin.pushurl", bareRemote);
 });
 
 afterAll(() => {
@@ -459,6 +496,32 @@ beforeEach(() => {
 /* ------------------------------------------------------------------ */
 
 describe("git/github route status-code convention", () => {
+  it("classifies a real push-only origin as a pull precondition", async () => {
+    dbFixture.rows.set("projects", [
+      {
+        id: PROJECT_ID,
+        name: "Push only",
+        gitRepoPath: pushOnlyRepoPath,
+        githubOwnerRepo: null,
+        defaultBranch: null,
+      },
+    ]);
+
+    const { POST } = await import("@/app/api/projects/[projectId]/git/pull/route");
+    const response = await POST(
+      mockNextRequest({ body: {} }),
+      mockRouteContext({ projectId: PROJECT_ID })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toMatchObject({
+      code: "remote_not_configured",
+      remote: "origin",
+      operation: "fetch",
+    });
+  });
+
   it("classifies every route the tree exposes under a git/ or github/ segment", () => {
     const classified = new Set(EXERCISED.map((r) => key(r.routePath, r.method)));
 

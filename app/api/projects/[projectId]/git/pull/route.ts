@@ -77,7 +77,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     // Checked before the pull itself: without a remote there is nothing to
     // merge, and git's failure for that state is indistinguishable from a
     // transport error once it reaches the route.
-    await assertRemoteConfigured(project.gitRepoPath, remote);
+    await assertRemoteConfigured(project.gitRepoPath, remote, "fetch");
 
     const result = await pullGitBranchWithConflictSupport(project.gitRepoPath, branch, remote);
 
@@ -310,6 +310,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         detail: {
           remote,
           code: error.code,
+          operation: error.operation,
           error: error.message,
         },
       });
@@ -319,6 +320,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           error: error.message,
           code: error.code,
           remote: error.remote,
+          operation: error.operation,
           configuredRemotes: error.configuredRemotes,
         },
         { status: 409 }

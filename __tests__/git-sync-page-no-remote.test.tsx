@@ -37,6 +37,10 @@ interface StatusData {
   hasRemoteBranch: boolean;
   remoteConfigured?: boolean | null;
   configuredRemotes?: string[] | null;
+  remoteFetchConfigured?: boolean | null;
+  remotePushConfigured?: boolean | null;
+  fetchRemotes?: string[] | null;
+  pushRemotes?: string[] | null;
 }
 
 /**
@@ -82,6 +86,10 @@ const CONFIGURED: StatusData = {
   hasRemoteBranch: true,
   remoteConfigured: true,
   configuredRemotes: ["origin"],
+  remoteFetchConfigured: true,
+  remotePushConfigured: true,
+  fetchRemotes: ["origin"],
+  pushRemotes: ["origin"],
 };
 
 function unconfigured(configuredRemotes: string[] = []): StatusData {
@@ -90,6 +98,10 @@ function unconfigured(configuredRemotes: string[] = []): StatusData {
     hasRemoteBranch: false,
     remoteConfigured: false,
     configuredRemotes,
+    remoteFetchConfigured: false,
+    remotePushConfigured: false,
+    fetchRemotes: configuredRemotes,
+    pushRemotes: configuredRemotes,
   };
 }
 
@@ -164,6 +176,26 @@ describe("GitSyncPage with no usable remote", () => {
       expect(screen.getByText("Ahead")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("git-remote-missing")).toBeNull();
+    expect(screen.getByRole("button", { name: "Push" })).toBeEnabled();
+  });
+
+  it("disables only Pull and explains a push-only remote from status state", async () => {
+    mockPageFetch(() => ({
+      ...CONFIGURED,
+      hasRemoteBranch: false,
+      remoteFetchConfigured: false,
+      remotePushConfigured: true,
+      fetchRemotes: [],
+      pushRemotes: ["origin"],
+    }));
+
+    render(<GitSyncPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("git-remote-fetch-missing")).toBeInTheDocument();
+    });
+    expect(screen.getByText("No remote to pull from")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pull" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Push" })).toBeEnabled();
   });
 

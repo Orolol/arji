@@ -39,11 +39,21 @@ export interface PullWithConflictResult {
 export interface GitRemoteAvailability {
   /** The remote that was asked about, after name validation. */
   remote: string;
-  /** True when that remote exists in the repository with a usable URL. */
+  /** True when that remote can be used by at least one transfer operation. */
   configured: boolean;
-  /** Every remote the repository does have — the UI's recovery options. */
+  /** Every remote usable by at least one transfer operation. */
   configuredRemotes: string[];
+  /** True when pull/fetch can read from the requested remote. */
+  fetchConfigured: boolean;
+  /** True when push can write to the requested remote. */
+  pushConfigured: boolean;
+  /** Remotes with a fetch URL. */
+  fetchRemotes: string[];
+  /** Remotes with a push URL or normal URL fallback. */
+  pushRemotes: string[];
 }
+
+export type GitRemoteOperation = "fetch" | "push";
 
 export class PushValidationError extends Error {
   readonly code: "working_tree_dirty" | "branch_behind_remote";
@@ -69,14 +79,22 @@ export class GitRemoteNotConfiguredError extends Error {
   readonly code = "remote_not_configured" as const;
   readonly remote: string;
   readonly configuredRemotes: string[];
+  readonly operation: GitRemoteOperation;
 
-  constructor(remote: string, configuredRemotes: string[]) {
+  constructor(
+    remote: string,
+    configuredRemotes: string[],
+    operation: GitRemoteOperation
+  ) {
     super(
-      `No git remote named '${remote}' is configured for this repository.`
+      operation === "fetch"
+        ? `No fetch URL is configured for git remote '${remote}'.`
+        : `No push URL is configured for git remote '${remote}'.`
     );
     this.name = "GitRemoteNotConfiguredError";
     this.remote = remote;
     this.configuredRemotes = configuredRemotes;
+    this.operation = operation;
   }
 }
 
@@ -174,20 +192,27 @@ export async function getRemoteAvailability(
   const git = getGit(repoPath);
   const remotes = await git.getRemotes(true);
 
-  // A remote row with no fetch or push URL is registered but unusable, so it
-  // is not something push/pull could ever talk to.
-  const configuredRemotes = remotes
-    .filter((entry) =>
-      Boolean(
-        (entry.refs?.fetch || "").trim() || (entry.refs?.push || "").trim()
-      )
-    )
+  const fetchRemotes = remotes
+    .filter((entry) => Boolean((entry.refs?.fetch || "").trim()))
     .map((entry) => entry.name);
+  // `git remote -v` (and therefore simple-git) resolves a normal remote URL
+  // as both fetch and push. A configured `pushurl` also appears here, so this
+  // list correctly includes the normal-URL fallback and push-only remotes.
+  const pushRemotes = remotes
+    .filter((entry) => Boolean((entry.refs?.push || "").trim()))
+    .map((entry) => entry.name);
+  const configuredRemotes = Array.from(
+    new Set([...fetchRemotes, ...pushRemotes])
+  );
 
   return {
     remote: cleanRemote,
     configured: configuredRemotes.includes(cleanRemote),
     configuredRemotes,
+    fetchConfigured: fetchRemotes.includes(cleanRemote),
+    pushConfigured: pushRemotes.includes(cleanRemote),
+    fetchRemotes,
+    pushRemotes,
   };
 }
 
@@ -197,13 +222,21 @@ export async function getRemoteAvailability(
  */
 export async function assertRemoteConfigured(
   repoPath: string,
-  remote = "origin"
+  remote: string,
+  operation: GitRemoteOperation
 ): Promise<void> {
   const availability = await getRemoteAvailability(repoPath, remote);
-  if (!availability.configured) {
+  const configured =
+    operation === "fetch"
+      ? availability.fetchConfigured
+      : availability.pushConfigured;
+  if (!configured) {
     throw new GitRemoteNotConfiguredError(
       availability.remote,
-      availability.configuredRemotes
+      operation === "fetch"
+        ? availability.fetchRemotes
+        : availability.pushRemotes,
+      operation
     );
   }
 }
