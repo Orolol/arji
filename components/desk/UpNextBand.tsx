@@ -82,7 +82,23 @@ export function chipLabel(ticket: DeskQueueTicket): string {
   return ticket.specOnly ? `${base} · spec` : base;
 }
 
-const CHIP_BASE = "min-w-0 flex-1 rounded-full px-[11px] py-[6px] text-[12.5px] text-left line-clamp-1";
+/**
+ * ONE LINE, and `truncate` is what delivers it — not `line-clamp-1`.
+ *
+ * The chip is a fixed 31px pill, so a label that wraps has nowhere to go. With
+ * `line-clamp-1` Chrome put the ellipsis on line one and then PAINTED the
+ * second line below the pill, sliced in half against the band. Measured on the
+ * scratch stack at 1440x950: `scrollHeight` 50 against a `clientHeight` of 31.
+ *
+ * It predates the fourth slot — reproduced with `SLOTS = 3` on the same tree —
+ * but four narrower chips wrap far more labels, so it went from one chip in a
+ * row to all of them. `truncate` (`white-space: nowrap`) is the honest
+ * expression of a single-line pill anyway, and it fits MORE of the title,
+ * since the whole width is one line. The sibling `line-clamp-1` call sites are
+ * unaffected: READY TO LAND's row was checked with a 140-character title and
+ * clamps correctly, because its row is not height-capped.
+ */
+const CHIP_BASE = "min-w-0 flex-1 truncate rounded-full px-[11px] py-[6px] text-[12.5px] text-left";
 
 const CHIP_RANK: Record<QueueChipRank, string> = {
   1: "bg-card font-medium text-foreground",

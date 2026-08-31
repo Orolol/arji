@@ -144,6 +144,32 @@ describe("row geometry", () => {
     expect(screen.queryByTestId("desk-queue-overflow")).toBeNull();
   });
 
+  /**
+   * jsdom has no layout, so this asserts the CLASS rather than the paint. The
+   * paint was checked in Chrome on a scratch stack: with `line-clamp-1` a
+   * wrapped label put its second line BELOW the pill, sliced in half
+   * (`scrollHeight` 50 against `clientHeight` 31); with `truncate` the chip is
+   * one line with an ellipsis inside the pill. Four slots make chips narrow
+   * enough that most labels wrap, so this guards the fourth slot as much as
+   * the chip.
+   */
+  it("keeps a chip on one line — truncate, never a line clamp", () => {
+    renderBand([
+      {
+        projectId: "p1",
+        tickets: [
+          ticket({
+            epicId: "1",
+            title: "Refonte complete du pipeline autonome avec garde-fous mecaniques",
+          }),
+        ],
+      },
+    ]);
+    const chip = screen.getAllByTestId("desk-queue-chip")[0];
+    expect(chip.className).toContain("truncate");
+    expect(chip.className).not.toContain("line-clamp");
+  });
+
   it("pads a short row so chips line up on the same four columns", () => {
     const { container } = renderBand([
       { projectId: "p1", tickets: [ticket({ epicId: "1" })] },
