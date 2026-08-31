@@ -31,10 +31,12 @@ import type { SessionDetail } from "./types";
  * file. The only fetching that starts here is the 15s `/files` read and, one
  * level down, the log's own chunk pager.
  *
- * KNOWN SEAM, not this packet's to fix: `app/projects/[projectId]/layout.tsx`
- * renders a 54px project header above this, so the 60px header below sits
- * under it. The root is height-bounded so the terminal scrolls internally
- * rather than scrolling the page.
+ * SEAM CLOSED (frame 13a). This screen used to sit under two other bars: the
+ * global top bar AND a 54px project header the project layout drew, with its
+ * own 60px header under both. The project header is gone and `SessionHeaderBar`
+ * is now a body row, so the only header on the route is the global bar. The
+ * root stays height-bounded so the terminal scrolls internally rather than
+ * scrolling the page.
  */
 
 export interface LiveSessionScreenProps {
@@ -110,8 +112,8 @@ export function LiveSessionScreen({
         stopError={stopError}
       />
 
-      {/* No top padding: the header's 60px is the only separation. The header
-          gutter is 24px and the body's 14px — the asymmetry is intentional. */}
+      {/* No top padding: the control row above is the only separation, and it
+          shares this body's 14px gutter so the two line up. */}
       <div className="flex min-h-0 flex-1 gap-[12px] px-[14px] pb-[14px]">
         <div className="flex min-w-0 flex-[7] flex-col gap-[12px]">
           {session.error && (

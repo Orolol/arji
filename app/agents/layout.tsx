@@ -3,13 +3,14 @@ import { WorkshopHeader } from "@/components/agents-workshop/WorkshopHeader";
 /**
  * The agents workshop shell (frame 7a).
  *
- * The global project rail hides itself on /agents (see SELF_NAVIGATING in
- * components/layout/Sidebar.tsx), so this header IS the page's navigation.
- * The header gutter is 24px and every body gutter 14px — that asymmetry comes
- * from the frames and is deliberate.
+ * Navigation is the global bar (`components/piscine/TopBar.tsx`), mounted once
+ * in the root layout. `WorkshopHeader` is no longer a header at all: it is this
+ * screen's SECOND ROW — the five tabs and the Frictions pill — sitting inside
+ * the content area on the 14px body gutter, so /agents draws exactly one 60px
+ * band and it is the bar's.
  *
- * `<main>` in the root layout already provides `flex-1 min-w-0 overflow-auto`
- * inside an `h-screen` row, so the shell only has to fill it.
+ * `<main>` in the root layout already provides `flex-1 min-h-0 min-w-0
+ * overflow-auto` under the bar, so the shell only has to fill it.
  */
 export default function AgentsLayout({
   children,

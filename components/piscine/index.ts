@@ -91,6 +91,17 @@ export type { AvatarSquareProps, AvatarTone, AvatarSize } from "./AvatarSquare";
 export { DeskHeader } from "./DeskHeader";
 export type { DeskHeaderProps } from "./DeskHeader";
 
+/**
+ * The GLOBAL bar (frame 13a). Mounted once in `app/layout.tsx` — a screen
+ * never renders it. It replaces both the retired left rail and the 60px header
+ * every screen used to draw; `DeskHeader` above is what is on its way out.
+ */
+export { TopBar, projectIdFromPath, categoryIsLive } from "./TopBar";
+export type { TopBarProps } from "./TopBar";
+
+export { TopBarMenu, deriveStatuses } from "./TopBarMenu";
+export type { TopBarMenuProps } from "./TopBarMenu";
+
 export { UnderlineTabNav } from "./UnderlineTabNav";
 export type {
   UnderlineTabNavProps,
@@ -122,6 +133,20 @@ export type { QuietDangerActionProps } from "./QuietDangerAction";
  * The token maps, re-exported so a screen needs ONE import for the whole
  * system. `SurfaceStratum` is the shared `stratum` vocabulary above.
  */
+/**
+ * The nav model behind the top bar — three categories, their entries and the
+ * "where does this lead right now?" resolver. Screens and tests share it.
+ */
+export {
+  NAV_CATEGORIES,
+  resolveNavHref,
+  navHrefBlockedReason,
+  isNavEntryActive,
+  activeNavCategory,
+  firstReachableHref,
+} from "@/lib/piscine/nav";
+export type { NavCategory, NavCategoryId, NavEntry } from "@/lib/piscine/nav";
+
 export {
   STRATA,
   STRATUM,

@@ -4,10 +4,10 @@ import type { ProjectTone } from "@/lib/piscine/tokens";
  * Two-letter roster-avatar label. Words first ("Opus Builder" → "OB"), falling
  * back to the first two characters of a single word ("opus" → "Op").
  *
- * TWIN: `projectInitials` in components/layout/Sidebar.tsx does exactly this
- * for the project rail. The algorithm is duplicated rather than imported
- * because that file belongs to another packet; if the two ever need to
- * diverge, they should be given different names first.
+ * ITS TWIN IS GONE: `projectInitials` lived in the left rail
+ * (components/layout/Sidebar.tsx), retired with frame 13a — the global bar
+ * prints full project names on its chips, so nothing abbreviates a project any
+ * more. This is now the only initials rule in the app.
  */
 export function agentInitials(name: string): string {
   const words = name.trim().split(/[\s_-]+/).filter(Boolean);

@@ -6,7 +6,6 @@ import { Sparkles } from "lucide-react";
 
 import { PillButton } from "@/components/piscine";
 import { DocsCard } from "@/components/spec/DocsCard";
-import { HeaderActionSlot } from "@/components/spec/HeaderActionSlot";
 import { MemoryPanel } from "@/components/spec/MemoryPanel";
 import { PromptAnatomyBand } from "@/components/spec/PromptAnatomyBand";
 import { SpecBand } from "@/components/spec/SpecBand";
@@ -245,19 +244,25 @@ export default function SpecPage({
     }
   }
 
+  /**
+   * Frame 8b drew "Régénérer par chat" in the project's 60px header. That
+   * header is gone (frame 13a — the global bar is the only one now), and with
+   * it the `#project-header-actions` node `HeaderActionSlot` used to portal
+   * into: the slot could never find a host again, so the portal was deleted and
+   * the pill renders where the fallback already put it — the right end of the
+   * SPEC band's own header row, which IS this screen's second row.
+   */
   const regenerateAction = (
-    <HeaderActionSlot projectId={projectId}>
-      <PillButton
-        variant="filled"
-        size="md"
-        icon={Sparkles}
-        data-testid="spec-update-button"
-        onClick={() => setUpdateDialogOpen(true)}
-        disabled={updateStatus === "running"}
-      >
-        Régénérer par chat
-      </PillButton>
-    </HeaderActionSlot>
+    <PillButton
+      variant="filled"
+      size="md"
+      icon={Sparkles}
+      data-testid="spec-update-button"
+      onClick={() => setUpdateDialogOpen(true)}
+      disabled={updateStatus === "running"}
+    >
+      Régénérer par chat
+    </PillButton>
   );
 
   return (

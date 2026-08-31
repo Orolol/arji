@@ -1,11 +1,15 @@
 /**
- * Settings page — "Autonomous Pipeline" card: loads the stored values,
- * round-trips the toggle and the two numeric caps through PATCH
- * /api/settings, clamps out-of-range input, and reverts on failure.
+ * Settings → Pipeline: the PIPELINE and VÉRIFICATION bands load the stored
+ * values, batch every edit into one PATCH /api/settings through the tab's
+ * shared footer, and refuse a value the gate could not use rather than storing
+ * it.
+ *
+ * The tab itself is a declared deviation from frame 11c, which draws no home
+ * for these nine settings; see app/settings/layout.tsx.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import SettingsPage from "@/app/settings/page";
+import PipelineSettingsPage from "@/app/settings/pipeline/page";
 import {
   parsePipelineMaxAttempts,
   parsePipelineMaxFixCycles,
@@ -34,7 +38,8 @@ beforeEach(() => {
       if (!patchShouldFail) Object.assign(stored, body);
       return Promise.resolve({
         ok: !patchShouldFail,
-        json: () => Promise.resolve(patchShouldFail ? { error: "nope" } : { data: body }),
+        json: () =>
+          Promise.resolve(patchShouldFail ? { error: "nope" } : { data: body }),
       });
     }
     if (url === "/api/settings") {
@@ -47,23 +52,33 @@ beforeEach(() => {
   });
 });
 
-describe("Settings page — Autonomous Pipeline card", () => {
+/** Every toggle on this screen is a real switch, not a checkbox. */
+function expectSwitch(testId: string, on: boolean) {
+  expect(screen.getByTestId(testId)).toHaveAttribute(
+    "aria-checked",
+    on ? "true" : "false"
+  );
+}
+
+function save() {
+  fireEvent.click(screen.getByTestId("settings-save"));
+}
+
+describe("Settings page — Autonomous Pipeline band", () => {
   it("renders defaults when nothing is stored", async () => {
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
 
     expect(
       screen.getByRole("heading", { name: "Autonomous Pipeline" })
     ).toBeInTheDocument();
 
-    await waitFor(() =>
-      expect(screen.getByTestId("pipeline-enabled-toggle")).not.toBeChecked()
-    );
-    expect(screen.getByTestId("pipeline-grader-toggle")).not.toBeChecked();
+    await waitFor(() => expectSwitch("pipeline-enabled-toggle", false));
+    expectSwitch("pipeline-grader-toggle", false);
     expect(screen.getByLabelText("Attempts per stage")).toHaveValue(2);
     expect(screen.getByLabelText("Review → fix cycles")).toHaveValue(2);
   });
 
-  it("hydrates the card from the stored settings", async () => {
+  it("hydrates the band from the stored settings", async () => {
     stored = {
       pipeline_enabled: true,
       pipeline_grader_enabled: true,
@@ -71,43 +86,44 @@ describe("Settings page — Autonomous Pipeline card", () => {
       pipeline_max_fix_cycles: 0,
     };
 
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
 
-    await waitFor(() =>
-      expect(screen.getByTestId("pipeline-enabled-toggle")).toBeChecked()
-    );
-    expect(screen.getByTestId("pipeline-grader-toggle")).toBeChecked();
+    await waitFor(() => expectSwitch("pipeline-enabled-toggle", true));
+    expectSwitch("pipeline-grader-toggle", true);
     expect(screen.getByLabelText("Attempts per stage")).toHaveValue(4);
     expect(screen.getByLabelText("Review → fix cycles")).toHaveValue(0);
   });
 
-  it("PATCHes pipeline_enabled when the toggle flips", async () => {
-    render(<SettingsPage />);
-    await waitFor(() =>
-      expect(screen.getByTestId("pipeline-enabled-toggle")).toBeInTheDocument()
-    );
+  it("PATCHes pipeline_enabled when the toggle flips and Save is pressed", async () => {
+    render(<PipelineSettingsPage />);
+    await waitFor(() => screen.getByTestId("pipeline-enabled-toggle"));
 
     fireEvent.click(screen.getByTestId("pipeline-enabled-toggle"));
+    // Nothing travels until Save: the tab is draft-and-commit.
+    expect(patchCalls).toHaveLength(0);
+    save();
 
-    await waitFor(() =>
-      expect(patchCalls).toContainEqual({ pipeline_enabled: true })
-    );
-    expect(screen.getByTestId("pipeline-enabled-toggle")).toBeChecked();
+    await waitFor(() => expect(patchCalls).toContainEqual({ pipeline_enabled: true }));
+    expectSwitch("pipeline-enabled-toggle", true);
   });
 
-  it("PATCHes the independently opt-in grader setting", async () => {
-    render(<SettingsPage />);
+  it("batches both pipeline flags into a single PATCH", async () => {
+    render(<PipelineSettingsPage />);
     await waitFor(() => screen.getByTestId("pipeline-grader-toggle"));
 
+    fireEvent.click(screen.getByTestId("pipeline-enabled-toggle"));
     fireEvent.click(screen.getByTestId("pipeline-grader-toggle"));
+    save();
 
-    await waitFor(() =>
-      expect(patchCalls).toContainEqual({ pipeline_grader_enabled: true })
-    );
+    await waitFor(() => expect(patchCalls).toHaveLength(1));
+    expect(patchCalls[0]).toEqual({
+      pipeline_enabled: true,
+      pipeline_grader_enabled: true,
+    });
   });
 
   it("PATCHes the caps and clamps out-of-range values", async () => {
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
     await waitFor(() =>
       expect(screen.getByLabelText("Attempts per stage")).toBeInTheDocument()
     );
@@ -115,42 +131,41 @@ describe("Settings page — Autonomous Pipeline card", () => {
     fireEvent.change(screen.getByLabelText("Attempts per stage"), {
       target: { value: "9" },
     });
+    save();
     await waitFor(() =>
       expect(patchCalls).toContainEqual({ pipeline_max_attempts: 5 })
+    );
+    // Stored is what is shown: the field snaps to the clamped value.
+    await waitFor(() =>
+      expect(screen.getByLabelText("Attempts per stage")).toHaveValue(5)
     );
 
     fireEvent.change(screen.getByLabelText("Review → fix cycles"), {
       target: { value: "0" },
     });
+    save();
     await waitFor(() =>
       expect(patchCalls).toContainEqual({ pipeline_max_fix_cycles: 0 })
     );
-    expect(
-      screen.getByText(
-        "Fix cycles disabled: blocking findings end the run immediately."
-      )
-    ).toBeInTheDocument();
   });
 
-  it("reverts the toggle and reports an error when the PATCH fails", async () => {
+  it("keeps the edit on screen and reports the error when the PATCH fails", async () => {
     patchShouldFail = true;
-    render(<SettingsPage />);
-    await waitFor(() =>
-      expect(screen.getByTestId("pipeline-enabled-toggle")).toBeInTheDocument()
-    );
+    render(<PipelineSettingsPage />);
+    await waitFor(() => screen.getByTestId("pipeline-enabled-toggle"));
 
     fireEvent.click(screen.getByTestId("pipeline-enabled-toggle"));
+    save();
 
     await waitFor(() =>
-      expect(
-        screen.getByText("Failed to save the pipeline settings.")
-      ).toBeInTheDocument()
+      expect(screen.getByTestId("settings-message")).toHaveTextContent("nope")
     );
-    expect(screen.getByTestId("pipeline-enabled-toggle")).not.toBeChecked();
+    // Draft-and-commit: the unsaved edit stays, so the user can retry it.
+    expectSwitch("pipeline-enabled-toggle", true);
   });
 
   it("ignores non-numeric input instead of PATCHing garbage", async () => {
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
     await waitFor(() =>
       expect(screen.getByLabelText("Attempts per stage")).toBeInTheDocument()
     );
@@ -158,6 +173,7 @@ describe("Settings page — Autonomous Pipeline card", () => {
     fireEvent.change(screen.getByLabelText("Attempts per stage"), {
       target: { value: "" },
     });
+    save();
 
     await new Promise((r) => setTimeout(r, 0));
     expect(patchCalls).toHaveLength(0);
@@ -166,7 +182,7 @@ describe("Settings page — Autonomous Pipeline card", () => {
 
 describe("Settings page — bug regression command and patterns", () => {
   it("hides the command and pattern fields until the gate is switched on", async () => {
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
     await waitFor(() => screen.getByTestId("bug-regression-toggle"));
 
     expect(screen.queryByTestId("bug-regression-command")).toBeNull();
@@ -179,7 +195,7 @@ describe("Settings page — bug regression command and patterns", () => {
 
   it("shows the effective defaults and PATCHes an edited command", async () => {
     stored = { bug_regression_check: true };
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
 
     const command = (await waitFor(() =>
       screen.getByTestId("bug-regression-command")
@@ -188,7 +204,7 @@ describe("Settings page — bug regression command and patterns", () => {
     expect(command.value).toBe(DEFAULT_BUG_REGRESSION_COMMAND);
 
     fireEvent.change(command, { target: { value: "bundle exec rspec {files}" } });
-    fireEvent.blur(command);
+    save();
 
     await waitFor(() =>
       expect(patchCalls).toContainEqual({
@@ -200,23 +216,21 @@ describe("Settings page — bug regression command and patterns", () => {
   it("refuses a command without the {files} placeholder instead of storing it", async () => {
     // Such a template would run the entire suite on every check.
     stored = { bug_regression_check: true };
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
 
     const command = (await waitFor(() =>
       screen.getByTestId("bug-regression-command")
     )) as HTMLInputElement;
     fireEvent.change(command, { target: { value: "npm test" } });
-    fireEvent.blur(command);
+    save();
 
     await waitFor(() => screen.getByText(/must contain \{files\}/i));
-    expect(
-      patchCalls.some((c) => "bug_regression_command" in c)
-    ).toBe(false);
+    expect(patchCalls.some((c) => "bug_regression_command" in c)).toBe(false);
   });
 
   it("PATCHes comma-separated patterns as an array", async () => {
     stored = { bug_regression_check: true };
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
 
     const patterns = (await waitFor(() =>
       screen.getByTestId("test-file-patterns")
@@ -224,19 +238,25 @@ describe("Settings page — bug regression command and patterns", () => {
     expect(patterns.value).toBe(DEFAULT_TEST_FILE_PATTERNS.join(", "));
 
     fireEvent.change(patterns, { target: { value: "spec/**/*.rb, test/**/*.rb" } });
-    fireEvent.blur(patterns);
+    save();
 
     await waitFor(() =>
       expect(patchCalls).toContainEqual({
         test_file_patterns: ["spec/**/*.rb", "test/**/*.rb"],
       })
     );
+    // Re-joined from what was stored, not from what was typed.
+    await waitFor(() =>
+      expect(screen.getByTestId("test-file-patterns")).toHaveValue(
+        "spec/**/*.rb, test/**/*.rb"
+      )
+    );
   });
 });
 
 describe("Settings page — deterministic verification", () => {
   it("renders the disabled defaults when no verify setting is stored", async () => {
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
 
     const commands = (await waitFor(() =>
       screen.getByTestId("verify-commands")
@@ -249,19 +269,19 @@ describe("Settings page — deterministic verification", () => {
 
   it("hydrates PATCH-encoded commands and saves normalized settings", async () => {
     stored = {
-      verify_commands: JSON.stringify([
-        { name: "test", command: "npm test" },
-      ]),
+      verify_commands: JSON.stringify([{ name: "test", command: "npm test" }]),
       verify_timeout_ms: "45000",
     };
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
 
     const commands = (await waitFor(() =>
       screen.getByTestId("verify-commands")
     )) as HTMLTextAreaElement;
-    expect(JSON.parse(commands.value)).toEqual([
-      { name: "test", command: "npm test" },
-    ]);
+    await waitFor(() =>
+      expect(JSON.parse(commands.value)).toEqual([
+        { name: "test", command: "npm test" },
+      ])
+    );
     expect(screen.getByTestId("verify-timeout-ms")).toHaveValue(45_000);
 
     fireEvent.change(commands, {
@@ -275,9 +295,7 @@ describe("Settings page — deterministic verification", () => {
     fireEvent.change(screen.getByTestId("verify-timeout-ms"), {
       target: { value: "90000" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save verification settings" })
-    );
+    save();
 
     await waitFor(() =>
       expect(patchCalls).toContainEqual({
@@ -291,13 +309,11 @@ describe("Settings page — deterministic verification", () => {
   });
 
   it("rejects malformed commands without PATCHing settings", async () => {
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
     const commands = await waitFor(() => screen.getByTestId("verify-commands"));
 
     fireEvent.change(commands, { target: { value: '[{"name":"test"}]' } });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save verification settings" })
-    );
+    save();
 
     expect(
       await screen.findByText(/must be a JSON array of objects/i)
@@ -307,7 +323,7 @@ describe("Settings page — deterministic verification", () => {
 
   it("puts the typed value back when the PATCH fails", async () => {
     patchShouldFail = true;
-    render(<SettingsPage />);
+    render(<PipelineSettingsPage />);
     const commands = (await waitFor(() =>
       screen.getByTestId("verify-commands")
     )) as HTMLTextAreaElement;
@@ -317,13 +333,9 @@ describe("Settings page — deterministic verification", () => {
     fireEvent.change(screen.getByTestId("verify-timeout-ms"), {
       target: { value: "45000" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save verification settings" })
-    );
+    save();
 
-    expect(
-      await screen.findByText(/Failed to save the pipeline settings/i)
-    ).toBeInTheDocument();
+    expect(await screen.findByText("nope")).toBeInTheDocument();
     // Leaving the pretty-printed value on screen next to the error would
     // imply a value that was never persisted.
     expect(commands.value).toBe(typed);
@@ -343,9 +355,7 @@ describe("pipeline setting parsers", () => {
 
   it("resolves the effective enabled default project-first", () => {
     expect(resolvePipelineEnabledDefault({}, "p1")).toBe(false);
-    expect(resolvePipelineEnabledDefault({ pipeline_enabled: true }, "p1")).toBe(
-      true
-    );
+    expect(resolvePipelineEnabledDefault({ pipeline_enabled: true }, "p1")).toBe(true);
     expect(
       resolvePipelineEnabledDefault(
         { pipeline_enabled: true, "pipeline_enabled:p1": false },
