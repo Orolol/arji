@@ -46,9 +46,12 @@ describe("README — importing from GitHub", () => {
     expect(readme).toMatch(/relative one.*refused/is);
   });
 
-  it("states that private repositories need the PAT from Settings", () => {
+  it("states that private repositories need the PAT from Paramètres", () => {
     expect(readme).toMatch(/[Pp]rivate repositories.*PAT/s);
-    expect(readme).toContain("Settings → GitHub PAT");
+    // The settings sheet became the Paramètres screen in the control-desk
+    // redesign; the PAT now lives on its Intégrations section. The fact a user
+    // acts on is unchanged — only where they go to do it.
+    expect(readme).toContain("Paramètres → Intégrations");
     expect(readme).toMatch(/settings.*table/i);
   });
 

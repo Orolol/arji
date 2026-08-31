@@ -1,5 +1,7 @@
 # Plan de nettoyage & refacto — 2026-08-14
 
+> **Document d'archive — 2026-08-31.** L'UI décrite ci-dessous a été remplacée par la refonte en control desk à strates d'attention ; ce fichier est conservé tel qu'écrit à sa date et n'a pas été révisé. UI actuelle : `README.md`, `docs/specs.md`.
+
 Audit complet du repo (7 dimensions, chaque affirmation de code mort contre-vérifiée
 par grep exhaustif : imports dynamiques, conventions Next.js, fichiers de config, barrels).
 

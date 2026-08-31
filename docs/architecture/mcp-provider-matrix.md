@@ -19,9 +19,11 @@ below as the record of why they went.
 registered provider has the channel, a review session that files neither a
 `submit_findings` verdict nor a finding row is not "a review that found
 nothing" — it is a review whose channel did not work. Such a review is
-*unverifiable*: it does not satisfy `review → done`, does not satisfy the Full
-Auto merge gate, and shows as a blocking reason on the board
-(`lib/pipeline/findings.ts`). A 401 on `submit_findings` is also traced onto
+*unverifiable*: it does not satisfy `review → done` and does not satisfy the
+Full Auto merge gate (`lib/pipeline/findings.ts`); the engine's own refusal
+message says the channel is broken rather than that no review ran, and that
+message is what surfaces on the ticket overlay's status control and merge
+button. A 401 on `submit_findings` is also traced onto
 the ticket (`lib/mcp/review-channel-failure.ts`), because that rejection is
 otherwise invisible — the session still ends `answered`.
 
@@ -43,8 +45,12 @@ by prose rather than refused.
 Known gap: for `oh-my-pi` and `agy` the server entry lives in a user-global
 config file Arij does not own, so `injected` means "Arij handed over the
 environment", not "the CLI loaded it" — and `agy` reports a missing entry as a
-quietly failed server. That case still looks injected; the 401 trace and the
-Review-column badge are what surface it.
+quietly failed server. That case still looks injected. What surfaces it now
+that the Review column is gone: the 401 trace's activity entry and
+notification (`lib/mcp/review-channel-failure.ts`), and the `/qa` screen's
+verdict text — `QA_UNVERIFIABLE_TEXT`, "review unverifiable · findings jamais
+reçues" (`lib/qa/aggregate.ts`). There is no badge on the desk for it; a
+ticket whose review is unverifiable simply never appears in READY TO LAND.
 
 ## The gate
 

@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { RefinementButton } from "@/components/kanban/RefinementButton";
+import { Mono, SelectPill } from "@/components/piscine";
 import { useTicketOverlay } from "@/components/ticket/TicketOverlayProvider";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { DeskProject } from "@/lib/control-desk/types";
 import { REGISTRY_GROUP_ORDER } from "@/lib/tickets-registry/aggregate";
 import {
@@ -106,8 +109,33 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
     () => new Set(),
   );
 
-  const { data, error, setWindow } = useTicketsRegistry(projectId ?? null, query);
+  const { data, error, setWindow, refresh } = useTicketsRegistry(projectId ?? null, query);
   const { openTicket } = useTicketOverlay();
+
+  /**
+   * In an UNscoped registry, which project's board the refinement pass
+   * targets. The pass is per-project (`/api/projects/:id/refinement`), and
+   * this screen shows tickets from every project at once, so the target is
+   * picked explicitly from the projects the registry already lists — never
+   * inferred. In a scoped registry the route param is authoritative and this
+   * state is neither read nor written.
+   */
+  const [refinementProjectId, setRefinementProjectId] = useState<string | null>(null);
+  /**
+   * The transient outcome line of a dispatch attempt. This screen has no
+   * toast rail, so the filter row is that surface: the text says what
+   * happened, the tone says whether to worry, and it clears itself.
+   */
+  const [refinementNotice, setRefinementNotice] = useState<{
+    tone: "success" | "error";
+    text: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!refinementNotice) return;
+    const timer = setTimeout(() => setRefinementNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [refinementNotice]);
 
   /**
    * ⌘F / Ctrl-F focuses the filter field. Same shape as the desk's ⌘K handler,
@@ -216,6 +244,97 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
     downloadCsv(filteredRows);
   }, [filteredRows]);
 
+  /**
+   * The refinement entry point, rendered into the filter row's right cluster.
+   *
+   * Scoped registry (`?project=`): the route param is the pass's target,
+   * exactly like the board's toolbar button — no picker, nothing to choose.
+   * Unscoped: the pass still targets ONE project's board, and the projects
+   * the registry already lists are the picker's only options. The picker is
+   * disabled until the first response (there is nothing to name yet) and for
+   * an empty app (there is nothing to refine).
+   */
+  const projects = data?.projects ?? [];
+  const selectedProject = refinementProjectId
+    ? projects.find((p) => p.id === refinementProjectId)
+    : undefined;
+  const refinementTarget = projectId ?? refinementProjectId;
+
+  const handleRefinementStarted = useCallback(() => {
+    setRefinementNotice({
+      tone: "success",
+      text: "Agent Refinement started — re-passing Backlog and To do",
+    });
+  }, []);
+
+  const handleRefinementFinished = useCallback(() => {
+    setRefinementNotice({
+      tone: "success",
+      text: "Board refinement finished — see the notification for the summary",
+    });
+    // The pass reshaped the planning columns: pull the new order and the
+    // moved tickets in now rather than waiting for the next poll.
+    void refresh();
+  }, [refresh]);
+
+  const handleRefinementError = useCallback((message: string) => {
+    setRefinementNotice({ tone: "error", text: message });
+  }, []);
+
+  const handleRefinementNotice = useCallback((message: string) => {
+    setRefinementNotice({ tone: "success", text: message });
+  }, []);
+
+  // `key={target}` forces a fresh instance per project: the button's
+  // running-edge ref must not remember a pass that belonged to the previous
+  // target, or switching targets would announce a finish that never happened.
+  const refinementButton = (target: string) => (
+    <RefinementButton
+      key={target}
+      projectId={target}
+      onError={handleRefinementError}
+      onNotice={handleRefinementNotice}
+      onStarted={handleRefinementStarted}
+      onFinished={handleRefinementFinished}
+    />
+  );
+
+  const refinementActions = (
+    <div data-testid="refine-actions" className="flex items-center gap-[7px]">
+      {refinementNotice ? (
+        <span data-testid="refinement-notice">
+          <Mono size={11} tone={refinementNotice.tone === "error" ? "danger" : "muted"}>
+            {refinementNotice.text}
+          </Mono>
+        </span>
+      ) : null}
+      {projectId ? (
+        refinementButton(projectId)
+      ) : (
+        <>
+          <SelectPill
+            label={selectedProject ? `refine: ${selectedProject.shortName}` : "refine: —"}
+            tone="mono"
+            fill="transparent"
+            disabled={projects.length === 0}
+            className="h-[26px] px-0 font-normal text-muted-foreground"
+          >
+            {projects.map((project) => (
+              <DropdownMenuItem
+                key={project.id}
+                onSelect={() => setRefinementProjectId(project.id)}
+                data-testid={`refine-project-${project.id}`}
+              >
+                {project.name}
+              </DropdownMenuItem>
+            ))}
+          </SelectPill>
+          {refinementTarget ? refinementButton(refinementTarget) : null}
+        </>
+      )}
+    </div>
+  );
+
   const ticketCount = filtersActive ? filteredRows.length : (data?.totals.tickets ?? 0);
   const projectCount = data?.totals.projects ?? 0;
   const footerStatus =
@@ -251,6 +370,7 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
         focusKey={focusKey}
         sort={sort}
         onSortChange={setSort}
+        actions={refinementActions}
       />
 
       <div className="flex min-h-0 flex-1 flex-col px-[14px] pb-[14px]">
