@@ -39,12 +39,16 @@
  *     same neutralisation.
  *   - The *evidence* channel is what a builder reasons **over**: an earlier
  *     session's own final text (`resultSummary`), the cross-session Dreaming
- *     digest, the mechanically grouped telescope payload. That text is agent
- *     output, and the memory a distill or a dream writes from it is injected
- *     into every later prompt for the project — so a directive smuggled here
- *     is the spec-rewrite incident with one extra hop. Unlike the document
- *     under rewrite this evidence is quotable rather than reproduced, so it
- *     is both neutralised AND fenced, under its own notice.
+ *     digest, the mechanically grouped telescope payload, the final branch
+ *     diff the Full Auto merge gate reads. That text is agent output, and the
+ *     memory a distill or a dream writes from it is injected into every later
+ *     prompt for the project — so a directive smuggled here is the
+ *     spec-rewrite incident with one extra hop. The diff is shorter still: a
+ *     build agent that commits a directive into any file on its branch is
+ *     addressing the session that decides whether the branch merges. Unlike
+ *     the document under rewrite this evidence is quotable rather than
+ *     reproduced, so it is both neutralised AND fenced, under its own
+ *     notice.
  */
 
 import { describe, expect, it } from "vitest";
@@ -477,6 +481,21 @@ const BUILDERS: Record<string, BuilderCase> = {
   },
   buildSecondOpinionPrompt: {
     channel: "fenced",
+    evidence: {
+      build: (payload) =>
+        promptBuilder.buildSecondOpinionPrompt(
+          cleanProject,
+          epic,
+          [story],
+          "feature/epic-queue",
+          "main",
+          payload,
+        ),
+      heading: "## Independent Second Opinion",
+      fenceInfo: /^diff$/,
+      evidenceNote:
+        "The final branch diff is the build agent's own committed work, replayed into the session that decides whether Full Auto merges it — the last gate before the base branch.",
+    },
     build: (p) =>
       promptBuilder.buildSecondOpinionPrompt(
         p,
@@ -786,6 +805,7 @@ describe("evidence-channel coverage", () => {
       "buildDreamingPrompt",
       "buildFailureDigestPrompt",
       "buildMemoryDistillPrompt",
+      "buildSecondOpinionPrompt",
     ]);
   });
 });
