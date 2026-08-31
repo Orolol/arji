@@ -1,7 +1,7 @@
 /**
  * What the platform actually hands `POST /api/projects/:id/chat/upload`.
  *
- * `middleware.ts` matches `/api/:path*`, so Next buffers every API request
+ * `proxy.ts` matches `/api/:path*`, so Next buffers every API request
  * body up to `experimental.proxyClientMaxBodySize` and gives the route only
  * what fitted. A body over that cap arrives truncated and `request.formData()`
  * rejects with a `TypeError`, which is a different failure — and a different

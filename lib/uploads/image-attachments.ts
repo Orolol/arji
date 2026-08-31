@@ -23,7 +23,7 @@ export const IMAGE_UPLOAD_ACCEPT = ALLOWED_IMAGE_MIME_TYPES.join(",");
  * The application's own limit on one attached image.
  *
  * It must stay strictly below `experimental.proxyClientMaxBodySize` in
- * `next.config.ts`: `middleware.ts` matches `/api/:path*`, so Next buffers the
+ * `next.config.ts`: `proxy.ts` matches `/api/:path*`, so Next buffers the
  * request body up to that cap, and a file at the same number overflows it once
  * the multipart envelope is added — the body then reaches the route truncated
  * and `imageUploadRejectionReason` never sees the file at all.

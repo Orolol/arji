@@ -75,7 +75,7 @@ not depend on that setting being right. If you point it somewhere by hand,
 keep it on `localhost`.
 
 `__tests__/next-config-dev-origins.test.ts` pins the two layers together —
-every loopback host `middleware.ts` accepts for `/api/*` must also be served
+every loopback host `proxy.ts` accepts for `/api/*` must also be served
 `/_next/*`. A Next upgrade that changes the rule fails that test rather than
 this suite.
 

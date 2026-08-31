@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3", "pdf-parse", "pdfjs-dist"],
 
   /**
-   * The loopback hosts `middleware.ts` already accepts for `/api/*`.
+   * The loopback hosts `proxy.ts` already accepts for `/api/*`.
    *
    * Next 16.3 blocks cross-site requests to `/_next/*` dev resources against a
    * default allowlist of `['**.localhost', 'localhost']` plus whatever
@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
    * `http://127.0.0.1:3000` every `/_next/static/chunks/*.js` came back 403
    * while `http://localhost:3000` worked.
    *
-   * Nothing announces that. The API answers — middleware trusts `127.0.0.1` —
+   * Nothing announces that. The API answers — the proxy trusts `127.0.0.1` —
    * and the server markup renders, so the page looks like it loaded; hydration
    * just never runs and the board sits inert. Measured on 16.3.3: with
    * `Sec-Fetch-Mode: no-cors` + `Sec-Fetch-Site: cross-site`, a `127.0.0.1`
@@ -29,7 +29,7 @@ const nextConfig: NextConfig = {
 
   experimental: {
     /**
-     * `middleware.ts` matches `/api/:path*`, so Next buffers every API request
+     * `proxy.ts` matches `/api/:path*`, so Next buffers every API request
      * body up to this cap and hands the route only what fitted. The default is
      * 10485760 — byte for byte `MAX_IMAGE_UPLOAD_BYTES` in
      * `lib/uploads/image-attachments.ts`. A file *at* the app's own limit

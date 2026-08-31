@@ -26,7 +26,7 @@
     "hooks",
     "lib",
     "public",
-    "middleware.ts",
+    "proxy.ts",
     "components.json",
     "next.config.ts",
     "tsconfig.json",
