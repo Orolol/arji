@@ -6,6 +6,7 @@
  */
 
 import type { NamedAgentCliOptions } from "./options-registry";
+import type { ExtraMcpScope } from "./extra-mcp-scope";
 
 /**
  * Every provider here MUST support per-spawn injection of the Arij MCP tool
@@ -41,29 +42,96 @@ export interface ProviderChunk {
  * residual exposure notes in lib/providers/codex.ts and
  * lib/providers/oh-my-pi.ts.
  */
+/**
+ * One MCP server as handed to a provider. `stdio` launches a child process,
+ * `http` points at a URL — the two shapes are disjoint, which is what the
+ * optional-never members encode.
+ *
+ * `env` / `headers` may carry SECRETS (a third-party server's API token).
+ * Anything that renders a spec into a display command, a log line, or a
+ * persisted field must redact them — see maskCodexMcpSecret in
+ * lib/providers/codex.ts, which masks every `mcp_servers.*.env=` override
+ * rather than only the one carrying ARIJ_MCP_TOKEN.
+ */
+export interface McpStdioServerSpec {
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  url?: undefined;
+  headers?: undefined;
+  /** Bare tool names to allow; absent = every tool the server exposes. */
+  toolAllowlist?: string[] | null;
+}
+
+export interface McpHttpServerSpec {
+  name: string;
+  url: string;
+  headers: Record<string, string>;
+  command?: undefined;
+  args?: undefined;
+  env?: undefined;
+  /** Bare tool names to allow; absent = every tool the server exposes. */
+  toolAllowlist?: string[] | null;
+}
+
+export type McpServerSpec = McpStdioServerSpec | McpHttpServerSpec;
+
+/**
+ * Per-session MCP injection config, built by `lib/claude/mcp-injection.ts` at
+ * spawn time (processManager.start is the single wiring point for agent
+ * sessions; lib/chat/cli-tool-channel.ts is the chat-turn equivalent).
+ * Providers translate it into their CLI's MCP wiring: Claude Code via
+ * `--mcp-config <0600 temp file>` + `--strict-mcp-config`, Codex via
+ * `-c mcp_servers.<name>.*` TOML overrides, Oh My Pi and agy via the child's
+ * environment (their user-global registry entry expands ${ARIJ_MCP_TOKEN} at
+ * load time).
+ *
+ * `servers` is a LIST because the user can declare third-party MCP servers
+ * (Godot, Confluence, Playwright…) globally or per project — see
+ * lib/mcp/servers.ts. `servers[0]` is ALWAYS the Arij control channel:
+ * `--strict-mcp-config` means the user's own ~/.claude.json and .mcp.json are
+ * ignored, so everything an agent can reach has to be in here, and the
+ * control channel must never be displaced by a user entry (the name `arij` is
+ * reserved at validation time for exactly that reason). Use `arijChannelSpec`
+ * rather than indexing, so providers that only need the Arij channel's env
+ * (omp, agy) say so explicitly.
+ *
+ * For claude and codex the Arij bearer token rides INSIDE the config (never
+ * in the child's process env), so agent Bash subshells never see it; claude's
+ * file form additionally keeps it out of argv/`/proc/<pid>/cmdline`. Codex
+ * has no file form and omp/agy have no config form at all — see the residual
+ * exposure notes in lib/providers/codex.ts and lib/providers/oh-my-pi.ts.
+ */
 export interface McpSpawnConfig {
   /**
-   * MCP server name exposed to the agent. The tool prefix it produces is
-   * CLI-specific: `mcp__<name>__*` on claude/codex, `mcp__<name>_*` on omp.
+   * Every server for this spawn, Arij first, then user-declared extras in
+   * resolution order (globals, then the project's own).
    */
-  serverName: string;
-  /** Executable that launches the stdio MCP shim (the running node binary). */
-  command: string;
-  /** Shim arguments — app-root-absolute path to bin/arij-mcp.mjs. */
-  args: string[];
-  /** Environment for the shim process only: base URL + per-session token. */
-  env: {
-    ARIJ_BASE_URL: string;
-    ARIJ_MCP_TOKEN: string;
-    /** Selects the shim's toolset; absent = the default agent toolset. */
-    ARIJ_MCP_TOOLSET?: "chat";
-  };
+  servers: McpServerSpec[];
   /**
-   * Exact tool names merged into the allowlist (no wildcards), in the
-   * spawning provider's spelling — claude/codex say mcp__arij__get_ticket,
-   * omp says mcp__arij_get_ticket (see arijMcpToolName).
+   * Exact tool names merged into the allowlist, in the spawning provider's
+   * spelling — claude/codex say mcp__arij__get_ticket, omp says
+   * mcp__arij_get_ticket, agy uses the bare name (see arijMcpToolName).
+   * Third-party servers contribute a whole-server entry instead, since their
+   * tools are not enumerable before the server is contacted.
    */
   allowedToolNames: string[];
+}
+
+/**
+ * The Arij control channel — `servers[0]` by construction. Providers whose
+ * only MCP surface is the child environment (omp, agy) need its `env` and
+ * nothing else.
+ */
+export function arijChannelSpec(mcp: McpSpawnConfig): McpStdioServerSpec {
+  const first = mcp.servers[0];
+  if (!first || first.command === undefined) {
+    throw new Error(
+      "McpSpawnConfig.servers[0] must be the Arij stdio control channel",
+    );
+  }
+  return first;
 }
 
 export interface ProviderSpawnOptions {
@@ -129,6 +197,15 @@ export interface ProviderSession {
 
 export interface AgentProvider {
   readonly type: ProviderType;
+
+  /**
+   * Which scopes of user-declared MCP servers this CLI can honor —
+   * "per-spawn" (global + project) or "user-global" (globals only). Declared
+   * per provider so the feature cannot be wired for one CLI and silently
+   * absent on another; see lib/providers/extra-mcp-scope.ts for what each
+   * value costs.
+   */
+  readonly extraMcpScope: ExtraMcpScope;
 
   /** Spawn a new agent session. Returns a handle for tracking. */
   spawn(options: ProviderSpawnOptions): ProviderSession;

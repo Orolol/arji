@@ -75,6 +75,7 @@
 
 import { ompRestrictedToolsBlockReason } from "./omp-version";
 import { PiProvider } from "./pi";
+import { arijChannelSpec } from "./types";
 import type {
   McpSpawnConfig,
   ProviderSpawnOptions,
@@ -94,8 +95,14 @@ export function buildOmpSpawnEnv(
   mcp?: McpSpawnConfig,
 ): NodeJS.ProcessEnv {
   if (!mcp) return { ...baseEnv, ARIJ_MCP_TOKEN: "" };
-  const merged = { ...baseEnv, ...mcp.env };
-  if (!("ARIJ_MCP_TOOLSET" in mcp.env)) {
+  // Only the ARIJ control channel's env goes here. omp's extra servers live in
+  // its user-global mcp.json with their values written in literally
+  // (lib/mcp/user-global-sync.ts) — `extraMcpScope` is "user-global" for
+  // exactly this reason, and putting a third-party secret in the child's
+  // environment would hand it to the agent's own Bash tool.
+  const arijEnv = arijChannelSpec(mcp).env;
+  const merged = { ...baseEnv, ...arijEnv };
+  if (!("ARIJ_MCP_TOOLSET" in arijEnv)) {
     delete merged.ARIJ_MCP_TOOLSET;
   }
   return merged;

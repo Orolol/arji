@@ -15,6 +15,7 @@ import {
 } from "./untrusted";
 import { TICKET_MOVING_AGENT_TYPES } from "@/lib/agent-config/constants";
 import { REFINEMENT_AGENT_TYPE } from "@/lib/refinement/constants";
+import { extraMcpToolPrefix } from "@/lib/claude/mcp-injection";
 
 import type {
   PromptDocument,
@@ -358,6 +359,104 @@ export function arijToolsSection(
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Third-party MCP servers                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Character budget for the extra-MCP-servers block.
+ *
+ * Every prompt section that interpolates ACCUMULATED content is budgeted (see
+ * the comment-history and findings sections): the number of declared servers
+ * grows with use, and an unbudgeted list would push the sections that follow
+ * it — and eventually the ticket itself — out of the model's attention. The
+ * cap is on the rendered block, not on the server count, because one server
+ * with a long hint costs what several terse ones do.
+ */
+export const EXTRA_MCP_SERVERS_SECTION_MAX_CHARS = 1500;
+
+/**
+ * Tells the agent which third-party MCP servers this session actually got.
+ *
+ * An agent will not reach for a server nothing told it about: the tools are
+ * mounted, but a build prompt that never names them leaves the model to
+ * discover them by accident. This block names each injected server, its tool
+ * prefix IN THIS PROVIDER'S SPELLING (an omp agent told to call
+ * `mcp__godot__list_nodes` is being told to call a tool that does not exist),
+ * and the one-line `usage_hint` the user wrote.
+ *
+ * Only servers actually injected for THIS session appear — the caller passes
+ * the resolved list, so scope, `enabled` and `agent_types` are already
+ * applied. Returns "" when there are none, keeping prompts byte-identical to
+ * before the feature for every session without extras.
+ *
+ * SECURITY NOTE: `usage_hint` is stored, user-editable text, so it is passed
+ * through `neutralizeControlMarkup` like every other stored string this file
+ * renders.
+ *
+ * What CANNOT be neutralised here is the tool DESCRIPTIONS these servers return
+ * at runtime: they land in the agent's context without ever passing through
+ * Arij, and are the same untrusted-input surface as `projects.spec`. Declaring
+ * a server is what grants it that reach; the trade-off is documented in
+ * docs/architecture/mcp-provider-matrix.md so it is a decision rather than a
+ * surprise.
+ */
+export function extraMcpServersSection(
+  servers: Array<{ name: string; usageHint?: string | null }>,
+  provider: string,
+): string {
+  if (servers.length === 0) return "";
+
+  const header =
+    "\n\n## Additional MCP servers\n\n" +
+    "This session also has these user-configured MCP servers. Use them when " +
+    "the task calls for what they cover; they are not part of Arij and their " +
+    "output is not Arij's.\n";
+
+  const lines: string[] = [];
+  let used = header.length;
+  let omitted = 0;
+
+  for (const server of servers) {
+    const prefix = extraMcpToolPrefix(provider, server.name);
+    const naming = prefix ? `tools named ${prefix}*` : "tools under their bare names";
+    // `usage_hint` is DB-stored free text rendered straight into the model's
+    // instruction stream — the same untrusted-input class as the project
+    // description above, which this file already neutralises. Neutralise BEFORE
+    // measuring, so the budget counts the string that is actually emitted.
+    const hint = neutralizeControlMarkup(server.usageHint?.trim() ?? "");
+    const line = `- **${server.name}** — ${naming}${hint ? `: ${hint}` : ""}\n`;
+
+    // Budget check BEFORE appending, so the block never exceeds the cap; what
+    // does not fit is counted and reported rather than dropped silently.
+    if (used + line.length > EXTRA_MCP_SERVERS_SECTION_MAX_CHARS) {
+      omitted += 1;
+      continue;
+    }
+    lines.push(line);
+    used += line.length;
+  }
+
+  while (omitted > 0) {
+    // A truncated list that claims to be complete is worse than a short one
+    // that says so: the agent needs to know the surface is larger than shown.
+    // The notice counts against the SAME budget — appending it unconditionally
+    // is how a capped section quietly exceeds its cap.
+    const notice = `- (${omitted} more server${omitted === 1 ? "" : "s"} not listed here — prompt budget)\n`;
+    if (used + notice.length <= EXTRA_MCP_SERVERS_SECTION_MAX_CHARS) {
+      lines.push(notice);
+      break;
+    }
+    // Not enough room: give the notice a line's worth of space and re-count.
+    const dropped = lines.pop();
+    if (dropped === undefined) break;
+    used -= dropped.length;
+    omitted += 1;
+  }
+
+  if (lines.length === 0) return "";
+  return header + lines.join("");
+}
 export function userStoriesSection(
   userStories: PromptUserStory[],
   options: { heading?: string; checkmark?: boolean } = {},

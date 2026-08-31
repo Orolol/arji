@@ -39,6 +39,8 @@ const pmState = vi.hoisted(() => ({
   providerSpawnedOptions: [] as Array<Record<string, unknown>>,
   resolveSpawn: null as null | ((r: unknown) => void),
   rejectSpawn: null as null | ((e: unknown) => void),
+  /** Rows the extra-MCP-server resolution sees; empty for most tests. */
+  mcpServerRows: [] as Array<Record<string, unknown>>,
 }));
 
 const tables = vi.hoisted(() => ({
@@ -51,10 +53,21 @@ const tables = vi.hoisted(() => ({
   },
   settings: { key: "settings.key", value: "settings.value" },
   projects: { id: "projects.id", name: "projects.name" },
+  // Third-party MCP servers. Present so the extras resolution actually RUNS
+  // (and finds nothing) rather than throwing on a missing export and taking
+  // the degrade-to-arij-only path — which would hide a regression in the
+  // resolution call itself behind a passing test.
+  mcpServers: {
+    id: "mcp_servers.id",
+    projectId: "mcp_servers.project_id",
+    name: "mcp_servers.name",
+  },
 }));
 
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn(() => ({})),
+  and: vi.fn(() => ({})),
+  isNull: vi.fn(() => ({})),
 }));
 
 vi.mock("@/lib/db/schema", () => tables);
@@ -74,6 +87,10 @@ vi.mock("@/lib/db", () => ({
                 ? pmState.settingsRow
                 : pmState.sessionRow;
             }),
+            // Row LISTS: only the extra-MCP-server resolution reads this way.
+            all: vi.fn(() =>
+              table === tables.mcpServers ? pmState.mcpServerRows : [],
+            ),
           })),
         })),
       };
@@ -134,6 +151,7 @@ import {
   markQuestionAsked,
   _resetMcpTokenStoreForTests,
 } from "@/lib/mcp/token-store";
+import { arijChannelSpec } from "@/lib/providers/types";
 import type { McpSpawnConfig } from "@/lib/providers/types";
 
 let processManager: typeof import("@/lib/claude/process-manager").processManager;
@@ -232,10 +250,10 @@ describe("processManager.start() — MCP injection gating", () => {
 
     const mcp = spawnedMcp();
     expect(mcp).toBeDefined();
-    expect(mcp!.serverName).toBe("arij");
-    expect(mcp!.command).toBe(process.execPath);
-    expect(mcp!.args[0].endsWith("bin/arij-mcp.mjs")).toBe(true);
-    expect(mcp!.env.ARIJ_MCP_TOKEN).toMatch(/^arij-mcp-/);
+    expect(arijChannelSpec(mcp!).name).toBe("arij");
+    expect(arijChannelSpec(mcp!).command).toBe(process.execPath);
+    expect(arijChannelSpec(mcp!).args[0].endsWith("bin/arij-mcp.mjs")).toBe(true);
+    expect(arijChannelSpec(mcp!).env.ARIJ_MCP_TOKEN).toMatch(/^arij-mcp-/);
     expect(mcp!.allowedToolNames).toContain("mcp__arij__ask_question");
     expect(mcp!.allowedToolNames).toContain("mcp__arij__create_bug");
 
@@ -249,7 +267,7 @@ describe("processManager.start() — MCP injection gating", () => {
 
     // The token resolves to the session row's identity — the cross-project
     // write barrier the HTTP routes enforce on.
-    const record = resolveMcpToken(mcp!.env.ARIJ_MCP_TOKEN);
+    const record = resolveMcpToken(arijChannelSpec(mcp!).env.ARIJ_MCP_TOKEN);
     expect(record).not.toBeNull();
     expect(record!.sessionId).toBe("s1");
     expect(record!.projectId).toBe("proj-1");
@@ -305,6 +323,70 @@ describe("processManager.start() — MCP injection gating", () => {
     expect(pmState.spawnedOptions[0].prompt).toBe("PLAIN");
   });
 
+  it("the toggle removes USER-DECLARED servers too, not just the arij channel", () => {
+    // One gate covers everything: off means no MCP at all. A third-party
+    // server surviving the toggle would be a channel the operator believes
+    // they closed.
+    pmState.sessionRow = sessionRow();
+    pmState.settingsRow = { value: JSON.stringify(false) };
+    pmState.mcpServerRows = [
+      {
+        id: "srv-1",
+        projectId: null,
+        name: "godot",
+        enabled: true,
+        transport: "stdio",
+        command: "/usr/bin/godot-mcp",
+        args: "[]",
+        env: "{}",
+        url: null,
+        headers: "{}",
+        agentTypes: null,
+        toolAllowlist: null,
+        usageHint: "scenes and nodes",
+      },
+    ];
+
+    processManager.start("s3b", { mode: "code", prompt: "PLAIN" });
+
+    expect(spawnedMcp()).toBeUndefined();
+    // …and the prompt says nothing about a server the session cannot reach.
+    expect(pmState.spawnedOptions[0].prompt).toBe("PLAIN");
+    expect(pmState.spawnedOptions[0].prompt).not.toContain("godot");
+  });
+
+  it("injects a resolved extra server and names it in the prompt", () => {
+    pmState.sessionRow = sessionRow();
+    pmState.mcpServerRows = [
+      {
+        id: "srv-1",
+        projectId: null,
+        name: "godot",
+        enabled: true,
+        transport: "stdio",
+        command: "/usr/bin/godot-mcp",
+        args: "[]",
+        env: "{}",
+        url: null,
+        headers: "{}",
+        agentTypes: null,
+        toolAllowlist: null,
+        usageHint: "scenes and nodes",
+      },
+    ];
+
+    processManager.start("s3c", { mode: "code", prompt: "PLAIN" });
+
+    const mcp = spawnedMcp();
+    expect(mcp!.servers.map((s) => s.name)).toEqual(["arij", "godot"]);
+    expect(mcp!.allowedToolNames).toContain("mcp__godot");
+
+    const prompt = pmState.spawnedOptions[0].prompt as string;
+    expect(prompt).toContain("## Additional MCP servers");
+    expect(prompt).toContain("**godot**");
+    expect(prompt).toContain("scenes and nodes");
+  });
+
   it("injects when mcp_tools_enabled is explicitly true", () => {
     pmState.sessionRow = sessionRow();
     pmState.settingsRow = { value: JSON.stringify(true) };
@@ -344,7 +426,7 @@ describe("processManager.start() — MCP injection gating", () => {
     const options = pmState.providerSpawnedOptions[0];
     const mcp = options.mcp as McpSpawnConfig | undefined;
     expect(mcp).toBeDefined();
-    expect(mcp!.serverName).toBe("arij");
+    expect(arijChannelSpec(mcp!).name).toBe("arij");
     expect(options.prompt as string).toContain("## Arij tools");
     expect(options.prompt as string).toContain(
       "report_friction and then continue working",
@@ -362,7 +444,7 @@ describe("processManager.start() — MCP injection gating", () => {
     expect(mcp).toBeDefined();
     expect(mcp!.allowedToolNames).toContain("mcp__arij_get_ticket");
     expect(mcp!.allowedToolNames).not.toContain("mcp__arij__get_ticket");
-    expect(mcp!.env.ARIJ_MCP_TOKEN).toMatch(/^arij-mcp-/);
+    expect(arijChannelSpec(mcp!).env.ARIJ_MCP_TOKEN).toMatch(/^arij-mcp-/);
 
     // the prompt names the tools in omp's spelling, never claude's
     const prompt = options.prompt as string;
@@ -476,7 +558,7 @@ describe("processManager — MCP token lifecycle", () => {
 
   it("revokes the token on completion but keeps the record for classification", async () => {
     processManager.start("t1", { mode: "code", prompt: "P" });
-    const token = spawnedMcp()!.env.ARIJ_MCP_TOKEN;
+    const token = arijChannelSpec(spawnedMcp()!).env.ARIJ_MCP_TOKEN;
     expect(resolveMcpToken(token)).not.toBeNull();
 
     pmState.resolveSpawn!({ success: true, result: "done", duration: 5 });
@@ -491,7 +573,7 @@ describe("processManager — MCP token lifecycle", () => {
 
   it("revokes the token when the spawn promise rejects", async () => {
     processManager.start("t2", { mode: "code", prompt: "P" });
-    const token = spawnedMcp()!.env.ARIJ_MCP_TOKEN;
+    const token = arijChannelSpec(spawnedMcp()!).env.ARIJ_MCP_TOKEN;
 
     pmState.rejectSpawn!(new Error("boom"));
     await flushPromises();
@@ -501,7 +583,7 @@ describe("processManager — MCP token lifecycle", () => {
 
   it("revokes the token on cancel() without waiting for process exit", () => {
     processManager.start("t3", { mode: "code", prompt: "P" });
-    const token = spawnedMcp()!.env.ARIJ_MCP_TOKEN;
+    const token = arijChannelSpec(spawnedMcp()!).env.ARIJ_MCP_TOKEN;
     expect(resolveMcpToken(token)).not.toBeNull();
 
     expect(processManager.cancel("t3")).toBe(true);
@@ -511,12 +593,12 @@ describe("processManager — MCP token lifecycle", () => {
 
   it("mints a fresh token for a restarted session", async () => {
     processManager.start("t4", { mode: "code", prompt: "P" });
-    const first = spawnedMcp(0)!.env.ARIJ_MCP_TOKEN;
+    const first = arijChannelSpec(spawnedMcp(0)!).env.ARIJ_MCP_TOKEN;
     pmState.resolveSpawn!({ success: true, result: "ok", duration: 1 });
     await flushPromises();
 
     processManager.start("t4", { mode: "code", prompt: "P" });
-    const second = spawnedMcp(1)!.env.ARIJ_MCP_TOKEN;
+    const second = arijChannelSpec(spawnedMcp(1)!).env.ARIJ_MCP_TOKEN;
 
     expect(second).not.toBe(first);
     expect(resolveMcpToken(first)).toBeNull();

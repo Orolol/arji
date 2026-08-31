@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { RoutinesSettings } from "@/components/routines/RoutinesSettings";
+import { McpServersSection } from "@/components/settings/McpServersSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -141,6 +142,8 @@ export default function ProjectSettingsPage() {
     <div className="p-6 max-w-4xl space-y-6">
       <ProjectTokenBudgetSection projectId={projectId} />
       <RoutinesSettings projectId={projectId} />
+      {/* Project-scoped MCP servers, plus the globals this project inherits. */}
+      <McpServersSection projectId={projectId} />
     </div>
   );
 }

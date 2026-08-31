@@ -389,6 +389,28 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       createdAt: "created_at",
     },
   },
+  mcpServers: {
+    sqlName: "mcp_servers",
+    columns: {
+      id: "id",
+      projectId: "project_id",
+      name: "name",
+      enabled: "enabled",
+      transport: "transport",
+      command: "command",
+      args: "args",
+      env: "env",
+      url: "url",
+      headers: "headers",
+      agentTypes: "agent_types",
+      toolAllowlist: "tool_allowlist",
+      usageHint: "usage_hint",
+      lastCheckedAt: "last_checked_at",
+      lastCheckOk: "last_check_ok",
+      lastCheckError: "last_check_error",
+      createdAt: "created_at",
+    },
+  },
   gitSyncLog: {
     sqlName: "git_sync_log",
     columns: {
@@ -950,6 +972,27 @@ const INDEXES: Record<string, IndexSpec[]> = {
       name: "verify_reports_epic_finished_idx",
       unique: false,
       columns: ["epic_id", "finished_at"],
+    },
+  ],
+  mcpServers: [
+    {
+      name: "mcp_servers_scope_name_idx",
+      unique: false,
+      columns: ["project_id", "name"],
+    },
+    // Per-scope uniqueness needs TWO partial indexes, not one: a global row is
+    // unique on `name` alone (its `project_id` is NULL, and SQLite treats NULLs
+    // as distinct, so the pair would never collide), a project row on the pair.
+    // Migration 0046 creates both.
+    {
+      name: "mcp_servers_global_name_uq",
+      unique: true,
+      columns: ["name"],
+    },
+    {
+      name: "mcp_servers_project_name_uq",
+      unique: true,
+      columns: ["project_id", "name"],
     },
   ],
   gradingReports: [

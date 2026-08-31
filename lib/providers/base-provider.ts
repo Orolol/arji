@@ -29,6 +29,10 @@ import {
   hasAskUserQuestion,
 } from "@/lib/claude/json-parser";
 import { findOversizedArg, oversizedArgMessage } from "./prompt-transport";
+import {
+  extraMcpScopeForProvider,
+  type ExtraMcpScope,
+} from "./extra-mcp-scope";
 import type {
   AgentProvider,
   ProviderResult,
@@ -147,6 +151,17 @@ function signalChild(child: ChildProcess, signal: "SIGTERM" | "SIGKILL"): void {
  */
 export abstract class BaseCliProvider implements AgentProvider {
   abstract readonly type: ProviderType;
+
+  /**
+   * Which scopes of user-declared MCP servers this CLI honors. Derived from
+   * the one map in extra-mcp-scope.ts rather than restated per subclass, so a
+   * new provider cannot forget to declare it and the resolution path
+   * (lib/mcp/servers.ts) can read the same answer without instantiating any
+   * provider.
+   */
+  get extraMcpScope(): ExtraMcpScope {
+    return extraMcpScopeForProvider(this.type);
+  }
 
   /** The CLI binary name (e.g. "claude", "codex", "gemini"). */
   abstract get binaryName(): string;

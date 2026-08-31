@@ -41,7 +41,7 @@ import {
   ARIJ_MCP_SERVER_NAME,
   buildMcpSpawnConfig,
 } from "@/lib/claude/mcp-injection";
-import type { McpSpawnConfig } from "@/lib/providers/types";
+import { arijChannelSpec, type McpSpawnConfig } from "@/lib/providers/types";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TEST_TOKEN = "arij-mcp-e2e-bearer-token";
@@ -142,10 +142,11 @@ beforeAll(async () => {
 
   // The declared env block plus a sanitized default environment mirrors how
   // claude/codex launch MCP servers (inherited env + the config's env).
+  const arijChannel = arijChannelSpec(spawnConfig);
   const transport = new StdioClientTransport({
-    command: spawnConfig.command,
-    args: spawnConfig.args,
-    env: { ...getDefaultEnvironment(), ...spawnConfig.env },
+    command: arijChannel.command,
+    args: arijChannel.args,
+    env: { ...getDefaultEnvironment(), ...arijChannel.env },
   });
 
   client = new Client({ name: "arij-mcp-e2e-test", version: "0.0.0" });
@@ -177,18 +178,23 @@ beforeEach(() => {
 
 describe("spawn config seam", () => {
   it("launches the real shim binary with exactly the two contract env vars", () => {
-    expect(spawnConfig.command).toBe(process.execPath);
-    expect(spawnConfig.args).toHaveLength(1);
-    expect(spawnConfig.args[0].endsWith(join("bin", "arij-mcp.mjs"))).toBe(
+    const arijChannel = arijChannelSpec(spawnConfig);
+    // The control channel is servers[0] by construction, and with no
+    // user-declared extras it is the ONLY entry.
+    expect(spawnConfig.servers).toHaveLength(1);
+    expect(arijChannel.name).toBe("arij");
+    expect(arijChannel.command).toBe(process.execPath);
+    expect(arijChannel.args).toHaveLength(1);
+    expect(arijChannel.args[0].endsWith(join("bin", "arij-mcp.mjs"))).toBe(
       true
     );
-    expect(existsSync(spawnConfig.args[0])).toBe(true);
-    expect(Object.keys(spawnConfig.env).sort()).toEqual([
+    expect(existsSync(arijChannel.args[0])).toBe(true);
+    expect(Object.keys(arijChannel.env).sort()).toEqual([
       "ARIJ_BASE_URL",
       "ARIJ_MCP_TOKEN",
     ]);
-    expect(spawnConfig.env.ARIJ_BASE_URL).toBe(stubBaseUrl);
-    expect(spawnConfig.env.ARIJ_MCP_TOKEN).toBe(TEST_TOKEN);
+    expect(arijChannel.env.ARIJ_BASE_URL).toBe(stubBaseUrl);
+    expect(arijChannel.env.ARIJ_MCP_TOKEN).toBe(TEST_TOKEN);
   });
 });
 
