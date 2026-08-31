@@ -23,7 +23,12 @@ describe("README onboarding documentation", () => {
 
   it("includes a high-level architecture overview", () => {
     expect(readme).toContain("## Architecture");
-    expect(readme).toContain("Chat Panel");
+    // The architecture section must still name the chat surface. It used to be
+    // "Chat Panel" — a resizable side panel next to the kanban board. Chat is
+    // a full route now (app/chat/page.tsx), so the assertion pins the current
+    // name; the point of the case is unchanged, which is that the overview
+    // says where chat lives.
+    expect(readme).toContain("Chat page");
     expect(readme).toContain("worktree");
   });
 
