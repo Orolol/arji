@@ -138,6 +138,46 @@ describe("desk mutations", () => {
     expect(body.resumeSessionId).toBe("s9");
   });
 
+  it("dismisses a signal with its own timestamp, then re-reads the desk", async () => {
+    // The payload's only YOUR TURN row is the e1 failure, failedAt 08:39.
+    const fetchMock = mockFetch(() => ({ body: { data: { ok: true } } }));
+    render(<NowDesk />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Écarter cet échec" }));
+
+    await waitFor(() => expect(calls(fetchMock, "/api/desk/dismiss").length).toBe(1));
+    const [url, init] = calls(fetchMock, "/api/desk/dismiss")[0];
+    expect(url).toBe("/api/desk/dismiss");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(String(init!.body))).toEqual({
+      epicId: "e1",
+      kind: "failed",
+      // The SIGNAL's timestamp, not the moment of the click — that is what
+      // lets a newer failure on the same epic bring the row back.
+      signalAt: "2026-08-28T08:39:00.000Z",
+    });
+
+    // The optimistic hide is a re-read, not local state: useControlDesk's
+    // requestSeq/mutationSeq guards are what keep the 4s poll from undoing it.
+    await waitFor(() =>
+      expect(calls(fetchMock, "/api/control-desk").length).toBeGreaterThan(1),
+    );
+  });
+
+  it("says so when a dismiss fails instead of hiding the row anyway", async () => {
+    const fetchMock = mockFetch((url) =>
+      url.includes("/api/desk/dismiss")
+        ? { status: 400, body: { error: "Validation failed", details: {} } }
+        : { body: { data: {} } },
+    );
+    render(<NowDesk />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Écarter cet échec" }));
+
+    expect(await screen.findByText("Impossible d'écarter ce signal")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
   it("turns a 409 into a toast that links to the session in the way", async () => {
     const fetchMock = mockFetch((url) =>
       url.includes("/build")

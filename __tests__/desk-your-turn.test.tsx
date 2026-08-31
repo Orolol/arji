@@ -9,6 +9,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { relativeAge } from "@/components/desk/AttentionRow";
 import { YourTurnBand } from "@/components/desk/YourTurnBand";
@@ -323,5 +324,81 @@ describe("band sizing", () => {
       conflicts: [conflict({ epicId: "c1" })],
     });
     expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+1 de plus");
+  });
+});
+
+/**
+ * Dismissing a signal.
+ *
+ * The band hands the row's OWN timestamp back up, not the moment of the click:
+ * that is what lets the server bring the row back when a newer question,
+ * failure or conflict lands on the same epic.
+ */
+describe("dismiss", () => {
+  it("offers the action on all three families", () => {
+    renderBand({
+      awaitingReply: [asks()],
+      failed: [failure()],
+      conflicts: [conflict()],
+      onDismiss: vi.fn(),
+    });
+    expect(screen.getAllByTestId("desk-dismiss")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Écarter cette question" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Écarter cet échec" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Écarter ce conflit" })).toBeInTheDocument();
+  });
+
+  it("stays hidden when the host wires no dismissal store", () => {
+    renderBand({ awaitingReply: [asks()] });
+    expect(screen.queryByTestId("desk-dismiss")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["asks", "Écarter cette question", "e1", "2026-08-28T09:00:00"],
+    ["conflict", "Écarter ce conflit", "e3", "2026-08-28T08:00:00"],
+  ])("reports the %s signal's own timestamp", (kind, label, epicId, signalAt) => {
+    const onDismiss = vi.fn();
+    renderBand({
+      awaitingReply: [asks({ askedAt: "2026-08-28T09:00:00" })],
+      conflicts: [conflict({ at: "2026-08-28T08:00:00" })],
+      onDismiss,
+    });
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    expect(onDismiss).toHaveBeenCalledWith(kind, { epicId, signalAt });
+  });
+
+  it("reports the failure's failedAt", () => {
+    const onDismiss = vi.fn();
+    const item = failure({ failedAt: "2026-08-28T07:30:00" });
+    renderBand({ failed: [item], onDismiss });
+    fireEvent.click(screen.getByRole("button", { name: "Écarter cet échec" }));
+    expect(onDismiss).toHaveBeenCalledWith("failed", {
+      epicId: item.epicId,
+      signalAt: "2026-08-28T07:30:00",
+    });
+  });
+
+  it("is reachable and operable from the keyboard", async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    renderBand({ awaitingReply: [asks()], onDismiss });
+
+    const button = screen.getByRole("button", { name: "Écarter cette question" });
+    button.focus();
+    expect(button).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+
+    await user.keyboard(" ");
+    expect(onDismiss).toHaveBeenCalledTimes(2);
+  });
+
+  it("goes quiet while the row has a mutation in flight", () => {
+    renderBand({
+      awaitingReply: [asks()],
+      pendingIds: new Set(["e1"]),
+      onDismiss: vi.fn(),
+    });
+    expect(screen.getByRole("button", { name: "Écarter cette question" })).toBeDisabled();
   });
 });

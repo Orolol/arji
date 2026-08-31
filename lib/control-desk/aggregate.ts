@@ -436,6 +436,100 @@ export function deriveConflicts(epics: readonly EpicRow[]): DeskConflict[] {
   return rows.sort((a, b) => (b.at ?? "").localeCompare(a.at ?? ""));
 }
 
+/* ------------------------------------------------------------------ */
+/* DISMISSALS                                                          */
+/* ------------------------------------------------------------------ */
+
+/** The three coral families a dismissal can address. */
+export const DESK_DISMISSAL_KINDS = ["asks", "failed", "conflict"] as const;
+
+export type DeskDismissalKind = (typeof DESK_DISMISSAL_KINDS)[number];
+
+export function isDeskDismissalKind(value: unknown): value is DeskDismissalKind {
+  return (
+    typeof value === "string" &&
+    (DESK_DISMISSAL_KINDS as readonly string[]).includes(value)
+  );
+}
+
+/** One stored dismissal, as the control-desk query reads it back. */
+export interface DeskDismissalRow {
+  epicId: string;
+  kind: string;
+  /** Timestamp of the signal that was waved off. */
+  signalAt: string | null;
+}
+
+export interface YourTurnRows {
+  awaitingReply: DeskAwaitingReply[];
+  failed: DeskFailure[];
+  conflicts: DeskConflict[];
+}
+
+function dismissalKey(epicId: string, kind: string): string {
+  // \u0000 cannot occur in an id, so the key is unambiguous.
+  return `${kind}\u0000${epicId}`;
+}
+
+/**
+ * Is `current` strictly newer than the signal that was dismissed?
+ *
+ * Compared as instants, not as strings: the three families read their
+ * timestamps from different columns and a lexical compare would be wrong the
+ * moment two of them disagreed on trailing `Z` or millisecond precision.
+ * Unparseable values fall back to an exact-string comparison, which is enough
+ * to tell "the same signal" from "a different one".
+ */
+function isNewerSignal(current: string | null, dismissed: string | null): boolean {
+  // A row with no timestamp cannot prove it is new, so it stays dismissed.
+  // `askedAt` is `agent_sessions.ended_at`, which is genuinely null for a
+  // session that never recorded one.
+  if (current === null) return false;
+  if (dismissed === null) return true;
+
+  const a = Date.parse(current);
+  const b = Date.parse(dismissed);
+  if (Number.isNaN(a) || Number.isNaN(b)) return current !== dismissed;
+  return a > b;
+}
+
+/**
+ * Drop the "Your turn" rows the user has waved off.
+ *
+ * PURE, and deliberately so: this is the whole of the dismissal rule, it runs
+ * on data the route has already fetched, and it is the one place the
+ * "comes back on a newer signal" promise is expressed.
+ *
+ * A dismissal hides its row only while the epic's CURRENT signal is no newer
+ * than the dismissed one. A new question, a new failure, or a conflict
+ * recorded after the dismissal therefore surfaces again — a permanent
+ * dismissal would hide real failures, which is the opposite of this stratum's
+ * job.
+ */
+export function applyDeskDismissals(
+  rows: YourTurnRows,
+  dismissals: readonly DeskDismissalRow[],
+): YourTurnRows {
+  if (dismissals.length === 0) return rows;
+
+  const byKey = new Map<string, string | null>();
+  for (const dismissal of dismissals) {
+    byKey.set(dismissalKey(dismissal.epicId, dismissal.kind), dismissal.signalAt);
+  }
+
+  const keep = (kind: DeskDismissalKind, epicId: string, signalAt: string | null): boolean => {
+    const key = dismissalKey(epicId, kind);
+    if (!byKey.has(key)) return true;
+    return isNewerSignal(signalAt, byKey.get(key) ?? null);
+  };
+
+  return {
+    awaitingReply: rows.awaitingReply.filter((row) => keep("asks", row.epicId, row.askedAt)),
+    failed: rows.failed.filter((row) => keep("failed", row.epicId, row.failedAt)),
+    conflicts: rows.conflicts.filter((row) => keep("conflict", row.epicId, row.at)),
+  };
+}
+
 function mergeFactsOf(epic: EpicRow): MergeReadinessFacts {
   return {
     status: epic.status,

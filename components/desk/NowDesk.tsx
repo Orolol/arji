@@ -27,6 +27,7 @@ import {
 import { useControlDesk } from "@/hooks/useControlDesk";
 import { useTicketOverlay } from "@/components/ticket/TicketOverlayProvider";
 import { buildRetryDispatch } from "@/lib/agent-sessions/retry-dispatch";
+import type { DeskDismissalKind } from "@/lib/control-desk/aggregate";
 import type {
   DeskAwaitingReply,
   DeskConflict,
@@ -357,6 +358,43 @@ export function NowDesk({
       }
     },
     [markPending, namedAgentId, raise, reportFailure, changed],
+  );
+
+  /**
+   * Dismiss a "Your turn" signal.
+   *
+   * The optimistic hide goes through `refresh()` rather than local state on
+   * purpose: `useControlDesk`'s requestSeq/mutationSeq guards make the refresh
+   * win against the in-flight 4s poll, whereas a local hidden-set would fight
+   * that poll and flicker the row back.
+   *
+   * This writes no ticket status and no activity entry — it is bookkeeping.
+   */
+  const handleDismiss = React.useCallback(
+    async (
+      kind: DeskDismissalKind,
+      item: { epicId: string; signalAt: string | null },
+    ) => {
+      markPending(item.epicId, true);
+      try {
+        const res = await fetch("/api/desk/dismiss", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ epicId: item.epicId, kind, signalAt: item.signalAt }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body.error) {
+          raise("error", "Impossible d'écarter ce signal");
+          return;
+        }
+        changed();
+      } catch {
+        raise("error", "Impossible d'écarter ce signal");
+      } finally {
+        markPending(item.epicId, false);
+      }
+    },
+    [markPending, raise, changed],
   );
 
   const handleResolveConflict = React.useCallback(
@@ -714,6 +752,7 @@ export function NowDesk({
         }
         onResolveConflict={handleResolveConflict}
         onOpenDiff={(item) => handleOpenTicket(item.epicId)}
+        onDismiss={handleDismiss}
       />
 
       {/*

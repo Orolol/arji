@@ -1,6 +1,7 @@
 "use client";
 
 import { BandHeader, Mono, StrataBand } from "@/components/piscine";
+import type { DeskDismissalKind } from "@/lib/control-desk/aggregate";
 import type {
   DeskAwaitingReply,
   DeskConflict,
@@ -45,6 +46,15 @@ export interface YourTurnBandProps {
   onOpenLog: (item: DeskFailure) => void;
   onResolveConflict: (item: DeskConflict) => void | Promise<void>;
   onOpenDiff: (item: DeskConflict) => void;
+  /**
+   * Wave a handled signal off the stratum. Takes the signal's own timestamp,
+   * not the moment of the click: the server hides the row only until a NEWER
+   * signal of the same kind lands on the epic.
+   */
+  onDismiss?: (
+    kind: DeskDismissalKind,
+    item: { epicId: string; signalAt: string | null },
+  ) => void | Promise<void>;
   className?: string;
 }
 
@@ -60,6 +70,7 @@ export function YourTurnBand({
   onOpenLog,
   onResolveConflict,
   onOpenDiff,
+  onDismiss,
   className,
 }: YourTurnBandProps) {
   const count = awaitingReply.length + failed.length + conflicts.length;
@@ -99,6 +110,11 @@ export function YourTurnBand({
               project={projectsById.get(item.projectId)}
               onReply={onReply}
               onSendToDev={onSendToDev}
+              onDismiss={
+                onDismiss
+                  ? (row) => onDismiss("asks", { epicId: row.epicId, signalAt: row.askedAt })
+                  : undefined
+              }
               pending={pendingIds?.has(item.epicId)}
             />
           ))}
@@ -109,6 +125,11 @@ export function YourTurnBand({
               project={projectsById.get(item.projectId)}
               onRetry={onRetry}
               onOpenLog={onOpenLog}
+              onDismiss={
+                onDismiss
+                  ? (row) => onDismiss("failed", { epicId: row.epicId, signalAt: row.failedAt })
+                  : undefined
+              }
               pending={pendingIds?.has(item.epicId)}
             />
           ))}
@@ -119,6 +140,11 @@ export function YourTurnBand({
               project={projectsById.get(item.projectId)}
               onResolve={onResolveConflict}
               onOpenDiff={onOpenDiff}
+              onDismiss={
+                onDismiss
+                  ? (row) => onDismiss("conflict", { epicId: row.epicId, signalAt: row.at })
+                  : undefined
+              }
               pending={pendingIds?.has(item.epicId)}
             />
           ))}

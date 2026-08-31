@@ -26,6 +26,7 @@ const {
   ticketDependencies,
   ticketActivityLog,
   settings,
+  deskDismissals,
 } = await import("@/lib/db/schema");
 const { GET } = await import("@/app/api/control-desk/route");
 const { buildMergeBlockedReason } = await import("@/lib/workflow/merge-failure");
@@ -54,6 +55,10 @@ function longAgo(): string {
 }
 
 function reset(): void {
+  // Dismissals carry no FK (they are bookkeeping), so deleting the epics does
+  // NOT cascade them away — they have to be cleared explicitly or they leak
+  // into the next test and silently hide its YOUR TURN rows.
+  db.delete(deskDismissals).run();
   db.delete(ticketDependencies).run();
   db.delete(ticketActivityLog).run();
   db.delete(ticketComments).run();
@@ -294,6 +299,88 @@ describe("GET /api/control-desk", () => {
     const asked = await payload();
     expect(asked.yourTurn.awaitingReply).toHaveLength(1);
     expect(asked.yourTurn.awaitingReply[0].question).toBe("newer");
+  });
+
+  /**
+   * The dismissal is applied SERVER-SIDE, after derivation. That is what makes
+   * a dismissed row survive a full page reload — the client keeps no hidden
+   * set — and what makes a newer signal bring it back on its own.
+   */
+  it("omits a dismissed question, and returns it once a NEWER one lands", async () => {
+    db.insert(epics)
+      .values({ id: "e1", projectId: "p1", title: "Renderer", readableId: "ARJ-24", status: "in_progress" })
+      .run();
+    db.insert(agentSessions)
+      .values({
+        id: "s1",
+        projectId: "p1",
+        epicId: "e1",
+        status: "completed",
+        outcome: "asked_question",
+        endedAt: today(8),
+        createdAt: today(8),
+      })
+      .run();
+    db.insert(ticketComments)
+      .values({ id: "c1", epicId: "e1", author: "agent", content: "Flag ou suppression ?", createdAt: today(9) })
+      .run();
+
+    const before = await payload();
+    expect(before.yourTurn.awaitingReply).toHaveLength(1);
+    const signalAt = before.yourTurn.awaitingReply[0].askedAt;
+
+    db.insert(deskDismissals)
+      .values({ epicId: "e1", kind: "asks", signalAt, dismissedAt: today(10) })
+      .run();
+
+    // Gone — and it stays gone across polls, because nothing about the epic
+    // changed.
+    expect((await payload()).yourTurn.awaitingReply).toHaveLength(0);
+    expect((await payload()).yourTurn.awaitingReply).toHaveLength(0);
+
+    // A NEWER question on the same epic is a new signal: the row comes back.
+    db.insert(agentSessions)
+      .values({
+        id: "s2",
+        projectId: "p1",
+        epicId: "e1",
+        status: "completed",
+        outcome: "asked_question",
+        endedAt: today(30),
+        createdAt: today(30),
+      })
+      .run();
+    db.insert(ticketComments)
+      .values({ id: "c2", epicId: "e1", author: "agent", content: "Et pour les tests ?", createdAt: today(31) })
+      .run();
+
+    const after = await payload();
+    expect(after.yourTurn.awaitingReply).toHaveLength(1);
+    expect(after.yourTurn.awaitingReply[0].question).toBe("Et pour les tests ?");
+  });
+
+  it("does not let an asks dismissal hide a failure on the same epic", async () => {
+    db.insert(epics)
+      .values({ id: "e1", projectId: "p1", title: "Worker pool", readableId: "ARJ-9", status: "in_progress" })
+      .run();
+    db.insert(agentSessions)
+      .values({
+        id: "s1",
+        projectId: "p1",
+        epicId: "e1",
+        agentType: "build",
+        status: "failed",
+        outcome: "failed",
+        error: "exit 1",
+        endedAt: today(8),
+        createdAt: today(8),
+      })
+      .run();
+    db.insert(deskDismissals)
+      .values({ epicId: "e1", kind: "asks", signalAt: today(8), dismissedAt: today(9) })
+      .run();
+
+    expect((await payload()).yourTurn.failed).toHaveLength(1);
   });
 
   it("puts an unanswered agent question in YOUR TURN, across projects", async () => {
