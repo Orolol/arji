@@ -7,6 +7,8 @@ import {
   mockRouteContext,
 } from "@/__tests__/helpers/db-mock";
 
+const mockAssertRemoteConfigured = vi.hoisted(() => vi.fn());
+const mockGetRemoteAvailability = vi.hoisted(() => vi.fn());
 const mockPullGitBranchWithConflictSupport = vi.hoisted(() => vi.fn());
 const mockGetConflictFileDiffs = vi.hoisted(() => vi.fn());
 const mockPushGitBranch = vi.hoisted(() => vi.fn());
@@ -15,6 +17,22 @@ const mockGetBranchSyncStatus = vi.hoisted(() => vi.fn());
 const mockGetCurrentGitBranch = vi.hoisted(() => vi.fn());
 const mockFetchGitRemote = vi.hoisted(() => vi.fn());
 const mockWriteGitSyncLog = vi.hoisted(() => vi.fn());
+/** Mirrors lib/git/remote's precondition error so the routes' `instanceof`
+ *  branch is reachable through the module mock. */
+const MockGitRemoteNotConfiguredError = vi.hoisted(
+  () =>
+    class GitRemoteNotConfiguredError extends Error {
+      readonly code = "remote_not_configured";
+      readonly remote: string;
+      readonly configuredRemotes: string[];
+      constructor(remote: string, configuredRemotes: string[]) {
+        super(`No git remote named '${remote}' is configured for this repository.`);
+        this.name = "GitRemoteNotConfiguredError";
+        this.remote = remote;
+        this.configuredRemotes = configuredRemotes;
+      }
+    }
+);
 const MockPushValidationError = vi.hoisted(
   () =>
     class PushValidationError extends Error {
@@ -35,6 +53,8 @@ vi.mock("@/lib/db", async () => {
 });
 
 vi.mock("@/lib/git/remote", () => ({
+  assertRemoteConfigured: mockAssertRemoteConfigured,
+  getRemoteAvailability: mockGetRemoteAvailability,
   pullGitBranchWithConflictSupport: mockPullGitBranchWithConflictSupport,
   getConflictFileDiffs: mockGetConflictFileDiffs,
   pushGitBranch: mockPushGitBranch,
@@ -43,6 +63,7 @@ vi.mock("@/lib/git/remote", () => ({
   getCurrentGitBranch: mockGetCurrentGitBranch,
   fetchGitRemote: mockFetchGitRemote,
   PushValidationError: MockPushValidationError,
+  GitRemoteNotConfiguredError: MockGitRemoteNotConfiguredError,
 }));
 
 vi.mock("@/lib/agent-config/agent-resolution", () => ({
@@ -84,6 +105,18 @@ describe("Project git sync routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
+    mockAssertRemoteConfigured.mockReset();
+    mockAssertRemoteConfigured.mockResolvedValue(undefined);
+    mockGetRemoteAvailability.mockReset();
+    mockGetRemoteAvailability.mockResolvedValue({
+      remote: "origin",
+      configured: true,
+      configuredRemotes: ["origin"],
+      fetchConfigured: true,
+      pushConfigured: true,
+      fetchRemotes: ["origin"],
+      pushRemotes: ["origin"],
+    });
     mockPullGitBranchWithConflictSupport.mockReset();
     mockGetConflictFileDiffs.mockReset();
     mockPushGitBranch.mockReset();
@@ -244,6 +277,16 @@ describe("GET git status implicit fetch (TTL)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
+    mockGetRemoteAvailability.mockReset();
+    mockGetRemoteAvailability.mockResolvedValue({
+      remote: "origin",
+      configured: true,
+      configuredRemotes: ["origin"],
+      fetchConfigured: true,
+      pushConfigured: true,
+      fetchRemotes: ["origin"],
+      pushRemotes: ["origin"],
+    });
     mockGetBranchSyncStatus.mockReset();
     mockGetCurrentGitBranch.mockReset();
     mockFetchGitRemote.mockReset();

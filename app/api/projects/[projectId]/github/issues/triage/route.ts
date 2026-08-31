@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { errorResponse } from "@/lib/api/route-helpers";
+import { GitHubNotConfiguredError } from "@/lib/github/client";
 import {
+  assertGitHubIssuesConfigured,
   isGitHubIssueSyncDue,
   listTriagedIssues,
   syncProjectGitHubIssues,
@@ -13,6 +15,10 @@ export async function GET(
   const { projectId } = await params;
 
   try {
+    // Asserted before anything else so the answer is the same whether or not a
+    // background sync happened to be due for this project.
+    assertGitHubIssuesConfigured(projectId);
+
     if (isGitHubIssueSyncDue(projectId, 15)) {
       await syncProjectGitHubIssues(projectId);
     }
@@ -23,6 +29,15 @@ export async function GET(
 
     return NextResponse.json({ data });
   } catch (error) {
+    // A project without a linked repo or a stored PAT is an ordinary,
+    // recoverable state, not a server fault: 400 with a `code` the UI branches
+    // on, matching epics/:epicId/pr and git/detect-remote.
+    if (error instanceof GitHubNotConfiguredError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: 400 }
+      );
+    }
     return errorResponse(error, "Failed to load triage issues.");
   }
 }

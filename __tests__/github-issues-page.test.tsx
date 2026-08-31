@@ -66,6 +66,59 @@ function mockFetchByUrl(options: {
   }) as typeof fetch);
 }
 
+/**
+ * Fetch mock for a project that has no GitHub repository (and/or no PAT)
+ * configured. Every request is recorded so the test can assert the page never
+ * fires the triage request that used to answer 500.
+ */
+function mockUnconfiguredFetch(options: {
+  ownerRepo?: string | null;
+  pat?: string;
+  /** Answer the triage route with the coded 4xx, for the late-config race. */
+  triage?: { status: number; code: string; error: string };
+}) {
+  return vi.spyOn(global, "fetch").mockImplementation((async (
+    input: RequestInfo | URL
+  ) => {
+    const url = String(input);
+
+    if (url === "/api/settings") {
+      return {
+        ok: true,
+        json: async () => ({ data: { github_pat: options.pat ?? "tok" } }),
+      } as Response;
+    }
+    if (url === "/api/projects/proj-1") {
+      return {
+        ok: true,
+        json: async () => ({
+          data: { githubOwnerRepo: options.ownerRepo ?? null },
+        }),
+      } as Response;
+    }
+    if (url.includes("/github/issues/triage") && options.triage) {
+      return {
+        ok: false,
+        status: options.triage.status,
+        json: async () => ({
+          error: options.triage!.error,
+          code: options.triage!.code,
+        }),
+      } as Response;
+    }
+    if (url.includes("/github/label-mapping")) {
+      return {
+        ok: true,
+        json: async () => ({
+          data: { featureLabels: ["feature"], bugLabels: ["bug"] },
+        }),
+      } as Response;
+    }
+
+    return { ok: true, json: async () => ({ data: [] }) } as Response;
+  }) as typeof fetch);
+}
+
 describe("GitHubIssuesPage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -132,6 +185,62 @@ describe("GitHubIssuesPage", () => {
         "/api/projects/proj-1/github/issues/import",
         expect.objectContaining({ method: "POST" })
       );
+    });
+  });
+
+  it("explains the missing repo instead of requesting triage, with zero console errors", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fetchMock = mockUnconfiguredFetch({ ownerRepo: null });
+
+    render(<GitHubIssuesPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/No GitHub repository is connected to this project/i)
+      ).toBeInTheDocument();
+    });
+
+    // The whole point of the ticket: the page must not fire a request it
+    // already knows cannot succeed.
+    const triageCalls = fetchMock.mock.calls.filter((call) =>
+      String(call[0]).includes("/github/issues/triage")
+    );
+    expect(triageCalls).toHaveLength(0);
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(screen.queryByText("Loading issues...")).not.toBeInTheDocument();
+  });
+
+  it("explains a missing PAT rather than showing an empty issue list", async () => {
+    mockUnconfiguredFetch({ ownerRepo: "Orolol/arij", pat: "" });
+
+    render(<GitHubIssuesPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/No GitHub personal access token is stored/i)
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("branches on the server's machine-readable code when the config is dropped mid-session", async () => {
+    // The client-side gate and the server can disagree (the repo is unlinked
+    // between the config read and the triage read), so the coded 4xx must
+    // drive the same explanatory state rather than a red error line.
+    mockUnconfiguredFetch({
+      ownerRepo: "Orolol/arij",
+      triage: {
+        status: 400,
+        code: "GITHUB_REPO_NOT_CONFIGURED",
+        error: "GitHub repository is not configured for this project.",
+      },
+    });
+
+    render(<GitHubIssuesPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/No GitHub repository is connected to this project/i)
+      ).toBeInTheDocument();
     });
   });
 });

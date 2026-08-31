@@ -8,12 +8,16 @@ const mockSync = vi.hoisted(() => vi.fn());
 const mockIsDue = vi.hoisted(() => vi.fn());
 const mockList = vi.hoisted(() => vi.fn());
 const mockImport = vi.hoisted(() => vi.fn());
+const mockAssertConfigured = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/github/issues", () => ({
   syncProjectGitHubIssues: mockSync,
   isGitHubIssueSyncDue: mockIsDue,
   listTriagedIssues: mockList,
   importGitHubIssuesAsTickets: mockImport,
+  // GET triage asserts the GitHub configuration before anything else; the
+  // unconfigured branch has its own suite in github-issues-not-configured.
+  assertGitHubIssuesConfigured: mockAssertConfigured,
 }));
 
 // The routes import shared helpers from @/lib/api/route-helpers, which pulls
@@ -29,6 +33,7 @@ describe("GitHub issues routes", () => {
   });
 
   it("GET triage triggers sync when due and returns issues", async () => {
+    mockAssertConfigured.mockReturnValue("Orolol/arij");
     mockIsDue.mockReturnValue(true);
     mockSync.mockResolvedValue({ synced: 10 });
     mockList.mockReturnValue([{ id: "ghi_1", issueNumber: 123, title: "Bug" }]);

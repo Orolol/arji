@@ -36,6 +36,25 @@ export interface PullWithConflictResult {
   conflictedFiles: string[];
 }
 
+export interface GitRemoteAvailability {
+  /** The remote that was asked about, after name validation. */
+  remote: string;
+  /** True when that remote can be used by at least one transfer operation. */
+  configured: boolean;
+  /** Every remote usable by at least one transfer operation. */
+  configuredRemotes: string[];
+  /** True when pull/fetch can read from the requested remote. */
+  fetchConfigured: boolean;
+  /** True when push can write to the requested remote. */
+  pushConfigured: boolean;
+  /** Remotes with a fetch URL. */
+  fetchRemotes: string[];
+  /** Remotes with a push URL or normal URL fallback. */
+  pushRemotes: string[];
+}
+
+export type GitRemoteOperation = "fetch" | "push";
+
 export class PushValidationError extends Error {
   readonly code: "working_tree_dirty" | "branch_behind_remote";
 
@@ -46,6 +65,36 @@ export class PushValidationError extends Error {
     super(message);
     this.name = "PushValidationError";
     this.code = code;
+  }
+}
+
+/**
+ * "This repository has no usable `origin`" is a precondition, not a transport
+ * fault. Throwing this instead of letting git's own `fatal: 'origin' does not
+ * appear to be a git repository` bubble up lets the routes answer 409 with a
+ * machine-readable `code` — the shape `merge_conflicts` and
+ * `working_tree_dirty` already use — rather than a 500 the UI cannot act on.
+ */
+export class GitRemoteNotConfiguredError extends Error {
+  readonly code = "remote_not_configured" as const;
+  readonly remote: string;
+  readonly configuredRemotes: string[];
+  readonly operation: GitRemoteOperation;
+
+  constructor(
+    remote: string,
+    configuredRemotes: string[],
+    operation: GitRemoteOperation
+  ) {
+    super(
+      operation === "fetch"
+        ? `No fetch URL is configured for git remote '${remote}'.`
+        : `No push URL is configured for git remote '${remote}'.`
+    );
+    this.name = "GitRemoteNotConfiguredError";
+    this.remote = remote;
+    this.configuredRemotes = configuredRemotes;
+    this.operation = operation;
   }
 }
 
@@ -125,6 +174,71 @@ export async function detectGitHubRemote(
   }
 
   return null;
+}
+
+/**
+ * Reads the repository's remote list and answers whether `remote` is usable.
+ *
+ * Deliberately decided from git's own configuration rather than from a failed
+ * push/pull's stderr: the message differs per git version and per transport,
+ * and reading it back is what turned an ordinary unconfigured project into a
+ * server fault.
+ */
+export async function getRemoteAvailability(
+  repoPath: string,
+  remote = "origin"
+): Promise<GitRemoteAvailability> {
+  const cleanRemote = defaultRemote(remote);
+  const git = getGit(repoPath);
+  const remotes = await git.getRemotes(true);
+
+  const fetchRemotes = remotes
+    .filter((entry) => Boolean((entry.refs?.fetch || "").trim()))
+    .map((entry) => entry.name);
+  // `git remote -v` (and therefore simple-git) resolves a normal remote URL
+  // as both fetch and push. A configured `pushurl` also appears here, so this
+  // list correctly includes the normal-URL fallback and push-only remotes.
+  const pushRemotes = remotes
+    .filter((entry) => Boolean((entry.refs?.push || "").trim()))
+    .map((entry) => entry.name);
+  const configuredRemotes = Array.from(
+    new Set([...fetchRemotes, ...pushRemotes])
+  );
+
+  return {
+    remote: cleanRemote,
+    configured: configuredRemotes.includes(cleanRemote),
+    configuredRemotes,
+    fetchConfigured: fetchRemotes.includes(cleanRemote),
+    pushConfigured: pushRemotes.includes(cleanRemote),
+    fetchRemotes,
+    pushRemotes,
+  };
+}
+
+/**
+ * Guard for the operations that need a remote to exist before they start.
+ * Throws GitRemoteNotConfiguredError when it does not.
+ */
+export async function assertRemoteConfigured(
+  repoPath: string,
+  remote: string,
+  operation: GitRemoteOperation
+): Promise<void> {
+  const availability = await getRemoteAvailability(repoPath, remote);
+  const configured =
+    operation === "fetch"
+      ? availability.fetchConfigured
+      : availability.pushConfigured;
+  if (!configured) {
+    throw new GitRemoteNotConfiguredError(
+      availability.remote,
+      operation === "fetch"
+        ? availability.fetchRemotes
+        : availability.pushRemotes,
+      operation
+    );
+  }
 }
 
 export async function fetchGitRemote(
