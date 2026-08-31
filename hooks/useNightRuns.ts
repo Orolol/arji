@@ -98,34 +98,65 @@ export function useNightRunDetail(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!runId) {
-      setDetail(null);
-      setError(null);
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await fetch(
-        `/api/projects/${projectId}/build/night-runs/${runId}`
-      );
-      const json = await res.json();
-      if (!res.ok || !json?.data) {
+  // Shared by the mount fetch and by `load`, so the effect only ever updates
+  // state from a promise callback instead of synchronously in its body.
+  const applyDetail = useCallback(
+    (ok: boolean, json: { data?: unknown; error?: string } | null) => {
+      if (!ok || !json?.data) {
         setDetail(null);
         setError(json?.error ?? "Night run not found");
       } else {
         setDetail(json.data as NightRunDetail);
         setError(null);
       }
+      setLoading(false);
+    },
+    []
+  );
+
+  const runUrl = runId
+    ? `/api/projects/${projectId}/build/night-runs/${runId}`
+    : null;
+
+  const load = useCallback(async () => {
+    if (!runUrl) {
+      setDetail(null);
+      setError(null);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(runUrl);
+      applyDetail(res.ok, await res.json());
     } catch {
       setError("Failed to load the night run summary");
+      setLoading(false);
     }
-    setLoading(false);
-  }, [projectId, runId]);
+  }, [runUrl, applyDetail]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!runUrl) {
+      return;
+    }
+    let cancelled = false;
+    let ok = false;
+    fetch(runUrl)
+      .then((res) => {
+        ok = res.ok;
+        return res.json();
+      })
+      .then((json) => {
+        if (!cancelled) applyDetail(ok, json);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError("Failed to load the night run summary");
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runUrl, applyDetail]);
 
   usePolling(load, intervalMs, Boolean(runId) && detail?.state === "running", {
     immediate: false,

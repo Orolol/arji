@@ -120,23 +120,40 @@ export default function ReleasesPage() {
     ? namedAgents.find((a) => a.id === namedAgentId)?.provider
     : undefined;
 
+  // Shared by the mount fetch and by `loadData`, so the effect only ever
+  // updates state from a promise callback instead of synchronously.
+  const applyData = useCallback(
+    (releasesData: { data?: unknown }, epicsData: { data?: unknown }) => {
+      setReleases((releasesData.data || []) as Release[]);
+      setAllEpics((epicsData.data || []) as Epic[]);
+      setLoading(false);
+    },
+    []
+  );
+
+  const fetchData = useCallback(
+    () =>
+      Promise.all([
+        fetch(`/api/projects/${projectId}/releases`).then((r) => r.json()),
+        fetch(`/api/projects/${projectId}/epics`).then((r) => r.json()),
+      ]),
+    [projectId]
+  );
+
   const loadData = useCallback(async () => {
-    const [releasesRes, epicsRes] = await Promise.all([
-      fetch(`/api/projects/${projectId}/releases`),
-      fetch(`/api/projects/${projectId}/epics`),
-    ]);
-
-    const releasesData = await releasesRes.json();
-    const epicsData = await epicsRes.json();
-
-    setReleases(releasesData.data || []);
-    setAllEpics((epicsData.data || []) as Epic[]);
-    setLoading(false);
-  }, [projectId]);
+    const [releasesData, epicsData] = await fetchData();
+    applyData(releasesData, epicsData);
+  }, [fetchData, applyData]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    let cancelled = false;
+    void fetchData().then(([releasesData, epicsData]) => {
+      if (!cancelled) applyData(releasesData, epicsData);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchData, applyData]);
 
   const doneEpics = useMemo(
     () => allEpics.filter((e) => e.status === "done" && !e.releaseId),

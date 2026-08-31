@@ -60,41 +60,56 @@ function providerLabel(provider: string): string {
 }
 
 export function StatsTab({ scope, projectId }: StatsTabProps) {
-  const [stats, setStats] = useState<StatsPayload | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
   const scopedProjectId = scope === "project" ? projectId : undefined;
+  const query = scopedProjectId
+    ? `?projectId=${encodeURIComponent(scopedProjectId)}`
+    : "";
+  const statsUrl = `/api/agent-config/stats${query}`;
+
+  // Keyed by the URL, so `loading` and the cleared error both derive from
+  // "the settled result does not belong to the scope being asked for now"
+  // instead of being reset synchronously at the top of the effect.
+  const [result, setResult] = useState<{
+    key: string;
+    stats: StatsPayload | null;
+    error: string | null;
+  } | null>(null);
+
+  const settled = result?.key === statsUrl ? result : null;
+  const stats = settled?.stats ?? null;
+  const error = settled?.error ?? null;
+  const loading = settled === null;
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
-    const query = scopedProjectId
-      ? `?projectId=${encodeURIComponent(scopedProjectId)}`
-      : "";
-    fetch(`/api/agent-config/stats${query}`)
+    fetch(statsUrl)
       .then((r) => r.json())
       .then((json) => {
         if (cancelled) return;
         if (json.error) {
-          setError(typeof json.error === "string" ? json.error : "Failed to load stats");
+          setResult({
+            key: statsUrl,
+            stats: null,
+            error: typeof json.error === "string" ? json.error : "Failed to load stats",
+          });
         } else {
-          setStats(json.data ?? { agents: [], reviewBounce: [] });
+          setResult({
+            key: statsUrl,
+            stats: json.data ?? { agents: [], reviewBounce: [] },
+            error: null,
+          });
         }
-        setLoading(false);
       })
       .catch(() => {
         if (cancelled) return;
-        setError("Failed to load stats");
-        setLoading(false);
+        setResult({ key: statsUrl, stats: null, error: "Failed to load stats" });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [scopedProjectId]);
+  }, [statsUrl]);
 
   if (loading) {
     return (

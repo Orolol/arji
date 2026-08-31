@@ -51,26 +51,60 @@ export default function ChatDetailPage() {
 
   const [meta, setMeta] = useState<ConversationMeta | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchData = useCallback(async () => {
-    const [metaRes, msgsRes] = await Promise.all([
-      fetch(`/api/projects/${projectId}/conversations/${conversationId}`),
-      fetch(`/api/projects/${projectId}/chat?conversationId=${conversationId}`),
-    ]);
-    const metaJson = await metaRes.json();
-    const msgsJson = await msgsRes.json();
+  // Split so the effect can fetch without the state writes being visible in
+  // its body: `fetchConversation` is pure I/O, `applyConversation` is the
+  // state update, and both the mount effect and `fetchData` compose them.
+  const fetchConversation = useCallback(
+    () =>
+      Promise.all([
+        fetch(`/api/projects/${projectId}/conversations/${conversationId}`).then(
+          (r) => r.json()
+        ),
+        fetch(
+          `/api/projects/${projectId}/chat?conversationId=${conversationId}`
+        ).then((r) => r.json()),
+      ]),
+    [projectId, conversationId]
+  );
 
-    if (metaJson.data) setMeta(metaJson.data);
-    if (msgsJson.data) setMessages(msgsJson.data);
-  }, [projectId, conversationId]);
+  const applyConversation = useCallback(
+    (metaJson: { data?: ConversationMeta }, msgsJson: { data?: ChatMessage[] }) => {
+      if (metaJson.data) setMeta(metaJson.data);
+      if (msgsJson.data) setMessages(msgsJson.data);
+    },
+    []
+  );
+
+  const fetchData = useCallback(async () => {
+    const [metaJson, msgsJson] = await fetchConversation();
+    applyConversation(metaJson, msgsJson);
+  }, [fetchConversation, applyConversation]);
+
+  // `loading` derives from "no payload has arrived for this conversation yet",
+  // which is what the synchronous `setLoading(true)` at the top of the effect
+  // used to express — and it also stops the previous conversation's messages
+  // from showing while the new one is still in flight.
+  const [loadedConversationId, setLoadedConversationId] = useState<string | null>(
+    null
+  );
+  const loading = loadedConversationId !== conversationId;
 
   useEffect(() => {
-    setLoading(true);
-    fetchData().finally(() => setLoading(false));
-  }, [fetchData]);
+    let cancelled = false;
+    void fetchConversation()
+      .then(([metaJson, msgsJson]) => {
+        if (!cancelled) applyConversation(metaJson, msgsJson);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadedConversationId(conversationId);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchConversation, applyConversation, conversationId]);
 
   // Auto-poll every 3s when status is "generating"
   useEffect(() => {
