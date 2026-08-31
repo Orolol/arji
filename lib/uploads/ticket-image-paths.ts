@@ -7,16 +7,16 @@
  * needs. An agent needs the opposite: it is spawned with its cwd set to a git
  * worktree of the *user's project*, so a repo-relative path would resolve
  * inside that worktree and find nothing. This module is where the same stored
- * value becomes an absolute path — the same `path.join(process.cwd(), …)` the
- * route serving the bytes performs, so the prompt and the thumbnail can never
+ * value becomes an absolute path, through the same `upload-paths.ts` helper
+ * the route serving the bytes uses, so the prompt and the thumbnail can never
  * point at different files.
  *
  * Separate from `ticket-images.ts` precisely because `process.cwd()` has no
  * meaning in a browser bundle.
  */
 
-import path from "path";
-import { parseTicketImages, uploadsDirectoryFor } from "./ticket-images";
+import { parseTicketImages } from "./ticket-images";
+import { uploadFileAbsolutePath } from "./upload-paths";
 
 /**
  * Absolute paths of the screenshots a ticket carries, in stored order.
@@ -36,6 +36,6 @@ export function ticketImageAbsolutePaths(
     // Rebuilt from the validated file name rather than joined onto the stored
     // string: `parseTicketImages` accepts a leading `./` and surrounding
     // whitespace, and neither belongs in a path handed to an agent.
-    path.join(process.cwd(), uploadsDirectoryFor(projectId), image.fileName)
+    uploadFileAbsolutePath(projectId, image.fileName)
   );
 }

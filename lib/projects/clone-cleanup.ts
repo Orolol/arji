@@ -236,7 +236,9 @@ export async function removeProjectClone(
     return skip(check.reason, project.gitRepoPath ?? null);
   }
 
-  if (!fs.existsSync(check.path)) {
+  // The projects root is user-configurable and sits outside the app's own
+  // tree, so there is nothing here for the build to trace.
+  if (!fs.existsSync(/*turbopackIgnore: true*/ check.path)) {
     return skip("missing", check.path);
   }
 

@@ -25,7 +25,7 @@ function getAllowedOrigins(): string[] {
   );
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const host = request.headers.get("host");
   const origin = request.headers.get("origin");
   const allowedOrigins = getAllowedOrigins();

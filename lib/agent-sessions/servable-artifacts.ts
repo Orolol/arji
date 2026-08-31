@@ -10,6 +10,7 @@ import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { db, type ArijDatabase } from "@/lib/db";
 import { agentSessions, sessionArtifacts } from "@/lib/db/schema";
+import { resolveSessionsRoot } from "./session-paths";
 
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".png": "image/png",
@@ -103,9 +104,7 @@ export function lookupServableSessionArtifact(
     return { servable: false, reason: "not-registered" };
   }
 
-  const sessionsRoot = path.resolve(
-    options.sessionsRoot ?? path.join(process.cwd(), "data", "sessions")
-  );
+  const sessionsRoot = resolveSessionsRoot(options.sessionsRoot);
   const artifactDirectory = path.resolve(
     sessionsRoot,
     row.agentSessionId,

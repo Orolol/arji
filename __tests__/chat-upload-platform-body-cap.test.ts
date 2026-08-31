@@ -28,7 +28,7 @@ import { POST } from "@/app/api/projects/[projectId]/chat/upload/route";
 /**
  * The app's size guard has to be *reachable*.
  *
- * `middleware.ts` matches `/api/:path*`, so Next buffers every upload body up
+ * `proxy.ts` matches `/api/:path*`, so Next buffers every upload body up
  * to `experimental.proxyClientMaxBodySize` and hands the route whatever fits.
  * That cap defaults to 10MB — the exact value `MAX_IMAGE_UPLOAD_BYTES` used to
  * hold — so a file *at* the app limit overflowed the platform cap as soon as

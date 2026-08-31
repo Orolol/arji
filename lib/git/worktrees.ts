@@ -75,7 +75,11 @@ export function parseWorktreeList(
     if (!worktreePath) return [];
 
     const exists = pathExists(worktreePath);
-    const isMain = index === 0 || path.resolve(worktreePath) === mainPath;
+    // A user's worktree lives wherever git says it does, outside this app's
+    // tree entirely, so there is nothing here for the build to trace.
+    const isMain =
+      index === 0 ||
+      path.resolve(/*turbopackIgnore: true*/ worktreePath) === mainPath;
 
     return [
       {

@@ -24,7 +24,7 @@
  * unlink them *after* the transaction commits. Doing it the other way round
  * would delete a screenshot for a ticket delete that then rolled back.
  *
- * Server-only: `db`, `fs`, `process.cwd()`.
+ * Server-only: `db`, `fs`, and the absolute paths `upload-paths.ts` builds.
  */
 
 import fs from "fs";
@@ -33,6 +33,11 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db, type ArijDatabase } from "@/lib/db";
 import { chatAttachments } from "@/lib/db/schema";
 import { uploadsDirectoryFor } from "./ticket-images";
+import {
+  projectUploadsDirectory,
+  storedUploadAbsolutePath,
+  uploadsRoot,
+} from "./upload-paths";
 
 /**
  * The subset of the database a claim needs. Typed as the `update` method
@@ -50,47 +55,25 @@ export class UploadClaimConflictError extends Error {
   }
 }
 
-function uploadsRoot(): string {
-  return path.join(process.cwd(), "data", "uploads");
-}
-
-/**
- * Whether a stored path may be unlinked.
- *
- * `file_path` is written by the upload route and never by a request, but this
- * is the one place that turns a database string into `fs.unlink`, so it is
- * checked rather than trusted: only files genuinely under `data/uploads/` are
- * removable, whatever the column happens to hold.
- */
-function unlinkableAbsolutePath(relativePath: string): string | null {
-  if (typeof relativePath !== "string" || relativePath.length === 0) return null;
-
-  const absolute = path.resolve(process.cwd(), relativePath);
-  const relativeToRoot = path.relative(uploadsRoot(), absolute);
-
-  if (
-    relativeToRoot.length === 0 ||
-    relativeToRoot.startsWith("..") ||
-    path.isAbsolute(relativeToRoot)
-  ) {
-    return null;
-  }
-
-  return absolute;
-}
-
 /**
  * Unlinks stored upload paths, skipping anything already gone.
  *
  * A missing file is not an error worth propagating: the row is what makes the
  * upload exist, and it is being deleted either way. Returns how many files
  * were actually removed.
+ *
+ * `file_path` is written by the upload route and never by a request, but this
+ * is the one place that turns a database string into `fs.unlink`, so it is
+ * checked rather than trusted: `storedUploadAbsolutePath` refuses anything not
+ * genuinely under `data/uploads/`, whatever the column happens to hold. The
+ * routes that serve and prompt with the same column read the rule from there
+ * too.
  */
 export function removeUploadFiles(relativePaths: readonly string[]): number {
   let removed = 0;
 
   for (const relativePath of relativePaths) {
-    const absolute = unlinkableAbsolutePath(relativePath);
+    const absolute = storedUploadAbsolutePath(relativePath);
     if (!absolute) continue;
 
     try {
@@ -229,7 +212,7 @@ export function deleteProjectUploads(projectId: string): ProjectUploadCleanup {
       .run();
   }
 
-  const directory = path.resolve(process.cwd(), uploadsDirectoryFor(projectId));
+  const directory = projectUploadsDirectory(projectId);
   let directoryRemoved = false;
 
   // Guarded the same way single files are: a project id that somehow escaped

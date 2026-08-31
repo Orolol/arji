@@ -6,7 +6,7 @@ import nextConfig from "@/next.config";
  * Two layers decide whether a locally-browsed page works, and they have to
  * agree.
  *
- * `middleware.ts` decides which hosts may call `/api/*`. It accepts the three
+ * `proxy.ts` decides which hosts may call `/api/*`. It accepts the three
  * loopback spellings a developer can type: `localhost`, `127.0.0.1` and
  * `[::1]`.
  *
@@ -18,7 +18,7 @@ import nextConfig from "@/next.config";
  * `allowedDevOrigins` a developer on `http://127.0.0.1:3000` gets 403 on every
  * chunk.
  *
- * The failure is silent in the worst way: the API answers (middleware said
+ * The failure is silent in the worst way: the API answers (the proxy said
  * yes), the server markup renders, and hydration simply never runs. No error
  * surfaces — the board just sits there. The e2e suite hit the same wall from
  * its `127.0.0.1` base URL and failed 4/7 on a skeleton.
@@ -31,15 +31,15 @@ import nextConfig from "@/next.config";
 /** Loopback spellings a developer can put in the address bar. */
 const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 
-async function getMiddleware() {
-  const mod = await import("@/middleware");
-  return mod.middleware;
+async function getProxy() {
+  const mod = await import("@/proxy");
+  return mod.proxy;
 }
 
-/** Does `middleware.ts` let this host reach the API? */
+/** Does `proxy.ts` let this host reach the API? */
 async function apiAccepts(host: string): Promise<boolean> {
-  const middleware = await getMiddleware();
-  const res = middleware(
+  const proxy = await getProxy();
+  const res = proxy(
     new NextRequest(`http://${host}:3000/api/projects`, {
       headers: { host: `${host}:3000` },
     })
@@ -103,7 +103,7 @@ describe("next.config allowedDevOrigins", () => {
   });
 
   it.each(LOOPBACK_HOSTS)(
-    "serves dev resources to %s, the same host the API middleware accepts",
+    "serves dev resources to %s, the same host the API proxy accepts",
     async (host) => {
       expect(await apiAccepts(host)).toBe(true);
       expect(await devResourceServed(host)).toBe(true);
@@ -113,7 +113,7 @@ describe("next.config allowedDevOrigins", () => {
   it("still blocks dev resources from a non-loopback host", async () => {
     // Guards the fix against being "widened" into a wildcard: the point is
     // parity with the API's loopback allowlist, not switching the protection
-    // off. This host is refused by the API middleware too.
+    // off. This host is refused by the API proxy too.
     expect(await apiAccepts("evil.example.com")).toBe(false);
     expect(await devResourceServed("evil.example.com")).toBe(false);
   });
