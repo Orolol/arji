@@ -259,7 +259,10 @@ export function useNamedAgents() {
     try {
       const res = await fetch("/api/agent-config/named-agents");
       const json = await res.json();
-      setData(json.data || []);
+      // Shape-check rather than `|| []`: every consumer maps over this, so a
+      // payload that is merely truthy (an object, a string) used to crash the
+      // picker instead of rendering an empty one.
+      setData(Array.isArray(json?.data) ? json.data : []);
     } catch {
       // ignore
     }
