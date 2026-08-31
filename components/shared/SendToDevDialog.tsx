@@ -29,11 +29,16 @@ export interface SendToDevDialogProps {
   busy?: boolean;
   /** Extra confirm gate (e.g. an agent already owns the ticket). */
   locked?: boolean;
+  /**
+   * `pipeline` is `undefined` when no trustworthy default could be read and
+   * the user made no explicit choice — the caller must then omit the flag so
+   * the build route resolves the `pipeline_enabled` chain itself.
+   */
   onConfirm: (
     comment: string | undefined,
     namedAgentId: string | null,
     resumeSessionId: string | undefined,
-    pipeline: boolean
+    pipeline: boolean | undefined
   ) => void;
 }
 
@@ -66,7 +71,13 @@ export function SendToDevDialog({
   const [resumeSessionId, setResumeSessionId] = useState<
     string | undefined
   >(undefined);
-  const [pipeline, setPipeline] = usePipelineDispatchDefault(projectId, open);
+  const {
+    pipeline,
+    setPipeline,
+    pending: pipelinePending,
+    unresolved: pipelineUnresolved,
+    requestValue: pipelineRequestValue,
+  } = usePipelineDispatchDefault(projectId, open);
 
   // Re-opening re-seeds from the parent: a fresh optional comment, or the
   // carried review comment for a back-to-dev dispatch. React's documented
@@ -126,19 +137,25 @@ export function SendToDevDialog({
             rows={4}
             className=""
           />
-          <PipelineDispatchCheckbox checked={pipeline} onChange={setPipeline} />
+          <PipelineDispatchCheckbox
+            checked={pipeline}
+            onChange={setPipeline}
+            unresolved={pipelineUnresolved}
+          />
         </>
       }
       confirmLabel="Dispatch Agent"
       confirmIcon={<Hammer className="h-4 w-4 mr-1" />}
       busy={busy}
-      confirmDisabled={locked || (commentRequired && !comment.trim())}
+      confirmDisabled={
+        locked || pipelinePending || (commentRequired && !comment.trim())
+      }
       onConfirm={() =>
         onConfirm(
           comment.trim() || undefined,
           agentId,
           resumeSessionId,
-          pipeline
+          pipelineRequestValue
         )
       }
       onCancel={() => onOpenChange(false)}

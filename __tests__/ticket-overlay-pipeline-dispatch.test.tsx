@@ -230,7 +230,11 @@ describe("TicketOverlay — dev dispatch through the shared dialog", () => {
     const checkbox = await screen.findByTestId("pipeline-checkbox");
     await waitFor(() => expect(checkbox).toBeChecked());
 
-    fireEvent.click(screen.getByRole("button", { name: /Dispatch Agent/i }));
+    // The confirm stays gated until the `pipeline_enabled` read lands, so
+    // the overlay never dispatches an optimistic default as an explicit flag.
+    const confirm = () => screen.getByRole("button", { name: /Dispatch Agent/i });
+    await waitFor(() => expect(confirm()).toBeEnabled());
+    fireEvent.click(confirm());
 
     await waitFor(() => expect(sendToDevSpy).toHaveBeenCalled());
     expect(sendToDevSpy.mock.calls[0]).toEqual([
@@ -249,7 +253,11 @@ describe("TicketOverlay — dev dispatch through the shared dialog", () => {
     await waitFor(() => expect(checkbox).toBeChecked());
     fireEvent.click(checkbox);
 
-    fireEvent.click(screen.getByRole("button", { name: /Dispatch Agent/i }));
+    // The confirm stays gated until the `pipeline_enabled` read lands, so
+    // the overlay never dispatches an optimistic default as an explicit flag.
+    const confirm = () => screen.getByRole("button", { name: /Dispatch Agent/i });
+    await waitFor(() => expect(confirm()).toBeEnabled());
+    fireEvent.click(confirm());
 
     await waitFor(() => expect(sendToDevSpy).toHaveBeenCalled());
     expect(sendToDevSpy.mock.calls[0][3]).toBe(false);

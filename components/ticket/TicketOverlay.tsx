@@ -321,7 +321,9 @@ export function TicketOverlay({
     comment: string | undefined,
     namedAgentId: string | null,
     sessionId: string | undefined,
-    pipeline: boolean,
+    // undefined = no readable default and no user choice: omit the flag and
+    // let the build route resolve `pipeline_enabled` itself.
+    pipeline: boolean | undefined,
   ) {
     setSelectedAgentId(namedAgentId);
     try {
