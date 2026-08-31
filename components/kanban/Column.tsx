@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -212,39 +212,51 @@ export function Column({
   // `isOver` says the pointer is here; it does not say the drop is allowed.
   const showDropSlot = isOver && !dropDisabled;
 
-  // Track newly arrived epics for highlight animation
-  const prevEpicIdsRef = useRef<Set<string>>(new Set());
+  // Track newly arrived epics for highlight animation.
+  //
+  // The arrival is detected during render rather than in an effect, so the
+  // flash starts on the same commit the card appears in instead of one later.
+  // `seen` is keyed on the joined id list — a primitive — because comparing
+  // against a freshly built Set would differ on every render and re-enter the
+  // adjustment forever.
   const [highlightedEpicIds, setHighlightedEpicIds] = useState<Set<string>>(new Set());
   const [headerHighlight, setHeaderHighlight] = useState(false);
 
-  useEffect(() => {
-    const currentIds = new Set(epics.map((e) => e.id));
-    const prevIds = prevEpicIdsRef.current;
+  const epicIdsKey = epics.map((e) => e.id).join("|");
+  const [seen, setSeen] = useState<{ key: string; ids: Set<string> }>(() => ({
+    key: epicIdsKey,
+    ids: new Set(epics.map((e) => e.id)),
+  }));
 
-    // Find newly arrived epics (in current but not in previous)
+  if (seen.key !== epicIdsKey) {
+    const currentIds = new Set(epics.map((e) => e.id));
     const newIds = new Set<string>();
     for (const id of currentIds) {
-      if (!prevIds.has(id)) {
+      if (!seen.ids.has(id)) {
         newIds.add(id);
       }
     }
 
-    if (newIds.size > 0 && prevIds.size > 0) {
-      // Only highlight if we had items before (skip initial load)
+    setSeen({ key: epicIdsKey, ids: currentIds });
+
+    // Only highlight if we had items before (skip initial load)
+    if (newIds.size > 0 && seen.ids.size > 0) {
       setHighlightedEpicIds(newIds);
       setHeaderHighlight(true);
-
-      const timer = setTimeout(() => {
-        setHighlightedEpicIds(new Set());
-        setHeaderHighlight(false);
-      }, 1500);
-
-      prevEpicIdsRef.current = currentIds;
-      return () => clearTimeout(timer);
     }
+  }
 
-    prevEpicIdsRef.current = currentIds;
-  }, [epics]);
+  // Clear the flash 1.5s after it starts.
+  useEffect(() => {
+    if (highlightedEpicIds.size === 0 && !headerHighlight) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setHighlightedEpicIds(new Set());
+      setHeaderHighlight(false);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [highlightedEpicIds, headerHighlight]);
 
   const renderCard = (epic: KanbanEpic) => (
     <div

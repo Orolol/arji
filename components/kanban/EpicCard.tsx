@@ -225,17 +225,24 @@ export function EpicCard({
 
   const isDraft = isDraftEpic(epic);
 
-  // Flash highlight animation state
+  // Flash highlight animation state. The rising edge is detected during
+  // render, so the flash starts on the commit that turns `highlight` on.
   const [isHighlighted, setIsHighlighted] = useState(false);
-  const prevHighlight = useRef(highlight);
-  useEffect(() => {
-    if (highlight && !prevHighlight.current) {
+  const [prevHighlight, setPrevHighlight] = useState(highlight);
+  if (highlight !== prevHighlight) {
+    setPrevHighlight(highlight);
+    if (highlight) {
       setIsHighlighted(true);
-      const timer = setTimeout(() => setIsHighlighted(false), 1500);
-      return () => clearTimeout(timer);
     }
-    prevHighlight.current = highlight;
-  }, [highlight]);
+  }
+
+  useEffect(() => {
+    if (!isHighlighted) {
+      return;
+    }
+    const timer = setTimeout(() => setIsHighlighted(false), 1500);
+    return () => clearTimeout(timer);
+  }, [isHighlighted]);
 
   // Every opacity state lives in this inline object because the drag opacity
   // does: an inline declaration beats any non-`!important` class rule, and
@@ -294,18 +301,28 @@ export function EpicCard({
       mergeReadiness?.blocker === "merge_conflict") &&
     mergeReadiness?.blocker !== "conflict_markers";
 
-  // Elapsed time ticker for active agent
-  const [elapsedText, setElapsedText] = useState("");
+  // Elapsed time ticker for active agent. The label is derived from the clock
+  // the interval advances, so there is no reset to do when the agent stops —
+  // no agent simply means no label.
+  const agentStartedAt = activeAgentActivity?.startedAt;
+  const [tickedAt, setTickedAt] = useState(() => new Date());
+  const [tickingFor, setTickingFor] = useState(agentStartedAt);
+  if (tickingFor !== agentStartedAt) {
+    // Re-read the clock immediately, so a newly started agent never shows the
+    // time of the previous tick for up to a second.
+    setTickingFor(agentStartedAt);
+    setTickedAt(new Date());
+  }
+
   useEffect(() => {
-    if (!activeAgentActivity?.startedAt) {
-      setElapsedText("");
+    if (!agentStartedAt) {
       return;
     }
-    const update = () => setElapsedText(formatElapsed(activeAgentActivity.startedAt!));
-    update();
-    const interval = setInterval(update, 1000);
+    const interval = setInterval(() => setTickedAt(new Date()), 1000);
     return () => clearInterval(interval);
-  }, [activeAgentActivity?.startedAt]);
+  }, [agentStartedAt]);
+
+  const elapsedText = agentStartedAt ? formatElapsed(agentStartedAt, tickedAt) : "";
 
   function handleCardClick(event: MouseEvent) {
     const additiveSelection = event.metaKey || event.ctrlKey || event.shiftKey;
