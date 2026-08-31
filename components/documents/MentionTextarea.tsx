@@ -57,6 +57,7 @@ export function MentionTextarea({
   onKeyDown,
   onBlur,
   onFocus,
+  ref: forwardedRef,
   ...props
 }: MentionTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -103,9 +104,14 @@ export function MentionTextarea({
       .slice(0, 8);
   }, [activeMention, documents]);
 
-  useEffect(() => {
+  // Reset the highlight when the query changes. Adjusting state during render
+  // (React's documented alternative to a reset effect) keeps the first
+  // suggestion highlighted without the extra commit an effect would cost.
+  const [lastQuery, setLastQuery] = useState(activeMention?.query);
+  if (activeMention?.query !== lastQuery) {
+    setLastQuery(activeMention?.query);
     setSelectedIndex(0);
-  }, [activeMention?.query]);
+  }
 
   const updateActiveMention = useCallback(
     (nextValue: string, cursorPosition: number | null) => {
@@ -148,10 +154,10 @@ export function MentionTextarea({
         {...props}
         ref={(node) => {
           textareaRef.current = node;
-          if (typeof props.ref === "function") {
-            props.ref(node);
-          } else if (props.ref) {
-            (props.ref as React.MutableRefObject<HTMLTextAreaElement | null>).current = node;
+          if (typeof forwardedRef === "function") {
+            forwardedRef(node);
+          } else if (forwardedRef) {
+            forwardedRef.current = node;
           }
         }}
         value={value}

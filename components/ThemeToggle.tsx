@@ -2,13 +2,19 @@
 
 import { useTheme } from "next-themes";
 import { Sun, Moon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
+
+// `next-themes` only knows the real theme on the client, so the first paint has
+// to match the server HTML. `useSyncExternalStore` gives that hydration guard
+// directly — false from the server snapshot, true on the client — without the
+// mount effect that used to set state on every mount.
+const subscribeToNothing = () => () => {};
+const isClient = () => true;
+const isServer = () => false;
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(subscribeToNothing, isClient, isServer);
 
   if (!mounted) return <div className="w-[34px] h-[34px]" />;
 

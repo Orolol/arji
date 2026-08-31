@@ -68,20 +68,36 @@ export function RepoStatusBar({
   );
 
   const [prs, setPrs] = useState<OpenPr[]>([]);
+  const prsUrl = `/api/projects/${projectId}/prs`;
+
   const loadPrs = useCallback(async () => {
     if (!prsEnabled) return;
     try {
-      const res = await fetch(`/api/projects/${projectId}/prs`);
+      const res = await fetch(prsUrl);
       const json = await res.json();
       if (Array.isArray(json?.data)) setPrs(json.data as OpenPr[]);
     } catch {
       // ignore — pills are informational
     }
-  }, [projectId, prsEnabled]);
+  }, [prsUrl, prsEnabled]);
 
+  // The initial load applies its result from a promise callback rather than
+  // through `loadPrs`, so the effect body never updates state synchronously.
   useEffect(() => {
-    void loadPrs();
-  }, [loadPrs]);
+    if (!prsEnabled) return;
+    let cancelled = false;
+    fetch(prsUrl)
+      .then((res) => res.json())
+      .then((json) => {
+        if (!cancelled && Array.isArray(json?.data)) setPrs(json.data as OpenPr[]);
+      })
+      .catch(() => {
+        // ignore — pills are informational
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [prsUrl, prsEnabled]);
 
   if (!enabled) return null;
 

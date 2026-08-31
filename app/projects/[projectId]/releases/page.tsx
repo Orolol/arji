@@ -91,26 +91,46 @@ export default function ReleasesPage() {
     ? namedAgents.find((a) => a.id === namedAgentId)?.provider
     : undefined;
 
+  // Shared by the mount fetch and by `loadData`, so the effect only ever
+  // updates state from a promise callback instead of synchronously.
+  const applyData = useCallback(
+    (
+      releasesData: { data?: unknown },
+      epicsData: { data?: unknown },
+      projectData: { data?: unknown }
+    ) => {
+      setReleases((releasesData.data || []) as ReleaseRow[]);
+      setAllEpics((epicsData.data || []) as ReleaseEpic[]);
+      setProject((projectData.data || null) as ProjectRecord | null);
+      setLoading(false);
+    },
+    []
+  );
+
+  const fetchData = useCallback(
+    () =>
+      Promise.all([
+        fetch(`/api/projects/${projectId}/releases`).then((r) => r.json()),
+        fetch(`/api/projects/${projectId}/epics`).then((r) => r.json()),
+        fetch(`/api/projects/${projectId}`).then((r) => r.json()),
+      ]),
+    [projectId]
+  );
+
   const loadData = useCallback(async () => {
-    const [releasesRes, epicsRes, projectRes] = await Promise.all([
-      fetch(`/api/projects/${projectId}/releases`),
-      fetch(`/api/projects/${projectId}/epics`),
-      fetch(`/api/projects/${projectId}`),
-    ]);
-
-    const releasesData = await releasesRes.json();
-    const epicsData = await epicsRes.json();
-    const projectData = await projectRes.json();
-
-    setReleases(releasesData.data || []);
-    setAllEpics((epicsData.data || []) as ReleaseEpic[]);
-    setProject((projectData.data || null) as ProjectRecord | null);
-    setLoading(false);
-  }, [projectId]);
+    const [releasesData, epicsData, projectData] = await fetchData();
+    applyData(releasesData, epicsData, projectData);
+  }, [fetchData, applyData]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    let cancelled = false;
+    void fetchData().then(([releasesData, epicsData, projectData]) => {
+      if (!cancelled) applyData(releasesData, epicsData, projectData);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchData, applyData]);
 
   // Both halves matter: the second is what stops an already-released ticket
   // from being offered again.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useStoredValue, writeStoredValue } from "@/hooks/useStoredValue";
 
 const DEFAULT_PANEL_RATIO = 0.4;
 const MIN_PANEL_WIDTH = 300;
@@ -18,7 +19,51 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+/**
+ * Panel width for a given container width and ratio. Pure, so the render pass
+ * can call it with the *measured* container width (state) while the drag
+ * handler calls it with the live one it reads off the DOM.
+ */
+function panelWidthFor(totalWidth: number, ratio: number) {
+  const minRatio = MIN_PANEL_WIDTH / totalWidth;
+  const maxRatio = (totalWidth - MIN_BOARD_WIDTH - DIVIDER_WIDTH) / totalWidth;
+  const safeRatio = clamp(ratio, minRatio, maxRatio);
+  const width = Math.round(totalWidth * safeRatio);
+  // Below ~706px the two minima collide (minRatio > maxRatio) and the
+  // clamp degenerates into a sub-usable — even negative — width. The
+  // desktop split never renders below MOBILE_BREAKPOINT (the mobile
+  // Sheet takes over), but floor the result anyway so a degenerate
+  // container can never emit an invalid `width` style.
+  return Math.max(MIN_PANEL_WIDTH, width);
+}
+
+/** Width used until the container has been measured. */
+function fallbackContainerWidth() {
+  if (typeof window === "undefined") {
+    return 1200;
+  }
+  return window.innerWidth || 1200;
+}
+
 export type UnifiedPanelState = "collapsed" | "expanded" | "hidden";
+
+// The ratio and the panel state are owned by localStorage (see
+// hooks/useStoredValue): subscribing to it removes the mount-read effect that
+// used to set state synchronously, and the write-back effect that mirrored it.
+
+function parseStoredRatio(raw: string | null) {
+  if (!raw) {
+    return DEFAULT_PANEL_RATIO;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : DEFAULT_PANEL_RATIO;
+}
+
+function parseStoredPanelState(raw: string | null): UnifiedPanelState {
+  return raw === "expanded" || raw === "collapsed" || raw === "hidden"
+    ? raw
+    : "collapsed";
+}
 
 interface UsePanelLayoutOptions {
   projectId: string;
@@ -45,10 +90,14 @@ export function usePanelLayout({
   setActiveId,
 }: UsePanelLayoutOptions) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [panelState, setPanelState] = useState<UnifiedPanelState>("collapsed");
-  const [panelRatio, setPanelRatio] = useState(DEFAULT_PANEL_RATIO);
   const [isDragging, setIsDragging] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  // The container's own width, measured after layout. Reading
+  // `containerRef.current` during render returned `null` on the first pass and
+  // never re-ran, so the panel stayed sized against the *window* — too wide
+  // whenever the container is inset (sidebar, rail). A ResizeObserver reports
+  // asynchronously, so this never re-renders synchronously from an effect.
+  const [containerWidth, setContainerWidth] = useState<number | null>(null);
 
   const storageKey = useMemo(
     () => `arij.unified-chat-panel.ratio.${projectId}`,
@@ -65,6 +114,18 @@ export function usePanelLayout({
     [projectId],
   );
 
+  const panelRatio = parseStoredRatio(useStoredValue(storageKey));
+  const setPanelRatio = useCallback(
+    (ratio: number) => writeStoredValue(storageKey, ratio.toFixed(4)),
+    [storageKey],
+  );
+
+  const panelState = parseStoredPanelState(useStoredValue(stateStorageKey));
+  const setPanelState = useCallback(
+    (state: UnifiedPanelState) => writeStoredValue(stateStorageKey, state),
+    [stateStorageKey],
+  );
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -79,70 +140,33 @@ export function usePanelLayout({
     return () => window.removeEventListener("resize", updateIsMobile);
   }, []);
 
+  // Reads the DOM, so it belongs to event handlers only — never to render.
   const getContainerWidth = useCallback(() => {
     if (typeof window === "undefined") {
       return 1200;
     }
-    return containerRef.current?.clientWidth || window.innerWidth || 1200;
+    return containerRef.current?.clientWidth || fallbackContainerWidth();
   }, []);
 
-  const computePanelWidth = useCallback(
-    (ratio: number) => {
-      const totalWidth = getContainerWidth();
-      const minRatio = MIN_PANEL_WIDTH / totalWidth;
-      const maxRatio = (totalWidth - MIN_BOARD_WIDTH - DIVIDER_WIDTH) / totalWidth;
-      const safeRatio = clamp(ratio, minRatio, maxRatio);
-      const width = Math.round(totalWidth * safeRatio);
-      // Below ~706px the two minima collide (minRatio > maxRatio) and the
-      // clamp degenerates into a sub-usable — even negative — width. The
-      // desktop split never renders below MOBILE_BREAKPOINT (the mobile
-      // Sheet takes over), but floor the result anyway so a degenerate
-      // container can never emit an invalid `width` style.
-      return Math.max(MIN_PANEL_WIDTH, width);
-    },
-    [getContainerWidth],
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width) {
+        setContainerWidth(width);
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const panelWidthPx = panelWidthFor(
+    containerWidth ?? fallbackContainerWidth(),
+    panelRatio,
   );
-
-  const panelWidthPx = computePanelWidth(panelRatio);
-
-  // Persist panelRatio — read on mount
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) {
-      return;
-    }
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) {
-      return;
-    }
-    setPanelRatio(parsed);
-  }, [storageKey]);
-
-  // Persist panelRatio — write on change
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(storageKey, panelRatio.toFixed(4));
-  }, [panelRatio, storageKey]);
-
-  // Persist panelState — read on mount
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const raw = window.localStorage.getItem(stateStorageKey);
-    if (raw === "expanded" || raw === "collapsed" || raw === "hidden") {
-      setPanelState(raw);
-    }
-  }, [stateStorageKey]);
-
-  // Persist panelState — write on change
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(stateStorageKey, panelState);
-  }, [panelState, stateStorageKey]);
 
   // Persist activeId — read on mount (with guard to avoid overriding user switches)
   const activeIdRestoredRef = useRef(false);
@@ -190,7 +214,7 @@ export function usePanelLayout({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [isDragging, panelState, getContainerWidth]);
+  }, [isDragging, panelState, getContainerWidth, setPanelRatio]);
 
   const startDrag = useCallback(() => {
     setIsDragging(true);
@@ -198,7 +222,7 @@ export function usePanelLayout({
 
   const resetPanelRatio = useCallback(() => {
     setPanelRatio(DEFAULT_PANEL_RATIO);
-  }, []);
+  }, [setPanelRatio]);
 
   return {
     containerRef,

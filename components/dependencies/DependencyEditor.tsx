@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -41,15 +41,20 @@ export function DependencyEditor({
     clearError,
   } = useEpicDependencies(projectId, epicId);
 
-  const [selectedPredecessorIds, setSelectedPredecessorIds] = useState<
-    string[]
-  >([]);
+  const [selectedPredecessorIds, setSelectedPredecessorIds] = useState<string[]>(
+    () => predecessors.map((p) => p.dependsOnTicketId)
+  );
   const [addingId, setAddingId] = useState<string>("");
 
-  // Sync local state from fetched predecessors
-  useEffect(() => {
+  // Re-seed the local selection whenever a fresh set of predecessors arrives.
+  // Adjusting state during render (React's documented alternative to a sync
+  // effect) means the editor never shows an empty selection for one commit
+  // before the fetched one replaces it.
+  const [seededFrom, setSeededFrom] = useState(predecessors);
+  if (seededFrom !== predecessors) {
+    setSeededFrom(predecessors);
     setSelectedPredecessorIds(predecessors.map((p) => p.dependsOnTicketId));
-  }, [predecessors]);
+  }
 
   // Epics available as predecessors (same project, not self, not already selected)
   const availableEpics = useMemo(() => {

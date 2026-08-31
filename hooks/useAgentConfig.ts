@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { usePolling } from "@/hooks/usePolling";
 import type { AgentType, AgentProvider } from "@/lib/agent-config/constants";
 import type { NamedAgentCliOptions } from "@/lib/providers/options-registry";
@@ -42,6 +43,82 @@ export interface CustomReviewAgent {
   source?: "global" | "project";
 }
 
+const EMPTY_LIST: never[] = [];
+
+type KeyedList<T> = { key: string; data: T[] } | null;
+
+/**
+ * Fetch `url` and record the rows against it. setState only ever runs from a
+ * promise callback, so this never updates state synchronously — safe to call
+ * straight from an effect body.
+ *
+ * `isStale` drops a reply nobody is waiting for any more. There is one slot
+ * for one key, so recording an answer about a URL the hook has left does not
+ * just keep something stale around — it evicts the current URL's rows and
+ * puts the list back to `loading` over a URL that is not going to be fetched
+ * again.
+ */
+function fetchList<T>(
+  url: string,
+  setLoaded: Dispatch<SetStateAction<KeyedList<T>>>,
+  isStale: () => boolean = () => false
+) {
+  return fetch(url)
+    .then((res) => res.json())
+    .then((json) => {
+      if (!isStale()) setLoaded({ key: url, data: (json.data || []) as T[] });
+    })
+    .catch(() => {
+      // Record the failure against *this* URL and nothing else. Carrying the
+      // previous URL's rows across would re-label another scope's prompts,
+      // assignments and review agents as this scope's own — and the editors
+      // write back to whichever scope is selected now, so a stale row shown
+      // under the new scope is edited into the new scope.
+      if (!isStale()) setLoaded({ key: url, data: EMPTY_LIST });
+    });
+}
+
+/**
+ * A GET-backed list keyed by its URL.
+ *
+ * `data` and `loading` both derive from whether the settled result belongs to
+ * the URL being asked for *now*. That replaces the `setLoading(true)` these
+ * hooks used to run synchronously at the top of their mount effect, and it also
+ * stops the previous scope's rows from being shown while the new scope's
+ * request is still in flight.
+ */
+function useKeyedList<T>(url: string) {
+  const [loaded, setLoaded] = useState<KeyedList<T>>(null);
+  // The URL being asked for *now*. `refresh` is what every save awaits and it
+  // is not cancelled when the URL changes underneath it, so the request for
+  // the scope the user has just left can still be in flight when the new one
+  // has already answered.
+  const requestedUrl = useRef(url);
+
+  const data: T[] = loaded?.key === url ? loaded.data : EMPTY_LIST;
+  const loading = loaded?.key !== url;
+
+  const refresh = useCallback(
+    () => fetchList<T>(url, setLoaded, () => url !== requestedUrl.current),
+    [url]
+  );
+
+  useEffect(() => {
+    requestedUrl.current = url;
+    let cancelled = false;
+    void fetchList<T>(
+      url,
+      setLoaded,
+      () => cancelled || url !== requestedUrl.current
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  return { data, loading, refresh };
+}
+
 function buildUrl(
   basePath: string,
   scope: "global" | "project",
@@ -57,25 +134,8 @@ export function useAgentPrompts(
   scope: "global" | "project",
   projectId?: string
 ) {
-  const [data, setData] = useState<ResolvedAgentPrompt[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const url = buildUrl("/agent-config/prompts", scope, projectId);
-      const res = await fetch(url);
-      const json = await res.json();
-      setData(json.data || []);
-    } catch {
-      // ignore
-    }
-    setLoading(false);
-  }, [scope, projectId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const url = buildUrl("/agent-config/prompts", scope, projectId);
+  const { data, loading, refresh: load } = useKeyedList<ResolvedAgentPrompt>(url);
 
   const updatePrompt = useCallback(
     async (agentType: AgentType, systemPrompt: string) => {
@@ -113,25 +173,8 @@ export function useAgentAssignments(
   scope: "global" | "project",
   projectId?: string
 ) {
-  const [data, setData] = useState<ResolvedAgentAssignment[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const url = buildUrl("/agent-config/providers", scope, projectId);
-      const res = await fetch(url);
-      const json = await res.json();
-      setData(json.data || []);
-    } catch {
-      setData([]);
-    }
-    setLoading(false);
-  }, [scope, projectId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const url = buildUrl("/agent-config/providers", scope, projectId);
+  const { data, loading, refresh: load } = useKeyedList<ResolvedAgentAssignment>(url);
 
   const assignAgent = useCallback(
     async (agentType: AgentType, namedAgentId: string | null) => {
@@ -169,25 +212,8 @@ export function useReviewAgents(
   scope: "global" | "project",
   projectId?: string
 ) {
-  const [data, setData] = useState<CustomReviewAgent[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const url = buildUrl("/agent-config/review-agents", scope, projectId);
-      const res = await fetch(url);
-      const json = await res.json();
-      setData(json.data || []);
-    } catch {
-      // ignore
-    }
-    setLoading(false);
-  }, [scope, projectId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const url = buildUrl("/agent-config/review-agents", scope, projectId);
+  const { data, loading, refresh: load } = useKeyedList<CustomReviewAgent>(url);
 
   const createAgent = useCallback(
     async (name: string, systemPrompt: string) => {
@@ -251,24 +277,9 @@ export interface NamedAgent {
 }
 
 export function useNamedAgents() {
-  const [data, setData] = useState<NamedAgent[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/agent-config/named-agents");
-      const json = await res.json();
-      setData(json.data || []);
-    } catch {
-      // ignore
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, loading, refresh: load } = useKeyedList<NamedAgent>(
+    "/api/agent-config/named-agents"
+  );
 
   const createNamedAgent = useCallback(
     async (input: {

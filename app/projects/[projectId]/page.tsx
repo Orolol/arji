@@ -69,7 +69,7 @@ export default function ProjectDeskPage() {
   const [buildMode, setBuildMode] = useState<"parallel" | "sequential" | "dag">(
     "parallel"
   );
-  const [teamMode, setTeamMode] = useState(false);
+  const [teamModeRequested, setTeamMode] = useState(false);
   const [autoMergeAgent, setAutoMergeAgent] = useState(false);
   const [namedAgentId, setNamedAgentId] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
@@ -82,9 +82,10 @@ export default function ProjectDeskPage() {
   const [autoModeDialogOpen, setAutoModeDialogOpen] = useState(false);
   const [nightSummaryRunId, setNightSummaryRunId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [highlightedActivityId, setHighlightedActivityId] = useState<string | null>(null);
-  const { activities } = useAgentPolling(projectId, 3000, refreshTrigger);
-  const prevSessionIds = useRef<Set<string>>(new Set());
+  // Session completions are spotted during render (see below); the tick feeds
+  // `refreshKey` and the id list feeds the completion toasts.
+  const [completionTick, setCompletionTick] = useState(0);
+  const [completedSessionIds, setCompletedSessionIds] = useState<string[]>([]);
   const panelRef = useRef<UnifiedChatPanelHandle>(null);
 
   // Real-time events via SSE — the desk polls /api/control-desk on its own, but
@@ -103,11 +104,24 @@ export default function ProjectDeskPage() {
     "release:created": () => setRefreshTrigger((t) => t + 1),
   });
 
-  useEffect(() => {
-    if (pollTick > 0) {
-      setRefreshTrigger((t) => t + 1);
-    }
-  }, [pollTick]);
+  // Fallback for when SSE is down and polling takes over. All three counters
+  // only ever mean "something changed, reload", so the refresh key is their
+  // sum rather than an effect copying one into another.
+  const refreshKey = refreshTrigger + pollTick + completionTick;
+
+  const { activities } = useAgentPolling(projectId, 3000, refreshKey);
+
+  // Team mode is a decision about the selection that was standing when the box
+  // was ticked. Falling below two tickets retires it outright: merely masking
+  // it lets a later re-selection resurrect a `team: true` build the user never
+  // asked for a second time. Adjusting state during render is React's own
+  // answer to "reset when a value changes" — the reset lands in this same pass,
+  // before anything is committed, so no one ever observes the stale value.
+  if (teamModeRequested && batch.allSelected.size < 2) {
+    setTeamMode(false);
+  }
+
+  const teamMode = teamModeRequested && batch.allSelected.size >= 2;
 
   const activeDetailTicketId = getActiveDetailTicketId(batch.selectedTicketIds);
 
@@ -118,13 +132,6 @@ export default function ProjectDeskPage() {
   function handleCloseDetailPanel() {
     batch.clear();
   }
-
-  useEffect(() => {
-    if (!highlightedActivityId) return;
-    if (!activities.some((activity) => activity.id === highlightedActivityId)) {
-      setHighlightedActivityId(null);
-    }
-  }, [activities, highlightedActivityId]);
 
   // Refresh when the project layout imports arji.json.
   useEffect(() => {
@@ -164,18 +171,47 @@ export default function ProjectDeskPage() {
     addToast("success", "Board refinement finished — see the notification for the summary");
   }, [addToast]);
 
-  useEffect(() => {
-    const deleted = searchParams.get("deleted");
-    if (!deleted) return;
+  // ?deleted=story|epic — the notice the deleted ticket's own page hands over.
+  //
+  // It is raised during render rather than through `addToast` in an effect:
+  // `addToast` also schedules the dismissal timer, and scheduling a timer is a
+  // side effect that must not run from a render pass. This notice therefore
+  // carries its own dismissal effect and is appended to the rendered list.
+  const deletedParam = searchParams.get("deleted");
+  const [handledDeleted, setHandledDeleted] = useState<string | null>(null);
+  const [deletedNotice, setDeletedNotice] = useState<string | null>(null);
 
-    if (deleted === "story") {
-      addToast("success", "User story deleted permanently");
-    } else if (deleted === "epic") {
-      addToast("success", "Epic deleted permanently");
+  if (deletedParam !== handledDeleted) {
+    setHandledDeleted(deletedParam);
+    if (deletedParam === "story") {
+      setDeletedNotice("User story deleted permanently");
+    } else if (deletedParam === "epic") {
+      setDeletedNotice("Epic deleted permanently");
     }
+  }
 
+  useEffect(() => {
+    if (!deletedNotice) return;
+    const timer = setTimeout(() => setDeletedNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [deletedNotice]);
+
+  const visibleToasts: Toast[] = deletedNotice
+    ? [
+        ...toasts,
+        {
+          id: "deleted-notice",
+          type: "success",
+          message: deletedNotice,
+          actionLabel: "Open session",
+        },
+      ]
+    : toasts;
+
+  useEffect(() => {
+    if (!searchParams.get("deleted")) return;
     consumeQueryParam(searchParams, "deleted", `/projects/${projectId}`);
-  }, [addToast, projectId, searchParams]);
+  }, [projectId, searchParams]);
 
   // Deep link: /projects/<id>?ticket=<epicId> opens the ticket detail
   // (used by "Agent asked a question" notifications), then strips the param.
@@ -207,7 +243,21 @@ export default function ProjectDeskPage() {
   // act, and the ref keeps a re-render (or a replace() that has not landed
   // yet) from firing it a second time or re-opening a dialog just closed.
   const handledPanelParam = useRef<string | null>(null);
-  const handledNightParam = useRef<string | null>(null);
+
+  // The two dialogs this can open are plain state of this component, so they
+  // are opened during render; the imperative panel calls and the URL rewrite
+  // remain side effects and stay in the effect below.
+  const panelParam = searchParams.get("panel");
+  const [handledPanel, setHandledPanel] = useState<string | null>(null);
+
+  if (panelParam !== handledPanel) {
+    setHandledPanel(panelParam);
+    if (panelParam === "new-epic-manual") {
+      setEpicDialogOpen(true);
+    } else if (panelParam === "new-bug") {
+      setBugDialogOpen(true);
+    }
+  }
 
   useEffect(() => {
     const panel = searchParams.get("panel");
@@ -222,78 +272,92 @@ export default function ProjectDeskPage() {
       panelRef.current?.openChat();
     } else if (panel === "new-epic") {
       panelRef.current?.openNewEpic();
-    } else if (panel === "new-epic-manual") {
-      setEpicDialogOpen(true);
-    } else if (panel === "new-bug") {
-      setBugDialogOpen(true);
     }
 
     consumeQueryParam(searchParams, "panel", `/projects/${projectId}`);
   }, [projectId, searchParams]);
 
-  // Same mechanism for the header's Night run button: ?night=start.
-  useEffect(() => {
-    const night = searchParams.get("night");
-    if (night !== "start") {
-      handledNightParam.current = null;
-      return;
+  // Same mechanism for the header's Night run button: ?night=start. The dialog
+  // is this component's state, so it opens during render and only the URL
+  // rewrite is left to an effect.
+  const nightParam = searchParams.get("night");
+  const [handledNight, setHandledNight] = useState<string | null>(null);
+
+  if (nightParam !== handledNight) {
+    setHandledNight(nightParam);
+    if (nightParam === "start") {
+      setNightDialogOpen(true);
     }
-    if (handledNightParam.current === night) return;
-    handledNightParam.current = night;
+  }
 
-    setNightDialogOpen(true);
-
+  useEffect(() => {
+    if (searchParams.get("night") !== "start") return;
     consumeQueryParam(searchParams, "night", `/projects/${projectId}`);
   }, [projectId, searchParams]);
 
   // Deep link: /projects/<id>?nightRun=<runId> opens the morning summary
   // (used by the "Night run finished" notification), then strips the param.
+  const nightRunParam = searchParams.get("nightRun");
+  const [handledNightRun, setHandledNightRun] = useState<string | null>(null);
+
+  if (nightRunParam !== handledNightRun) {
+    setHandledNightRun(nightRunParam);
+    if (nightRunParam) {
+      setNightSummaryRunId(nightRunParam);
+    }
+  }
+
   useEffect(() => {
-    const nightRun = searchParams.get("nightRun");
-    if (!nightRun) return;
-
-    setNightSummaryRunId(nightRun);
-
+    if (!searchParams.get("nightRun")) return;
     consumeQueryParam(searchParams, "nightRun", `/projects/${projectId}`);
   }, [projectId, searchParams]);
 
-  // Reset team mode when selection drops below 2
-  useEffect(() => {
-    if (batch.allSelected.size < 2) {
-      setTeamMode(false);
-    }
-  }, [batch.allSelected.size]);
+  // Detect session completions for notifications + refresh. The disappearance
+  // is spotted during render — keyed on the joined id list, a primitive, so the
+  // comparison cannot differ on every render — and the per-session lookup that
+  // turns it into a toast stays in the effect below.
+  const activityIdsKey = activities.map((a) => a.id).join("|");
+  const [seenActivities, setSeenActivities] = useState<{
+    key: string;
+    ids: Set<string>;
+  }>(() => ({ key: activityIdsKey, ids: new Set(activities.map((a) => a.id)) }));
 
-  // Detect session completions for notifications + refresh
-  useEffect(() => {
+  if (seenActivities.key !== activityIdsKey) {
     const currentIds = new Set(activities.map((a) => a.id));
-    let hasCompleted = false;
-    for (const prevId of prevSessionIds.current) {
-      if (!currentIds.has(prevId)) {
-        hasCompleted = true;
-        fetch(`/api/projects/${projectId}/sessions/${prevId}`)
-          .then((r) => r.json())
-          .then((d) => {
-            if (d.data) {
-              const s = d.data;
-              if (s.status === "completed") {
-                addToast("success", `Agent #${prevId.slice(0, 6)} completed`);
-              } else if (s.status === "failed") {
-                addToast(
-                  "error",
-                  `Agent #${prevId.slice(0, 6)} failed: ${s.error || "Unknown error"}`
-                );
-              }
-            }
-          })
-          .catch(() => {});
-      }
+    const gone = [...seenActivities.ids].filter((id) => !currentIds.has(id));
+    setSeenActivities({ key: activityIdsKey, ids: currentIds });
+    if (gone.length > 0) {
+      setCompletedSessionIds(gone);
+      setCompletionTick((t) => t + 1);
     }
-    if (hasCompleted) {
-      setRefreshTrigger((t) => t + 1);
+  }
+
+  useEffect(() => {
+    if (completedSessionIds.length === 0) return;
+    let cancelled = false;
+
+    for (const prevId of completedSessionIds) {
+      fetch(`/api/projects/${projectId}/sessions/${prevId}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (cancelled || !d.data) return;
+          const s = d.data;
+          if (s.status === "completed") {
+            addToast("success", `Agent #${prevId.slice(0, 6)} completed`);
+          } else if (s.status === "failed") {
+            addToast(
+              "error",
+              `Agent #${prevId.slice(0, 6)} failed: ${s.error || "Unknown error"}`
+            );
+          }
+        })
+        .catch(() => {});
     }
-    prevSessionIds.current = currentIds;
-  }, [activities, projectId]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [completedSessionIds, projectId, addToast]);
 
   async function handleBuild() {
     if (batch.allSelected.size === 0) return;
@@ -456,11 +520,11 @@ export default function ProjectDeskPage() {
               <AutoModeToggle
                 projectId={projectId}
                 onOpen={() => setAutoModeDialogOpen(true)}
-                refreshTrigger={refreshTrigger}
+                refreshTrigger={refreshKey}
               />
               <RefinementButton
                 projectId={projectId}
-                refreshTrigger={refreshTrigger}
+                refreshTrigger={refreshKey}
                 onError={(message) => addToast("error", message)}
                 onNotice={(message) => addToast("success", message)}
                 onStarted={() =>
@@ -663,11 +727,10 @@ export default function ProjectDeskPage() {
             </div>
 
             {/* Agent monitor bar */}
-            <AgentMonitor
-              projectId={projectId}
-              activities={activities}
-              highlightedActivityId={highlightedActivityId}
-            />
+            {/* No `highlightedActivityId`: the linked-agent hover that used to
+                feed it belonged to the board this desk replaced, so the monitor
+                keeps its own default of "nothing highlighted". */}
+            <AgentMonitor projectId={projectId} activities={activities} />
           </div>
         </UnifiedChatPanel>
       </div>
@@ -681,7 +744,7 @@ export default function ProjectDeskPage() {
           projectId={projectId}
           epicId={activeDetailTicketId}
           open
-          refreshTrigger={refreshTrigger}
+          refreshTrigger={refreshKey}
           onClose={handleCloseDetailPanel}
           onAgentConflict={({ message, sessionUrl }) =>
             addToast(
@@ -705,7 +768,7 @@ export default function ProjectDeskPage() {
 
       {/* Toast notifications */}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-        {toasts.map((toast) => (
+        {visibleToasts.map((toast) => (
           <div
             key={toast.id}
             className={cn(

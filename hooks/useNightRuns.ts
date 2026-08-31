@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePolling } from "@/hooks/usePolling";
 import type {
   NightRunDetail,
@@ -85,47 +85,113 @@ export async function stopNightRun(
   }
 }
 
+type SettledDetail = {
+  /** The run URL this result answers. */
+  key: string;
+  detail: NightRunDetail | null;
+  error: string | null;
+};
+
 /**
  * Loads one night run's detail (morning summary). Keeps polling while the
  * run is still executing so the dialog can be opened mid-run.
+ *
+ * Every value is keyed by the run being asked for *now*. The dialog is one
+ * mount pointed at one run after another — the list closes it (`runId` back to
+ * null) and reopens it on the next run — so a result recorded for a run it has
+ * since left is not an answer about this one. Retaining it is not merely
+ * cosmetic: `detail.state` draws the Stop button, and the click stops the
+ * *current* `runId`, so run A's live state under run B's id offers to stop a
+ * run nobody looked at.
  */
 export function useNightRunDetail(
   projectId: string,
   runId: string | null,
   intervalMs: number = 5000
 ) {
-  const [detail, setDetail] = useState<NightRunDetail | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [settled, setSettled] = useState<SettledDetail | null>(null);
+
+  const runUrl = runId
+    ? `/api/projects/${projectId}/build/night-runs/${runId}`
+    : null;
+
+  /**
+   * The run URL being asked for *now*, for the response handlers to check
+   * against: a request is never cancelled when the dialog moves on, and
+   * `usePolling` leaves its in-flight callback running when it restarts. A
+   * poll issued for the previous run can therefore still answer, and there is
+   * only one slot to answer into. Dropping the reply is not cosmetic either:
+   * once a finished run is on screen nothing polls any more, so a result
+   * evicted by a straggler is never fetched again and the dialog is stuck
+   * loading until it is closed and reopened.
+   */
+  const requestedUrl = useRef(runUrl);
+
+  // No run asked for is a settled empty state, not a pending one.
+  const current = runUrl !== null && settled?.key === runUrl ? settled : null;
+  const detail = current?.detail ?? null;
+  const error = current?.error ?? null;
+  const loading = runUrl !== null && current === null;
+
+  // Shared by the mount fetch and by `load`, so the effect only ever updates
+  // state from a promise callback instead of synchronously in its body.
+  const applyDetail = useCallback(
+    (
+      key: string,
+      ok: boolean,
+      json: { data?: unknown; error?: string } | null
+    ) => {
+      if (key !== requestedUrl.current) return;
+      setSettled(
+        ok && json?.data
+          ? { key, detail: json.data as NightRunDetail, error: null }
+          : { key, detail: null, error: json?.error ?? "Night run not found" }
+      );
+    },
+    []
+  );
+
+  const applyFailure = useCallback((key: string) => {
+    if (key !== requestedUrl.current) return;
+    setSettled({
+      key,
+      detail: null,
+      error: "Failed to load the night run summary",
+    });
+  }, []);
 
   const load = useCallback(async () => {
-    if (!runId) {
-      setDetail(null);
-      setError(null);
-      return;
-    }
-    setLoading(true);
+    if (!runUrl) return;
     try {
-      const res = await fetch(
-        `/api/projects/${projectId}/build/night-runs/${runId}`
-      );
-      const json = await res.json();
-      if (!res.ok || !json?.data) {
-        setDetail(null);
-        setError(json?.error ?? "Night run not found");
-      } else {
-        setDetail(json.data as NightRunDetail);
-        setError(null);
-      }
+      const res = await fetch(runUrl);
+      applyDetail(runUrl, res.ok, await res.json());
     } catch {
-      setError("Failed to load the night run summary");
+      applyFailure(runUrl);
     }
-    setLoading(false);
-  }, [projectId, runId]);
+  }, [runUrl, applyDetail, applyFailure]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    requestedUrl.current = runUrl;
+    if (!runUrl) {
+      return;
+    }
+    let cancelled = false;
+    let ok = false;
+    fetch(runUrl)
+      .then((res) => {
+        ok = res.ok;
+        return res.json();
+      })
+      .then((json) => {
+        if (!cancelled) applyDetail(runUrl, ok, json);
+      })
+      .catch(() => {
+        if (!cancelled) applyFailure(runUrl);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runUrl, applyDetail, applyFailure]);
 
   usePolling(load, intervalMs, Boolean(runId) && detail?.state === "running", {
     immediate: false,

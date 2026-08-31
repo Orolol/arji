@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { usePolling } from "@/hooks/usePolling";
 
 export interface TicketComment {
@@ -12,6 +12,8 @@ export interface TicketComment {
   agentSessionId: string | null;
   createdAt: string;
 }
+
+const EMPTY_COMMENTS: TicketComment[] = [];
 
 export type TicketCommentsTarget =
   | { kind: "epic"; epicId: string | null }
@@ -33,8 +35,14 @@ export function useTicketComments(projectId: string, target: TicketCommentsTarge
         : null
       : `/api/projects/${projectId}/stories/${storyId}/comments`;
 
-  const [comments, setComments] = useState<TicketComment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadedComments, setComments] = useState<TicketComment[]>([]);
+  const [isLoading, setLoading] = useState(true);
+
+  // A target with no URL has an empty, settled thread. Deriving that beats the
+  // reset effect it replaces: the value is right on the first render instead of
+  // one commit later, and returning to a target still shows its cached thread.
+  const comments = commentsUrl ? loadedComments : EMPTY_COMMENTS;
+  const loading = commentsUrl ? isLoading : false;
 
   const loadComments = useCallback(async () => {
     if (!commentsUrl) return;
@@ -48,14 +56,6 @@ export function useTicketComments(projectId: string, target: TicketCommentsTarge
       // silently fail on poll
     }
     setLoading(false);
-  }, [commentsUrl]);
-
-  // Reset to an empty, non-loading thread when there is no target URL
-  useEffect(() => {
-    if (!commentsUrl) {
-      setComments([]);
-      setLoading(false);
-    }
   }, [commentsUrl]);
 
   // Initial load + 5s polling

@@ -19,6 +19,8 @@ interface ResumableSession {
   completedAt: string | null;
 }
 
+const EMPTY_SESSIONS: ResumableSession[] = [];
+
 interface SessionPickerProps {
   projectId: string;
   epicId?: string;
@@ -58,17 +60,31 @@ export function SessionPicker({
   selectedSessionId,
   onSelect,
 }: SessionPickerProps) {
-  const [sessions, setSessions] = useState<ResumableSession[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Codex has no resumable-session endpoint, so it has no request at all.
+  const requestKey =
+    provider === "codex"
+      ? null
+      : [projectId, epicId, userStoryId, agentType, namedAgentId, provider]
+          .map((part) => part ?? "")
+          .join("|");
+
+  const [loaded, setLoaded] = useState<{
+    key: string;
+    sessions: ResumableSession[];
+  } | null>(null);
+
+  // Both derived from the request identity, which is what the reset/loading
+  // setStates at the top of the effect were really tracking.
+  const sessions =
+    requestKey !== null && loaded?.key === requestKey ? loaded.sessions : EMPTY_SESSIONS;
+  const loading = requestKey !== null && loaded?.key !== requestKey;
 
   useEffect(() => {
-    if (provider === "codex") {
-      setSessions([]);
-      setLoading(false);
+    if (requestKey === null) {
       return;
     }
 
-    setLoading(true);
+    let cancelled = false;
     const params = new URLSearchParams();
     if (epicId) params.set("epicId", epicId);
     if (userStoryId) params.set("userStoryId", userStoryId);
@@ -78,10 +94,25 @@ export function SessionPicker({
 
     fetch(`/api/projects/${projectId}/sessions/resumable?${params}`)
       .then((r) => r.json())
-      .then((data) => setSessions(data.data || []))
-      .catch(() => setSessions([]))
-      .finally(() => setLoading(false));
-  }, [projectId, epicId, userStoryId, agentType, namedAgentId, provider]);
+      .then((data) => {
+        if (!cancelled) setLoaded({ key: requestKey, sessions: data.data || [] });
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded({ key: requestKey, sessions: [] });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    projectId,
+    epicId,
+    userStoryId,
+    agentType,
+    namedAgentId,
+    provider,
+    requestKey,
+  ]);
 
   useEffect(() => {
     if (!selectedSessionId) return;
