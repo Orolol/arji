@@ -1,5 +1,7 @@
 # Idées de features — brainstorm du 2026-08-15
 
+> **Document d'archive — 2026-08-31.** L'UI décrite ci-dessous a été remplacée par la refonte en control desk à strates d'attention ; ce fichier est conservé tel qu'écrit à sa date et n'a pas été révisé. UI actuelle : `README.md`, `docs/specs.md`.
+
 Généré par 5 idéateurs (UX quotidienne, orchestration, observabilité, intégrations, paris IA-natifs)
 sur base d'un inventaire du produit ; 43 idées brutes, dédupliquées et vérifiées contre le code
 (chaque ancrage spot-checké par grep). Effort : S = une session, M = quelques jours, L/XL = structurant.

@@ -39,7 +39,10 @@ export {
   REVIEW_BOUNDARY_SECTION,
 } from "./prompt-sections";
 import { getProjectMemoryContent } from "@/lib/documents/memory";
-import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
+import {
+  PROJECT_MEMORY_MAX_CHARS,
+  PROJECT_MEMORY_MAX_TOKENS,
+} from "@/lib/documents/memory-constants";
 // The prompt asks for these headings and the workflow refuses to store a
 // document without them — one contract, one definition.
 import { DREAMING_MEMORY_SECTIONS } from "@/lib/workflow/dreaming-constants";
@@ -1193,7 +1196,17 @@ export function buildCiFixPrompt(
       // Tildes avoid accidentally closing a conventional backtick fence
       // embedded in compiler/test output. Replace a literal closing marker
       // as a second boundary guard.
-      const safeTail = failure.logTail.replace(/~~~/g, "~ ~ ~");
+      //
+      // The boundary is only half the defence: a log tail is repository
+      // controlled — a test name, a fixture, a source line the runner echoes
+      // — so a `<system-directive>` committed anywhere the failing job prints
+      // arrives here as live-looking markup, addressed to a session the
+      // ci_watch autofix routine dispatches unattended. Neutralise it too.
+      // Only the markup is escaped, so the tail stays readable as a
+      // diagnostic and a reviewer can still see what was attempted.
+      const safeTail = neutralizeControlMarkup(
+        failure.logTail.replace(/~~~/g, "~ ~ ~"),
+      );
       push(
         "findings",
         `Untrusted GitHub Actions log tail:\n\n~~~text\n${safeTail}\n~~~`,
@@ -1539,7 +1552,19 @@ export function buildMergeResolutionPrompt(
   parts.push(`## Merge Conflict Resolution\n`);
   parts.push(`Branch: \`${branchName}\`\n`);
   parts.push(`### Git merge output\n`);
-  parts.push("```\n" + conflictOutput.trim() + "\n```\n");
+  // The merge output is evidence, not instructions: it names and quotes the
+  // conflicting content of the build agent's own committed branch, and the
+  // session reading it has write access to this worktree and is told below
+  // to commit. Two defects a bare ```-fenced interpolation had:
+  //
+  // - No neutralisation. A `<system-directive>` an agent committed into any
+  //   conflicting file reached this prompt as live markup.
+  // - Fixed fence. Conflicting Markdown — this repository has plenty — closes
+  //   a three-backtick fence early, and everything after it reads as prompt.
+  //
+  // `fenceAgentOutput` escapes the impersonating tags, grows the fence past
+  // the longest backtick run in the content and labels the block as a record.
+  parts.push(fenceAgentOutput(conflictOutput) + "\n");
 
   parts.push(`## Instructions
 
@@ -1713,6 +1738,15 @@ export function buildSecondOpinionPrompt(
     parts.push(userStoriesSection(userStories, { checkmark: false }));
   }
 
+  // The diff is the *build agent's own committed work*: every source file,
+  // test fixture and comment on the branch reaches this gate verbatim, and
+  // this gate is the last thing between Full Auto and the base branch. So it
+  // gets the evidence-channel treatment — neutralised, and fenced with a run
+  // longer than anything it contains. A bare ```diff fence is closed by the
+  // first Markdown file the branch touches, and everything after it reads as
+  // prompt rather than as diff.
+  const trimmedDiff = finalDiff?.trim();
+
   parts.push(`## Independent Second Opinion
 
 Branch: \`${branchName}\`
@@ -1724,9 +1758,7 @@ read-only pass over the **final branch diff** before Full Auto merges it.
 The exact output of \`git diff ${baseBranch}...HEAD\` is embedded below. Read
 only the surrounding code needed to validate it; do not edit files.
 
-\`\`\`diff
-${finalDiff?.trim() || "(no committed diff)"}
-\`\`\`
+${trimmedDiff ? fenceAgentOutput(trimmedDiff, "diff") : "(no committed diff)"}
 
 1. Inspect the embedded final diff and read only the surrounding code needed to validate it.
 2. Look only for merge-blocking defects: correctness regressions, security issues, destructive behaviour, or an acceptance criterion that the diff plainly does not implement. Do not restyle working code and do not edit files.
@@ -1845,7 +1877,7 @@ Rewrite the ENTIRE memory document, merging anything durable the just-finished s
 - MERGE, don't append: deduplicate against the current memory, rewrite entries to stay general, and drop entries the session proved wrong or obsolete.
 - If the session revealed nothing durable, return the current memory (cleaned up if useful) unchanged in substance.
 - Prefer short bullet points grouped under a few \`##\` headings.
-- HARD LIMIT: the document must stay under ${PROJECT_MEMORY_MAX_CHARS} characters. Cut the least valuable entries first if space runs out.
+- HARD LIMIT: the document must stay under ${PROJECT_MEMORY_MAX_TOKENS} tokens (about ${PROJECT_MEMORY_MAX_CHARS} characters). Cut the least valuable entries first if space runs out.
 
 ### Output Format
 
@@ -1972,7 +2004,7 @@ ${DREAMING_MEMORY_SECTIONS.map((title) => `## ${title}`).join("\n")}
 - NEVER include per-ticket trivia: ticket titles, ids, session ids, dates, costs, provider names, or one-off incident details. Every line must be true for the NEXT session too.
 - Prefer short, imperative bullet points. Give the reason when it is not obvious ("X, because Y").
 - If the digest supports nothing new for a section, keep whatever the current memory already had under it rather than inventing filler.
-- HARD LIMIT: the document must stay under ${PROJECT_MEMORY_MAX_CHARS} characters. Cut the least valuable entries first if space runs out.
+- HARD LIMIT: the document must stay under ${PROJECT_MEMORY_MAX_TOKENS} tokens (about ${PROJECT_MEMORY_MAX_CHARS} characters). Cut the least valuable entries first if space runs out.
 
 ### Output Format
 

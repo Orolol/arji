@@ -79,7 +79,7 @@ export function EditorFooterBar({
         </p>
       ) : null}
 
-      <div className="flex items-center gap-[10px] px-1">
+      <div className="flex flex-wrap items-center gap-[10px] px-1">
         {/* The old trigger was an icon-only button and needed
             aria-label="Delete {name}"; this one carries its own visible label,
             which is the accessible name — the editor already says which agent

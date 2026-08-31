@@ -16,12 +16,17 @@ export interface ReleaseHeaderClusterProps {
 }
 
 /**
- * The screen-specific right cluster of the Releases header: the repo line, an
- * outline Fetch and the single filled Push button.
+ * The Releases screen's SECOND ROW: the repo line, an outline Fetch and the
+ * single filled Push button.
  *
- * Every frame carries a different cluster (8b has ⌘K + Régénérer par chat, 8a a
- * chrono + Stop), so the shared project layout cannot own this — it is rendered
- * by the page, above the two-column body.
+ * This one was born body-rendered and is the shape the 13a retrofit adopted for
+ * every screen: h38, the body's 14px gutter, no border, no background — a row
+ * INSIDE the content, never a header. The global bar
+ * (`components/piscine/TopBar.tsx`) is the only header on the route.
+ *
+ * Every screen carries a different row (8b Écrire/Prévisualiser + Régénérer par
+ * chat, 8a chrono + Stop, 8d the range control), which is precisely why the
+ * shared project layout cannot own any of them.
  *
  * Deliberately NOT RepoStrataBand (Git Sync): that band also draws PR pills and a behind
  * count the frame does not have, and its testids are asserted on by an existing
@@ -54,7 +59,10 @@ export function ReleaseHeaderCluster({
       : ` · ${worktreeCount} ${worktreeCount === 1 ? "worktree" : "worktrees"}`;
 
   return (
-    <div className="flex h-[38px] shrink-0 items-center justify-end gap-[14px] px-[14px]">
+    <div
+      data-testid="release-controls"
+      className="flex h-[38px] shrink-0 items-center justify-end gap-[14px] px-[14px]"
+    >
       <span data-testid="release-repo-line" title={error ?? undefined}>
         {error ? (
           // The hook resolves ahead/behind against this branch; when it cannot,

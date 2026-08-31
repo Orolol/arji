@@ -39,7 +39,11 @@ import {
   providerReportsOwnSessionId,
   providerAcceptsAssignedSessionId,
 } from "@/lib/agent-sessions/resume-capability";
-import type { McpSpawnConfig, ProviderSpawnOptions } from "@/lib/providers/types";
+import {
+  arijChannelSpec,
+  type McpSpawnConfig,
+  type ProviderSpawnOptions,
+} from "@/lib/providers/types";
 
 type Listener = (...args: unknown[]) => void;
 
@@ -98,11 +102,15 @@ function envelope(overrides: Record<string, unknown> = {}): string {
   });
 }
 
-const MCP: McpSpawnConfig = {
-  serverName: "arij",
+const ARIJ_CHANNEL = {
+  name: "arij",
   command: "/usr/bin/node",
   args: ["/app/bin/arij-mcp.mjs"],
   env: { ARIJ_BASE_URL: "http://localhost:3000", ARIJ_MCP_TOKEN: "tok-1" },
+};
+
+const MCP: McpSpawnConfig = {
+  servers: [ARIJ_CHANNEL],
   allowedToolNames: ["get_ticket"],
 };
 
@@ -218,7 +226,15 @@ describe("AgyProvider", () => {
     it("passes the chat toolset selector through when the channel sets it", () => {
       const env = provider.buildEnv(
         baseOptions({
-          mcp: { ...MCP, env: { ...MCP.env, ARIJ_MCP_TOOLSET: "chat" } },
+          mcp: {
+            ...MCP,
+            servers: [
+              {
+                ...ARIJ_CHANNEL,
+                env: { ...ARIJ_CHANNEL.env, ARIJ_MCP_TOOLSET: "chat" },
+              },
+            ],
+          },
         }),
       );
       expect(env.ARIJ_MCP_TOOLSET).toBe("chat");
@@ -234,7 +250,9 @@ describe("AgyProvider", () => {
         config.allowedToolNames.every((name) => !name.startsWith("mcp__")),
       ).toBe(true);
       // spelling is the ONLY divergence — server, shim and env are unchanged
-      expect(config.env).toEqual(buildMcpSpawnConfig({ token: "t" }).env);
+      expect(arijChannelSpec(config).env).toEqual(
+        arijChannelSpec(buildMcpSpawnConfig({ token: "t" })).env,
+      );
     });
   });
 

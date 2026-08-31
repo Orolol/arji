@@ -251,8 +251,9 @@ export default function ReleasesPage() {
       data-testid="releases-screen"
       className="flex h-full min-h-0 flex-col font-sans text-foreground"
     >
-      {/* The project layout exposes no per-page header-actions slot, so the
-          cluster is the page's own pinned row above the body. */}
+      {/* The screen's second row. The project layout draws no header at all
+          any more (frame 13a), so this is the page's own pinned row above the
+          body — on the same 14px gutter as the columns under it. */}
       <ReleaseHeaderCluster
         projectId={projectId}
         branch={branch}

@@ -171,6 +171,9 @@ function OptionControl({
         }
         chrome="filled"
         size="md"
+        // Up to six levels on one rail: on a phone they take a second row
+        // rather than overlapping each other's labels.
+        wrap
         // On the pool ground the inactive label is the stratum's mid tone,
         // not --muted-foreground.
         className="[--segment-inactive:var(--strata-next-mid)]"

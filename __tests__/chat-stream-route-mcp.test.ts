@@ -74,14 +74,18 @@ vi.mock("@/lib/chat/cli-tool-channel", () => ({
 }));
 
 const FAKE_MCP: McpSpawnConfig = {
-  serverName: "arij",
-  command: "/usr/bin/node",
-  args: ["/app/bin/arij-mcp.mjs"],
-  env: {
-    ARIJ_BASE_URL: "http://localhost:3000",
-    ARIJ_MCP_TOKEN: "arij-mcp-test-token",
-    ARIJ_MCP_TOOLSET: "chat",
-  },
+  servers: [
+    {
+      name: "arij",
+      command: "/usr/bin/node",
+      args: ["/app/bin/arij-mcp.mjs"],
+      env: {
+        ARIJ_BASE_URL: "http://localhost:3000",
+        ARIJ_MCP_TOKEN: "arij-mcp-test-token",
+        ARIJ_MCP_TOOLSET: "chat",
+      },
+    },
+  ],
   allowedToolNames: ["mcp__arij__list_tickets"],
 };
 

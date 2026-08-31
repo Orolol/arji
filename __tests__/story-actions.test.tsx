@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AgentActionsBar } from "@/components/shared/AgentActionsBar";
 
 vi.mock("@/components/documents/MentionTextarea", () => ({
@@ -30,8 +30,9 @@ vi.mock("@/components/shared/NamedAgentSelect", () => ({
   }) => (
     <select
       data-testid="agent-select"
-      value={value ?? ""}
+      className={className}
       onChange={(e) => onChange(e.target.value)}
+      value={value ?? ""}
     >
       <option value="">Select agent</option>
       <option value="agent-1">Claude Code</option>
@@ -57,6 +58,20 @@ function storyTarget(overrides?: Partial<typeof baseStory>) {
 }
 
 describe("AgentActionsBar (story target)", () => {
+  beforeEach(() => {
+    // The send-to-dev dialog reads the effective `pipeline_enabled` setting
+    // and gates its confirm until that read lands; serve an empty settings
+    // map so these tests exercise the product default (pipeline on).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => ({
+        ok: true,
+        json: async () =>
+          String(input) === "/api/settings" ? { data: {} } : { data: [] },
+      }))
+    );
+  });
+
   it("shows Send to Dev button for todo status", () => {
     render(<AgentActionsBar {...baseProps} />);
     expect(screen.getByText("Send to Dev")).toBeInTheDocument();
@@ -133,12 +148,14 @@ describe("AgentActionsBar (story target)", () => {
     render(<AgentActionsBar {...baseProps} onSendToDev={onSendToDev} />);
 
     fireEvent.click(screen.getByText("Send to Dev"));
-    fireEvent.click(screen.getByText("Dispatch Agent"));
+    const confirm = screen.getByRole("button", { name: /Dispatch Agent/ });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
 
     // Called with undefined comment, null namedAgentId (default) and the
     // pipeline flag, which defaults to the effective `pipeline_enabled`
-    // setting (absent here, so false).
-    expect(onSendToDev).toHaveBeenCalledWith(undefined, null, undefined, false);
+    // setting (absent here, so the product default: true).
+    expect(onSendToDev).toHaveBeenCalledWith(undefined, null, undefined, true);
   });
 
   it("calls onSendToDev with selected namedAgentId", async () => {
@@ -148,13 +165,15 @@ describe("AgentActionsBar (story target)", () => {
     fireEvent.click(screen.getByText("Send to Dev"));
     const select = screen.getAllByTestId("agent-select")[0];
     fireEvent.change(select, { target: { value: "agent-1" } });
-    fireEvent.click(screen.getByText("Dispatch Agent"));
+    const confirm = screen.getByRole("button", { name: /Dispatch Agent/ });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
 
     expect(onSendToDev).toHaveBeenCalledWith(
       undefined,
       "agent-1",
       undefined,
-      false
+      true
     );
   });
 

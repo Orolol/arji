@@ -16,7 +16,8 @@ import { SpecPreview } from "@/components/spec/SpecPreview";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useProjectEvents } from "@/hooks/useProjectEvents";
-import { PROJECT_MEMORY_MAX_CHARS } from "@/lib/documents/memory-constants";
+import { PROJECT_MEMORY_MAX_TOKENS } from "@/lib/documents/memory-constants";
+import { estimateTokens } from "@/lib/tokens/estimator";
 import type {
   MemoryWriteProvenance,
   MemoryWriteSource,
@@ -88,7 +89,7 @@ function sourceLabel(source: MemoryWriteSource | null | undefined): string {
  *
  * - pairs as an equal peer next to the spec editor;
  * - edit/preview modes driven by the section's tab;
- * - character cap indicator and approaching warning;
+ * - token cap indicator and approaching warning;
  * - template skeleton for the 4 Dreaming sections when empty/non-conforming;
  * - last write provenance in header (manual / Dreaming / distillation) + timestamp;
  * - 1-click pre-dream snapshot restore with explicit confirmation;
@@ -138,9 +139,10 @@ export function MemoryPanel({
   const panelRef = useRef<HTMLDivElement>(null);
 
   const safeContent = content;
-  const overCap = safeContent.length > PROJECT_MEMORY_MAX_CHARS;
+  const estimatedTokens = estimateTokens(safeContent);
+  const overCap = estimatedTokens > PROJECT_MEMORY_MAX_TOKENS;
   const approachingCap =
-    !overCap && safeContent.length >= Math.floor(PROJECT_MEMORY_MAX_CHARS * 0.85);
+    !overCap && estimatedTokens >= Math.floor(PROJECT_MEMORY_MAX_TOKENS * 0.85);
   const dirty = safeContent !== savedContent;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -414,7 +416,7 @@ export function MemoryPanel({
           right={
             <span data-testid="memory-cap-indicator">
               <Mono size={10.5} tone={capTone}>
-                {`${safeContent.length} / ${PROJECT_MEMORY_MAX_CHARS}`}
+                {`${estimatedTokens} / ${PROJECT_MEMORY_MAX_TOKENS}`}
               </Mono>
             </span>
           }
@@ -701,14 +703,14 @@ export function MemoryPanel({
             the same #a63a1a as `text-destructive` below it. */}
         {approachingCap && (
           <p className="flex-none text-[12px] text-strata-land-deep">
-            Approaching the {PROJECT_MEMORY_MAX_CHARS}-character cap (
-            {safeContent.length}/{PROJECT_MEMORY_MAX_CHARS}).
+            Approaching the {PROJECT_MEMORY_MAX_TOKENS}-token cap (
+            {estimatedTokens}/{PROJECT_MEMORY_MAX_TOKENS}).
           </p>
         )}
         {overCap && (
           <p className="flex-none text-[12px] text-destructive">
-            Over the {PROJECT_MEMORY_MAX_CHARS}-character cap (
-            {safeContent.length}/{PROJECT_MEMORY_MAX_CHARS}). Trim the content to
+            Over the {PROJECT_MEMORY_MAX_TOKENS}-token cap (
+            {estimatedTokens}/{PROJECT_MEMORY_MAX_TOKENS}). Trim the content to
             save.
           </p>
         )}

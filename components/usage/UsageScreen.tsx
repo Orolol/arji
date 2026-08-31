@@ -51,7 +51,7 @@ export function UsageScreen() {
 
   // State precedence is the contract: skeleton only before the FIRST report,
   // error screen only when there is nothing to show, and a stale report always
-  // beats a blank page (the header carries the warning instead).
+  // beats a blank page (the control row carries the warning instead).
   if (loading && !report) {
     return (
       <div
@@ -125,8 +125,8 @@ function UsageBody({
     : "night runs inclus";
 
   return (
-    // No TOP padding: row 1 butts against the header. The 24px header gutter
-    // versus the 14px body gutter is intentional asymmetry.
+    // No TOP padding: row 1 butts against the range/Refresh row above, which
+    // shares this 14px gutter so the two line up.
     <div className="flex min-h-full flex-col gap-[12px] px-[14px] pb-[14px]">
       <div className="flex shrink-0 flex-wrap gap-[12px]" data-testid="usage-band">
         <StatTile

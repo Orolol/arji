@@ -1,27 +1,30 @@
 "use client";
 
-import Link from "next/link";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
-import {
-  DeskHeader,
-  Mono,
-  PillButton,
-  SegmentedControl,
-  pillButtonVariants,
-} from "@/components/piscine";
+import { Mono, PillButton, SegmentedControl } from "@/components/piscine";
 import { formatClock } from "@/components/usage/formatters";
 import type { UsageRange } from "@/lib/types/usage";
 
 /**
- * The 60px paper header of frame 8d.
+ * The usage screen's SECOND ROW — frame 13a's retrofit of frame 8d.
  *
- * ONE FILLED BUTTON PER ROW: "Back to board" is it. Refresh is an outline pill
- * and the active range segment is a control state, not a second button.
+ * 8d drew a 60px page header (logo · "Usage" · range control · Refresh · a
+ * filled "Back to board"). 13a made the top bar global, so the logo, the page
+ * identity and the way home all live there now and this file keeps only what
+ * is genuinely per-screen: the range the report covers and the way to re-read
+ * it. "Back to board" is gone — the bar's "A · Now" pill IS the way home, and a
+ * second control saying the same thing next to it was the duplication 13a
+ * exists to remove.
  *
- * The segmented control carries an EXTRA 14px left margin on top of the
- * header's own 14px gap, so the gap between the title and the control reads as
- * 28px. That is the frame; do not unify it.
+ * NO FILLED BUTTON. Losing "Back to board" left the row without one, and that
+ * is correct rather than an omission to fill: the system caps a row at one
+ * filled button, it does not require one, and Refresh is a re-read — the least
+ * committing action on the screen. Painting it deep water-green would make the
+ * cheapest thing here the loudest.
+ *
+ * The gutter is the body's 14px, not the retired header's 24px: this row now
+ * sits INSIDE the screen, so it lines up with the tiles under it.
  */
 export interface UsageHeaderProps {
   range: UsageRange;
@@ -48,13 +51,16 @@ export function UsageHeader({
   onRefresh,
 }: UsageHeaderProps) {
   return (
-    <DeskHeader title="Usage">
+    <div
+      data-testid="usage-controls"
+      className="flex h-[38px] shrink-0 items-center gap-[14px] px-[14px]"
+    >
       <SegmentedControl
         // `filled` is the white --card rail; the 1.5px hairline is added
         // because this control sits on shell paper, not on a card.
         chrome="filled"
         size="sm"
-        className="ml-[14px] border-[1.5px] border-border"
+        className="border-[1.5px] border-border"
         options={RANGE_OPTIONS}
         value={range}
         onChange={onRangeChange}
@@ -82,18 +88,7 @@ export function UsageHeader({
         >
           Refresh
         </PillButton>
-        {/*
-          PillButton is a <button>; the pill that NAVIGATES is a Link wearing
-          the same cva recipe rather than a button nested in an anchor.
-        */}
-        <Link
-          href="/"
-          className={pillButtonVariants({ variant: "filled", size: "md" })}
-        >
-          <ArrowLeft size={13} aria-hidden="true" />
-          Back to board
-        </Link>
       </div>
-    </DeskHeader>
+    </div>
   );
 }

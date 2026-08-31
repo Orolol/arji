@@ -168,15 +168,25 @@ export default function PiscinePreviewPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <DeskHeader title="Piscine primitives">
-        <span className="ml-auto">
-          <Mono size={10.5} tone="muted" uppercase tracking={0.08}>
-            dev harness · not a product screen
-          </Mono>
-        </span>
-      </DeskHeader>
-
-      <div className="mx-auto flex max-w-[1180px] flex-col gap-7 px-6 pb-24">
+      {/*
+        The harness draws no page header of its own. Frame 13a's bar is mounted
+        globally by app/layout.tsx and is already above this; a DeskHeader here
+        would put a second 60px strip under it — the exact stacking this pass
+        removes. The harness's identity is a second row inside its own content,
+        like every other screen. `DeskHeader` still has a SPECIMEN below: it is
+        a primitive on its way out, not one this page is allowed to wear.
+      */}
+      <div className="mx-auto flex max-w-[1180px] flex-col gap-7 px-6 pt-[14px] pb-24">
+        <div className="flex h-[38px] shrink-0 items-center gap-[12px]">
+          <span className="font-display text-[17px] font-bold tracking-[-0.01em] text-foreground">
+            Piscine primitives
+          </span>
+          <span className="ml-auto">
+            <Mono size={10.5} tone="muted" uppercase tracking={0.08}>
+              dev harness · not a product screen
+            </Mono>
+          </span>
+        </div>
         {/* ── StrataBand ─────────────────────────────────────────────────── */}
         <Section
           name="StrataBand"
@@ -819,7 +829,7 @@ export default function PiscinePreviewPage() {
         {/* ── DeskHeader ─────────────────────────────────────────────────── */}
         <Section
           name="DeskHeader"
-          note="60px shell · 24px gutter (body is 14px — the asymmetry is intentional) · no border, no shadow"
+          note="RETIRING — frame 13a's global bar replaced it; kept as a specimen while the last screens still mount it · 60px shell · 24px gutter · no border, no shadow"
         >
           <SurfaceCard radius={12} className="w-full overflow-hidden">
             <DeskHeader title="Now">

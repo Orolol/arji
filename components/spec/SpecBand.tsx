@@ -33,7 +33,8 @@ interface SpecBandProps {
   /** An agent is rewriting the spec: the editor and the save pill are frozen. */
   updateRunning: boolean;
   onSave: () => void | Promise<void>;
-  /** The "Régénérer par chat" pill, wrapped in its HeaderActionSlot. */
+  /** The "Régénérer par chat" pill — this band's header IS the screen's
+   *  second row, so the pill lives here rather than in a page header. */
   headerAction?: ReactNode;
   className?: string;
 }
@@ -113,11 +114,10 @@ export function SpecBand({
           injectée dans chaque prompt d&apos;agent
         </span>
         {/*
-          Two --action fills share this row when the header portal is absent:
-          the active segment and the "Régénérer par chat" pill. Documented and
-          accepted — the segment is a MODE INDICATOR, not a button, and the
-          "one filled button per row" rule counts buttons. Do not demote the
-          segment to an outline to "fix" it.
+          Two --action fills share this row: the active segment and the
+          "Régénérer par chat" pill. Documented and accepted — the segment is a
+          MODE INDICATOR, not a button, and the "one filled button per row" rule
+          counts buttons. Do not demote the segment to an outline to "fix" it.
         */}
         <div className="ml-auto flex flex-none items-center gap-[8px]">
           <SegmentedControl

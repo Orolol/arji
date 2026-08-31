@@ -49,18 +49,26 @@ import {
   providerSupportsMcp,
   writeMcpConfigFile,
 } from "@/lib/claude/mcp-injection";
-import type { McpSpawnConfig, ProviderSpawnOptions } from "@/lib/providers/types";
+import {
+  arijChannelSpec,
+  type McpSpawnConfig,
+  type ProviderSpawnOptions,
+} from "@/lib/providers/types";
 
 const TOKEN = "arij-mcp-secret-token-12345";
 
-const sampleMcp: McpSpawnConfig = {
-  serverName: "arij",
+const sampleArijChannel = {
+  name: "arij",
   command: "/usr/bin/node",
   args: ["/app/bin/arij-mcp.mjs"],
   env: {
     ARIJ_BASE_URL: "http://localhost:3000",
     ARIJ_MCP_TOKEN: TOKEN,
   },
+};
+
+const sampleMcp: McpSpawnConfig = {
+  servers: [sampleArijChannel],
   allowedToolNames: [...ARIJ_MCP_ALLOWED_TOOL_NAMES],
 };
 
@@ -686,26 +694,26 @@ describe("arijMcpToolPrefix / arijMcpToolName — per-provider spelling", () => 
 describe("buildMcpSpawnConfig", () => {
   it("targets the app-root shim via the running node binary and carries the token", () => {
     const config = buildMcpSpawnConfig({ token: TOKEN });
-    expect(config.serverName).toBe(ARIJ_MCP_SERVER_NAME);
-    expect(config.command).toBe(process.execPath);
-    expect(config.args).toHaveLength(1);
-    expect(config.args[0].endsWith("bin/arij-mcp.mjs")).toBe(true);
-    expect(config.args[0].startsWith(process.cwd())).toBe(true);
-    expect(config.env.ARIJ_MCP_TOKEN).toBe(TOKEN);
-    expect(config.env.ARIJ_BASE_URL.length).toBeGreaterThan(0);
+    expect(arijChannelSpec(config).name).toBe(ARIJ_MCP_SERVER_NAME);
+    expect(arijChannelSpec(config).command).toBe(process.execPath);
+    expect(arijChannelSpec(config).args).toHaveLength(1);
+    expect(arijChannelSpec(config).args[0].endsWith("bin/arij-mcp.mjs")).toBe(true);
+    expect(arijChannelSpec(config).args[0].startsWith(process.cwd())).toBe(true);
+    expect(arijChannelSpec(config).env.ARIJ_MCP_TOKEN).toBe(TOKEN);
+    expect(arijChannelSpec(config).env.ARIJ_BASE_URL.length).toBeGreaterThan(0);
     expect(config.allowedToolNames).toEqual([...ARIJ_MCP_ALLOWED_TOOL_NAMES]);
   });
 
   it("keeps the default (agent) config free of any toolset selector", () => {
     const config = buildMcpSpawnConfig({ token: TOKEN });
-    expect("ARIJ_MCP_TOOLSET" in config.env).toBe(false);
+    expect("ARIJ_MCP_TOOLSET" in arijChannelSpec(config).env).toBe(false);
     expect(buildMcpSpawnConfig({ token: TOKEN, toolset: "agent" })).toEqual(config);
   });
 
   it("selects the chat toolset via env and swaps in the chat allowlist", () => {
     const config = buildMcpSpawnConfig({ token: TOKEN, toolset: "chat" });
-    expect(config.env.ARIJ_MCP_TOOLSET).toBe("chat");
-    expect(config.env.ARIJ_MCP_TOKEN).toBe(TOKEN);
+    expect(arijChannelSpec(config).env.ARIJ_MCP_TOOLSET).toBe("chat");
+    expect(arijChannelSpec(config).env.ARIJ_MCP_TOKEN).toBe(TOKEN);
     expect(config.allowedToolNames).toEqual([...ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES]);
     // no agent-only tools leak into the chat allowlist
     expect(config.allowedToolNames).not.toContain("mcp__arij__ask_question");
@@ -734,7 +742,9 @@ describe("buildMcpSpawnConfig", () => {
       "mcp__arij_promote_ticket",
     ]);
     // spelling is the ONLY divergence — server, shim and env are unchanged
-    expect(config.env).toEqual(buildMcpSpawnConfig({ token: TOKEN }).env);
+    expect(arijChannelSpec(config).env).toEqual(
+      arijChannelSpec(buildMcpSpawnConfig({ token: TOKEN })).env,
+    );
   });
 
   it("applies the omp spelling to the chat toolset too", () => {
@@ -743,7 +753,7 @@ describe("buildMcpSpawnConfig", () => {
       toolset: "chat",
       provider: "oh-my-pi",
     });
-    expect(config.env.ARIJ_MCP_TOOLSET).toBe("chat");
+    expect(arijChannelSpec(config).env.ARIJ_MCP_TOOLSET).toBe("chat");
     expect(config.allowedToolNames).toContain("mcp__arij_create_ticket");
     expect(config.allowedToolNames).not.toContain("mcp__arij__create_ticket");
   });
@@ -757,8 +767,12 @@ describe("buildMcpSpawnConfig", () => {
 
 describe("chat-toolset spawn configs — provider wiring", () => {
   const chatMcp: McpSpawnConfig = {
-    ...sampleMcp,
-    env: { ...sampleMcp.env, ARIJ_MCP_TOOLSET: "chat" },
+    servers: [
+      {
+        ...sampleArijChannel,
+        env: { ...sampleArijChannel.env, ARIJ_MCP_TOOLSET: "chat" },
+      },
+    ],
     allowedToolNames: [...ARIJ_MCP_CHAT_ALLOWED_TOOL_NAMES],
   };
 

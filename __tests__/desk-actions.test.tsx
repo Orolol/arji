@@ -9,6 +9,7 @@
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { NowDesk } from "@/components/desk/NowDesk";
 import type { ControlDeskPayload } from "@/lib/control-desk/types";
@@ -89,7 +90,6 @@ const payload: ControlDeskPayload = {
     },
   ],
   heldBackCount: 0,
-  inboxUnread: 0,
   upNext: [],
 };
 
@@ -232,16 +232,67 @@ describe("desk mutations", () => {
     expect(inputClasses).toContain("placeholder:text-strata-feed-deep");
   });
 
-  it("floats the command palette on the scrim alone, with no shadow", async () => {
-    // `--shadow-overlay` is the only shadow in the system and it belongs to
-    // the ticket overlay.
+  /**
+   * ⌘K used to be bound HERE as well as in the global bar — two window
+   * listeners toggling two different pieces of state off one keystroke. The
+   * bar is on every route, so it owns the shortcut and the palette; the desk
+   * must not open a second one. (The palette's own behaviour is pinned in
+   * __tests__/top-bar.test.tsx.)
+   */
+  it("leaves ⌘K to the global bar", async () => {
     mockFetch(() => ({ body: { data: {} } }));
     render(<NowDesk />);
     await screen.findByTestId("desk-composer-input");
 
     fireEvent.keyDown(window, { key: "k", metaKey: true });
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.className).not.toContain("shadow-");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  /**
+   * The desk draws no header any more — the bar does. Everything the two used
+   * to have in common is gone from here.
+   */
+  it("draws no header of its own under the global bar", async () => {
+    mockFetch(() => ({ body: { data: {} } }));
+    render(<NowDesk />);
+    await screen.findByTestId("desk-composer-input");
+
+    expect(document.querySelector('[data-slot="desk-header"]')).toBeNull();
+    expect(screen.queryByTestId("desk-project-rail")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("desk-command-trigger")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("desk-inbox")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("desk-settings")).not.toBeInTheDocument();
+  });
+
+  it("hides the second row when a host route already scopes the desk", async () => {
+    mockFetch(() => ({ body: { data: {} } }));
+    render(<NowDesk projectId="p1" />);
+    await screen.findByTestId("desk-composer-input");
+
+    // /projects/:id draws its own control row, with that project's Full Auto.
+    expect(screen.queryByTestId("desk-controls")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("desk-full-auto")).not.toBeInTheDocument();
+  });
+
+  it("keeps every project page reachable from the global desk", async () => {
+    const user = userEvent.setup();
+    mockFetch(() => ({ body: { data: {} } }));
+    render(<NowDesk />);
+
+    await user.click(await screen.findByRole("button", { name: "Project pages" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Spec & Memory" })).toHaveAttribute(
+      "href",
+      "/projects/p1/spec",
+    );
+    expect(screen.getByRole("menuitem", { name: "QA" })).toHaveAttribute(
+      "href",
+      "/projects/p1/qa",
+    );
+    expect(screen.getByRole("menuitem", { name: "Git Sync" })).toHaveAttribute(
+      "href",
+      "/projects/p1/git-sync",
+    );
   });
 
   it("toggles Full Auto from a CheckMark, not a bare native checkbox", async () => {

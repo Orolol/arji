@@ -38,6 +38,13 @@ interface StatusResponse {
     ahead: number;
     behind: number;
     hasRemoteBranch: boolean;
+    /** null when the server could not read the repository's remote list. */
+    remoteConfigured?: boolean | null;
+    configuredRemotes?: string[] | null;
+    remoteFetchConfigured?: boolean | null;
+    remotePushConfigured?: boolean | null;
+    fetchRemotes?: string[] | null;
+    pushRemotes?: string[] | null;
     lastFetchedAt?: number | null;
     lastFetchError?: string | null;
   };
@@ -111,6 +118,17 @@ export default function GitSyncPage() {
   const [ahead, setAhead] = useState(0);
   const [behind, setBehind] = useState(0);
   const [hasRemoteBranch, setHasRemoteBranch] = useState(true);
+  // These come from the status read, so the missing-remote affordance is
+  // re-derived on every mount instead of living in a push/pull response.
+  const [configuredRemotes, setConfiguredRemotes] = useState<string[]>([]);
+  const [remoteFetchConfigured, setRemoteFetchConfigured] = useState<
+    boolean | null
+  >(null);
+  const [remotePushConfigured, setRemotePushConfigured] = useState<
+    boolean | null
+  >(null);
+  const [fetchRemotes, setFetchRemotes] = useState<string[]>([]);
+  const [pushRemotes, setPushRemotes] = useState<string[]>([]);
   const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
   const [lastFetchError, setLastFetchError] = useState<string | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
@@ -158,6 +176,19 @@ export default function GitSyncPage() {
       setAhead(json.data.ahead);
       setBehind(json.data.behind);
       setHasRemoteBranch(json.data.hasRemoteBranch);
+      setConfiguredRemotes(json.data.configuredRemotes ?? []);
+      setRemoteFetchConfigured(
+        json.data.remoteFetchConfigured ?? json.data.remoteConfigured ?? null
+      );
+      setRemotePushConfigured(
+        json.data.remotePushConfigured ?? json.data.remoteConfigured ?? null
+      );
+      setFetchRemotes(
+        json.data.fetchRemotes ?? json.data.configuredRemotes ?? []
+      );
+      setPushRemotes(
+        json.data.pushRemotes ?? json.data.configuredRemotes ?? []
+      );
       setLastFetchedAt(json.data.lastFetchedAt ?? null);
       setLastFetchError(json.data.lastFetchError ?? null);
     } catch {
@@ -181,6 +212,25 @@ export default function GitSyncPage() {
     prune: pruneWorktrees,
     pruning: pruningWorktrees,
   } = useWorktrees(projectId);
+
+  /**
+   * The server's own 409 for "this repository has no usable remote" — the one
+   * condition on these routes that is a precondition rather than a fault.
+   */
+  function isRemoteMissingResponse(res: Response, json: { code?: string }) {
+    return res.status === 409 && json?.code === "remote_not_configured";
+  }
+
+  /**
+   * Re-reads the status endpoint so the missing-remote panel comes from the
+   * server's view of the repository, then restores the message: `refreshStatus`
+   * clears `error` on entry, so setting it first would lose it.
+   */
+  async function reportMissingRemote(json: { error?: string }) {
+    showToast("error", "No git remote configured");
+    await refreshStatus();
+    setError(json?.error || "No git remote is configured for this repository.");
+  }
 
   async function handlePull() {
     setPulling(true);
@@ -213,6 +263,11 @@ export default function GitSyncPage() {
         setError(json.error || "Merge conflicts detected");
         showToast("error", "Merge conflicts detected");
         setConflictDiffs(Array.isArray(json.conflictDiffs) ? json.conflictDiffs : []);
+        return;
+      }
+
+      if (isRemoteMissingResponse(res, json)) {
+        await reportMissingRemote(json);
         return;
       }
 
@@ -249,6 +304,11 @@ export default function GitSyncPage() {
       });
 
       const json = await res.json();
+      if (isRemoteMissingResponse(res, json)) {
+        await reportMissingRemote(json);
+        return;
+      }
+
       if (!res.ok) {
         setError(json.error || "Push failed");
         showToast("error", json.error || "Push failed");
@@ -265,6 +325,18 @@ export default function GitSyncPage() {
       setPushing(false);
     }
   }
+
+  // `null` means the server could not read the remote list — unknown, not
+  // missing, so the actions stay available.
+  const fetchMissing = remoteFetchConfigured === false;
+  const pushMissing = remotePushConfigured === false;
+  const remoteMissing = fetchMissing && pushMissing;
+  const operationMissing = fetchMissing || pushMissing;
+  const recoveryRemotes = remoteMissing
+    ? configuredRemotes
+    : fetchMissing
+      ? fetchRemotes
+      : pushRemotes;
 
   const rows: Array<{ key: string; value: ReactNode }> = [
     {
@@ -419,11 +491,86 @@ export default function GitSyncPage() {
               </div>
             </div>
 
+            {operationMissing && (
+              <div
+                data-testid={
+                  remoteMissing
+                    ? "git-remote-missing"
+                    : fetchMissing
+                      ? "git-remote-fetch-missing"
+                      : "git-remote-push-missing"
+                }
+                className="flex flex-col gap-[10px] rounded-[10px] border border-border-soft bg-band p-[14px]"
+              >
+                <div className="flex items-center gap-[9px]">
+                  <TriangleAlert className="h-[15px] w-[15px] flex-none text-priority-yellow" />
+                  <h3 className="text-[13.5px] font-semibold">
+                    {remoteMissing
+                      ? "No remote to sync with"
+                      : fetchMissing
+                        ? "No remote to pull from"
+                        : "No remote to push to"}
+                  </h3>
+                </div>
+                <p className="text-[12.5px] leading-[1.55] text-muted-foreground">
+                  {remoteMissing ? (
+                    <>
+                      This repository has no remote named{" "}
+                      <span className="font-mono">{remote}</span>, so there is
+                      nothing to pull from or push to yet.
+                    </>
+                  ) : fetchMissing ? (
+                    <>
+                      Remote <span className="font-mono">{remote}</span> can
+                      push, but has no fetch URL, so Pull is unavailable.
+                    </>
+                  ) : (
+                    <>
+                      Remote <span className="font-mono">{remote}</span> has no
+                      push URL, so Push is unavailable.
+                    </>
+                  )}
+                </p>
+                {recoveryRemotes.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-[9px]">
+                    <span className="text-[12.5px] text-muted-foreground">
+                      Remotes available for this operation:
+                    </span>
+                    {recoveryRemotes.map((name) => (
+                      <Button
+                        key={name}
+                        variant="outline"
+                        data-testid={`use-remote-${name}`}
+                        className="h-[27px] rounded-[8px] px-[10px] font-mono text-[12px]"
+                        onClick={() => setRemote(name)}
+                      >
+                        Use {name}
+                      </Button>
+                    ))}
+                  </div>
+                ) : (
+                  <p
+                    data-testid="git-remote-add-hint"
+                    className="text-[12.5px] leading-[1.55] text-muted-foreground"
+                  >
+                    Configure the remote from the repository, then refresh:{" "}
+                    <span className="font-mono">
+                      {remoteMissing
+                        ? `git remote add ${remote} <url>`
+                        : fetchMissing
+                          ? `git remote set-url ${remote} <url>`
+                          : `git remote set-url --push ${remote} <url>`}
+                    </span>
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-[10px]">
               <Button
                 className="h-[31px] rounded-[8px] px-[13px] text-[13px]"
                 onClick={handlePull}
-                disabled={pulling || loadingStatus}
+                disabled={pulling || loadingStatus || fetchMissing}
               >
                 {pulling ? (
                   <Loader2 className="h-[14px] w-[14px] animate-spin" />
@@ -436,7 +583,7 @@ export default function GitSyncPage() {
                 variant="outline"
                 className="h-[31px] rounded-[8px] px-[12px] text-[13px]"
                 onClick={handlePush}
-                disabled={pushing || loadingStatus}
+                disabled={pushing || loadingStatus || pushMissing}
               >
                 {pushing ? (
                   <Loader2 className="h-[14px] w-[14px] animate-spin" />

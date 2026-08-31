@@ -4,7 +4,7 @@
  * One memory document per project, stored in the existing `documents` table
  * with `kind = 'memory'` (see lib/documents/memory-constants.ts for why that
  * discriminator). Content is markdown, hard-capped at
- * PROJECT_MEMORY_MAX_CHARS on every write.
+ * PROJECT_MEMORY_MAX_TOKENS estimated tokens on every write.
  */
 
 import { and, eq } from "drizzle-orm";
@@ -17,13 +17,21 @@ import {
   MEMORY_DOC_FILENAME,
   MEMORY_DOC_KIND,
   PROJECT_MEMORY_MAX_CHARS,
+  PROJECT_MEMORY_MAX_TOKENS,
 } from "./memory-constants";
+import { estimateTokens } from "@/lib/tokens/estimator";
 
 export type MemoryDocRecord = typeof documents.$inferSelect;
 
-/** Truncates content to the hard cap (no-op when already under it). */
+/**
+ * Truncates content to the hard cap (no-op when already within it).
+ *
+ * The cap is PROJECT_MEMORY_MAX_TOKENS estimated tokens; under the
+ * estimator's 1-token ≈ 4-chars contract that is exactly
+ * PROJECT_MEMORY_MAX_CHARS characters, which is the slice target.
+ */
 export function enforceMemoryCap(content: string): string {
-  if (content.length <= PROJECT_MEMORY_MAX_CHARS) return content;
+  if (estimateTokens(content) <= PROJECT_MEMORY_MAX_TOKENS) return content;
   return content.slice(0, PROJECT_MEMORY_MAX_CHARS);
 }
 
@@ -67,7 +75,7 @@ export function getProjectMemoryContent(
 
 export interface SaveProjectMemoryResult {
   doc: MemoryDocRecord;
-  /** True when the content was cut at PROJECT_MEMORY_MAX_CHARS. */
+  /** True when the content was cut at the token cap. */
   truncated: boolean;
 }
 
@@ -81,7 +89,7 @@ export function saveProjectMemory(
   content: string,
   database: ArijDatabase = defaultDb
 ): SaveProjectMemoryResult {
-  const truncated = content.length > PROJECT_MEMORY_MAX_CHARS;
+  const truncated = estimateTokens(content) > PROJECT_MEMORY_MAX_TOKENS;
   const capped = enforceMemoryCap(content);
   const now = new Date().toISOString();
 

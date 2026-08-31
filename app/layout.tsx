@@ -3,7 +3,7 @@ import { Bricolage_Grotesque, Instrument_Sans, Space_Mono } from "next/font/goog
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
-import { Sidebar } from "@/components/layout/Sidebar";
+import { TopBar } from "@/components/piscine";
 
 /* Piscine typography. next/font/google self-hosts these at build time — no
    runtime request to Google — and each `variable` is bridged to a Tailwind
@@ -69,9 +69,16 @@ export default function RootLayout({
       >
         <ThemeProvider>
           <TooltipProvider>
-            <div className="flex h-screen">
-              <Sidebar />
-              <main className="flex-1 min-w-0 overflow-auto">{children}</main>
+            {/*
+              Frame 13a: ONE global bar, on every route, above a single scroll
+              container. It replaces the left rail (retired) and, once the
+              retrofit pass strips them, the 60px header each screen still
+              draws for itself. `min-h-0` is what lets `main` scroll instead of
+              growing the column past the viewport.
+            */}
+            <div className="flex h-screen flex-col">
+              <TopBar />
+              <main className="flex-1 min-h-0 min-w-0 overflow-auto">{children}</main>
             </div>
           </TooltipProvider>
         </ThemeProvider>

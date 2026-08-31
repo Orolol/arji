@@ -1,14 +1,18 @@
 /**
- * Settings page: the optional weekly Claude budget round-trips through
- * /api/settings under the global (unsuffixed) key.
+ * Settings → Workspace, BUDGET band: the weekly Claude budget and the monthly
+ * cap round-trip through /api/settings under their global (unsuffixed) keys.
+ *
+ * Both save through the tab's shared footer. The frame draws only the monthly
+ * cap; the weekly budget joins it here rather than being lost.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import SettingsPage from "@/app/settings/page";
 
-/** Pinned by the contract; inlined here exactly as the page inlines it. */
+/** Pinned by the contract; inlined here exactly as lib/types/usage.ts spells them. */
 const BUDGET_KEY = "usage_budget_usd_7d_claude";
+const MONTHLY_KEY = "usage_budget_usd_month";
 
 function mockSettings(stored: Record<string, unknown>, patchOk = true) {
   const fetchMock = vi.fn(
@@ -18,7 +22,17 @@ function mockSettings(stored: Record<string, unknown>, patchOk = true) {
         return { ok: true, json: async () => ({ data: { webhooks: [] } }) };
       }
       if (url === "/api/settings" && init?.method === "PATCH") {
-        return { ok: patchOk, json: async () => ({ data: { updated: true } }) };
+        return {
+          ok: patchOk,
+          json: async () =>
+            patchOk ? { data: { updated: true } } : { error: "nope" },
+        };
+      }
+      if (url === "/api/projects") {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url === "/api/usage") {
+        return { ok: true, json: async () => ({ data: {} }) };
       }
       return { ok: true, json: async () => ({ data: stored }) };
     }
@@ -27,26 +41,30 @@ function mockSettings(stored: Record<string, unknown>, patchOk = true) {
   return fetchMock;
 }
 
-/** Body of the last PATCH /api/settings call. */
-function lastPatchBody(fetchMock: ReturnType<typeof vi.fn>) {
-  const calls = fetchMock.mock.calls.filter(
-    (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === "PATCH"
-  );
-  return JSON.parse((calls[calls.length - 1][1] as { body: string }).body);
+function patchBodies(fetchMock: ReturnType<typeof vi.fn>) {
+  return fetchMock.mock.calls
+    .filter((c: unknown[]) => (c[1] as RequestInit | undefined)?.method === "PATCH")
+    .map((c: unknown[]) => JSON.parse((c[1] as { body: string }).body));
 }
 
-describe("Settings — usage budget", () => {
+function lastPatchBody(fetchMock: ReturnType<typeof vi.fn>) {
+  const bodies = patchBodies(fetchMock);
+  return bodies[bodies.length - 1];
+}
+
+describe.each([
+  { name: "weekly Claude budget", testId: "usage-budget-setting", key: BUDGET_KEY },
+  { name: "monthly cap", testId: "monthly-cap-setting", key: MONTHLY_KEY },
+])("Settings — $name", ({ testId, key }) => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
   it("prefills the input from the stored global key", async () => {
-    mockSettings({ [BUDGET_KEY]: 50 });
+    mockSettings({ [key]: 50 });
     render(<SettingsPage />);
 
-    await waitFor(() =>
-      expect(screen.getByTestId("usage-budget-setting")).toHaveValue(50)
-    );
+    await waitFor(() => expect(screen.getByTestId(testId)).toHaveValue(50));
   });
 
   it("stays empty when no budget is stored", async () => {
@@ -54,15 +72,15 @@ describe("Settings — usage budget", () => {
     render(<SettingsPage />);
 
     await screen.findByTestId("usage-settings");
-    expect(screen.getByTestId("usage-budget-setting")).toHaveValue(null);
+    expect(screen.getByTestId(testId)).toHaveValue(null);
   });
 
   it("treats a non-positive stored value as no budget", async () => {
-    mockSettings({ [BUDGET_KEY]: 0 });
+    mockSettings({ [key]: 0 });
     render(<SettingsPage />);
 
     await screen.findByTestId("usage-settings");
-    expect(screen.getByTestId("usage-budget-setting")).toHaveValue(null);
+    expect(screen.getByTestId(testId)).toHaveValue(null);
   });
 
   it("saves a positive budget under the unsuffixed key", async () => {
@@ -70,34 +88,22 @@ describe("Settings — usage budget", () => {
     render(<SettingsPage />);
 
     await screen.findByTestId("usage-settings");
-    fireEvent.change(screen.getByTestId("usage-budget-setting"), {
-      target: { value: "80" },
-    });
-    fireEvent.click(screen.getByTestId("usage-settings-save"));
+    fireEvent.change(screen.getByTestId(testId), { target: { value: "80" } });
+    fireEvent.click(screen.getByTestId("settings-save"));
 
-    await waitFor(() =>
-      expect(lastPatchBody(fetchMock)).toEqual({ [BUDGET_KEY]: 80 })
-    );
-    expect(
-      await screen.findByTestId("usage-settings-message")
-    ).toHaveTextContent("Saved");
+    await waitFor(() => expect(lastPatchBody(fetchMock)).toEqual({ [key]: 80 }));
+    expect(await screen.findByTestId("settings-message")).toHaveTextContent("Saved");
   });
 
   it("clears the budget with null when the field is emptied", async () => {
-    const fetchMock = mockSettings({ [BUDGET_KEY]: 50 });
+    const fetchMock = mockSettings({ [key]: 50 });
     render(<SettingsPage />);
 
-    await waitFor(() =>
-      expect(screen.getByTestId("usage-budget-setting")).toHaveValue(50)
-    );
-    fireEvent.change(screen.getByTestId("usage-budget-setting"), {
-      target: { value: "" },
-    });
-    fireEvent.click(screen.getByTestId("usage-settings-save"));
+    await waitFor(() => expect(screen.getByTestId(testId)).toHaveValue(50));
+    fireEvent.change(screen.getByTestId(testId), { target: { value: "" } });
+    fireEvent.click(screen.getByTestId("settings-save"));
 
-    await waitFor(() =>
-      expect(lastPatchBody(fetchMock)).toEqual({ [BUDGET_KEY]: null })
-    );
+    await waitFor(() => expect(lastPatchBody(fetchMock)).toEqual({ [key]: null }));
   });
 
   it("rejects a non-positive budget without calling the API", async () => {
@@ -105,18 +111,13 @@ describe("Settings — usage budget", () => {
     render(<SettingsPage />);
 
     await screen.findByTestId("usage-settings");
-    fireEvent.change(screen.getByTestId("usage-budget-setting"), {
-      target: { value: "-5" },
-    });
-    fireEvent.click(screen.getByTestId("usage-settings-save"));
+    fireEvent.change(screen.getByTestId(testId), { target: { value: "-5" } });
+    fireEvent.click(screen.getByTestId("settings-save"));
 
-    expect(
-      await screen.findByTestId("usage-settings-message")
-    ).toHaveTextContent("Budget must be a positive dollar amount.");
-    const patches = fetchMock.mock.calls.filter(
-      (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === "PATCH"
+    expect(await screen.findByTestId("settings-message")).toHaveTextContent(
+      "Budget must be a positive dollar amount."
     );
-    expect(patches).toHaveLength(0);
+    expect(patchBodies(fetchMock)).toHaveLength(0);
   });
 
   it("reports a failed save", async () => {
@@ -124,24 +125,28 @@ describe("Settings — usage budget", () => {
     render(<SettingsPage />);
 
     await screen.findByTestId("usage-settings");
-    fireEvent.change(screen.getByTestId("usage-budget-setting"), {
-      target: { value: "20" },
-    });
-    fireEvent.click(screen.getByTestId("usage-settings-save"));
+    fireEvent.change(screen.getByTestId(testId), { target: { value: "20" } });
+    fireEvent.click(screen.getByTestId("settings-save"));
 
-    expect(
-      await screen.findByTestId("usage-settings-message")
-    ).toHaveTextContent("Failed to save the usage budget.");
+    expect(await screen.findByTestId("settings-message")).toHaveTextContent("nope");
+  });
+});
+
+describe("Settings — BUDGET band copy", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it("explains that the budget is Arij-metered, not an account quota", async () => {
+  it("does not repeat the frame's false claim that the cap pauses Full Auto", async () => {
     mockSettings({});
     render(<SettingsPage />);
 
-    const section = await screen.findByTestId("usage-settings");
-    expect(section).toHaveTextContent("Claude weekly budget (USD)");
-    expect(section).toHaveTextContent(
-      "Arij-metered sessions only, not an account quota"
+    const band = await screen.findByTestId("usage-settings");
+    // Nothing in lib/auto-mode/* reads a spend cap; the tile that used to say
+    // otherwise is documented as display-only.
+    expect(band.textContent).not.toContain("se mettent en pause");
+    expect(band).toHaveTextContent(
+      "rien ne met Full Auto ni les night runs en pause automatiquement"
     );
   });
 });

@@ -12,8 +12,9 @@
 
 /**
  * Global settings key: default "run the full pipeline" behaviour for
- * single-ticket build dispatches. Off by default — an absent key means the
- * pipeline never starts unless the request explicitly asks for it.
+ * single-ticket build dispatches. On by default — an absent key means the
+ * full pipeline (build → review → auto-fix) runs unless the request
+ * explicitly opts out or the key is set to `false`.
  */
 export const PIPELINE_ENABLED_SETTING_KEY = "pipeline_enabled";
 
@@ -96,19 +97,21 @@ export function parsePipelineEnabledSetting(value: unknown): boolean | null {
 /**
  * Resolves the effective "pipeline on by default" answer for a project from
  * a settings map (as returned by GET /api/settings, already JSON-parsed):
- * per-project key wins, then the global key, then OFF. Shared by the
- * dispatch dialog (default checkbox state) and the settings UI.
+ * per-project key wins, then the global key, then ON. Shared by the
+ * dispatch dialog (default checkbox state) and the settings UI. The
+ * fallback matches the server's `resolvePipelineEnabled` so a dialog with
+ * no settings loaded shows what the server would actually do.
  */
 export function resolvePipelineEnabledDefault(
   settings: Record<string, unknown> | null | undefined,
   projectId: string
 ): boolean {
-  if (!settings) return false;
+  if (!settings) return true;
   const perProject = parsePipelineEnabledSetting(
     settings[pipelineEnabledSettingKey(projectId)]
   );
   if (perProject !== null) return perProject;
-  return parsePipelineEnabledSetting(settings[PIPELINE_ENABLED_SETTING_KEY]) ?? false;
+  return parsePipelineEnabledSetting(settings[PIPELINE_ENABLED_SETTING_KEY]) ?? true;
 }
 
 /** Client-side effective grader setting: project override → global → OFF. */

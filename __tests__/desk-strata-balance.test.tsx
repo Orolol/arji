@@ -49,8 +49,7 @@ function payload(overrides: Partial<ControlDeskPayload> = {}): ControlDeskPayloa
     yourTurn: { awaitingReply: [], failed: [], conflicts: [] },
     readyToLand: [],
     heldBackCount: 0,
-    inboxUnread: 0,
-    upNext: [],
+      upNext: [],
     ...overrides,
   };
 }

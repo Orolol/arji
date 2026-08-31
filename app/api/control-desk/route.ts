@@ -790,12 +790,6 @@ export async function GET() {
   };
   const yourTurn = applyDeskDismissals(derived, dismissals);
 
-  // Counted on the UNFILTERED rows on purpose. A dismissal hides a row from
-  // this desk's coral stratum; it does not mark anything read, and `/api/inbox`
-  // applies no such filter. Counting the filtered rows made the badge say "2"
-  // and its destination list 3.
-  const inboxUnread = derived.awaitingReply.filter((row) => row.unreadAi).length;
-
   const payload: ControlDeskPayload = {
     generatedAt: now.toISOString(),
     projects: deskProjects,
@@ -812,7 +806,6 @@ export async function GET() {
     readyToLand,
     heldBackCount,
     upNext: deriveUpNext(deskProjects, deskEpics, edges, busyEpicIds),
-    inboxUnread,
   };
 
   console.debug("[control-desk/GET] query profile", {

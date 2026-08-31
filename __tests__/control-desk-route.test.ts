@@ -29,6 +29,7 @@ const {
   deskDismissals,
 } = await import("@/lib/db/schema");
 const { GET } = await import("@/app/api/control-desk/route");
+const { GET: INBOX_GET } = await import("@/app/api/inbox/route");
 const { buildMergeBlockedReason } = await import("@/lib/workflow/merge-failure");
 const { autoModeEnabledSettingKey } = await import("@/lib/auto-mode/constants");
 const { CONTROL_DESK_LOOKBACK_DAYS } = await import("@/lib/control-desk/types");
@@ -361,11 +362,15 @@ describe("GET /api/control-desk", () => {
 
   /**
    * The Inbox badge counts UNREAD AGENT COMMENTS, and a dismissal marks
-   * nothing read. `/api/inbox` — the page the badge links to — applies no
-   * dismissal filter, so a badge derived from the filtered rows read "2" over
-   * a destination that still listed 3.
+   * nothing read.
+   *
+   * The badge lives in `components/piscine/TopBar.tsx` and reads `/api/inbox`
+   * through `useInbox` — the SAME route the `/inbox` page it links to renders
+   * from, which applies no dismissal filter. This asserts the two cannot drift:
+   * dismissing a coral row must empty the desk stratum and leave the inbox
+   * count untouched.
    */
-  it("keeps the Inbox badge steady when a question is dismissed", async () => {
+  it("keeps the Inbox count steady when a question is dismissed", async () => {
     db.insert(epics)
       .values({ id: "e1", projectId: "p1", title: "Renderer", readableId: "ARJ-24", status: "in_progress" })
       .run();
@@ -384,9 +389,15 @@ describe("GET /api/control-desk", () => {
       .values({ id: "c1", epicId: "e1", author: "agent", content: "Flag ou suppression ?", createdAt: today(9) })
       .run();
 
+    const inboxCount = async (): Promise<number> => {
+      const response = await INBOX_GET();
+      const body = await response.json();
+      return body.data.unreadCount as number;
+    };
+
     const before = await payload();
     expect(before.yourTurn.awaitingReply).toHaveLength(1);
-    expect(before.inboxUnread).toBe(1);
+    expect(await inboxCount()).toBe(1);
 
     db.insert(deskDismissals)
       .values({
@@ -400,8 +411,8 @@ describe("GET /api/control-desk", () => {
     const after = await payload();
     // The coral row is gone from THIS desk...
     expect(after.yourTurn.awaitingReply).toHaveLength(0);
-    // ...but the comment is still unread, and /inbox still lists it.
-    expect(after.inboxUnread).toBe(1);
+    // ...but the comment is still unread, so the bar's badge and /inbox agree.
+    expect(await inboxCount()).toBe(1);
   });
 
   it("does not let an asks dismissal hide a failure on the same epic", async () => {

@@ -31,9 +31,10 @@ value is passed straight through to the `chromium` project.
 ## Dev server here, production server on CI
 
 Locally the suite drives `next dev`. On CI it drives `next start`, because
-`next dev` compiles each route on first request: cold, the board took ~12s to
-go from navigation to a hydrated heading, past the 5s an `expect` waits. That
-makes the first spec to touch a route fail and every later one pass — an
+`next dev` compiles each route on first request: cold, `/projects/:id` (the
+kanban board then, the project-scoped control desk now) took ~12s to go from
+navigation to a hydrated heading, past the 5s an `expect` waits. That makes
+the first spec to touch a route fail and every later one pass — an
 order-dependent red that does not reproduce warm. A production server has no
 per-route compile, so the suite also exercises the bundle that ships.
 
@@ -62,10 +63,11 @@ labels the chunk `<script>` loads of a page served from an IP literal
 `/_next/static/chunks/*.js` returns 403.
 
 The symptom is not an error — it is a page that renders and does nothing: the
-server markup is there, hydration never runs, and specs fail on a skeleton
-(`h1` stuck at `...`, `0 tickets visible`, SSE `Offline`). Only the
-static-markup smoke tests pass. If you point the suite somewhere by hand, keep
-it on `localhost`.
+server markup is there, hydration never runs, and every spec waiting on
+something the client fetches fails. The strata labels paint, the bands stay
+empty, nothing ever goes live. Only the static-markup smoke tests pass — the
+title, the band names. If you point the suite somewhere by hand, keep it on
+`localhost`.
 
 ## Reuse a dev server that is already running
 

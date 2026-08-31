@@ -238,7 +238,13 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
   if (loading) return <WorkshopLoading />;
 
   return (
-    <div className="flex min-h-0 flex-1 gap-3 px-[14px] pb-[14px]">
+    /*
+      One scrolling column on a phone, two on a desktop. Below `md` the roster
+      is a full-width list ABOVE the editor rather than a 330px column beside
+      it: at 390px that column left 32px for a form whose fields are 200px
+      wide, which is the horizontal page scroll this layout used to produce.
+    */
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-[14px] pb-[14px] md:flex-row md:overflow-hidden">
       <AgentRoster
         agents={agents}
         selectedId={activeId}
@@ -252,7 +258,7 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
       />
 
       {agent && draft ? (
-        <div className="flex min-w-0 flex-1 flex-col gap-[10px] overflow-y-auto">
+        <div className="flex min-w-0 flex-1 flex-col gap-[10px] md:overflow-y-auto">
           <AgentIdentityCard
             // Remount per agent: the "stronger model chosen but not yet
             // targeted" state belongs to one agent's editing session.

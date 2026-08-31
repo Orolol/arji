@@ -2,17 +2,9 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import {
-  AlertTriangle,
-  Inbox,
-  Infinity as InfinityIcon,
-  LayoutGrid,
-  Search,
-  Settings,
-} from "lucide-react";
+import { AlertTriangle, Infinity as InfinityIcon } from "lucide-react";
 
 import {
-  DeskHeader,
   Mono,
   PillButton,
   SurfaceCard,
@@ -35,10 +27,9 @@ import type {
 } from "@/lib/control-desk/types";
 import { cn } from "@/lib/utils";
 
-import { DeskCommandPalette } from "./DeskCommandPalette";
 import { FullAutoProjectRow } from "./FullAutoProjectRow";
 import { DeskComposer } from "./DeskComposer";
-import { DeskProjectRail } from "./DeskProjectRail";
+import { DeskProjectMenu } from "./DeskProjectMenu";
 import { ReadyToLandBand } from "./ReadyToLandBand";
 import { UpNextBand } from "./UpNextBand";
 import { WorkingBand } from "./WorkingBand";
@@ -55,6 +46,14 @@ import { YourTurnBand } from "./YourTurnBand";
  * ONE READ, ONE POLL. Everything comes from `GET /api/control-desk`; see
  * `hooks/useControlDesk.ts` for why the desk polls instead of opening one
  * EventSource per project.
+ *
+ * NO HEADER OF ITS OWN. `components/piscine/TopBar.tsx` is mounted once in
+ * `app/layout.tsx` and already carries the logo, the project chips, ⌘K, the
+ * inbox, Usage, Agents, Settings and the Auto state — the desk used to draw all
+ * of it a second time, 60px below. What remains here is the SECOND ROW: the two
+ * controls only the desk can offer, because both act on the payload it is
+ * already holding. The `/projects/:id` host draws its own control row, so the
+ * second row is skipped when the desk is scoped by its host.
  *
  * TOASTS. The desk raises its own unless the host page passes `onToast` — the
  * `/projects/:id` route already owns a toast stack for its dialogs and deep
@@ -111,16 +110,17 @@ export function NowDesk({
 }: NowDeskProps) {
   const router = useRouter();
   const { openTicket } = useTicketOverlay();
-  const [activeProjectId, setActiveProjectId] = React.useState<string | null>(
-    projectId ?? null,
-  );
-  React.useEffect(() => {
-    setActiveProjectId(projectId ?? null);
-  }, [projectId]);
+  /**
+   * The desk's scope is its host's route and nothing else now: the header rail
+   * that used to filter it in place was a second row of project chips directly
+   * under the bar's own, differing only in what a click did. The bar's chips
+   * lead to `/projects/:id`, which renders THIS desk filtered — one gesture,
+   * one meaning.
+   */
+  const activeProjectId = projectId ?? null;
 
   const { data, refresh } = useControlDesk(activeProjectId);
   const [toasts, setToasts] = React.useState<DeskToast[]>([]);
-  const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(new Set());
   const [landingEpicId, setLandingEpicId] = React.useState<string | null>(null);
   const [landingAll, setLandingAll] = React.useState(false);
@@ -159,19 +159,6 @@ export function NowDesk({
     });
   }, []);
 
-  /* ---- ⌘K --------------------------------------------------------- */
-
-  React.useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "k") return;
-      if (!event.metaKey && !event.ctrlKey) return;
-      event.preventDefault();
-      setPaletteOpen((open) => !open);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
   /* ---- derived ----------------------------------------------------- */
 
   const projects = React.useMemo(() => data?.projects ?? [], [data]);
@@ -179,11 +166,6 @@ export function NowDesk({
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
   );
-  // Straight from the server, which counts it BEFORE the dismissal filter.
-  // Deriving it from `yourTurn.awaitingReply` — which IS filtered — made
-  // dismissing a coral row decrement a badge whose destination (`/inbox`)
-  // had not changed: the tile read "2", the page it opens listed 3.
-  const unreadCount = data?.inboxUnread ?? 0;
   const autoOn = projects.filter((project) => project.autoModeEnabled).length;
 
   const handleOpenTicket = React.useCallback(
@@ -690,96 +672,72 @@ export function NowDesk({
         className,
       )}
     >
-      <DeskHeader title="Now" titleHref="/">
-        <DeskProjectRail
-          projects={projects}
-          activeProjectId={activeProjectId}
-          onSelect={(next) => setActiveProjectId(next)}
-        />
+      {/*
+        ── SECOND ROW ────────────────────────────────────────────────────
+        Not a header: the global bar is the header. Body gutter (14px), not
+        the 24px header gutter. Two controls, both of them things the bar
+        cannot do — arm Full Auto across projects, and reach the per-project
+        pages the three nav categories do not claim (Docs, Frictions, Git
+        Sync, GitHub Issues, per-project Settings).
 
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          <PillButton
-            variant="outline"
-            size="md"
-            icon={Search}
-            onClick={() => setPaletteOpen(true)}
-            data-testid="desk-command-trigger"
-          >
-            <Mono size={11}>⌘K</Mono>
-          </PillButton>
+        Skipped when a host scopes the desk: `/projects/:id` draws its own
+        control row above it, carrying that project's Full Auto switch.
+      */}
+      {projectId ? null : (
+        <div
+          data-testid="desk-controls"
+          className="flex h-[40px] shrink-0 items-center gap-[8px] px-[14px]"
+        >
+          <div className="ml-auto flex shrink-0 items-center gap-[8px]">
+            <DeskProjectMenu projects={projects} />
 
-          <PillButton
-            variant="outline"
-            outlineTone="neutral"
-            iconOnly
-            icon={Inbox}
-            badge={unreadCount}
-            onClick={() => router.push("/inbox")}
-            data-testid="desk-inbox"
-          >
-            Inbox
-          </PillButton>
-
-          <PillButton
-            variant="outline"
-            outlineTone="neutral"
-            iconOnly
-            icon={LayoutGrid}
-            onClick={() => router.push("/usage")}
-          >
-            Usage
-          </PillButton>
-
-          <PillButton
-            variant="outline"
-            outlineTone="neutral"
-            iconOnly
-            icon={Settings}
-            onClick={() => router.push("/agents")}
-          >
-            Agents
-          </PillButton>
-
-          {/* Full Auto is PER PROJECT — there is no global flag, so the pill
-              reports how many projects are armed and opens the per-project
-              switches rather than pretending to be one toggle. */}
-          <Popover open={autoPopoverOpen} onOpenChange={setAutoPopoverOpen}>
-            <PopoverTrigger asChild>
-              <PillButton
-                variant="filled"
-                size="md"
-                icon={InfinityIcon}
-                data-testid="desk-full-auto"
+            {/* Full Auto is PER PROJECT — there is no global flag, so the pill
+                reports how many projects are armed and opens the per-project
+                switches rather than pretending to be one toggle. The bar's
+                "Auto" pill is the read-only rollup and leads to Réglages; this
+                is where the switches actually live. */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <PillButton
+                  variant="filled"
+                  size="md"
+                  icon={InfinityIcon}
+                  data-testid="desk-full-auto"
+                >
+                  {`Full Auto · ${autoOn}/${projects.length}`}
+                </PillButton>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                className="w-[320px] rounded-[12px] border-[1.5px] border-border bg-card p-2 shadow-none"
               >
-                {`Full Auto · ${autoOn}/${projects.length}`}
-              </PillButton>
-            </PopoverTrigger>
-            <PopoverContent
-              align="end"
-              className="w-[320px] rounded-[12px] border-[1.5px] border-border bg-card p-2 shadow-none"
-            >
-              <div className="flex flex-col gap-1">
-                {/*
-                  The row is the control, and the mark is the CheckMark
-                  primitive. A native <input type="checkbox"> painted nothing
-                  here: Tailwind's preflight sets `border: 0` on inputs, so the
-                  `border-border` it carried never rendered, and its `rounded`
-                  was off the 10/12/14/9999 scale the system allows.
-                */}
-                {projects.map((project) => (
-                  <FullAutoProjectRow
-                    key={project.id}
-                    project={project}
-                    onToggle={toggleAutoMode}
-                    onSetAgent={setAutoModeAgent}
-                    agents={autoAgents[project.id]}
-                  />
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
+                <div className="flex flex-col gap-1">
+                  {/*
+                    The row is the control, and the mark is the CheckMark
+                    primitive. A native <input type="checkbox"> painted nothing
+                    here: Tailwind's preflight sets `border: 0` on inputs, so the
+                    `border-border` it carried never rendered, and its `rounded`
+                    was off the 10/12/14/9999 scale the system allows.
+
+                    The row also carries the two per-project agent overrides —
+                    the only place they can be set, since /settings writes the
+                    bare workspace keys. See FullAutoProjectRow.
+                  */}
+                  {projects.map((project) => (
+                    <FullAutoProjectRow
+                      key={project.id}
+                      project={project}
+                      onToggle={toggleAutoMode}
+                      onSetAgent={setAutoModeAgent}
+                      agents={autoAgents[project.id]}
+                    />
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
-      </DeskHeader>
+      )}
 
       <WorkingBand
         working={data?.working ?? []}
@@ -848,14 +806,6 @@ export function NowDesk({
         namedAgentId={namedAgentId}
         onNamedAgentChange={setNamedAgentId}
         onSubmit={handleCompose}
-      />
-
-      <DeskCommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        payload={data}
-        onOpenTicket={handleOpenTicket}
-        onSelectProject={setActiveProjectId}
       />
 
       {onToast ? null : (

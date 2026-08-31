@@ -935,3 +935,78 @@ export const providerUsageSnapshots = sqliteTable("provider_usage_snapshots", {
 
 export type ProviderUsageSnapshot = typeof providerUsageSnapshots.$inferSelect;
 export type NewProviderUsageSnapshot = typeof providerUsageSnapshots.$inferInsert;
+
+/**
+ * User-declared third-party MCP servers (epic "Serveurs MCP additionnels,
+ * globaux et par projet").
+ *
+ * `projectId` NULL = a global server injected into every project's
+ * sessions; a value scopes the server to one project. The cascade FK
+ * makes project deletion clean up the project's servers automatically.
+ * `name` is unique PER SCOPE, enforced by two PARTIAL unique indexes
+ * (migration 0049): a plain UNIQUE(project_id, name) cannot express
+ * "unique among the globals" because SQLite treats NULLs as distinct, but
+ * a partial index keyed on `project_id IS NULL` can. The service checks the
+ * same invariant first so the API answers 409 rather than surfacing a raw
+ * constraint error. The name `arij` is reserved by the service.
+ *
+ * `env` / `headers` values are write-only: reads mask them (see
+ * maskMcpServerSecrets), and `agentTypes` NULL means "every session type"
+ * (agent types AND chat turns).
+ */
+export const mcpServers = sqliteTable(
+  "mcp_servers",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").references(() => projects.id, {
+      onDelete: "cascade",
+    }),
+    name: text("name").notNull(),
+    enabled: integer("enabled", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    transport: text("transport", { enum: ["stdio", "http"] })
+      .notNull()
+      .default("stdio"),
+    command: text("command"),
+    args: text("args").notNull().default("[]"),
+    env: text("env").notNull().default("{}"),
+    url: text("url"),
+    headers: text("headers").notNull().default("{}"),
+    /** JSON array of agent types ("chat" names CLI chat turns); NULL = all. */
+    agentTypes: text("agent_types"),
+    /** JSON array of bare tool names; NULL = every tool the server exposes. */
+    toolAllowlist: text("tool_allowlist"),
+    usageHint: text("usage_hint"),
+    lastCheckedAt: text("last_checked_at"),
+    /** Tri-state: NULL = never checked. */
+    lastCheckOk: integer("last_check_ok", { mode: "boolean" }),
+    lastCheckError: text("last_check_error"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    scopeNameIdx: index("mcp_servers_scope_name_idx").on(
+      table.projectId,
+      table.name
+    ),
+    // Per-scope uniqueness (migration 0049). Two PARTIAL indexes, because the
+    // scopes need different key shapes: a global is unique on `name` alone, a
+    // project row on the pair.
+    globalNameUq: uniqueIndex("mcp_servers_global_name_uq")
+      .on(table.name)
+      .where(sql`${table.projectId} IS NULL`),
+    projectNameUq: uniqueIndex("mcp_servers_project_name_uq")
+      .on(table.projectId, table.name)
+      .where(sql`${table.projectId} IS NOT NULL`),
+    transportCheck: check(
+      "mcp_servers_transport_check",
+      sql`${table.transport} IN ('stdio', 'http')`
+    ),
+  })
+);
+
+export type McpServer = typeof mcpServers.$inferSelect;
+export type NewMcpServer = typeof mcpServers.$inferInsert;
+

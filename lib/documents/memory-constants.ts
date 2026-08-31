@@ -25,9 +25,10 @@ export const MEMORY_DOC_KIND = "memory";
 export const MEMORY_DOC_FILENAME = "Project memory";
 
 /**
- * Hard cap on the memory doc body, enforced on every write path (manual
- * editor rejects, distillation and dreaming truncate). Keeps the prompt
- * injection token-cheap by construction.
+ * Hard cap on the memory doc body, expressed in ESTIMATED TOKENS
+ * (lib/tokens/estimator.ts: 1 token ≈ 4 characters), enforced on every
+ * write path (manual editor rejects, distillation and dreaming truncate).
+ * Keeps the prompt injection token-budgeted by construction.
  *
  * Raised 4000 → 8000 for Dreaming (lib/workflow/dreaming.ts): a memory
  * distilled from ONE session is a handful of conventions, but one dreamed
@@ -44,8 +45,28 @@ export const MEMORY_DOC_FILENAME = "Project memory";
  * spec with its own editor, and the four dreaming sections plus build
  * instructions regularly hit the 8000 cap — a full dream rewrite landed with
  * its last section cut off.
+ *
+ * Rebased 12000 chars → 10000 tokens (epic 7n2sxOJdaqlO): the cap is now
+ * stated in the unit Arij estimates prompts in, and the two writer prompts
+ * (distill, dreaming) tell the model the limit in tokens. That is a ~3.3x
+ * headroom increase (12000 chars ≈ 3000 tokens → 10000 tokens) — deliberate:
+ * a full dream rewrite of the four required sections plus build instructions
+ * was regularly hitting the old cap mid-sentence. The cost stays bounded by
+ * the same reasoning as the 4000 → 8000 step above: the document rides in
+ * every agent prompt, capped at ~10k tokens instead of ~3k.
  */
-export const PROJECT_MEMORY_MAX_CHARS = 12000;
+export const PROJECT_MEMORY_MAX_TOKENS = 10_000;
+
+/**
+ * Character-budget equivalent of PROJECT_MEMORY_MAX_TOKENS under the
+ * estimator's 1-token ≈ 4-chars contract: 40 000 characters estimate to
+ * exactly 10 000 tokens. Used where a character count is the working unit
+ * (the truncation slice, the manual-editor length bound, the stored
+ * envelope's `maxChars` field); the token budget stays the acceptance
+ * oracle — writes and the manual PUT are validated against `estimateTokens`
+ * and PROJECT_MEMORY_MAX_TOKENS.
+ */
+export const PROJECT_MEMORY_MAX_CHARS = PROJECT_MEMORY_MAX_TOKENS * 4;
 
 /**
  * `documents.kind` of the pre-dream memory snapshot.
