@@ -4,7 +4,10 @@ import {
   isErrorResponse,
   errorResponse,
 } from "@/lib/api/route-helpers";
-import { detectGitHubRemote as detectRemote } from "@/lib/git/remote";
+import {
+  detectGitHubRemote as detectRemote,
+  GitRepositoryUnavailableError,
+} from "@/lib/git/remote";
 
 export async function POST(
   _request: NextRequest,
@@ -28,6 +31,16 @@ export async function POST(
 
     return NextResponse.json({ data: result });
   } catch (error) {
+    // Same shared helper as GET github/detect — see that route. This one
+    // already 400s when no origin can be parsed, so the unusable path it sits
+    // next to must not stay a 500.
+    if (error instanceof GitRepositoryUnavailableError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: 400 }
+      );
+    }
+
     return errorResponse(error, "Failed to inspect git remotes for this project.");
   }
 }

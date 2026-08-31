@@ -1,3 +1,7 @@
+import { execFile } from "node:child_process";
+import { stat } from "node:fs/promises";
+import { promisify } from "node:util";
+
 import simpleGit, { type SimpleGit } from "simple-git";
 import {
   isSafeRepoSegment,
@@ -20,6 +24,8 @@ export interface DetectedGitHubRemote extends ParsedGitHubRemote {
 // can share it; re-exported here so server callers keep one import site.
 export type { ParsedGitHubRepoInput } from "@/lib/git/github-url";
 export { parseGitHubRepoInput } from "@/lib/git/github-url";
+
+const execFileAsync = promisify(execFile);
 
 export interface BranchSyncStatus {
   branch: string;
@@ -98,6 +104,113 @@ export class GitRemoteNotConfiguredError extends Error {
   }
 }
 
+export type GitRepositoryUnavailableCode =
+  | "GIT_REPO_NOT_A_REPOSITORY"
+  | "GIT_REPO_PATH_MISSING";
+
+/**
+ * "The configured `gitRepoPath` is not a usable repository" is a precondition
+ * the user can fix, exactly like `GitRemoteNotConfiguredError`'s missing
+ * remote. Without it, git's `fatal: not a git repository ...` prose reached
+ * `errorResponse(...)` and every caller answered 500 — including the detect
+ * route the connect banner hits on every project page load.
+ */
+export class GitRepositoryUnavailableError extends Error {
+  readonly code: GitRepositoryUnavailableCode;
+  readonly repoPath: string;
+
+  constructor(code: GitRepositoryUnavailableCode, repoPath: string) {
+    super(
+      code === "GIT_REPO_PATH_MISSING"
+        ? `The configured repository path does not exist: ${repoPath}`
+        : `The configured repository path is not a git repository: ${repoPath}`
+    );
+    this.name = "GitRepositoryUnavailableError";
+    this.code = code;
+    this.repoPath = repoPath;
+  }
+}
+
+/**
+ * git's exit status is the same in every language; its prose is not. Running
+ * the probe under the C locale makes the one message we do read deterministic,
+ * so classification cannot depend on which translation the machine's git was
+ * built with.
+ *
+ * `LANGUAGE` is blanked as well: gettext consults it ahead of `LC_ALL`, and
+ * only ignores it once the locale resolves to C/POSIX. Blanking it costs
+ * nothing and removes the ordering question entirely.
+ */
+function cLocaleEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, LC_ALL: "C", LANGUAGE: "" };
+}
+
+/**
+ * True only for git's "this is not a repository" refusal, read under the
+ * locale we pinned above. Exit 128 is git's generic fatal — it also covers a
+ * corrupt object store and a dubious-ownership refusal — so the status alone
+ * would mislabel a broken repository as an unconfigured one. Anything else
+ * stays an unexpected fault and keeps reaching the caller as a 500.
+ */
+function isNotARepositoryFailure(error: unknown): boolean {
+  const failure = error as { code?: unknown; stderr?: unknown };
+  if (failure.code !== 128) return false;
+  return /not a git repository/i.test(String(failure.stderr ?? ""));
+}
+
+/**
+ * Guard for the operations that need the path to be a repository before they
+ * start.
+ *
+ * Deliberately spawns git directly instead of going through simple-git.
+ * `checkIsRepo()` converts exit 128 into `false` only when stderr matches
+ * `/Not a git repository|Kein Git-Repository/i`, so on a git speaking any
+ * third language it rejects with a generic `GitError` — which is how a plain
+ * directory used to escape this guard and reach the routes as a 500. Pinning
+ * the locale on a `SimpleGit` instance is not an option either: `.env()`
+ * replaces the whole environment, and simple-git 3.36 rejects a spread of
+ * `process.env` outright on any machine that sets `EDITOR`, `PAGER`,
+ * `GIT_SSH_COMMAND` or a credential helper. Spawning git ourselves is what
+ * lets us choose the locale and read the exit status.
+ *
+ * `--is-inside-work-tree` exits 0 for every shape callers legitimately pass —
+ * a work tree, a subdirectory of one, a linked worktree, a bare repository and
+ * the `.git` directory itself — so success is the whole membership test and no
+ * separate bare-repository probe is needed. Only a genuine non-repository
+ * exits 128.
+ */
+export async function assertGitRepository(repoPath: string): Promise<void> {
+  // Checked first so the ENOENT below can only mean a missing git binary,
+  // which is an unexpected fault rather than a path the user can fix.
+  try {
+    if (!(await stat(repoPath)).isDirectory()) {
+      throw new GitRepositoryUnavailableError("GIT_REPO_PATH_MISSING", repoPath);
+    }
+  } catch (error) {
+    if (error instanceof GitRepositoryUnavailableError) throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      throw new GitRepositoryUnavailableError("GIT_REPO_PATH_MISSING", repoPath);
+    }
+    throw error;
+  }
+
+  try {
+    await execFileAsync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: repoPath,
+      env: cLocaleEnv(),
+    });
+  } catch (error) {
+    if (isNotARepositoryFailure(error)) {
+      throw new GitRepositoryUnavailableError(
+        "GIT_REPO_NOT_A_REPOSITORY",
+        repoPath
+      );
+    }
+    throw error;
+  }
+}
+
 function normalizeRemoteUrl(raw: string): string {
   return raw.trim();
 }
@@ -151,6 +264,11 @@ function defaultRemote(remote?: string): string {
 export async function detectGitHubRemote(
   repoPath: string
 ): Promise<DetectedGitHubRemote | null> {
+  // Checked before reading remotes so the two answers stay distinguishable:
+  // `null` means "a repository with nothing GitHub-shaped on it", which is an
+  // ordinary 200 for the callers, while an unusable path is a refusal.
+  await assertGitRepository(repoPath);
+
   const git = getGit(repoPath);
   const remotes = await git.getRemotes(true);
   if (remotes.length === 0) return null;
