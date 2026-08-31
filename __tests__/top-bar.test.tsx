@@ -183,9 +183,9 @@ describe("nav model", () => {
       "chat /chat",
       "usage /usage",
       "workspace /settings",
-      "night-runs /settings?tab=night",
-      "notifications /settings?tab=notifications",
-      "integrations /settings?tab=integrations",
+      "night-runs /settings#night-runs",
+      "notifications /settings#notifications",
+      "integrations /settings/integrations",
     ]);
   });
 
