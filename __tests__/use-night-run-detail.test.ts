@@ -131,4 +131,58 @@ describe("useNightRunDetail", () => {
     await waitFor(() => expect(result.current.detail?.runId).toBe("run-b"));
     expect(result.current.error).toBeNull();
   });
+
+  it("ignores a poll for the run the dialog has already left", async () => {
+    let releaseStaleA: ((value: unknown) => void) | null = null;
+    let runACalls = 0;
+
+    global.fetch = vi.fn((url: string) => {
+      if (url.endsWith("/run-a")) {
+        runACalls += 1;
+        if (runACalls === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ data: detailFor("run-a", "running") }),
+          });
+        }
+        // The poll that is still in flight when the dialog moves to run B.
+        return new Promise((resolve) => {
+          releaseStaleA = resolve;
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ data: detailFor("run-b") }),
+      });
+    }) as unknown as typeof fetch;
+
+    const { result, rerender } = renderHook(
+      ({ runId }: { runId: string | null }) =>
+        useNightRunDetail("proj-1", runId, 10),
+      { initialProps: { runId: "run-a" as string | null } }
+    );
+
+    // Run A is live, so the hook keeps polling it. Wait until a second request
+    // for A is in flight and then leave it there.
+    await waitFor(() => expect(result.current.detail?.runId).toBe("run-a"));
+    await waitFor(() => expect(runACalls).toBeGreaterThan(1));
+
+    rerender({ runId: null });
+    rerender({ runId: "run-b" });
+    await waitFor(() => expect(result.current.detail?.runId).toBe("run-b"));
+
+    // Run B is finished, so nothing polls any more: a result evicted here is
+    // never fetched again, and the dialog stays on "loading" until it is
+    // closed and reopened.
+    await act(async () => {
+      releaseStaleA!({
+        ok: true,
+        json: () => Promise.resolve({ data: detailFor("run-a", "running") }),
+      });
+    });
+
+    expect(result.current.detail?.runId).toBe("run-b");
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
 });

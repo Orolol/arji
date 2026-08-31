@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePolling } from "@/hooks/usePolling";
 import type {
   NightRunDetail,
@@ -115,6 +115,18 @@ export function useNightRunDetail(
     ? `/api/projects/${projectId}/build/night-runs/${runId}`
     : null;
 
+  /**
+   * The run URL being asked for *now*, for the response handlers to check
+   * against: a request is never cancelled when the dialog moves on, and
+   * `usePolling` leaves its in-flight callback running when it restarts. A
+   * poll issued for the previous run can therefore still answer, and there is
+   * only one slot to answer into. Dropping the reply is not cosmetic either:
+   * once a finished run is on screen nothing polls any more, so a result
+   * evicted by a straggler is never fetched again and the dialog is stuck
+   * loading until it is closed and reopened.
+   */
+  const requestedUrl = useRef(runUrl);
+
   // No run asked for is a settled empty state, not a pending one.
   const current = runUrl !== null && settled?.key === runUrl ? settled : null;
   const detail = current?.detail ?? null;
@@ -129,6 +141,7 @@ export function useNightRunDetail(
       ok: boolean,
       json: { data?: unknown; error?: string } | null
     ) => {
+      if (key !== requestedUrl.current) return;
       setSettled(
         ok && json?.data
           ? { key, detail: json.data as NightRunDetail, error: null }
@@ -139,6 +152,7 @@ export function useNightRunDetail(
   );
 
   const applyFailure = useCallback((key: string) => {
+    if (key !== requestedUrl.current) return;
     setSettled({
       key,
       detail: null,
@@ -157,6 +171,7 @@ export function useNightRunDetail(
   }, [runUrl, applyDetail, applyFailure]);
 
   useEffect(() => {
+    requestedUrl.current = runUrl;
     if (!runUrl) {
       return;
     }

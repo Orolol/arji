@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 import {
   useAgentAssignments,
   useAgentPrompts,
@@ -124,5 +124,66 @@ describe("agent config scope switches", () => {
       expect(result.current.data[0]?.namedAgentId).toBe("global-builder")
     );
     expect(global.fetch).toHaveBeenCalledWith(GLOBAL_URL);
+  });
+
+  it("ignores a scope's reload that lands after the user moved on", async () => {
+    const globalAssignment = {
+      ...projectAssignment,
+      namedAgentId: "global-builder",
+      source: "global",
+      scope: "global",
+    } as unknown as ResolvedAgentAssignment;
+
+    let releaseStaleProject: ((value: unknown) => void) | null = null;
+    let projectCalls = 0;
+
+    global.fetch = vi.fn((url: string) => {
+      if (url === PROJECT_URL) {
+        projectCalls += 1;
+        if (projectCalls === 1) {
+          return Promise.resolve({
+            json: () => Promise.resolve({ data: [projectAssignment] }),
+          });
+        }
+        // The reload a save fires; still in flight when the scope changes.
+        return new Promise((resolve) => {
+          releaseStaleProject = resolve;
+        });
+      }
+      return Promise.resolve({
+        json: () => Promise.resolve({ data: [globalAssignment] }),
+      });
+    }) as unknown as typeof fetch;
+
+    const { result, rerender } = renderHook(
+      ({ scope, projectId }: ScopeProps) => useAgentAssignments(scope, projectId),
+      { initialProps: { scope: "project", projectId: "proj-1" } as ScopeProps }
+    );
+
+    await waitFor(() =>
+      expect(result.current.data[0]?.namedAgentId).toBe("project-builder")
+    );
+
+    // Every mutation ends in `await load()`, so a request for the project
+    // scope can outlive the switch to the shared one.
+    act(() => {
+      void result.current.refresh();
+    });
+
+    rerender({ scope: "global", projectId: undefined });
+    await waitFor(() =>
+      expect(result.current.data[0]?.namedAgentId).toBe("global-builder")
+    );
+
+    // Nothing re-fetches the shared scope on its own: rows evicted here stay
+    // gone, and the tab falls back to a spinner over an unchanged URL.
+    await act(async () => {
+      releaseStaleProject!({
+        json: () => Promise.resolve({ data: [projectAssignment] }),
+      });
+    });
+
+    expect(result.current.data[0]?.namedAgentId).toBe("global-builder");
+    expect(result.current.loading).toBe(false);
   });
 });

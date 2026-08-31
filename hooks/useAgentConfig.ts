@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { AgentType, AgentProvider } from "@/lib/agent-config/constants";
 import type { NamedAgentCliOptions } from "@/lib/providers/options-registry";
@@ -50,16 +50,22 @@ type KeyedList<T> = { key: string; data: T[] } | null;
  * Fetch `url` and record the rows against it. setState only ever runs from a
  * promise callback, so this never updates state synchronously — safe to call
  * straight from an effect body.
+ *
+ * `isStale` drops a reply nobody is waiting for any more. There is one slot
+ * for one key, so recording an answer about a URL the hook has left does not
+ * just keep something stale around — it evicts the current URL's rows and
+ * puts the list back to `loading` over a URL that is not going to be fetched
+ * again.
  */
 function fetchList<T>(
   url: string,
   setLoaded: Dispatch<SetStateAction<KeyedList<T>>>,
-  isCancelled: () => boolean = () => false
+  isStale: () => boolean = () => false
 ) {
   return fetch(url)
     .then((res) => res.json())
     .then((json) => {
-      if (!isCancelled()) setLoaded({ key: url, data: (json.data || []) as T[] });
+      if (!isStale()) setLoaded({ key: url, data: (json.data || []) as T[] });
     })
     .catch(() => {
       // Record the failure against *this* URL and nothing else. Carrying the
@@ -67,7 +73,7 @@ function fetchList<T>(
       // assignments and review agents as this scope's own — and the editors
       // write back to whichever scope is selected now, so a stale row shown
       // under the new scope is edited into the new scope.
-      if (!isCancelled()) setLoaded({ key: url, data: EMPTY_LIST });
+      if (!isStale()) setLoaded({ key: url, data: EMPTY_LIST });
     });
 }
 
@@ -82,15 +88,28 @@ function fetchList<T>(
  */
 function useKeyedList<T>(url: string) {
   const [loaded, setLoaded] = useState<KeyedList<T>>(null);
+  // The URL being asked for *now*. `refresh` is what every save awaits and it
+  // is not cancelled when the URL changes underneath it, so the request for
+  // the scope the user has just left can still be in flight when the new one
+  // has already answered.
+  const requestedUrl = useRef(url);
 
   const data: T[] = loaded?.key === url ? loaded.data : EMPTY_LIST;
   const loading = loaded?.key !== url;
 
-  const refresh = useCallback(() => fetchList<T>(url, setLoaded), [url]);
+  const refresh = useCallback(
+    () => fetchList<T>(url, setLoaded, () => url !== requestedUrl.current),
+    [url]
+  );
 
   useEffect(() => {
+    requestedUrl.current = url;
     let cancelled = false;
-    void fetchList<T>(url, setLoaded, () => cancelled);
+    void fetchList<T>(
+      url,
+      setLoaded,
+      () => cancelled || url !== requestedUrl.current
+    );
     return () => {
       cancelled = true;
     };
