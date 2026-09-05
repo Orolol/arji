@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import path from "node:path";
+import { CLI_STUB_BIN_DIR } from "./e2e/fixtures/cli-stub";
+import { DATABASE_FILE } from "./e2e/fixtures/data-root";
 
 const PORT = process.env.E2E_PORT ? Number(process.env.E2E_PORT) : 3100;
 
@@ -92,8 +95,47 @@ export default defineConfig({
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    /** Merged over the runner's own environment by Playwright. */
     env: {
       NO_PROXY: "127.0.0.1,localhost",
+      /**
+       * The agent boundary, and the only part of a build-or-review journey
+       * that is not the real thing.
+       *
+       * `lib/providers/*` spawn their CLI by bare name with the server's
+       * environment, so prepending this directory is what makes `claude`
+       * resolve to `e2e/fixtures/cli-stub/bin/claude` — a scripted agent that
+       * commits in the worktree and files a verdict through the session's own
+       * MCP token, in milliseconds and identically every time. PREPENDED, not
+       * appended: a real CLI earlier on the PATH would take the dispatch, and
+       * `assertCliStubInstalled` refuses to run a journey unless this entry
+       * comes first.
+       *
+       * Only the server Playwright starts gets this. A dev server reused
+       * through `reuseExistingServer` was started by someone else — see
+       * e2e/README.md, and the preflight for what happens if it was started
+       * without the stub.
+       */
+      PATH: `${CLI_STUB_BIN_DIR}${path.delimiter}${process.env.PATH ?? ""}`,
+      /**
+       * Where a spawned agent is told to call Arij back (the MCP channel's
+       * base URL, lib/webhooks/send.ts). It defaults to `localhost:3000` —
+       * a developer's ordinary dev server, not the one under test — so a
+       * review's `submit_findings` would be filed against the wrong process.
+       */
+      ARIJ_BASE_URL: BASE_URL,
+      /**
+       * The database, named explicitly so the runner and the server cannot
+       * disagree about it.
+       *
+       * The fixtures read stored state directly (the rendered board is not
+       * dependable evidence right after a write — B-arij-141), so they have to
+       * open the same file `lib/db/index.ts` does. Passing it here rather than
+       * letting both sides infer it means the agreement holds even when the
+       * developer's shell already exports `ARIJ_DB_PATH`, which resolves to a
+       * different database than `<cwd>/data/arij.db`.
+       */
+      ARIJ_DB_PATH: DATABASE_FILE,
     },
   },
 });

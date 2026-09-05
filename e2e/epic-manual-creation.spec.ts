@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures/arij-project";
-import { openNewMenu, openTicketDetail, ticketCard } from "./fixtures/board";
+import { openNewMenu, openRegistry, openTicketDetail, ticketCard } from "./fixtures/board";
 
 /**
  * The direct epic path end to end: New → New Epic (manual) → a filled form →
@@ -49,12 +49,13 @@ test.describe("Manual epic creation", () => {
     // assertion that the route accepted what the form built.
     await expect(dialog).toBeHidden();
 
+    await openRegistry(page, project.id);
     await expect(ticketCard(page, epicTitle)).toBeVisible();
 
     const panel = await openTicketDetail(page, epicTitle);
     await expect(
-      panel.getByRole("heading", { name: "User Stories (2)" })
-    ).toBeVisible();
+      panel.getByTestId("ticket-story-row")
+    ).toHaveCount(2);
     await expect(panel.getByText(firstStory)).toBeVisible();
     await expect(panel.getByText(secondStory)).toBeVisible();
   });

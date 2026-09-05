@@ -5,8 +5,9 @@ npm run test:e2e
 ```
 
 Playwright starts `next dev` itself (port 3100 by default) and drives the real
-routes — no mocked fetches. Two things about this host are worth knowing before
-the first run.
+routes — no mocked fetches. Three things are worth knowing before the first
+run: which browser it drives, what stands in for the agent CLIs, and how to
+point it at a dev server that is already up.
 
 ## The browser
 

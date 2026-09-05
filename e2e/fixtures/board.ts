@@ -22,7 +22,13 @@ export async function openNewMenu(page: Page, entryTestId: string): Promise<void
  * two elements and fail strict mode.
  */
 export function ticketCard(page: Page, title: string): Locator {
-  return page.locator("h4", { hasText: title });
+  return page.getByTestId("tickets-row").filter({ hasText: title });
+}
+
+/** The registry includes Backlog and Done, which are absent from the desk. */
+export async function openRegistry(page: Page, projectId?: string): Promise<void> {
+  const currentProject = projectId ?? new URL(page.url()).pathname.match(/^\/projects\/([^/]+)/)?.[1];
+  await page.goto(currentProject ? `/tickets?project=${currentProject}` : "/tickets");
 }
 
 /**
@@ -30,15 +36,37 @@ export function ticketCard(page: Page, title: string): Locator {
  * loading state so callers can assert on real content.
  */
 export async function openTicketDetail(page: Page, title: string): Promise<Locator> {
+  if (new URL(page.url()).pathname !== "/tickets") await openRegistry(page);
   const card = ticketCard(page, title);
   await expect(card).toBeVisible();
   await card.click();
 
   const panel = page.getByTestId("epic-detail-panel");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("Loading...")).toHaveCount(0);
+  /**
+   * Past the suite's default expect timeout because opening a ticket fans out
+   * into a dozen route handlers (comments, artifacts, grading, verify, stories,
+   * dependencies, sessions…), each of which `next dev` may still be compiling,
+   * against one server shared by every worker. The panel sitting on "Loading…"
+   * for more than 15s is ordinary under that load and says nothing about the
+   * behaviour under test.
+   *
+   * A panel that never loads still fails — this widens the window, it does not
+   * remove the check.
+   */
+  await expect(panel.getByTestId("ticket-status-control")).toBeVisible({ timeout: 45_000 });
 
   return panel;
+}
+
+/** Select a workflow edge through the same menu a user operates. */
+export async function changeTicketStatus(page: Page, label: string): Promise<number> {
+  await page.getByTestId("ticket-status-control").getByRole("button").click();
+  const changed = page.waitForResponse(response =>
+    /\/epics\/[^/]+$/.test(new URL(response.url()).pathname) && response.request().method() === "PATCH"
+  );
+  await page.getByRole("menuitem", { name: label, exact: true }).click();
+  return (await changed).status();
 }
 
 /**

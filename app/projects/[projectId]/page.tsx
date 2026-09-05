@@ -764,6 +764,8 @@ export default function ProjectDeskPage() {
         {visibleToasts.map((toast) => (
           <div
             key={toast.id}
+            data-testid="board-toast"
+            data-toast-type={toast.type}
             className={cn(
               "flex items-center gap-2 rounded-[11px] border px-[14px] py-[10px] text-[13px]",
               toast.type === "success"
