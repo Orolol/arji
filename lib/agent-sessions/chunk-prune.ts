@@ -78,10 +78,16 @@ export interface SessionChunkPruneOptions {
   /** Per-stream character budget kept for every pruned session. */
   tailChars: Record<AgentSessionStreamType, number>;
   /**
-   * Stop the run once this many chunk rows have been deleted, leaving the
-   * rest for the next daily pass. Scanning is cheap and index-backed;
-   * deleting hundreds of thousands of rows in one synchronous pass on the
-   * shared better-sqlite3 connection is not.
+   * Hard ceiling on the chunk rows one run may delete, leaving the rest for
+   * the next daily pass. Scanning is cheap and index-backed; deleting
+   * hundreds of thousands of rows in one synchronous pass on the shared
+   * better-sqlite3 connection is not.
+   *
+   * A ceiling on the RUN, not a checkpoint between sessions: one session held
+   * 1,715 chunks on the live database, so a budget only consulted before each
+   * session would let a single session overshoot it by three orders of
+   * magnitude and hold the connection for the whole of it. The allowance is
+   * threaded down into each stream and bounds the DELETE itself.
    */
   maxDeletedChunks: number;
   /** Stamped into the marker so a reader can date the elision. */
@@ -100,7 +106,10 @@ export interface SessionChunkPruneResult {
   reclaimedChars: number;
   /** `last_non_empty_text` values derived from chunks about to be deleted. */
   preservedLastTexts: number;
-  /** True when `maxDeletedChunks` stopped the run with work left over. */
+  /**
+   * True when `maxDeletedChunks` stopped the run with work left over — either
+   * before a session it never opened, or part-way through one it did.
+   */
   reachedDeleteBudget: boolean;
 }
 
@@ -119,12 +128,20 @@ interface StreamPruneOutcome {
   deletedChunks: number;
   truncatedChunks: number;
   reclaimedChars: number;
+  /** The run's delete allowance, not the retained tail, is what stopped here. */
+  budgetExhausted: boolean;
 }
 
 const UNCHANGED_STREAM: StreamPruneOutcome = {
   deletedChunks: 0,
   truncatedChunks: 0,
   reclaimedChars: 0,
+  budgetExhausted: false,
+};
+
+const BUDGET_STOPPED_STREAM: StreamPruneOutcome = {
+  ...UNCHANGED_STREAM,
+  budgetExhausted: true,
 };
 
 export interface SessionChunkPruner {
@@ -223,11 +240,28 @@ export function createSessionChunkPruner(
     return null;
   }
 
+  /**
+   * Prune one stream down to its retained tail, deleting at most `allowance`
+   * rows.
+   *
+   * The allowance is the run's remaining delete budget, and it is the reason
+   * this does not simply delete everything older than the boundary. When it
+   * cannot afford the whole older run, it deletes the `allowance` OLDEST rows
+   * instead and moves the marker onto the oldest survivor — so the stream is
+   * left in the same shape a full prune leaves it in, just further from the
+   * end: a marker saying what went, and untouched content after it. The next
+   * daily pass carries on from there.
+   *
+   * The retained tail is never at risk from a partial pass: it deletes a
+   * subset of what a full pass would, so a tail that survives the full cut
+   * survives this one a fortiori.
+   */
   function pruneStream(
     sessionId: string,
     streamType: AgentSessionStreamType,
     budget: number,
     prunedAt: string,
+    allowance: number,
   ): StreamPruneOutcome {
     const rows = streamChunks(sessionId, streamType);
     if (rows.length === 0) return UNCHANGED_STREAM;
@@ -254,36 +288,51 @@ export function createSessionChunkPruner(
     // and any marker an earlier run wrote — exactly as they are.
     if (older.length === 0 && !worthTruncating) return UNCHANGED_STREAM;
 
-    const content = chunkContent(boundary.id);
-    const retainedContent = worthTruncating
+    const deletable = Math.min(older.length, Math.max(0, allowance));
+    // Rows to delete and no allowance to delete them with. Rewriting the
+    // boundary now would write a marker for an elision that has not happened.
+    if (older.length > 0 && deletable === 0) return BUDGET_STOPPED_STREAM;
+
+    // `older` is newest-first, so its LAST `deletable` entries are the oldest
+    // rows in the stream — the end a prune eats from. Index -1 means the whole
+    // older run went and the boundary itself is the oldest survivor, which is
+    // the only case where trimming it down to its tail is in order.
+    const survivorIndex = older.length - deletable - 1;
+    const anchor = survivorIndex >= 0 ? older[survivorIndex] : boundary;
+    const truncate = survivorIndex < 0 && worthTruncating;
+    const deletedRows = older.slice(older.length - deletable);
+
+    const content = chunkContent(anchor.id);
+    const retainedContent = truncate
       ? sliceTail(content, neededFromBoundary)
       : content;
     const deletedChars =
-      older.reduce((sum, row) => sum + row.chars, 0) +
+      deletedRows.reduce((sum, row) => sum + row.chars, 0) +
       (content.length - retainedContent.length);
 
     // The marker is the FIRST thing that survives, so everything after it is
     // untouched tail and a reader can trust the closing lines. Its own
     // characters are netted out of the reported saving.
     const marker = chunkPruneMarker(deletedChars, prunedAt);
-    rewriteChunkContent.run(`${marker}\n${retainedContent}`, boundary.id);
+    rewriteChunkContent.run(`${marker}\n${retainedContent}`, anchor.id);
 
     const deletedChunks =
-      older.length > 0
-        ? deleteOlderChunks.run(sessionId, streamType, boundary.sequence)
-            .changes
+      deletable > 0
+        ? deleteOlderChunks.run(sessionId, streamType, anchor.sequence).changes
         : 0;
 
     return {
       deletedChunks,
-      truncatedChunks: worthTruncating ? 1 : 0,
+      truncatedChunks: truncate ? 1 : 0,
       reclaimedChars: deletedChars - (marker.length + 1),
+      budgetExhausted: deletable < older.length,
     };
   }
 
   function pruneSession(
     session: EligibleSessionRow,
     options: SessionChunkPruneOptions,
+    allowance: number,
   ): StreamPruneOutcome & { preservedLastText: boolean } {
     let preservedLastText = false;
     if (!session.lastNonEmptyText?.trim()) {
@@ -297,22 +346,29 @@ export function createSessionChunkPruner(
     let deletedChunks = 0;
     let truncatedChunks = 0;
     let reclaimedChars = 0;
+    let budgetExhausted = false;
     for (const streamType of PRUNED_STREAM_TYPES) {
+      // Spent down as the streams are walked: the three of them share ONE
+      // allowance, so a session cannot exceed the run's budget by walking
+      // three streams that each respect it separately.
       const outcome = pruneStream(
         session.id,
         streamType,
         options.tailChars[streamType],
         options.prunedAt,
+        allowance - deletedChunks,
       );
       deletedChunks += outcome.deletedChunks;
       truncatedChunks += outcome.truncatedChunks;
       reclaimedChars += outcome.reclaimedChars;
+      if (outcome.budgetExhausted) budgetExhausted = true;
     }
 
     return {
       deletedChunks,
       truncatedChunks,
       reclaimedChars,
+      budgetExhausted,
       preservedLastText,
     };
   }
@@ -336,7 +392,8 @@ export function createSessionChunkPruner(
       };
 
       for (const session of sessions) {
-        if (result.deletedChunks >= options.maxDeletedChunks) {
+        const allowance = options.maxDeletedChunks - result.deletedChunks;
+        if (allowance <= 0) {
           result.reachedDeleteBudget = true;
           break;
         }
@@ -346,7 +403,7 @@ export function createSessionChunkPruner(
         // sessions pruned and later ones untouched, but never a stream whose
         // head is gone and whose survivor carries no marker.
         const outcome = database.transaction(() =>
-          pruneSession(session, options),
+          pruneSession(session, options, allowance),
         )();
 
         result.deletedChunks += outcome.deletedChunks;
@@ -355,6 +412,13 @@ export function createSessionChunkPruner(
         if (outcome.preservedLastText) result.preservedLastTexts += 1;
         if (outcome.deletedChunks > 0 || outcome.truncatedChunks > 0) {
           result.prunedSessions += 1;
+        }
+        // The allowance ran out INSIDE this session. Stopping here rather
+        // than opening the next one keeps `scannedSessions` honest: a session
+        // this run never had the budget to touch was not examined.
+        if (outcome.budgetExhausted) {
+          result.reachedDeleteBudget = true;
+          break;
         }
       }
 

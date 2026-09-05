@@ -193,8 +193,18 @@ export function capChunkContent(content: string): {
 export const DERIVED_CHUNK_KEY_PREFIX = "sha256-";
 
 /**
- * The key a keyless chunk is stored under: a digest of the content that is
- * about to be stored.
+ * The key a keyless chunk is stored under: a digest of the content the writer
+ * handed us, BEFORE the cap.
+ *
+ * Before the cap, and never after it, because the cap is lossy: it keeps a
+ * head and a tail and drops the middle. Two different chunks of equal byte
+ * length whose kept ends agree — a stream that repeats a long banner, an
+ * agent writing two answers under the same preamble — cap to the same row and
+ * would collide deterministically on a digest of the capped form. The second
+ * one is not a duplicate; discarding it drops real output AND skips the
+ * uncapped `lastNonEmptyText` extraction, so the session's final word stays
+ * whatever the first chunk said. Hashing the original makes the digest mean
+ * what its name says: same input, same key.
  *
  * Dedupe rides the existing (session_id, stream_type, chunk_key) unique index
  * rather than a new hash column, so a keyless write gets exactly the
@@ -205,11 +215,17 @@ export const DERIVED_CHUNK_KEY_PREFIX = "sha256-";
  *
  * base64url rather than hex: the same 256 bits in 43 characters instead of
  * 64, on a column that is now written and indexed for every keyless chunk.
+ *
+ * Cost: one sha256 pass over the whole input rather than over the capped
+ * 256 KiB. Only keyless writers pay it — every row on the live database
+ * arrives with a provider key and takes the lookup-only fast path above —
+ * and at ~5.5 KB per chunk it is far below the `Buffer` work the cap already
+ * does on the same string.
  */
-export function deriveChunkKey(storedContent: string): string {
+export function deriveChunkKey(content: string): string {
   return (
     DERIVED_CHUNK_KEY_PREFIX +
-    createHash("sha256").update(storedContent, "utf8").digest("base64url")
+    createHash("sha256").update(content, "utf8").digest("base64url")
   );
 }
 
@@ -589,12 +605,13 @@ export function createSessionChunkStore(
       }
     }
 
-    // Capped first, then hashed: what the digest identifies is what would be
-    // stored, so it is bounded by SESSION_CHUNK_MAX_STORED_BYTES rather than
-    // by whatever size a provider handed us. Two chunks that cap to identical
-    // rows ARE the same row, elided middle included.
+    // Hashed BEFORE the cap, then capped. The digest has to identify the
+    // chunk the writer produced, not the lossy shape storage keeps: two
+    // distinct oversized chunks sharing a head and a tail cap to the same
+    // bytes, and a digest taken afterwards would call the second one a
+    // duplicate. See `deriveChunkKey`.
+    const chunkKey = suppliedKey ?? deriveChunkKey(input.content);
     const content = capChunkContent(input.content).content;
-    const chunkKey = suppliedKey ?? deriveChunkKey(content);
 
     // Keyless writers get the same check on the derived key. Deliberately
     // before the sequence reservation below: a deduped write must cost a

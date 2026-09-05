@@ -12,7 +12,10 @@ import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { wasQuestionAskedViaMcp } from "@/lib/mcp/token-store";
-import { splitCappedPrompt } from "@/lib/agent-sessions/prompt-cap";
+import {
+  splitCappedPrompt,
+  type CappedPromptParts,
+} from "@/lib/agent-sessions/prompt-cap";
 
 /**
  * Resolves the best available text output for a completed agent session.
@@ -130,10 +133,10 @@ function stripPromptEcho(
  *    a capped prompt is a big prompt, and a big prompt is precisely what the
  *    snowball is made of.
  *
- * The span search cannot fire by accident: `head` is 104 KiB and `tail` is
- * 20 KiB of the session's own prompt. If a pathological prompt repeated its
- * own tail inside the elided middle the span would close early and leave a
- * bounded remnant — less scrubbing, never a wrong removal.
+ * The span search cannot fire by accident: `head` is 104 KiB of the session's
+ * own prompt, the span's length is that prompt's own byte length, and `tail`
+ * — the 20 KiB the cap kept — has to sit at exactly the offset the original
+ * had it. A head match that fails the check is stepped over, not removed.
  */
 function replacePromptEchoes(output: string, prompt: string): string | null {
   const capped = splitCappedPrompt(prompt);
@@ -148,20 +151,71 @@ function replacePromptEchoes(output: string, prompt: string): string | null {
   // an empty needle would match at every position and never advance `cursor`.
   if (!capped.head || !capped.tail) return null;
 
-  let result = "";
-  let cursor = 0;
+  return replaceCappedPromptEchoes(output, capped);
+}
+
+/**
+ * The capped-prompt case: find each echo by its LENGTH, verify it by its end.
+ *
+ * The cap is lossy but not silent — it records how many bytes it dropped — so
+ * `head + elided + tail` is the exact byte length of the prompt the CLI was
+ * handed. That length is what closes the span. Searching for `tail` instead
+ * closes it at the first place the text happens to reappear, and repeated or
+ * nested closing instructions are precisely the shape of prompt this scrub
+ * exists for: a 1.18 MB prompt carrying its instruction block twice left 1.04
+ * MB of itself behind, and a run that delivered nothing but its own prompt
+ * back was classified `answered`.
+ *
+ * Bytes, not characters, and therefore `Buffer`: the cap counted bytes, so
+ * only a byte offset can be compared against what it recorded. Every cut is
+ * on a boundary the match itself proves — an echo starts where `head` starts
+ * and ends where `tail` ends, both of them whole substrings of the prompt —
+ * so the pieces re-decode without a replacement character.
+ *
+ * The verification is what makes a length-driven removal safe. A span is
+ * removed only when the bytes at its far end are the tail the cap kept; a
+ * head occurrence that is a partial echo, or ordinary output that quotes the
+ * head, fails that and the search resumes one byte later.
+ *
+ * A digest of the original would close the last hypothetical gap — output
+ * that reproduces the 104 KiB head, then exactly the elided byte count of
+ * something else, then the 20 KiB tail. That is an echo under any reading,
+ * and storing the digest needs a column the cap does not have, so the length
+ * and the two ends are where this stops.
+ */
+function replaceCappedPromptEchoes(
+  output: string,
+  capped: CappedPromptParts,
+): string | null {
+  const head = Buffer.from(capped.head, "utf8");
+  const tail = Buffer.from(capped.tail, "utf8");
+  const promptBytes = head.length + capped.elidedBytes + tail.length;
+  const marker = Buffer.from(PROMPT_ECHO_MARKER, "utf8");
+
+  const buffer = Buffer.from(output, "utf8");
+  const pieces: Buffer[] = [];
+  let kept = 0;
+  let search = 0;
   let found = false;
   for (;;) {
-    const headAt = output.indexOf(capped.head, cursor);
+    const headAt = buffer.indexOf(head, search);
     if (headAt < 0) break;
-    const tailAt = output.indexOf(capped.tail, headAt + capped.head.length);
-    if (tailAt < 0) break;
-    result += output.slice(cursor, headAt) + PROMPT_ECHO_MARKER;
-    cursor = tailAt + capped.tail.length;
+    const end = headAt + promptBytes;
+    const endsWithTail =
+      end <= buffer.length &&
+      buffer.compare(tail, 0, tail.length, end - tail.length, end) === 0;
+    if (!endsWithTail) {
+      search = headAt + 1;
+      continue;
+    }
+    pieces.push(buffer.subarray(kept, headAt), marker);
+    kept = end;
+    search = end;
     found = true;
   }
   if (!found) return null;
-  return result + output.slice(cursor);
+  pieces.push(buffer.subarray(kept));
+  return Buffer.concat(pieces).toString("utf8");
 }
 
 

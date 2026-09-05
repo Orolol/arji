@@ -379,6 +379,107 @@ describe("session chunk pruner", () => {
     expect(result.scannedSessions).toBe(1);
     expect(chunkCount("batch-b")).toBe(20);
   });
+
+  it("never deletes more rows than the budget allows, inside one session", () => {
+    // 20 chunks x 2,000 chars against an 8,000-char raw tail: four rows cover
+    // the tail and sixteen are eligible. The budget has to bound the DELETE
+    // itself — checking it only between sessions lets a single session take
+    // all sixteen, and the live database has a session of 1,715 chunks.
+    seedSession({ id: "one-big", status: "completed", endedAt: daysAgo(40) });
+    for (let index = 0; index < 20; index += 1) {
+      seedChunk("one-big", "raw", filler(index, 2000));
+    }
+
+    const result = prune({ maxDeletedChunks: 1 });
+
+    expect(result.deletedChunks).toBe(1);
+    expect(result.reachedDeleteBudget).toBe(true);
+    expect(chunkCount("one-big", "raw")).toBe(19);
+  });
+
+  it("spends one allowance across the three streams of a session", () => {
+    seedSession({ id: "three-streams", status: "failed", endedAt: daysAgo(40) });
+    for (const streamType of ["raw", "output", "response"] as const) {
+      for (let index = 0; index < 12; index += 1) {
+        seedChunk("three-streams", streamType, filler(index, 2000));
+      }
+    }
+
+    const result = prune({ maxDeletedChunks: 3 });
+
+    // Not 3 per stream. The whole session is one budget.
+    expect(result.deletedChunks).toBe(3);
+    expect(chunkCount("three-streams")).toBe(36 - 3);
+    expect(result.reachedDeleteBudget).toBe(true);
+  });
+
+  it("keeps the oldest survivor's marker and the forensic tail on a partial pass", () => {
+    seedSession({ id: "partial", status: "completed", endedAt: daysAgo(40) });
+    for (let index = 0; index < 20; index += 1) {
+      seedChunk("partial", "raw", filler(index, 2000));
+    }
+    const tailBefore = readChunkTail(
+      "partial",
+      "raw",
+      FORENSIC_RAW_TAIL_MAX_CHARS,
+    );
+
+    const result = prune({ maxDeletedChunks: 2 });
+
+    expect(result.deletedChunks).toBe(2);
+    expect(chunkCount("partial", "raw")).toBe(18);
+
+    const remaining = db
+      .select()
+      .from(agentSessionChunks)
+      .where(eq(agentSessionChunks.sessionId, "partial"))
+      .orderBy(agentSessionChunks.sequence)
+      .all();
+    // A partial pass leaves the same shape a full one does, just further from
+    // the end: a marker first, untouched content after it.
+    expect(isChunkPruneMarker(remaining[0].content.split("\n")[0])).toBe(true);
+    expect(
+      remaining
+        .slice(1)
+        .some((row) => isChunkPruneMarker(row.content.split("\n")[0])),
+    ).toBe(false);
+    // The two rows that went were the OLDEST two, so the tail is untouched.
+    expect(readChunkTail("partial", "raw", FORENSIC_RAW_TAIL_MAX_CHARS)).toBe(
+      tailBefore,
+    );
+  });
+
+  it("finishes the session over successive budgeted passes", () => {
+    seedSession({ id: "drip", status: "completed", endedAt: daysAgo(40) });
+    for (let index = 0; index < 20; index += 1) {
+      seedChunk("drip", "raw", filler(index, 2000));
+    }
+    const tailBefore = readChunkTail(
+      "drip",
+      "raw",
+      FORENSIC_RAW_TAIL_MAX_CHARS,
+    );
+
+    let passes = 0;
+    let deleted = 0;
+    for (;;) {
+      const result = prune({ maxDeletedChunks: 5 });
+      deleted += result.deletedChunks;
+      expect(result.deletedChunks).toBeLessThanOrEqual(5);
+      passes += 1;
+      if (!result.reachedDeleteBudget) break;
+      // Progress, not a stall: a run that reports a budget stop must have
+      // spent it.
+      expect(result.deletedChunks).toBeGreaterThan(0);
+      expect(passes).toBeLessThan(10);
+    }
+
+    expect(deleted).toBe(16);
+    expect(chunkCount("drip", "raw")).toBe(4);
+    expect(readChunkTail("drip", "raw", FORENSIC_RAW_TAIL_MAX_CHARS)).toBe(
+      tailBefore,
+    );
+  });
 });
 
 describe("retention window setting", () => {

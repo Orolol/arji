@@ -115,7 +115,26 @@ export function isPromptElisionMarker(line: string): boolean {
 export interface CappedPromptParts {
   head: string;
   tail: string;
+  /**
+   * Bytes the cap dropped between {@link head} and {@link tail}, read back
+   * out of the marker.
+   *
+   * Load-bearing rather than decorative: `head`, this count and `tail` add up
+   * to the byte length of the prompt the CLI was actually handed, which is
+   * the only thing that says where an echo of it ENDS. Matching `tail`
+   * instead closes the span at the first place the prompt happens to repeat
+   * its own closing lines — see `replacePromptEchoes` in
+   * lib/claude/resolve-session-output.ts.
+   */
+  elidedBytes: number;
 }
+
+/**
+ * The digits inside a marker, with the group `toLocaleString("en-US")` writes.
+ * Anchored to the marker's opening so it cannot pick a number out of the
+ * label.
+ */
+const MARKER_ELIDED_BYTES = /^\[… ([\d,]+) bytes elided/;
 
 /**
  * Reads a stored prompt back into the two ends the cap kept, or null when the
@@ -127,6 +146,11 @@ export interface CappedPromptParts {
  * between — which is what lets `stripPromptEcho` still recognise an echo of
  * the WHOLE prompt from the two ends Arij kept.
  *
+ * The marker is read, not discarded: its byte count is the missing middle's
+ * length, so `head.length + elidedBytes + tail.length` recovers the byte
+ * length of the prompt that was stored — the metadata an echo scrub needs to
+ * know where a copy of it ends.
+ *
  * Requires exactly one marker (a capturing split yields three parts). A
  * prompt that itself quoted a marker would split into more, and is treated as
  * uncapped — the conservative answer, and the behaviour that predates the cap.
@@ -134,9 +158,15 @@ export interface CappedPromptParts {
 export function splitCappedPrompt(stored: string): CappedPromptParts | null {
   const parts = stored.split(promptElisionMarkerSplitter());
   if (parts.length !== 3) return null;
-  const [head, , tail] = parts;
+  const [head, marker, tail] = parts;
+  const elided = MARKER_ELIDED_BYTES.exec(marker);
+  // Unreachable through the splitter, which only matches markers carrying a
+  // digit group; belt and braces, because the byte count is arithmetic every
+  // caller downstream trusts.
+  if (!elided) return null;
   return {
     head: head.endsWith("\n") ? head.slice(0, -1) : head,
     tail: tail.startsWith("\n") ? tail.slice(1) : tail,
+    elidedBytes: Number(elided[1].replaceAll(",", "")),
   };
 }

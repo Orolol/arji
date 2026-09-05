@@ -12,11 +12,13 @@
  * duplicate content in all. Every row there is keyed today, so these tests
  * pin the keyless path before a provider that omits keys ever writes to it.
  *
- * The contract: a keyless chunk is stored under a digest of what would be
- * stored, an exact repeat returns `inserted: false` without consuming a
- * sequence, and the keyed fast path is untouched.
+ * The contract: a keyless chunk is stored under a digest of the content its
+ * writer produced — before the write-path cap, which is lossy and would make
+ * two different oversized chunks share a key — an exact repeat returns
+ * `inserted: false` without consuming a sequence, and the keyed fast path is
+ * untouched.
  */
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import {
   createSessionChunkStore,
@@ -24,50 +26,30 @@ import {
   deriveChunkKey,
   type SessionChunkStore,
 } from "@/lib/agent-sessions/chunks";
-import { SESSION_CHUNK_MAX_STORED_BYTES } from "@/lib/agent-sessions/chunk-cap";
+import {
+  SESSION_CHUNK_MAX_STORED_BYTES,
+  SESSION_CHUNK_STORED_HEAD_BYTES,
+  SESSION_CHUNK_STORED_TAIL_BYTES,
+  isChunkElisionMarker,
+} from "@/lib/agent-sessions/chunk-cap";
+import { createTestDb } from "@/lib/db/test-utils";
 
-function createTestDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  db.exec(`
-    CREATE TABLE agent_sessions (
-      id text PRIMARY KEY NOT NULL,
-      last_non_empty_text text
-    );
-
-    CREATE TABLE agent_session_sequences (
-      session_id text PRIMARY KEY NOT NULL,
-      next_sequence integer NOT NULL DEFAULT 1,
-      updated_at text DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE cascade
-    );
-
-    CREATE TABLE agent_session_chunks (
-      id text PRIMARY KEY NOT NULL,
-      session_id text NOT NULL,
-      stream_type text NOT NULL,
-      sequence integer NOT NULL,
-      chunk_key text,
-      content text NOT NULL,
-      created_at text DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE cascade
-    );
-
-    CREATE UNIQUE INDEX agent_session_chunks_session_sequence_unique
-      ON agent_session_chunks (session_id, sequence);
-    CREATE UNIQUE INDEX agent_session_chunks_session_stream_key_unique
-      ON agent_session_chunks (session_id, stream_type, chunk_key);
-    CREATE INDEX agent_session_chunks_session_stream_sequence_idx
-      ON agent_session_chunks (session_id, stream_type, sequence);
-  `);
-  db.prepare("INSERT INTO agent_sessions (id) VALUES ('s1')").run();
-  db.prepare("INSERT INTO agent_sessions (id) VALUES ('s2')").run();
-  return db;
-}
-
+/**
+ * The real migration chain, not hand-written DDL: dedupe IS the
+ * (session_id, stream_type, chunk_key) unique index, and a test that
+ * re-declares the index it depends on proves the copy, not the schema.
+ */
 function setup(): { db: Database.Database; store: SessionChunkStore } {
-  const db = createTestDb();
-  return { db, store: createSessionChunkStore(db) };
+  const { sqlite } = createTestDb();
+  sqlite
+    .prepare("INSERT INTO projects (id, name) VALUES ('p1', 'Dedupe')")
+    .run();
+  for (const id of ["s1", "s2"]) {
+    sqlite
+      .prepare("INSERT INTO agent_sessions (id, project_id) VALUES (?, 'p1')")
+      .run(id);
+  }
+  return { db: sqlite, store: createSessionChunkStore(sqlite) };
 }
 
 /** Rows as SQLite holds them, read back rather than trusted from the return. */
@@ -86,6 +68,17 @@ function rows(
     chunkKey: string | null;
     content: string;
   }[];
+}
+
+/** The session row's final word, as the store wrote it. */
+function lastNonEmptyText(db: Database.Database, sessionId = "s1"): string | null {
+  return (
+    db
+      .prepare(
+        "SELECT last_non_empty_text AS text FROM agent_sessions WHERE id = ?"
+      )
+      .get(sessionId) as { text: string | null }
+  ).text;
 }
 
 /** The reservation counter, i.e. the sequence the NEXT insert would take. */
@@ -204,7 +197,7 @@ describe("keyless chunk deduplication", () => {
     expect(rows(db, "s2")).toHaveLength(1);
   });
 
-  it("dedupes two identical oversized chunks on their stored form", () => {
+  it("dedupes two identical oversized chunks on their original content", () => {
     const { db, store } = setup();
     const oversized = "x".repeat(SESSION_CHUNK_MAX_STORED_BYTES + 4096);
 
@@ -221,9 +214,51 @@ describe("keyless chunk deduplication", () => {
 
     expect(first.inserted).toBe(true);
     expect(second.inserted).toBe(false);
-    // The digest identifies what was STORED, so it matches the capped row.
-    expect(rows(db)[0].chunkKey).toBe(deriveChunkKey(first.chunk.content));
+    // The digest identifies what the WRITER produced, not the capped row it
+    // became — the row is stored capped, the key is the original's.
+    expect(rows(db)[0].chunkKey).toBe(deriveChunkKey(oversized));
+    expect(rows(db)[0].content).not.toBe(oversized);
     expect(rows(db)).toHaveLength(1);
+  });
+
+  it("keeps two oversized chunks that differ only inside the elided middle", () => {
+    const { db, store } = setup();
+    // Identical retained ends, identical byte length, different middles: what
+    // the cap keeps is the same for both, so a digest of the CAPPED form
+    // calls the second one a duplicate and drops it. The trailing whitespace
+    // puts each chunk's real final line inside the part the cap elides.
+    const head = "H".repeat(SESSION_CHUNK_STORED_HEAD_BYTES);
+    const whitespaceTail = "\n".repeat(SESSION_CHUNK_STORED_TAIL_BYTES);
+    const middle = "m".repeat(20_000);
+    const chunk = (finalLine: string) =>
+      `${head}\n${middle}\n${finalLine}\n${whitespaceTail}`;
+
+    const first = store.appendChunk({
+      sessionId: "s1",
+      streamType: "output",
+      content: chunk("First final answer"),
+    });
+    const second = store.appendChunk({
+      sessionId: "s1",
+      streamType: "output",
+      content: chunk("Other final answer"),
+    });
+
+    // The premise: both really do cap to the same bytes.
+    expect(first.chunk.content).toBe(second.chunk.content);
+    expect(isChunkElisionMarker(first.chunk.content.split("\n")[1])).toBe(true);
+
+    // Two distinct outputs, therefore two rows.
+    expect(first.inserted).toBe(true);
+    expect(second.inserted).toBe(true);
+    expect(rows(db)).toHaveLength(2);
+    expect(rows(db).map((row) => row.chunkKey)).toEqual([
+      deriveChunkKey(chunk("First final answer")),
+      deriveChunkKey(chunk("Other final answer")),
+    ]);
+
+    // And the second write's uncapped final word is what the session carries.
+    expect(lastNonEmptyText(db)).toBe("Other final answer");
   });
 
   it("still derives lastNonEmptyText from the first of the duplicates", () => {
@@ -246,14 +281,7 @@ describe("keyless chunk deduplication", () => {
       content: "done\n",
     });
 
-    const text = (
-      db
-        .prepare(
-          "SELECT last_non_empty_text AS text FROM agent_sessions WHERE id = 's1'"
-        )
-        .get() as { text: string | null }
-    ).text;
-    expect(text).toBe("final word");
+    expect(lastNonEmptyText(db)).toBe("final word");
   });
 });
 

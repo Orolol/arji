@@ -10,7 +10,9 @@ vi.mock("@/lib/db", async () => {
 });
 
 // Import after mocks
-const { resolveSessionOutput } = await import("@/lib/claude/resolve-session-output");
+const { classifySessionOutcome, resolveSessionOutput } = await import(
+  "@/lib/claude/resolve-session-output"
+);
 
 beforeEach(() => {
   resetDbMockState();
@@ -269,6 +271,102 @@ describe("prompt-echo scrubbing with a capped stored prompt", () => {
     const output = resolveSessionOutput(result, "s-echo-capped-3");
     expect(output).not.toContain(PROMPT_ECHO_MARKER);
     expect(output).toContain("And then something else entirely.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A capped prompt that repeats its own closing lines
+// ---------------------------------------------------------------------------
+
+/**
+ * The shape a tail-matching scrub gets wrong.
+ *
+ * The prompt carries its instruction block TWICE — nested instructions, a
+ * quoted earlier prompt, a comment echoing a previous run: exactly the data
+ * the snowball is made of. The 20 KiB tail the cap kept therefore also occurs
+ * in the middle, so closing the span at the first tail match ends the echo far
+ * too early and leaves the rest of the prompt standing.
+ */
+const CLOSING_BLOCK = `\n## Instructions\n\n${"Implement the ticket carefully.\n".repeat(
+  1_200,
+)}`;
+const REPEATED_TAIL_PROMPT =
+  `# Project: Arij\n${"SPEC-MIDDLE-LINE\n".repeat(6_000)}` +
+  CLOSING_BLOCK +
+  `${"SPEC-MIDDLE-LINE\n".repeat(6_000)}` +
+  CLOSING_BLOCK;
+
+describe("prompt-echo scrubbing when the prompt repeats its own tail", () => {
+  it("removes the whole echo, not just up to the first tail match", () => {
+    const storedPrompt = capSessionPrompt(REPEATED_TAIL_PROMPT);
+    const parts = splitCappedPrompt(storedPrompt)!;
+    // The premise: the kept tail really does occur inside the elided middle,
+    // before the copy at the end.
+    expect(REPEATED_TAIL_PROMPT.indexOf(parts.tail)).toBeLessThan(
+      REPEATED_TAIL_PROMPT.length - parts.tail.length,
+    );
+
+    const result = textResult(`${REPEATED_TAIL_PROMPT}\n\nActual final report.`);
+    dbMockState.getQueue = [{ prompt: storedPrompt }];
+
+    const output = resolveSessionOutput(result, "s-repeat-1");
+    expect(output).toContain("Actual final report.");
+    expect(output).toContain(PROMPT_ECHO_MARKER);
+    expect(output).not.toContain("SPEC-MIDDLE-LINE");
+    expect(output).not.toContain("Implement the ticket carefully.");
+    // The remnant a first-tail-match span leaves is not "bounded": it is
+    // everything between the two copies. Measured at 1.04 MB on a 1.18 MB
+    // prompt before this was fixed.
+    expect(output.length).toBeLessThan(
+      PROMPT_ECHO_MARKER.length + "\n\nActual final report.".length + 8,
+    );
+  });
+
+  it("treats an echo-only run as silent rather than answered", () => {
+    const storedPrompt = capSessionPrompt(REPEATED_TAIL_PROMPT);
+    const result = textResult(REPEATED_TAIL_PROMPT);
+
+    dbMockState.getQueue = [{ prompt: storedPrompt }, { lastNonEmptyText: null }];
+    expect(classifySessionOutcome(result, "s-repeat-2")).toBe("silent");
+
+    dbMockState.getQueue = [
+      { prompt: storedPrompt },
+      { lastNonEmptyText: null },
+    ];
+    expect(resolveSessionOutput(result, "s-repeat-2b", "Nothing delivered.")).toBe(
+      "Nothing delivered.",
+    );
+  });
+
+  it("removes every copy when the prompt is echoed more than once", () => {
+    const storedPrompt = capSessionPrompt(REPEATED_TAIL_PROMPT);
+    const result = textResult(
+      `${REPEATED_TAIL_PROMPT}\n\n${REPEATED_TAIL_PROMPT}\n\nThe deliverable.`,
+    );
+    dbMockState.getQueue = [{ prompt: storedPrompt }];
+
+    const output = resolveSessionOutput(result, "s-repeat-3");
+    expect(output).toContain("The deliverable.");
+    expect(output).not.toContain("SPEC-MIDDLE-LINE");
+    // Two echoes, one marker: the n-times collapse in stripPromptEcho.
+    expect(output.split(PROMPT_ECHO_MARKER)).toHaveLength(2);
+  });
+
+  it("leaves a truncated echo alone rather than eating what follows it", () => {
+    // Head present, tail present, but the run stopped mid-prompt: the span is
+    // the wrong length, so nothing matches and nothing is removed. Less
+    // scrubbing is the safe direction; swallowing real output is not.
+    const storedPrompt = capSessionPrompt(REPEATED_TAIL_PROMPT);
+    const truncated = REPEATED_TAIL_PROMPT.slice(
+      0,
+      Math.floor(REPEATED_TAIL_PROMPT.length / 2),
+    );
+    const result = textResult(`${truncated}\n\nAnd here is the real answer.`);
+    dbMockState.getQueue = [{ prompt: storedPrompt }];
+
+    const output = resolveSessionOutput(result, "s-repeat-4");
+    expect(output).not.toContain(PROMPT_ECHO_MARKER);
+    expect(output).toContain("And here is the real answer.");
   });
 });
 

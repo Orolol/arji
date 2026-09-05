@@ -241,6 +241,38 @@ describe("capSessionPrompt", () => {
     expect(prompt.startsWith(parts!.head)).toBe(true);
     expect(prompt.endsWith(parts!.tail)).toBe(true);
   });
+
+  it("recovers the original prompt's byte length from the marker", () => {
+    const prompt = oversizedPrompt();
+    const parts = splitCappedPrompt(capSessionPrompt(prompt))!;
+
+    // The arithmetic the echo scrub closes a span on. Exact, not approximate:
+    // the marker records the bytes the cut dropped, so the two kept ends and
+    // that count add up to the prompt the CLI was handed. Anything else and a
+    // length-driven scrub removes the wrong span.
+    expect(
+      Buffer.byteLength(parts.head, "utf8") +
+        parts.elidedBytes +
+        Buffer.byteLength(parts.tail, "utf8"),
+    ).toBe(Buffer.byteLength(prompt, "utf8"));
+    expect(parts.elidedBytes).toBeGreaterThan(0);
+  });
+
+  it("recovers it across a multi-byte cut, where the boundary walk moved the ends", () => {
+    // Astral characters straddling both cut points: the head walks back and
+    // the tail walks forward, so head + elided + tail only still adds up if
+    // the marker was written from the adjusted offsets.
+    const prompt = `${"\u{1F30A}".repeat(60_000)}${"e\u0301".repeat(20_000)}`;
+    const parts = splitCappedPrompt(capSessionPrompt(prompt))!;
+
+    expect(
+      Buffer.byteLength(parts.head, "utf8") +
+        parts.elidedBytes +
+        Buffer.byteLength(parts.tail, "utf8"),
+    ).toBe(Buffer.byteLength(prompt, "utf8"));
+    expect(prompt.startsWith(parts.head)).toBe(true);
+    expect(prompt.endsWith(parts.tail)).toBe(true);
+  });
 });
 
 describe("resume and retry read identity, not the stored prompt", () => {
