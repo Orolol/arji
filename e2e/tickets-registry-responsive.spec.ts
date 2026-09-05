@@ -325,7 +325,11 @@ test.describe("the tickets registry on a phone", () => {
       showAllBox.x + showAllBox.width,
       "the show-all link is pushed out of the viewport at 390px",
     ).toBeLessThanOrEqual(390);
-    await showAll.click();
+    // By keyboard, which is the half a click cannot prove: `QuietLink` renders
+    // a real button, so it takes focus and answers Enter.
+    await showAll.focus();
+    await expect(showAll).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(rows).toHaveCount(8);
 
     // Search, by touch: the field is on screen and it filters.
