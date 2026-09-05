@@ -437,9 +437,15 @@ describe("listChunkPage — what the DATABASE materialises, not just the page", 
     const BUDGET = 1024 * 1024;
     seed(
       store,
+      // Distinct content per chunk, at an identical size: keyless chunks
+      // dedupe on their content, and 64 copies of one blob is one row.
       Array.from(
         { length: 64 },
-        () => ["raw", "x".repeat(MAX_CHUNK)] as const
+        (_, i) =>
+          [
+            "raw",
+            "x".repeat(MAX_CHUNK - 4) + String(i).padStart(4, "0"),
+          ] as const
       )
     );
 
@@ -475,7 +481,11 @@ describe("listChunkPage — what the DATABASE materialises, not just the page", 
     const store = createSessionChunkStore(database);
     seed(
       store,
-      Array.from({ length: 120 }, () => ["raw", "y".repeat(5500)] as const)
+      Array.from(
+        { length: 120 },
+        (_, i) =>
+          ["raw", "y".repeat(5496) + String(i).padStart(4, "0")] as const
+      )
     );
 
     const page = store.listChunkPage("s1", "raw", { limit: 200 });

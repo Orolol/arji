@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -199,6 +200,35 @@ export function capChunkContent(content: string): {
       `${buffer.subarray(tailStart).toString("utf8")}`,
     capped: true,
   };
+}
+
+/**
+ * Namespace for a chunk key Arij derives instead of receiving. Keeps a
+ * derived key disjoint from every caller-supplied one: the live database's
+ * 256,594 keys are all `stdout:N`, `stderr:N`, `final-output`,
+ * `final-response` or `result-<sessionId>`, and none of those can start here.
+ */
+export const DERIVED_CHUNK_KEY_PREFIX = "sha256-";
+
+/**
+ * The key a keyless chunk is stored under: a digest of the content that is
+ * about to be stored.
+ *
+ * Dedupe rides the existing (session_id, stream_type, chunk_key) unique index
+ * rather than a new hash column, so a keyless write gets exactly the
+ * duplicate semantics a keyed one already had, with no migration and no
+ * second index to keep in step. SQLite treats NULLs in a unique index as
+ * distinct from each other, which is precisely why keyless chunks never
+ * deduped before.
+ *
+ * base64url rather than hex: the same 256 bits in 43 characters instead of
+ * 64, on a column that is now written and indexed for every keyless chunk.
+ */
+export function deriveChunkKey(storedContent: string): string {
+  return (
+    DERIVED_CHUNK_KEY_PREFIX +
+    createHash("sha256").update(storedContent, "utf8").digest("base64url")
+  );
 }
 
 export interface AppendSessionChunkInput {
@@ -556,14 +586,40 @@ export function createSessionChunkStore(
     input: AppendSessionChunkInput
   ): AppendSessionChunkResult {
     const createdAt = input.createdAt ?? new Date().toISOString();
-    const chunkKey = input.chunkKey ?? null;
+    const suppliedKey = input.chunkKey ?? null;
 
-    if (chunkKey) {
-      const existing = selectExistingByKeyStmt.get({
+    const findDuplicate = (chunkKey: string) =>
+      selectExistingByKeyStmt.get({
         sessionId: input.sessionId,
         streamType: input.streamType,
         chunkKey,
       });
+
+    // The fast path, unchanged: a caller-supplied key answers the duplicate
+    // question with one indexed lookup, without reading the content at all.
+    if (suppliedKey) {
+      const existing = findDuplicate(suppliedKey);
+      if (existing) {
+        return {
+          inserted: false,
+          chunk: toSessionChunk(existing),
+        };
+      }
+    }
+
+    // Capped first, then hashed: what the digest identifies is what would be
+    // stored, so it is bounded by SESSION_CHUNK_MAX_STORED_BYTES rather than
+    // by whatever size a provider handed us. Two chunks that cap to identical
+    // rows ARE the same row, elided middle included.
+    const content = capChunkContent(input.content).content;
+    const chunkKey = suppliedKey ?? deriveChunkKey(content);
+
+    // Keyless writers get the same check on the derived key. Deliberately
+    // before the sequence reservation below: a deduped write must cost a
+    // lookup and nothing else — no row, and no hole in the session's
+    // sequence either.
+    if (!suppliedKey) {
+      const existing = findDuplicate(chunkKey);
       if (existing) {
         return {
           inserted: false,
@@ -588,7 +644,7 @@ export function createSessionChunkStore(
       streamType: input.streamType,
       sequence: sequenceRow.sequence,
       chunkKey,
-      content: capChunkContent(input.content).content,
+      content,
       createdAt,
     };
 

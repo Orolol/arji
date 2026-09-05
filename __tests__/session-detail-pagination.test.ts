@@ -331,7 +331,15 @@ describe("worst-case payload", () => {
     db.update(agentSessions)
       .set({ prompt: "p".repeat(1_800_000) })
       .run();
-    seedChunks("raw", Array.from({ length: 200 }, () => "r".repeat(64 * 1024)));
+    // Distinct per chunk, at an identical size — 200 copies of one blob is
+    // one row now that keyless chunks dedupe on their content.
+    seedChunks(
+      "raw",
+      Array.from(
+        { length: 200 },
+        (_, i) => "r".repeat(64 * 1024 - 4) + String(i).padStart(4, "0")
+      )
+    );
     seedLegacyChunks(SESSION, "response", ["R".repeat(8_300_000)]);
     // One 4 MB line with no newline in it. The CHUNK is capped on the way in
     // now, but `last_non_empty_text` is deliberately derived from the uncapped
