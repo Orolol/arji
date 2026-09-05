@@ -370,3 +370,63 @@ describe("prompt-echo scrubbing when the prompt repeats its own tail", () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// A capped prompt that is not ASCII
+// ---------------------------------------------------------------------------
+
+/**
+ * The scrub closes an echo on the prompt's exact BYTE length, and the two ends
+ * it matches on are the bytes the cap kept. That arithmetic only holds because
+ * `capTextHeadTail` walks each cut off any UTF-8 continuation byte before
+ * slicing: a cut left inside a character would decode to U+FFFD, so the stored
+ * head would no longer be a substring of what the CLI echoed and the span
+ * would never match.
+ *
+ * The cap's own tests pin "never cuts inside a multi-byte character". They do
+ * not pin what that costs the resolver: with the walk-off removed, every test
+ * above still passes — they are all ASCII — while a non-ASCII echo silently
+ * stops being scrubbed and an echo-only run is classified `answered` again.
+ * That is the gap these two cover.
+ */
+const UTF8_CLOSING_BLOCK = `\n## 指示\n\n${"チケットを慎重に実装してください 🌊\n".repeat(
+  1_200,
+)}`;
+const UTF8_PROMPT =
+  `# Projet: Arij\n${"仕様の中間行 — SPEC-MIDDLE 🌊\n".repeat(6_000)}` +
+  UTF8_CLOSING_BLOCK +
+  `${"仕様の中間行 — SPEC-MIDDLE 🌊\n".repeat(6_000)}` +
+  UTF8_CLOSING_BLOCK;
+
+describe("prompt-echo scrubbing when the prompt is multi-byte", () => {
+  it("removes the whole echo of a multi-byte capped prompt", () => {
+    const storedPrompt = capSessionPrompt(UTF8_PROMPT);
+    const parts = splitCappedPrompt(storedPrompt)!;
+
+    // The premise the span arithmetic rests on: neither cut landed inside a
+    // character, so the two kept ends plus the elided count are exactly the
+    // byte length of the prompt the CLI was handed.
+    expect(storedPrompt).not.toContain("�");
+    expect(
+      Buffer.byteLength(parts.head, "utf8") +
+        parts.elidedBytes +
+        Buffer.byteLength(parts.tail, "utf8"),
+    ).toBe(Buffer.byteLength(UTF8_PROMPT, "utf8"));
+
+    const result = textResult(`${UTF8_PROMPT}\n\nLe rapport final. 🎯`);
+    dbMockState.getQueue = [{ prompt: storedPrompt }];
+
+    const output = resolveSessionOutput(result, "s-utf8-1");
+    expect(output).toContain("Le rapport final. 🎯");
+    expect(output).toContain(PROMPT_ECHO_MARKER);
+    expect(output).not.toContain("SPEC-MIDDLE");
+  });
+
+  it("treats a multi-byte echo-only run as silent rather than answered", () => {
+    const storedPrompt = capSessionPrompt(UTF8_PROMPT);
+    const result = textResult(UTF8_PROMPT);
+
+    dbMockState.getQueue = [{ prompt: storedPrompt }, { lastNonEmptyText: null }];
+    expect(classifySessionOutcome(result, "s-utf8-2")).toBe("silent");
+  });
+});
