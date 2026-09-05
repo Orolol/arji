@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { AlertTriangle } from "lucide-react";
 
@@ -72,14 +72,14 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
   const { openTicket } = useTicketOverlay();
   const { data, error, refresh } = useQaFindings(projectId ?? null);
 
-  const [filter, setFilter] = React.useState<FindingFilter>("all");
-  const [toasts, setToasts] = React.useState<QaToast[]>([]);
-  const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(new Set());
-  const [dismissTarget, setDismissTarget] = React.useState<QaFinding | null>(null);
-  const [dismissPending, setDismissPending] = React.useState(false);
-  const [runPending, setRunPending] = React.useState(false);
+  const [filter, setFilter] = useState<FindingFilter>("all");
+  const [toasts, setToasts] = useState<QaToast[]>([]);
+  const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
+  const [dismissTarget, setDismissTarget] = useState<QaFinding | null>(null);
+  const [dismissPending, setDismissPending] = useState(false);
+  const [runPending, setRunPending] = useState(false);
 
-  const raise = React.useCallback(
+  const raise = useCallback(
     (tone: QaToastTone, message: string, action?: QaToastAction) => {
       if (onToast) {
         onToast(tone, message, action);
@@ -97,7 +97,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
     [onToast],
   );
 
-  const markPending = React.useCallback((findingId: string, pending: boolean) => {
+  const markPending = useCallback((findingId: string, pending: boolean) => {
     setPendingIds((current) => {
       const next = new Set(current);
       if (pending) next.add(findingId);
@@ -110,7 +110,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
    * 409 AGENT_ALREADY_RUNNING is not an error the user can do anything with
    * unless the toast can take them to the session that is in the way.
    */
-  const reportFailure = React.useCallback(
+  const reportFailure = useCallback(
     (
       res: Response,
       body: DispatchErrorBody,
@@ -137,13 +137,13 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
 
   /* ---- derived ------------------------------------------------------ */
 
-  const projects = React.useMemo(() => data?.projects ?? [], [data]);
-  const projectsById = React.useMemo(
+  const projects = useMemo(() => data?.projects ?? [], [data]);
+  const projectsById = useMemo(
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
   );
-  const findings = React.useMemo(() => data?.findings ?? [], [data]);
-  const visibleFindings = React.useMemo(
+  const findings = useMemo(() => data?.findings ?? [], [data]);
+  const visibleFindings = useMemo(
     () => applyFindingFilter(findings, filter),
     [findings, filter],
   );
@@ -153,7 +153,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
       ? "—"
       : `${data.coveragePercent}%`;
 
-  const handleOpenTicket = React.useCallback(
+  const handleOpenTicket = useCallback(
     (epicId: string, ownerProjectId?: string | null) => {
       openTicket(epicId, { projectId: ownerProjectId ?? projectId ?? null });
     },
@@ -172,7 +172,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
    * before this screen existed. No `namedAgentId` and no `pipeline`: omitting
    * `pipeline` lets the server's `pipeline_enabled` setting chain decide.
    */
-  const handleFix = React.useCallback(
+  const handleFix = useCallback(
     async (finding: QaFinding) => {
       markPending(finding.findingId, true);
       try {
@@ -215,7 +215,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
    * If the ticket-comment echo fails the first write is NOT rolled back:
    * losing the dismissal is worse than losing its echo.
    */
-  const handleDismiss = React.useCallback(
+  const handleDismiss = useCallback(
     async (finding: QaFinding, reason: string) => {
       setDismissPending(true);
       markPending(finding.findingId, true);
@@ -280,7 +280,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
    * four types would create four sessions on one ticket: the route creates one
    * per review type.
    */
-  const handleRunPass = React.useCallback(
+  const handleRunPass = useCallback(
     async (target: QaReviewTarget) => {
       setRunPending(true);
       try {
@@ -308,7 +308,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
     [raise, reportFailure, refresh],
   );
 
-  const handleStopRun = React.useCallback(
+  const handleStopRun = useCallback(
     async (sessionId: string) => {
       const run = data?.runs.find((row) => row.sessionId === sessionId);
       if (!run) return;
@@ -336,7 +336,14 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
     <div
       data-testid="qa-screen"
       className={cn(
-        "flex h-full min-h-0 w-full flex-col bg-background font-sans text-foreground",
+        "flex w-full flex-col bg-background font-sans text-foreground",
+        // ONE SCREENFUL IS A DESKTOP MODEL. `h-full` + a growing band means the
+        // bands share a fixed height and the coral one absorbs what is left —
+        // which on a phone is nothing, so the findings and their actions were
+        // squeezed to a zero-height scroller (B-arij-iL4-FmyXgGr). Below `lg`
+        // the screen is as tall as its content and `app/layout.tsx`'s <main>
+        // scrolls it, the way a phone page is read.
+        "min-h-full lg:h-full lg:min-h-0",
         className,
       )}
     >
@@ -375,7 +382,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-[12px] px-[14px] pb-[14px]">
+      <div className="flex flex-col gap-[12px] px-[14px] pb-[14px] lg:min-h-0 lg:flex-1">
         <QaRunsBand
           runs={data?.runs ?? []}
           queued={data?.queued ?? []}
@@ -399,7 +406,12 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
           onDismiss={(finding) => setDismissTarget(finding)}
         />
 
-        <div className="grid shrink-0 grid-cols-2 gap-[12px]">
+        {/* The bottom split stacks on a phone. Two columns of a 390px screen
+            are 145px each: the verdict rows lose their ticket chip to the
+            column edge and the rubric chips wrap inside a 27px pill. Stacking
+            also gives the coral band above — the one band on 11b that grows —
+            the height its rows need. Unchanged from `lg` up. */}
+        <div className="grid shrink-0 grid-cols-1 gap-[12px] lg:grid-cols-2">
           <VerdictsBand
             verdicts={data?.verdicts ?? []}
             projectsById={projectsById}

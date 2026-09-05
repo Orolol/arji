@@ -61,6 +61,34 @@ export function landMeta(row: DeskLandRow): string {
   return parts.join(" · ");
 }
 
+/**
+ * The land row's skeleton — B-arij-M9zsQujUTCoR.
+ *
+ * The chip, the `#218 · clean · 4/4 US` meta and the Land pill are all
+ * `shrink-0`, so the title button is the only child that can absorb a deficit
+ * and it absorbs all of it: measured 0px wide in Chrome at both 390×844 (the
+ * band 139px, with the Land pill painted over UP NEXT) and 768×1024 (328px).
+ *
+ * Below `sm` the row becomes two lines — identity and title, then meta and
+ * Land. `sm`, not `lg`: once `NowDesk` stops putting the two bands side by
+ * side below `lg`, a 640px-wide band already leaves the title ~205px, and a
+ * second line there would only be spent height.
+ *
+ * From `sm` up the two wrappers are `display: contents`, so the desktop row
+ * still has its four children as direct flex items.
+ */
+const ROW_CLASS = cn(
+  "flex items-center gap-3 px-[13px] py-[10px]",
+  "max-sm:flex-col max-sm:items-stretch max-sm:gap-1.5",
+);
+
+const ROW_HEAD_CLASS = cn("contents", "max-sm:flex max-sm:min-w-0 max-sm:items-center max-sm:gap-2");
+
+const ROW_ACTIONS_CLASS = cn(
+  "contents",
+  "max-sm:flex max-sm:min-w-0 max-sm:flex-wrap max-sm:items-center max-sm:justify-end max-sm:gap-2",
+);
+
 export function ReadyToLandBand({
   rows,
   heldBackCount,
@@ -112,47 +140,51 @@ export function ReadyToLandBand({
             radius={12}
             selected={selectedEpicIds?.has(row.epicId)}
             data-testid="desk-land-row"
-            className="flex items-center gap-3 px-[13px] py-[10px]"
+            className={cn(ROW_CLASS)}
           >
-            <IdentityChip
-              label={row.readableId ?? project?.shortName ?? "—"}
-              tone={projectTone(project?.colorIndex ?? 0)}
-              size="sm"
-            />
-            <button
-              type="button"
-              disabled={!onOpenTicket}
-              onClick={(event) => onOpenTicket?.(row.epicId, event)}
-              className={cn(
-                "line-clamp-1 min-w-0 flex-1 border-0 bg-transparent p-0 text-left",
-                "font-sans text-[13px] font-medium text-foreground",
-                "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                "disabled:cursor-default",
-              )}
-            >
-              {row.title}
-            </button>
-            <Mono size={10.5} tone="muted" className="shrink-0">
-              {landMeta(row)}
-            </Mono>
-            {row.agentBusy ? (
-              <Mono size={10.5} tone="land-mid" className="shrink-0">
-                agent au travail
-              </Mono>
-            ) : (
-              <PillButton
-                variant="filled"
+            <div data-testid="desk-land-row-head" className={ROW_HEAD_CLASS}>
+              <IdentityChip
+                label={row.readableId ?? project?.shortName ?? "—"}
+                tone={projectTone(project?.colorIndex ?? 0)}
                 size="sm"
-                icon={GitMerge}
-                onClick={() => void onLand(row)}
-                pending={landingEpicId === row.epicId}
-                pendingLabel="Landing…"
-                disabled={landingAll || (landingEpicId !== null && landingEpicId !== undefined)}
-                data-testid="desk-land-button"
+              />
+              <button
+                type="button"
+                disabled={!onOpenTicket}
+                onClick={(event) => onOpenTicket?.(row.epicId, event)}
+                className={cn(
+                  "line-clamp-1 min-w-0 flex-1 border-0 bg-transparent p-0 text-left",
+                  "font-sans text-[13px] font-medium text-foreground",
+                  "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
+                  "disabled:cursor-default",
+                )}
               >
-                Land
-              </PillButton>
-            )}
+                {row.title}
+              </button>
+            </div>
+            <div data-testid="desk-land-row-actions" className={ROW_ACTIONS_CLASS}>
+              <Mono size={10.5} tone="muted" className="shrink-0">
+                {landMeta(row)}
+              </Mono>
+              {row.agentBusy ? (
+                <Mono size={10.5} tone="land-mid" className="shrink-0">
+                  agent au travail
+                </Mono>
+              ) : (
+                <PillButton
+                  variant="filled"
+                  size="sm"
+                  icon={GitMerge}
+                  onClick={() => void onLand(row)}
+                  pending={landingEpicId === row.epicId}
+                  pendingLabel="Landing…"
+                  disabled={landingAll || (landingEpicId !== null && landingEpicId !== undefined)}
+                  data-testid="desk-land-button"
+                >
+                  Land
+                </PillButton>
+              )}
+            </div>
           </SurfaceCard>
         );
       })}

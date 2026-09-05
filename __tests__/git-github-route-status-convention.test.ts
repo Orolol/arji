@@ -534,6 +534,50 @@ const EXERCISED: ExercisedRoute[] = [
     },
   },
   {
+    // Outside the git/github subtree — which is exactly how it escaped the
+    // derivation below and kept answering 500 after the three git/* routes
+    // were fixed. The Git Sync page mounts a worktrees panel, so it fires on
+    // the same page load. Pinned by hand here; widening the derivation to
+    // "any route that reaches git" would have caught it mechanically, but it
+    // pulls in a dozen build/merge/review routes that each need classifying,
+    // so that is its own ticket rather than a drive-by edit.
+    routePath: "/api/projects/[projectId]/worktrees",
+    method: "GET",
+    allowed: [200],
+    note:
+      "A read: a repository with no agent worktree answers `count: 0`, which is the honest empty list rather than a failure.",
+    notARepository: {
+      allowed: [400],
+      code: "GIT_REPO_NOT_A_REPOSITORY",
+      note:
+        "Regressed route: git's `fatal: not a git repository` prose reached errorResponse(), so the Git Sync page logged a console 500 on every load. Unlike an empty list, an unusable path has no in-payload representation — a `count: 0` nobody can vouch for would be a fabrication.",
+    },
+    invoke: async () => {
+      const { GET } = await import("@/app/api/projects/[projectId]/worktrees/route");
+      return GET(mockNextRequest(), mockRouteContext({ projectId: PROJECT_ID }));
+    },
+  },
+  {
+    routePath: "/api/projects/[projectId]/worktrees",
+    method: "POST",
+    allowed: [200],
+    note:
+      "`git worktree prune` on a repository with nothing to prune is a successful no-op, not a refusal.",
+    notARepository: {
+      allowed: [400],
+      code: "GIT_REPO_NOT_A_REPOSITORY",
+      note:
+        "Same regressed handler, and the mutating half: there is nothing to prune in a directory that is not a repository, and saying so is not a fault.",
+    },
+    invoke: async () => {
+      const { POST } = await import("@/app/api/projects/[projectId]/worktrees/route");
+      return POST(
+        mockNextRequest({ method: "POST" }),
+        mockRouteContext({ projectId: PROJECT_ID })
+      );
+    },
+  },
+  {
     // Outside the git/github subtree, but the epic cites it as the behaviour
     // the four regressed routes were supposed to match — so it is pinned here
     // rather than merely excluded.
@@ -829,15 +873,16 @@ describe("git/github route status-code convention", () => {
     const refusals = EXERCISED.filter((entry) =>
       entry.notARepository.allowed.every((status) => status >= 400)
     );
-    // The three regressed routes, the two the adjacent epic already fixed, and
-    // the four that refuse for their own (GitHub-link) reason. A shrinking set
-    // would mean a route quietly stopped refusing at all.
-    expect(refusals.length).toBeGreaterThanOrEqual(9);
+    // The three regressed git/* routes, the worktrees route's two handlers,
+    // the two the adjacent epic already fixed, and the four that refuse for
+    // their own (GitHub-link) reason. A shrinking set would mean a route
+    // quietly stopped refusing at all.
+    expect(refusals.length).toBeGreaterThanOrEqual(11);
     expect(
       refusals.filter((entry) => entry.notARepository.code === "GIT_REPO_NOT_A_REPOSITORY")
         .length,
       "every route that actually reaches git must publish the shared code"
-    ).toBeGreaterThanOrEqual(5);
+    ).toBeGreaterThanOrEqual(7);
 
     const defects: string[] = [];
     for (const entry of refusals) {

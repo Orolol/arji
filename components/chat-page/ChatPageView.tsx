@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Sparkles } from "lucide-react";
 
@@ -221,17 +221,30 @@ export function ChatPageView({
     the queue ranks, none of which move that fast.
   */
   const { data: desk, refresh: refreshDesk } = useControlDesk(null, 8000);
-  const projects: readonly DeskProject[] = React.useMemo(
+  const projects: readonly DeskProject[] = useMemo(
     () => desk?.projects ?? [],
     [desk],
   );
 
-  const [chosenProjectId, setChosenProjectId] = React.useState<string | null>(
+  const [chosenProjectId, setChosenProjectId] = useState<string | null>(
     initialProjectId ?? null,
   );
-  React.useEffect(() => {
+  /*
+    A new `initialProjectId` — a deep link arriving while the page is already
+    mounted — wins over the local pick. Adjusted during render rather than from
+    an effect so the first paint after the link is the requested project, not
+    one commit of the previous one.
+
+    Only a CHANGE applies, and only a truthy one: navigating to the bare /chat
+    route drops the param, and that must leave the current pick alone rather
+    than snapping back to the first project.
+  */
+  const [lastInitialProjectId, setLastInitialProjectId] =
+    useState(initialProjectId);
+  if (initialProjectId !== lastInitialProjectId) {
+    setLastInitialProjectId(initialProjectId);
     if (initialProjectId) setChosenProjectId(initialProjectId);
-  }, [initialProjectId]);
+  }
 
   const activeProjectId =
     chosenProjectId && projects.some((row) => row.id === chosenProjectId)
@@ -241,8 +254,8 @@ export function ChatPageView({
     projects.find((row) => row.id === activeProjectId) ?? null;
   const tone = projectTone(project?.colorIndex ?? 0);
 
-  const [toasts, setToasts] = React.useState<ToastRow[]>([]);
-  const raise = React.useCallback(
+  const [toasts, setToasts] = useState<ToastRow[]>([]);
+  const raise = useCallback(
     (tone: "success" | "error", message: string) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       setToasts((current) => [...current, { id, tone, message }]);
@@ -346,11 +359,11 @@ const CONTEXT_PANE_CLASS =
  * is the screen's own shape with nothing in it.
  */
 function EmptyChatWorkspace() {
-  const emptyTokens = React.useMemo(
+  const emptyTokens = useMemo(
     () => ({ spec: null, memory: null, citedDocs: [] }),
     [],
   );
-  const [pane, setPane] = React.useState<ChatPane>(DEFAULT_CHAT_PANE);
+  const [pane, setPane] = useState<ChatPane>(DEFAULT_CHAT_PANE);
 
   return (
     <div className={CHAT_BODY_CLASS}>
@@ -447,7 +460,7 @@ function ChatWorkspace({
 
   const { agents } = useNamedAgentsList();
 
-  const activeConversation = React.useMemo(
+  const activeConversation = useMemo(
     () => conversations.find((row) => row.id === activeId) ?? null,
     [conversations, activeId],
   );
@@ -473,8 +486,8 @@ function ChatWorkspace({
 
   // The deep link only applies while the conversation it names still exists,
   // and only once: after that the user's own selection wins.
-  const deepLinkApplied = React.useRef(false);
-  React.useEffect(() => {
+  const deepLinkApplied = useRef(false);
+  useEffect(() => {
     if (deepLinkApplied.current || !initialConversationId) return;
     if (!conversations.some((row) => row.id === initialConversationId)) return;
     deepLinkApplied.current = true;
@@ -482,7 +495,7 @@ function ChatWorkspace({
   }, [conversations, initialConversationId, setActiveId]);
 
   // Deleting or losing the active conversation must not blank the thread.
-  React.useEffect(() => {
+  useEffect(() => {
     if (conversations.length === 0) return;
     if (!activeId || !conversations.some((row) => row.id === activeId)) {
       setActiveId(conversations[0].id);
@@ -492,8 +505,8 @@ function ChatWorkspace({
   // The conversation row's status flips to `generated` SERVER-side after the
   // stream closes; without this catch-up the roster keeps showing the busy
   // state for a turn that finished.
-  const previousSending = React.useRef(sending);
-  React.useEffect(() => {
+  const previousSending = useRef(sending);
+  useEffect(() => {
     if (previousSending.current && !sending) {
       const timer = setTimeout(() => void refreshConversations(), 3000);
       previousSending.current = sending;
@@ -506,7 +519,7 @@ function ChatWorkspace({
 
   /* ---- who is talking -------------------------------------------------- */
 
-  const agentLabelFor = React.useCallback(
+  const agentLabelFor = useCallback(
     (conversation: { namedAgentId?: string | null; provider: string }) => {
       if (conversation.namedAgentId) {
         const named = agents?.find((row) => row.id === conversation.namedAgentId);
@@ -522,7 +535,7 @@ function ChatWorkspace({
     [agents],
   );
 
-  const agentLabels = React.useMemo(() => {
+  const agentLabels = useMemo(() => {
     const map = new Map<string, string>();
     for (const conversation of conversations) {
       map.set(conversation.id, agentLabelFor(conversation));
@@ -538,21 +551,21 @@ function ChatWorkspace({
 
   // Memoised over `messages`: the JSON candidate scan is O(content) per
   // message, which is fine per change and NOT fine per render.
-  const epicsByMessage = React.useMemo(
+  const epicsByMessage = useMemo(
     () => epicsByMessageId(messages),
     [messages],
   );
 
-  const [epicByMessage, setEpicByMessage] = React.useState<Map<string, string>>(
+  const [epicByMessage, setEpicByMessage] = useState<Map<string, string>>(
     () => new Map(),
   );
   /** Status seeded by the create response, so placement never starts at `—`. */
-  const [createdMeta, setCreatedMeta] = React.useState<
+  const [createdMeta, setCreatedMeta] = useState<
     Map<string, { readableId: string | null; status: string }>
   >(() => new Map());
 
   // Reload restores the exact bindings; the heuristics below are the fallback.
-  React.useEffect(() => {
+  useEffect(() => {
     if (!activeId) {
       setEpicByMessage(new Map());
       return;
@@ -560,7 +573,7 @@ function ChatWorkspace({
     setEpicByMessage(readStoredEpicMap(activeId));
   }, [activeId]);
 
-  const recordEpicBinding = React.useCallback(
+  const recordEpicBinding = useCallback(
     (
       messageId: string,
       created: { epicId: string; readableId: string | null; status: string },
@@ -584,8 +597,8 @@ function ChatWorkspace({
     [activeId, onDeskChanged],
   );
 
-  const deskTickets = React.useMemo(() => flattenDeskTickets(desk), [desk]);
-  const ticketsById = React.useMemo(() => {
+  const deskTickets = useMemo(() => flattenDeskTickets(desk), [desk]);
+  const ticketsById = useMemo(() => {
     const map = new Map<string, DeskTicket>();
     for (const row of deskTickets) {
       // The status-bearing row (upNext) is inserted first and must win.
@@ -603,7 +616,7 @@ function ChatWorkspace({
    * A card that resolves to nothing is still fully actionable — that is the
    * point — but it must never show a `readableId` it did not resolve.
    */
-  const resolvedEpicByMessage = React.useMemo(() => {
+  const resolvedEpicByMessage = useMemo(() => {
     const map = new Map(epicByMessage);
 
     const linkedEpicId = activeConversation?.epicId ?? null;
@@ -631,7 +644,7 @@ function ChatWorkspace({
     return map;
   }, [epicByMessage, epicsByMessage, activeConversation, ticketsById, deskTickets]);
 
-  const resolveTicket = React.useCallback(
+  const resolveTicket = useCallback(
     (epicId: string): ChatThreadResolvedTicket => {
       const row = ticketsById.get(epicId);
       const seeded = createdMeta.get(epicId);
@@ -646,7 +659,7 @@ function ChatWorkspace({
 
   /* ---- "Créé dans ce chat" --------------------------------------------- */
 
-  const createdHere: CreatedHereEntry[] = React.useMemo(() => {
+  const createdHere: CreatedHereEntry[] = useMemo(() => {
     const ids: string[] = [];
     const seen = new Set<string>();
     const push = (epicId: string | null | undefined) => {
@@ -682,7 +695,7 @@ function ChatWorkspace({
     epicsByMessage,
   ]);
 
-  const ticketCounts = React.useMemo(() => {
+  const ticketCounts = useMemo(() => {
     const map = new Map<string, number>();
     // Only the ACTIVE conversation's messages are loaded, so it is the only
     // row whose count is knowable. The others simply omit the line rather than
@@ -697,20 +710,20 @@ function ChatWorkspace({
 
   /* ---- which pane, on a viewport too narrow for three -------------------- */
 
-  const [pane, setPane] = React.useState<ChatPane>(DEFAULT_CHAT_PANE);
-  const threadPaneRef = React.useRef<HTMLDivElement>(null);
-  const [claimThreadFocus, setClaimThreadFocus] = React.useState(false);
+  const [pane, setPane] = useState<ChatPane>(DEFAULT_CHAT_PANE);
+  const threadPaneRef = useRef<HTMLDivElement>(null);
+  const [claimThreadFocus, setClaimThreadFocus] = useState(false);
 
   // AFTER the commit that un-hides the pane, never during the click: focusing
   // a `display: none` element is a silent no-op, so this cannot be done in the
   // handler that asks for the switch.
-  React.useEffect(() => {
+  useEffect(() => {
     if (!claimThreadFocus) return;
     setClaimThreadFocus(false);
     threadPaneRef.current?.focus();
   }, [claimThreadFocus]);
 
-  const handleSelectConversation = React.useCallback(
+  const handleSelectConversation = useCallback(
     (conversationId: string) => {
       setActiveId(conversationId);
       // On a phone the card you just tapped belongs to the pane that is about
@@ -728,7 +741,7 @@ function ChatWorkspace({
 
   /* ---- sending --------------------------------------------------------- */
 
-  const [sendStartedAt, setSendStartedAt] = React.useState<string | null>(null);
+  const [sendStartedAt, setSendStartedAt] = useState<string | null>(null);
 
   const hasMessages = messages.length > 0;
   const hasUserMessage = messages.some((message) => message.role === "user");
@@ -741,7 +754,7 @@ function ChatWorkspace({
   const busy =
     sending || isLegacyConversationGenerating(activeConversation?.status);
 
-  const handleSend = React.useCallback(
+  const handleSend = useCallback(
     (content: string, attachmentIds: string[]) => {
       if (!activeId) return;
       setSendStartedAt(new Date().toISOString());
@@ -750,14 +763,14 @@ function ChatWorkspace({
     [activeId, sendMessage],
   );
 
-  const handleCreateConversation = React.useCallback(
+  const handleCreateConversation = useCallback(
     (options: { type: string; label: string }) => {
       void createConversation(options);
     },
     [createConversation],
   );
 
-  const handleSelectAgent = React.useCallback(
+  const handleSelectAgent = useCallback(
     (choice: ChatAgentChoice) => {
       // The agent cannot change mid-conversation.
       if (!activeId || hasMessages) return;
@@ -768,10 +781,10 @@ function ChatWorkspace({
 
   /* ---- "Proposer l'ajout" ---------------------------------------------- */
 
-  const [proposing, setProposing] = React.useState(false);
-  const [specHref, setSpecHref] = React.useState<string | null>(null);
+  const [proposing, setProposing] = useState(false);
+  const [specHref, setSpecHref] = useState<string | null>(null);
 
-  const proposeSpecAddition = React.useCallback(async () => {
+  const proposeSpecAddition = useCallback(async () => {
     const lastAssistant = [...messages]
       .reverse()
       .find((message) => message.role === "assistant" && message.content.trim());

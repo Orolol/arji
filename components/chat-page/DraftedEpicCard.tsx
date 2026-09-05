@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useCallback, useState } from "react";
 import { Hammer } from "lucide-react";
 
 import {
@@ -78,7 +78,7 @@ export function DraftedEpicCard({
   onOpenTicket,
   onToast,
 }: DraftedEpicCardProps) {
-  const [pending, setPending] = React.useState<PendingAction>(null);
+  const [pending, setPending] = useState<PendingAction>(null);
 
   const storyCount = epic.userStories.length;
   const acTotal = totalAcceptanceCriteria(epic);
@@ -89,7 +89,7 @@ export function DraftedEpicCard({
       : `${storyCount} stories`;
 
   /** Create the ticket. Returns its id, or null when the route refused. */
-  const createEpic = React.useCallback(
+  const createEpic = useCallback(
     async (status: EpicCreateStatus): Promise<string | null> => {
       try {
         const res = await fetch(`/api/projects/${projectId}/epics`, {

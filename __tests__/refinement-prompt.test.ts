@@ -9,6 +9,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildRefinementPrompt } from "@/lib/claude/prompt-builder";
+import { arijToolsSection } from "@/lib/claude/prompt-sections";
+import { allowedToolNamesForAgentType } from "@/lib/claude/mcp-injection";
+import { REFINEMENT_AGENT_TYPE } from "@/lib/refinement/constants";
 import {
   assembleRefinementSnapshot,
   type RefinementSnapshot,
@@ -131,9 +134,27 @@ describe("buildRefinementPrompt", () => {
       "add_dependency",
       "remove_dependency",
       "promote_ticket",
+      "merge_tickets",
+      "discard_ticket",
+      "create_planning_ticket",
     ]) {
       expect(prompt).toContain(tool);
     }
+  });
+
+  /**
+   * merge_tickets and discard_ticket delete board rows permanently, and the
+   * prompt is where the agent learns the bar. Without it a pass can read
+   * "tidy the board" as licence to clear the Backlog.
+   */
+  it("says plainly that discarding and merging delete tickets for good", () => {
+    const prompt = buildRefinementPrompt(project, snapshot());
+    expect(prompt).toContain("permanent delete");
+    expect(prompt).toContain("no undo");
+    // And it separates the two calls the agent will confuse: duplicated work
+    // is a merge, unclear work goes back to Backlog with a question.
+    expect(prompt).toContain("Duplicated work is a merge, not a discard");
+    expect(prompt).toContain("unclear goes back to");
   });
 
   it("fences the snapshot and frames it as data, not instructions", () => {
@@ -221,5 +242,65 @@ describe("buildRefinementPrompt", () => {
   it("says the board is empty rather than rendering blank columns", () => {
     const prompt = buildRefinementPrompt(project, { backlog: [], todo: [] });
     expect(prompt).toContain("Both planning columns are empty");
+  });
+});
+
+/**
+ * The "Arij tools" section is the session's tool inventory in prose, written
+ * by hand next to an allowlist generated from a constant. Nothing but this
+ * keeps the two from drifting — and a pass told it has five tools will not
+ * reach for the three it also has.
+ */
+describe("the refinement session's Arij tools section", () => {
+  /**
+   * Derived, not spelled out: whatever the allowlist gives a refinement pass
+   * and gives nobody else is by definition a tool only this prose can
+   * introduce. Adding a fourth exclusive tool without naming it here fails.
+   *
+   * Scoped to the exclusive ones rather than the whole allowlist because the
+   * base text already under-names the shared set for this agent type —
+   * attach_artifact, submit_findings and submit_grading are offered to a
+   * refinement pass and mentioned to nobody. That is a pre-existing gap in a
+   * different sentence, not this one's to close.
+   */
+  it("names every tool the allowlist gives a refinement pass and no one else", () => {
+    const ordinary = new Set(allowedToolNamesForAgentType("build"));
+    const exclusive = allowedToolNamesForAgentType(REFINEMENT_AGENT_TYPE).filter(
+      (tool) => !ordinary.has(tool)
+    );
+    expect(exclusive.length).toBeGreaterThan(0);
+
+    const text = arijToolsSection(REFINEMENT_AGENT_TYPE);
+    for (const tool of exclusive) {
+      expect(text).toContain(tool.replace("mcp__arij__", ""));
+    }
+  });
+
+  it("still names the board tools it shares with the older toolset", () => {
+    const text = arijToolsSection(REFINEMENT_AGENT_TYPE);
+    for (const tool of [
+      "set_priority",
+      "reorder_tickets",
+      "add_dependency",
+      "remove_dependency",
+      "promote_ticket",
+    ]) {
+      expect(text).toContain(tool);
+    }
+  });
+
+  it("states that the retiring tools delete permanently", () => {
+    const text = arijToolsSection(REFINEMENT_AGENT_TYPE);
+    expect(text).toContain("permanently");
+    expect(text).toContain("no undo");
+  });
+
+  it("says nothing about them to any other agent type", () => {
+    for (const agentType of ["build", "review_feature", "grading"]) {
+      const text = arijToolsSection(agentType);
+      expect(text).not.toContain("discard_ticket");
+      expect(text).not.toContain("merge_tickets");
+      expect(text).not.toContain("create_planning_ticket");
+    }
   });
 });

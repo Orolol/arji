@@ -13,6 +13,7 @@
  */
 
 import * as React from "react";
+import { useEffect, useRef } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -47,10 +48,10 @@ export function GhostInputPill({
   className,
   ...props
 }: GhostInputPillProps) {
-  const inputRef = React.useRef<HTMLInputElement>(null);
-  const composingRef = React.useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const composingRef = useRef(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (autoFocusKey === undefined) return;
     inputRef.current?.focus();
   }, [autoFocusKey]);
@@ -83,7 +84,7 @@ export function GhostInputPill({
         "flex items-center rounded-full border-[1.5px] border-input",
         "font-sans text-[12.5px] leading-none text-foreground placeholder:text-muted-foreground",
         "shadow-none outline-none",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
         "disabled:pointer-events-none disabled:opacity-50",
         fill === "card" ? "h-[32px] bg-card px-[13px]" : "h-[31px] bg-field px-3",
         typeof width === "number" && "shrink-0",

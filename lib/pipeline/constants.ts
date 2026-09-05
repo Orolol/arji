@@ -329,3 +329,21 @@ export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
   fix: "Fix",
   forensic: "Forensic",
 };
+
+/* ------------------------------------------------------------------ */
+/* Forensic evidence budgets                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Tail of a dead session's `raw` stream handed to the forensic agent.
+ *
+ * Here rather than in `lib/pipeline/forensic.ts` (which re-exports them)
+ * because the retention pruner sizes what it KEEPS from what this reader
+ * asks for — see `SESSION_CHUNK_RETAINED_TAIL_CHARS` in
+ * lib/routines/retention.ts — and must not drag the forensic dispatcher's
+ * scheduler and process-manager imports along to learn a number.
+ */
+export const FORENSIC_RAW_TAIL_MAX_CHARS = 8000;
+
+/** Tail of a dead session's `output` stream handed to the forensic agent. */
+export const FORENSIC_OUTPUT_TAIL_MAX_CHARS = 4000;

@@ -182,6 +182,121 @@ describe("formatRefinementComment", () => {
   });
 });
 
+describe("merges, discards and creations in the report", () => {
+  const report = buildRefinementReport([
+    change({
+      kind: "merged",
+      ticketId: "epic-1",
+      label: "E-arij-001",
+      detail: "absorbed E-arij-009",
+      reason: "One screen, one ticket.",
+      snapshot: "**E-arij-009 — Search sorting** (feature, priority 0, was in todo)",
+    }),
+    change({
+      kind: "discarded",
+      ticketId: "epic-9",
+      label: "E-arij-009",
+      detail: 'deleted — "Legacy exporter"',
+      reason: "The exporter was removed in 0.3.",
+      ticketGone: true,
+      snapshot: "**E-arij-009 — Legacy exporter** (feature, priority 0, was in backlog)",
+    }),
+    change({
+      kind: "created",
+      ticketId: "epic-4",
+      label: "E-arij-004",
+      detail: 'new feature in Backlog — "Backfill the index"',
+      reason: "Nothing covered pre-existing rows.",
+    }),
+  ]);
+
+  it("names all three in the aggregate line", () => {
+    expect(formatRefinementSummary(report)).toBe(
+      "1 merge · 1 ticket discarded · 1 ticket created"
+    );
+  });
+
+  /**
+   * A discarded ticket's deep link resolves to nothing. Linking it would read
+   * as a broken navigation rather than as "this ticket is gone".
+   */
+  it("does not link a ticket the pass deleted", () => {
+    const body = formatRefinementComment("proj-1", report, undefined, {
+      includeFullList: true,
+    });
+    expect(body).not.toContain("?ticket=epic-9");
+    expect(body).toContain("~~E-arij-009~~");
+    // The ones that survived are still links.
+    expect(body).toContain("[E-arij-004](/projects/proj-1?ticket=epic-4)");
+  });
+
+  /** For a discard this block is the only surviving copy of the ticket. */
+  it("carries the deleted ticket's own text", () => {
+    const body = formatRefinementComment("proj-1", report, undefined, {
+      includeFullList: true,
+    });
+    expect(body).toContain("What E-arij-009 contained:");
+    expect(body).toContain("Legacy exporter");
+    expect(body).toContain("The exporter was removed in 0.3.");
+  });
+
+  /**
+   * A merge's absorbed text is already posted on the survivor as the
+   * absorption comment (app/api/mcp/merge-tickets/route.ts), and the recap
+   * usually lands on that same ticket — a merge target is first among the
+   * pass's structural changes. Re-rendering the snapshot here published every
+   * absorbed story's acceptance criteria twice in one feed.
+   */
+  it("does not repeat a merge's absorbed text, which the survivor already carries", () => {
+    const withMergeSnapshot = buildRefinementReport([
+      change({
+        kind: "merged",
+        ticketId: "epic-1",
+        label: "E-arij-001",
+        detail: "absorbed E-arij-009",
+        reason: "One screen, one ticket.",
+        // A record built the way the route no longer builds one.
+        snapshot: "**E-arij-009 — Search sorting** (feature, priority 0)",
+      }),
+    ]);
+    const body = formatRefinementComment("proj-1", withMergeSnapshot, undefined, {
+      includeFullList: true,
+    });
+    // The merge is still listed with its justification...
+    expect(body).toContain("Merged together");
+    expect(body).toContain("absorbed E-arij-009");
+    // ...and the absorbed text is not re-rendered under any heading.
+    expect(body).not.toContain("Search sorting");
+    expect(body).not.toContain("What E-arij-001");
+  });
+
+  /**
+   * Ticket comments are rendered as plain text under `whitespace-pre-wrap`
+   * (components/ticket/CommentBubble.tsx) — never as markdown, never as HTML.
+   * A `<details>` fold-out therefore shows the user its own tags, which is
+   * what this recap used to do.
+   */
+  it("puts no raw HTML in a body the feed renders verbatim", () => {
+    const body = formatRefinementComment("proj-1", report, undefined, {
+      includeFullList: true,
+    });
+    expect(body).not.toContain("<details>");
+    expect(body).not.toContain("<summary>");
+    expect(body).not.toMatch(/<\/?[a-z][^>]*>/);
+  });
+
+  it("leads a merge and a creation with their own headline", () => {
+    expect(
+      formatRefinementComment("proj-1", report, "epic-1").startsWith(
+        "Absorbed other tickets"
+      )
+    ).toBe(true);
+    expect(
+      formatRefinementComment("proj-1", report, "epic-4").startsWith("Created")
+    ).toBe(true);
+  });
+});
+
 describe("publishRefinementReport", () => {
   let projectId: string;
   let sessionId: string;
@@ -388,6 +503,281 @@ describe("publishRefinementReport", () => {
     expect(published.commentedTicketIds).toEqual([]);
     // The notification still fires — see the no-op case below.
     expect(published.notificationId).toBeTruthy();
+  });
+
+  /**
+   * A discarded ticket's row is gone by the time the report runs, so it can
+   * neither host a comment nor be linked. The fallback host used to be "the
+   * first ticket the pass touched at all", which after a discard is a
+   * deleted id — the insert then violates the FK, or (with the pragma off)
+   * orphans a comment nobody can read.
+   */
+  it("never posts the recap on a ticket the pass deleted", () => {
+    const auth = { sessionId, agentType: REFINEMENT_AGENT_TYPE };
+    recordRefinementChange(
+      auth,
+      change({
+        kind: "discarded",
+        ticketId: createId(),
+        label: "E-9",
+        detail: 'deleted — "Legacy exporter"',
+        reason: "Removed in 0.3.",
+        ticketGone: true,
+        snapshot: "**E-9 — Legacy exporter** (feature, priority 0, was in backlog)",
+      })
+    );
+    recordRefinementChange(
+      auth,
+      change({
+        kind: "promoted",
+        ticketId: promotedId,
+        label: "E-1",
+        detail: "promoted to To do",
+        reason: "Ready.",
+      })
+    );
+
+    const published = publishRefinementReport({
+      projectId,
+      sessionId,
+      succeeded: true,
+    });
+
+    expect(published.commentedTicketIds).toEqual([promotedId]);
+    // ...and that surviving comment is where the tombstone landed.
+    expect(comments(promotedId)[0].content).toContain("Legacy exporter");
+  });
+
+  /**
+   * The sharp edge of the same rule. With no promotion to host the recap the
+   * fallback is "the first ticket the pass touched" — and after a discard
+   * that is a deleted id. Inserting against it violates the FK, the insert
+   * is swallowed by the report's per-ticket try/catch, and the pass ends up
+   * publishing NO breakdown at all: the reordered ticket that could have
+   * hosted it is never considered.
+   */
+  it("falls back to a surviving ticket when the first one it touched is gone", () => {
+    const auth = { sessionId, agentType: REFINEMENT_AGENT_TYPE };
+    recordRefinementChange(
+      auth,
+      change({
+        kind: "discarded",
+        ticketId: createId(),
+        label: "E-9",
+        detail: 'deleted — "Legacy exporter"',
+        reason: "Removed in 0.3.",
+        ticketGone: true,
+        snapshot: "**E-9 — Legacy exporter** (feature, priority 0, was in backlog)",
+      })
+    );
+    recordRefinementChange(
+      auth,
+      change({
+        kind: "reordered",
+        ticketId: reorderedId,
+        label: "E-3",
+        detail: "todo position 0",
+        reason: "Unblocked first.",
+      })
+    );
+
+    const published = publishRefinementReport({
+      projectId,
+      sessionId,
+      succeeded: true,
+    });
+
+    expect(published.commentedTicketIds).toEqual([reorderedId]);
+    const body = comments(reorderedId)[0].content;
+    expect(body).toContain("Legacy exporter");
+    expect(body).toContain("Re-ranked");
+  });
+
+  /**
+   * A pass that discarded everything it touched has no ticket of its own to
+   * file the record on — and it is exactly the pass whose record the user
+   * most needs. `notifications` is not an answer: nothing in the app renders
+   * that table (hooks/useNotifications.ts has no consumer; the chrome reads
+   * /api/inbox, built from ticket_comments and agent_sessions), so the
+   * tombstone would be a permanently deleted ticket with no readable trace.
+   * It falls back to a ticket the project still has, and says why.
+   */
+  it("files a discard-only pass's record on a surviving ticket of the project", () => {
+    recordRefinementChange(
+      { sessionId, agentType: REFINEMENT_AGENT_TYPE },
+      change({
+        kind: "discarded",
+        ticketId: createId(),
+        label: "E-9",
+        detail: 'deleted — "Legacy exporter"',
+        reason: "Removed in 0.3.",
+        ticketGone: true,
+        snapshot:
+          "**E-9 — Legacy exporter** (feature, priority 0, was in backlog)\n\nExports to the old CSV shape.",
+      })
+    );
+
+    const published = publishRefinementReport({
+      projectId,
+      sessionId,
+      succeeded: true,
+    });
+
+    expect(published.commentedTicketIds).toHaveLength(1);
+    const body = comments(published.commentedTicketIds[0])[0].content;
+    expect(body).toContain("Legacy exporter");
+    expect(body).toContain("Exports to the old CSV shape.");
+    // ...and it says plainly that this ticket is only the host.
+    expect(body).toContain("this ticket was not touched");
+
+    // The notification still carries the duplicate.
+    const row = testDb.instance!.db.select().from(notifications).all()[0];
+    expect(row.title).toContain("1 ticket discarded");
+    expect(row.message).toContain("Discarded E-9: Removed in 0.3.");
+  });
+
+  /**
+   * The fallback is deterministic — top of the planning columns by board
+   * order — so two runs of the same pass do not scatter their records.
+   */
+  it("picks the top of the planning columns as that host", () => {
+    // Unambiguously the top: the other two are seeded in "todo" at 0 and 1,
+    // and a tie on `position` would make the id break it — i.e. a flake.
+    testDb
+      .instance!.db.update(epics)
+      .set({ position: 8 })
+      .where(eq(epics.id, promotedId))
+      .run();
+    testDb
+      .instance!.db.update(epics)
+      .set({ position: 9 })
+      .where(eq(epics.id, demotedId))
+      .run();
+    testDb
+      .instance!.db.update(epics)
+      .set({ status: "backlog", position: 0 })
+      .where(eq(epics.id, reorderedId))
+      .run();
+
+    recordRefinementChange(
+      { sessionId, agentType: REFINEMENT_AGENT_TYPE },
+      change({
+        kind: "discarded",
+        ticketId: createId(),
+        label: "E-9",
+        detail: "deleted",
+        reason: "Obsolete.",
+        ticketGone: true,
+        snapshot: "**E-9 — Legacy exporter** (feature, priority 0)",
+      })
+    );
+
+    const published = publishRefinementReport({
+      projectId,
+      sessionId,
+      succeeded: true,
+    });
+    expect(published.commentedTicketIds).toEqual([reorderedId]);
+  });
+
+  /**
+   * Scenario A of the host bug: `ticketGone` is set on the record of the
+   * DELETING call and on no other, so a ticket that got an earlier record in
+   * the same pass and was retired afterwards still looked alive there. It was
+   * put forward as the host, the insert violated the FK, the catch swallowed
+   * it, and the pass published its breakdown nowhere.
+   */
+  it("does not host on a ticket an earlier record named and a later call deleted", () => {
+    const auth = { sessionId, agentType: REFINEMENT_AGENT_TYPE };
+    const deletedId = createId();
+    // The record order a real pass produces: set_priority(A), then
+    // discard_ticket(A). Only the second carries ticketGone.
+    recordRefinementChange(
+      auth,
+      change({
+        kind: "priority",
+        ticketId: deletedId,
+        label: "E-9",
+        detail: "priority 0 → 2",
+        reason: "Looked urgent.",
+      })
+    );
+    recordRefinementChange(
+      auth,
+      change({
+        kind: "discarded",
+        ticketId: deletedId,
+        label: "E-9",
+        detail: "deleted",
+        reason: "Then found obsolete.",
+        ticketGone: true,
+        snapshot: "**E-9 — Legacy exporter** (feature, priority 0)",
+      })
+    );
+
+    const published = publishRefinementReport({
+      projectId,
+      sessionId,
+      succeeded: true,
+    });
+
+    expect(published.commentedTicketIds).toHaveLength(1);
+    expect(published.commentedTicketIds).not.toContain(deletedId);
+    // And the breakdown really was published, not swallowed.
+    const body = comments(published.commentedTicketIds[0])[0].content;
+    expect(body).toContain("Legacy exporter");
+    expect(body).toContain("Priority changes");
+  });
+
+  /**
+   * Scenario B: the pass promoted A and then merged A into B. `movedTicketIds`
+   * held both, A came first and became `fullListTicketId` — so B's comment
+   * pointed at a deleted ticket for a breakdown that was never posted.
+   */
+  it("does not point the breakdown at a ticket a later merge absorbed", () => {
+    const auth = { sessionId, agentType: REFINEMENT_AGENT_TYPE };
+    const absorbedId = createId();
+    recordRefinementChange(
+      auth,
+      change({
+        kind: "promoted",
+        ticketId: absorbedId,
+        label: "E-9",
+        detail: "promoted to To do",
+        reason: "Looked ready.",
+      })
+    );
+    recordRefinementChange(
+      auth,
+      change({
+        kind: "merged",
+        ticketId: promotedId,
+        label: "E-1",
+        detail: "absorbed E-9",
+        reason: "Same screen.",
+      })
+    );
+
+    const published = publishRefinementReport({
+      projectId,
+      sessionId,
+      succeeded: true,
+    });
+
+    expect(published.commentedTicketIds).toEqual([promotedId]);
+    const body = comments(promotedId)[0].content;
+    // The surviving ticket carries the full list itself, not a pointer to a
+    // ticket that no longer exists.
+    expect(body).toContain("Merged together");
+    expect(body).not.toContain("Full breakdown of this pass:");
+  });
+
+  it("leaves the notification message empty when nothing was discarded", () => {
+    seedChanges();
+    publishRefinementReport({ projectId, sessionId, succeeded: true });
+    expect(
+      testDb.instance!.db.select().from(notifications).all()[0].message
+    ).toBeNull();
   });
 
   it("raises one notification carrying the aggregate", () => {

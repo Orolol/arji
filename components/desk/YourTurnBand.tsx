@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { BandHeader, Mono, StrataBand } from "@/components/piscine";
 import type { DeskDismissalKind } from "@/lib/control-desk/aggregate";
@@ -81,8 +81,8 @@ export function YourTurnBand({
 }: YourTurnBandProps) {
   const count = awaitingReply.length + failed.length + conflicts.length;
 
-  const listRef = React.useRef<HTMLDivElement | null>(null);
-  const [hiddenCount, setHiddenCount] = React.useState(0);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [hiddenCount, setHiddenCount] = useState(0);
 
   // Re-measure when the ROWS change, not on every render: the desk rebuilds
   // `?? []` fallbacks each poll, so depending on the arrays themselves would
@@ -108,11 +108,11 @@ export function YourTurnBand({
    * so the budget refills. Height alone cannot tell those apart — revealing
    * the marker changes the height too.
    */
-  const passRef = React.useRef({ count: 0, at: 0 });
+  const passRef = useRef({ count: 0, at: 0 });
   const MAX_PASSES = 5;
   const SETTLE_MS = 250;
 
-  const measure = React.useCallback(() => {
+  const measure = useCallback(() => {
     const list = listRef.current;
     if (!list) return;
     // Nothing overflows: every row is on screen and there is nothing to
@@ -140,17 +140,27 @@ export function YourTurnBand({
   // the next render re-measures. It is cheap (a rect read per row, only while
   // rows are on screen) and it cannot spin — React bails out when the count is
   // unchanged, and SETTLE_MS/MAX_PASSES bound a real oscillation.
-  React.useLayoutEffect(() => {
+  //
+  // The setState is the point, not an oversight, so the rule is silenced HERE
+  // rather than left to a blanket disable. `set-state-in-effect` guards against
+  // cascading renders; this effect deliberately causes them, because the count
+  // it writes changes the layout it just measured and only a re-measure can
+  // converge. MAX_PASSES/SETTLE_MS above are that cascade's budget. React bails
+  // out when the count is unchanged, which is the common case and costs one
+  // render. Deriving the count during render instead is not available: it needs
+  // post-layout rects, which do not exist until the DOM is committed.
+  useLayoutEffect(() => {
     const now = Date.now();
     const pass = passRef.current;
     if (now - pass.at > SETTLE_MS) pass.count = 0;
     if (pass.count >= MAX_PASSES) return;
     pass.count += 1;
     pass.at = now;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     measure();
   });
 
-  React.useEffect(() => {
+  useEffect(() => {
     const list = listRef.current;
     if (!list) return;
 
@@ -198,9 +208,18 @@ export function YourTurnBand({
       stratum="you"
       density="full"
       gap={11}
-      // The band caps and its row list scrolls: a backlog of questions must
-      // never push WORKING — the only band that grows — off the screen.
-      className={cn("mx-[14px] mt-[10px] max-h-[30vh]", className)}
+      /*
+        The band caps and its row list scrolls: a backlog of questions must
+        never push WORKING — the only band that grows — off the screen.
+
+        50vh below `lg` — B-arij-M9zsQujUTCoR. A stacked coral row is ~166px at
+        390px (identity, question over two lines, field, three buttons) against
+        53px on a desktop, so 30vh of an 844px screen left ONE partial row and
+        "+6 de plus". Half the viewport shows two whole rows and still stops the
+        stratum from taking the page; below `lg` the desk scrolls, so the cap is
+        no longer what keeps the bands under it reachable.
+      */
+      className={cn("mx-[14px] mt-[10px] max-h-[30vh] max-lg:max-h-[50vh]", className)}
     >
       <BandHeader
         label="Your turn"

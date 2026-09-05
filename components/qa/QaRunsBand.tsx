@@ -52,7 +52,13 @@ export function QaRunsBand({
       {empty ? null : (
         <div
           data-testid="qa-runs-grid"
-          className={cn("grid grid-cols-3 gap-[11px]")}
+          // THREE COLUMNS IS A DESKTOP FIGURE. A grid column's implicit
+          // `min-width: auto` never shrinks below its card, so at 320/390px
+          // the three of them measured 384/431px inside a 292/362px band —
+          // the third card and its Stop control were simply outside it
+          // (B-arij-iL4-FmyXgGr). One column on a phone, two from `sm`, and
+          // the frame's three from `lg`.
+          className={cn("grid grid-cols-1 gap-[11px] sm:grid-cols-2 lg:grid-cols-3")}
         >
           {runs.map((run) => (
             <QaRunCard

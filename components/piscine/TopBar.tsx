@@ -412,7 +412,7 @@ export function TopBar({ className }: TopBarProps) {
           className={cn(
             "flex size-[34px] shrink-0 items-center justify-center rounded-full",
             "bg-action text-action-foreground no-underline outline-none",
-            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+            "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
           )}
         >
           <span className="font-display text-[15px] font-bold leading-none">A</span>
@@ -445,7 +445,7 @@ export function TopBar({ className }: TopBarProps) {
               "flex size-[26px] shrink-0 items-center justify-center rounded-full",
               "border-[1.5px] border-dashed border-border-strong text-muted-foreground",
               "outline-none transition-colors hover:text-foreground motion-reduce:transition-none",
-              "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
             )}
           >
             <Plus size={12} aria-hidden="true" />
@@ -729,7 +729,7 @@ function ProjectChip({
       title={project.name}
       data-testid={`top-bar-project-${project.id}`}
       data-active={active ? "true" : undefined}
-      className="shrink-0 rounded-full no-underline outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      className="shrink-0 rounded-full no-underline outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
       <IdentityChip
         label={project.name}
@@ -770,7 +770,7 @@ function DestinationPill({
         "flex h-[32px] shrink-0 cursor-pointer items-center gap-[6px] rounded-full px-[10px]",
         "bg-action font-sans text-[13px] leading-none text-action-foreground",
         "no-underline outline-none",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
         // Reserved at rest so the liseré never reflows the row.
         "border-[1.5px] border-transparent",
         active ? "border-action-outline font-bold" : "font-semibold",
@@ -814,7 +814,7 @@ function CategoryBubble({
       className={cn(
         "flex h-[32px] shrink-0 cursor-pointer items-center gap-[6px] rounded-full px-[10px]",
         "font-sans text-[13px] leading-none outline-none",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
         BUBBLE_CLASS[category.stratum],
         // Reserved at rest so the liseré never reflows the row.
         "border-[1.5px] border-transparent",

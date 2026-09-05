@@ -46,7 +46,7 @@ export function FindingFilterPills({
               "flex h-[24px] cursor-pointer items-center rounded-full px-[11px]",
               "border-0 font-sans text-[11.5px] leading-none outline-none",
               "transition-colors duration-150 motion-reduce:transition-none",
-              "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
               active
                 ? "bg-card font-semibold text-foreground"
                 : "bg-transparent font-medium text-strata-you-mid",

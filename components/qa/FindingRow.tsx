@@ -31,6 +31,30 @@ import { FindingSeverityStamp } from "./FindingSeverityStamp";
  * A finding on a shipped ticket (`fixable: false`) shows Diff + Dismiss: the
  * build route refuses `done`/`released`, and a button whose route will refuse
  * it is never rendered.
+ *
+ * BELOW `lg` THE ROW FOLDS — B-arij-iL4-FmyXgGr. The desk grammar above is one
+ * flex line, and its stamp, chip, meta and pills are each `shrink-0` with only
+ * the description able to give way. On a phone that arithmetic has one outcome:
+ * measured in Chrome at 320/390/414px, the description collapsed to 0px and the
+ * three pills were laid out from x=480 to x=748 — off the screen, inside a band
+ * whose `overflow-y-auto` quietly makes `overflow-x` `auto` too. Fix with agent,
+ * Diff and Dismiss are the only ways to act on a blocking finding, so that is
+ * the whole screen being unusable, not a cosmetic clip.
+ *
+ * The fold is three lines, in the frame's own reading order:
+ *
+ *     [BLOCKING] [ARJ-113]            Sentinelle Sécurité · 6m
+ *     Le token MCP est écrit en clair … · lib/…/injection.ts:2140
+ *                          [Fix with agent] [Diff] [Dismiss]
+ *
+ * DOM order never changes — the meta is pulled up beside the chip with
+ * `order-*`, so a screen reader and the desktop row still read stamp · chip ·
+ * description · meta · actions. Every phone rule is undone at `lg:`, where the
+ * row is the single line the frames draw, to the pixel: the action group's own
+ * `lg:gap-3` is the gap the row used to give the loose pills.
+ *
+ * NOT `overflow-hidden`. Clipping would hide the pills rather than move them,
+ * and a hidden Dismiss is the same unusable screen with a tidier edge.
  */
 export interface FindingRowProps {
   finding: QaFinding;
@@ -79,7 +103,8 @@ export function FindingRow({
       data-testid="qa-finding-row"
       data-tier={finding.tier}
       className={cn(
-        "flex items-center gap-3 px-[14px] py-[10px]",
+        "flex flex-wrap items-center gap-x-3 gap-y-[6px] px-[14px] py-[10px]",
+        "lg:flex-nowrap",
         "animate-in fade-in slide-in-from-bottom-2 motion-reduce:animate-none",
         className,
       )}
@@ -91,9 +116,15 @@ export function FindingRow({
         size="sm"
       />
 
+      {/* `basis-full` is what gives the description its own line on a phone:
+          on the desk row it was the only flexible item, so it absorbed the
+          whole shortfall and measured 0px. `grow` + `lg:basis-0` is `flex-1`
+          spelled in two parts, so the desktop cell is the one it always was. */}
       <span
+        data-testid="qa-finding-text"
         className={cn(
-          "line-clamp-1 min-w-0 flex-1 font-sans text-[13.5px]",
+          "order-1 line-clamp-2 min-w-0 grow basis-full font-sans text-[13.5px]",
+          "lg:order-none lg:line-clamp-1 lg:basis-0",
           minor
             ? "font-normal text-strata-you-mid"
             : "font-medium text-foreground",
@@ -107,50 +138,71 @@ export function FindingRow({
         ) : null}
       </span>
 
-      <Mono size={10} tone={minor ? "you-mid" : "muted"} className="shrink-0">
-        {`${finding.reviewer ?? "—"} · ${findingAge(finding.filedAt)}`}
-      </Mono>
+      {/* `Mono` takes no arbitrary DOM props, so the test id sits on the
+          wrapper — the same shape `QaScreen` uses for the coverage stat.
+          The wrapper is the flex item: on a phone it rides up beside the chip
+          (`ml-auto`), and a named agent longer than the line is ellipsised
+          rather than allowed to widen the card. */}
+      <span
+        data-testid="qa-finding-meta"
+        className="order-none ml-auto min-w-0 truncate lg:ml-0 lg:shrink-0"
+      >
+        <Mono size={10} tone={minor ? "you-mid" : "muted"}>
+          {`${finding.reviewer ?? "—"} · ${findingAge(finding.filedAt)}`}
+        </Mono>
+      </span>
 
-      {!minor && finding.fixable ? (
-        <PillButton
-          variant="filled"
-          size="sm"
-          icon={Hammer}
-          onClick={() => onFix?.(finding)}
-          pending={pending}
-          pendingLabel="Dispatch…"
-          data-testid="qa-finding-fix"
-        >
-          Fix with agent
-        </PillButton>
-      ) : null}
+      {/* ONE GROUP, not three loose pills: pills that wrapped one at a time
+          would strand Dismiss on a line of its own. `flex-wrap` inside it is
+          for 320px, where the three of them are wider than the card. */}
+      <div
+        data-testid="qa-finding-actions"
+        className={cn(
+          "order-2 flex basis-full flex-wrap items-center justify-end gap-2",
+          "lg:order-none lg:basis-auto lg:shrink-0 lg:gap-3",
+        )}
+      >
+        {!minor && finding.fixable ? (
+          <PillButton
+            variant="filled"
+            size="sm"
+            icon={Hammer}
+            onClick={() => onFix?.(finding)}
+            pending={pending}
+            pendingLabel="Dispatch…"
+            data-testid="qa-finding-fix"
+          >
+            Fix with agent
+          </PillButton>
+        ) : null}
 
-      {!minor ? (
+        {!minor ? (
+          <PillButton
+            variant="outline"
+            outlineTone="action"
+            size="sm"
+            onClick={() => onDiff?.(finding)}
+            data-testid="qa-finding-diff"
+          >
+            Diff
+          </PillButton>
+        ) : null}
+
+        {/* The frame draws the Dismiss LABEL in --muted-foreground while its
+            border stays --action-outline. The className is the only way to get
+            that pairing, and twMerge keeps it. */}
         <PillButton
           variant="outline"
           outlineTone="action"
           size="sm"
-          onClick={() => onDiff?.(finding)}
-          data-testid="qa-finding-diff"
+          onClick={() => onDismiss?.(finding)}
+          disabled={pending}
+          className="text-muted-foreground"
+          data-testid="qa-finding-dismiss"
         >
-          Diff
+          Dismiss
         </PillButton>
-      ) : null}
-
-      {/* The frame draws the Dismiss LABEL in --muted-foreground while its
-          border stays --action-outline. The className is the only way to get
-          that pairing, and twMerge keeps it. */}
-      <PillButton
-        variant="outline"
-        outlineTone="action"
-        size="sm"
-        onClick={() => onDismiss?.(finding)}
-        disabled={pending}
-        className="text-muted-foreground"
-        data-testid="qa-finding-dismiss"
-      >
-        Dismiss
-      </PillButton>
+      </div>
     </SurfaceCard>
   );
 }

@@ -4,17 +4,23 @@ import InboxPage from "@/app/inbox/page";
 import type { InboxItem } from "@/hooks/useInbox";
 
 const mockInboxState = vi.hoisted(() => ({
-  items: [] as unknown[],
+  items: [] as InboxItem[],
   loading: false,
   markRead: vi.fn(),
   reply: vi.fn(),
   refresh: vi.fn(),
 }));
 
+// Mirrors what the real hook forwards from GET /api/inbox: the row count the
+// bar badge uses, plus the two category counters (pinned against the real
+// database in __tests__/inbox-api.test.ts).
 vi.mock("@/hooks/useInbox", () => ({
   useInbox: () => ({
     items: mockInboxState.items,
     unreadCount: mockInboxState.items.length,
+    unreadMessageCount: mockInboxState.items.filter((i) => i.unread).length,
+    awaitingReplyCount: mockInboxState.items.filter((i) => i.awaitingReply)
+      .length,
     loading: mockInboxState.loading,
     markRead: mockInboxState.markRead,
     reply: mockInboxState.reply,
@@ -64,7 +70,7 @@ describe("Inbox page", () => {
 
   it("groups rows by project, preserving the server order", () => {
     mockInboxState.items = [
-      makeItem({ epicId: "e1", projectId: "p1", projectName: "Alpha" }),
+      makeItem({ epicId: "e1", projectId: "p1", projectName: "Alpha", unread: true }),
       makeItem({
         epicId: "e2",
         projectId: "p2",
@@ -72,7 +78,7 @@ describe("Inbox page", () => {
         awaitingReply: false,
         unread: true,
       }),
-      makeItem({ epicId: "e3", projectId: "p1", projectName: "Alpha" }),
+      makeItem({ epicId: "e3", projectId: "p1", projectName: "Alpha", unread: true }),
     ];
 
     render(<InboxPage />);
@@ -87,7 +93,7 @@ describe("Inbox page", () => {
     // Both p1 rows live under the p1 group.
     expect(groups[0]).toContainElement(screen.getByTestId("inbox-item-e1"));
     expect(groups[0]).toContainElement(screen.getByTestId("inbox-item-e3"));
-    expect(screen.getByTestId("inbox-count")).toHaveTextContent("3 waiting");
+    expect(screen.getByTestId("inbox-count")).toHaveTextContent("3 unread");
   });
 
   it("renders excerpt, age, awaiting badge, and the ticket deep link", () => {
@@ -221,5 +227,161 @@ describe("Inbox page", () => {
     ).not.toBeInTheDocument();
     // The deep link into the ticket remains the path for those rows.
     expect(screen.getByTestId("inbox-item-link-e1")).toBeInTheDocument();
+  });
+
+  /*
+   * B-arij-DWd1DEARyLMe — "Agents waiting on you" / "55 waiting" over a list
+   * that is mostly unread reports on finished tickets. The rows are legitimate
+   * inbox content; the wording is what claimed 55 agents were blocked.
+   */
+  describe("unread messages vs. real pending questions", () => {
+    /** An unread report on a finished ticket: nothing is waiting on a reply. */
+    function doneReport(overrides: Partial<InboxItem> = {}): InboxItem {
+      return makeItem({
+        epicId: "e-done",
+        status: "done",
+        awaitingReply: false,
+        unread: true,
+        title: "Ship the release notes",
+        latestCommentExcerpt: "Merged and released. Nothing left to do here.",
+        ...overrides,
+      });
+    }
+
+    it("describes the header in terms of unread messages, not blocked agents", () => {
+      mockInboxState.items = [doneReport()];
+
+      render(<InboxPage />);
+
+      expect(screen.getByTestId("inbox-subtitle")).toHaveTextContent(/unread/i);
+      expect(
+        screen.queryByText(/agents waiting on you/i)
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("inbox-count")).toHaveTextContent("1 unread");
+      expect(screen.getByTestId("inbox-count")).not.toHaveTextContent(
+        /waiting/i
+      );
+    });
+
+    it("counts only real pending questions in the awaiting counter", () => {
+      mockInboxState.items = [
+        makeItem({ epicId: "e-q", awaitingReply: true, unread: true }),
+        doneReport({ epicId: "e-d1" }),
+        doneReport({ epicId: "e-d2" }),
+      ];
+
+      render(<InboxPage />);
+
+      expect(screen.getByTestId("inbox-count")).toHaveTextContent("3 unread");
+      expect(screen.getByTestId("inbox-awaiting-count")).toHaveTextContent(
+        "1 awaiting your reply"
+      );
+    });
+
+    it("shows no awaiting counter when every row is a plain report", () => {
+      mockInboxState.items = [doneReport({ epicId: "e-d1" }), doneReport({ epicId: "e-d2" })];
+
+      render(<InboxPage />);
+
+      expect(screen.getByTestId("inbox-count")).toHaveTextContent("2 unread");
+      expect(
+        screen.queryByTestId("inbox-awaiting-count")
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows no unread counter when the only row is an already-read question", () => {
+      // Awaiting rows stay in the inbox after being read — they must not be
+      // counted as unread messages.
+      mockInboxState.items = [
+        makeItem({ epicId: "e-q", awaitingReply: true, unread: false }),
+      ];
+
+      render(<InboxPage />);
+
+      expect(screen.queryByTestId("inbox-count")).not.toBeInTheDocument();
+      expect(screen.getByTestId("inbox-awaiting-count")).toHaveTextContent(
+        "1 awaiting your reply"
+      );
+    });
+
+    it("marks an unread report as an update, not as a request for a reply", () => {
+      mockInboxState.items = [doneReport()];
+
+      render(<InboxPage />);
+
+      expect(screen.getByTestId("inbox-unread-badge-e-done")).toHaveTextContent(
+        /unread/i
+      );
+      expect(
+        screen.queryByTestId("inbox-awaiting-badge-e-done")
+      ).not.toBeInTheDocument();
+      // The excerpt stays readable — the report is still consultable.
+      expect(
+        screen.getByText("Merged and released. Nothing left to do here.")
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("inbox-item-link-e-done")).toHaveAttribute(
+        "href",
+        "/projects/p1?ticket=e-done"
+      );
+      // …and the composer no longer tells the user an agent expects an answer.
+      expect(
+        screen.getByTestId("inbox-reply-input-e-done")
+      ).not.toHaveAttribute("placeholder", expect.stringMatching(/reply/i));
+      expect(screen.getByTestId("inbox-reply-send-e-done")).toHaveTextContent(
+        /comment/i
+      );
+    });
+
+    it("keeps the reply framing on a real pending question", () => {
+      mockInboxState.items = [makeItem({ awaitingReply: true, unread: true })];
+
+      render(<InboxPage />);
+
+      expect(screen.getByTestId("inbox-awaiting-badge-e1")).toHaveTextContent(
+        /awaiting reply/i
+      );
+      expect(screen.queryByTestId("inbox-unread-badge-e1")).not.toBeInTheDocument();
+      expect(screen.getByTestId("inbox-reply-input-e1")).toHaveAttribute(
+        "placeholder",
+        expect.stringMatching(/reply/i)
+      );
+      expect(screen.getByTestId("inbox-reply-send-e1")).toHaveTextContent(
+        /reply/i
+      );
+      // Marking a pending question read would not clear it from the inbox,
+      // so the row does not offer it.
+      expect(
+        screen.queryByTestId("inbox-mark-read-e1")
+      ).not.toBeInTheDocument();
+    });
+
+    it("lets an unread report be dismissed by reading it, without replying", async () => {
+      mockInboxState.items = [doneReport()];
+
+      render(<InboxPage />);
+
+      fireEvent.click(screen.getByTestId("inbox-mark-read-e-done"));
+
+      await waitFor(() => {
+        expect(mockInboxState.markRead).toHaveBeenCalledWith("e-done");
+      });
+      // No reply was posted and no status was touched.
+      expect(mockInboxState.reply).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("reads as unread messages when everything has been read", () => {
+      mockInboxState.items = [];
+
+      render(<InboxPage />);
+
+      expect(screen.getByTestId("inbox-empty")).toHaveTextContent(
+        /no unread agent messages/i
+      );
+      expect(screen.queryByTestId("inbox-count")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("inbox-awaiting-count")
+      ).not.toBeInTheDocument();
+    });
   });
 });

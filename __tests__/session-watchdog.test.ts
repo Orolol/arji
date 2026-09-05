@@ -102,7 +102,9 @@ function seedChunk(sessionId: string, createdAt: string): void {
   appendSessionChunk({
     sessionId,
     streamType: "output",
-    content: "some agent output",
+    // Timestamped so successive chunks differ: a keyless chunk repeating
+    // earlier content is deduped, and the watchdog reads the NEWEST chunk.
+    content: `some agent output at ${createdAt}`,
     createdAt,
   });
 }

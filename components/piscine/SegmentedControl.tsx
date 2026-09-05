@@ -22,6 +22,17 @@
  * idiom as the `--dot-color` / `--track-color` scopes in app/globals.css.
  *
  * No dividers between segments — the filled active segment does the work.
+ *
+ * FOCUS RING: `focus-visible:outline-solid` on the segment is load-bearing,
+ * not noise. In Tailwind v4 `outline-none` sets `--tw-outline-style: none`,
+ * and `outline-2` only sets a WIDTH — it resolves its style from that same
+ * variable. Measured in Chrome before that class existed: the segment matched
+ * `:focus-visible`, computed `outline-width: 2px` and `outline-color`
+ * correctly, and still painted nothing because `outline-style` stayed `none`.
+ * Same mechanism as B-arij-194 on TopBar. The explanation lives up here rather
+ * than beside the class because a backticked comment inside the `cn(…)`
+ * argument list hides the whole control from the source scan in
+ * `__tests__/focus-ring-paints.test.tsx`.
  */
 
 import * as React from "react";
@@ -122,16 +133,7 @@ export function SegmentedControl<T extends string>({
                 : "h-full",
               "cursor-pointer text-[12px] leading-none outline-none",
               "transition-[background-color,color,opacity] duration-150 motion-reduce:transition-none",
-              // `focus-visible:outline-solid` is load-bearing, not noise. In
-              // Tailwind v4 `outline-none` sets `--tw-outline-style: none`, and
-              // `outline-2` only sets a WIDTH — it resolves its style from that
-              // same variable. Measured in Chrome before this line: the segment
-              // matched `:focus-visible`, computed `outline-width: 2px` and
-              // `outline-color` correctly, and still painted nothing because
-              // `outline-style` stayed `none`. Same mechanism as B-arij-194 on
-              // TopBar; the other call sites of this shape are their own ticket.
-              "focus-visible:outline-2 focus-visible:outline-solid",
-              "focus-visible:-outline-offset-2 focus-visible:outline-ring",
+              "focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
               "disabled:pointer-events-none disabled:opacity-45",
               active
                 ? "bg-action font-semibold text-action-foreground"

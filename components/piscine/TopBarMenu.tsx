@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { Moon } from "lucide-react";
 
@@ -108,7 +109,7 @@ export function TopBarMenu({
   const stratum = STRATUM_CLASS[category.stratum];
   const geometry = CARD[category.panel ?? "none"];
 
-  const statuses = React.useMemo(() => deriveStatuses(data), [data]);
+  const statuses = useMemo(() => deriveStatuses(data), [data]);
 
   /*
    * The 8px offset below the bar is PADDING on a transparent wrapper, never a
@@ -279,7 +280,7 @@ function MenuRow({
         ROW_CLASS,
         "text-foreground no-underline outline-none",
         "transition-colors motion-reduce:transition-none",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
         active ? cn("font-semibold", stratum.activeRow) : "font-medium hover:bg-muted",
       )}
     >
@@ -371,7 +372,7 @@ function MorningPanel({
         onClick={onNavigate}
         className={cn(
           "mt-auto font-sans text-[12px] font-semibold no-underline outline-none",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
           linkClass,
         )}
       >
@@ -388,7 +389,7 @@ function MorningPanel({
  * agent falls back to its dispatch role, which is what the desk's own cards do.
  */
 function RightNowPanel({ data }: { data: ReturnType<typeof useControlDesk>["data"] }) {
-  const groups = React.useMemo(() => {
+  const groups = useMemo(() => {
     if (!data) return [];
     const counts = new Map<string, number>();
     for (const session of data.working) {

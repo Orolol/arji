@@ -89,6 +89,13 @@ export const ARIJ_MCP_AGENT_TOOLS = [
   "add_dependency",
   "remove_dependency",
   "promote_ticket",
+  // The three that CREATE or DESTROY board rows. Listed here so the shim's
+  // agent toolset carries them, but narrowed to the refinement agent type by
+  // AGENT_TYPE_EXCLUSIVE_TOOL_NAMES below and refused outright for any other
+  // session by the routes themselves (requireRefinementSessionToken).
+  "merge_tickets",
+  "discard_ticket",
+  "create_planning_ticket",
 ] as const;
 
 /**
@@ -212,6 +219,28 @@ export const AGENT_TYPE_WITHHELD_TOOL_NAMES: Record<string, readonly string[]> =
     refinement: ["update_ticket_status"],
   };
 
+/**
+ * Tools offered to ONE agent type and no other — the converse of the map
+ * above.
+ *
+ * The withheld map narrows a type that has too much; this narrows a TOOL that
+ * is too sharp for the general toolset. `merge_tickets` and `discard_ticket`
+ * permanently delete board rows and `create_planning_ticket` invents them;
+ * none of that belongs in a build or review session's reach, where the model
+ * is meant to be writing or judging code. A board refinement pass is the one
+ * context where reshaping the planning columns IS the deliverable.
+ *
+ * As with everything else here this shapes what a model reaches for — and
+ * only claude-code consumes the allowlist at all. The boundary is
+ * `requireRefinementSessionToken` on the three routes.
+ */
+export const AGENT_TYPE_EXCLUSIVE_TOOL_NAMES: Record<string, readonly string[]> =
+  {
+    merge_tickets: ["refinement"],
+    discard_ticket: ["refinement"],
+    create_planning_ticket: ["refinement"],
+  };
+
 /** The agent tools a given agent type may be offered. */
 export function allowedToolNamesForAgentType(
   agentType: string | null | undefined,
@@ -220,9 +249,14 @@ export function allowedToolNamesForAgentType(
   const withheld = new Set(
     (agentType && AGENT_TYPE_WITHHELD_TOOL_NAMES[agentType]) || []
   );
-  return ARIJ_MCP_AGENT_TOOLS.filter((tool) => !withheld.has(tool)).map((tool) =>
-    arijMcpToolName(provider, tool),
-  );
+  return ARIJ_MCP_AGENT_TOOLS.filter((tool) => {
+    if (withheld.has(tool)) return false;
+    const exclusiveTo = AGENT_TYPE_EXCLUSIVE_TOOL_NAMES[tool];
+    if (exclusiveTo && !(agentType && exclusiveTo.includes(agentType))) {
+      return false;
+    }
+    return true;
+  }).map((tool) => arijMcpToolName(provider, tool));
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   syncProjectGitHubIssues,
 } from "@/lib/github/issues";
 import { runCiWatchRoutine } from "@/lib/routines/ci-watch";
+import { runRetentionRoutine } from "@/lib/routines/retention";
 import { parseRoutineConfig } from "@/lib/routines/constants";
 
 /** Result persisted and surfaced by the routine scheduler. */
@@ -47,6 +48,7 @@ export interface RoutineActionDeps {
   isGitHubIssueSyncDue(projectId: string, intervalMinutes: number): boolean;
   syncProjectGitHubIssues(projectId: string): Promise<{ synced: number }>;
   runCiWatch(routine: Routine): Promise<RoutineActionResult>;
+  runRetention(routine: Routine): Promise<RoutineActionResult>;
 }
 
 /**
@@ -109,6 +111,7 @@ export const defaultRoutineActionDeps: RoutineActionDeps = {
   isGitHubIssueSyncDue,
   syncProjectGitHubIssues,
   runCiWatch: runCiWatchRoutine,
+  runRetention: (routine) => runRetentionRoutine(routine),
 };
 
 function optionalBoolean(
@@ -252,6 +255,8 @@ export async function executeRoutineAction(
       return runGitHubIssueSyncRoutine(routine, deps);
     case "ci_watch":
       return deps.runCiWatch(routine);
+    case "retention":
+      return deps.runRetention(routine);
     case "dreaming":
       throw new Error(`Routine kind ${routine.kind} is not available yet`);
   }

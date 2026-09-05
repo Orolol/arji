@@ -17,7 +17,7 @@
  * `images` column holds something `parseTicketImages` refuses.
  */
 
-import * as React from "react";
+import { useEffect, useState } from "react";
 
 import { FieldKicker, SurfaceCard } from "@/components/piscine";
 import {
@@ -32,7 +32,7 @@ export interface TicketScreenshotsProps {
 }
 
 export function TicketScreenshots({ images }: TicketScreenshotsProps) {
-  const [lightboxImage, setLightboxImage] = React.useState<LightboxImage | null>(
+  const [lightboxImage, setLightboxImage] = useState<LightboxImage | null>(
     null,
   );
 
@@ -44,7 +44,7 @@ export function TicketScreenshots({ images }: TicketScreenshotsProps) {
    * marking the event handled in the CAPTURE phase reaches the overlay and
    * not the lightbox: the image closes, the ticket stays.
    */
-  React.useEffect(() => {
+  useEffect(() => {
     if (!lightboxImage) return;
     const markHandled = (event: KeyboardEvent) => {
       if (event.key === "Escape") event.preventDefault();
@@ -72,7 +72,7 @@ export function TicketScreenshots({ images }: TicketScreenshotsProps) {
               setLightboxImage({ url: image.url, alt: image.fileName })
             }
             aria-label={`Open ${image.fileName}`}
-            className="border-0 bg-transparent p-0 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            className="border-0 bg-transparent p-0 outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             <SurfaceCard radius={10} interactive className="overflow-hidden">
               {/* Local, project-scoped upload route — not a remote asset. */}

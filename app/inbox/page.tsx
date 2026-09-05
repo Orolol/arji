@@ -2,7 +2,14 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Inbox, MessageCircleQuestion, Send, Hammer } from "lucide-react";
+import {
+  Check,
+  Hammer,
+  Inbox,
+  Mail,
+  MessageCircleQuestion,
+  Send,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useInbox, type InboxItem } from "@/hooks/useInbox";
@@ -57,10 +64,16 @@ function InboxRow({
   onMarkRead: (epicId: string) => Promise<void>;
 }) {
   const [replyText, setReplyText] = useState("");
-  const [busy, setBusy] = useState<"reply" | "dispatch" | null>(null);
+  const [busy, setBusy] = useState<"reply" | "dispatch" | "read" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const canSendToDev = isBuildableStatus(item.status);
+  // A row is a REPORT unless an agent is actually held on an answer. Reports
+  // are the bulk of the inbox — most of them land on tickets that are already
+  // finished — so they are never framed as owing the user a reply: they carry
+  // a neutral "Unread" mark and a way to file them away by reading them.
+  const isPendingQuestion = item.awaitingReply;
+  const canMarkRead = item.unread && !isPendingQuestion;
 
   async function handleReply() {
     const content = replyText.trim();
@@ -72,6 +85,22 @@ function InboxRow({
       setReplyText("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to post reply");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Reading is the whole action: it moves the epic's read cursor through the
+  // existing /api/inbox/read route and nothing else. No comment is posted and
+  // no ticket status is touched — a finished ticket stays finished.
+  async function handleMarkRead() {
+    if (busy) return;
+    setBusy("read");
+    setError(null);
+    try {
+      await onMarkRead(item.epicId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to mark as read");
     } finally {
       setBusy(null);
     }
@@ -113,8 +142,15 @@ function InboxRow({
       className="rounded-lg border border-border bg-card px-4 py-3 space-y-2"
       data-testid={`inbox-item-${item.epicId}`}
     >
-      <div className="flex items-center gap-2 min-w-0">
-        {item.awaitingReply && (
+      {/*
+        Two lines, not one. Packed on a single row the badge, the readable id
+        and the status chip are all `shrink-0`, so on a phone the title — the
+        only thing that says which ticket this is — was left ~30px of the 390
+        and truncated to nothing. The meta keeps its row; the title gets its
+        own, at full width, on every screen.
+      */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+        {isPendingQuestion && (
           <span
             className="inline-flex items-center gap-1 rounded-full bg-priority-yellow/10 text-priority-yellow px-2 py-0.5 text-[11px] font-medium shrink-0"
             data-testid={`inbox-awaiting-badge-${item.epicId}`}
@@ -123,22 +159,32 @@ function InboxRow({
             Awaiting reply
           </span>
         )}
+        {!isPendingQuestion && item.unread && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[11px] font-medium shrink-0"
+            data-testid={`inbox-unread-badge-${item.epicId}`}
+          >
+            <Mail className="h-3 w-3" />
+            Unread
+          </span>
+        )}
         {item.readableId && (
           <span className="text-xs font-mono text-muted-foreground shrink-0">
             {item.readableId}
           </span>
         )}
-        <Link
-          href={`/projects/${item.projectId}?ticket=${item.epicId}`}
-          className="text-sm font-medium truncate hover:underline"
-          data-testid={`inbox-item-link-${item.epicId}`}
-        >
-          {item.title}
-        </Link>
         <span className="ml-auto text-xs text-muted-foreground shrink-0">
           {statusLabel(item.status)}
         </span>
       </div>
+
+      <Link
+        href={`/projects/${item.projectId}?ticket=${item.epicId}`}
+        className="block text-sm font-medium truncate hover:underline"
+        data-testid={`inbox-item-link-${item.epicId}`}
+      >
+        {item.title}
+      </Link>
 
       {item.latestCommentExcerpt && (
         <p className="text-sm text-muted-foreground line-clamp-2">
@@ -150,36 +196,58 @@ function InboxRow({
         {timeAgo(item.latestCommentCreatedAt)}
       </p>
 
-      <div className="flex items-end gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <Textarea
           value={replyText}
           onChange={(e) => setReplyText(e.target.value)}
-          placeholder="Reply to the agent…"
+          placeholder={
+            isPendingQuestion
+              ? "Reply to the agent…"
+              : "Comment on this ticket (optional)…"
+          }
           rows={1}
-          className="min-h-9 text-sm flex-1 resize-none"
+          className="min-h-9 text-sm flex-1 min-w-0 resize-none"
           data-testid={`inbox-reply-input-${item.epicId}`}
         />
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={handleReply}
-          disabled={!replyText.trim() || busy !== null}
-          data-testid={`inbox-reply-send-${item.epicId}`}
-        >
-          <Send className="h-3.5 w-3.5 mr-1" />
-          {busy === "reply" ? "Replying…" : "Reply"}
-        </Button>
-        {canSendToDev && (
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+          {canMarkRead && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleMarkRead}
+              disabled={busy !== null}
+              data-testid={`inbox-mark-read-${item.epicId}`}
+            >
+              <Check className="h-3.5 w-3.5 mr-1" />
+              {busy === "read" ? "Marking…" : "Mark as read"}
+            </Button>
+          )}
           <Button
             size="sm"
-            onClick={handleSendToDev}
-            disabled={busy !== null}
-            data-testid={`inbox-send-to-dev-${item.epicId}`}
+            variant="secondary"
+            onClick={handleReply}
+            disabled={!replyText.trim() || busy !== null}
+            data-testid={`inbox-reply-send-${item.epicId}`}
           >
-            <Hammer className="h-3.5 w-3.5 mr-1" />
-            {busy === "dispatch" ? "Dispatching…" : "Send to Dev"}
+            <Send className="h-3.5 w-3.5 mr-1" />
+            {busy === "reply"
+              ? "Sending…"
+              : isPendingQuestion
+                ? "Reply"
+                : "Comment"}
           </Button>
-        )}
+          {canSendToDev && (
+            <Button
+              size="sm"
+              onClick={handleSendToDev}
+              disabled={busy !== null}
+              data-testid={`inbox-send-to-dev-${item.epicId}`}
+            >
+              <Hammer className="h-3.5 w-3.5 mr-1" />
+              {busy === "dispatch" ? "Dispatching…" : "Send to Dev"}
+            </Button>
+          )}
+        </div>
       </div>
       {error && (
         <p
@@ -194,28 +262,52 @@ function InboxRow({
 }
 
 export default function InboxPage() {
-  const { items, loading, markRead, reply } = useInbox();
+  const { items, unreadMessageCount, awaitingReplyCount, loading, markRead, reply } =
+    useInbox();
 
   const groups = useMemo(() => groupByProject(items), [items]);
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-8 space-y-6" data-testid="inbox-page">
-      <div className="flex items-center gap-3">
-        <Inbox className="h-6 w-6 text-muted-foreground" />
-        <div>
+      {/*
+        B-arij-DWd1DEARyLMe — this header used to read "Agents waiting on you"
+        over "55 waiting", while most of those 55 rows were unread reports on
+        tickets that had already been merged. The list is right; the wording
+        was not. The headline count now names what it counts (unread messages)
+        and the questions genuinely held on the user get their own counter,
+        which is the only one that says "waiting".
+      */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Inbox className="h-6 w-6 text-muted-foreground shrink-0" />
+        <div className="min-w-0">
           <h1 className="text-xl font-bold">Inbox</h1>
-          <p className="text-sm text-muted-foreground">
-            Agents waiting on you, across all projects.
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="inbox-subtitle"
+          >
+            Unread agent messages, across all projects. Only the questions
+            flagged below need an answer.
           </p>
         </div>
-        {items.length > 0 && (
-          <span
-            className="ml-auto text-sm text-muted-foreground"
-            data-testid="inbox-count"
-          >
-            {items.length} waiting
-          </span>
-        )}
+        <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+          {unreadMessageCount > 0 && (
+            <span
+              className="text-sm text-muted-foreground"
+              data-testid="inbox-count"
+            >
+              {unreadMessageCount} unread
+            </span>
+          )}
+          {awaitingReplyCount > 0 && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-priority-yellow/10 text-priority-yellow px-2 py-0.5 text-sm font-medium"
+              data-testid="inbox-awaiting-count"
+            >
+              <MessageCircleQuestion className="h-3.5 w-3.5" />
+              {awaitingReplyCount} awaiting your reply
+            </span>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -227,7 +319,7 @@ export default function InboxPage() {
           className="py-12 text-center text-sm text-muted-foreground"
           data-testid="inbox-empty"
         >
-          Inbox zero — no agents are waiting on you.
+          Inbox zero — no unread agent messages.
         </div>
       ) : (
         groups.map((group) => (

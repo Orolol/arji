@@ -80,7 +80,7 @@ export function AddAgentCard({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className={`${shell} flex flex-col gap-[5px] text-left outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring`}
+        className={`${shell} flex flex-col gap-[5px] text-left outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring`}
       >
         <span className="flex items-center gap-[7px] font-sans text-[13.5px] font-semibold text-foreground">
           <Plus size={14} aria-hidden="true" />

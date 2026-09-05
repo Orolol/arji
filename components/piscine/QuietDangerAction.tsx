@@ -45,7 +45,7 @@ export function QuietDangerAction({
         "cursor-pointer no-underline shadow-none outline-none",
         "hover:brightness-[0.92] dark:hover:brightness-[1.12]",
         "transition-[filter,opacity] duration-150 motion-reduce:transition-none",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0",
         size === 12 ? "text-[12px]" : "text-[11.5px]",
         className,

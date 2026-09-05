@@ -146,7 +146,9 @@ describe("session chunk persistence", () => {
     expect(store.listChunks("s4", "raw")).toHaveLength(1);
   });
 
-  it("appends chunks without a chunkKey and never dedupes them", () => {
+  // The keyless path used to be exempt from dedupe entirely; see
+  // session-chunk-dedupe.test.ts for the full contract.
+  it("appends chunks without a chunkKey, deduping identical content", () => {
     const db = createTestDb();
     seedSession(db, "s6");
     const store = createSessionChunkStore(db);
@@ -156,21 +158,28 @@ describe("session chunk persistence", () => {
       streamType: "raw",
       content: "keyless",
     });
-    const second = store.appendChunk({
+    const duplicate = store.appendChunk({
       sessionId: "s6",
       streamType: "raw",
       content: "keyless",
       chunkKey: null,
     });
+    const different = store.appendChunk({
+      sessionId: "s6",
+      streamType: "raw",
+      content: "keyless, but not the same",
+    });
 
     expect(first.inserted).toBe(true);
-    expect(second.inserted).toBe(true);
-    expect(first.chunk.chunkKey).toBeNull();
-    expect(second.chunk.chunkKey).toBeNull();
+    expect(duplicate.inserted).toBe(false);
+    expect(different.inserted).toBe(true);
 
     const stored = store.listChunks("s6", "raw");
     expect(stored.map((chunk) => chunk.sequence)).toEqual([1, 2]);
-    expect(stored.every((chunk) => chunk.chunkKey === null)).toBe(true);
+    expect(stored.map((chunk) => chunk.content)).toEqual([
+      "keyless",
+      "keyless, but not the same",
+    ]);
   });
 
   it("derives and stores lastNonEmptyText from output/response chunks", () => {

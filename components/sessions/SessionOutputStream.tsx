@@ -11,6 +11,14 @@ import {
   countCharacters,
   fetchSessionChunkPage,
 } from "@/lib/agent-sessions/session-detail";
+import {
+  chunkElisionMarkerSplitter,
+  isChunkElisionMarker,
+} from "@/lib/agent-sessions/chunk-cap";
+import {
+  chunkPruneMarkerSplitter,
+  isChunkPruneMarker,
+} from "@/lib/agent-sessions/chunk-retention";
 
 /** The bounded first page the session detail payload already carried. */
 export interface SessionStreamSeed {
@@ -36,6 +44,47 @@ interface SessionOutputStreamProps {
   emptyLabel: string;
   /** Shown instead of `emptyLabel` while the session is still writing. */
   waitingLabel?: string;
+}
+
+/**
+ * Split the stream's text around Arij's two elision markers — the write-path
+ * cap's "the middle of this chunk is gone" and data retention's "the head of
+ * this stream is gone" — and give each its own element, so Arij's own voice
+ * reads as a notice rather than as one more dim line of agent output.
+ *
+ * Split, not a line-by-line map: a page carries up to a megabyte of text, and
+ * one element per line would be thousands of nodes where the flat block needs
+ * one. `String.split` with a capturing pattern interleaves the markers back
+ * into the parts, so the surrounding text stays in whole runs. The two passes
+ * nest rather than combine into one pattern: each marker's shape belongs to
+ * the module that writes it, and neither owns the other's regexp source.
+ */
+function withElisionMarkers(text: string): React.ReactNode[] {
+  return text.split(chunkElisionMarkerSplitter()).flatMap((part, index) =>
+    isChunkElisionMarker(part)
+      ? [
+          <span
+            key={`cap-${index}`}
+            data-testid="chunk-elision-marker"
+            className="text-strata-live-mid"
+          >
+            {part}
+          </span>,
+        ]
+      : part.split(chunkPruneMarkerSplitter()).map((inner, innerIndex) =>
+          isChunkPruneMarker(inner) ? (
+            <span
+              key={`prune-${index}-${innerIndex}`}
+              data-testid="chunk-prune-marker"
+              className="text-strata-live-mid"
+            >
+              {inner}
+            </span>
+          ) : (
+            inner
+          )
+        )
+  );
 }
 
 /**
@@ -163,7 +212,7 @@ export function SessionOutputStream({
   return (
     <div className="flex flex-col gap-[10px]" data-testid={`stream-${streamType}`}>
       <div className="max-h-[500px] overflow-y-auto overflow-x-hidden font-mono text-[11.5px] leading-[1.7] whitespace-pre-wrap break-words text-muted-foreground">
-        {chunks.map((chunk) => chunk.content).join("")}
+        {withElisionMarkers(chunks.map((chunk) => chunk.content).join(""))}
       </div>
       {truncatedCount > 0 && (
         <p className="text-[11.5px] text-meta" data-testid={`stream-truncated-${streamType}`}>

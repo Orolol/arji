@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { BandHeader, Mono, QuietLink, Stamp, StrataBand } from "@/components/piscine";
@@ -37,7 +38,7 @@ export function ReleaseHistory({
   onInspect,
 }: ReleaseHistoryProps) {
   // One at a time: a history card with four open rows is a list, not a history.
-  const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   return (
     <StrataBand
@@ -70,7 +71,7 @@ export function ReleaseHistory({
                   data-testid={`release-history-row-${release.id}`}
                   aria-expanded={expanded}
                   onClick={() => setExpandedId(expanded ? null : release.id)}
-                  className={`flex w-full items-center gap-[10px] px-[2px] py-[10px] text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+                  className={`flex w-full items-center gap-[10px] px-[2px] py-[10px] text-left outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring ${
                     isLast && !expanded ? "" : "border-b-[1.5px] border-muted"
                   }`}
                 >

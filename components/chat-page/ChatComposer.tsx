@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRef, useState } from "react";
 import { ImagePlus, Sparkles } from "lucide-react";
 
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
@@ -100,8 +101,8 @@ export function ChatComposer({
   disabled = false,
   onSend,
 }: ChatComposerProps) {
-  const [value, setValue] = React.useState("");
-  const composingRef = React.useRef(false);
+  const [value, setValue] = useState("");
+  const composingRef = useRef(false);
   const { agents } = useNamedAgentsList();
   const safeAgents = Array.isArray(agents) ? agents : [];
 
@@ -207,7 +208,9 @@ export function ChatComposer({
         */}
         <div className="flex min-w-0 grow shrink basis-[calc(100%-29px)] @min-[36rem]:basis-0">
           <MentionTextarea
-            projectId={projectId ?? ""}
+            // NOT `?? ""`: an empty segment is what produced the
+            // `/api/projects/documents` 404s on every /chat load.
+            projectId={projectId}
             value={value}
             onValueChange={setValue}
             onKeyDown={handleKeyDown}

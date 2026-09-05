@@ -19,7 +19,7 @@
  * this tree, in any state.
  */
 
-import * as React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Trash2, Wrench } from "lucide-react";
 
 import { AgentDispatchDialog } from "@/components/shared/AgentDispatchDialog";
@@ -64,26 +64,26 @@ export function TicketOverlay({
   onAgentConflict,
   refreshTrigger = 0,
 }: TicketOverlayProps) {
-  const [statusError, setStatusError] = React.useState<string | null>(null);
-  const [draft, setDraft] = React.useState("");
-  const [commentError, setCommentError] = React.useState<string | null>(null);
-  const [sending, setSending] = React.useState(false);
-  const [diffView, setDiffView] = React.useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
-  const [resolveMergeOpen, setResolveMergeOpen] = React.useState(false);
-  const [resolvingMerge, setResolvingMerge] = React.useState(false);
-  const [resolveMergeAgentId, setResolveMergeAgentId] = React.useState<
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [diffView, setDiffView] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [resolveMergeOpen, setResolveMergeOpen] = useState(false);
+  const [resolvingMerge, setResolvingMerge] = useState(false);
+  const [resolveMergeAgentId, setResolveMergeAgentId] = useState<
     string | null
   >(null);
   const [resolveMergeResumeSessionId, setResolveMergeResumeSessionId] =
-    React.useState<string | undefined>();
-  const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(
+    useState<string | undefined>();
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(
     null,
   );
-  const [stopping, setStopping] = React.useState(false);
-  const [rebuildOpen, setRebuildOpen] = React.useState(false);
-  const [backToDevOpen, setBackToDevOpen] = React.useState(false);
-  const [backToDevSeed, setBackToDevSeed] = React.useState("");
+  const [stopping, setStopping] = useState(false);
+  const [rebuildOpen, setRebuildOpen] = useState(false);
+  const [backToDevOpen, setBackToDevOpen] = useState(false);
+  const [backToDevSeed, setBackToDevSeed] = useState("");
 
   const data = useTicketOverlayData(projectId, epicId, open, {
     refreshTrigger,
@@ -152,7 +152,7 @@ export function TicketOverlay({
    * paint one frame of the old ticket's rejection message over the new one,
    * which is a bug users actually hit.
    */
-  const [lastEpicId, setLastEpicId] = React.useState(epicId);
+  const [lastEpicId, setLastEpicId] = useState(epicId);
   if (epicId !== lastEpicId) {
     setLastEpicId(epicId);
     setStatusError(null);
@@ -170,7 +170,7 @@ export function TicketOverlay({
   const escapeBlocked =
     deleteDialogOpen || resolveMergeOpen || rebuildOpen || backToDevOpen;
 
-  React.useEffect(() => {
+  useEffect(() => {
     function onEscape(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       if (!open) return;
@@ -185,7 +185,7 @@ export function TicketOverlay({
   }, [open, onClose, escapeBlocked]);
 
   // The desk behind must not scroll under the scrim.
-  React.useEffect(() => {
+  useEffect(() => {
     if (!open) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -195,8 +195,8 @@ export function TicketOverlay({
   }, [open]);
 
   // Focus moves into the modal on open and returns to the opener on close.
-  const modalRef = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
+  const modalRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
     if (!open) return;
     const opener = document.activeElement as HTMLElement | null;
     modalRef.current?.focus();
@@ -207,7 +207,7 @@ export function TicketOverlay({
 
   /* ---------------- handlers ---------------------------------------- */
 
-  const handleStatusChange = React.useCallback(
+  const handleStatusChange = useCallback(
     async (next: string) => {
       setStatusError(null);
       const result = await updateEpic({ status: next });
@@ -216,7 +216,7 @@ export function TicketOverlay({
     [updateEpic],
   );
 
-  const handlePriorityChange = React.useCallback(
+  const handlePriorityChange = useCallback(
     async (next: number) => {
       setStatusError(null);
       const result = await updateEpic({ priority: next });
@@ -225,7 +225,7 @@ export function TicketOverlay({
     [updateEpic],
   );
 
-  const reportConflict = React.useCallback(
+  const reportConflict = useCallback(
     (error: unknown) => {
       if (isAgentAlreadyRunningError(error)) {
         onAgentConflict?.({

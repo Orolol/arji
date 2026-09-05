@@ -19,6 +19,7 @@
  */
 
 import * as React from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Bell, GitBranch, Grid3x3, Send, Settings, Square, Trash2, X } from "lucide-react";
 
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -148,23 +149,44 @@ const BARS = [
   { value: 6 }, { value: 2 },
 ];
 
+/*
+  The demo Chrono's start time: 4m12s before the page was first read on the
+  client. It cannot be computed during render (server and hydration would
+  disagree) and it never changes once read, so it is a one-value external store
+  rather than state — see the call site below.
+*/
+let chronoStartedAt: string | null = null;
+const subscribeChronoStartedAt = () => () => {};
+const readChronoStartedAt = () =>
+  (chronoStartedAt ??= new Date(Date.now() - 252_000).toISOString());
+const readNoChronoStartedAt = () => null;
+
 /* ── the harness ──────────────────────────────────────────────────────────── */
 
 export default function PiscinePreviewPage() {
-  // Set after mount: a timestamp computed during render would differ between
-  // the server pass and hydration.
-  const [startedAt, setStartedAt] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    setStartedAt(new Date(Date.now() - 252_000).toISOString());
-  }, []);
+  /*
+    A client-only timestamp, read through the store above.
 
-  const [segMd, setSegMd] = React.useState("balanced");
-  const [segSm, setSegSm] = React.useState("30d");
-  const [segFilled, setSegFilled] = React.useState("write");
-  const [reply, setReply] = React.useState("");
-  const [replyCard, setReplyCard] = React.useState("Looks right to me");
-  const [storyDone, setStoryDone] = React.useState(true);
-  const [inRelease, setInRelease] = React.useState(false);
+    Computing it during render would differ between the server pass and
+    hydration, and setting it from a mount effect is a cascading render the
+    compiler rules reject. `useSyncExternalStore` is the third door React
+    provides for exactly this: the server snapshot is `null`, the client
+    snapshot is memoised on first read, and the value is stable thereafter.
+    The same idiom is already used by `TopBar` for its last-visited project.
+  */
+  const startedAt = useSyncExternalStore(
+    subscribeChronoStartedAt,
+    readChronoStartedAt,
+    readNoChronoStartedAt,
+  );
+
+  const [segMd, setSegMd] = useState("balanced");
+  const [segSm, setSegSm] = useState("30d");
+  const [segFilled, setSegFilled] = useState("write");
+  const [reply, setReply] = useState("");
+  const [replyCard, setReplyCard] = useState("Looks right to me");
+  const [storyDone, setStoryDone] = useState(true);
+  const [inRelease, setInRelease] = useState(false);
 
   return (
     <div className="min-h-screen bg-background">

@@ -70,7 +70,20 @@ export function uploadFileNameFromPath(
   return isServableUploadFileName(fileName) ? fileName : null;
 }
 
-/** Whatever the column holds, reduced to the list of strings it meant. */
+/**
+ * Whatever the column holds, reduced to the list of strings it meant.
+ *
+ * Exported because a ticket's images sometimes have to be *carried* rather
+ * than displayed — a refinement merge moves the absorbed ticket's screenshots
+ * onto the survivor (app/api/mcp/merge-tickets/route.ts). That path must keep
+ * every stored entry verbatim, including ones `parseTicketImages` drops as
+ * unservable: dropping a hand-written path there would silently delete it
+ * with the source row.
+ */
+export function storedTicketImagePaths(raw: unknown): unknown[] {
+  return storedImagePaths(raw);
+}
+
 function storedImagePaths(raw: unknown): unknown[] {
   if (Array.isArray(raw)) return raw;
   if (typeof raw !== "string") return [];

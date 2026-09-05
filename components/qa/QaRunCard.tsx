@@ -72,7 +72,7 @@ export function QaRunCard({
           }}
           className={cn(
             "ml-auto flex shrink-0 text-muted-foreground outline-none",
-            "hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+            "hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
           )}
         >
           <StopCircle size={14} aria-hidden="true" />
@@ -86,7 +86,7 @@ export function QaRunCard({
         className={cn(
           "line-clamp-2 min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left",
           "font-sans text-[13.5px] leading-[1.35] font-semibold text-foreground",
-          "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
           "disabled:cursor-default",
         )}
       >

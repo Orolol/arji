@@ -18,7 +18,13 @@ import { PRIORITY_LABELS } from "@/lib/types/kanban";
 import { cn } from "@/lib/utils";
 
 /**
- * One line of the registry.
+ * One line of the registry — one STACK of two lines below `lg`.
+ *
+ * TWO SHAPES, ONE DOM. The seven-column table is the desktop shape; on a phone
+ * the same cells re-flow into the identity chip and the title on one line and
+ * the five trailing cells on a wrapping line beneath it. Nothing is hidden and
+ * nothing is conditionally rendered — see `REGISTRY_GRID` and the `lg:contents`
+ * cluster below for the two halves of the mechanism.
  *
  * THE ROW IS THE BUTTON. One interactive element, no nesting — which is why
  * the ticket chip is rendered WITHOUT an `onClick`: `IdentityChip` becomes a
@@ -40,8 +46,24 @@ const PRIORITY_CLASS: Record<number, string> = {
   3: "font-semibold text-strata-you-deep",
 };
 
+/**
+ * The row's track template, shared with the column header so the two can never
+ * disagree.
+ *
+ * TWO SHAPES, ONE GRID. Below `lg` the row is a stack: the identity chip and
+ * the title on the first line, everything else on a wrapping second line (the
+ * `lg:contents` cluster in the row below). The seven-column table — 738px of
+ * FIXED track before its gaps — only appears once the width exists to draw it,
+ * because on a 390px screen those fixed tracks left the `1fr` title at zero and
+ * pushed the tail of the row out of the card.
+ *
+ * `minmax(0,1fr)` rather than `1fr` for the title at BOTH shapes: a bare `1fr`
+ * takes `auto` as its automatic minimum, so a long title widens the track past
+ * the card instead of yielding to the ellipsis.
+ */
 export const REGISTRY_GRID =
-  "grid grid-cols-[112px_1fr_130px_96px_120px_170px_110px] items-center gap-3";
+  "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-[3px] " +
+  "lg:grid-cols-[112px_minmax(0,1fr)_130px_96px_120px_170px_110px] lg:gap-y-0";
 
 export interface RegistryRowProps {
   row: Row;
@@ -200,8 +222,13 @@ export function RegistryRow({ row, project, striped, onOpen }: RegistryRowProps)
       title={blocked ? `waits on ${row.blockedBy.join(", ")}` : undefined}
       className={cn(
         REGISTRY_GRID,
-        "w-full px-[18px] py-[8px] text-left outline-none",
-        "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+        // Taller on a phone: two stacked lines plus this padding clear the 44px
+        // touch target, and the desktop density comes back with the table.
+        "w-full px-[18px] py-[10px] text-left outline-none lg:py-[8px]",
+        // outline-solid from B-arij-JJ5FdaHpX7d6: outline-none sets the STYLE
+        // to none, so outline-2 alone paints nothing and the row would have no
+        // keyboard affordance at all.
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
         "hover:bg-muted/40",
         striped && "bg-background",
         row.group === "released" && "text-muted-foreground",
@@ -216,46 +243,67 @@ export function RegistryRow({ row, project, striped, onOpen }: RegistryRowProps)
       />
 
       <span
+        data-testid="tickets-row-title"
         className={cn(
-          "line-clamp-1 min-w-0 text-[13px]",
+          // Two lines on a phone, one in the table. The title is the cell the
+          // registry exists for; a single clamped line at 390px reads as a
+          // fragment, and the second line costs nothing the stack has not
+          // already spent.
+          "line-clamp-2 min-w-0 text-[13px] lg:line-clamp-1",
           row.group === "released" ? "font-normal" : "font-medium",
         )}
       >
         {row.title}
       </span>
 
-      <StateCell row={row} />
+      {/*
+        The five trailing cells.
 
-      <Mono size={11} tone="muted" className="min-w-0">
-        {row.usCount > 0 ? `${row.usDone}/${row.usCount}` : "—"}
-      </Mono>
-
-      {priorityLabel === null ? (
-        <Mono size={11} tone="muted" className="min-w-0">
-          —
-        </Mono>
-      ) : (
-        <span
-          className={cn(
-            "min-w-0 text-[11.5px]",
-            PRIORITY_CLASS[row.priority as number] ?? "text-muted-foreground",
-          )}
-        >
-          {priorityLabel}
-        </span>
-      )}
-
-      <Mono size={10.5} tone={row.activityTone} clamp={1} className="min-w-0">
-        {row.activity ?? "—"}
-      </Mono>
-
-      <Mono
-        size={11}
-        tone={row.costUsd === null ? "muted" : "ink"}
-        className="min-w-0 justify-self-end text-right"
+        `lg:contents` is the whole responsive trick: from `lg` up this wrapper
+        stops generating a box, so its children become grid items of the row
+        itself and land in columns 3-7 exactly as they did before. Below `lg`
+        it is an ordinary wrapping flex line under the title — the columns are
+        RE-LAID-OUT, never hidden, so every figure stays readable on a phone.
+      */}
+      <div
+        data-testid="tickets-row-meta"
+        className="col-span-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-[2px] lg:contents"
       >
-        {row.costUsd === null ? "—" : `$${row.costUsd.toFixed(2)}`}
-      </Mono>
+        <StateCell row={row} />
+
+        <Mono size={11} tone="muted" className="min-w-0">
+          {row.usCount > 0 ? `${row.usDone}/${row.usCount}` : "—"}
+        </Mono>
+
+        {priorityLabel === null ? (
+          <Mono size={11} tone="muted" className="min-w-0">
+            —
+          </Mono>
+        ) : (
+          <span
+            className={cn(
+              "min-w-0 text-[11.5px]",
+              PRIORITY_CLASS[row.priority as number] ?? "text-muted-foreground",
+            )}
+          >
+            {priorityLabel}
+          </span>
+        )}
+
+        <Mono size={10.5} tone={row.activityTone} clamp={1} className="min-w-0">
+          {row.activity ?? "—"}
+        </Mono>
+
+        {/* `justify-self` is a no-op on a flex item, so the right alignment is
+            the table's and only the table's. */}
+        <Mono
+          size={11}
+          tone={row.costUsd === null ? "muted" : "ink"}
+          className="min-w-0 lg:justify-self-end lg:text-right"
+        >
+          {row.costUsd === null ? "—" : `$${row.costUsd.toFixed(2)}`}
+        </Mono>
+      </div>
     </button>
   );
 }

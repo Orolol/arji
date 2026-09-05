@@ -52,7 +52,7 @@ export function SettingToggle({
       className={cn(
         "relative shrink-0 rounded-full border-0 outline-none",
         "transition-colors duration-150 motion-reduce:transition-none",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
         "disabled:pointer-events-none disabled:opacity-50",
         size === "lg" ? "h-[20px] w-[36px]" : "h-[18px] w-[32px]",
         on ? "bg-strata-live-fill" : "bg-border-strong",

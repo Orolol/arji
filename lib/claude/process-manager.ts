@@ -2,6 +2,7 @@ import { spawnClaude, type ClaudeOptions, type ClaudeResult } from "./spawn";
 import { getProvider, type ProviderType, type ProviderSession } from "@/lib/providers";
 import {
   type AgentSessionLifecycleStatus,
+  capSessionPrompt,
   isValidSessionTransition,
   isTerminalSessionStatus,
 } from "@/lib/agent-sessions/lifecycle";
@@ -206,7 +207,10 @@ class ClaudeProcessManager {
         // before this injection. Re-persist it so the session detail shows
         // the persona the agent actually received — it is configuration, not
         // a secret, and a prompt display that omits it is misleading.
-        patch.prompt = options.prompt;
+        //
+        // Capped on the way into the row, never on the way into the spawn:
+        // `options.prompt` above is what the CLI is handed, whole.
+        patch.prompt = capSessionPrompt(options.prompt);
       }
 
       if (patch.cliOptions !== undefined || patch.prompt !== undefined) {
@@ -324,17 +328,19 @@ class ClaudeProcessManager {
             extraMcpServersSection(extras.servers, provider);
           // Re-persist the prompt WITH the appended section — same display
           // argument as the persona re-persist above, plus a hard requirement
-          // of its own: resolveSessionOutput's echo scrub matches
-          // agent_sessions.prompt as an exact substring of the session's
-          // output, and a CLI that echoes its prompt echoes the SPAWNED
-          // prompt, tools section included. A stored prompt that stops short
-          // left the section behind in ticket comments (measured on
-          // E-arij-138, 2026-08-27). Own try/catch: a failed write must not
-          // be mistaken for a failed injection by the outer catch, which
-          // would drop the channel that was just built.
+          // of its own: resolveSessionOutput's echo scrub recognises an echo
+          // from agent_sessions.prompt, and a CLI that echoes its prompt
+          // echoes the SPAWNED prompt, tools section included. A stored
+          // prompt that stops short left the section behind in ticket
+          // comments (measured on E-arij-138, 2026-08-27). The write-path cap
+          // does not reopen that: the section is at the very END of the
+          // prompt, so it lands in the tail the cap keeps, and the scrub
+          // matches a capped prompt head-to-tail. Own try/catch: a failed
+          // write must not be mistaken for a failed injection by the outer
+          // catch, which would drop the channel that was just built.
           try {
             db.update(agentSessions)
-              .set({ prompt: options.prompt })
+              .set({ prompt: capSessionPrompt(options.prompt) })
               .where(eq(agentSessions.id, sessionId))
               .run();
           } catch (error) {

@@ -15,7 +15,7 @@
  * show: an image-only bug report (no prose, no meta) still gets its card.
  */
 
-import * as React from "react";
+import { useMemo } from "react";
 
 import { MarkdownContent } from "@/components/chat/MarkdownContent";
 import { Mono, SurfaceCard } from "@/components/piscine";
@@ -39,7 +39,7 @@ export function TicketDescriptionCard({
 }: TicketDescriptionCardProps) {
   const body = description?.trim() ? description : null;
 
-  const screenshots = React.useMemo(
+  const screenshots = useMemo(
     () => (projectId ? parseTicketImages(images, projectId) : []),
     [images, projectId],
   );

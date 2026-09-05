@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 
 import { SelectPill, StrataBand, projectTone } from "@/components/piscine";
@@ -55,9 +55,9 @@ export function DeskComposer({
   disabled = false,
   className,
 }: DeskComposerProps) {
-  const [title, setTitle] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const composingRef = React.useRef(false);
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const composingRef = useRef(false);
   const { agents } = useNamedAgentsList();
 
   const project =
@@ -133,7 +133,7 @@ export function DeskComposer({
           // the stratum rather than as content.
           "font-sans text-[13.5px] font-medium text-foreground",
           "placeholder:text-strata-feed-deep placeholder:opacity-80",
-          "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
           "disabled:opacity-60",
         )}
       />

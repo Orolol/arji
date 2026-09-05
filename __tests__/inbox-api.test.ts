@@ -119,6 +119,74 @@ describe("GET /api/inbox", () => {
     expect(res.status).toBe(200);
     expect(body.data.items).toEqual([]);
     expect(body.data.unreadCount).toBe(0);
+    expect(body.data.unreadMessageCount).toBe(0);
+    expect(body.data.awaitingReplyCount).toBe(0);
+  });
+
+  /*
+   * B-arij-DWd1DEARyLMe — the inbox shipped ONE counter (`unreadCount`, the
+   * row count) and the page printed it as "N waiting", so 55 unread reports
+   * on finished tickets read as 55 blocked agents. The row count stays: it is
+   * the global bar badge's rule and the ticket freezes it. What was missing is
+   * the split — how many of those rows are unread messages, and how many are
+   * questions actually waiting on the user.
+   */
+  it("counts unread messages and pending questions in separate counters", async () => {
+    // A finished ticket whose report was never opened: unread, no question.
+    seedEpic("e-report", "p1", { status: "done" });
+    seedComment("c1", "e-report", "agent", "2026-08-16T09:00:00.000Z");
+    // A real question the user has already opened but not answered: awaiting,
+    // and NOT unread.
+    seedEpic("e-question", "p1");
+    seedComment("c2", "e-question", "agent", "2026-08-16T08:00:00.000Z");
+    seedSession(
+      "s1",
+      "p1",
+      "e-question",
+      "asked_question",
+      "2026-08-16T08:00:00.000Z"
+    );
+    seedCursor("e-question", "2026-08-16T08:30:00.000Z");
+
+    const res = await GET();
+    const body = await res.json();
+
+    // Unchanged rule — the bar badge counts every row in the inbox.
+    expect(body.data.unreadCount).toBe(2);
+    // The split the page needs, each counting only its own category.
+    expect(body.data.unreadMessageCount).toBe(1);
+    expect(body.data.awaitingReplyCount).toBe(1);
+  });
+
+  it("counts an unread question in both counters without doubling the row", async () => {
+    seedEpic("e1", "p1");
+    seedComment("c1", "e1", "agent", "2026-08-16T09:00:00.000Z");
+    seedSession("s1", "p1", "e1", "asked_question", "2026-08-16T09:00:00.000Z");
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(body.data.items).toHaveLength(1);
+    expect(body.data.unreadCount).toBe(1);
+    expect(body.data.unreadMessageCount).toBe(1);
+    expect(body.data.awaitingReplyCount).toBe(1);
+  });
+
+  it("leaves the awaiting counter at zero when every row is a plain report", async () => {
+    seedEpic("e1", "p1", { status: "done" });
+    seedEpic("e2", "p1", { status: "done" });
+    seedComment("c1", "e1", "agent", "2026-08-16T09:00:00.000Z");
+    seedComment("c2", "e2", "agent", "2026-08-16T10:00:00.000Z");
+    // Terminal sessions that delivered — no question anywhere.
+    seedSession("s1", "p1", "e1", "success", "2026-08-16T09:00:00.000Z");
+    seedSession("s2", "p1", "e2", "success", "2026-08-16T10:00:00.000Z");
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(body.data.unreadCount).toBe(2);
+    expect(body.data.unreadMessageCount).toBe(2);
+    expect(body.data.awaitingReplyCount).toBe(0);
   });
 
   it("collects unread agent comments across ALL projects with project names", async () => {

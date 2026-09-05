@@ -9,10 +9,28 @@ import { parseWorktreeList } from "@/lib/git/worktrees";
 
 const mockListWorktrees = vi.hoisted(() => vi.fn());
 const mockPruneOrphanWorktrees = vi.hoisted(() => vi.fn());
+/**
+ * The fixture path here is synthetic (`/repos/arij`), so the real
+ * `assertGitRepository` guard the route now runs first would refuse every case
+ * in this file for a reason it is not about. The guard's own behaviour — and
+ * the 400 the routes answer for a path that is not a repository — is pinned
+ * against real directories in
+ * `__tests__/worktrees-route-not-a-repository.test.ts`.
+ */
+const mockAssertGitRepository = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", async () => {
   const { dbModuleMock } = await import("@/__tests__/helpers/db-mock");
   return dbModuleMock();
+});
+
+// Only the guard FUNCTION is replaced. The real module is spread back in so
+// `GitRepositoryUnavailableError` keeps its identity: the route branches on
+// `instanceof`, which a bare factory silently breaks.
+vi.mock("@/lib/git/remote", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/git/remote")>("@/lib/git/remote");
+  return { ...actual, assertGitRepository: mockAssertGitRepository };
 });
 
 vi.mock("@/lib/git/worktrees", async () => {
@@ -98,6 +116,7 @@ describe("GET /api/projects/[projectId]/worktrees", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
+    mockAssertGitRepository.mockResolvedValue(undefined);
   });
 
   it("404s for an unknown project", async () => {
@@ -190,9 +209,33 @@ describe("GET /api/projects/[projectId]/worktrees", () => {
     expect(json.data.worktrees[0].state).toBe("idle");
   });
 
-  it("surfaces a git failure instead of pretending there are zero worktrees", async () => {
+  it("refuses with 400 before shelling out when the path is not a repository", async () => {
     dbMockState.getQueue = [{ id: "proj1", gitRepoPath: "/repos/arij" }];
-    mockListWorktrees.mockRejectedValue(new Error("not a git repository"));
+    const { GitRepositoryUnavailableError } = await import("@/lib/git/remote");
+    mockAssertGitRepository.mockRejectedValue(
+      new GitRepositoryUnavailableError(
+        "GIT_REPO_NOT_A_REPOSITORY",
+        "/repos/arij"
+      )
+    );
+
+    const { GET } = await import(
+      "@/app/api/projects/[projectId]/worktrees/route"
+    );
+    const res = await GET(mockNextRequest(), routeParams);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "GIT_REPO_NOT_A_REPOSITORY" });
+    expect(mockListWorktrees).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an unexpected git failure instead of pretending there are zero worktrees", async () => {
+    // An untyped failure from a path that IS a repository — a corrupt object
+    // store, a dubious-ownership refusal. Only the typed
+    // `GitRepositoryUnavailableError` is a recoverable configuration state;
+    // everything else stays a fault.
+    dbMockState.getQueue = [{ id: "proj1", gitRepoPath: "/repos/arij" }];
+    mockListWorktrees.mockRejectedValue(new Error("fatal: bad object HEAD"));
 
     const { GET } = await import(
       "@/app/api/projects/[projectId]/worktrees/route"
@@ -210,6 +253,7 @@ describe("POST /api/projects/[projectId]/worktrees", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
+    mockAssertGitRepository.mockResolvedValue(undefined);
   });
 
   it("prunes orphans and returns the remaining worktrees", async () => {
@@ -243,6 +287,26 @@ describe("POST /api/projects/[projectId]/worktrees", () => {
     expect(json.data.pruned).toBe(1);
     expect(json.data.count).toBe(1);
     expect(json.data.orphanCount).toBe(0);
+  });
+
+  it("never prunes when the path is not a repository", async () => {
+    dbMockState.getQueue = [{ id: "proj1", gitRepoPath: "/repos/arij" }];
+    const { GitRepositoryUnavailableError } = await import("@/lib/git/remote");
+    mockAssertGitRepository.mockRejectedValue(
+      new GitRepositoryUnavailableError(
+        "GIT_REPO_NOT_A_REPOSITORY",
+        "/repos/arij"
+      )
+    );
+
+    const { POST } = await import(
+      "@/app/api/projects/[projectId]/worktrees/route"
+    );
+    const res = await POST(mockNextRequest({ method: "POST" }), routeParams);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "GIT_REPO_NOT_A_REPOSITORY" });
+    expect(mockPruneOrphanWorktrees).not.toHaveBeenCalled();
   });
 
   it("never prunes for a project without a git repository", async () => {

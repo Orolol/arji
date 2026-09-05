@@ -9,7 +9,7 @@
  * still refuses to print a zero where it has no number.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 
@@ -25,6 +25,18 @@ vi.mock("next/navigation", () => ({
 }));
 
 import SessionDetailPage from "@/app/projects/[projectId]/sessions/[sessionId]/page";
+import {
+  chunkElisionMarker,
+  SESSION_CHUNK_ELISION_LABEL,
+} from "@/lib/agent-sessions/chunk-cap";
+import {
+  promptElisionMarker,
+  SESSION_PROMPT_ELISION_LABEL,
+} from "@/lib/agent-sessions/prompt-cap";
+import {
+  chunkPruneMarker,
+  SESSION_CHUNK_PRUNE_LABEL,
+} from "@/lib/agent-sessions/chunk-retention";
 
 const mockSession = {
   id: "sess-12345678",
@@ -95,17 +107,18 @@ function installFetch({
   session = mockSession,
   files = mockFiles,
   actions = [] as unknown[],
+  prompt = "THE EXACT PROMPT",
 }: {
   session?: Record<string, unknown>;
   files?: unknown;
   actions?: unknown[];
+  /** What `?include=prompt` serves — the STORED prompt, cap and all. */
+  prompt?: string;
 } = {}) {
   const fetchMock = vi.fn((input: unknown) => {
     const url = String(input);
     if (url.includes("include=prompt")) {
-      return Promise.resolve(
-        jsonResponse({ data: { ...session, prompt: "THE EXACT PROMPT" } })
-      );
+      return Promise.resolve(jsonResponse({ data: { ...session, prompt } }));
     }
     if (url.includes("view=arij-actions")) {
       return Promise.resolve(
@@ -244,6 +257,168 @@ describe("live session — the log is the screen", () => {
     expect(card).toHaveTextContent("read spec.md");
     expect(card).toHaveTextContent("34 passed, 0 failed");
   });
+
+  it("shows the write-path cap's elision marker as Arij's own line, not as output", async () => {
+    const marker = chunkElisionMarker(8_123_456);
+    installFetch({
+      session: {
+        ...mockSession,
+        status: "running",
+        chunkStreams: {
+          raw: {
+            chunks: [
+              {
+                id: "chunk-1",
+                sessionId: "sess-1",
+                streamType: "raw",
+                sequence: 1,
+                chunkKey: "stdout:0",
+                content: `$ npm test\n${marker}\n· 34 passed, 0 failed\n`,
+                createdAt: new Date().toISOString(),
+                contentLength: 60,
+                contentTruncated: false,
+                contentOffset: 0,
+              },
+            ],
+            nextAfter: 1,
+            hasMore: false,
+          },
+        },
+      },
+    });
+    render(<SessionDetailPage />);
+
+    const card = await screen.findByTestId("stream-raw");
+    // Legible: the whole sentence is on screen, in one element of its own —
+    // not folded into the dim run of agent output around it.
+    const line = within(card).getByTestId("chunk-elision-marker");
+    expect(line).toHaveTextContent("8,123,456 bytes elided");
+    expect(line).toHaveTextContent(SESSION_CHUNK_ELISION_LABEL);
+    expect(line.textContent).toContain(marker);
+    // The lines on either side are still ordinary output.
+    expect(card).toHaveTextContent("npm test");
+    expect(card).toHaveTextContent("34 passed, 0 failed");
+  });
+
+  it("shows the retention marker in the log pane as Arij's voice", async () => {
+    // A pruned stream opens on Arij's sentence and continues with untouched
+    // agent output — if the marker rendered as ordinary output, a reader
+    // would take "pruned by Arij data retention" for something the agent said.
+    const marker = chunkPruneMarker(2_500_000, "2026-09-05T04:30:00.000Z");
+    installFetch({
+      session: {
+        ...mockSession,
+        status: "completed",
+        chunkStreams: {
+          raw: {
+            chunks: [
+              {
+                id: "chunk-1",
+                sessionId: "sess-1",
+                streamType: "raw",
+                sequence: 1,
+                chunkKey: null,
+                content: `${marker}\n· 34 passed, 0 failed\n`,
+                createdAt: new Date().toISOString(),
+                contentLength: 60,
+                contentTruncated: false,
+                contentOffset: 0,
+              },
+            ],
+            nextAfter: 1,
+            hasMore: false,
+          },
+        },
+      },
+    });
+    render(<SessionDetailPage />);
+
+    const card = await screen.findByTestId("stream-raw");
+    const line = within(card).getByTestId("chunk-prune-marker");
+    expect(line).toHaveTextContent("2,500,000 earlier characters");
+    expect(line).toHaveTextContent(SESSION_CHUNK_PRUNE_LABEL);
+    // The retained tail beside it is still ordinary output.
+    expect(card).toHaveTextContent("34 passed, 0 failed");
+    expect(within(card).queryByTestId("chunk-elision-marker")).toBeNull();
+  });
+
+  it("shows the retention marker in the response pane too", async () => {
+    const marker = chunkPruneMarker(120_000, "2026-09-05T04:30:00.000Z");
+    installFetch({
+      session: {
+        ...mockSession,
+        status: "completed",
+        chunkStreams: {
+          response: {
+            chunks: [
+              {
+                id: "chunk-9",
+                sessionId: "sess-1",
+                streamType: "response",
+                sequence: 9,
+                chunkKey: null,
+                content: `${marker}\nAll tests passed.`,
+                createdAt: new Date().toISOString(),
+                contentLength: 90,
+                contentTruncated: false,
+                contentOffset: 0,
+              },
+            ],
+            nextAfter: 9,
+            hasMore: false,
+          },
+        },
+      },
+    });
+    render(<SessionDetailPage />);
+
+    await userEvent.click(await screen.findByText("Réponse"));
+
+    const pane = await screen.findByTestId("stream-response");
+    const line = within(pane).getByTestId("chunk-prune-marker");
+    expect(line).toHaveTextContent("120,000 earlier characters");
+    expect(line).toHaveTextContent(SESSION_CHUNK_PRUNE_LABEL);
+    expect(pane).toHaveTextContent("All tests passed.");
+  });
+
+  it("shows the elision marker in the response pane too", async () => {
+    const marker = chunkElisionMarker(4_000_000);
+    installFetch({
+      session: {
+        ...mockSession,
+        status: "completed",
+        chunkStreams: {
+          response: {
+            chunks: [
+              {
+                id: "chunk-9",
+                sessionId: "sess-1",
+                streamType: "response",
+                sequence: 9,
+                chunkKey: "final-response",
+                content: `Implemented.\n${marker}\nAll tests passed.`,
+                createdAt: new Date().toISOString(),
+                contentLength: 90,
+                contentTruncated: false,
+                contentOffset: 0,
+              },
+            ],
+            nextAfter: 9,
+            hasMore: false,
+          },
+        },
+      },
+    });
+    render(<SessionDetailPage />);
+
+    await userEvent.click(await screen.findByText("Réponse"));
+
+    const pane = await screen.findByTestId("stream-response");
+    const line = within(pane).getByTestId("chunk-elision-marker");
+    expect(line).toHaveTextContent("4,000,000 bytes elided");
+    expect(line).toHaveTextContent(SESSION_CHUNK_ELISION_LABEL);
+    expect(pane).toHaveTextContent("All tests passed.");
+  });
 });
 
 describe("live session — the two performance workarounds", () => {
@@ -265,6 +440,42 @@ describe("live session — the two performance workarounds", () => {
     await user.click(screen.getByText("voir le prompt exact →"));
     await user.click(screen.getByText("voir le prompt exact →"));
     expect(calls(fetchMock, "include=prompt")).toHaveLength(1);
+  });
+
+  it("shows the prompt cap's elision marker legibly in the prompt pane", async () => {
+    // A capped row is head + marker + tail. The pane whose whole job is
+    // showing what went in has to say which part of it Arij did not keep —
+    // otherwise the prompt reads as complete and 4.8 MB shorter than it was.
+    const marker = promptElisionMarker(4_856_320);
+    installFetch({
+      prompt: `# Project: Arij\n${marker}\n## Instructions\n\nImplement the ticket.`,
+    });
+    const user = userEvent.setup();
+    render(<SessionDetailPage />);
+
+    await screen.findByText("Prompt composé");
+    await user.click(screen.getByText("voir le prompt exact →"));
+
+    const line = await screen.findByTestId("prompt-elision-marker");
+    expect(line).toHaveTextContent("4,856,320 bytes elided");
+    expect(line).toHaveTextContent(SESSION_PROMPT_ELISION_LABEL);
+    // Arij's own line, not one more dim line of the prompt it interrupts.
+    expect(line.className).toContain("text-strata-next-deep");
+    // The two ends the cap kept are still shown as ordinary prompt text.
+    expect(screen.getByText(/# Project: Arij/)).toBeInTheDocument();
+    expect(screen.getByText(/Implement the ticket\./)).toBeInTheDocument();
+  });
+
+  it("renders an uncapped prompt with no marker at all", async () => {
+    installFetch();
+    const user = userEvent.setup();
+    render(<SessionDetailPage />);
+
+    await screen.findByText("Prompt composé");
+    await user.click(screen.getByText("voir le prompt exact →"));
+
+    expect(await screen.findByText("THE EXACT PROMPT")).toBeInTheDocument();
+    expect(screen.queryByTestId("prompt-elision-marker")).toBeNull();
   });
 
   it("scans the raw stream for Arij actions in its own request", async () => {

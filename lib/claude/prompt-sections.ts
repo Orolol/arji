@@ -345,12 +345,16 @@ export function arijToolsSection(
       ? " This session is attached to the project board, not to a single " +
         "ticket, so every call must name its target with ticket_id — there " +
         "is no default ticket to fall back on. Your board tools are " +
-        "set_priority, reorder_tickets, add_dependency, remove_dependency " +
-        "and promote_ticket; each one requires a `reason` that is recorded " +
-        "in the ticket's activity log. They work on Backlog and To do only. " +
-        "update_ticket_status is withheld from this session and the route " +
-        "refuses it — promote_ticket is your only channel for a column " +
-        "move, and it demands the missing question when you send work back."
+        "set_priority, reorder_tickets, add_dependency, remove_dependency, " +
+        "promote_ticket, merge_tickets, discard_ticket and " +
+        "create_planning_ticket; each one requires a `reason` that is " +
+        "recorded in the ticket's activity log. They work on Backlog and To " +
+        "do only. update_ticket_status is withheld from this session and the " +
+        "route refuses it — promote_ticket is your only channel for a column " +
+        "move, and it demands the missing question when you send work back. " +
+        "merge_tickets and discard_ticket delete the tickets they retire, " +
+        "permanently and with no undo; Arij refuses either on a ticket an " +
+        "agent has already run on."
       : "";
 
   return section(
