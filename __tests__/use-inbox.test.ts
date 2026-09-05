@@ -33,12 +33,21 @@ describe("useInbox", () => {
     vi.restoreAllMocks();
   });
 
+  // The route's real payload shape: the row count the bar badge reads, plus
+  // the two category counters (app/api/inbox/route.ts).
   function mockInboxResponse(items: InboxItem[]) {
     fetchSpy.mockImplementation((url: string) => {
       if (url === "/api/inbox") {
         return Promise.resolve(
           new Response(
-            JSON.stringify({ data: { items, unreadCount: items.length } }),
+            JSON.stringify({
+              data: {
+                items,
+                unreadCount: items.length,
+                unreadMessageCount: items.filter((i) => i.unread).length,
+                awaitingReplyCount: items.filter((i) => i.awaitingReply).length,
+              },
+            }),
             { status: 200, headers: { "Content-Type": "application/json" } }
           )
         );
@@ -61,6 +70,38 @@ describe("useInbox", () => {
     expect(result.current.items).toHaveLength(1);
     expect(result.current.unreadCount).toBe(1);
     expect(fetchSpy).toHaveBeenCalledWith("/api/inbox");
+  });
+
+  it("forwards the unread and awaiting counters apart from the row count", async () => {
+    mockInboxResponse([
+      // An unread report on a finished ticket — nobody is held on a reply.
+      makeItem({ epicId: "e-done", status: "done", awaitingReply: false, unread: true }),
+      // A question already opened but never answered — awaiting, not unread.
+      makeItem({ epicId: "e-q", awaitingReply: true, unread: false }),
+    ]);
+
+    const { result } = renderHook(() => useInbox());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.unreadCount).toBe(2);
+    expect(result.current.unreadMessageCount).toBe(1);
+    expect(result.current.awaitingReplyCount).toBe(1);
+  });
+
+  it("falls back to zero counters when the payload omits them", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify({ data: { items: [makeItem()] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const { result } = renderHook(() => useInbox());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.unreadCount).toBe(0);
+    expect(result.current.unreadMessageCount).toBe(0);
+    expect(result.current.awaitingReplyCount).toBe(0);
   });
 
   it("markRead POSTs the epic id and re-fetches the inbox", async () => {

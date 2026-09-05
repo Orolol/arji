@@ -46,7 +46,7 @@ function sortableTimestamp(value: string | null): string {
 }
 
 /**
- * GET /api/inbox — cross-project inbox of tickets waiting on the user.
+ * GET /api/inbox — cross-project inbox of unread agent messages.
  *
  * An epic is in the inbox when:
  *  - its latest comment is agent-authored and newer than the epic's read
@@ -56,6 +56,17 @@ function sortableTimestamp(value: string | null): string {
  *    inbox even after being read, until the user actually replies).
  *
  * Order: awaiting-reply first, then newest comment first.
+ *
+ * THE TWO CATEGORIES ARE COUNTED APART (B-arij-DWd1DEARyLMe). Most rows are
+ * unread reports on tickets that are already finished; only the awaiting-reply
+ * ones are a question actually held on the user. The response therefore
+ * carries three numbers:
+ *  - `unreadCount` — every row. UNCHANGED: this is the rule the global bar
+ *    badge has always counted, and the ticket freezes it.
+ *  - `unreadMessageCount` — rows whose latest agent message has not been read.
+ *  - `awaitingReplyCount` — rows holding a real pending question.
+ * A row can be in both categories (an unread question); it is still one row,
+ * so the two never have to add up to `unreadCount`.
  */
 export async function GET() {
   // Latest comment per epic (any author), carrying the content for excerpts.
@@ -191,6 +202,11 @@ export async function GET() {
     }));
 
   return NextResponse.json({
-    data: { items, unreadCount: items.length },
+    data: {
+      items,
+      unreadCount: items.length,
+      unreadMessageCount: items.filter((item) => item.unread).length,
+      awaitingReplyCount: items.filter((item) => item.awaitingReply).length,
+    },
   });
 }
