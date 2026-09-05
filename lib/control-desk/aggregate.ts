@@ -164,7 +164,10 @@ export interface SessionRow {
  * The prompt cannot be sampled with a short `substr` either: the markers sit
  * after the spec and memory sections, measured as deep as 4.9 MB in.
  *
- * The sibling route still runs the heuristic; it is not this packet's file.
+ * The sibling route has since dropped the heuristic for the same two reasons,
+ * so the two classifications agree again — see the note on
+ * `inferDbActivityType` there, and
+ * `__tests__/sessions-active-route-projection.test.ts`.
  */
 export function inferTaskType(row: {
   agentType: string | null;

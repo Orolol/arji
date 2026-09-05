@@ -62,7 +62,6 @@ describe("sessions/active route activity typing", () => {
         orchestrationMode: "solo",
         provider: "codex",
         agentType: null,
-        prompt: null,
         startedAt: "2026-02-13T11:00:00.000Z",
         epicTitle: "Authentication",
         storyTitle: null,
@@ -128,7 +127,6 @@ describe("sessions/active route activity typing", () => {
         orchestrationMode: "solo",
         provider: "claude-code",
         agentType: null,
-        prompt: null,
         startedAt: null,
         createdAt: "2026-02-13T11:30:00.000Z",
         epicTitle: "Queued Epic",
@@ -153,6 +151,15 @@ describe("sessions/active route activity typing", () => {
     });
   });
 
+  /**
+   * By `agentType`, not by the prompt. This case used to seed
+   * `agentType: null` with the merge-resolution prompt, pinning a substring
+   * test over the whole `prompt` column that has since been removed — it was
+   * unreachable when right and reachable only when wrong (every
+   * merge-resolution dispatch site writes `agent_type = "merge"`, and no live
+   * row has a NULL `agent_type` at all). See
+   * `sessions-active-route-projection.test.ts` for the measurement.
+   */
   it("classifies merge-resolution sessions as merge", async () => {
     dbMockState.allRows = [
       {
@@ -163,8 +170,7 @@ describe("sessions/active route activity typing", () => {
         mode: "code",
         orchestrationMode: "solo",
         provider: "claude-code",
-        agentType: null,
-        prompt: "## Merge Conflict Resolution\nA `git merge main` was started.",
+        agentType: "merge",
         startedAt: "2026-02-12T10:00:00.000Z",
         epicTitle: "Payments",
         storyTitle: null,
@@ -200,9 +206,11 @@ describe("sessions/active route activity typing", () => {
         mode: "code",
         orchestrationMode: "solo",
         provider: "claude-code",
-        agentType: null,
-        prompt:
-          "You are performing a **security review** on the code changes for the ticket described above.",
+        // Same correction as the merge case above: the review header regex
+        // over `prompt` is gone, and `review_*` is what real review sessions
+        // carry. The point of the case — code mode must not demote a review
+        // to a build — is unchanged.
+        agentType: "review_security",
         startedAt: "2026-02-12T10:05:00.000Z",
         epicTitle: "Auth",
         storyTitle: "Validate JWT audience",
@@ -239,7 +247,6 @@ describe("sessions/active route activity typing", () => {
         orchestrationMode: "team",
         provider: "claude-code",
         agentType: null,
-        prompt: "team build prompt",
         startedAt: "2026-02-12T10:10:00.000Z",
         epicTitle: null,
         storyTitle: null,
@@ -278,7 +285,6 @@ describe("sessions/active route activity typing", () => {
         orchestrationMode: "solo",
         provider: "claude-code",
         agentType: "build",
-        prompt: null,
         startedAt: new Date(Date.now() - 600_000).toISOString(),
         createdAt: null,
         epicTitle: "Fresh",
@@ -311,7 +317,6 @@ describe("sessions/active route activity typing", () => {
         orchestrationMode: "solo",
         provider: "claude-code",
         agentType: "build",
-        prompt: null,
         startedAt: silentSince,
         createdAt: null,
         epicTitle: "Stale",
@@ -343,7 +348,6 @@ describe("sessions/active route activity typing", () => {
         orchestrationMode: "solo",
         provider: "claude-code",
         agentType: "chat",
-        prompt: null,
         startedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
         createdAt: null,
         epicTitle: null,
@@ -372,7 +376,6 @@ describe("sessions/active route activity typing", () => {
         orchestrationMode: "solo",
         provider: "claude-code",
         agentType: "build",
-        prompt: null,
         startedAt: null,
         createdAt: queuedAt,
         epicTitle: "Queued",
@@ -427,7 +430,6 @@ describe("sessions/active route activity typing", () => {
         orchestrationMode: "solo",
         provider: "claude-code",
         agentType,
-        prompt: "## Current Project Memory\n\n- a rule",
         startedAt: "2026-02-12T10:12:00.000Z",
         epicTitle: null,
         storyTitle: null,
@@ -464,7 +466,6 @@ describe("sessions/active route activity typing", () => {
         orchestrationMode: "solo",
         provider: "claude-code",
         agentType: "failure_digest",
-        prompt: "## Task: Recurring Failure Digest",
         startedAt: "2026-02-12T10:12:00.000Z",
         epicTitle: null,
         storyTitle: null,
@@ -500,7 +501,6 @@ describe("sessions/active route activity typing", () => {
         orchestrationMode: "solo",
         provider: "codex",
         agentType: "grading",
-        prompt: "Evaluate acceptance criteria",
         startedAt: "2026-02-12T10:12:00.000Z",
         epicTitle: "Structured outcomes",
         storyTitle: null,
@@ -536,7 +536,6 @@ describe("sessions/active route activity typing", () => {
         orchestrationMode: "solo",
         provider: "claude-code",
         agentType: "release_notes",
-        prompt: "Generate release notes",
         startedAt: "2026-02-12T10:12:00.000Z",
         epicTitle: null,
         storyTitle: null,
