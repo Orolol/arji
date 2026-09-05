@@ -430,3 +430,92 @@ describe("prompt-echo scrubbing when the prompt is multi-byte", () => {
     expect(classifySessionOutcome(result, "s-utf8-2")).toBe("silent");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The echo arrives as bare stdout, not inside a JSON envelope
+// ---------------------------------------------------------------------------
+
+/**
+ * `parseClaudeOutput` opens with `raw.trim()`, and only a JSON envelope
+ * shields the text inside it from that trim. The measured echo — an
+ * unauthenticated omp writing its prompt to stdout — has no envelope, so what
+ * reaches the scrub is the prompt with its trailing newline already gone.
+ *
+ * 863 of the 974 stored prompts over 500 bytes end in whitespace (88.6%,
+ * measured read-only on the live database), so this is the common case, not
+ * the corner. Every fixture above wraps its echo in `textResult`, which is
+ * why the gap survived the fix for the repeated-tail finding: a byte-length
+ * span that expects the trailing newline to still be there overshoots the end
+ * of the buffer, the verification fails, and the whole echo is kept.
+ */
+function rawStdoutResult(text: string) {
+  return { success: true, result: text, duration: 100 };
+}
+
+describe("prompt-echo scrubbing when the CLI echoed to bare stdout", () => {
+  it("scrubs an uncapped echo whose trailing newline the output trim ate", () => {
+    const prompt = `${FAKE_PROMPT}\n`;
+    // The premise: the echo is no longer a verbatim substring of the output.
+    expect(prompt.trim().includes(prompt)).toBe(false);
+
+    dbMockState.getQueue = [{ prompt }, { lastNonEmptyText: null }];
+    expect(
+      resolveSessionOutput(rawStdoutResult(prompt), "s-bare-1", "Nothing delivered."),
+    ).toBe("Nothing delivered.");
+  });
+
+  it("treats a bare-stdout echo of a capped prompt as silent, not answered", () => {
+    // REPEATED_TAIL_PROMPT ends with its closing block's newline, so the span
+    // this scrub closes on runs one byte past the end of the trimmed output.
+    expect(/\s$/.test(REPEATED_TAIL_PROMPT)).toBe(true);
+    const storedPrompt = capSessionPrompt(REPEATED_TAIL_PROMPT);
+    const result = rawStdoutResult(REPEATED_TAIL_PROMPT);
+
+    dbMockState.getQueue = [{ prompt: storedPrompt }, { lastNonEmptyText: null }];
+    expect(classifySessionOutcome(result, "s-bare-2")).toBe("silent");
+
+    dbMockState.getQueue = [{ prompt: storedPrompt }, { lastNonEmptyText: null }];
+    const output = resolveSessionOutput(result, "s-bare-2b", "Nothing delivered.");
+    // Not "a bounded remnant": before this, all 1.18 MB of it came back.
+    expect(output).toBe("Nothing delivered.");
+  });
+
+  it("collapses a bare-stdout echo repeated to the end of the output", () => {
+    const storedPrompt = capSessionPrompt(REPEATED_TAIL_PROMPT);
+    const result = rawStdoutResult(
+      `${REPEATED_TAIL_PROMPT}\n\n${REPEATED_TAIL_PROMPT}`,
+    );
+    dbMockState.getQueue = [{ prompt: storedPrompt }, { lastNonEmptyText: null }];
+
+    // The first copy keeps its newline and matches exactly; only the last one
+    // needs the trimmed variant. Both have to go.
+    expect(resolveSessionOutput(result, "s-bare-3", "Nothing delivered.")).toBe(
+      "Nothing delivered.",
+    );
+  });
+
+  it("keeps genuine output that precedes a trailing bare-stdout echo", () => {
+    const storedPrompt = capSessionPrompt(REPEATED_TAIL_PROMPT);
+    const result = rawStdoutResult(
+      `I rewrote the retention window.\n\n${REPEATED_TAIL_PROMPT}`,
+    );
+    dbMockState.getQueue = [{ prompt: storedPrompt }];
+
+    const output = resolveSessionOutput(result, "s-bare-4");
+    expect(output).toContain("I rewrote the retention window.");
+    expect(output).toContain(PROMPT_ECHO_MARKER);
+    expect(output).not.toContain("SPEC-MIDDLE-LINE");
+  });
+
+  it("does not treat output merely ENDING like the prompt's tail as an echo", () => {
+    // Only the whole prompt, minus the whitespace a trim would have taken,
+    // counts. The closing block alone is not an echo of the prompt.
+    const storedPrompt = capSessionPrompt(REPEATED_TAIL_PROMPT);
+    const result = rawStdoutResult(`Here is what I did.${CLOSING_BLOCK}`);
+    dbMockState.getQueue = [{ prompt: storedPrompt }];
+
+    const output = resolveSessionOutput(result, "s-bare-5");
+    expect(output).toContain("Here is what I did.");
+    expect(output).not.toContain(PROMPT_ECHO_MARKER);
+  });
+});

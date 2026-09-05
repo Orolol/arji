@@ -142,8 +142,16 @@ function replacePromptEchoes(output: string, prompt: string): string | null {
   const capped = splitCappedPrompt(prompt);
 
   if (!capped) {
-    if (!output.includes(prompt)) return null;
-    return output.split(prompt).join(PROMPT_ECHO_MARKER);
+    const whole = output.includes(prompt)
+      ? output.split(prompt).join(PROMPT_ECHO_MARKER)
+      : output;
+    // `parseClaudeOutput` trims the run's output before this ever sees it, so
+    // a prompt ending in whitespace — 88.6% of the stored rows — cannot match
+    // as an exact substring when its echo is the LAST thing in the output.
+    // That is the echo-only run, the one whose whole payload is the snowball.
+    const trimmedEcho = trailingTrimmedEcho(whole, prompt);
+    if (trimmedEcho !== null) return trimmedEcho;
+    return whole === output ? null : whole;
   }
 
   // Neither end can be empty for a prompt this function actually capped, but
@@ -152,6 +160,28 @@ function replacePromptEchoes(output: string, prompt: string): string | null {
   if (!capped.head || !capped.tail) return null;
 
   return replaceCappedPromptEchoes(output, capped);
+}
+
+/**
+ * Replaces a final echo whose trailing whitespace the output-side trim ate.
+ *
+ * `parseClaudeOutput` opens with `raw.trim()`, so whatever the CLI echoed
+ * reaches this file already stripped at both outer edges. A prompt that ends
+ * in a newline — 863 of the 974 stored prompts over 500 bytes, 88.6% —
+ * therefore never appears verbatim in the output when its echo runs to the
+ * end, which is precisely the echo-only run: the one that resolves to
+ * megabytes of its own prompt and classifies `answered` instead of `silent`.
+ *
+ * Only the LAST occurrence can be affected (one trim, one output), so this
+ * anchors on the end of the string rather than searching: the output must end
+ * with the prompt minus its trailing whitespace, and that shortened form must
+ * still carry content. Anything less is left alone.
+ */
+function trailingTrimmedEcho(output: string, prompt: string): string | null {
+  const trimmed = prompt.trimEnd();
+  if (trimmed === prompt || !trimmed) return null;
+  if (!output.endsWith(trimmed)) return null;
+  return `${output.slice(0, output.length - trimmed.length)}${PROMPT_ECHO_MARKER}`;
 }
 
 /**
@@ -192,6 +222,13 @@ function replaceCappedPromptEchoes(
   const promptBytes = head.length + capped.elidedBytes + tail.length;
   const marker = Buffer.from(PROMPT_ECHO_MARKER, "utf8");
 
+  // The same output-side trim the uncapped path has to allow for, in bytes.
+  // A capped prompt is a BIG prompt, so this is the shape that costs most:
+  // without it an echo-only run of a newline-terminated prompt keeps every
+  // byte of itself. `shortfall` is what the trim would have taken off the end.
+  const tailTrimmed = Buffer.from(capped.tail.trimEnd(), "utf8");
+  const shortfall = tail.length - tailTrimmed.length;
+
   const buffer = Buffer.from(output, "utf8");
   const pieces: Buffer[] = [];
   let kept = 0;
@@ -204,13 +241,30 @@ function replaceCappedPromptEchoes(
     const endsWithTail =
       end <= buffer.length &&
       buffer.compare(tail, 0, tail.length, end - tail.length, end) === 0;
-    if (!endsWithTail) {
+    // The trimmed variant is deliberately the narrower claim: it is allowed
+    // only when the span would finish exactly at the end of the output, which
+    // is the one position a single trailing trim can have touched.
+    const trimmedEnd = end - shortfall;
+    const endsTrimmed =
+      !endsWithTail &&
+      shortfall > 0 &&
+      tailTrimmed.length > 0 &&
+      trimmedEnd === buffer.length &&
+      buffer.compare(
+        tailTrimmed,
+        0,
+        tailTrimmed.length,
+        trimmedEnd - tailTrimmed.length,
+        trimmedEnd,
+      ) === 0;
+    if (!endsWithTail && !endsTrimmed) {
       search = headAt + 1;
       continue;
     }
+    const cut = endsWithTail ? end : trimmedEnd;
     pieces.push(buffer.subarray(kept, headAt), marker);
-    kept = end;
-    search = end;
+    kept = cut;
+    search = cut;
     found = true;
   }
   if (!found) return null;
