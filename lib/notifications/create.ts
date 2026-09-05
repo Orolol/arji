@@ -1215,6 +1215,13 @@ export interface RefinementReportNotificationInput {
   summary: string;
   /** False when the session failed or was cancelled part-way. */
   succeeded: boolean;
+  /**
+   * Long-form body. Carries the tombstones of tickets the pass DELETED — a
+   * discard has no ticket feed left to be recorded in, and a pass that
+   * discarded everything it touched leaves no recap-comment host either, so
+   * this is the surface of last resort. NULL for the ordinary pass.
+   */
+  message?: string | null;
 }
 
 /**
@@ -1247,6 +1254,7 @@ export function createRefinementReportNotification(
       title: input.succeeded
         ? `${REFINEMENT_LABEL} — ${input.summary}`
         : `${REFINEMENT_LABEL} ended early — ${input.summary}`,
+      message: input.message ?? null,
       targetUrl: `/projects/${input.projectId}`,
     })
     .run();

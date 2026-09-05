@@ -62,7 +62,7 @@ export function FullAutoProjectRow({
         className={cn(
           "flex w-full items-center gap-2 rounded-[10px] px-2 py-[6px] text-left",
           "outline-none hover:bg-muted",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
         )}
       >
         <CheckMark checked={project.autoModeEnabled} />

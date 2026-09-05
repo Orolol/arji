@@ -55,7 +55,7 @@ export function CheckMark({
         )
       : "border-[1.5px] border-border-strong bg-transparent",
     onToggle &&
-      "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50",
+      "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50",
     className,
   );
 

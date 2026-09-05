@@ -163,7 +163,7 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
                 "w-full resize-y rounded-[10px] border-[1.5px] border-input bg-field px-3 py-[9px]",
                 "font-sans text-[12.5px] leading-[1.5] text-foreground placeholder:text-muted-foreground",
                 "shadow-none outline-none",
-                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
                 "disabled:pointer-events-none disabled:opacity-50",
               )}
             />

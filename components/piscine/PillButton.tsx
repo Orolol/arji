@@ -36,7 +36,7 @@ const pillButtonVariants = cva(
     "relative inline-flex shrink-0 items-center justify-center",
     "whitespace-nowrap rounded-full font-sans font-semibold leading-none",
     "cursor-pointer shadow-none outline-none",
-    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+    "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
     "transition-[background-color,border-color,filter,opacity] duration-150 motion-reduce:transition-none",
     "disabled:pointer-events-none disabled:opacity-50",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0",

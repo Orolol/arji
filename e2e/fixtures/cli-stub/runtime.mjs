@@ -37,7 +37,10 @@
  *                             preflight reads it to prove the server under
  *                             test really resolves to these stubs BEFORE any
  *                             journey dispatches an agent
- *     scenarios/<epicId>.json the script for one ticket's journey
+ *     scenarios/<epicId>.json the script for one ticket's journey — or, for
+ *                             a board refinement pass, for the board it names
+ *                             (that spawn has no worktree, so the scenario
+ *                             resolves through the ticket ids in its prompt)
  *     invocations/<epicId>-<n>.json  what actually happened, in order
  */
 
@@ -283,6 +286,49 @@ async function runReviewStep(step, channel) {
   return { submitFindings: { status: response.status, verdict: body.verdict } };
 }
 
+/**
+ * The refinement step: the scripted board writes, over the session's own MCP
+ * token.
+ *
+ * Like the review step, it calls the HTTP routes the shim fronts rather than
+ * speaking JSON-RPC to `bin/arij-mcp.mjs` — the shim's transport has its own
+ * unit coverage, while a journey needs to prove that a refinement session's
+ * tool calls reach the routes, the guards and the end-of-run report.
+ *
+ * The first non-2xx throws. A refinement pass whose merge was refused is a
+ * pass that changed nothing, and the report would then say "the board was
+ * already in shape" — exactly the vacuous green this fixture exists to
+ * prevent.
+ */
+async function runRefinementStep(step, channel) {
+  if (!channel) {
+    throw new Error(
+      "refinement step reached the stub without an MCP channel — the session was spawned without " +
+        "--mcp-config, so it can make no board writes at all (is mcp_tools_enabled false?)"
+    );
+  }
+
+  const refinementCalls = [];
+  for (const call of step.calls || []) {
+    const endpoint = String(call.tool).replace(/_/g, "-");
+    const response = await fetch(`${channel.baseUrl}/api/mcp/${endpoint}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${channel.token}`,
+      },
+      body: JSON.stringify(call.body ?? {}),
+    });
+    refinementCalls.push({ tool: call.tool, status: response.status });
+    if (!response.ok) {
+      throw new Error(
+        `${call.tool} failed: ${response.status} ${await response.text()}`
+      );
+    }
+  }
+  return { refinementCalls };
+}
+
 function git(cwd, args) {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf8",
@@ -346,6 +392,8 @@ async function runClaude(argv) {
       detail = runBuildStep(step);
     } else if (step.kind === "review") {
       detail = await runReviewStep(step, channel);
+    } else if (step.kind === "refinement") {
+      detail = await runRefinementStep(step, channel);
     } else if (step.kind === "fail") {
       throw new Error(step.error || "the scenario asked this step to fail");
     } else {

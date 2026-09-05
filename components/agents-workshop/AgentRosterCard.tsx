@@ -82,7 +82,7 @@ export function AgentRosterCard({
         onClick={onSelect}
         className={cn(
           "flex w-full flex-col gap-2 rounded-[13px] px-4 py-[14px] text-left",
-          "outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+          "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
         )}
       >
         <div className="flex items-center gap-[9px]">

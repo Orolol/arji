@@ -47,7 +47,7 @@ export function NewConversationCard({
             "border-[1.5px] border-dashed border-border-strong",
             "px-[15px] py-[14px] text-[13px] font-semibold text-foreground",
             "outline-none transition-colors hover:border-foreground",
-            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+            "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
             "disabled:pointer-events-none disabled:opacity-50",
             "motion-reduce:transition-none",
           ].join(" ")}

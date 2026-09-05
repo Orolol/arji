@@ -2202,6 +2202,24 @@ Concretely, for the whole set:
    written goes back with \`promote_ticket\` \`status: "backlog"\` and the
    \`question\` that has to be answered first. That question is posted on the
    ticket, so make it specific and answerable.
+7. **Merge what is one piece of work.** When several tickets would be built
+   in a single sitting — near-duplicates, or a bug that is really a slice of
+   the epic next to it — fold them together with \`merge_tickets\`: name the
+   one that survives, list the ones it absorbs, and pass \`title\` /
+   \`description\` so the surviving ticket describes the *combined* scope
+   rather than only its own half. The sources' stories, your user's comments,
+   their screenshots and the dependency edges move across; the sources are
+   then deleted.
+8. **Discard what no longer needs doing.** A ticket whose feature shipped
+   another way, whose bug is long gone, or that the project has moved past
+   goes with \`discard_ticket\`. This is a permanent delete with no undo, so
+   the bar is high: obsolete, not merely unclear — unclear goes back to
+   Backlog with a question. Duplicated work is a merge, not a discard.
+9. **Add what is missing.** If reading the board end to end makes an absent
+   piece of work obvious — the migration nobody wrote a ticket for, the
+   follow-up half of a ticket that only covers one side — create it with
+   \`create_planning_ticket\`, with acceptance criteria concrete enough that
+   it would survive your own readiness check.
 
 ## Rules
 
@@ -2215,7 +2233,14 @@ Concretely, for the whole set:
   operations. This is a board pass.
 - **Be conservative.** Leaving a ticket alone is a valid outcome and a much
   better one than a churny move you cannot justify. Do not promote a ticket
-  just to have promoted something.
+  just to have promoted something, and do not delete or invent one to have a
+  fuller report.
+- **Deletion is real.** \`discard_ticket\` and the sources of
+  \`merge_tickets\` are removed from the database permanently — Arij has no
+  archive column. Arij refuses to delete any ticket an agent has already run
+  on, and records the full text of everything you retire in the report, but
+  that is a safety net, not a licence. If you are unsure whether the user
+  still wants a ticket, leave it and say so in a comment.
 - Every tool call names its ticket explicitly with \`ticket_id\` — this
   session is attached to the board, not to a single ticket.
 
@@ -2230,8 +2255,9 @@ ${fenceOnly(renderRefinementSnapshot(snapshot))}
 ## Finishing
 
 When the pass is done, end with a short plain-text summary of what you
-changed: how many tickets you promoted, how many you sent back, which
-dependency edges you added or removed, and whether you re-ranked To do. Arij
+changed: how many tickets you promoted, how many you sent back, what you
+merged, discarded or created, which dependency edges you added or removed,
+and whether you re-ranked To do. Arij
 builds the user-facing report from the activity log, so your summary is for
 the session transcript — keep it brief and factual.
 `);

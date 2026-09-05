@@ -63,7 +63,7 @@ export function QaQueuedTile({
             onClick={() => run.epicId && onOpenTicket?.(run.epicId)}
             className={cn(
               "flex min-w-0 cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-left",
-              "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
               "disabled:cursor-default",
             )}
           >
