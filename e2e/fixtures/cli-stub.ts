@@ -68,6 +68,21 @@ export type ScenarioStep =
       }[];
       say?: string;
     }
+  | {
+      /**
+       * A board refinement pass: a scripted sequence of MCP tool calls over
+       * the session's own token.
+       *
+       * Generic rather than one field per tool, because what a refinement
+       * pass IS is a sequence of tool calls — and the journey writes the
+       * bodies with the real ticket ids it just seeded. Any non-2xx fails
+       * the step, so a route that starts refusing surfaces as a red journey
+       * rather than as a pass that quietly did nothing.
+       */
+      kind: "refinement";
+      calls: { tool: string; body: Record<string, unknown> }[];
+      say?: string;
+    }
   | { kind: "fail"; error?: string };
 
 /** What one spawn of the stub actually received and did. */
@@ -86,6 +101,8 @@ export interface StubInvocation {
   committed?: string;
   head?: string;
   submitFindings?: { status: number; verdict: string };
+  /** One entry per scripted MCP call a `refinement` step made. */
+  refinementCalls?: { tool: string; status: number }[];
 }
 
 const writtenScenarios = new Set<string>();
