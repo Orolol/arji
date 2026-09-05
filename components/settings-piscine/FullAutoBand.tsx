@@ -59,6 +59,24 @@ import type { SettingsDraft } from "./useSettingsDraft";
  * only through AutoModeDialog, which writes the SUFFIXED per-project keys.
  * "Default" is the empty value — no workspace default, so the chain falls
  * through to the built-in Claude Code — not an agent whose name is blank.
+ *
+ * …AND THEY DO NOT DIE WITH THE MASTER SWITCH. `dimmed` is the BARE
+ * `auto_mode_enabled`, but the desk popover arms one project through
+ * `auto_mode_enabled:<projectId>`, which the resolver reads FIRST — so a
+ * workspace with the bare key off can be armed and dispatching. These two
+ * pills are that dispatch's fallback rung: their value keeps deciding which
+ * agent runs unattended work, and disabling them locks a user who arms
+ * projects one at a time out of a live setting.
+ *
+ * THE REST OF THE BAND KEEPS THE FRAME'S DISABLE AS A SCOPE LINE, NOT AS A
+ * RUNTIME GUARANTEE. Their values are not suspended either: for a project
+ * armed on its own, `resolveAutoModeConfigForProject` inherits the global
+ * `auto_mode_smart_dispatch` and `full_auto_second_opinion` through the same
+ * fallback chain, and `resolveMaxConcurrentForProject` applies
+ * `agent_max_concurrent` without ever reading `auto_mode_enabled`. They stay
+ * disabled here because unlocking them is a separate product decision; the
+ * pills are the control the bug report names, so they are the one that
+ * changes.
  */
 export interface FullAutoBandProps {
   draft: SettingsDraft;
@@ -149,13 +167,29 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
               ) : null}
             </SettingField>
 
+            {/*
+              THE ONE FIELD THIS BAND KEEPS OPERABLE. It dims with the band —
+              that state is honest — but it stays clickable, so the two pills
+              opt back out of BandDim's two disabling halves and nothing here
+              passes `dimmed` down:
+              - `pointer-events-auto` undoes the body's `pointer-events-none`;
+              - `aria-disabled={false}` stops the body's `aria-disabled="true"`
+                propagating, which is how assistive tech (and Playwright's
+                actionability check) reads a disabled ancestor.
+              Drop either one and the pills go back to being unclickable while
+              a project armed from the desk is dispatching under their value.
+            */}
             <SettingField
               kicker="AGENTS PAR DÉFAUT"
               stratum="live"
               flex={1}
               testId="full-auto-agents"
             >
-              <div className="flex items-center gap-[6px]">
+              <div
+                data-testid="full-auto-agents-live"
+                aria-disabled={false}
+                className="pointer-events-auto flex items-center gap-[6px]"
+              >
                 <RolePill
                   role="build"
                   settingKey={AUTO_MODE_BUILD_AGENT_SETTING_KEY}
@@ -163,7 +197,6 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
                   testId="auto-build-agent"
                   draft={draft}
                   agents={namedAgents}
-                  disabled={dimmed}
                 />
                 <RolePill
                   role="review"
@@ -172,7 +205,6 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
                   testId="auto-review-agent"
                   draft={draft}
                   agents={namedAgents}
-                  disabled={dimmed}
                 />
               </div>
             </SettingField>
@@ -249,7 +281,6 @@ function RolePill({
   testId,
   draft,
   agents,
-  disabled,
 }: {
   role: "build" | "review";
   settingKey: string;
@@ -257,7 +288,6 @@ function RolePill({
   testId: string;
   draft: SettingsDraft;
   agents: readonly { id: string; name: string }[];
-  disabled: boolean;
 }) {
   const selected = draft.text(settingKey);
   const name = agents.find((agent) => agent.id === selected)?.name ?? "Default";
@@ -268,7 +298,6 @@ function RolePill({
         label={`${label} · ${name}`}
         tone="ink"
         fill="card"
-        disabled={disabled}
         className="h-[30px]"
       >
         <DropdownMenuItem onSelect={() => draft.set(settingKey, "")}>
