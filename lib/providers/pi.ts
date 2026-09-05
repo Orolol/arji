@@ -8,6 +8,14 @@
  * because omp kept pi's `--mode json` event stream byte-compatible, so all
  * the parsing below is shared.
  *
+ * Decision (epic H3WaoKFiwd8j, "delete or register?"): NEITHER. Deleting the
+ * module breaks `oh-my-pi`, which extends this class; registering `pi` would
+ * admit a CLI with no MCP channel, which lib/providers/types.ts forbids. It
+ * stays an abstract base with no registry key of its own — reached through
+ * inheritance, which is why a key-based audit misreads it as dead code.
+ * `__tests__/provider-registry-single-source.test.ts` pins that reachability
+ * so the question does not have to be re-litigated from the registry map.
+ *
  * CLI: pi --mode json [--tools <allowlist>] [--session <ID>] [--model <M>] -p <PROMPT>
  *
  * Oversized prompts: pi's positional messages accept a `@path` form that
@@ -304,7 +312,19 @@ export abstract class PiProvider extends BaseCliProvider {
     return args;
   }
 
-  extractResult(stdout: string): string {
+  /**
+   * The full base signature, not the one parameter this actually reads: a
+   * narrowed override is only legal until something calls it through the
+   * subclass. `handleExit` below does exactly that, and when it passed the
+   * base's three arguments the call resolved against a one-parameter override
+   * and failed to compile (TS2554) — green unit suite, broken `next build`.
+   * Pinned by __tests__/provider-extract-result-contract.test.ts.
+   */
+  extractResult(
+    stdout: string,
+    _stderr?: string,
+    _spawnContext?: ProviderSpawnContext,
+  ): string {
     return extractPiResult(stdout);
   }
 

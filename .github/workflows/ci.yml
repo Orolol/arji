@@ -67,9 +67,18 @@ jobs:
         run: |
           echo "::notice::If the failure above is 'unused suppressions', a tracked lint violation was fixed. Run 'npm run lint:prune' and commit the updated eslint-suppressions.json."
 
-      # NODE_ENV is deliberately left unset: `next build` sets production itself,
-      # while exporting it here would make `npm ci` skip devDependencies.
+      # NODE_ENV is pinned on the step, never on the job: a job-level value would
+      # also reach `npm ci` above, which then skips devDependencies and leaves the
+      # build without the toolchain it needs. `next build` does default to
+      # production, but only when nothing has already set NODE_ENV — an inherited
+      # `NODE_ENV=development` makes it die on a spurious prerender error instead.
+      # That is not theoretical here: every agent session in this repo inherits it
+      # from the dev server that spawned it, and a reusable or composite caller can
+      # leak it into a runner just as easily. Pinning costs nothing and removes the
+      # ambient dependency.
       - name: Production build
+        env:
+          NODE_ENV: production
         run: npm run build
 
   # Browser regressions. A separate job with no `needs:`, so it runs alongside
@@ -109,7 +118,12 @@ jobs:
       # This repeats the `verify` build instead of depending on that job, so a
       # slow build cannot serialise the two — and `verify` gates the build on
       # its own.
+      #
+      # NODE_ENV pinned on the step for the same reason as in `verify` above; the
+      # server Playwright then boots has to be the production one.
       - name: Production build
+        env:
+          NODE_ENV: production
         run: npm run build
 
       # Playwright starts and stops the server itself (see webServer in
