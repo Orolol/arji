@@ -198,9 +198,18 @@ export function YourTurnBand({
       stratum="you"
       density="full"
       gap={11}
-      // The band caps and its row list scrolls: a backlog of questions must
-      // never push WORKING — the only band that grows — off the screen.
-      className={cn("mx-[14px] mt-[10px] max-h-[30vh]", className)}
+      /*
+        The band caps and its row list scrolls: a backlog of questions must
+        never push WORKING — the only band that grows — off the screen.
+
+        50vh below `lg` — B-arij-M9zsQujUTCoR. A stacked coral row is ~166px at
+        390px (identity, question over two lines, field, three buttons) against
+        53px on a desktop, so 30vh of an 844px screen left ONE partial row and
+        "+6 de plus". Half the viewport shows two whole rows and still stops the
+        stratum from taking the page; below `lg` the desk scrolls, so the cap is
+        no longer what keeps the bands under it reachable.
+      */
+      className={cn("mx-[14px] mt-[10px] max-h-[30vh] max-lg:max-h-[50vh]", className)}
     >
       <BandHeader
         label="Your turn"
