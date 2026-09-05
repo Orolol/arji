@@ -15,17 +15,24 @@ import {
   type ChatModeProvider,
 } from "@/lib/agent-config/constants";
 
-const { getProvider, getOpenAiConfigFromSettings, resolveAgent } = vi.hoisted(
-  () => ({
-    getProvider: vi.fn(),
-    getOpenAiConfigFromSettings: vi.fn(),
-    resolveAgent: vi.fn(),
-  }),
-);
+const {
+  getProvider,
+  getOpenAiConfigFromSettings,
+  resolveAgent,
+  resolveAssignedAgent,
+} = vi.hoisted(() => ({
+  getProvider: vi.fn(),
+  getOpenAiConfigFromSettings: vi.fn(),
+  resolveAgent: vi.fn(),
+  resolveAssignedAgent: vi.fn(),
+}));
 
 vi.mock("@/lib/providers", () => ({ getProvider }));
 vi.mock("@/lib/openai/client", () => ({ getOpenAiConfigFromSettings }));
-vi.mock("@/lib/agent-config/agent-resolution", () => ({ resolveAgent }));
+vi.mock("@/lib/agent-config/agent-resolution", () => ({
+  resolveAgent,
+  resolveAssignedAgent,
+}));
 
 import {
   DEFAULT_CHAT_MODE_PROBES,
@@ -57,7 +64,68 @@ describe("resolveDefaultChatMode", () => {
     vi.clearAllMocks();
     installClis([]);
     configureDirectApi({});
+    // Unassigned is the default state, and the one every rung below assumes.
+    resolveAssignedAgent.mockReturnValue(null);
     resolveAgent.mockReturnValue({ provider: "claude-code", namedAgentId: null });
+  });
+
+  it("lets an explicit CHAT & SPEC assignment outrank an installed persistent CLI", async () => {
+    // The failure this rung exists for. `which claude` succeeds on every
+    // machine running Arij's default engine, so without it the assignment
+    // below was dead on all of them — silently, with no activity entry.
+    installClis(["claude-code"]);
+    resolveAssignedAgent.mockReturnValue({
+      provider: "codex",
+      namedAgentId: "codex-builder",
+    });
+
+    const mode = await resolveDefaultChatMode("proj-1");
+
+    expect(mode).toEqual({
+      provider: "codex",
+      namedAgentId: "codex-builder",
+      source: "role-assignment",
+    });
+    expect(resolveAssignedAgent).toHaveBeenCalledWith("chat", "proj-1");
+  });
+
+  it("keeps the assignment's named agent, which is what carries its model", async () => {
+    // Dropping the id is not cosmetic: the stream route reads
+    // `overridesProvider = provider && !namedAgentId`, so a resolution that
+    // loses the link also loses the agent's model and CLI options.
+    installClis(["claude-code", "oh-my-pi"]);
+    resolveAssignedAgent.mockReturnValue({
+      provider: "codex",
+      namedAgentId: "codex-builder",
+    });
+
+    expect((await resolveDefaultChatMode("proj-1")).namedAgentId).toBe(
+      "codex-builder",
+    );
+  });
+
+  it("still prefers the persistent CLI when the role was never assigned", async () => {
+    // The other half of the rung, and story 2's headline: deferring to a
+    // choice must not become deferring to the seeded fallback, which is what
+    // `resolveAgent` would have returned here too.
+    installClis(["claude-code"]);
+    resolveAssignedAgent.mockReturnValue(null);
+
+    expect((await resolveDefaultChatMode("proj-1")).source).toBe(
+      "persistent-cli",
+    );
+  });
+
+  it("treats a throwing assignment lookup as unassigned, not as an error", async () => {
+    installClis(["claude-code"]);
+    resolveAssignedAgent.mockImplementation(() => {
+      throw new Error("no such table: agent_provider_defaults");
+    });
+
+    await expect(resolveDefaultChatMode("proj-1")).resolves.toMatchObject({
+      provider: "claude-code-persistent",
+      source: "persistent-cli",
+    });
   });
 
   it("prefers the persistent Claude mode when the claude-code CLI is installed", async () => {
@@ -197,6 +265,7 @@ describe("resolveDefaultChatMode", () => {
 
   it("uses injected probes instead of the defaults", async () => {
     const probes: ChatModeProbes = {
+      resolveAssignedChatAgent: vi.fn(() => null),
       isCliAvailable: vi.fn(() => false),
       isDirectApiConfigured: vi.fn(() => true),
       resolveChatAgent: vi.fn(() => ({ provider: "claude-code" as const })),
@@ -234,6 +303,21 @@ describe("DEFAULT_CHAT_MODE_PROBES", () => {
 
     configureDirectApi({ model: "llama3.1" });
     expect(DEFAULT_CHAT_MODE_PROBES.isDirectApiConfigured()).toBe(false);
+  });
+
+  it("reads the assignment rung from resolveAssignedAgent('chat', projectId)", () => {
+    // Not `resolveAgent`: that one cannot answer "did the user choose?" —
+    // it returns the seeded agent either way.
+    resolveAssignedAgent.mockReturnValue({
+      provider: "codex",
+      namedAgentId: "codex-builder",
+    });
+
+    expect(DEFAULT_CHAT_MODE_PROBES.resolveAssignedChatAgent("proj-9")).toEqual({
+      provider: "codex",
+      namedAgentId: "codex-builder",
+    });
+    expect(resolveAssignedAgent).toHaveBeenCalledWith("chat", "proj-9");
   });
 
   it("delegates the last rung to resolveAgent('chat', projectId)", () => {

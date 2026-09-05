@@ -10,17 +10,31 @@
  *
  * Order of preference, first match wins:
  *
- *   1. a persistent CLI mode whose binary is installed — a warm process is
+ *   1. the user's CHAT & SPEC role assignment, when there is one — an
+ *      explicit choice outranks any default this module can invent, which is
+ *      the spec's own precedence and its "explicit agent choices beat
+ *      automation" decision. Without this rung the convenience default below
+ *      silently killed the assignment on every machine with `claude`
+ *      installed, and nothing in the UI said so;
+ *   2. a persistent CLI mode whose binary is installed — a warm process is
  *      the fastest turn available and costs the user no configuration;
- *   2. the direct API, when Settings carry a base URL and a model;
- *   3. `resolveAgent("chat", projectId)` — today's behaviour, unchanged.
+ *   3. the direct API, when Settings carry a base URL and a model;
+ *   4. `resolveAgent("chat", projectId)` — the seeded catch-all, unchanged.
+ *
+ * Rungs 1 and 4 both end in `resolveAgent` territory, and the split between
+ * them is the whole point: rung 1 fires only on a row the user wrote, rung 4
+ * on the fallback `resolveAgent` invents when they wrote none. `resolveAgent`
+ * alone cannot tell those apart — see `resolveAssignedAgent`.
  *
  * Named agents are untouched: `namedAgents.provider` stays typed
  * `AgentProvider`, so a persistent mode is a conversation-level provider and
  * never an agent identity. No migration is involved.
  */
 
-import { resolveAgent } from "@/lib/agent-config/agent-resolution";
+import {
+  resolveAgent,
+  resolveAssignedAgent,
+} from "@/lib/agent-config/agent-resolution";
 import {
   OPENAI_COMPATIBLE_PROVIDER,
   PERSISTENT_CHAT_PROVIDER_OPTIONS,
@@ -37,7 +51,11 @@ export interface ResolvedChatMode {
   /** Only the `resolveAgent` fallback carries one; chat-only modes have none. */
   namedAgentId: string | null;
   /** Which rung answered, for callers that log or assert the decision. */
-  source: "persistent-cli" | "direct-api" | "agent-resolution";
+  source:
+    | "role-assignment"
+    | "persistent-cli"
+    | "direct-api"
+    | "agent-resolution";
 }
 
 /**
@@ -45,6 +63,16 @@ export interface ResolvedChatMode {
  * answer them without a PATH, a settings table or a named-agent row.
  */
 export interface ChatModeProbes {
+  /**
+   * The CHAT & SPEC assignment, or null when the role was never assigned.
+   * Deliberately NOT `resolveChatAgent`: that one always answers, folding an
+   * unassigned role into the seeded agent, so a resolver built on it cannot
+   * apply a default "only when the user has not chosen" — it would either
+   * always defer or always override.
+   */
+  resolveAssignedChatAgent: (
+    projectId?: string,
+  ) => { provider: AgentProvider; namedAgentId?: string | null } | null;
   isCliAvailable: (provider: AgentProvider) => boolean | Promise<boolean>;
   isDirectApiConfigured: () => boolean;
   resolveChatAgent: (
@@ -53,6 +81,7 @@ export interface ChatModeProbes {
 }
 
 export const DEFAULT_CHAT_MODE_PROBES: ChatModeProbes = {
+  resolveAssignedChatAgent: (projectId) => resolveAssignedAgent("chat", projectId),
   // Same probe as GET /api/providers/available, so the default a conversation
   // opens on and the availability the picker draws cannot disagree.
   isCliAvailable: (provider) => getProvider(provider).isAvailable(),
@@ -71,11 +100,14 @@ export const DEFAULT_CHAT_MODE_PROBES: ChatModeProbes = {
  * neither may turn "which mode does this conversation open on?" into a 500,
  * since every failure here has a working next rung.
  */
-async function probed(run: () => boolean | Promise<boolean>): Promise<boolean> {
+async function probed<T>(
+  run: () => T | Promise<T>,
+  onFailure: T,
+): Promise<T> {
   try {
     return await run();
   } catch {
-    return false;
+    return onFailure;
   }
 }
 
@@ -83,6 +115,23 @@ export async function resolveDefaultChatMode(
   projectId?: string,
   probes: ChatModeProbes = DEFAULT_CHAT_MODE_PROBES,
 ): Promise<ResolvedChatMode> {
+  // An assignment the user wrote by hand outranks every default below. This
+  // rung exists because the ones below cannot see it: `resolveAgent` answers
+  // "claude-code + the seeded agent" both when the user chose that and when
+  // they chose nothing, so a resolver reading only the last rung would either
+  // never defer to a choice or always defer to a non-choice.
+  const assigned = await probed(
+    () => probes.resolveAssignedChatAgent(projectId),
+    null,
+  );
+  if (assigned) {
+    return {
+      provider: assigned.provider,
+      namedAgentId: assigned.namedAgentId ?? null,
+      source: "role-assignment",
+    };
+  }
+
   // The preference order IS PERSISTENT_CHAT_PROVIDER_OPTIONS' order (Claude
   // Code, then Oh My Pi) rather than a second list that can drift from it;
   // __tests__/default-chat-mode.test.ts pins that the constant still reads
@@ -90,7 +139,7 @@ export async function resolveDefaultChatMode(
   // second `which` is work nobody asked for.
   for (const persistent of PERSISTENT_CHAT_PROVIDER_OPTIONS) {
     const cli = persistentChatBaseProvider(persistent);
-    if (await probed(() => probes.isCliAvailable(cli))) {
+    if (await probed(() => probes.isCliAvailable(cli), false)) {
       return {
         provider: persistent,
         namedAgentId: null,
@@ -99,7 +148,7 @@ export async function resolveDefaultChatMode(
     }
   }
 
-  if (await probed(() => probes.isDirectApiConfigured())) {
+  if (await probed(() => probes.isDirectApiConfigured(), false)) {
     return {
       provider: OPENAI_COMPATIBLE_PROVIDER,
       namedAgentId: null,

@@ -293,6 +293,57 @@ export function resolveAgent(
   agentType: AgentType,
   projectId?: string,
 ): ResolvedAgent {
+  const assigned = resolveAssignedAgent(agentType, projectId);
+  if (assigned) return assigned;
+
+  // Preserve task-specific historical defaults before consulting the seeded
+  // catch-all agent. Assignments above still override these at project/global
+  // scope, and an explicit dispatch choice is handled by
+  // resolveAgentByNamedId before reaching this function.
+  const taskDefault = BUILTIN_TASK_DEFAULTS[agentType];
+  if (taskDefault) {
+    return { ...taskDefault };
+  }
+
+  // Builtin fallback — resolve via global default named agent
+  const defaultAgent = db
+    .select()
+    .from(namedAgents)
+    .where(eq(namedAgents.name, GLOBAL_DEFAULT_AGENT_NAME))
+    .get();
+
+  if (defaultAgent) {
+    return {
+      provider: normalizeProvider(defaultAgent.provider),
+      model: defaultAgent.model,
+      name: defaultAgent.name,
+      namedAgentId: defaultAgent.id,
+      cliOptions: parseStoredProviderOptions(
+        defaultAgent.provider,
+        defaultAgent.options,
+      ),
+    };
+  }
+
+  return { provider: FALLBACK_PROVIDER, namedAgentId: null };
+}
+
+/**
+ * The user's role ASSIGNMENT for `agentType` — project scope, then global —
+ * and nothing below it. `null` means the role was never assigned.
+ *
+ * `resolveAgent` cannot express that distinction: it folds an unassigned role
+ * into the seeded catch-all agent, so its answer is identical whether the user
+ * picked that agent deliberately or never picked at all. A caller that applies
+ * its own default only in the ABSENCE of a choice has to be able to tell those
+ * two apart — `lib/chat/default-chat-mode.ts` is the case that forced this
+ * out, since offering a warm CLI must not silently outrank a CHAT & SPEC
+ * assignment the user made by hand.
+ */
+export function resolveAssignedAgent(
+  agentType: AgentType,
+  projectId?: string,
+): ResolvedAgent | null {
   // Try project-scoped default first
   if (projectId) {
     const row = db
@@ -335,36 +386,7 @@ export function resolveAgent(
     if (resolved) return resolved;
   }
 
-  // Preserve task-specific historical defaults before consulting the seeded
-  // catch-all agent. Assignments above still override these at project/global
-  // scope, and an explicit dispatch choice is handled by
-  // resolveAgentByNamedId before reaching this function.
-  const taskDefault = BUILTIN_TASK_DEFAULTS[agentType];
-  if (taskDefault) {
-    return { ...taskDefault };
-  }
-
-  // Builtin fallback — resolve via global default named agent
-  const defaultAgent = db
-    .select()
-    .from(namedAgents)
-    .where(eq(namedAgents.name, GLOBAL_DEFAULT_AGENT_NAME))
-    .get();
-
-  if (defaultAgent) {
-    return {
-      provider: normalizeProvider(defaultAgent.provider),
-      model: defaultAgent.model,
-      name: defaultAgent.name,
-      namedAgentId: defaultAgent.id,
-      cliOptions: parseStoredProviderOptions(
-        defaultAgent.provider,
-        defaultAgent.options,
-      ),
-    };
-  }
-
-  return { provider: FALLBACK_PROVIDER, namedAgentId: null };
+  return null;
 }
 
 /**
