@@ -65,6 +65,7 @@ import {
   PROVIDER_OPTIONS,
 } from "@/lib/agent-config/constants";
 import type { Conversation } from "@/hooks/useConversations";
+import type { DeskProject } from "@/lib/control-desk/types";
 
 const NOTHING_SELECTED: AgentSelection = { namedAgentId: null, provider: null };
 
@@ -83,6 +84,37 @@ function renderPill(
     />,
   );
   return { onSelect };
+}
+
+const DESK_PROJECT: DeskProject = {
+  id: "p1",
+  name: "Piscine",
+  shortName: "PISC",
+  colorIndex: 0,
+  activeAgents: 0,
+  autoModeEnabled: false,
+};
+
+/**
+ * The desk composer as `NowDesk` mounts it. The mode is NOT a parameter here
+ * on purpose: what these tests pin is the composer's own `mode="dispatch"`,
+ * which no test reached before — `renderPill` passes the mode in, so it goes
+ * on proving `dispatch` behaves while saying nothing about the desk asking
+ * for it.
+ */
+function renderDeskComposer(namedAgentId: string | null = null) {
+  const onNamedAgentChange = vi.fn();
+  render(
+    <DeskComposer
+      projects={[DESK_PROJECT]}
+      targetProjectId="p1"
+      onTargetProjectChange={vi.fn()}
+      namedAgentId={namedAgentId}
+      onNamedAgentChange={onNamedAgentChange}
+      onSubmit={vi.fn()}
+    />,
+  );
+  return { onNamedAgentChange };
 }
 
 function trigger() {
@@ -350,6 +382,70 @@ describe("what the trigger says", () => {
   });
 });
 
+describe("the desk composer's own wiring", () => {
+  /**
+   * `dispatch mode` above proves the MODE. This proves the DESK ASKS FOR IT —
+   * a separate claim, and the one that was missing: flipping the composer's
+   * own `mode` to `chat` left all 72 tests of this epic green, so the desk
+   * could start offering the direct API and the persistent CLIs without a
+   * single assertion moving. Those are chat-only modes; a build dispatched on
+   * one is a request `epics/[epicId]/build/route.ts` cannot honour.
+   */
+  it("mounts its picker in dispatch mode — no chat-only mode reaches the desk", () => {
+    renderDeskComposer();
+
+    expect(screen.getByTestId("desk-agent-select")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-option-default-agent")).toHaveTextContent(
+      DEFAULT_AGENT_LABEL,
+    );
+    expect(screen.getByTestId("chat-option-agent-a1")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-option-agent-a2")).toBeInTheDocument();
+
+    expect(screen.queryByTestId("chat-option-openai-compatible")).toBeNull();
+    for (const provider of [
+      ...PERSISTENT_CHAT_PROVIDER_OPTIONS,
+      ...PROVIDER_OPTIONS,
+    ]) {
+      expect(screen.queryByTestId(`chat-option-provider-${provider}`)).toBeNull();
+    }
+    // The four chat groups are not merely empty here, they are undrawn.
+    expect(groupLabels()).toEqual([]);
+  });
+
+  it("hands the desk a named agent id alone — the provider never travels", () => {
+    // `NowDesk` POSTs `{ namedAgentId }` or `{}` to the build routes and the
+    // route reads nothing else, deriving the provider from the agent row. So
+    // the composer's callback carries no provider at all: the picker emits one
+    // for display, and the desk drops it here.
+    const { onNamedAgentChange } = renderDeskComposer();
+
+    fireEvent.click(screen.getByTestId("chat-option-agent-a2"));
+    expect(onNamedAgentChange).toHaveBeenCalledWith("a2");
+    expect(onNamedAgentChange).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId("chat-option-default-agent"));
+    expect(onNamedAgentChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it("names the selected agent on the trigger", () => {
+    renderDeskComposer("a1");
+    expect(screen.getByTestId("desk-agent-select")).toHaveTextContent(
+      "Opus Planner",
+    );
+  });
+
+  it("says the default rather than an em-dash when no agent is chosen", () => {
+    // `chat` labels an empty selection "—" because a conversation always runs
+    // on something the server already stored. The desk's empty selection means
+    // the opposite — nothing was chosen and the route will resolve it — so the
+    // dispatch trigger has to say so.
+    renderDeskComposer(null);
+    expect(screen.getByTestId("desk-agent-select")).toHaveTextContent(
+      DEFAULT_AGENT_LABEL,
+    );
+  });
+});
+
 describe("the two pickers `/projects/:id` mounts at once", () => {
   /**
    * The project route draws the desk composer AND the chat panel's header, so
@@ -374,16 +470,7 @@ describe("the two pickers `/projects/:id` mounts at once", () => {
     render(
       <>
         <DeskComposer
-          projects={[
-            {
-              id: "p1",
-              name: "Piscine",
-              shortName: "PISC",
-              colorIndex: 0,
-              activeAgents: 0,
-              autoModeEnabled: false,
-            },
-          ]}
+          projects={[DESK_PROJECT]}
           targetProjectId="p1"
           onTargetProjectChange={vi.fn()}
           namedAgentId={null}
