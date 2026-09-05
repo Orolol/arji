@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -40,6 +40,13 @@ export function BugCreateDialog({
   onCreated,
   namedAgentId = null,
 }: BugCreateDialogProps) {
+  const fieldId = useId();
+  const titleId = `${fieldId}-title`;
+  const descriptionId = `${fieldId}-description`;
+  const priorityId = `${fieldId}-priority`;
+  const screenshotsLabelId = `${fieldId}-screenshots-label`;
+  const screenshotsHintId = `${fieldId}-screenshots-hint`;
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("2");
@@ -192,10 +199,14 @@ export function BugCreateDialog({
 
         <div className="space-y-4 py-2">
           <div>
-            <label className="mb-1 block text-[12.5px] text-muted-foreground">
+            <label
+              htmlFor={titleId}
+              className="mb-1 block text-[12.5px] text-muted-foreground"
+            >
               Title *
             </label>
             <Input
+              id={titleId}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Bug title..."
@@ -205,10 +216,14 @@ export function BugCreateDialog({
           </div>
 
           <div>
-            <label className="mb-1 block text-[12.5px] text-muted-foreground">
+            <label
+              htmlFor={descriptionId}
+              className="mb-1 block text-[12.5px] text-muted-foreground"
+            >
               Description
             </label>
             <Textarea
+              id={descriptionId}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Steps to reproduce, expected vs actual behavior..."
@@ -216,11 +231,18 @@ export function BugCreateDialog({
             />
           </div>
 
-          <div>
+          <div
+            role="group"
+            aria-labelledby={screenshotsLabelId}
+            aria-describedby={screenshotsHintId}
+          >
             <div className="mb-1 flex items-center justify-between gap-2">
-              <label className="text-[12.5px] text-muted-foreground">
+              <span
+                id={screenshotsLabelId}
+                className="text-[12.5px] text-muted-foreground"
+              >
                 Screenshots
-              </label>
+              </span>
               <Button
                 type="button"
                 variant="outline"
@@ -240,7 +262,10 @@ export function BugCreateDialog({
               className="mb-2"
             />
 
-            <p className="text-[11.5px] text-muted-foreground">
+            <p
+              id={screenshotsHintId}
+              className="text-[11.5px] text-muted-foreground"
+            >
               Paste a screenshot with Ctrl/Cmd+V, drop an image here, or attach one.
             </p>
 
@@ -254,11 +279,17 @@ export function BugCreateDialog({
           </div>
 
           <div>
-            <label className="mb-1 block text-[12.5px] text-muted-foreground">
+            <label
+              htmlFor={priorityId}
+              className="mb-1 block text-[12.5px] text-muted-foreground"
+            >
               Priority
             </label>
             <Select value={priority} onValueChange={setPriority}>
-              <SelectTrigger className="h-[29px] rounded-[7px] text-[12.5px]">
+              <SelectTrigger
+                id={priorityId}
+                className="h-[29px] rounded-[7px] text-[12.5px]"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
