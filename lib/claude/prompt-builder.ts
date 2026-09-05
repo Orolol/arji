@@ -166,7 +166,14 @@ export function buildDeterministicVerificationFixSection(
 ): string {
   const name = verificationValueOnOneLine(failed.name);
   const command = verificationValueOnOneLine(failed.command);
-  const output = failed.tail.trimEnd() || "(The command produced no output.)";
+  // Neutralised, not just fenced: the tail is whatever the configured
+  // command printed — a test name, a fixture, a source line quoted in a
+  // stack trace — and it reaches an unattended fix cycle that edits and
+  // commits. The dynamic fence below stops it closing its own block; only
+  // escaping stops it posing as a control turn.
+  const output =
+    neutralizeControlMarkup(failed.tail.trimEnd()) ||
+    "(The command produced no output.)";
   const fence = verificationOutputFence(output);
   const outcome =
     failed.exitCode === null
