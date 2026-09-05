@@ -14,7 +14,10 @@
  *     silently drops work;
  *   - the source's USER-authored comments are re-pointed to the target. The
  *     user wrote them, so they are not the pass's to delete. Agent comments
- *     go with the source: they narrate a ticket that no longer exists;
+ *     filed on the source TICKET go with it: they narrate a ticket that no
+ *     longer exists. (Comments of either author hanging off a source STORY
+ *     travel with that story, because the story itself survives — the rule is
+ *     about the row being deleted, not about who wrote what.);
  *   - dependency edges are re-pointed, so nothing the source waited for and
  *     nothing waiting on it is silently unblocked;
  *   - the source's full original text is posted on the target as an
