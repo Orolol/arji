@@ -22,6 +22,7 @@ import {
   type ChatModeProvider,
 } from "@/lib/agent-config/constants";
 import type { DeskProject } from "@/lib/control-desk/types";
+import { cn } from "@/lib/utils";
 
 export const CHAT_COMPOSER_PLACEHOLDER =
   "Écris — ⏎ envoie, ⇧⏎ saute une ligne, @ cite un doc";
@@ -141,10 +142,21 @@ export function ChatComposer({
         className="px-[18px] pb-1"
       />
 
+      {/*
+        ONE ROW FROM `sm`, TWO BELOW IT (B-arij-180). The row is a 16px glyph,
+        a text field and three fixed controls: at 390px the controls' own
+        min-content took all of it and the field was measured at 24px — on
+        screen, uncovered, and useless. Wrapping gives the field its own row
+        and drops the controls underneath; from `sm` the band is byte-for-byte
+        the single row it has always been.
+      */}
       <StrataBand
         stratum="feed"
         gap={13}
-        className="min-h-[58px] shrink-0 flex-row items-center px-[18px] py-0"
+        className={cn(
+          "min-h-[58px] shrink-0 flex-row flex-wrap items-center px-[18px] py-[9px]",
+          "sm:flex-nowrap sm:py-0",
+        )}
       >
         <Sparkles
           size={16}
@@ -152,25 +164,33 @@ export function ChatComposer({
           className="shrink-0 text-strata-feed-deep"
         />
 
-        <MentionTextarea
-          projectId={projectId ?? ""}
-          value={value}
-          onValueChange={setValue}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          onCompositionStart={() => {
-            composingRef.current = true;
-          }}
-          onCompositionEnd={() => {
-            composingRef.current = false;
-          }}
-          placeholder={CHAT_COMPOSER_PLACEHOLDER}
-          aria-label="Écris un message"
-          data-testid="chat-composer-input"
-          rows={1}
-          disabled={disabled}
-          className="min-h-[24px] max-h-[120px] min-w-0 flex-1 resize-none rounded-none border-0 bg-transparent p-0 py-[17px] text-[13.5px] font-medium text-foreground shadow-none placeholder:text-strata-feed-deep placeholder:opacity-90 focus-visible:border-0 focus-visible:ring-0"
-        />
+        {/*
+          THE FLEX ITEM IS THIS DIV, not the textarea. `MentionTextarea` owns
+          its own `relative flex-1 min-w-0 w-full` wrapper (the mention popover
+          anchors on it), so a basis set through `className` lands one level
+          too deep and never reaches the row.
+        */}
+        <div className="flex min-w-0 grow shrink basis-[calc(100%-29px)] sm:basis-0">
+          <MentionTextarea
+            projectId={projectId ?? ""}
+            value={value}
+            onValueChange={setValue}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false;
+            }}
+            placeholder={CHAT_COMPOSER_PLACEHOLDER}
+            aria-label="Écris un message"
+            data-testid="chat-composer-input"
+            rows={1}
+            disabled={disabled}
+            className="min-h-[24px] max-h-[120px] min-w-0 flex-1 resize-none rounded-none border-0 bg-transparent p-0 py-[17px] text-[13.5px] font-medium text-foreground shadow-none placeholder:text-strata-feed-deep placeholder:opacity-90 focus-visible:border-0 focus-visible:ring-0"
+          />
+        </div>
 
         <PillButton
           variant="outline"
@@ -200,7 +220,17 @@ export function ChatComposer({
           ))}
         </SelectPill>
 
-        <SelectPill label={agentLabel} tone="ink" disabled={agentLocked}>
+        {/*
+          A named agent's name is arbitrary, and the pill is `shrink-0`. On a
+          phone row it is capped so `SelectPill`'s own `truncate` can do its
+          job instead of pushing the row wider than the band.
+        */}
+        <SelectPill
+          label={agentLabel}
+          tone="ink"
+          disabled={agentLocked}
+          className="max-w-[45%] sm:max-w-none"
+        >
           <DropdownMenuLabel className="text-[11px] text-muted-foreground">
             Direct API
           </DropdownMenuLabel>

@@ -55,6 +55,12 @@ export interface SegmentedControlProps<T extends string> {
    * breakpoint restores `basis-0`, `flex-nowrap` and the fixed height.
    */
   wrap?: boolean;
+  /**
+   * Accessible name for the `role="group"` rail. A control that only switches
+   * a view (the chat page's Conversations | Fil | Contexte) is otherwise an
+   * unnamed group of three toggle buttons to a screen reader.
+   */
+  "aria-label"?: string;
   className?: string;
 }
 
@@ -65,12 +71,14 @@ export function SegmentedControl<T extends string>({
   chrome = "bordered",
   size = "md",
   wrap = false,
+  "aria-label": ariaLabel,
   className,
 }: SegmentedControlProps<T>) {
   return (
     <div
       data-slot="segmented-control"
       role="group"
+      aria-label={ariaLabel}
       className={cn(
         "flex overflow-hidden font-sans",
         wrap && "flex-wrap sm:flex-nowrap",
@@ -114,7 +122,16 @@ export function SegmentedControl<T extends string>({
                 : "h-full",
               "cursor-pointer text-[12px] leading-none outline-none",
               "transition-[background-color,color,opacity] duration-150 motion-reduce:transition-none",
-              "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+              // `focus-visible:outline-solid` is load-bearing, not noise. In
+              // Tailwind v4 `outline-none` sets `--tw-outline-style: none`, and
+              // `outline-2` only sets a WIDTH — it resolves its style from that
+              // same variable. Measured in Chrome before this line: the segment
+              // matched `:focus-visible`, computed `outline-width: 2px` and
+              // `outline-color` correctly, and still painted nothing because
+              // `outline-style` stayed `none`. Same mechanism as B-arij-194 on
+              // TopBar; the other call sites of this shape are their own ticket.
+              "focus-visible:outline-2 focus-visible:outline-solid",
+              "focus-visible:-outline-offset-2 focus-visible:outline-ring",
               "disabled:pointer-events-none disabled:opacity-45",
               active
                 ? "bg-action font-semibold text-action-foreground"
