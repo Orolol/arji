@@ -40,7 +40,7 @@ export const ROUTINE_KIND_DESCRIPTIONS: Record<AvailableRoutineKind, string> = {
   ci_watch:
     "Polls open pull requests and reports newly failing CI checks by head SHA.",
   retention:
-    "Prunes stored output of terminal sessions past the retention window, keeping each session's final response and forensic tail.",
+    "Prunes stored output of terminal sessions past the retention window, keeping each session's final response and forensic tail, and caps stored prompts left over the size limit.",
 };
 
 export function isAvailableRoutineKind(
@@ -84,6 +84,19 @@ export function defaultRoutineConfig(
  * configuration a user edits — see INTERNAL_CONFIG_KEYS there.
  */
 export const RETENTION_VACUUMED_AT_CONFIG_KEY = "retentionVacuumedAt";
+
+/**
+ * The same one-shot claim for the prompt sweep, and a SEPARATE key on purpose.
+ *
+ * `agent_sessions.prompt` and `agent_session_chunks` are two independent
+ * historical backlogs, each cleared exactly once. Sharing one claim would mean
+ * whichever sweep ran first spent the other's VACUUM: a database that pruned
+ * chunks months ago would rewrite 22 MB of prompt into the free list and never
+ * return a byte of it to the filesystem. Two keys, two rewrites over the life
+ * of a database, and neither backlog silently loses its reclaim.
+ */
+export const RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY =
+  "retentionPromptsVacuumedAt";
 
 export const TIME_OF_DAY_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 

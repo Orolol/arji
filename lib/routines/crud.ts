@@ -5,6 +5,7 @@ import {
   isDailyRoutineKind,
   isAvailableRoutineKind,
   isSameLocalDay,
+  RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY,
   RETENTION_VACUUMED_AT_CONFIG_KEY,
   type AvailableRoutineKind,
   TIME_OF_DAY_PATTERN,
@@ -15,6 +16,7 @@ const INTERNAL_CONFIG_KEYS = new Set([
   "ciWatchState",
   "ciWatchErrorState",
   RETENTION_VACUUMED_AT_CONFIG_KEY,
+  RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY,
 ]);
 
 /**
