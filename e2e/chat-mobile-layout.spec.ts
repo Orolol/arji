@@ -137,6 +137,19 @@ interface PageGeometry {
   composer: Box | null;
   /** The composer's own band — the box its controls have to stay inside. */
   band: Box | null;
+  /**
+   * How the band resolved its own row, and whether the stylesheet that decides
+   * it arrived at all.
+   *
+   * `next dev` compiles CSS per route on first request, and under parallel
+   * workers a cold route can paint before its stylesheet lands. Unstyled, the
+   * band is a plain block whose flex-wrap is the CSS initial `nowrap` — which
+   * squeezes the field exactly as a real regression would. Without these two
+   * the failure reads "the field is 89px" and points at the fix rather than at
+   * the server that had not finished compiling.
+   */
+  bandWrap: string;
+  bandStyled: boolean;
   input: Box | null;
   /** `true` when the point at the composer input's centre belongs to it. */
   inputHittable: boolean;
@@ -283,6 +296,10 @@ async function readGeometry(page: Page): Promise<PageGeometry> {
       threadPane: box(document.querySelector('[data-testid="chat-thread-pane"]')),
       composer: box(composer),
       band: box(band),
+      bandWrap: band ? getComputedStyle(band).flexWrap : "no-band",
+      // `display:flex` is the band's own base class. Resolving to `block`
+      // means Tailwind's stylesheet is not applied to this document yet.
+      bandStyled: !!band && getComputedStyle(band).display === "flex",
       input: box(input),
       inputHittable: hittable(input),
       controls: buttons.map((button, index) => ({
@@ -341,10 +358,20 @@ function expectComposerUsable(geometry: PageGeometry, where: string) {
     geometry.inputHittable,
     `${where}: something covers the composer input`,
   ).toBe(true);
+  // The stylesheet first: an unstyled band squeezes the field exactly as a
+  // regression does, and saying so is the difference between a bug report and
+  // a re-run.
+  expect(
+    geometry.bandStyled,
+    `${where}: the composer band is unstyled (display is not flex) — the page ` +
+      `was measured before its stylesheet landed, so nothing below this is ` +
+      `evidence about the layout`,
+  ).toBe(true);
   expect(
     geometry.input!.width,
     `${where}: the composer input was squeezed to ${geometry.input!.width}px ` +
-      `by the controls beside it`,
+      `by the controls beside it (band ${geometry.band?.width}px, ` +
+      `flex-wrap ${geometry.bandWrap})`,
   ).toBeGreaterThanOrEqual(MIN_INPUT_WIDTH_PX);
   expect(
     geometry.controls.length,
@@ -386,6 +413,37 @@ async function settleComposer(page: Page) {
     ),
   ).not.toHaveText("—");
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
+
+  /*
+    AND the stylesheet that decides the band's row.
+
+    `next dev` compiles CSS per route on first request. Observed once: the
+    first run of this spec against a cold server with two workers reported an
+    89px field at 1024 and a covered input at 640, and six consecutive runs
+    once the route was warm were green — as were the same widths measured one
+    at a time on the cold tree. An unstyled band is a plain block whose
+    flex-wrap is the CSS initial `nowrap`, which squeezes the field exactly as
+    a real regression would, so a page measured before its stylesheet landed
+    fits those numbers.
+
+    NOT PROVEN: this wait was added after that run, so `bandStyled` was never
+    captured at the moment it failed, and concurrent load from a second session
+    on the same dev server is an equally good fit. The wait closes the styling
+    race specifically; the assertion below names it if it ever recurs.
+
+    `display: flex` is the band's own base class, so it resolving to `block`
+    means Tailwind has not reached this document. WAITING on it rather than
+    asserting it is what keeps a cold route from reading as a layout defect;
+    `expectComposerUsable` still asserts it, for the case where it never
+    arrives at all. CI runs `next start` (playwright.config.ts, SERVER_MODE),
+    which compiles nothing and never takes this path.
+  */
+  await page.waitForFunction(() => {
+    const band = document
+      .querySelector('[data-testid="chat-composer"]')
+      ?.querySelector('[data-slot="strata-band"]');
+    return !!band && getComputedStyle(band).display === "flex";
+  });
 }
 
 async function capture(page: Page, info: TestInfo, name: string) {
