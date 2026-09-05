@@ -1,6 +1,9 @@
 arij.db
 arij.db-wal
 arij.db-shm
+e2e.db
+e2e.db-wal
+e2e.db-shm
 sessions/
 logs/
 uploads/
