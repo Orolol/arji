@@ -7,6 +7,8 @@ import { Mono, SelectPill } from "@/components/piscine";
 import { useTicketOverlay } from "@/components/ticket/TicketOverlayProvider";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { DeskProject } from "@/lib/control-desk/types";
+import { defaultSortDirection, sortRegistryRows, type RegistrySortDirection } from "@/lib/tickets-registry/sort";
+import type { KanbanStatus } from "@/lib/types/kanban";
 import { REGISTRY_GROUP_ORDER } from "@/lib/tickets-registry/aggregate";
 import {
   REGISTRY_WINDOW_MAX,
@@ -61,38 +63,24 @@ function matchesQuery(row: RegistryRow, needle: string): boolean {
   );
 }
 
-/**
- * Re-order WITHIN a group, never across one.
- *
- * `activité` keeps the server's order, which is the exact one: the open set
- * arrives in `epics.position` (execution order) and the two terminal windows in
- * `updated_at DESC`. The other three sorts are approximate for the WINDOWED
- * groups — a `coût` or `priorité` sort orders only the rows the window shipped
- * — which is precisely why the server window is ordered by recency, so the
- * DEFAULT sort is the one that is always exact.
- */
-function sortRows(rows: RegistryRow[], sort: RegistrySort): RegistryRow[] {
-  if (sort === "activite") return rows;
-  const sorted = [...rows];
-  if (sort === "priorite") {
-    sorted.sort((a, b) => (b.priority ?? -1) - (a.priority ?? -1));
-    return sorted;
-  }
-  if (sort === "cout") {
-    sorted.sort((a, b) => (b.costUsd ?? -1) - (a.costUsd ?? -1));
-    return sorted;
-  }
-  sorted.sort((a, b) =>
-    (a.readableId ?? a.epicId).localeCompare(b.readableId ?? b.epicId),
-  );
-  return sorted;
-}
-
 export interface TicketsRegistryViewProps {
   projectId?: string;
 }
 
 export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
+  // A route scope change takes precedence over the screen's local selection.
+  const [projectSelection, setProjectSelection] = useState<{
+    scope?: string;
+    value: string | null;
+  }>({ scope: projectId, value: projectId ?? null });
+  if (projectSelection.scope !== projectId) {
+    setProjectSelection({ scope: projectId, value: projectId ?? null });
+  }
+  const selectedProjectId = projectSelection.scope === projectId
+    ? projectSelection.value
+    : projectId ?? null;
+  const [status, setStatus] = useState<KanbanStatus | "all">("all");
+  const [direction, setDirection] = useState<RegistrySortDirection>("desc");
   const [state, setState] = useState<RegistryStateFilter>("all");
   const [bug, setBug] = useState(false);
   const [highPlus, setHighPlus] = useState(false);
@@ -109,7 +97,7 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
     () => new Set(),
   );
 
-  const { data, error, setWindow, refresh } = useTicketsRegistry(projectId ?? null, query);
+  const { data, error, setWindow, refresh } = useTicketsRegistry(selectedProjectId, query, sort, direction, status);
   const { openTicket } = useTicketOverlay();
 
   /**
@@ -117,8 +105,8 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
    * targets. The pass is per-project (`/api/projects/:id/refinement`), and
    * this screen shows tickets from every project at once, so the target is
    * picked explicitly from the projects the registry already lists — never
-   * inferred. In a scoped registry the route param is authoritative and this
-   * state is neither read nor written.
+   * inferred. When a project filter is selected, it supplies the target and this
+   * separate refinement selection is unused.
    */
   const [refinementProjectId, setRefinementProjectId] = useState<string | null>(null);
   /**
@@ -167,11 +155,13 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
     return rows.filter(
       (row) =>
         groups.has(row.group) &&
+        (!selectedProjectId || row.projectId === selectedProjectId) &&
+        (status === "all" || row.status === status) &&
         (!bug || row.type === "bug") &&
         (!highPlus || (row.priority ?? -1) >= 2) &&
         matchesQuery(row, needle),
     );
-  }, [data, state, bug, highPlus, needle]);
+  }, [data, state, bug, highPlus, needle, selectedProjectId, status]);
 
   const rowsByGroup = useMemo(() => {
     const grouped: Record<RegistryGroup, RegistryRow[]> = {
@@ -183,10 +173,10 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
     };
     for (const row of filteredRows) grouped[row.group].push(row);
     for (const group of REGISTRY_GROUP_ORDER) {
-      grouped[group] = sortRows(grouped[group], sort);
+      grouped[group] = sortRegistryRows(grouped[group], sort, direction);
     }
     return grouped;
-  }, [filteredRows, sort]);
+  }, [filteredRows, sort, direction]);
 
   /**
    * The header's tally.
@@ -241,13 +231,13 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
   const onExportCsv = useCallback(() => {
     // Every filtered row across every group — group truncation is a display
     // device, not a scope.
-    downloadCsv(filteredRows);
-  }, [filteredRows]);
+    downloadCsv(REGISTRY_GROUP_ORDER.flatMap((group) => rowsByGroup[group]));
+  }, [rowsByGroup]);
 
   /**
    * The refinement entry point, rendered into the filter row's right cluster.
    *
-   * Scoped registry (`?project=`): the route param is the pass's target,
+   * Project-filtered registry: the selected project is the pass's target,
    * exactly like the board's toolbar button — no picker, nothing to choose.
    * Unscoped: the pass still targets ONE project's board, and the projects
    * the registry already lists are the picker's only options. The picker is
@@ -258,7 +248,7 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
   const selectedProject = refinementProjectId
     ? projects.find((p) => p.id === refinementProjectId)
     : undefined;
-  const refinementTarget = projectId ?? refinementProjectId;
+  const refinementTarget = selectedProjectId ?? refinementProjectId;
 
   const handleRefinementStarted = useCallback(() => {
     setRefinementNotice({
@@ -308,8 +298,8 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
           </Mono>
         </span>
       ) : null}
-      {projectId ? (
-        refinementButton(projectId)
+      {selectedProjectId ? (
+        refinementButton(selectedProjectId)
       ) : (
         <>
           <SelectPill
@@ -335,7 +325,17 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
     </div>
   );
 
-  const ticketCount = filtersActive ? filteredRows.length : (data?.totals.tickets ?? 0);
+  const onSortChange = useCallback((next: RegistrySort) => {
+    setDirection(next === sort ? direction === "asc" ? "desc" : "asc" : defaultSortDirection(next));
+    setSort(next);
+  }, [sort, direction]);
+  const ticketCount = (() => {
+    // Local filters count visible rows; state pills include unloaded rows in
+    // their groups, while All uses the exact-status scope's server total.
+    if (filtersActive || filteredRows.length === 0) return filteredRows.length;
+    if (state === "all") return data?.totals.tickets ?? 0;
+    return STATE_GROUPS[state].reduce((total, group) => total + (data?.groupTotals[group] ?? 0), 0);
+  })();
   const projectCount = data?.totals.projects ?? 0;
   const footerStatus =
     error ??
@@ -359,8 +359,14 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
     >
       <RegistryFilters
         counts={counts}
+        projects={data?.projects ?? []}
+        projectId={selectedProjectId}
+        onProjectChange={(value) => setProjectSelection({ scope: projectId, value })}
+        status={status}
+        onStatusChange={(value) => { setStatus(value); setState("all"); }}
+        direction={direction}
         state={state}
-        onStateChange={setState}
+        onStateChange={(value) => { setState(value); setStatus("all"); }}
         bug={bug}
         onBugChange={setBug}
         highPlus={highPlus}
@@ -369,12 +375,15 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
         onQueryChange={setQuery}
         focusKey={focusKey}
         sort={sort}
-        onSortChange={setSort}
+        onSortChange={onSortChange}
         actions={refinementActions}
       />
 
       <div className="flex min-h-0 flex-1 flex-col px-[14px] pb-[14px]">
         <RegistryTable
+          sort={sort}
+          direction={direction}
+          onSortChange={onSortChange}
           rowsByGroup={data ? rowsByGroup : EMPTY_ROWS}
           groupTotals={groupTotals}
           projectsById={projectsById}

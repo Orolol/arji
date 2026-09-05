@@ -31,6 +31,7 @@ import {
   deriveWorking,
   normalizeLogLine,
   type EpicRow,
+  type DependencyEpicRow,
   type FailureSessionRow,
   type SessionRow,
 } from "@/lib/control-desk/aggregate";
@@ -142,14 +143,20 @@ export interface RegistryEpicRow extends EpicRow {
   releaseId: string | null;
 }
 
+export interface RegistrySessionRow extends SessionRow {
+  activityAt: string | null;
+}
+
 export interface RegistryDeriveInput {
   projects: readonly DeskProject[];
   epics: readonly RegistryEpicRow[];
   /** Every `running` / `queued` session, the desk's own read. */
-  sessions: readonly SessionRow[];
+  sessions: readonly RegistrySessionRow[];
   /** Newest-session-per-epic rows inside the 14-day failure cutoff. */
   failureSessions: readonly FailureSessionRow[];
   edges: readonly TicketDependencyEdge[];
+  /** Prerequisite facts independent of search, filters and terminal windows. */
+  dependencyEpics?: readonly DependencyEpicRow[];
   /** `releases.id → version`, for the released group's stamp. */
   releaseVersionById: ReadonlyMap<string, string>;
   /** `SUM(total_cost_usd)` per epic. Absent AND null both mean "no cost". */
@@ -315,10 +322,12 @@ export function deriveRegistryRows(input: RegistryDeriveInput): RegistryRow[] {
   // is the only way the registry's `To Do · #1` and the desk's UP NEXT rank-1
   // chip are guaranteed to name the same ticket.
   const queueTickets = new Map(
-    deriveUpNext(input.projects, input.epics, input.edges, busyEpicIds).flatMap(
+    deriveUpNext(input.projects, input.epics, input.edges, busyEpicIds, input.dependencyEpics).flatMap(
       (project) => project.tickets.map((ticket) => [ticket.epicId, ticket] as const),
     ),
   );
+
+  const activityBySession = new Map(input.sessions.map((session) => [session.id, session.activityAt]));
 
   return input.epics.map((epic) => {
     const status = epic.status ?? "";
@@ -398,6 +407,8 @@ export function deriveRegistryRows(input: RegistryDeriveInput): RegistryRow[] {
       usCount: epic.usCount,
       activity,
       activityTone: tone,
+      activityAt: (live ? activityBySession.get(live.sessionId) ?? live.startedAt : null) ?? ask?.askedAt ?? failure?.failedAt ?? conflict?.at
+        ?? (status === "backlog" && blockedBy.length === 0 ? epic.createdAt : epic.updatedAt),
       costUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : null,
       projectName: project?.name ?? "",
     } satisfies RegistryRow;
@@ -431,9 +442,10 @@ export interface RegistryTotals {
  *
  * The one approximation, stated rather than hidden: an unloaded `done`/
  * `released` row that a running session or an unanswered question would have
- * promoted into ACTIVE / YOUR TURN is counted in its status's group. Both
- * promotions imply very recent activity and the window is ordered by
- * `updated_at DESC`, so such a row is essentially always inside it.
+ * promoted into ACTIVE / YOUR TURN is counted in its status's group. The
+ * caller chooses the window order, so even recent promotions may be omitted;
+ * ACTIVE / YOUR TURN can be understated and terminal groups overstated.
+ * Dependency readiness is separate: it uses complete prerequisite facts.
  */
 export function deriveRegistryTotals(input: RegistryTotalsInput): RegistryTotals {
   const groupLoaded: Record<RegistryGroup, number> = {

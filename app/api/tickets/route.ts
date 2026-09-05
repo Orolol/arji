@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 
+import { KANBAN_COLUMNS, type KanbanStatus } from "@/lib/types/kanban";
+import { REGISTRY_SORTS, type RegistrySort } from "@/lib/tickets-registry/sort";
+import { getSessionLastActivityAt } from "@/lib/agents/watchdog";
 import { db } from "@/lib/db";
 import {
   agentSessions,
@@ -25,7 +28,6 @@ import type { TicketDependencyEdge } from "@/lib/types/kanban";
 import {
   deriveProjects,
   type FailureSessionRow,
-  type SessionRow,
 } from "@/lib/control-desk/aggregate";
 import {
   CONTROL_DESK_LOOKBACK_DAYS,
@@ -35,6 +37,7 @@ import {
   deriveRegistryRows,
   deriveRegistryTotals,
   type RegistryEpicRow,
+  type RegistrySessionRow,
 } from "@/lib/tickets-registry/aggregate";
 import {
   REGISTRY_COST_WINDOW_DAYS,
@@ -198,6 +201,8 @@ export async function GET(request: Request) {
   const now = new Date();
   const url = new URL(request.url);
   const scopedProject = url.searchParams.get("project")?.trim() || null;
+  const requestedStatus = url.searchParams.get("status");
+  const scopedStatus = KANBAN_COLUMNS.includes(requestedStatus as KanbanStatus) ? requestedStatus as KanbanStatus : null;
   const qLike = likePattern(url.searchParams.get("q"));
   const doneLimit = clampLimit(url.searchParams.get("doneLimit"), REGISTRY_DONE_WINDOW);
   const releasedLimit = clampLimit(
@@ -262,11 +267,32 @@ export async function GET(request: Request) {
     .orderBy(epics.position)
     .all();
 
+  // Order terminal tickets BEFORE limiting them, so changing a header can
+  // reveal an older ticket outside the default recency window. These scalar
+  // aggregates use the existing epic_id indexes and never read session prose.
+  const requestedSort = url.searchParams.get("sort");
+  const sort: RegistrySort = REGISTRY_SORTS.includes(requestedSort as RegistrySort)
+    ? requestedSort as RegistrySort : "activite";
+  const ascending = url.searchParams.get("direction") === "asc";
+  const terminalSortValue = {
+    ticket: sql`lower(coalesce(${epics.readableId}, ${epics.id}))`,
+    titre: sql`lower(${epics.title})`,
+    // Status is constant within each terminal window: state sorting is
+    // display-only. Keep the newest window in both directions.
+    etat: sql`julianday(${epics.updatedAt})`,
+    stories: sql`(SELECT count(*) FROM user_stories WHERE user_stories.epic_id = ${epics.id})`,
+    priorite: sql`${epics.priority}`,
+    activite: sql`julianday(${epics.updatedAt})`,
+    cout: sql`(SELECT sum(total_cost_usd) FROM agent_sessions WHERE agent_sessions.epic_id = ${epics.id})`,
+  }[sort];
+
   /* ---- 4/5. the two terminal windows -------------------------------- */
 
   // `(project_id, status)` are the index's two leading columns, so this is one
-  // range per project; `updated_at` is not in the index, so SQLite builds a
-  // temp b-tree over that range. Bounded and cheap. The free-text filter is
+  // range per project. The caller-chosen sort needs a temporary b-tree over
+  // all candidates before LIMIT; cost/story sorts also aggregate per candidate.
+  // Only the returned rows and their downstream fact queries are bounded.
+  // The free-text filter is
   // applied HERE and only here, so a search can reach a released ticket that
   // sits outside the default window.
   const terminalWindow = (status: "done" | "released", limit: number) =>
@@ -289,7 +315,7 @@ export async function GET(request: Request) {
             : []),
         ),
       )
-      .orderBy(desc(epics.updatedAt))
+      .orderBy(sql`${terminalSortValue} IS NULL`, ascending && sort !== "etat" ? asc(terminalSortValue) : desc(terminalSortValue), asc(epics.id))
       .limit(limit)
       .all();
 
@@ -555,8 +581,8 @@ export async function GET(request: Request) {
   // The one deliberately unindexed scan (`status` has no index): its answer
   // must not be truncated, and it reads only narrow columns (~0.1 ms).
   // `last_non_empty_text` is UNCAPPED at the write side — a CLI emitting one
-  // 4 MB line stores 4 MB — so the clip happens in SQL. No watchdog call: the
-  // registry draws no stale marker and `deriveWorking` handles `undefined`.
+  // 4 MB line stores 4 MB — so the clip happens in SQL. The indexed last-chunk lookup below supplies the live activity sort;
+  // no watchdog sweep or stale-state mutation runs on this read path.
   const activeRows = db
     .select({
       id: agentSessions.id,
@@ -592,7 +618,10 @@ export async function GET(request: Request) {
     )
     .all();
 
-  const sessionRows: SessionRow[] = activeRows;
+  const sessionRows: RegistrySessionRow[] = activeRows.map((session) => ({
+    ...session,
+    activityAt: getSessionLastActivityAt(session),
+  }));
 
   /* ---- 14. failures ------------------------------------------------- */
 
@@ -685,6 +714,22 @@ export async function GET(request: Request) {
     .where(inArray(ticketDependencies.projectId, scopedProjectIds))
     .all();
 
+  // Read only the prerequisite identity/status projection. A delivered
+  // prerequisite may be outside either window (or excluded by search); it
+  // must still satisfy its edges without becoming a row in the response.
+  const dependencyEpics = db
+    .selectDistinct({
+      id: epics.id,
+      projectId: epics.projectId,
+      status: epics.status,
+      readableId: epics.readableId,
+      title: epics.title,
+    })
+    .from(ticketDependencies)
+    .innerJoin(epics, eq(ticketDependencies.dependsOnTicketId, epics.id))
+    .where(inArray(ticketDependencies.projectId, scopedProjectIds))
+    .all();
+
   /* ---- 16. release versions ----------------------------------------- */
 
   const releaseIds = [
@@ -752,21 +797,29 @@ export async function GET(request: Request) {
     };
   });
 
-  const rows = deriveRegistryRows({
+  const derivedRows = deriveRegistryRows({
     projects: deskProjects,
     epics: registryEpics,
     sessions: sessionRows,
     failureSessions,
     edges,
+    dependencyEpics,
     releaseVersionById,
     costByEpicId,
     now,
   });
+  const rows = derivedRows.filter((row) => !scopedStatus || row.status === scopedStatus);
 
-  const { groupTotals, groupLoaded, counts } = deriveRegistryTotals({
+  // State pills clear the exact filter, so their counts describe that scope.
+  // Group totals and the footer describe the current exact filter instead.
+  const { counts } = deriveRegistryTotals({ rows: derivedRows, statusCounts });
+  const visibleTotals = deriveRegistryTotals({
     rows,
-    statusCounts,
+    statusCounts: scopedStatus
+      ? new Map([[scopedStatus, statusCounts.get(scopedStatus) ?? 0]])
+      : statusCounts,
   });
+  const { groupTotals, groupLoaded } = visibleTotals;
 
   const payload: TicketsRegistryPayload = {
     generatedAt: now.toISOString(),
@@ -776,7 +829,7 @@ export async function GET(request: Request) {
     groupTotals,
     groupLoaded,
     totals: {
-      tickets: counts.all ?? 0,
+      tickets: visibleTotals.counts.all ?? 0,
       projects: scopedProject ? 1 : deskProjects.length,
       cost30dUsd:
         typeof cost30d?.cost === "number" && Number.isFinite(cost30d.cost)

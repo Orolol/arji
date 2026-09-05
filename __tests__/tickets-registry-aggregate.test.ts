@@ -8,12 +8,13 @@
 import { describe, it, expect } from "vitest";
 
 import { relativeAge as deskRelativeAge } from "@/components/desk/AttentionRow";
-import { deriveProjects, type SessionRow, type FailureSessionRow } from "@/lib/control-desk/aggregate";
+import { deriveProjects, type FailureSessionRow } from "@/lib/control-desk/aggregate";
 import {
   GROUP_PREVIEW,
   TASK_LABEL,
   composeActivity,
   deriveRegistryRows,
+  type RegistrySessionRow,
   deriveRegistryTotals,
   relativeAge,
   type RegistryEpicRow,
@@ -62,8 +63,9 @@ function epic(overrides: Partial<RegistryEpicRow> & { id: string }): RegistryEpi
   };
 }
 
-function session(overrides: Partial<SessionRow> & { id: string }): SessionRow {
+function session(overrides: Partial<RegistrySessionRow> & { id: string }): RegistrySessionRow {
   return {
+    activityAt: null,
     projectId: "p1",
     epicId: null,
     userStoryId: null,
@@ -107,7 +109,7 @@ function failure(
 
 function derive(input: {
   epics: RegistryEpicRow[];
-  sessions?: SessionRow[];
+  sessions?: RegistrySessionRow[];
   failures?: FailureSessionRow[];
   edges?: TicketDependencyEdge[];
   releases?: Map<string, string>;
@@ -466,4 +468,12 @@ describe("GROUP_PREVIEW", () => {
       released: 2,
     });
   });
+});
+
+ it("exposes the live session's latest output date for activity sorting", () => {
+  const [row] = derive({
+    epics: [epic({ id: "live" })],
+    sessions: [{ ...session({ id: "s", epicId: "live" }), activityAt: "2026-08-30T11:59:00Z" }],
+  });
+  expect(row.activityAt).toBe("2026-08-30T11:59:00Z");
 });

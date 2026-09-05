@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import { Mono, QuietLink, StrataBand } from "@/components/piscine";
 import type { DeskProject } from "@/lib/control-desk/types";
 import { GROUP_PREVIEW, REGISTRY_GROUP_ORDER } from "@/lib/tickets-registry/aggregate";
 import type { RegistryGroup, RegistryRow as Row } from "@/lib/tickets-registry/types";
+import type { RegistrySort, RegistrySortDirection } from "@/lib/tickets-registry/sort";
 import { cn } from "@/lib/utils";
 
 import { GroupHeader } from "./GroupHeader";
@@ -28,15 +29,11 @@ import { REGISTRY_GRID, RegistryRow } from "./RegistryRow";
 
 /** Source copy is sentence case; CSS uppercases it, so screen readers and the
  * copy files keep the readable form (the `BandHeader` convention). */
-const COLUMNS = [
-  "Ticket",
-  "Titre",
-  "État",
-  "Stories",
-  "Priorité",
-  "Dernière activité",
-  "Coût",
-] as const;
+const COLUMNS: readonly [string, RegistrySort][] = [
+  ["Ticket", "ticket"], ["Titre", "titre"], ["État", "etat"],
+  ["Stories", "stories"], ["Priorité", "priorite"],
+  ["Dernière activité", "activite"], ["Coût", "cout"],
+];
 
 /** The truncation line's noun, when it can be stated truthfully. */
 function truncationSuffix(group: RegistryGroup, hiddenRows: readonly Row[]): string {
@@ -56,6 +53,9 @@ function truncationSuffix(group: RegistryGroup, hiddenRows: readonly Row[]): str
 }
 
 export interface RegistryTableProps {
+  sort: RegistrySort;
+  direction: RegistrySortDirection;
+  onSortChange: (sort: RegistrySort) => void;
   rowsByGroup: Record<RegistryGroup, Row[]>;
   /** True totals per group — windowed groups report more than they ship. */
   groupTotals: Record<RegistryGroup, number>;
@@ -74,6 +74,9 @@ export interface RegistryTableProps {
 }
 
 export function RegistryTable({
+  sort,
+  direction,
+  onSortChange,
   rowsByGroup,
   groupTotals,
   projectsById,
@@ -108,19 +111,20 @@ export function RegistryTable({
           "shrink-0 border-b-[1.5px] border-border px-[18px] py-[9px]",
         )}
       >
-        {COLUMNS.map((label, index) => (
-          <Mono
-            key={label}
-            size={9.5}
-            weight={700}
-            tracking={0.08}
-            uppercase
-            tone="muted"
-            className={cn("min-w-0", index === COLUMNS.length - 1 && "justify-self-end text-right")}
-          >
-            {label}
-          </Mono>
-        ))}
+        {COLUMNS.map(([label, key], index) => {
+          const Icon = sort !== key ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
+          return (
+            <div key={key} role="columnheader" aria-sort={sort === key ? direction === "asc" ? "ascending" : "descending" : "none"}
+              className={cn("min-w-0", index === COLUMNS.length - 1 && "justify-self-end text-right")}>
+              <button type="button" onClick={() => onSortChange(key)}
+                title="Trier dans chaque groupe"
+                className="flex items-center gap-1 cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">
+                <Mono size={9.5} weight={700} tracking={0.08} uppercase tone={sort === key ? "ink" : "muted"}>{label}</Mono>
+                <Icon size={11} aria-hidden className="shrink-0 text-muted-foreground" />
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto" data-testid="tickets-body">

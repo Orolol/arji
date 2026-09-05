@@ -570,3 +570,123 @@ describe("an empty board", () => {
     expect(data.totals.projects).toBe(0);
   });
 });
+
+describe("column sorting before terminal pagination", () => {
+  it.each(["done", "released"] as const)("finds older %s tickets outside the recency window", async (status) => {
+    db.insert(epics).values([
+      { id: "old", projectId: "p1", title: "Alpha", readableId: "ARJ-001", status, priority: 3, updatedAt: daysAgo(30) },
+      { id: "new", projectId: "p1", title: "Zulu", readableId: "ARJ-002", status, priority: 1, updatedAt: daysAgo(1) },
+      { id: "foreign", projectId: "p2", title: "Aardvark", status, priority: 3 },
+    ]).run();
+    db.insert(userStories).values({ id: "us", epicId: "old", title: "Story" }).run();
+    db.insert(agentSessions).values({ id: "cost", projectId: "p1", epicId: "old", agentType: "build", status: "completed", totalCostUsd: 9 }).run();
+    const query = `?project=p1&${status}Limit=1`;
+    for (const [sort, direction] of [["ticket", "asc"], ["titre", "asc"], ["priorite", "desc"], ["stories", "desc"], ["cout", "desc"], ["activite", "asc"]]) {
+      const data = await payload(`${query}&sort=${sort}&direction=${direction}`);
+      expect(data.rows.map((row) => row.epicId), sort).toEqual(["old"]);
+      expect(data.groupTotals[status]).toBe(2);
+    }
+    for (const [sort, direction] of [["ticket", "desc"], ["titre", "desc"], ["priorite", "asc"], ["stories", "asc"], ["activite", "desc"]]) {
+      expect((await payload(`${query}&sort=${sort}&direction=${direction}`)).rows.map((row) => row.epicId), sort).toEqual(["new"]);
+    }
+    // Unknown query values keep the default recency order.
+    expect((await payload(`${query}&sort=invalid&direction=invalid`)).rows[0].epicId).toBe("new");
+  });
+});
+
+it("filters exact rows while keeping pill counts independent and terminal pagination exact", async () => {
+  db.insert(epics).values([
+    { id: "ready", projectId: "p1", title: "Ready", status: "to_merge" },
+    ...Array.from({ length: 45 }, (_, index) => ({ id: `done-${index}`, projectId: "p1", title: `Done ${index}`, status: "done" })),
+    { id: "other", projectId: "p2", title: "Other", status: "done" },
+  ]).run();
+  const first = await payload("?project=p1&status=done");
+  expect(first.rows).toHaveLength(40);
+  expect(first.rows.every((row) => row.status === "done")).toBe(true);
+  expect(first.groupTotals.done).toBe(45);
+  expect(first.counts.all).toBe(46);
+  expect(first.counts.done).toBe(46);
+  expect((await payload("?project=p1&status=done&doneLimit=45")).rows).toHaveLength(45);
+  const ready = await payload("?project=p1&status=to_merge");
+  expect(ready.rows.map((row) => row.epicId)).toEqual(["ready"]);
+  expect(ready.counts.all).toBe(46);
+  expect((await payload("?project=p1&status=released")).counts.all).toBe(46);
+});
+
+
+describe("dependency facts independent of visible terminal windows", () => {
+  it.each(["done", "released"])("keeps %s prerequisites satisfied under every open-state filter", async (deliveredStatus) => {
+    db.insert(epics).values([
+      { id: "dep", projectId: "p1", title: "Shipped", readableId: "ARJ-001", status: deliveredStatus },
+      ...["backlog", "todo", "in_progress", "review"].map((status) => ({ id: status, projectId: "p1", title: status, status })),
+    ]).run();
+    for (const status of ["backlog", "todo", "in_progress", "review"]) {
+      db.insert(ticketDependencies).values({ id: `edge-${status}`, projectId: "p1", ticketId: status, dependsOnTicketId: "dep", scopeId: "p1" }).run();
+    }
+    const baseline = byId(await payload("?project=p1"));
+    for (const status of ["backlog", "todo", "in_progress", "review"]) {
+      const data = await payload(`?project=p1&status=${status}`);
+      expect(data.rows).toHaveLength(1);
+      const row = data.rows[0];
+      expect(row.blockedBy, status).toEqual([]);
+      expect(row.queueRank, status).toBe(baseline.get(status)!.queueRank);
+      expect(row.activity, status).not.toContain("blocked");
+    }
+  });
+
+  it.each(["done", "released"])("keeps %s dependencies outside sorted and searched windows satisfied", async (status) => {
+    db.insert(epics).values([
+      { id: "dep", projectId: "p1", title: "Zulu shipped", status },
+      { id: "visible", projectId: "p1", title: "Alpha", status },
+      { id: "todo", projectId: "p1", title: "Pending", status: "todo" },
+    ]).run();
+    db.insert(ticketDependencies).values({ id: "edge", projectId: "p1", ticketId: "todo", dependsOnTicketId: "dep", scopeId: "p1" }).run();
+    for (const suffix of [`&sort=titre&direction=asc&${status}Limit=1`, "&q=Pending"]) {
+      const data = await payload(`?project=p1${suffix}`);
+      expect(byId(data).has("dep")).toBe(false);
+      expect(byId(data).get("todo")).toMatchObject({ blockedBy: [], queueRank: 1 });
+    }
+  });
+
+  it("retains readable blockers for undelivered prerequisites hidden by an exact filter", async () => {
+    db.insert(epics).values([
+      { id: "dep", projectId: "p1", title: "Unfinished", readableId: "ARJ-001", status: "review" },
+      { id: "todo", projectId: "p1", title: "Pending", status: "todo" },
+    ]).run();
+    db.insert(ticketDependencies).values({ id: "edge", projectId: "p1", ticketId: "todo", dependsOnTicketId: "dep", scopeId: "p1" }).run();
+    expect((await payload("?project=p1&status=todo")).rows[0]).toMatchObject({ blockedBy: ["ARJ-001"], queueRank: null });
+  });
+});
+
+it("keeps state-pill counts stable across exact filters", async () => {
+  db.insert(epics).values([
+    { id: "todo", projectId: "p1", title: "Todo", status: "todo" },
+    { id: "done1", projectId: "p1", title: "Done", status: "done" },
+    { id: "done2", projectId: "p1", title: "Done", status: "done" },
+    { id: "released", projectId: "p1", title: "Released", status: "released" },
+  ]).run();
+  const baseline = await payload("?project=p1");
+  for (const status of ["todo", "done", "released", "review"]) {
+    expect((await payload(`?project=p1&status=${status}`)).counts).toEqual(baseline.counts);
+  }
+});
+
+it.each(["done", "released"])("orders mixed stored timestamp formats before limiting %s", async (status) => {
+  db.insert(epics).values([
+    { id: "early", projectId: "p1", title: "Early", status, updatedAt: "2026-09-05T08:00:00.000Z" },
+    { id: "late", projectId: "p1", title: "Late", status, updatedAt: "2026-09-05 09:00:00" },
+  ]).run();
+  expect((await payload(`?project=p1&${status}Limit=1&sort=activite&direction=desc`)).rows[0].epicId).toBe("late");
+  expect((await payload(`?project=p1&${status}Limit=1&sort=activite&direction=asc`)).rows[0].epicId).toBe("early");
+});
+
+
+it.each(["done", "released"])("keeps the newest %s window when state sorting is display-only", async (status) => {
+  db.insert(epics).values([
+    { id: "a-old", projectId: "p1", title: "Old", status, updatedAt: daysAgo(30) },
+    { id: "z-new", projectId: "p1", title: "New", status, updatedAt: daysAgo(1) },
+  ]).run();
+  for (const direction of ["asc", "desc"]) {
+    expect((await payload(`?project=p1&${status}Limit=1&sort=etat&direction=${direction}`)).rows[0].epicId).toBe("z-new");
+  }
+});
