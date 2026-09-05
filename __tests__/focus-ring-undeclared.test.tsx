@@ -21,12 +21,15 @@
  * day and night, by `e2e/focus-ring.spec.ts`.
  */
 
+import { readFileSync } from "node:fs";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
 import {
   type ClassListSite,
   describeSite,
+  outlinePairingSites,
   scanSources,
   sourceFiles,
   undeclaredFocusSites,
@@ -203,15 +206,25 @@ describe("the ⌘K command palette input", () => {
   });
 
   /**
-   * The control: the palette's result buttons were already correct, and it is
-   * their correctness that made a source-level check on this file vacuous.
+   * The control, and the reason the assertion above reads the DOM instead of
+   * the source. This file already declared a correct ring before the fix — on
+   * its result buttons — so "some class list in DeskCommandPalette.tsx pairs
+   * outline-none with a painting ring" was true the whole time the input
+   * carried none. A file-level check would have passed on the wrong element.
    */
-  it("is a different element from the result buttons that were already fine", () => {
-    renderPalette();
-    const input = screen.getByTestId("desk-command-input");
+  it("is not the element a file-level check would have found", () => {
+    const file = "components/desk/DeskCommandPalette.tsx";
+    const rings = outlinePairingSites(readFileSync(file, "utf8"), file);
 
-    expect(input.tagName).toBe("INPUT");
-    expect(input.className).not.toContain("bg-muted");
+    expect(
+      rings.length,
+      `${file} is expected to hold more than one ring-declaring class list; ` +
+        `with only one, the file-level shortcut would be sound and this test ` +
+        `would be pinning nothing`,
+    ).toBeGreaterThan(1);
+
+    renderPalette();
+    expect(screen.getByTestId("desk-command-input").tagName).toBe("INPUT");
   });
 });
 
