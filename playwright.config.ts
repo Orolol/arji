@@ -93,7 +93,7 @@ export default defineConfig({
         ? `npm run start -- --port ${PORT}`
         : `npm run dev -- --port ${PORT}`,
     url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: !process.env.CI && process.env.E2E_REUSE_SERVER === "1",
     timeout: 120_000,
     /** Merged over the runner's own environment by Playwright. */
     env: {

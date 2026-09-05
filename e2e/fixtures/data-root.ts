@@ -30,7 +30,7 @@ export const DATA_ROOT = process.env.E2E_DATA_ROOT
  */
 export const DATABASE_FILE = process.env.ARIJ_DB_PATH?.trim()
   ? path.resolve(process.env.ARIJ_DB_PATH.trim())
-  : path.join(DATA_ROOT, "arij.db");
+  : path.join(DATA_ROOT, "e2e.db");
 
 /** The dev server holds the same WAL database open, so writes may have to queue. */
 export function openDatabase(): Database.Database {

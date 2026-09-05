@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { withDatabase } from "./data-root";
 
@@ -38,7 +39,8 @@ import { withDatabase } from "./data-root";
 export const CLI_STUB_BIN_DIR = path.join(__dirname, "cli-stub", "bin");
 
 /** Shared with `cli-stub/runtime.mjs`, which computes it the same way. */
-const STUB_HOME = path.join(tmpdir(), "arij-e2e-cli-stub");
+const STUB_HOME = path.join(tmpdir(), "arij-e2e-cli-stub-" + createHash("sha256")
+  .update(path.resolve(__dirname, "../..")).digest("hex").slice(0, 12));
 const SCENARIO_DIR = path.join(STUB_HOME, "scenarios");
 const INVOCATION_DIR = path.join(STUB_HOME, "invocations");
 const HANDSHAKE_FILE = path.join(STUB_HOME, "handshake.json");

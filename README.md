@@ -77,14 +77,14 @@ zones:
 
 - **left** — the logo pill (always back to the desk) and the project chips; the
   active project wears its colour, and a project with a live agent breathes.
-- **center** — three category bubbles, each opening a menu
+- **center** — a direct `Now` link to the desk, followed by three category bubbles, each opening a menu
   (`lib/piscine/nav.ts` is the single definition):
   - **Work** — Tickets, Spec & Memory, QA, Releases
   - **Agents** — Named agents, Sessions, Chat, Usage
   - **Réglages** — Workspace & Full Auto, Night runs, Notifications, Intégrations
 - **right** — `⌘K` command palette, Inbox, Auto, New.
 
-"Now" is never a category: the desk is what the logo returns to.
+`Now` is a direct destination with no menu; the logo also returns to the desk.
 
 ### Screens
 

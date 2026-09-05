@@ -360,7 +360,15 @@ export async function epicSessions(
   };
   return data
     .filter((row) => row.kind === "agent_session" && row.epicId === epicId)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .map(row => ({
+      ...row,
+      // The deliberately compact session list omits the structured verdict.
+      // Read the persisted verdict, without inflating the production endpoint.
+      reviewVerdict: withDatabase(db => (db.prepare(
+        "SELECT review_verdict FROM agent_sessions WHERE id = ? AND project_id = ?"
+      ).get(row.id, projectId) as { review_verdict: string | null }).review_verdict),
+    }));
 }
 
 /** The review findings filed against a ticket, oldest first. */

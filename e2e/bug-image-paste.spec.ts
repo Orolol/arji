@@ -2,6 +2,7 @@ import { expect, test } from "./fixtures/arij-project";
 import {
   naturalWidthOfLazyImage,
   openNewMenu,
+  openRegistry,
   openTicketDetail,
   pasteImage,
   ticketCard,
@@ -40,6 +41,7 @@ test.describe("Bug creation with a pasted screenshot", () => {
     await dialog.getByRole("button", { name: "Create Bug" }).click();
     await expect(dialog).toBeHidden();
 
+    await openRegistry(page, project.id);
     await expect(ticketCard(page, bugTitle)).toBeVisible();
 
     const panel = await openTicketDetail(page, bugTitle);

@@ -316,7 +316,7 @@ export function TopBar({ className }: TopBarProps) {
       setPaletteOpen(false);
       router.push(href);
     },
-    [router],
+    [router, setPaletteOpen],
   );
 
   return (

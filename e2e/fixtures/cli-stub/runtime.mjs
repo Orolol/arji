@@ -45,11 +45,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
-const HOME = path.join(os.tmpdir(), "arij-e2e-cli-stub");
-const SCENARIO_DIR = path.join(HOME, "scenarios");
-const INVOCATION_DIR = path.join(HOME, "invocations");
-const HANDSHAKE_FILE = path.join(HOME, "handshake.json");
+const STUB_ROOT = path.join(os.tmpdir(), "arij-e2e-cli-stub-" + createHash("sha256")
+  .update(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..")).digest("hex").slice(0, 12));
+const SCENARIO_DIR = path.join(STUB_ROOT, "scenarios");
+const INVOCATION_DIR = path.join(STUB_ROOT, "invocations");
+const HANDSHAKE_FILE = path.join(STUB_ROOT, "handshake.json");
 
 /** Identity used for the stub's commits, so the scratch repo needs no config. */
 const COMMIT_IDENTITY = ["-c", "user.email=stub@arij.local", "-c", "user.name=Arij E2E Stub"];
@@ -84,7 +87,7 @@ function recordHandshake(binary) {
     arijBaseUrl: process.env.ARIJ_BASE_URL || "",
   };
   try {
-    fs.mkdirSync(HOME, { recursive: true });
+  fs.mkdirSync(STUB_ROOT, { recursive: true });
     const temp = `${HANDSHAKE_FILE}.${process.pid}.tmp`;
     fs.writeFileSync(temp, JSON.stringify(payload, null, 2));
     fs.renameSync(temp, HANDSHAKE_FILE);

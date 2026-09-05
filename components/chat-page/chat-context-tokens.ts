@@ -111,14 +111,10 @@ export function useChatContextTokens(
   const [spec, setSpec] = useState<string | null>(null);
   const [memory, setMemory] = useState<string | null>(null);
   const [documents, setDocuments] = useState<ChatContextDocument[]>([]);
+  const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!projectId) {
-      setSpec(null);
-      setMemory(null);
-      setDocuments([]);
-      return;
-    }
+    if (!projectId) return;
     let cancelled = false;
 
     async function readJson(url: string): Promise<unknown> {
@@ -138,6 +134,7 @@ export function useChatContextTokens(
         readJson(`/api/projects/${projectId}/documents`),
       ]);
       if (cancelled) return;
+      setLoadedProjectId(projectId);
 
       const projectSpec = (project as { data?: { spec?: string | null } } | null)
         ?.data?.spec;
@@ -178,14 +175,14 @@ export function useChatContextTokens(
 
   return useMemo(
     () => ({
-      spec: tokensOf(spec),
-      memory: tokensOf(memory),
-      citedDocs: citedDocuments(messages, documents).map((doc) => ({
+      spec: tokensOf(projectId === loadedProjectId ? spec : null),
+      memory: tokensOf(projectId === loadedProjectId ? memory : null),
+      citedDocs: citedDocuments(messages, projectId === loadedProjectId ? documents : []).map((doc) => ({
         id: doc.id,
         originalFilename: doc.originalFilename,
         tokens: tokensOf(doc.markdownContent),
       })),
     }),
-    [spec, memory, documents, messages],
+    [spec, memory, documents, messages, projectId, loadedProjectId],
   );
 }

@@ -45,13 +45,8 @@
 -- selects from it unguarded. Same fix as the 0027 collision noted in
 -- lib/db/init.ts: move to a fresh tag past main's high-water mark.
 --
--- `idx` stays 47 — contiguous with this branch's own journal, which the
--- migration tests assert (idx === array index). It is deliberately NOT
--- pre-set to its post-merge value: drizzle never reads `idx`, so it changes
--- nothing at apply time, and leaving it contiguous keeps that invariant green
--- here while making the merge resolution fail loudly until whoever merges
--- renumbers it to 49. The `when` is the half that matters, and it is already
--- correct on both sides of the merge.
+-- After integration, idx 49 follows main's two MCP migrations. Both journal
+-- order and the timestamp increase, so fresh and existing databases apply it.
 CREATE TABLE IF NOT EXISTS `desk_dismissals` (
 	`epic_id` text NOT NULL,
 	`kind` text NOT NULL,

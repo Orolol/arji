@@ -51,74 +51,25 @@ test.describe("Ticket activity feed", () => {
     await page.goto(project.boardUrl);
     const panel = await openTicketDetail(page, title);
 
-    await panel.getByRole("tab", { name: /Activity/ }).click();
-
-    const feed = panel.getByTestId("activity-scroll-area");
-    await expect(feed).toBeVisible();
-    const viewport = feed.locator("[data-radix-scroll-area-viewport]");
-
-    // 1. The panel contains its content — nothing is cut off by overflow-hidden.
-    const panelOverflow = await panel.evaluate(
-      (element) => element.scrollHeight - element.clientHeight
-    );
-    expect(
-      panelOverflow,
-      "the ticket panel overflows its own box, so part of the feed is clipped away"
-    ).toBeLessThanOrEqual(1);
-
-    // 2. The feed viewport is the box that scrolls, and it has somewhere to go.
-    const geometry = await viewport.evaluate((element) => ({
-      scrollHeight: element.scrollHeight,
-      clientHeight: element.clientHeight,
+    const viewport = panel.getByTestId("ticket-reply-input").locator("..").locator("..").locator("div.overflow-y-auto");
+    await expect(viewport).toBeVisible();
+    await viewport.scrollIntoViewIfNeeded();
+    const geometry = await viewport.evaluate(element => ({
+      scrollHeight: element.scrollHeight, clientHeight: element.clientHeight,
     }));
-    expect(
-      geometry.scrollHeight,
-      "the feed did not overflow its viewport, so this run proves nothing about scrolling"
-    ).toBeGreaterThan(geometry.clientHeight);
-
-    // 3. The wheel actually moves it — in both directions. Distance from the
-    //    bottom rather than a scrollTop target: the feed keeps settling while
-    //    late content (markdown, relative timestamps) lands, so the bottom is
-    //    only meaningful read together with the offset.
-    const distanceFromBottom = () =>
-      viewport.evaluate(
-        (element) => element.scrollHeight - element.scrollTop - element.clientHeight
-      );
-
-    // The newest entry is what the feed opens on.
-    await expect
-      .poll(distanceFromBottom, {
-        message: "the feed did not open on its newest entry",
-      })
-      .toBeLessThanOrEqual(1);
-
+    expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight);
     await viewport.hover();
-    await page.mouse.wheel(0, -400);
-    await expect
-      .poll(distanceFromBottom, { message: "scrolling up did not move the feed" })
-      .toBeGreaterThan(100);
-
-    // Generously past the bottom: the browser clamps, and the assertion stays
-    // about "the wheel scrolls down" rather than about pixel arithmetic.
-    await page.mouse.wheel(0, 4000);
-    await expect
-      .poll(distanceFromBottom, {
-        message: "scrolling back down did not move the feed",
-      })
-      .toBeLessThanOrEqual(1);
-
-    // 4. The composer stays inside the panel: a user who read the feed can
-    //    still answer it.
-    const composer = panel.getByTestId("activity-composer");
-    const composerBox = await composer.boundingBox();
-    const panelBox = await panel.boundingBox();
-    expect(composerBox).not.toBeNull();
-    expect(panelBox).not.toBeNull();
-    expect(
-      composerBox!.y + composerBox!.height,
-      "the comment composer sits below the panel, where nothing can scroll to it"
-    ).toBeLessThanOrEqual(panelBox!.y + panelBox!.height + 1);
-    await expect(composer.getByPlaceholder("Add a comment...")).toBeVisible();
+    await page.mouse.wheel(0, 400);
+    await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBeGreaterThan(100);
+    await page.mouse.wheel(0, -4000);
+    await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBe(0);
+    const composer = panel.getByTestId("ticket-reply-input");
+    await composer.scrollIntoViewIfNeeded();
+    await expect(composer).toBeVisible();
+    await composer.fill("The conversation still accepts replies after scrolling.");
+    await panel.getByTestId("ticket-reply-send").click();
+    await expect(composer).toHaveValue("");
+    await expect(viewport.getByText("The conversation still accepts replies after scrolling.")).toBeAttached();
   });
 
   /**

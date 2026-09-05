@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
 
 import { BandHeader, Mono, SegmentedControl, StrataBand } from "@/components/piscine";
@@ -20,12 +20,13 @@ import { SettingsSection } from "./SettingsSection";
  * server render and the segment would flip on hydration.
  */
 type ThemeSegment = "light" | "dark";
+const subscribe = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
 
 export function AppearanceBand() {
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(subscribe, clientSnapshot, serverSnapshot);
 
   return (
     <SettingsSection testId="appearance-settings" heading="Thème">

@@ -53,7 +53,7 @@ function mockFetchByUrl(options: {
       } as Response;
     }
     if (url === "/api/settings") {
-      return { ok: true, json: async () => ({ data: { github_pat: "tok" } }) } as Response;
+      return { ok: true, json: async () => ({ data: { github_pat: { hasToken: true } } }) } as Response;
     }
     if (url === "/api/projects/proj-1") {
       return {
@@ -85,7 +85,7 @@ function mockUnconfiguredFetch(options: {
     if (url === "/api/settings") {
       return {
         ok: true,
-        json: async () => ({ data: { github_pat: options.pat ?? "tok" } }),
+        json: async () => ({ data: { github_pat: { hasToken: Boolean(options.pat ?? "tok") } } }),
       } as Response;
     }
     if (url === "/api/projects/proj-1") {

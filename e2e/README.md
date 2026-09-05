@@ -89,12 +89,11 @@ directory refuses to start:
 Unable to acquire lock at .../.next/dev/lock, is another instance of next dev running?
 ```
 
-If a dev server is already up for this worktree, point the suite at it instead
-of letting it spawn its own — `reuseExistingServer` then finds it and skips the
-spawn entirely:
+The suite starts its own server by default. To reuse an E2E server started
+with the CLI stubs and the same test database, opt in explicitly:
 
 ```
-E2E_PORT=3199 npm run test:e2e
+E2E_REUSE_SERVER=1 E2E_PORT=3199 npm run test:e2e
 ```
 
 ## Never wait for `networkidle`
@@ -152,20 +151,39 @@ git repo under the OS temp directory, and deletes both afterwards. Tests never
 share a board, so they stay safe under `fullyParallel`, and the `arji.json`
 export a board write triggers lands in the scratch repo rather than in this one.
 
-The suite runs against your real dev database, so teardown has to put it back
-as it found it. `DELETE /api/projects/:id` cascades the board rows, but an
-upload is not reachable from a project: `chat_attachments` rows carry
-`chat_message_id = NULL` and no project column, and the bytes sit in
-`data/uploads/<projectId>/`. The fixture therefore deletes those rows and that
-directory itself, and **asserts** both are gone — a run that leaks fails.
+The suite uses `data/e2e.db`, separate from the personal `data/arij.db`.
+`ARIJ_DB_PATH` overrides that path for both the runner and the server.
+`DELETE /api/projects/:id` cascades the board rows and cleans up project
+uploads. The fixture asserts that the attachment rows and upload directory
+are gone — a run that leaks fails.
 
 That cleanup needs the same `data/` the server writes to. It is derived from
 the Playwright rootDir, which is right whenever Playwright starts the server;
 if you reuse a dev server started from another directory, say so:
 
 ```
-E2E_DATA_ROOT=/path/to/that/checkout/data E2E_PORT=3199 npm run test:e2e
+E2E_DATA_ROOT=/path/to/that/checkout/data E2E_REUSE_SERVER=1 E2E_PORT=3199 npm run test:e2e
 ```
 
 Getting it wrong is loud, not silent: the fixture checks that the project it
 just created is visible in that database before the test body runs.
+
+## Agent journeys and the current interface
+
+`build-review-merge.spec.ts` opens a ticket from `/tickets`, dispatches a build
+from its overlay, tests the refusing side of the review gate, runs a review,
+then merges the actual commit. `ticket-workflow.spec.ts` exercises the status
+menu and its guards. These replace the old Kanban drag tests: the product no
+longer has draggable columns.
+
+Only the external CLI is scripted. The server receives the stub binaries on
+its PATH; worktrees, sessions, MCP findings, workflow transitions and merges
+all execute in Arij. Before dispatch, a handshake verifies every registered
+provider resolves to a stub and calls back to the server under test.
+
+`full-auto-agents.spec.ts` additionally saves workspace defaults through
+Settings, checks project overrides in the desk popover, and lets the real
+Full Auto supervisor build, review and merge with the selected named agents.
+`piscine-finishing.spec.ts` verifies 0/1/6 attention rows, dismissal persistence
+and renewed signals, repository controls, and navigation with eight projects.
+The layout cases save screenshots in the Playwright test results.
