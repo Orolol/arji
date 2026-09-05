@@ -64,9 +64,9 @@ import { TopBarMenu } from "./TopBarMenu";
  *   Then the project chips: the ACTIVE one (the project in the URL) wears its
  *   pastel fill, the others are deep text on paper. Colour here is WHO, never
  *   state; the only state a chip carries is the breathing dot of a project with
- * - CENTER is navigation, absolutely centred so it does not drift when the
- *   project list grows. FIVE pills: `Now`, then `Work`, `Chat` (a direct
- *   destination button next to Work), `Agents`, and `Réglages`.
+ * - CENTER is navigation, centred so it does not drift when the project list
+ *   grows. FIVE pills: `Now`, then `Work`, `Chat` (a direct destination button
+ *   next to Work), `Agents`, and `Réglages`.
  *   On a category bubble, hover opens the menu and click goes to the menu's
  *   first reachable entry; the active one wears a 1.5px border in its own
  *   under-colour plus a chevron.
@@ -79,6 +79,36 @@ import { TopBarMenu } from "./TopBarMenu";
  *   `NAV_CATEGORIES` contains the three categories; see the head of
  *   `lib/piscine/nav.ts`.
  * - RIGHT never changes, on any route: ⌘K, inbox, Auto, New.
+ *
+ * HOW THE THREE ZONES SHARE ONE ROW (B-arij-164).
+ *
+ * They SHARE it — none of them is lifted out of it. The island used to be
+ * `position: absolute` and centred on the viewport, which bought exact centring
+ * at 1440 and cost a collision everywhere else: an out-of-flow group occupies
+ * no width, so the browser happily painted 439px of pills over the left chips
+ * and over the right cluster (measured: 122px of overlap at 768, and a page
+ * that scrolled to 380px inside a 320px viewport). Its companion — an inline
+ * `max-width: calc(50% - 235px)` on the left zone — went NEGATIVE below 470px,
+ * so the project chips were clamped to zero and simply vanished on a phone.
+ *
+ * Both are gone. The flanks are `flex-1 basis-0` instead: a zero basis means
+ * their hypothetical size is 0, so they never overflow the line and they take
+ * EQUAL shares of whatever the island leaves — which centres the island by
+ * arithmetic, with no measured magic number to rot when a sixth pill lands.
+ * (Verified in Chrome: the island sits at exactly the same x as before at 1280
+ * and 1440.) The left zone carries `min-w-0` so its chips scroll rather than
+ * floor the row; the right zone deliberately does NOT, so its buttons are the
+ * row's hard floor and are never clipped.
+ *
+ * Below `lg` the island takes its own line (`w-full`, and the header wraps),
+ * because 439px of pills plus a logo plus four actions do not share 320px —
+ * and do not usefully share 768px either: the right cluster's own min-content
+ * floor would leave the left zone 4px, which is the logo overflowing rather
+ * than the chips scrolling. And below `sm` every label goes `sr-only` —
+ * VISUALLY hidden, never removed, so the accessible names, the keyboard path
+ * and `getByRole(name)` are all untouched. That takes the island to 205px,
+ * which fits the 300px a 320px viewport leaves.
+ *
  * DATA, AND WHAT IT COSTS. The bar is on every route, so it may not carry the
  * desk's poll: at rest it reads `useProjects` (one fetch, refreshed when the
  * route changes) and `useInbox` (the 5s poll the retired rail already ran). The
@@ -102,21 +132,25 @@ const HOVER_CLOSE_MS = 260;
 const PALETTE_POLL_MS = 10_000;
 
 /**
- * Half the centred pill island, in px, and the clearance the left zone keeps
- * from it.
+ * The label of a pill that has room for one, and nothing at all below `sm`.
  *
- * The island is absolutely centred, so the left zone cannot push it — it would
- * slide UNDERNEATH. Its cap is therefore a hard number, and a wrong one is
- * invisible until a workspace has enough projects to reach it.
- * MEASURED IN CHROME, not derived: `top-bar-island` reports 439px at 1440×950
- * with an active category chevron (427px at rest), so half is 220.
- * `__tests__/top-bar.test.tsx` pins BOTH the resulting max-width and the pill
- * count it was measured for.
+ * `sr-only` rather than `hidden`: the pill's accessible name is its text, so
+ * removing it would leave five unlabelled buttons on a phone. This keeps the
+ * name and drops only the pixels — 234px of them across the island, which is
+ * the difference between fitting a 320px screen and scrolling it.
  */
-const ISLAND_HALF_WIDTH_PX = 220;
+const ISLAND_LABEL_CLASS = "sr-only sm:not-sr-only";
 
-/** Breathing room between the last project chip and the island's left edge. */
-const ISLAND_CLEARANCE_PX = 15;
+/**
+ * The same trick for the right cluster, one breakpoint later.
+ *
+ * Navigation labels are worth more than action labels, and the two groups do
+ * not compete for the same line: the island has a line of its own until `lg`,
+ * while ⌘K / Auto / New share theirs with the logo and the project chips. So
+ * they come back one breakpoint later — at `md`, where the shared line has
+ * 366px for the left zone even with all three labels drawn.
+ */
+const ACTION_LABEL_CLASS = "sr-only md:not-sr-only";
 
 /** Bubble colours per stratum. Written out in full — Tailwind scans literals. */
 const BUBBLE_CLASS: Record<NavCategory["stratum"], string> = {
@@ -353,21 +387,24 @@ export function TopBar({ className }: TopBarProps) {
     <header
       data-testid="top-bar"
       className={cn(
-        "relative z-40 flex h-[60px] shrink-0 items-center gap-[12px] bg-background px-[14px] xl:px-[24px]",
+        "relative z-40 flex shrink-0 flex-wrap items-center bg-background",
+        "gap-x-[8px] gap-y-[6px] px-[10px] py-[8px] sm:gap-x-[12px] sm:px-[14px]",
+        // One row again only once the island fits BESIDE its flanks with room
+        // left for the chips: at 768 it does not — the right cluster's own
+        // floor would leave the left zone 4px and the logo would overflow.
+        "lg:h-[60px] lg:flex-nowrap lg:py-0",
+        "xl:px-[24px]",
         className,
       )}
     >
       {/* ── LEFT: identity ────────────────────────────────────────────── */}
       {/*
-        The centre pills are absolutely positioned, so a growing project list
-        would slide UNDER them instead of pushing them. The cap keeps the left
-        zone clear of the pill group — measured, not guessed: see
-        ISLAND_HALF_WIDTH_PX — and the chips scroll inside it.
+        `flex-1 basis-0` — grows from nothing, so it can never push the island
+        or wrap the right cluster onto its own line, and takes the same share
+        of the leftover as the right zone does (which is what centres the
+        island). `min-w-0` lets the chips scroll inside whatever it gets.
       */}
-      <div
-        className="flex min-w-0 items-center gap-[10px]"
-        style={{ maxWidth: `calc(50% - ${ISLAND_HALF_WIDTH_PX + ISLAND_CLEARANCE_PX}px)` }}
-      >
+      <div className="order-1 flex min-w-0 flex-1 basis-0 items-center gap-[10px]">
         <Link
           href="/"
           data-testid="top-bar-home"
@@ -418,89 +455,115 @@ export function TopBar({ className }: TopBarProps) {
 
       {/* ── CENTER: the three category bubbles ────────────────────────── */}
       {/*
-        `inset-y-0` makes this container the full 60px of the bar, so the menu's
-        `top: 100%` lands on the bar's bottom edge rather than on the 32px
-        bubble's — which would have the card overlapping the bar. The 8px the
-        frame draws between the two is padding INSIDE the menu wrapper, so the
-        pointer never leaves this subtree on its way down; see TopBarMenu.
+        `relative` + `self-stretch`, and both are load-bearing.
+
+        `relative` because this element is what the menu anchors to (TopBarMenu
+        is `absolute top-full`); without it the menu would silently re-anchor
+        on the <header> and centre itself on the whole bar. `self-stretch` is
+        what `inset-y-0` used to do: it makes this box the full height of its
+        line, so `top: 100%` lands on the bar's bottom edge rather than 14px up
+        on the 32px pill's. The 8px the frame draws between the two is padding
+        INSIDE the menu wrapper, so the pointer never leaves this subtree on
+        its way down; see TopBarMenu.
+
+        `order-3` + `w-full` put it on its own line while the header wraps;
+        from `lg` the header stops wrapping and it takes the middle slot.
       */}
       <div
         data-testid="top-bar-island"
-        className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center gap-[5px]"
+        className={cn(
+          "relative order-3 flex w-full min-w-0 shrink-0 items-center justify-center self-stretch",
+          "lg:order-2 lg:w-auto",
+        )}
         onMouseLeave={hoverClose}
         onKeyDown={onKeyDown}
       >
-        <DestinationPill
-          href="/"
-          testId="top-bar-bubble-now"
-          label="Now"
-          icon={Radar}
-          active={onDesk}
-          onFocus={close}
-        />
+        {/*
+          The pills live one level down, in their own scroller.
 
-        <CategoryBubble
-          category={NAV_CATEGORIES[0]}
-          active={activeCategory?.id === "work"}
-          expanded={openId === "work"}
-          live={categoryIsLive(NAV_CATEGORIES[0], liveSessionCount)}
-          onHoverOpen={() => hoverOpen("work")}
-          onFocusOpen={() => open("work")}
-          onActivate={() => {
-            const href = firstReachableHref(NAV_CATEGORIES[0], scopeProjectId);
-            if (href) {
-              close();
-              router.push(href);
-              return;
-            }
-            open("work");
-          }}
-        />
+          The island itself may not be the scroll container: `overflow-x` on it
+          would compute `overflow-y: auto` too and clip the menu that opens
+          below it. This rail is a safety net rather than the plan — the pills
+          fit every breakpoint the fix targets — but it is what guarantees that
+          a longer label or a sixth pill costs an internal scroll instead of a
+          horizontal scrollbar on the page.
+        */}
+        <div
+          data-testid="top-bar-island-rail"
+          className="flex min-w-0 items-center gap-[5px] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          <DestinationPill
+            href="/"
+            testId="top-bar-bubble-now"
+            label="Now"
+            icon={Radar}
+            active={onDesk}
+            onFocus={close}
+          />
 
-        <DestinationPill
-          href="/chat"
-          testId="top-bar-bubble-chat"
-          label="Chat"
-          icon={MessageSquare}
-          active={onChat}
-          onFocus={close}
-        />
+          <CategoryBubble
+            category={NAV_CATEGORIES[0]}
+            active={activeCategory?.id === "work"}
+            expanded={openId === "work"}
+            live={categoryIsLive(NAV_CATEGORIES[0], liveSessionCount)}
+            onHoverOpen={() => hoverOpen("work")}
+            onFocusOpen={() => open("work")}
+            onActivate={() => {
+              const href = firstReachableHref(NAV_CATEGORIES[0], scopeProjectId);
+              if (href) {
+                close();
+                router.push(href);
+                return;
+              }
+              open("work");
+            }}
+          />
 
-        <CategoryBubble
-          category={NAV_CATEGORIES[1]}
-          active={activeCategory?.id === "agents"}
-          expanded={openId === "agents"}
-          live={categoryIsLive(NAV_CATEGORIES[1], liveSessionCount)}
-          onHoverOpen={() => hoverOpen("agents")}
-          onFocusOpen={() => open("agents")}
-          onActivate={() => {
-            const href = firstReachableHref(NAV_CATEGORIES[1], scopeProjectId);
-            if (href) {
-              close();
-              router.push(href);
-              return;
-            }
-            open("agents");
-          }}
-        />
+          <DestinationPill
+            href="/chat"
+            testId="top-bar-bubble-chat"
+            label="Chat"
+            icon={MessageSquare}
+            active={onChat}
+            onFocus={close}
+          />
 
-        <CategoryBubble
-          category={NAV_CATEGORIES[2]}
-          active={activeCategory?.id === "settings"}
-          expanded={openId === "settings"}
-          live={categoryIsLive(NAV_CATEGORIES[2], liveSessionCount)}
-          onHoverOpen={() => hoverOpen("settings")}
-          onFocusOpen={() => open("settings")}
-          onActivate={() => {
-            const href = firstReachableHref(NAV_CATEGORIES[2], scopeProjectId);
-            if (href) {
-              close();
-              router.push(href);
-              return;
-            }
-            open("settings");
-          }}
-        />
+          <CategoryBubble
+            category={NAV_CATEGORIES[1]}
+            active={activeCategory?.id === "agents"}
+            expanded={openId === "agents"}
+            live={categoryIsLive(NAV_CATEGORIES[1], liveSessionCount)}
+            onHoverOpen={() => hoverOpen("agents")}
+            onFocusOpen={() => open("agents")}
+            onActivate={() => {
+              const href = firstReachableHref(NAV_CATEGORIES[1], scopeProjectId);
+              if (href) {
+                close();
+                router.push(href);
+                return;
+              }
+              open("agents");
+            }}
+          />
+
+          <CategoryBubble
+            category={NAV_CATEGORIES[2]}
+            active={activeCategory?.id === "settings"}
+            expanded={openId === "settings"}
+            live={categoryIsLive(NAV_CATEGORIES[2], liveSessionCount)}
+            onHoverOpen={() => hoverOpen("settings")}
+            onFocusOpen={() => open("settings")}
+            onActivate={() => {
+              const href = firstReachableHref(NAV_CATEGORIES[2], scopeProjectId);
+              if (href) {
+                close();
+                router.push(href);
+                return;
+              }
+              open("settings");
+            }}
+          />
+        </div>
 
         {openId ? (
           <TopBarMenu
@@ -515,7 +578,14 @@ export function TopBar({ className }: TopBarProps) {
       </div>
 
       {/* ── RIGHT: the cluster that never changes ─────────────────────── */}
-      <div className="ml-auto flex shrink-0 items-center gap-[6px] sm:gap-[8px]">
+      {/*
+        The mirror of the left zone, with ONE deliberate difference: no
+        `min-w-0`. Its `min-width: auto` floor is the row's hard floor — these
+        four controls are never clipped, and the left zone's chips absorb the
+        squeeze instead. `justify-end` replaces the `ml-auto` the zone used to
+        need: a flex-1 flank already reaches the edge.
+      */}
+      <div className="order-2 flex flex-1 basis-0 items-center justify-end gap-[6px] sm:gap-[8px] lg:order-3">
         {/*
           The pill OPENS the palette; it is the same surface ⌘K reaches, and
           the bar owns both. It is not a link any more — there is nowhere to
@@ -532,7 +602,9 @@ export function TopBar({ className }: TopBarProps) {
           title="Rechercher — ⌘K"
           data-testid="top-bar-search"
         >
-          <Mono size={11}>⌘K</Mono>
+          <Mono size={11} className={ACTION_LABEL_CLASS}>
+            ⌘K
+          </Mono>
         </PillButton>
 
         <PillButton
@@ -570,7 +642,7 @@ export function TopBar({ className }: TopBarProps) {
           )}
         >
           <InfinityIcon size={14} aria-hidden="true" />
-          Auto
+          <span className={ACTION_LABEL_CLASS}>Auto</span>
         </Link>
 
         {/*
@@ -589,7 +661,7 @@ export function TopBar({ className }: TopBarProps) {
           )}
         >
           <Plus size={13} aria-hidden="true" />
-          New
+          <span className={ACTION_LABEL_CLASS}>New</span>
         </Link>
       </div>
 
@@ -705,7 +777,7 @@ function DestinationPill({
       )}
     >
       <Icon size={14} aria-hidden="true" />
-      {label}
+      <span className={ISLAND_LABEL_CLASS}>{label}</span>
     </Link>
   );
 }
@@ -750,7 +822,7 @@ function CategoryBubble({
       )}
     >
       <Icon size={14} aria-hidden="true" />
-      {category.label}
+      <span className={ISLAND_LABEL_CLASS}>{category.label}</span>
       {live ? (
         <span data-testid={`top-bar-live-${category.id}`} className="flex">
           <BreathingDot size={6} />
