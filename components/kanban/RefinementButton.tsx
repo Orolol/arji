@@ -179,7 +179,7 @@ export function RefinementButton({
       title={
         running
           ? "A board refinement pass is running"
-          : "Agent Refinement — re-pass Backlog and To do: questions, priorities, order, dependencies, promotion"
+          : "Agent Refinement — re-pass Backlog and To do: questions, priorities, order, dependencies, promotion, merges, discards and missing tickets"
       }
       className={cn(
         "flex shrink-0 items-center gap-[6px] rounded-[7px] border px-[10px] py-[4px] text-[12px] font-medium transition-colors",

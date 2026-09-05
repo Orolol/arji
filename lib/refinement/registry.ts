@@ -27,7 +27,10 @@ export type RefinementChangeKind =
   | "priority"
   | "reordered"
   | "dependency_added"
-  | "dependency_removed";
+  | "dependency_removed"
+  | "merged"
+  | "discarded"
+  | "created";
 
 export interface RefinementChange {
   kind: RefinementChangeKind;
@@ -39,6 +42,22 @@ export interface RefinementChange {
   detail: string;
   /** The agent's mandatory justification, verbatim. */
   reason: string;
+  /**
+   * True when `ticketId` names a row that no longer exists — a discarded
+   * ticket. The report must not link to it and must not try to post its
+   * recap comment on it.
+   *
+   * A `merged` record deliberately does NOT set this: it is filed against
+   * the surviving TARGET, which is also where the sources' tombstones were
+   * already posted.
+   */
+  ticketGone?: boolean;
+  /**
+   * The full text of what left the board, for the kinds that destroy a
+   * ticket. Rendered into the end-of-run recap comment, which for a discard
+   * is the only durable copy left.
+   */
+  snapshot?: string;
 }
 
 /**

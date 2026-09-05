@@ -131,9 +131,27 @@ describe("buildRefinementPrompt", () => {
       "add_dependency",
       "remove_dependency",
       "promote_ticket",
+      "merge_tickets",
+      "discard_ticket",
+      "create_planning_ticket",
     ]) {
       expect(prompt).toContain(tool);
     }
+  });
+
+  /**
+   * merge_tickets and discard_ticket delete board rows permanently, and the
+   * prompt is where the agent learns the bar. Without it a pass can read
+   * "tidy the board" as licence to clear the Backlog.
+   */
+  it("says plainly that discarding and merging delete tickets for good", () => {
+    const prompt = buildRefinementPrompt(project, snapshot());
+    expect(prompt).toContain("permanent delete");
+    expect(prompt).toContain("no undo");
+    // And it separates the two calls the agent will confuse: duplicated work
+    // is a merge, unclear work goes back to Backlog with a question.
+    expect(prompt).toContain("Duplicated work is a merge, not a discard");
+    expect(prompt).toContain("unclear goes back to");
   });
 
   it("fences the snapshot and frames it as data, not instructions", () => {

@@ -38,6 +38,9 @@ const EXPECTED_TOOL_NAMES = [
   "add_dependency",
   "remove_dependency",
   "promote_ticket",
+  "merge_tickets",
+  "discard_ticket",
+  "create_planning_ticket",
 ];
 
 /**
