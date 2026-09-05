@@ -16,6 +16,10 @@
  * generation are visible to this file's static import.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  SESSION_PROMPT_MAX_STORED_BYTES,
+  splitCappedPrompt,
+} from "@/lib/agent-sessions/prompt-cap";
 
 const pmState = vi.hoisted(() => ({
   sessionRow: null as
@@ -283,15 +287,44 @@ describe("processManager.start() — MCP injection gating", () => {
     const spawned = pmState.spawnedOptions[0].prompt as string;
     expect(spawned).toContain("## Arij tools");
 
-    // resolveSessionOutput's echo scrub matches agent_sessions.prompt as an
-    // exact substring of the session's output, so the stored prompt must be
-    // byte-identical to the SPAWNED prompt — a stored prompt that stops
-    // before the tools section leaves an echoed section behind in ticket
-    // comments (measured on E-arij-138, 2026-08-27).
+    // resolveSessionOutput's echo scrub recognises an echo from
+    // agent_sessions.prompt, so a prompt under the write-path cap must be
+    // stored byte-identical to the SPAWNED prompt — a stored prompt that
+    // stops before the tools section leaves an echoed section behind in
+    // ticket comments (measured on E-arij-138, 2026-08-27).
     const promptUpdates = pmState.updates
       .filter((payload) => "prompt" in payload)
       .map((payload) => payload.prompt);
     expect(promptUpdates).toContain(spawned);
+  });
+
+  it("re-persists an OVERSIZED prompt capped, while spawning it whole", () => {
+    pmState.sessionRow = sessionRow();
+    const base = `BASE PROMPT\n${"context line\n".repeat(20_000)}`;
+    expect(Buffer.byteLength(base, "utf8")).toBeGreaterThan(
+      SESSION_PROMPT_MAX_STORED_BYTES,
+    );
+
+    processManager.start("s-persist-big", { mode: "code", prompt: base });
+
+    // The cap is a STORAGE cap: the CLI is still handed the whole prompt.
+    const spawned = pmState.spawnedOptions[0].prompt as string;
+    expect(spawned.startsWith(base)).toBe(true);
+    expect(spawned).toContain("## Arij tools");
+
+    const stored = pmState.updates
+      .filter((payload) => "prompt" in payload)
+      .map((payload) => payload.prompt as string)
+      .at(-1) as string;
+    expect(Buffer.byteLength(stored, "utf8")).toBeLessThanOrEqual(
+      SESSION_PROMPT_MAX_STORED_BYTES,
+    );
+
+    const parts = splitCappedPrompt(stored);
+    expect(parts).not.toBeNull();
+    // The tools section is appended LAST, so it lands in the tail the cap
+    // keeps — which is what stops the cap reopening the E-arij-138 hole.
+    expect(parts!.tail).toContain("## Arij tools");
   });
 
   it("review agent types get the submit_findings + Overall Verdict sentence", () => {

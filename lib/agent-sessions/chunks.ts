@@ -17,6 +17,7 @@ import {
   SESSION_CHUNK_STORED_HEAD_BYTES,
   SESSION_CHUNK_STORED_TAIL_BYTES,
 } from "@/lib/agent-sessions/chunk-cap";
+import { capTextHeadTail } from "@/lib/agent-sessions/head-tail-cap";
 // Type-only in the other direction, so this is not a runtime cycle.
 import { countCharacters } from "@/lib/agent-sessions/session-detail";
 
@@ -164,42 +165,23 @@ export function truncateUtf8(
  * handed at any size, which is how the live database came to hold a single
  * 8.3 MB chunk and a single 51.3 MB session.
  *
- * The common case — every chunk is ~5.5 KB on average, and this runs once per
- * emission on every live session — costs one `byteLength` scan and no
- * allocation at all. Only a chunk actually over the cap is buffered, and then
- * out of ONE copy: head and tail are cut from the same buffer, because the
- * chunks this matters for are megabytes and a `Buffer.from` per end would
- * double the peak allocation for no gain. `headEnd < tailStart` always holds,
- * because head + tail is under the cap and the cap is under `buffer.length`.
+ * The cut itself is {@link capTextHeadTail}, shared with the prompt cap: the
+ * two differ only in their numbers and their marker, and one copy of a UTF-8
+ * boundary walk is enough. The common case — every chunk is ~5.5 KB on
+ * average, and this runs once per emission on every live session — costs one
+ * `byteLength` scan and no allocation at all.
  */
 export function capChunkContent(content: string): {
   content: string;
   capped: boolean;
 } {
-  if (Buffer.byteLength(content, "utf8") <= SESSION_CHUNK_MAX_STORED_BYTES) {
-    return { content, capped: false };
-  }
-  const buffer = Buffer.from(content, "utf8");
-
-  // Walk off any continuation byte (0b10xxxxxx) so neither cut lands inside a
-  // character and decodes to U+FFFD: back for the head's end, forward for the
-  // tail's start.
-  let headEnd = SESSION_CHUNK_STORED_HEAD_BYTES;
-  while (headEnd > 0 && (buffer[headEnd] & 0xc0) === 0x80) headEnd--;
-  let tailStart = buffer.length - SESSION_CHUNK_STORED_TAIL_BYTES;
-  while (tailStart < buffer.length && (buffer[tailStart] & 0xc0) === 0x80) {
-    tailStart++;
-  }
-
-  // Newlines around the marker so it is a line of its own however the head
-  // and the tail happen to end — the session log renders line by line.
-  return {
-    content:
-      `${buffer.subarray(0, headEnd).toString("utf8")}\n` +
-      `${chunkElisionMarker(tailStart - headEnd)}\n` +
-      `${buffer.subarray(tailStart).toString("utf8")}`,
-    capped: true,
-  };
+  const cut = capTextHeadTail(content, {
+    maxBytes: SESSION_CHUNK_MAX_STORED_BYTES,
+    headBytes: SESSION_CHUNK_STORED_HEAD_BYTES,
+    tailBytes: SESSION_CHUNK_STORED_TAIL_BYTES,
+    marker: chunkElisionMarker,
+  });
+  return { content: cut.text, capped: cut.capped };
 }
 
 /**

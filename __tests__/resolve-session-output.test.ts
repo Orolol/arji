@@ -211,3 +211,64 @@ describe("prompt-echo scrubbing", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// The same scrub, once the stored prompt is capped at persistence
+// ---------------------------------------------------------------------------
+
+const { capSessionPrompt } = await import("@/lib/agent-sessions/lifecycle");
+const { splitCappedPrompt } = await import("@/lib/agent-sessions/prompt-cap");
+
+/**
+ * A prompt over SESSION_PROMPT_MAX_STORED_BYTES: what the row holds is head +
+ * marker + tail, and what a CLI echoes is still the WHOLE thing. Recognisable
+ * ends, a distinctive middle, so a partial strip is visible as such.
+ */
+const BIG_PROMPT = `# Project: Arij\n${"SPEC-MIDDLE-LINE\n".repeat(20_000)}\n## Instructions\n\nImplement the ticket.`;
+
+describe("prompt-echo scrubbing with a capped stored prompt", () => {
+  it("still recognises a full echo from the two ends the cap kept", () => {
+    const storedPrompt = capSessionPrompt(BIG_PROMPT);
+    // The premise: the row no longer contains the prompt the CLI echoed.
+    expect(splitCappedPrompt(storedPrompt)).not.toBeNull();
+    expect(BIG_PROMPT.includes(storedPrompt)).toBe(false);
+
+    const result = textResult(`${BIG_PROMPT}\n\nActual final report.`);
+    dbMockState.getQueue = [{ prompt: storedPrompt }];
+
+    const output = resolveSessionOutput(result, "s-echo-capped-1");
+    expect(output).toContain("Actual final report.");
+    expect(output).toContain(PROMPT_ECHO_MARKER);
+    // The elided middle is what a head-only or tail-only match would leave
+    // behind — megabytes of it, straight into a ticket comment.
+    expect(output).not.toContain("SPEC-MIDDLE-LINE");
+    expect(output).not.toContain("# Project: Arij");
+  });
+
+  it("treats an output that is only the echoed prompt as no output at all", () => {
+    const result = {
+      ...textResult(`${BIG_PROMPT}\n\n${BIG_PROMPT}`),
+      success: false,
+      error: "Oh My Pi is not authenticated.",
+    };
+    dbMockState.getQueue = [
+      { prompt: capSessionPrompt(BIG_PROMPT) },
+      { lastNonEmptyText: null },
+    ];
+    expect(resolveSessionOutput(result, "s-echo-capped-2")).toBe(
+      "Oh My Pi is not authenticated.",
+    );
+  });
+
+  it("leaves output that merely resembles the prompt alone", () => {
+    // The head is there, the tail is not: no span to close, nothing removed.
+    const storedPrompt = capSessionPrompt(BIG_PROMPT);
+    const head = splitCappedPrompt(storedPrompt)!.head;
+    const result = textResult(`${head}\n\nAnd then something else entirely.`);
+    dbMockState.getQueue = [{ prompt: storedPrompt }];
+
+    const output = resolveSessionOutput(result, "s-echo-capped-3");
+    expect(output).not.toContain(PROMPT_ECHO_MARKER);
+    expect(output).toContain("And then something else entirely.");
+  });
+});
+

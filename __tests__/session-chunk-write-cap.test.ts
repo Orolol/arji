@@ -192,16 +192,26 @@ describe("capChunkContent", () => {
   });
 
   it("never cuts inside a multi-byte character", () => {
-    // A wall of 4-byte emoji: every candidate cut point is mid-character, so
-    // a naive byte slice would decode to U+FFFD at both seams.
-    const emoji = "🙂".repeat(SESSION_CHUNK_MAX_STORED_BYTES); // 4 bytes each
-    const { content, capped } = capChunkContent(emoji);
+    // A 9-byte unit — "é" (2) + "→" (3) + "🌊" (4) — so neither cut point
+    // divides evenly into it and both land mid-character. A wall of 4-byte
+    // emoji does NOT test this: head (212,992 bytes) and tail offset are both
+    // multiples of 4, so a naive byte slice would pass.
+    const unit = "é→🌊";
+    const text = unit.repeat(
+      Math.ceil((SESSION_CHUNK_MAX_STORED_BYTES * 3) / Buffer.byteLength(unit))
+    );
+    const { content, capped } = capChunkContent(text);
 
     expect(capped).toBe(true);
     expect(content).not.toContain("�");
+    // Round-tripping through UTF-8 must be a no-op — the proof that no
+    // half-character survived either seam.
+    expect(Buffer.from(content, "utf8").toString("utf8")).toBe(content);
     const [head, , tail] = content.split("\n");
-    expect(head).toBe("🙂".repeat(head.length / 2));
-    expect(tail).toBe("🙂".repeat(tail.length / 2));
+    expect(head.endsWith("🌊") || head.endsWith("é") || head.endsWith("→")).toBe(
+      true
+    );
+    expect(tail.length).toBeGreaterThan(0);
   });
 
   it("keeps a capped chunk strictly under the cap, marker included", () => {

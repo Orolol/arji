@@ -30,6 +30,10 @@ import {
   SESSION_CHUNK_ELISION_LABEL,
 } from "@/lib/agent-sessions/chunk-cap";
 import {
+  promptElisionMarker,
+  SESSION_PROMPT_ELISION_LABEL,
+} from "@/lib/agent-sessions/prompt-cap";
+import {
   chunkPruneMarker,
   SESSION_CHUNK_PRUNE_LABEL,
 } from "@/lib/agent-sessions/chunk-retention";
@@ -103,17 +107,18 @@ function installFetch({
   session = mockSession,
   files = mockFiles,
   actions = [] as unknown[],
+  prompt = "THE EXACT PROMPT",
 }: {
   session?: Record<string, unknown>;
   files?: unknown;
   actions?: unknown[];
+  /** What `?include=prompt` serves — the STORED prompt, cap and all. */
+  prompt?: string;
 } = {}) {
   const fetchMock = vi.fn((input: unknown) => {
     const url = String(input);
     if (url.includes("include=prompt")) {
-      return Promise.resolve(
-        jsonResponse({ data: { ...session, prompt: "THE EXACT PROMPT" } })
-      );
+      return Promise.resolve(jsonResponse({ data: { ...session, prompt } }));
     }
     if (url.includes("view=arij-actions")) {
       return Promise.resolve(
@@ -435,6 +440,42 @@ describe("live session — the two performance workarounds", () => {
     await user.click(screen.getByText("voir le prompt exact →"));
     await user.click(screen.getByText("voir le prompt exact →"));
     expect(calls(fetchMock, "include=prompt")).toHaveLength(1);
+  });
+
+  it("shows the prompt cap's elision marker legibly in the prompt pane", async () => {
+    // A capped row is head + marker + tail. The pane whose whole job is
+    // showing what went in has to say which part of it Arij did not keep —
+    // otherwise the prompt reads as complete and 4.8 MB shorter than it was.
+    const marker = promptElisionMarker(4_856_320);
+    installFetch({
+      prompt: `# Project: Arij\n${marker}\n## Instructions\n\nImplement the ticket.`,
+    });
+    const user = userEvent.setup();
+    render(<SessionDetailPage />);
+
+    await screen.findByText("Prompt composé");
+    await user.click(screen.getByText("voir le prompt exact →"));
+
+    const line = await screen.findByTestId("prompt-elision-marker");
+    expect(line).toHaveTextContent("4,856,320 bytes elided");
+    expect(line).toHaveTextContent(SESSION_PROMPT_ELISION_LABEL);
+    // Arij's own line, not one more dim line of the prompt it interrupts.
+    expect(line.className).toContain("text-strata-next-deep");
+    // The two ends the cap kept are still shown as ordinary prompt text.
+    expect(screen.getByText(/# Project: Arij/)).toBeInTheDocument();
+    expect(screen.getByText(/Implement the ticket\./)).toBeInTheDocument();
+  });
+
+  it("renders an uncapped prompt with no marker at all", async () => {
+    installFetch();
+    const user = userEvent.setup();
+    render(<SessionDetailPage />);
+
+    await screen.findByText("Prompt composé");
+    await user.click(screen.getByText("voir le prompt exact →"));
+
+    expect(await screen.findByText("THE EXACT PROMPT")).toBeInTheDocument();
+    expect(screen.queryByTestId("prompt-elision-marker")).toBeNull();
   });
 
   it("scans the raw stream for Arij actions in its own request", async () => {

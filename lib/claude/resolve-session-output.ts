@@ -12,6 +12,7 @@ import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { wasQuestionAskedViaMcp } from "@/lib/mcp/token-store";
+import { splitCappedPrompt } from "@/lib/agent-sessions/prompt-cap";
 
 /**
  * Resolves the best available text output for a completed agent session.
@@ -83,10 +84,10 @@ export const PROMPT_ECHO_MARKER =
  * lives here, in the single choke point every dispatch path resolves
  * output through.
  *
- * Exact-substring only: `agent_sessions.prompt` is the byte-exact string the
- * CLI was spawned with, and the measured echoes were exact copies. Partial
- * echoes are caught by the prompt-side per-comment budget
- * (commentHistorySection in prompt-builder.ts).
+ * Verbatim only: the measured echoes were exact copies, and partial echoes
+ * are caught by the prompt-side per-comment budget (commentHistorySection in
+ * prompt-builder.ts). What "verbatim" can be checked against depends on what
+ * the row holds — see `replacePromptEchoes`.
  */
 function stripPromptEcho(
   output: string | null,
@@ -95,11 +96,11 @@ function stripPromptEcho(
   if (!output) return output;
   const prompt = getSessionPrompt(sessionId);
   if (!prompt || prompt.length < PROMPT_ECHO_MIN_CHARS) return output;
-  if (!output.includes(prompt)) return output;
 
-  const stripped = output
-    .split(prompt)
-    .join(PROMPT_ECHO_MARKER)
+  const replaced = replacePromptEchoes(output, prompt);
+  if (replaced === null) return output;
+
+  const stripped = replaced
     // An n-times echo (the measured case was exactly twice) collapses to one
     // marker instead of a marker per copy.
     .replaceAll(
@@ -111,6 +112,56 @@ function stripPromptEcho(
 
   // Nothing but the echo: report that as "no output", not as content.
   return stripped === PROMPT_ECHO_MARKER ? null : stripped;
+}
+
+/**
+ * Replaces every echo of the session's prompt in `output`, or null when there
+ * is none to replace.
+ *
+ * Two shapes, because `agent_sessions.prompt` has two:
+ *
+ *  - Stored whole (96% of rows) — the byte-exact string the CLI was spawned
+ *    with, so an exact-substring split is both correct and cheap.
+ *  - Stored CAPPED (`capSessionPrompt`, the rows over 128 KiB) — the row is
+ *    head + marker + tail and matches nothing in the output, because the CLI
+ *    echoed the WHOLE prompt. Matching the two kept ends and removing
+ *    everything between them recovers the echo exactly: in the original those
+ *    ends bracketed the elided middle. This is the case that matters most —
+ *    a capped prompt is a big prompt, and a big prompt is precisely what the
+ *    snowball is made of.
+ *
+ * The span search cannot fire by accident: `head` is 104 KiB and `tail` is
+ * 20 KiB of the session's own prompt. If a pathological prompt repeated its
+ * own tail inside the elided middle the span would close early and leave a
+ * bounded remnant — less scrubbing, never a wrong removal.
+ */
+function replacePromptEchoes(output: string, prompt: string): string | null {
+  const capped = splitCappedPrompt(prompt);
+
+  if (!capped) {
+    if (!output.includes(prompt)) return null;
+    return output.split(prompt).join(PROMPT_ECHO_MARKER);
+  }
+
+  // Neither end can be empty for a prompt this function actually capped, but
+  // `splitCappedPrompt` also answers for a prompt that merely QUOTED a marker;
+  // an empty needle would match at every position and never advance `cursor`.
+  if (!capped.head || !capped.tail) return null;
+
+  let result = "";
+  let cursor = 0;
+  let found = false;
+  for (;;) {
+    const headAt = output.indexOf(capped.head, cursor);
+    if (headAt < 0) break;
+    const tailAt = output.indexOf(capped.tail, headAt + capped.head.length);
+    if (tailAt < 0) break;
+    result += output.slice(cursor, headAt) + PROMPT_ECHO_MARKER;
+    cursor = tailAt + capped.tail.length;
+    found = true;
+  }
+  if (!found) return null;
+  return result + output.slice(cursor);
 }
 
 
