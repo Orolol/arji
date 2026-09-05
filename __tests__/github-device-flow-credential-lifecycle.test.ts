@@ -395,6 +395,40 @@ describe("two ticks in flight at once", () => {
     expect((await first).res.status).toBe(200);
   });
 
+  it("keeps the duplicate out for the WHOLE tick, identity lookup included", async () => {
+    const handle = await startFlow();
+
+    mockPollDeviceFlow.mockResolvedValueOnce({
+      state: "success",
+      accessToken: ACCESS_TOKEN,
+      scopes: ["repo"],
+    });
+    const identity = deferred<unknown>();
+    mockValidateGitHubToken.mockReturnValueOnce(identity.promise);
+
+    const first = poll(handle);
+    await flush();
+
+    // The duplicate arrives AFTER GitHub answered but BEFORE the identity
+    // lookup came back. The device code is spent by now, so letting this tick
+    // through would earn a terminal refusal from GitHub and drop the flow —
+    // which would cost the first tick, holding a perfectly good token, its
+    // claim. A successful sign-in would be discarded as "superseded".
+    const second = await poll(handle);
+    expect(mockPollDeviceFlow).toHaveBeenCalledTimes(1);
+    expect(second.res.status).toBe(200);
+    expect(second.json.data.state).toBe("pending");
+
+    identity.resolve({ valid: true, login: "octocat" });
+    const { res, json } = await first;
+
+    // The sign-in the user actually completed still lands.
+    expect(res.status).toBe(200);
+    expect(json.data.state).toBe("success");
+    expect(json.data.login).toBe("octocat");
+    expect(writtenTokens()).toContain(JSON.stringify(ACCESS_TOKEN));
+  });
+
   it("releases the marker so the next tick still reaches GitHub", async () => {
     const handle = await startFlow();
 
