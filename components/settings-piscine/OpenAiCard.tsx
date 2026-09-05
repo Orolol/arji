@@ -292,7 +292,7 @@ export function OpenAiCard({
               data-testid="openai-clear-key-button"
               disabled={clearing || saving}
               onClick={() => void clearKey()}
-              className="cursor-pointer border-0 bg-transparent p-0 font-mono text-[10.5px] text-destructive outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
+              className="cursor-pointer border-0 bg-transparent p-0 font-mono text-[10.5px] text-destructive outline-none hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
             >
               {clearing ? "Clearing..." : "Clear key"}
             </button>

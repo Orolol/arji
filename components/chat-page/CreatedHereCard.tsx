@@ -56,7 +56,7 @@ export function CreatedHereCard({
           type="button"
           data-testid="chat-created-here-row"
           onClick={() => onOpenTicket(entry.epicId)}
-          className="flex items-center gap-2 rounded-[8px] bg-transparent p-0 text-left outline-none transition-colors hover:brightness-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none"
+          className="flex items-center gap-2 rounded-[8px] bg-transparent p-0 text-left outline-none transition-colors hover:brightness-[0.97] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none"
         >
           <IdentityChip label={entry.readableId ?? "—"} tone={tone} size="sm" />
           <span className="line-clamp-1 text-[12px] text-foreground">

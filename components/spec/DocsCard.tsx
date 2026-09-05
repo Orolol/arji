@@ -205,7 +205,7 @@ export function DocsCard({ projectId, initialDocuments, className }: DocsCardPro
           "border-[1.5px] border-dashed bg-transparent px-[11px] py-[9px]",
           "text-[12px] font-normal outline-none",
           "transition-colors duration-150 motion-reduce:transition-none",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
           // No shadow and no lift on drag-over — only the border and the label
           // change tone. House rule 7.
           dragging

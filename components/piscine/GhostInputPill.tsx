@@ -83,7 +83,7 @@ export function GhostInputPill({
         "flex items-center rounded-full border-[1.5px] border-input",
         "font-sans text-[12.5px] leading-none text-foreground placeholder:text-muted-foreground",
         "shadow-none outline-none",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
         "disabled:pointer-events-none disabled:opacity-50",
         fill === "card" ? "h-[32px] bg-card px-[13px]" : "h-[31px] bg-field px-3",
         typeof width === "number" && "shrink-0",

@@ -190,7 +190,7 @@ export function UpNextBand({
                     "border-0 font-sans outline-none",
                     selectedEpicIds?.has(ticket.epicId) &&
                       "ring-2 ring-foreground",
-                    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
                     "disabled:cursor-default",
                   )}
                 >

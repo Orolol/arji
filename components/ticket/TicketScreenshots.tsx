@@ -72,7 +72,7 @@ export function TicketScreenshots({ images }: TicketScreenshotsProps) {
               setLightboxImage({ url: image.url, alt: image.fileName })
             }
             aria-label={`Open ${image.fileName}`}
-            className="border-0 bg-transparent p-0 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            className="border-0 bg-transparent p-0 outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             <SurfaceCard radius={10} interactive className="overflow-hidden">
               {/* Local, project-scoped upload route — not a remote asset. */}

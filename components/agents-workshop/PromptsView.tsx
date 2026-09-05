@@ -47,7 +47,7 @@ import {
 // indicator at all; the ring is the replacement, matching the buttons below
 // and FieldBoxInput's own focus treatment.
 const PROMPT_TEXTAREA =
-  "min-h-32 w-full resize-y rounded-[10px] border-0 bg-card px-3 py-2 font-mono text-[12.5px] leading-[1.5] text-foreground outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring placeholder:text-muted-foreground disabled:opacity-60";
+  "min-h-32 w-full resize-y rounded-[10px] border-0 bg-card px-3 py-2 font-mono text-[12.5px] leading-[1.5] text-foreground outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring placeholder:text-muted-foreground disabled:opacity-60";
 
 export function PromptsView({ projectId }: { projectId?: string }) {
   const [scope, setScope] = useState<"global" | "project">(
@@ -133,7 +133,7 @@ function PromptRow({
         onClick={() => setExpanded((open) => !open)}
         aria-expanded={expanded}
         aria-controls={panelId}
-        className="flex items-center gap-3 rounded-[9px] px-4 py-2.5 text-left outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+        className="flex items-center gap-3 rounded-[9px] px-4 py-2.5 text-left outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring"
       >
         {expanded ? (
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />

@@ -133,7 +133,7 @@ export function DeskComposer({
           // the stratum rather than as content.
           "font-sans text-[13.5px] font-medium text-foreground",
           "placeholder:text-strata-feed-deep placeholder:opacity-80",
-          "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
           "disabled:opacity-60",
         )}
       />
