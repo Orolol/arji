@@ -274,6 +274,31 @@ describe("agent and project pills", () => {
   });
 });
 
+describe("the documents load before a project is resolved", () => {
+  /**
+   * /chat paints the composer before the active project resolves. The field
+   * used to receive `projectId ?? ""`, and the empty segment collapsed to
+   * `/api/projects/documents` — six 404s in one audit session.
+   */
+  it("asks for no documents at all while the project is null", async () => {
+    await renderComposer({ projects: [], project: null, projectId: null, disabled: true });
+
+    const documentCalls = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.includes("documents"));
+    expect(documentCalls).toEqual([]);
+  });
+
+  it("asks for that project's documents once it resolves", async () => {
+    await renderComposer();
+
+    const documentCalls = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.includes("documents"));
+    expect(documentCalls).toEqual(["/api/projects/p1/documents"]);
+  });
+});
+
 describe("what the conversation PATCH carries", () => {
   // A named agent OWNS its provider: sending both loses the user's choice
   // because the route re-derives the provider from the agent row.

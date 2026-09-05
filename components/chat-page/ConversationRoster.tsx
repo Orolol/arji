@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 import type { Conversation } from "@/hooks/useConversations";
 import type { DeskProject } from "@/lib/control-desk/types";
 
@@ -13,6 +14,10 @@ import { NewConversationCard } from "./NewConversationCard";
 /**
  * The 300px left column: conversations, the dashed "New conversation" card,
  * and the sunken "LE CHAT SAIT" note pinned to the bottom.
+ *
+ * 300px FROM `lg` ONLY. Below it the page is one pane at a time
+ * (`ChatPaneSwitcher`) and the roster is that whole pane — a fixed 300px next
+ * to a 300px rail is what pushed the thread off a 390px phone (B-arij-180).
  *
  * THE ROSTER IS SCOPED TO THE ACTIVE PROJECT, AND THAT IS NOT AN OVERSIGHT.
  * Frame 11a samples three rows across three projects. Listing conversations
@@ -38,6 +43,8 @@ export interface ConversationRosterProps {
   onRestartPersistentSession: (conversationId: string) => void;
   createDisabled?: boolean;
   now?: number;
+  /** The host's pane visibility — see `chatPaneClass`. */
+  className?: string;
 }
 
 export function ConversationRoster({
@@ -51,11 +58,16 @@ export function ConversationRoster({
   onRestartPersistentSession,
   createDisabled = false,
   now,
+  className,
 }: ConversationRosterProps) {
   return (
     <div
       data-testid="chat-roster"
-      className="flex w-[300px] min-h-0 shrink-0 flex-col gap-[10px]"
+      className={cn(
+        "flex min-h-0 w-full flex-1 flex-col gap-[10px]",
+        "lg:w-[300px] lg:flex-none",
+        className,
+      )}
     >
       {/*
         The list AND the create card scroll together — the frame draws the

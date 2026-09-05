@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useCallback, useState } from "react";
 import { GitMerge, Hammer, RefreshCw, Send, X } from "lucide-react";
 
 import {
@@ -139,7 +140,7 @@ function DismissButton({
 }
 
 function useRowEnter(onEnter: () => void) {
-  return React.useCallback(
+  return useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (event.key !== "Enter") return;
       if (event.target !== event.currentTarget) return;
@@ -174,8 +175,8 @@ export function AsksYouRow({
   pending = false,
   className,
 }: AsksYouRowProps) {
-  const [draft, setDraft] = React.useState("");
-  const [focusKey, setFocusKey] = React.useState<number | undefined>(undefined);
+  const [draft, setDraft] = useState("");
+  const [focusKey, setFocusKey] = useState<number | undefined>(undefined);
   const onKeyDown = useRowEnter(() => setFocusKey((key) => (key ?? 0) + 1));
 
   const send = () => {

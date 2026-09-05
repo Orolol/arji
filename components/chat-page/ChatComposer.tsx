@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRef, useState } from "react";
 import { ImagePlus, Sparkles } from "lucide-react";
 
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
@@ -13,9 +14,29 @@ import { ImageAttachmentStrip } from "@/components/shared/ImageAttachmentStrip";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useImageAttachments } from "@/hooks/useImageAttachments";
 import type { DeskProject } from "@/lib/control-desk/types";
+import { cn } from "@/lib/utils";
 
 export const CHAT_COMPOSER_PLACEHOLDER =
   "Écris — ⏎ envoie, ⇧⏎ saute une ligne, @ cite un doc";
+
+/**
+ * The largest share an agent pill may take — of two different rows.
+ *
+ * WRAPPED, the pill shares its row with the attach button and the project
+ * pill and nothing else, so 45% of the band is affordable and is what a phone
+ * has always rendered. ONE ROW, it shares with the FIELD, and 30% of the
+ * composer is the share the 36rem wrap threshold below is computed from.
+ *
+ * Measured: giving the wrapped row the tighter cap truncated "Claude Code" —
+ * an ordinary provider label, not a long one — from 116px to 109px at 390.
+ * The single-row cap is in `cqw` rather than `%` because a percentage
+ * resolves against the band's content box while the threshold that justifies
+ * it is expressed on the container; keeping both on the container is what
+ * makes the arithmetic below checkable.
+ *
+ * Literal classes rather than numbers: Tailwind cannot see a computed one.
+ */
+const AGENT_PILL_MAX = "max-w-[45%] @min-[36rem]:max-w-[30cqw]";
 
 /**
  * The linden composer band (frame 11a).
@@ -66,8 +87,8 @@ export function ChatComposer({
   disabled = false,
   onSend,
 }: ChatComposerProps) {
-  const [value, setValue] = React.useState("");
-  const composingRef = React.useRef(false);
+  const [value, setValue] = useState("");
+  const composingRef = useRef(false);
 
   const {
     attachments,
@@ -116,7 +137,15 @@ export function ChatComposer({
   }
 
   return (
-    <div data-testid="chat-composer" className="flex shrink-0 flex-col">
+    /*
+      `@container`: the band's row is decided by the COMPOSER's width, not by
+      the window's (B-arij-180, round 2). The two are not the same number —
+      the chat page puts the thread between two 300px flanks from `lg`, so the
+      band is 372px wide at a 1024px window and 740px wide at a 768px one. A
+      viewport breakpoint gets that backwards, and did: the widest layout in
+      the app held the narrowest composer, with 89px of field measured at 1024.
+    */
+    <div data-testid="chat-composer" className="@container flex shrink-0 flex-col">
       {/* Self-hides when empty and nothing is uploading. */}
       <ImageAttachmentStrip
         attachments={effectiveAttachments}
@@ -125,10 +154,29 @@ export function ChatComposer({
         className="px-[18px] pb-1"
       />
 
+      {/*
+        ONE ROW FROM 36rem OF BAND, TWO BELOW IT (B-arij-180). The row is a
+        16px glyph, a text field and three fixed controls: at 390px the
+        controls' own min-content took all of it and the field was measured at
+        24px — on screen, uncovered, and useless. Wrapping gives the field its
+        own row and drops the controls underneath.
+
+        36rem is arithmetic, not taste. A single row spends 96px on the glyph,
+        the four gaps and the attach button, up to 100px on the project pill
+        (`shortProjectName` caps its label at 8 characters) and up to
+        `AGENT_PILL_MAX` of the band on the agent pill, which leaves the field
+        `0.7 x band - 232`. That crosses the 160px the e2e calls a usable field
+        at 560px of band, and 36rem is the first round number above it. A
+        628px desktop band stays one row, so the 1280 and 1440 frames are
+        untouched; a 372px band at 1024 now wraps instead of pretending.
+      */}
       <StrataBand
         stratum="feed"
         gap={13}
-        className="min-h-[58px] shrink-0 flex-row items-center px-[18px] py-0"
+        className={cn(
+          "min-h-[58px] shrink-0 flex-row flex-wrap items-center px-[18px] py-[9px]",
+          "@min-[36rem]:flex-nowrap @min-[36rem]:py-0",
+        )}
       >
         <Sparkles
           size={16}
@@ -136,25 +184,35 @@ export function ChatComposer({
           className="shrink-0 text-strata-feed-deep"
         />
 
-        <MentionTextarea
-          projectId={projectId ?? ""}
-          value={value}
-          onValueChange={setValue}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          onCompositionStart={() => {
-            composingRef.current = true;
-          }}
-          onCompositionEnd={() => {
-            composingRef.current = false;
-          }}
-          placeholder={CHAT_COMPOSER_PLACEHOLDER}
-          aria-label="Écris un message"
-          data-testid="chat-composer-input"
-          rows={1}
-          disabled={disabled}
-          className="min-h-[24px] max-h-[120px] min-w-0 flex-1 resize-none rounded-none border-0 bg-transparent p-0 py-[17px] text-[13.5px] font-medium text-foreground shadow-none placeholder:text-strata-feed-deep placeholder:opacity-90 focus-visible:border-0 focus-visible:ring-0"
-        />
+        {/*
+          THE FLEX ITEM IS THIS DIV, not the textarea. `MentionTextarea` owns
+          its own `relative flex-1 min-w-0 w-full` wrapper (the mention popover
+          anchors on it), so a basis set through `className` lands one level
+          too deep and never reaches the row.
+        */}
+        <div className="flex min-w-0 grow shrink basis-[calc(100%-29px)] @min-[36rem]:basis-0">
+          <MentionTextarea
+            // NOT `?? ""`: an empty segment is what produced the
+            // `/api/projects/documents` 404s on every /chat load.
+            projectId={projectId}
+            value={value}
+            onValueChange={setValue}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false;
+            }}
+            placeholder={CHAT_COMPOSER_PLACEHOLDER}
+            aria-label="Écris un message"
+            data-testid="chat-composer-input"
+            rows={1}
+            disabled={disabled}
+            className="min-h-[24px] max-h-[120px] min-w-0 flex-1 resize-none rounded-none border-0 bg-transparent p-0 py-[17px] text-[13.5px] font-medium text-foreground shadow-none placeholder:text-strata-feed-deep placeholder:opacity-90 focus-visible:border-0 focus-visible:ring-0"
+          />
+        </div>
 
         <PillButton
           variant="outline"
@@ -184,11 +242,35 @@ export function ChatComposer({
           ))}
         </SelectPill>
 
+        {/*
+          A named agent's name is an arbitrary string — `createNamedAgentSchema`
+          only refuses a blank one — and `SelectPill` is `shrink-0`, which is
+          right for the project pill's 8-character short name and wrong here.
+          Measured on main with a 107-character name (437d4c7): the pill took
+          its max-content width of 663px, overflowed the band, was clipped by
+          the thread column, and left the field at ZERO at 640, 768, 1024, 1280
+          and 1440. The page never scrolled sideways — the field simply
+          collapsed.
+
+          Three tokens, one behaviour: `max-w` in `cqw` is a share of the
+          composer rather than of the window, so the cap holds in the narrow
+          three-column band as well as on a phone; `min-w-0` lets the label's
+          own `truncate` engage; `shrink` makes the PILL the item that yields
+          when the row is over-subscribed, which is what the field used to do.
+
+          THE CAP TRAVELS WITH THE MOUNT, NOT WITH THE COMPONENT. Unifying the
+          three menus put a shared `AgentSelectPill` here, and this is the only
+          one of its three mounts whose row also holds a text field that can be
+          squeezed to nothing — the desk bar and the project panel's header do
+          not. So it stays a `className` at the call site rather than becoming
+          the component's default.
+        */}
         <AgentSelectPill
           mode="chat"
           selection={agentSelection}
           onSelect={onSelectAgent}
           disabled={agentLocked}
+          className={cn(AGENT_PILL_MAX, "min-w-0 shrink")}
         />
 
         <input {...fileInputProps} />

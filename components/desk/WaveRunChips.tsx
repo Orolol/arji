@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useCallback, useState } from "react";
 import { Layers, Moon, Square } from "lucide-react";
 
 import { Mono, PillButton } from "@/components/piscine";
@@ -50,11 +50,11 @@ export interface WaveRunChipsProps {
 }
 
 export function WaveRunChips({ projectId }: WaveRunChipsProps) {
-  const [batches, setBatches] = React.useState<WaveBatch[]>([]);
+  const [batches, setBatches] = useState<WaveBatch[]>([]);
   /** Night run ids the user already asked to stop (local echo). */
-  const [stopped, setStopped] = React.useState<string[]>([]);
+  const [stopped, setStopped] = useState<string[]>([]);
 
-  const poll = React.useCallback(async () => {
+  const poll = useCallback(async () => {
     if (!projectId) return;
     try {
       const res = await fetch(`/api/projects/${projectId}/build/waves`);

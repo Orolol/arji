@@ -176,6 +176,30 @@ export default function SessionsPage() {
   const [summaryRunId, setSummaryRunId] = useState<string | null>(null);
 
   /**
+   * Reset on project change, adjusted DURING RENDER rather than from an
+   * effect — what React documents for "a prop changed, drop the derived
+   * state", and what the rest of this codebase now does (`DismissDialog`,
+   * `DeskCommandPalette`).
+   *
+   * The difference is the frame: an effect clears one commit late, so the new
+   * project's first paint is the previous project's session list under the
+   * new project's URL. Adjusting here means that paint never happens.
+   *
+   * Not lint-enforced here, and deliberately not trusted to be: the React
+   * Compiler rules do not read this component at all. Probed by mutation — a
+   * textbook `set-state-in-effect` injected into this file draws no
+   * diagnostic, while the same injection in `hooks/useAgentPolling.ts` and in
+   * `app/projects/[projectId]/page.tsx` is reported. Filed separately.
+   */
+  const [loadedProjectId, setLoadedProjectId] = useState(projectId);
+  if (loadedProjectId !== projectId) {
+    setLoadedProjectId(projectId);
+    setItems([]);
+    setIncomplete(null);
+    setLoading(true);
+  }
+
+  /**
    * Night-run history. This list is the only durable way back into a past
    * run's morning summary — the "Night run finished" notification carrying
    * the `?nightRun=` deep link is transient.
@@ -192,7 +216,23 @@ export default function SessionsPage() {
   } = useNightRuns(projectId, nightFilterActive);
 
   useEffect(() => {
-    loadSessions();
+    // Following the cursor to the end means a load is not one round trip but
+    // one window per page, held open for as long as the project has sessions.
+    // Switching projects has to close it, on two counts.
+    //
+    // Measured, in Chrome against a 733-session project: the abandoned loop
+    // kept paging for four more requests after the switch, fetching a list
+    // nobody would ever see. That is the cost this abort removes.
+    //
+    // The state guard below is the second count, and it is defensive: today's
+    // App Router remounts this page when the [projectId] segment changes, so
+    // the abandoned loop's setItems lands on an unmounted component. That is
+    // a routing detail, not a guarantee — under a plain re-render the last
+    // writer wins, and the longer, older list does not pollute the new
+    // project's list so much as replace it.
+    const controller = new AbortController();
+    loadSessions(controller.signal);
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -201,17 +241,26 @@ export default function SessionsPage() {
    * the synthesis band and both sort orders still cover every session. Each
    * page is painted as it lands, so the newest sessions show immediately
    * instead of waiting on the tail.
+   *
+   * `signal` both stops the paging and disowns the run: it is checked before
+   * every state write, because aborting cannot unwind a request that already
+   * succeeded and is only having its body read.
    */
-  async function loadSessions() {
+  async function loadSessions(signal: AbortSignal) {
     try {
-      setIncomplete(null);
       await fetchUnifiedSessions<UnifiedSession>(projectId, {
+        signal,
         onPage: (rowsSoFar) => {
+          if (signal.aborted) return;
           setItems([...rowsSoFar]);
           setLoading(false);
         },
       });
     } catch (error) {
+      // A cancelled load is not a failed one. Its rows belong to a project
+      // that is no longer on screen, so the banner — which claims the list
+      // BELOW it is a prefix — would be a lie about the project that is.
+      if (signal.aborted) return;
       // Keep whatever is already on screen rather than blanking the list —
       // but never present a prefix as the list. The counts in the synthesis
       // band and both sort orders are derived from every row, so a missing
@@ -222,7 +271,7 @@ export default function SessionsPage() {
           : "Could not load every session; the list below may be incomplete."
       );
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }
 
@@ -464,7 +513,16 @@ export default function SessionsPage() {
             value={ticketQuery}
             onChange={(e) => setTicketQuery(e.target.value)}
             placeholder="Filter by ticket"
-            className="w-full min-w-0 bg-transparent text-[12.5px] text-foreground placeholder:text-muted-foreground focus:outline-none sm:w-[150px]"
+            data-testid="sessions-ticket-filter"
+            // There is no field box here — the label is a bare icon + input
+            // row — so the ring belongs to the input itself. It replaces a
+            // focus:outline-none that removed the browser's default and put
+            // nothing in its place (B-arij-203).
+            className={cn(
+              "w-full min-w-0 bg-transparent text-[12.5px] text-foreground placeholder:text-muted-foreground sm:w-[150px]",
+              "outline-none",
+              "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
+            )}
           />
         </label>
       </div>

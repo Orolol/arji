@@ -49,9 +49,15 @@ const {
   sessionChunkRetentionDaysSettingKey,
 } = await import("@/lib/routines/retention");
 const { readChunkTail } = await import("@/lib/pipeline/forensic");
-const { RETENTION_VACUUMED_AT_CONFIG_KEY, isDailyRoutineKind } = await import(
-  "@/lib/routines/constants"
+const { capSessionPrompt } = await import("@/lib/agent-sessions/lifecycle");
+const { SESSION_PROMPT_MAX_STORED_BYTES } = await import(
+  "@/lib/agent-sessions/prompt-cap"
 );
+const {
+  RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY,
+  RETENTION_VACUUMED_AT_CONFIG_KEY,
+  isDailyRoutineKind,
+} = await import("@/lib/routines/constants");
 const { isRoutineDue } = await import("@/lib/routines/scheduler");
 const { FORENSIC_RAW_TAIL_MAX_CHARS, FORENSIC_OUTPUT_TAIL_MAX_CHARS } =
   await import("@/lib/pipeline/constants");
@@ -71,6 +77,7 @@ function seedSession(values: {
   endedAt?: string | null;
   createdAt?: string | null;
   lastNonEmptyText?: string | null;
+  prompt?: string | null;
 }): void {
   db.insert(agentSessions)
     .values({
@@ -80,6 +87,7 @@ function seedSession(values: {
       endedAt: values.endedAt ?? null,
       createdAt: values.createdAt ?? values.endedAt ?? daysAgo(1),
       lastNonEmptyText: values.lastNonEmptyText ?? null,
+      prompt: values.prompt ?? null,
     })
     .run();
 }
@@ -532,7 +540,7 @@ describe("retention routine", () => {
     };
   }
 
-  function deps(pruned: number) {
+  function deps(pruned: number, cappedPrompts = 0) {
     return {
       resolveRetentionDays: vi.fn(() => 30),
       prune: vi.fn(() => ({
@@ -543,6 +551,12 @@ describe("retention routine", () => {
         reclaimedChars: 4_000_000,
         preservedLastTexts: 1,
         reachedDeleteBudget: false,
+      })),
+      capPrompts: vi.fn(() => ({
+        scannedSessions: cappedPrompts,
+        cappedPrompts,
+        reclaimedBytes: cappedPrompts * 1_000_000,
+        reachedRowBudget: false,
       })),
       vacuum: vi.fn(),
       claimVacuum: vi.fn(),
@@ -574,6 +588,7 @@ describe("retention routine", () => {
     expect(first.claimVacuum).toHaveBeenCalledWith(
       "routine-retention",
       NOW.toISOString(),
+      [RETENTION_VACUUMED_AT_CONFIG_KEY],
     );
     expect(first.claimVacuum.mock.invocationCallOrder[0]).toBeLessThan(
       first.vacuum.mock.invocationCallOrder[0],
@@ -600,6 +615,23 @@ describe("retention routine", () => {
     expect(quiet.claimVacuum).not.toHaveBeenCalled();
   });
 
+  it("spends both one-shot claims in one rewrite when both backlogs come due", async () => {
+    const both = deps(3, 2);
+    const result = await runRetentionRoutine(routine(), both, NOW);
+
+    expect(both.vacuum).toHaveBeenCalledTimes(1);
+    expect(both.claimVacuum).toHaveBeenCalledWith(
+      "routine-retention",
+      NOW.toISOString(),
+      [
+        RETENTION_VACUUMED_AT_CONFIG_KEY,
+        RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY,
+      ],
+    );
+    expect(result.message).toContain("Pruned 3 sessions");
+    expect(result.message).toContain("2 stored prompts capped");
+  });
+
   it("honours an explicit vacuum opt-out", async () => {
     const optedOut = deps(3);
     await runRetentionRoutine(routine({ vacuum: false }), optedOut, NOW);
@@ -610,6 +642,57 @@ describe("retention routine", () => {
     await expect(
       runRetentionRoutine(routine({ maxDeletedChunks: 0 }), deps(3), NOW),
     ).rejects.toThrow(/maxDeletedChunks/);
+  });
+
+  /**
+   * The regression this epic exists for. `runRetentionRoutine` pruned
+   * `agent_session_chunks` and nothing else, so the 38 pre-cap rows holding
+   * 27.0 MB in `agent_sessions.prompt` had no scheduled owner at all — the
+   * capping story had assigned them to "the retention sweep".
+   *
+   * Deliberately seeded with NO chunks: the prompt sweep must not be a
+   * side-effect of a session also being prunable, and the measured live
+   * database was exactly this shape — everything inside the chunk window,
+   * megabytes of pre-cap prompt.
+   */
+  it("caps prompts left over the write-path cap, with no chunks to prune", async () => {
+    const oversized =
+      "[pre-cap prompt] " +
+      "x".repeat(SESSION_PROMPT_MAX_STORED_BYTES * 3);
+    seedSession({
+      id: "pre-cap",
+      status: "completed",
+      endedAt: daysAgo(1),
+      prompt: oversized,
+    });
+    db.insert(routines)
+      .values({
+        id: "routine-retention",
+        projectId: PROJECT_ID,
+        kind: "retention",
+        timeOfDay: "04:30",
+        config: "{}",
+      })
+      .run();
+
+    const result = await runRetentionRoutine(
+      db.select().from(routines).where(eq(routines.id, "routine-retention")).get()!,
+      undefined,
+      NOW,
+    );
+
+    const stored = db
+      .select({ prompt: agentSessions.prompt })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, "pre-cap"))
+      .get()!.prompt!;
+    expect(Buffer.byteLength(stored, "utf8")).toBeLessThan(
+      SESSION_PROMPT_MAX_STORED_BYTES,
+    );
+    // Byte-identical to what the write path would have stored: same cap, same
+    // marker, so `splitCappedPrompt` and the echo scrub cannot tell them apart.
+    expect(stored).toBe(capSessionPrompt(oversized));
+    expect(result.status).toBe("completed");
   });
 
   it("prunes the real database end to end through the default dependencies", async () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useState } from "react";
 
 import { QuestionCards } from "@/components/chat/QuestionCards";
 import { ImageLightbox, type LightboxImage } from "@/components/shared/ImageLightbox";
@@ -103,7 +104,7 @@ export function ChatThread({
   footer,
 }: ChatThreadProps) {
   const scrollRef = useFeedAutoScroll(messages.length);
-  const [lightboxImage, setLightboxImage] = React.useState<LightboxImage | null>(
+  const [lightboxImage, setLightboxImage] = useState<LightboxImage | null>(
     null,
   );
 

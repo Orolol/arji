@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Badge } from "@/components/ui/badge";
 import { InlineEdit } from "@/components/kanban/InlineEdit";
 import {
@@ -48,6 +49,15 @@ interface StoryDetailPanelProps {
 }
 
 export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
+  // Generated rather than static: the panel is a component, and two mounted
+  // copies sharing hard-coded ids would point every label at the first one.
+  const fieldId = useId();
+  const statusId = `${fieldId}-status`;
+  const descriptionId = `${fieldId}-description`;
+  const descriptionLabelId = `${descriptionId}-label`;
+  const criteriaId = `${fieldId}-acceptance-criteria`;
+  const criteriaLabelId = `${criteriaId}-label`;
+
   return (
     <div className="p-6 space-y-6">
       {/* Title */}
@@ -62,14 +72,17 @@ export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
       {/* Status & Metadata */}
       <div className="flex items-center gap-3">
         <div>
-          <label className="text-xs text-muted-foreground block mb-1">
+          <label
+            htmlFor={statusId}
+            className="text-xs text-muted-foreground block mb-1"
+          >
             Status
           </label>
           <Select
             value={story.status}
             onValueChange={(v) => onUpdate({ status: v })}
           >
-            <SelectTrigger className="h-8 text-xs w-32">
+            <SelectTrigger id={statusId} className="h-8 text-xs w-32">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -82,9 +95,17 @@ export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
           </Select>
         </div>
         <div>
-          <label className="text-xs text-muted-foreground block mb-1">
+          {/*
+            Pure spacer: it lines the badge up with the select beside it and
+            names nothing, so it must not be a <label> — an empty label is a
+            label pointing at no control.
+          */}
+          <span
+            aria-hidden="true"
+            className="text-xs text-muted-foreground block mb-1"
+          >
             &nbsp;
-          </label>
+          </span>
           <Badge className={STATUS_COLORS[story.status] || STATUS_COLORS.todo}>
             {USER_STORY_STATUS_LABELS[story.status as UserStoryStatus] || story.status}
           </Badge>
@@ -107,10 +128,16 @@ export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
 
       {/* Description */}
       <div>
-        <label className="text-xs text-muted-foreground block mb-1">
+        <label
+          id={descriptionLabelId}
+          htmlFor={descriptionId}
+          className="text-xs text-muted-foreground block mb-1"
+        >
           Description
         </label>
         <InlineEdit
+          id={descriptionId}
+          aria-labelledby={descriptionLabelId}
           value={story.description || ""}
           onSave={(v) => onUpdate({ description: v })}
           multiline
@@ -120,10 +147,16 @@ export function StoryDetailPanel({ story, onUpdate }: StoryDetailPanelProps) {
 
       {/* Acceptance Criteria */}
       <div>
-        <label className="text-xs text-muted-foreground block mb-1">
+        <label
+          id={criteriaLabelId}
+          htmlFor={criteriaId}
+          className="text-xs text-muted-foreground block mb-1"
+        >
           Acceptance Criteria
         </label>
         <InlineEdit
+          id={criteriaId}
+          aria-labelledby={criteriaLabelId}
           value={story.acceptanceCriteria || ""}
           onSave={(v) => onUpdate({ acceptanceCriteria: v })}
           multiline

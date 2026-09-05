@@ -14,6 +14,25 @@
  * survives — and because the pruner is worth testing against a raw database
  * handle with no scheduler in the way.
  *
+ * ## The second sweep: prompts already over the write-path cap
+ *
+ * `agent_sessions.prompt` is capped on the way in (`capSessionPrompt`), which
+ * bounds growth and does nothing about what predates it — on a snapshot of the
+ * live database, 38 rows holding 27.0 MB, of which the head/tail cut reclaimed
+ * 22.2 MB. That half was assigned to "the retention sweep" and the sweep did
+ * not cover it: this routine walked `agent_session_chunks` and nothing else.
+ * It now runs `lib/agent-sessions/prompt-backfill.ts` as a second step, over
+ * the same project, applying the same cap and writing the same marker the
+ * write path writes — so a backfilled row is indistinguishable from a natively
+ * capped one.
+ *
+ * The two steps are independent: prompts are capped regardless of a session's
+ * age or status, because the cap is an invariant on the column rather than a
+ * retention decision, and a row over the cap is by construction a row written
+ * before the cap existed. A run that prunes no chunks but caps a prompt is a
+ * `completed` run, not a skipped one — which matters, because the measured
+ * live database is exactly that case.
+ *
  * The routine is daily, so it goes through the same `last_run_at` claim as
  * `night_run` and `github_issue_sync`: the scheduler writes the timestamp
  * before it calls the action, which is the restart-safe half of the
@@ -31,13 +50,20 @@
  * The claim is durable (`retentionVacuumedAt` in the routine config), so a
  * restart cannot replay it.
  *
+ * There are two of those one-shot claims, one per historical backlog:
+ * `retentionVacuumedAt` for the chunk prune and `retentionPromptsVacuumedAt`
+ * for the prompt sweep. Separate on purpose — a database that pruned its
+ * chunks before the prompt sweep existed has already spent the first, and a
+ * shared claim would rewrite 22 MB of prompt into the free list and never
+ * return a byte of it to the filesystem.
+ *
  * To reclaim again later — after a one-off retention-window change, say —
  * run it by hand against a stopped server:
  *
  *     sqlite3 data/arij.db 'VACUUM;'
  *
- * or clear `retentionVacuumedAt` from the routine's config and let the next
- * prune redo it. Set `config.vacuum` to `false` to opt out entirely.
+ * or clear the relevant claim from the routine's config and let the next run
+ * redo it. Set `config.vacuum` to `false` to opt out entirely.
  */
 
 import { eq, inArray } from "drizzle-orm";
@@ -49,12 +75,18 @@ import {
   type SessionChunkPruneResult,
 } from "@/lib/agent-sessions/chunk-prune";
 import {
+  createSessionPromptBackfiller,
+  DEFAULT_MAX_CAPPED_PROMPTS_PER_RUN,
+  type SessionPromptBackfillResult,
+} from "@/lib/agent-sessions/prompt-backfill";
+import {
   FORENSIC_OUTPUT_TAIL_MAX_CHARS,
   FORENSIC_RAW_TAIL_MAX_CHARS,
 } from "@/lib/pipeline/constants";
 import type { RoutineActionResult } from "@/lib/routines/actions";
 import {
   parseRoutineConfig,
+  RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY,
   RETENTION_VACUUMED_AT_CONFIG_KEY,
 } from "@/lib/routines/constants";
 
@@ -180,8 +212,17 @@ export interface RetentionDeps {
     maxDeletedChunks: number;
     prunedAt: string;
   }): SessionChunkPruneResult;
+  capPrompts(options: {
+    projectId: string;
+    maxRows: number;
+  }): SessionPromptBackfillResult;
   vacuum(): void;
-  claimVacuum(routineId: string, at: string): void;
+  /**
+   * Records the one-shot VACUUM claims this run is about to spend. Takes the
+   * keys rather than assuming one, so a run that reclaims both backlogs in a
+   * single rewrite spends both claims in a single write.
+   */
+  claimVacuum(routineId: string, at: string, keys: readonly string[]): void;
 }
 
 export const defaultRetentionDeps: RetentionDeps = {
@@ -191,12 +232,14 @@ export const defaultRetentionDeps: RetentionDeps = {
       ...options,
       tailChars: SESSION_CHUNK_RETAINED_TAIL_CHARS,
     }),
+  capPrompts: (options) =>
+    createSessionPromptBackfiller(sqlite).backfill(options),
   // Deliberately on the raw handle and outside any transaction: SQLite
   // refuses VACUUM inside one.
   vacuum: () => {
     sqlite.exec("VACUUM");
   },
-  claimVacuum: (routineId, at) => {
+  claimVacuum: (routineId, at, keys) => {
     const row = db
       .select({ config: routines.config })
       .from(routines)
@@ -216,7 +259,7 @@ export const defaultRetentionDeps: RetentionDeps = {
       .set({
         config: JSON.stringify({
           ...config,
-          [RETENTION_VACUUMED_AT_CONFIG_KEY]: at,
+          ...Object.fromEntries(keys.map((key) => [key, at])),
         }),
       })
       .where(eq(routines.id, routineId))
@@ -257,6 +300,17 @@ function formatChars(chars: number): string {
   return `${(chars / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
+/**
+ * The prompt cap is expressed in bytes, so its saving is reported in bytes —
+ * a second unit for the same line, rather than the chunk pruner's characters
+ * reused for a number that was never counted that way.
+ */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} bytes`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
 export function retentionCutoff(now: Date, retentionDays: number): string {
   return new Date(now.getTime() - retentionDays * 86_400_000).toISOString();
 }
@@ -277,9 +331,16 @@ export async function runRetentionRoutine(
     "maxDeletedChunks",
     DEFAULT_MAX_DELETED_CHUNKS_PER_RUN,
   );
+  const maxCappedPrompts = positiveInteger(
+    config,
+    "maxCappedPrompts",
+    DEFAULT_MAX_CAPPED_PROMPTS_PER_RUN,
+  );
   const vacuumAllowed = booleanOption(config, "vacuum", true);
   const alreadyVacuumed =
     typeof config[RETENTION_VACUUMED_AT_CONFIG_KEY] === "string";
+  const promptsAlreadyVacuumed =
+    typeof config[RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY] === "string";
 
   const retentionDays = deps.resolveRetentionDays(routine.projectId);
   const prunedAt = now.toISOString();
@@ -290,36 +351,73 @@ export async function runRetentionRoutine(
     prunedAt,
   });
 
+  // Deliberately unconditional on the prune's outcome. The two sweeps share a
+  // run and a VACUUM, nothing else: a project whose chunks are all inside the
+  // window can still hold megabytes of pre-cap prompt, which is precisely the
+  // state the live database was measured in.
+  const prompts = deps.capPrompts({
+    projectId: routine.projectId,
+    maxRows: maxCappedPrompts,
+  });
+
   const targetUrl = `/projects/${routine.projectId}/sessions`;
-  if (result.prunedSessions === 0) {
+  if (result.prunedSessions === 0 && prompts.cappedPrompts === 0) {
     return {
       status: "skipped",
       message: `Nothing to prune: ${result.scannedSessions} terminal session${
         result.scannedSessions === 1 ? "" : "s"
-      } older than ${retentionDays} days are already inside their retained tail.`,
+      } older than ${retentionDays} days are already inside their retained tail, and no stored prompt is over its cap.`,
       targetUrl,
       shouldNotify: false,
     };
   }
 
-  let vacuumed = false;
-  if (vacuumAllowed && !alreadyVacuumed) {
+  // Each backlog spends its own claim, and only when THIS run actually freed
+  // something from it — so a prompt-only run cannot burn the chunk prune's
+  // one rewrite, or the other way round. When both come due at once they
+  // share the single VACUUM and are both marked spent.
+  const vacuumClaims: string[] = [];
+  if (vacuumAllowed) {
+    if (!alreadyVacuumed && result.prunedSessions > 0) {
+      vacuumClaims.push(RETENTION_VACUUMED_AT_CONFIG_KEY);
+    }
+    if (!promptsAlreadyVacuumed && prompts.cappedPrompts > 0) {
+      vacuumClaims.push(RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY);
+    }
+  }
+
+  const vacuumed = vacuumClaims.length > 0;
+  if (vacuumed) {
     // Claim BEFORE the rewrite, exactly like the scheduler's own run claim: a
     // crash mid-VACUUM must not hand the next boot a second multi-second
     // exclusive rewrite. SQLite rolls the file back on its own.
-    deps.claimVacuum(routine.id, prunedAt);
+    deps.claimVacuum(routine.id, prunedAt, vacuumClaims);
     deps.vacuum();
-    vacuumed = true;
   }
 
-  const parts = [
-    `Pruned ${result.prunedSessions} session${
-      result.prunedSessions === 1 ? "" : "s"
-    } older than ${retentionDays} days`,
-    `${result.deletedChunks} chunk${
-      result.deletedChunks === 1 ? "" : "s"
-    } deleted, ${formatChars(result.reclaimedChars)} of content freed`,
-  ];
+  const parts: string[] = [];
+  if (result.prunedSessions > 0) {
+    parts.push(
+      `Pruned ${result.prunedSessions} session${
+        result.prunedSessions === 1 ? "" : "s"
+      } older than ${retentionDays} days`,
+      `${result.deletedChunks} chunk${
+        result.deletedChunks === 1 ? "" : "s"
+      } deleted, ${formatChars(result.reclaimedChars)} of content freed`,
+    );
+  }
+  if (prompts.cappedPrompts > 0) {
+    parts.push(
+      `${prompts.cappedPrompts} stored prompt${
+        prompts.cappedPrompts === 1 ? "" : "s"
+      } capped, ${formatBytes(prompts.reclaimedBytes)} freed`,
+    );
+  }
+  if (prompts.reachedRowBudget) {
+    parts.push(
+      `stopped at the ${maxCappedPrompts}-prompt budget for this run`,
+    );
+  }
   if (result.truncatedChunks > 0) {
     parts.push(`${result.truncatedChunks} trimmed to their retained tail`);
   }

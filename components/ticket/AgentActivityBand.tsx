@@ -28,7 +28,7 @@
  * stretch to fill the modal.
  */
 
-import * as React from "react";
+import { useState } from "react";
 
 import {
   BandHeader,
@@ -96,7 +96,7 @@ export function AgentActivityBand({
 }
 
 function ActivityLine({ line }: { line: TimelineEntry }) {
-  const [expanded, setExpanded] = React.useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   if (!line.group || line.group.length === 0) {
     return (

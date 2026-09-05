@@ -22,21 +22,33 @@ export interface InboxItem {
 
 interface InboxState {
   items: InboxItem[];
+  /** Every row in the inbox — the rule the bar badge counts. */
   unreadCount: number;
+  /** Rows whose latest agent message has not been read yet. */
+  unreadMessageCount: number;
+  /** Rows holding a question the user has genuinely not answered. */
+  awaitingReplyCount: number;
   loading: boolean;
 }
 
 const POLL_INTERVAL_MS = 5000;
 
 /**
- * Cross-project inbox of tickets waiting on the user: agent questions
- * awaiting a reply plus unread agent comments. Polls /api/inbox (house
- * pattern, same cadence as useNotifications).
+ * Cross-project inbox of unread agent messages: reports on tickets that may
+ * well be finished, plus the questions an agent is genuinely held on. Polls
+ * /api/inbox (house pattern, same cadence as useNotifications).
+ *
+ * The three counters are the route's (see app/api/inbox/route.ts): the row
+ * count the bar badge has always shown, and the two category counters the
+ * inbox page prints so a pile of unread reports is not read as a pile of
+ * blocked agents.
  */
 export function useInbox() {
   const [state, setState] = useState<InboxState>({
     items: [],
     unreadCount: 0,
+    unreadMessageCount: 0,
+    awaitingReplyCount: 0,
     loading: true,
   });
 
@@ -48,6 +60,8 @@ export function useInbox() {
       setState({
         items: body.data?.items || [],
         unreadCount: body.data?.unreadCount ?? 0,
+        unreadMessageCount: body.data?.unreadMessageCount ?? 0,
+        awaitingReplyCount: body.data?.awaitingReplyCount ?? 0,
         loading: false,
       });
     } catch {
@@ -100,6 +114,8 @@ export function useInbox() {
   return {
     items: state.items,
     unreadCount: state.unreadCount,
+    unreadMessageCount: state.unreadMessageCount,
+    awaitingReplyCount: state.awaitingReplyCount,
     loading: state.loading,
     markRead,
     reply,

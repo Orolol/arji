@@ -17,7 +17,11 @@ interface ActiveMention {
 
 interface MentionTextareaProps
   extends Omit<React.ComponentProps<typeof Textarea>, "value" | "onChange"> {
-  projectId: string;
+  /**
+   * Nullable on purpose: the chat composer mounts before its active project
+   * resolves. An absent id means "no documents yet", never an empty segment.
+   */
+  projectId: string | null | undefined;
   value: string;
   onValueChange: (value: string) => void;
 }
@@ -65,11 +69,27 @@ export function MentionTextarea({
   const [activeMention, setActiveMention] = useState<ActiveMention | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
+  // An unresolved project is not an id. `/api/projects/${""}/documents`
+  // collapses to `/api/projects/documents` — a route nothing serves — so the
+  // guard belongs on the identifier, before the request.
+  const resolvedProjectId = projectId?.trim() ? projectId.trim() : null;
+
+  // The loaded list belongs to one project. Reset it during render (React's
+  // documented alternative to a reset effect) so a switch cannot leave the
+  // previous project's filenames suggestable while the new list is in flight.
+  const [loadedProjectId, setLoadedProjectId] = useState(resolvedProjectId);
+  if (loadedProjectId !== resolvedProjectId) {
+    setLoadedProjectId(resolvedProjectId);
+    setDocuments([]);
+  }
+
   useEffect(() => {
+    if (!resolvedProjectId) return;
+
     let cancelled = false;
 
     async function loadDocuments() {
-      const res = await fetch(`/api/projects/${projectId}/documents`);
+      const res = await fetch(`/api/projects/${resolvedProjectId}/documents`);
       const json = await res.json().catch(() => ({}));
       if (!res.ok || cancelled) return;
 
@@ -92,7 +112,7 @@ export function MentionTextarea({
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [resolvedProjectId]);
 
   const filteredDocuments = useMemo(() => {
     if (!activeMention) return [];

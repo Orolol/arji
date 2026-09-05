@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { projectTone } from "@/components/piscine";
+import { ToastStack } from "@/components/notifications/ToastStack";
+import { useToastStack } from "@/components/notifications/useToastStack";
 import { NextReleaseBand } from "@/components/releases/NextReleaseBand";
 import { ReleaseHeaderCluster } from "@/components/releases/ReleaseHeaderCluster";
 import { ReleaseHistory } from "@/components/releases/ReleaseHistory";
@@ -23,13 +25,6 @@ import {
 import { useGitHubConfig } from "@/hooks/useGitHubConfig";
 import { useNamedAgentsList } from "@/hooks/useNamedAgentsList";
 import { useReleasePublish } from "@/hooks/useReleasePublish";
-import { cn } from "@/lib/utils";
-
-interface Toast {
-  id: string;
-  type: "success" | "error";
-  message: string;
-}
 
 /** The fields of the project row this screen reads. */
 interface ProjectRecord {
@@ -47,15 +42,7 @@ export default function ReleasesPage() {
   const [allEpics, setAllEpics] = useState<ReleaseEpic[]>([]);
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [loading, setLoading] = useState(true);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-
-  const showToast = useCallback((type: "success" | "error", message: string) => {
-    const id = crypto.randomUUID();
-    setToasts((prev) => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-  }, []);
+  const { toasts, raise: showToast, dismiss: dismissToast } = useToastStack();
 
   // GitHub config. `isConfigured` reads the MASKED settings shape
   // (`github_pat.hasToken === true`); testing it as a string made it
@@ -335,26 +322,7 @@ export default function ReleasesPage() {
         </div>
       </div>
 
-      {toasts.length > 0 && (
-        <div className="fixed right-4 bottom-4 z-50 flex flex-col gap-2">
-          {toasts.map((toast) => (
-            <div
-              key={toast.id}
-              data-testid="release-toast"
-              data-type={toast.type}
-              className={cn(
-                "animate-in fade-in slide-in-from-bottom-2 motion-reduce:animate-none",
-                "rounded-[10px] px-4 py-2 text-[13px] font-medium",
-                toast.type === "success"
-                  ? "bg-action text-action-foreground"
-                  : "bg-destructive text-action-foreground"
-              )}
-            >
-              {toast.message}
-            </div>
-          ))}
-        </div>
-      )}
+      <ToastStack items={toasts} onDismiss={dismissToast} testId="release-toast" />
     </div>
   );
 }
