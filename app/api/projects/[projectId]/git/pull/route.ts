@@ -9,10 +9,12 @@ import {
 } from "@/lib/api/route-helpers";
 import { resolveCliSessionId } from "@/lib/db/resolve-cli-session-id";
 import {
+  assertGitRepository,
   assertRemoteConfigured,
   getCurrentGitBranch,
   getConflictFileDiffs,
   GitRemoteNotConfiguredError,
+  GitRepositoryUnavailableError,
   pullGitBranchWithConflictSupport,
 } from "@/lib/git/remote";
 import { writeGitSyncLog } from "@/lib/github/sync-log";
@@ -68,12 +70,25 @@ export async function POST(request: NextRequest, { params }: Params) {
   const resumeSessionId =
     typeof body?.resumeSessionId === "string" ? body.resumeSessionId : null;
   const requestedBranch = typeof body?.branch === "string" ? body.branch : "";
-  const branch = requestedBranch.trim() || (await getCurrentGitBranch(project.gitRepoPath));
+  // Resolved INSIDE the try below when the caller did not supply it. Reading
+  // the current branch reaches git, and this pre-read used to sit above the
+  // try: on a `gitRepoPath` that is not a repository it threw past the handler
+  // and Next answered its default 500 page, with no `{ error }` envelope and
+  // no audit row. Kept mutable so the catch blocks can still name the branch
+  // when one was known.
+  let branch = requestedBranch.trim();
   const resolved = resolveAgentByNamedId("merge", projectId, namedAgentId);
   const provider = resolved.provider;
   const model = resolved.model;
 
   try {
+    // First of all: every git call below assumes the path is a repository.
+    // An unusable one is a configuration state the user can fix, so it gets
+    // the 400 and the shared code `github/detect` already answers, not a
+    // transport-shaped fault.
+    await assertGitRepository(project.gitRepoPath);
+    if (!branch) branch = await getCurrentGitBranch(project.gitRepoPath);
+
     // Checked before the pull itself: without a remote there is nothing to
     // merge, and git's failure for that state is indistinguishable from a
     // transport error once it reaches the route.
@@ -298,6 +313,28 @@ export async function POST(request: NextRequest, { params }: Params) {
       },
     });
   } catch (error) {
+    // A path that is not a usable repository is the same class of recoverable
+    // state as the unconfigured remote below — audited the same way, refused
+    // with the same 400 and code the two detect routes already publish.
+    if (error instanceof GitRepositoryUnavailableError) {
+      writeGitSyncLog({
+        projectId,
+        operation: "pull",
+        status: "failed",
+        branch: branch || null,
+        detail: {
+          remote,
+          code: error.code,
+          error: error.message,
+        },
+      });
+
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: 400 }
+      );
+    }
+
     // An unconfigured remote is a precondition the user can fix, not a fault:
     // 409 with the code and the repository's real remotes so the client can
     // offer them, matching git/detect-remote's 4xx for the same state.
@@ -306,7 +343,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         projectId,
         operation: "pull",
         status: "failed",
-        branch,
+        branch: branch || null,
         detail: {
           remote,
           code: error.code,
@@ -331,7 +368,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       projectId,
       operation: "pull",
       status: "failed",
-      branch,
+      branch: branch || null,
       detail: {
         remote,
         ffOnly: false,

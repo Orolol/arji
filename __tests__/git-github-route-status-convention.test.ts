@@ -19,10 +19,17 @@ import { mockNextRequest, mockRouteContext } from "@/__tests__/helpers/db-mock";
  * So the route list here is DERIVED FROM THE ROUTE TREE, not hand-maintained:
  *
  *   1. Every `route.ts` under a `git` or `github` path segment must have an
- *      EXERCISED entry — it is really invoked against a project whose
- *      repository has no remote and whose GitHub configuration is absent, and
- *      its status is asserted against a declared allow-list that never
- *      contains 500.
+ *      EXERCISED entry — it is really invoked against TWO fixtures, and for
+ *      each one its status is asserted against a declared allow-list that
+ *      never contains 500:
+ *        a. a real repository with no remote and no GitHub configuration;
+ *        b. a `gitRepoPath` that exists but was never `git init`-ed.
+ *      Fixture (b) is the one this epic added. It catches a strictly larger
+ *      defect: `git/status`, `git/push` and `git/pull` did not merely answer
+ *      500 for it, they threw PAST their handler — Next's default error page,
+ *      with no `{ error }` envelope for any client to read — while
+ *      `github/detect` and `git/detect-remote` had already been fixed to
+ *      answer 400 `GIT_REPO_NOT_A_REPOSITORY` for the very same path.
  *   2. Every route OUTSIDE that subtree whose source touches GitHub
  *      configuration (`githubOwnerRepo`, the stored PAT, the typed
  *      not-configured error) must be classified too — exercised, or EXCLUDED
@@ -200,10 +207,12 @@ const key = (routePath: string, method: HttpMethod) => `${method} ${routePath}`;
 /* Classification                                                      */
 /* ------------------------------------------------------------------ */
 
-interface ExercisedRoute {
-  routePath: string;
-  method: HttpMethod;
-  /** Statuses this route may answer in the unconfigured fixture. Never 500. */
+/**
+ * What a route may answer for ONE fixture. Both fixtures below are ordinary
+ * recoverable states, so neither expectation may contain 500.
+ */
+interface FixtureExpectation {
+  /** Statuses this route may answer for that fixture. Never 500. */
   allowed: number[];
   /** Why that is the right answer for this route. */
   note: string;
@@ -212,7 +221,26 @@ interface ExercisedRoute {
    * declares one. Routes whose 4xx is plain input validation leave it unset.
    */
   code?: string;
+}
+
+interface ExercisedRoute extends FixtureExpectation {
+  routePath: string;
+  method: HttpMethod;
+  /**
+   * Expectations for the SECOND fixture: a `gitRepoPath` that exists but was
+   * never `git init`-ed. The no-remote fixture cannot catch this class —
+   * `git/status`, `git/push` and `git/pull` answered it with Next's default
+   * 500 page (no `{ error }` envelope at all) long after `github/detect` and
+   * `git/detect-remote` had been fixed to answer 400.
+   */
+  notARepository: FixtureExpectation;
   invoke: () => Promise<NextResponse | Response>;
+}
+
+/** The two fields every refusal payload is checked for. */
+interface RefusalBody {
+  error?: unknown;
+  code?: unknown;
 }
 
 const PROJECT_ID = "proj-convention";
@@ -221,6 +249,8 @@ const EPIC_ID = "epic-convention";
 /** A repository with no remote at all — created in `beforeAll`. */
 let repoPath = "";
 let pushOnlyRepoPath = "";
+/** An existing directory that was never `git init`-ed — the second fixture. */
+let notARepoPath = "";
 
 const EXERCISED: ExercisedRoute[] = [
   {
@@ -229,6 +259,11 @@ const EXERCISED: ExercisedRoute[] = [
     allowed: [200],
     note:
       "Writes the owner/repo. It is the fix for the unconfigured state, so it must succeed while unconfigured.",
+    notARepository: {
+      allowed: [200],
+      note:
+        "Writes the owner/repo into the database and never touches git, so an unusable path is irrelevant to it.",
+    },
     invoke: async () => {
       const { POST } = await import("@/app/api/projects/[projectId]/git/connect/route");
       return POST(
@@ -242,6 +277,12 @@ const EXERCISED: ExercisedRoute[] = [
     method: "POST",
     allowed: [400],
     note: "The convention's original reference: no parsable origin is a 400, never a fault.",
+    notARepository: {
+      allowed: [400],
+      code: "GIT_REPO_NOT_A_REPOSITORY",
+      note:
+        "Already fixed by the adjacent epic: the shared assertGitRepository() guard refuses before reading remotes.",
+    },
     invoke: async () => {
       const { POST } = await import(
         "@/app/api/projects/[projectId]/git/detect-remote/route"
@@ -255,6 +296,12 @@ const EXERCISED: ExercisedRoute[] = [
     allowed: [409],
     note: "Regressed route: nothing to merge from a remote that does not exist — a conflict, not a fault.",
     code: "remote_not_configured",
+    notARepository: {
+      allowed: [400],
+      code: "GIT_REPO_NOT_A_REPOSITORY",
+      note:
+        "Regressed route: its branch pre-read sat above the try, so git's fatal escaped the handler as a bare 500 page.",
+    },
     invoke: async () => {
       const { POST } = await import("@/app/api/projects/[projectId]/git/pull/route");
       return POST(mockNextRequest({ body: {} }), mockRouteContext({ projectId: PROJECT_ID }));
@@ -266,6 +313,12 @@ const EXERCISED: ExercisedRoute[] = [
     allowed: [409],
     note: "Regressed route: it used to surface git's raw transport prose as a 500.",
     code: "remote_not_configured",
+    notARepository: {
+      allowed: [400],
+      code: "GIT_REPO_NOT_A_REPOSITORY",
+      note:
+        "Regressed route: same escaped branch pre-read, and the client got no `error` field at all to display.",
+    },
     invoke: async () => {
       const { POST } = await import("@/app/api/projects/[projectId]/git/push/route");
       return POST(mockNextRequest({ body: {} }), mockRouteContext({ projectId: PROJECT_ID }));
@@ -277,6 +330,12 @@ const EXERCISED: ExercisedRoute[] = [
     allowed: [200],
     note:
       "A read: the missing remote is reported inside the payload (`remoteConfigured: false`), not as a failure.",
+    notARepository: {
+      allowed: [400],
+      code: "GIT_REPO_NOT_A_REPOSITORY",
+      note:
+        "Regressed route: unlike the missing remote, an unusable path has no in-payload representation — it is a refusal.",
+    },
     invoke: async () => {
       const { GET } = await import("@/app/api/projects/[projectId]/git/status/route");
       return GET(
@@ -290,6 +349,12 @@ const EXERCISED: ExercisedRoute[] = [
     method: "GET",
     allowed: [200],
     note: "Detection: `{ detected: false }` is the successful answer for a repository with no remote.",
+    notARepository: {
+      allowed: [400],
+      code: "GIT_REPO_NOT_A_REPOSITORY",
+      note:
+        "Already fixed by the adjacent epic; pinned here so the whole subtree answers one way for one condition.",
+    },
     invoke: async () => {
       const { GET } = await import("@/app/api/projects/[projectId]/github/detect/route");
       return GET(mockNextRequest(), mockRouteContext({ projectId: PROJECT_ID }));
@@ -301,6 +366,11 @@ const EXERCISED: ExercisedRoute[] = [
     allowed: [200, 201],
     note:
       "Imports from the local issue cache, so it needs no live GitHub configuration; an empty cache imports nothing.",
+    notARepository: {
+      allowed: [200, 201],
+      note:
+        "Imports from the local issue cache; it reads no git repository, so the path being unusable changes nothing.",
+    },
     invoke: async () => {
       const { POST } = await import(
         "@/app/api/projects/[projectId]/github/issues/import/route"
@@ -317,6 +387,12 @@ const EXERCISED: ExercisedRoute[] = [
     allowed: [400],
     note: "Regressed route: an unlinked repository is a 400 carrying GITHUB_REPO_NOT_CONFIGURED.",
     code: "GITHUB_REPO_NOT_CONFIGURED",
+    notARepository: {
+      allowed: [400],
+      code: "GITHUB_REPO_NOT_CONFIGURED",
+      note:
+        "Talks to the GitHub API, not the checkout: the unlinked repository is still the first precondition it hits.",
+    },
     invoke: async () => {
       const { POST } = await import("@/app/api/projects/[projectId]/github/issues/sync/route");
       return POST(mockNextRequest({ method: "POST" }), mockRouteContext({ projectId: PROJECT_ID }));
@@ -329,6 +405,12 @@ const EXERCISED: ExercisedRoute[] = [
     note:
       "Regressed route: this is the one the /github-issues page logged a console 500 for on every load.",
     code: "GITHUB_REPO_NOT_CONFIGURED",
+    notARepository: {
+      allowed: [400],
+      code: "GITHUB_REPO_NOT_CONFIGURED",
+      note:
+        "Same as issues/sync — it reads the GitHub link, never the working copy.",
+    },
     invoke: async () => {
       const { GET } = await import("@/app/api/projects/[projectId]/github/issues/triage/route");
       return GET(
@@ -344,6 +426,11 @@ const EXERCISED: ExercisedRoute[] = [
     method: "GET",
     allowed: [200],
     note: "Reads local settings only; falls back to the built-in mapping when nothing is stored.",
+    notARepository: {
+      allowed: [200],
+      note:
+        "Reads local settings only; no git access on any path.",
+    },
     invoke: async () => {
       const { GET } = await import("@/app/api/projects/[projectId]/github/label-mapping/route");
       return GET(mockNextRequest(), mockRouteContext({ projectId: PROJECT_ID }));
@@ -354,6 +441,11 @@ const EXERCISED: ExercisedRoute[] = [
     method: "PUT",
     allowed: [200],
     note: "Writes local settings only; no GitHub precondition applies.",
+    notARepository: {
+      allowed: [200],
+      note:
+        "Writes local settings only; no git access on any path.",
+    },
     invoke: async () => {
       const { PUT } = await import("@/app/api/projects/[projectId]/github/label-mapping/route");
       return PUT(
@@ -367,6 +459,11 @@ const EXERCISED: ExercisedRoute[] = [
     method: "POST",
     allowed: [400],
     note: "Global, project-independent: a missing token is rejected as bad input before any GitHub call.",
+    notARepository: {
+      allowed: [400],
+      note:
+        "Global and project-independent, so it never sees this project's repository path.",
+    },
     invoke: async () => {
       const { POST } = await import("@/app/api/settings/github/validate/route");
       return POST(mockNextRequest({ body: {} }));
@@ -380,6 +477,11 @@ const EXERCISED: ExercisedRoute[] = [
     method: "POST",
     allowed: [400],
     note: "Reference implementation of the convention: missing owner/repo is a 400.",
+    notARepository: {
+      allowed: [400],
+      note:
+        "Missing owner/repo is checked before any git work, so it refuses for the same reason on both fixtures.",
+    },
     invoke: async () => {
       const { POST } = await import("@/app/api/projects/[projectId]/epics/[epicId]/pr/route");
       return POST(
@@ -462,6 +564,25 @@ beforeAll(() => {
     "initial"
   );
 
+  notARepoPath = path.join(tmpRoot, "plain-directory");
+  fs.mkdirSync(notARepoPath, { recursive: true });
+  // Only meaningful while it really sits outside every repository: a temp dir
+  // nested in one would make every not-a-repository assertion vacuously green.
+  let insideRepo = true;
+  try {
+    execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: notARepoPath,
+      stdio: "pipe",
+    });
+  } catch {
+    insideRepo = false;
+  }
+  if (insideRepo) {
+    throw new Error(
+      `Fixture invalid: ${notARepoPath} is inside a git repository, so "not a repository" is untestable here.`
+    );
+  }
+
   pushOnlyRepoPath = path.join(tmpRoot, "push-only-origin");
   fs.cpSync(repoPath, pushOnlyRepoPath, { recursive: true });
   const bareRemote = path.join(tmpRoot, "push-target.git");
@@ -474,21 +595,27 @@ afterAll(() => {
   if (tmpRoot) fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-beforeEach(() => {
+/**
+ * Seeds the one project every route resolves. It always EXISTS and always has
+ * a `gitRepoPath` — only what that path points at, and the missing GitHub
+ * link, vary. Anything else would make the routes answer 404/400 for the
+ * wrong reason. No `settings` rows are seeded either: no stored PAT.
+ */
+function seedProject(gitRepoPath: string): void {
   dbFixture.rows.clear();
-  // The project exists and points at a real repository — it is only the
-  // GitHub link and the git remote that are missing. Anything else would make
-  // the routes answer 404/400 for the wrong reason.
   dbFixture.rows.set("projects", [
     {
       id: PROJECT_ID,
       name: "Convention",
-      gitRepoPath: repoPath,
+      gitRepoPath,
       githubOwnerRepo: null,
       defaultBranch: null,
     },
   ]);
-  // No `settings` rows: no stored PAT either.
+}
+
+beforeEach(() => {
+  seedProject(repoPath);
 });
 
 /* ------------------------------------------------------------------ */
@@ -497,15 +624,7 @@ beforeEach(() => {
 
 describe("git/github route status-code convention", () => {
   it("classifies a real push-only origin as a pull precondition", async () => {
-    dbFixture.rows.set("projects", [
-      {
-        id: PROJECT_ID,
-        name: "Push only",
-        gitRepoPath: pushOnlyRepoPath,
-        githubOwnerRepo: null,
-        defaultBranch: null,
-      },
-    ]);
+    seedProject(pushOnlyRepoPath);
 
     const { POST } = await import("@/app/api/projects/[projectId]/git/pull/route");
     const response = await POST(
@@ -536,7 +655,8 @@ describe("git/github route status-code convention", () => {
     expect(
       unclassified,
       "New git/github route handler(s) found. Add an EXERCISED entry driving each one " +
-        "against the unconfigured fixture so it cannot answer 500 for a precondition."
+        "against BOTH fixtures (no remote, and a path that is not a repository) so it " +
+        "cannot answer 500 for a precondition."
     ).toEqual([]);
   });
 
@@ -601,6 +721,88 @@ describe("git/github route status-code convention", () => {
       ).toContain(response.status);
     }
   );
+
+  it.each(EXERCISED.map((entry) => [key(entry.routePath, entry.method), entry] as const))(
+    "%s does not answer 500 for a path that is not a repository",
+    async (_label, entry) => {
+      seedProject(notARepoPath);
+
+      // A handler that THROWS is the second half of the defect: Next turns the
+      // rejection into its default error page, so the client sees a 500 with
+      // no `{ error }` envelope at all. Caught here rather than left to bubble
+      // so the failure names the contract instead of an anonymous rejection.
+      let response: NextResponse | Response;
+      try {
+        response = await entry.invoke();
+      } catch (error) {
+        throw new Error(
+          `${entry.method} ${entry.routePath} threw past its handler for a path that is not a ` +
+            `repository, so Next answers its default 500 page with no { error } envelope. ` +
+            `${entry.notARepository.note}\nThrown: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+        );
+      }
+
+      const body = await response.json().catch(() => null);
+      const { allowed, note } = entry.notARepository;
+
+      expect(
+        response.status,
+        `${entry.method} ${entry.routePath} answered 500 for a recoverable configuration state. ` +
+          `Expected one of ${allowed.join("/")} — ${note}\nBody: ${JSON.stringify(body)}`
+      ).not.toBe(500);
+
+      expect(
+        allowed,
+        `${entry.method} ${entry.routePath} answered ${response.status}; ${note}\n` +
+          `Body: ${JSON.stringify(body)}`
+      ).toContain(response.status);
+    }
+  );
+
+  it("answers every not-a-repository refusal with a payload the client can branch on", async () => {
+    const refusals = EXERCISED.filter((entry) =>
+      entry.notARepository.allowed.every((status) => status >= 400)
+    );
+    // The three regressed routes, the two the adjacent epic already fixed, and
+    // the four that refuse for their own (GitHub-link) reason. A shrinking set
+    // would mean a route quietly stopped refusing at all.
+    expect(refusals.length).toBeGreaterThanOrEqual(9);
+    expect(
+      refusals.filter((entry) => entry.notARepository.code === "GIT_REPO_NOT_A_REPOSITORY")
+        .length,
+      "every route that actually reaches git must publish the shared code"
+    ).toBeGreaterThanOrEqual(5);
+
+    const defects: string[] = [];
+    for (const entry of refusals) {
+      seedProject(notARepoPath);
+      const label = key(entry.routePath, entry.method);
+      let body: RefusalBody | null = null;
+      try {
+        body = (await (await entry.invoke()).json()) as RefusalBody;
+      } catch (error) {
+        defects.push(
+          `${label}: threw instead of returning a JSON envelope (${
+            error instanceof Error ? error.message : String(error)
+          })`
+        );
+        continue;
+      }
+      if (typeof body?.error !== "string" || body.error.trim().length === 0) {
+        defects.push(`${label}: no human-readable error message`);
+      }
+      const expectedCode = entry.notARepository.code;
+      if (expectedCode && body?.code !== expectedCode) {
+        defects.push(
+          `${label}: expected code ${expectedCode}, got ${JSON.stringify(body?.code)}`
+        );
+      }
+    }
+
+    expect(defects).toEqual([]);
+  });
 
   it("answers every precondition refusal with a payload the client can branch on", async () => {
     // The status alone is not the contract: a 4xx carrying only prose leaves
