@@ -28,7 +28,6 @@ import type { TicketDependencyEdge } from "@/lib/types/kanban";
 import {
   deriveProjects,
   type FailureSessionRow,
-  type SessionRow,
 } from "@/lib/control-desk/aggregate";
 import {
   CONTROL_DESK_LOOKBACK_DAYS,
@@ -38,6 +37,7 @@ import {
   deriveRegistryRows,
   deriveRegistryTotals,
   type RegistryEpicRow,
+  type RegistrySessionRow,
 } from "@/lib/tickets-registry/aggregate";
 import {
   REGISTRY_COST_WINDOW_DAYS,
@@ -243,7 +243,7 @@ export async function GET(request: Request) {
   const statusCountRows = db
     .select({ status: epics.status, n: sql<number>`COUNT(*)`.as("n") })
     .from(epics)
-    .where(and(inArray(epics.projectId, scopedProjectIds), scopedStatus ? eq(epics.status, scopedStatus) : undefined))
+    .where(inArray(epics.projectId, scopedProjectIds))
     .groupBy(epics.status)
     .all();
 
@@ -277,7 +277,9 @@ export async function GET(request: Request) {
   const terminalSortValue = {
     ticket: sql`lower(coalesce(${epics.readableId}, ${epics.id}))`,
     titre: sql`lower(${epics.title})`,
-    etat: sql`${epics.status}`,
+    // Status is constant within each terminal window: state sorting is
+    // display-only. Keep the newest window in both directions.
+    etat: sql`julianday(${epics.updatedAt})`,
     stories: sql`(SELECT count(*) FROM user_stories WHERE user_stories.epic_id = ${epics.id})`,
     priorite: sql`${epics.priority}`,
     activite: sql`julianday(${epics.updatedAt})`,
@@ -287,12 +289,14 @@ export async function GET(request: Request) {
   /* ---- 4/5. the two terminal windows -------------------------------- */
 
   // `(project_id, status)` are the index's two leading columns, so this is one
-  // range per project; `updated_at` is not in the index, so SQLite builds a
-  // temp b-tree over that range. Bounded and cheap. The free-text filter is
+  // range per project. The caller-chosen sort needs a temporary b-tree over
+  // all candidates before LIMIT; cost/story sorts also aggregate per candidate.
+  // Only the returned rows and their downstream fact queries are bounded.
+  // The free-text filter is
   // applied HERE and only here, so a search can reach a released ticket that
   // sits outside the default window.
   const terminalWindow = (status: "done" | "released", limit: number) =>
-    scopedStatus && scopedStatus !== status ? [] : db
+    db
       .select(epicColumns())
       .from(epics)
       .innerJoin(projects, eq(epics.projectId, projects.id))
@@ -311,7 +315,7 @@ export async function GET(request: Request) {
             : []),
         ),
       )
-      .orderBy(sql`${terminalSortValue} IS NULL`, ascending ? asc(terminalSortValue) : desc(terminalSortValue), asc(epics.id))
+      .orderBy(sql`${terminalSortValue} IS NULL`, ascending && sort !== "etat" ? asc(terminalSortValue) : desc(terminalSortValue), asc(epics.id))
       .limit(limit)
       .all();
 
@@ -614,7 +618,7 @@ export async function GET(request: Request) {
     )
     .all();
 
-  const sessionRows: (SessionRow & { activityAt: string | null })[] = activeRows.map((session) => ({
+  const sessionRows: RegistrySessionRow[] = activeRows.map((session) => ({
     ...session,
     activityAt: getSessionLastActivityAt(session),
   }));
@@ -710,6 +714,22 @@ export async function GET(request: Request) {
     .where(inArray(ticketDependencies.projectId, scopedProjectIds))
     .all();
 
+  // Read only the prerequisite identity/status projection. A delivered
+  // prerequisite may be outside either window (or excluded by search); it
+  // must still satisfy its edges without becoming a row in the response.
+  const dependencyEpics = db
+    .selectDistinct({
+      id: epics.id,
+      projectId: epics.projectId,
+      status: epics.status,
+      readableId: epics.readableId,
+      title: epics.title,
+    })
+    .from(ticketDependencies)
+    .innerJoin(epics, eq(ticketDependencies.dependsOnTicketId, epics.id))
+    .where(inArray(ticketDependencies.projectId, scopedProjectIds))
+    .all();
+
   /* ---- 16. release versions ----------------------------------------- */
 
   const releaseIds = [
@@ -777,21 +797,29 @@ export async function GET(request: Request) {
     };
   });
 
-  const rows = deriveRegistryRows({
+  const derivedRows = deriveRegistryRows({
     projects: deskProjects,
     epics: registryEpics,
     sessions: sessionRows,
     failureSessions,
     edges,
+    dependencyEpics,
     releaseVersionById,
     costByEpicId,
     now,
-  }).filter((row) => !scopedStatus || row.status === scopedStatus);
-
-  const { groupTotals, groupLoaded, counts } = deriveRegistryTotals({
-    rows,
-    statusCounts,
   });
+  const rows = derivedRows.filter((row) => !scopedStatus || row.status === scopedStatus);
+
+  // State pills clear the exact filter, so their counts describe that scope.
+  // Group totals and the footer describe the current exact filter instead.
+  const { counts } = deriveRegistryTotals({ rows: derivedRows, statusCounts });
+  const visibleTotals = deriveRegistryTotals({
+    rows,
+    statusCounts: scopedStatus
+      ? new Map([[scopedStatus, statusCounts.get(scopedStatus) ?? 0]])
+      : statusCounts,
+  });
+  const { groupTotals, groupLoaded } = visibleTotals;
 
   const payload: TicketsRegistryPayload = {
     generatedAt: now.toISOString(),
@@ -801,7 +829,7 @@ export async function GET(request: Request) {
     groupTotals,
     groupLoaded,
     totals: {
-      tickets: counts.all ?? 0,
+      tickets: visibleTotals.counts.all ?? 0,
       projects: scopedProject ? 1 : deskProjects.length,
       cost30dUsd:
         typeof cost30d?.cost === "number" && Number.isFinite(cost30d.cost)

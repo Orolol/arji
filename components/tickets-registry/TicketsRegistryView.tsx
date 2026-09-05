@@ -325,13 +325,17 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
     </div>
   );
 
-  const onSortChange = (next: RegistrySort) => {
+  const onSortChange = useCallback((next: RegistrySort) => {
     setDirection(next === sort ? direction === "asc" ? "desc" : "asc" : defaultSortDirection(next));
     setSort(next);
-  };
-  const ticketCount = filtersActive || filteredRows.length === 0 ? filteredRows.length : state === "all"
-    ? (data?.totals.tickets ?? 0)
-    : STATE_GROUPS[state].reduce((total, group) => total + (data?.groupTotals[group] ?? 0), 0);
+  }, [sort, direction]);
+  const ticketCount = (() => {
+    // Local filters count visible rows; state pills include unloaded rows in
+    // their groups, while All uses the exact-status scope's server total.
+    if (filtersActive || filteredRows.length === 0) return filteredRows.length;
+    if (state === "all") return data?.totals.tickets ?? 0;
+    return STATE_GROUPS[state].reduce((total, group) => total + (data?.groupTotals[group] ?? 0), 0);
+  })();
   const projectCount = data?.totals.projects ?? 0;
   const footerStatus =
     error ??

@@ -104,7 +104,7 @@ export interface RegistryRow {
   /** DERNIÈRE ACTIVITÉ, composed server-side so the CSV and the DOM agree. */
   activity: string | null;
   /** Machine-readable activity date; never sort the relative display text. */
-  activityAt?: string | null;
+  activityAt: string | null;
   activityTone: "muted" | "you-deep";
   /** `SUM(total_cost_usd)` over the ticket's sessions. NULL is load-bearing. */
   costUsd: number | null;
@@ -136,8 +136,9 @@ export interface TicketsRegistryPayload {
    */
   projects: DeskProject[];
   rows: RegistryRow[];
+  /** Pill destinations ignore the exact-status filter, which clicking a pill clears. */
   counts: RegistryCounts;
-  /** True count per group, even when the window is smaller than the group. */
+  /** Counts for the current exact-status scope, including unloaded terminal rows. */
   groupTotals: Record<RegistryGroup, number>;
   /** Rows actually shipped per group — compare with `groupTotals` to know if windowed. */
   groupLoaded: Record<RegistryGroup, number>;

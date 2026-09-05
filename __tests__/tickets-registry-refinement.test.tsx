@@ -115,6 +115,7 @@ function row(overrides: Partial<RegistryRow> & { epicId: string }): RegistryRow 
     usDone: 2,
     usCount: 5,
     activity: "updated · 1d ago",
+    activityAt: null,
     activityTone: "muted",
     costUsd: 0.84,
     projectName: "Arij",

@@ -671,11 +671,14 @@ export function deriveUpNextForProject(input: UpNextInput): DeskQueueTicket[] {
   }));
 }
 
+export type DependencyEpicRow = Pick<EpicRow, "id" | "projectId" | "status" | "readableId" | "title">;
+
 export function deriveUpNext(
   projects: readonly DeskProject[],
   epics: readonly EpicRow[],
   edges: readonly TicketDependencyEdge[],
   busyEpicIds: ReadonlySet<string>,
+  dependencyEpics: readonly DependencyEpicRow[] = [],
 ): DeskUpNextProject[] {
   const byProject = new Map<string, EpicRow[]>();
   for (const epic of epics) {
@@ -694,11 +697,20 @@ export function deriveUpNext(
     else edgesByProject.set(projectId, [edge]);
   }
 
+  // A windowed caller supplies prerequisite facts separately from renderable
+  // epics. They affect blocking and labels, never queue membership or ranks.
+  const dependencyByProject = new Map<string, DependencyEpicRow[]>();
+  for (const epic of dependencyEpics) {
+    const list = dependencyByProject.get(epic.projectId) ?? [];
+    list.push(epic);
+    dependencyByProject.set(epic.projectId, list);
+  }
+
   return projects.map((project) => {
     const projectEpics = byProject.get(project.id) ?? [];
     const labelById = new Map<string, string>();
     const statusById = new Map<string, string>();
-    for (const epic of projectEpics) {
+    for (const epic of [...(dependencyByProject.get(project.id) ?? []), ...projectEpics]) {
       labelById.set(epic.id, epic.readableId || epic.title || epic.id);
       statusById.set(epic.id, epic.status ?? "");
     }

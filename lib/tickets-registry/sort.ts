@@ -10,7 +10,11 @@ export function defaultSortDirection(sort: RegistrySort): RegistrySortDirection 
   return ["activite", "priorite", "cout", "stories"].includes(sort) ? "desc" : "asc";
 }
 
-/** Display order only, within the existing groups. Missing values stay last. */
+/**
+ * Display order only, within the existing groups. Missing values stay last.
+ * State uses workflow order here. Each SQL terminal window has one constant
+ * status, so state sorting leaves its selection in newest-first order.
+ */
 export function sortRegistryRows(rows: readonly RegistryRow[], sort: RegistrySort, direction: RegistrySortDirection): RegistryRow[] {
   const value = (row: RegistryRow): string | number | null => {
     switch (sort) {
