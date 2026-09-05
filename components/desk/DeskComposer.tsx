@@ -4,8 +4,8 @@ import { useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 
 import { SelectPill, StrataBand, projectTone } from "@/components/piscine";
+import { AgentSelectPill } from "@/components/shared/AgentSelectPill";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { useNamedAgentsList } from "@/hooks/useNamedAgentsList";
 import type { DeskProject } from "@/lib/control-desk/types";
 import { cn } from "@/lib/utils";
 
@@ -58,12 +58,9 @@ export function DeskComposer({
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const composingRef = useRef(false);
-  const { agents } = useNamedAgentsList();
 
   const project =
     projects.find((candidate) => candidate.id === targetProjectId) ?? projects[0];
-  const agentName =
-    agents.find((candidate) => candidate.id === namedAgentId)?.name ?? "Default agent";
 
   async function submit(dispatch: boolean) {
     const trimmed = title.trim();
@@ -154,16 +151,18 @@ export function DeskComposer({
         ))}
       </SelectPill>
 
-      <SelectPill label={agentName} tone="ink">
-        <DropdownMenuItem onSelect={() => onNamedAgentChange(null)}>
-          Default agent
-        </DropdownMenuItem>
-        {agents.map((agent) => (
-          <DropdownMenuItem key={agent.id} onSelect={() => onNamedAgentChange(agent.id)}>
-            {agent.name}
-          </DropdownMenuItem>
-        ))}
-      </SelectPill>
+      {/* `dispatch`: named agents only. A build runs neither on the direct API
+          nor on a persistent CLI — both are chat-only — so the desk keeps
+          exactly the options it had, and gains the shared component's
+          selection contract. */}
+      <AgentSelectPill
+        mode="dispatch"
+        // Its own id: `/projects/:id` mounts this composer AND the chat
+        // panel's picker, and one shared id there resolves to two elements.
+        testId="desk-agent-select"
+        selection={{ namedAgentId, provider: null }}
+        onSelect={(selection) => onNamedAgentChange(selection.namedAgentId)}
+      />
     </StrataBand>
   );
 }

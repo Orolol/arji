@@ -7,6 +7,7 @@ import { Sparkles } from "lucide-react";
 import { PillButton, projectTone } from "@/components/piscine";
 import { ToastStack } from "@/components/notifications/ToastStack";
 import { useToastStack } from "@/components/notifications/useToastStack";
+import type { AgentSelection } from "@/components/shared/AgentSelectPill";
 import { useTicketOverlay } from "@/components/ticket/TicketOverlayProvider";
 import { useChat } from "@/hooks/useChat";
 import { useControlDesk } from "@/hooks/useControlDesk";
@@ -28,8 +29,11 @@ import { isLegacyConversationGenerating } from "@/lib/chat/parity-contract";
 import type { ControlDeskPayload, DeskProject } from "@/lib/control-desk/types";
 import { cn } from "@/lib/utils";
 
-import { agentSelectionPatch } from "./agent-selection";
-import { ChatComposer, type ChatAgentChoice } from "./ChatComposer";
+import {
+  agentSelectionPatch,
+  selectionForConversation,
+} from "./agent-selection";
+import { ChatComposer } from "./ChatComposer";
 import {
   ChatPaneSwitcher,
   DEFAULT_CHAT_PANE,
@@ -284,6 +288,12 @@ export function ChatPageView({
   );
 }
 
+/** No conversation to run: the pill names nothing rather than a default. */
+const EMPTY_AGENT_SELECTION: AgentSelection = {
+  namedAgentId: null,
+  provider: null,
+};
+
 /**
  * The page body, shared by the empty state and the real workspace.
  *
@@ -351,7 +361,7 @@ function EmptyChatWorkspace() {
           projects={[]}
           project={null}
           onSelectProject={() => {}}
-          agentLabel="—"
+          agentSelection={EMPTY_AGENT_SELECTION}
           onSelectAgent={() => {}}
           agentLocked
           disabled
@@ -506,6 +516,15 @@ function ChatWorkspace({
   const activeAgentLabel = activeConversation
     ? agentLabelFor(activeConversation)
     : "—";
+
+  /**
+   * What the composer's pill selects on. `agentLabelFor` stays: the thread and
+   * the roster name the same agent, and only the pill derives its own label.
+   */
+  const activeAgentSelection: AgentSelection = useMemo(
+    () => selectionForConversation(activeConversation),
+    [activeConversation],
+  );
 
   /* ---- per-message epics ----------------------------------------------- */
 
@@ -731,10 +750,12 @@ function ChatWorkspace({
   );
 
   const handleSelectAgent = useCallback(
-    (choice: ChatAgentChoice) => {
+    (choice: AgentSelection) => {
       // The agent cannot change mid-conversation.
       if (!activeId || hasMessages) return;
-      void updateConversation(activeId, agentSelectionPatch(choice));
+      const patch = agentSelectionPatch(choice);
+      if (!patch) return;
+      void updateConversation(activeId, patch);
     },
     [activeId, hasMessages, updateConversation],
   );
@@ -883,7 +904,7 @@ function ChatWorkspace({
           projects={projects}
           project={project}
           onSelectProject={onSelectProject}
-          agentLabel={activeAgentLabel}
+          agentSelection={activeAgentSelection}
           onSelectAgent={handleSelectAgent}
           agentLocked={!activeId || hasMessages}
           attachmentsDisabled={activeProvider === OPENAI_COMPATIBLE_PROVIDER}

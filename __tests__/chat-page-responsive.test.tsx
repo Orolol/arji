@@ -23,7 +23,7 @@
  */
 
 import * as React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -141,8 +141,22 @@ vi.mock("@/hooks/useChat", () => ({
   }),
 }));
 
+/**
+ * The composer no longer takes an `agentLabel` string: the merged
+ * `AgentSelectPill` derives the label from the selection and this roster (see
+ * `components/shared/AgentSelectPill.tsx`). So the long name that this file
+ * exists to measure has to arrive as a named agent, not as a prop.
+ */
+const namedAgents = vi.hoisted(() => ({
+  current: [] as { id: string; name: string; provider: string }[],
+}));
+
 vi.mock("@/hooks/useNamedAgentsList", () => ({
-  useNamedAgentsList: () => ({ agents: [], loading: false, refresh: vi.fn() }),
+  useNamedAgentsList: () => ({
+    agents: namedAgents.current,
+    loading: false,
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock("@/hooks/useSpecGeneration", () => ({
@@ -365,7 +379,12 @@ describe("chat composer — the row a long agent name has to share", () => {
   const LONG_AGENT_NAME =
     "Claude Code — Architecture, implementation et revue des interfaces du projet Arij — raisonnement approfondi";
 
-  async function renderComposer(agentLabel: string) {
+  async function renderComposer(agentName: string) {
+    // The label travels through the roster now; the geometry under test is
+    // unchanged, and so are the four assertions below.
+    namedAgents.current = [
+      { id: "long-agent", name: agentName, provider: "claude-code" },
+    ];
     await act(async () => {
       render(
         <ChatComposer
@@ -373,7 +392,7 @@ describe("chat composer — the row a long agent name has to share", () => {
           projects={[PROJECT]}
           project={PROJECT}
           onSelectProject={vi.fn()}
-          agentLabel={agentLabel}
+          agentSelection={{ namedAgentId: "long-agent", provider: "claude-code" }}
           onSelectAgent={vi.fn()}
           agentLocked={false}
           onSend={vi.fn()}
@@ -381,6 +400,10 @@ describe("chat composer — the row a long agent name has to share", () => {
       );
     });
   }
+
+  afterEach(() => {
+    namedAgents.current = [];
+  });
 
   /** The agent pill — `ink` toned, as against the project pill's `project`. */
   function agentPill(): Element {

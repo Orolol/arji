@@ -6,22 +6,13 @@ import { ImagePlus, Sparkles } from "lucide-react";
 
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import { PillButton, SelectPill, StrataBand, projectTone } from "@/components/piscine";
+import {
+  AgentSelectPill,
+  type AgentSelection,
+} from "@/components/shared/AgentSelectPill";
 import { ImageAttachmentStrip } from "@/components/shared/ImageAttachmentStrip";
-import {
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useImageAttachments } from "@/hooks/useImageAttachments";
-import { useNamedAgentsList } from "@/hooks/useNamedAgentsList";
-import {
-  OPENAI_COMPATIBLE_PROVIDER,
-  PERSISTENT_CHAT_PROVIDER_OPTIONS,
-  PROVIDER_LABELS,
-  PROVIDER_OPTIONS,
-  type AgentProvider,
-  type ChatModeProvider,
-} from "@/lib/agent-config/constants";
 import type { DeskProject } from "@/lib/control-desk/types";
 import { cn } from "@/lib/utils";
 
@@ -68,19 +59,14 @@ const AGENT_PILL_MAX = "max-w-[45%] @min-[36rem]:max-w-[30cqw]";
  * NO DRAG-AND-DROP: `useImageAttachments` exposes drop handlers and this screen
  * deliberately does not wire them (house rule).
  */
-export interface ChatAgentChoice {
-  namedAgentId: string | null;
-  provider: ChatModeProvider;
-}
-
 export interface ChatComposerProps {
   projectId: string | null;
   projects: readonly DeskProject[];
   project: DeskProject | null;
   onSelectProject: (projectId: string) => void;
-  /** Label for the agent pill — a named agent, or the provider's label. */
-  agentLabel: string;
-  onSelectAgent: (choice: ChatAgentChoice) => void;
+  /** What the conversation runs on; the pill names it itself. */
+  agentSelection: AgentSelection;
+  onSelectAgent: (choice: AgentSelection) => void;
   /** The picker is locked once the conversation has a message. */
   agentLocked: boolean;
   /** The active provider cannot take images (OpenAI-compatible fast mode). */
@@ -94,7 +80,7 @@ export function ChatComposer({
   projects,
   project,
   onSelectProject,
-  agentLabel,
+  agentSelection,
   onSelectAgent,
   agentLocked,
   attachmentsDisabled = false,
@@ -103,8 +89,6 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const [value, setValue] = useState("");
   const composingRef = useRef(false);
-  const { agents } = useNamedAgentsList();
-  const safeAgents = Array.isArray(agents) ? agents : [];
 
   const {
     attachments,
@@ -262,96 +246,32 @@ export function ChatComposer({
           A named agent's name is an arbitrary string — `createNamedAgentSchema`
           only refuses a blank one — and `SelectPill` is `shrink-0`, which is
           right for the project pill's 8-character short name and wrong here.
-          Measured with a 107-character name: the pill took its max-content
-          width of 663px, overflowed the band, was clipped by the thread
-          column, and left the field at ZERO at 640, 768, 1024, 1280 and 1440.
-          The page never scrolled sideways — the field simply collapsed.
+          Measured on main with a 107-character name (437d4c7): the pill took
+          its max-content width of 663px, overflowed the band, was clipped by
+          the thread column, and left the field at ZERO at 640, 768, 1024, 1280
+          and 1440. The page never scrolled sideways — the field simply
+          collapsed.
 
           Three tokens, one behaviour: `max-w` in `cqw` is a share of the
           composer rather than of the window, so the cap holds in the narrow
           three-column band as well as on a phone; `min-w-0` lets the label's
           own `truncate` engage; `shrink` makes the PILL the item that yields
           when the row is over-subscribed, which is what the field used to do.
+
+          THE CAP TRAVELS WITH THE MOUNT, NOT WITH THE COMPONENT. Unifying the
+          three menus put a shared `AgentSelectPill` here, and this is the only
+          one of its three mounts whose row also holds a text field that can be
+          squeezed to nothing — the desk bar and the project panel's header do
+          not. So it stays a `className` at the call site rather than becoming
+          the component's default.
         */}
-        <SelectPill
-          label={agentLabel}
-          tone="ink"
+        <AgentSelectPill
+          mode="chat"
+          selection={agentSelection}
+          onSelect={onSelectAgent}
           disabled={agentLocked}
           className={cn(AGENT_PILL_MAX, "min-w-0 shrink")}
-        >
-          <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-            Direct API
-          </DropdownMenuLabel>
-          <DropdownMenuItem
-            data-testid="chat-option-openai-compatible"
-            onSelect={() =>
-              onSelectAgent({
-                namedAgentId: null,
-                provider: OPENAI_COMPATIBLE_PROVIDER,
-              })
-            }
-          >
-            {PROVIDER_LABELS[OPENAI_COMPATIBLE_PROVIDER]}
-          </DropdownMenuItem>
-
-          {safeAgents.length > 0 ? (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-                Named Agents
-              </DropdownMenuLabel>
-              {safeAgents.map((agent) => (
-                <DropdownMenuItem
-                  key={agent.id}
-                  data-testid={`chat-option-agent-${agent.id}`}
-                  onSelect={() =>
-                    // A named agent OWNS its provider: the PATCH route
-                    // re-derives it from the agent row, so sending a provider
-                    // alongside it is silently ignored.
-                    onSelectAgent({
-                      namedAgentId: agent.id,
-                      provider: agent.provider as ChatModeProvider,
-                    })
-                  }
-                >
-                  {agent.name}
-                </DropdownMenuItem>
-              ))}
-            </>
-          ) : null}
-
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-            Persistent CLI
-          </DropdownMenuLabel>
-          {PERSISTENT_CHAT_PROVIDER_OPTIONS.map((provider) => (
-            <DropdownMenuItem
-              key={provider}
-              data-testid={`chat-option-provider-${provider}`}
-              onSelect={() =>
-                onSelectAgent({ namedAgentId: null, provider })
-              }
-            >
-              {PROVIDER_LABELS[provider]}
-            </DropdownMenuItem>
-          ))}
-
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-            CLI Providers
-          </DropdownMenuLabel>
-          {PROVIDER_OPTIONS.map((provider: AgentProvider) => (
-            <DropdownMenuItem
-              key={provider}
-              data-testid={`chat-option-provider-${provider}`}
-              onSelect={() =>
-                onSelectAgent({ namedAgentId: null, provider })
-              }
-            >
-              {`${PROVIDER_LABELS[provider]} (CLI)`}
-            </DropdownMenuItem>
-          ))}
-        </SelectPill>
+        />
 
         <input {...fileInputProps} />
       </StrataBand>

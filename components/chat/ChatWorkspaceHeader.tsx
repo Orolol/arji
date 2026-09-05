@@ -4,9 +4,10 @@ import { Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  ChatProviderSelect,
-  type ChatAgentSelection,
-} from "@/components/chat/ChatProviderSelect";
+  AgentSelectPill,
+  type AgentSelection,
+} from "@/components/shared/AgentSelectPill";
+import { selectionForConversation } from "@/components/chat-page/agent-selection";
 import type { Conversation } from "@/hooks/useConversations";
 import { resolveLegacyConversationLabel } from "@/lib/chat/parity-contract";
 import { isPersistentChatProvider } from "@/lib/agent-config/constants";
@@ -16,13 +17,16 @@ interface ChatWorkspaceHeaderProps {
   activeProvider: string;
   hasMessages: boolean;
   isBusy: boolean;
-  onSelectAgentOrProvider: (selection: ChatAgentSelection) => void;
+  onSelectAgentOrProvider: (selection: AgentSelection) => void;
   onRestartPersistentSession?: () => void;
 }
 
 /**
  * Right-hand meta cluster of the conversation tab row: the provider marker
- * (read by tests) and the unified chat provider / named-agent picker.
+ * (read by tests) and the shared agent picker in `chat` mode — the same
+ * component the desk and the chat page mount, so the three menus can no longer
+ * drift. The trigger is the Piscine `SelectPill`; the shadcn `Select` this
+ * surface used to draw is gone.
  */
 export function ChatWorkspaceHeader({
   activeConversation,
@@ -33,6 +37,11 @@ export function ChatWorkspaceHeader({
   onRestartPersistentSession = () => {},
 }: ChatWorkspaceHeaderProps) {
   const isPersistent = isPersistentChatProvider(activeConversation?.provider);
+  // Shared with the chat page: `provider` is a free-form column, and a
+  // conversation stored before a provider cleanup (`gemini-cli`, `pi`) has no
+  // item in the menu — the pill labels it with the raw string rather than
+  // blanking the trigger.
+  const selection: AgentSelection = selectionForConversation(activeConversation);
   const isHot = activeConversation?.persistentSessionState === "hot";
   return (
     <div className="flex items-center gap-2">
@@ -81,8 +90,9 @@ export function ChatWorkspaceHeader({
           <RotateCcw className="h-3.5 w-3.5" />
         </Button>
       )}
-      <ChatProviderSelect
-        activeConversation={activeConversation}
+      <AgentSelectPill
+        mode="chat"
+        selection={selection}
         onSelect={onSelectAgentOrProvider}
         disabled={!activeConversation || hasMessages || isBusy}
       />
