@@ -336,7 +336,14 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
     <div
       data-testid="qa-screen"
       className={cn(
-        "flex h-full min-h-0 w-full flex-col bg-background font-sans text-foreground",
+        "flex w-full flex-col bg-background font-sans text-foreground",
+        // ONE SCREENFUL IS A DESKTOP MODEL. `h-full` + a growing band means the
+        // bands share a fixed height and the coral one absorbs what is left —
+        // which on a phone is nothing, so the findings and their actions were
+        // squeezed to a zero-height scroller (B-arij-iL4-FmyXgGr). Below `lg`
+        // the screen is as tall as its content and `app/layout.tsx`'s <main>
+        // scrolls it, the way a phone page is read.
+        "min-h-full lg:h-full lg:min-h-0",
         className,
       )}
     >
@@ -375,7 +382,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-[12px] px-[14px] pb-[14px]">
+      <div className="flex flex-col gap-[12px] px-[14px] pb-[14px] lg:min-h-0 lg:flex-1">
         <QaRunsBand
           runs={data?.runs ?? []}
           queued={data?.queued ?? []}
@@ -399,7 +406,12 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
           onDismiss={(finding) => setDismissTarget(finding)}
         />
 
-        <div className="grid shrink-0 grid-cols-2 gap-[12px]">
+        {/* The bottom split stacks on a phone. Two columns of a 390px screen
+            are 145px each: the verdict rows lose their ticket chip to the
+            column edge and the rubric chips wrap inside a 27px pill. Stacking
+            also gives the coral band above — the one band on 11b that grows —
+            the height its rows need. Unchanged from `lg` up. */}
+        <div className="grid shrink-0 grid-cols-1 gap-[12px] lg:grid-cols-2">
           <VerdictsBand
             verdicts={data?.verdicts ?? []}
             projectsById={projectsById}
