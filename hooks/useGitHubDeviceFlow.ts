@@ -30,6 +30,7 @@ import type { GitHubOAuthMeta } from "@/lib/github/oauth-meta";
 
 export const DEVICE_FLOW_START_URL = "/api/auth/github/device/start";
 export const DEVICE_FLOW_POLL_URL = "/api/auth/github/device/poll";
+export const DEVICE_FLOW_CANCEL_URL = "/api/auth/github/device/cancel";
 
 /**
  * How many ticks in a row may fail transiently before the flow gives up.
@@ -143,6 +144,32 @@ interface PollContext {
   setTimer: (timer: ReturnType<typeof setTimeout>) => void;
   setState: (state: DeviceFlowState) => void;
   onConnected: (meta: GitHubOAuthMeta) => void;
+}
+
+/**
+ * Tell the server the flow is over. Fire-and-forget, and it has to be.
+ *
+ * Stopping the timers only stops this tab from asking. The server still holds
+ * the device code, and a tick already awaiting GitHub still comes back holding
+ * a real token — which the poll route would write to `settings`, connecting an
+ * account the user just walked away from. Releasing the slot makes that tick's
+ * pre-write claim fail, so it discards the token instead.
+ *
+ * Nothing is awaited and nothing is reported: this is called from `cancel()`
+ * and from an unmount effect, both of which are synchronous, and a failure
+ * here costs at worst a device code that expires by itself in fifteen minutes.
+ * `keepalive` is what carries the request through the unmount case.
+ */
+function releaseFlow(handle: string): void {
+  if (!handle) return;
+  void fetch(DEVICE_FLOW_CANCEL_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ handle }),
+    keepalive: true,
+  }).catch(() => {
+    // Deliberately silent — see above.
+  });
 }
 
 function scheduleTick(
@@ -285,6 +312,10 @@ export function useGitHubDeviceFlow(
   const generationRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onConnectedRef = useRef(onConnected);
+  // The handle of the flow the server still holds a device code for, or "".
+  // Cleared the moment a flow reaches a terminal state so a later cancel
+  // cannot release a slot that a newer `start` has since taken.
+  const liveHandleRef = useRef("");
 
   useEffect(() => {
     onConnectedRef.current = onConnected;
@@ -293,10 +324,14 @@ export function useGitHubDeviceFlow(
   useEffect(
     () => () => {
       // A timer that fires after the card unmounts would set state on a dead
-      // tree, and a flow nobody is watching is a device code held for nothing.
+      // tree, and a flow nobody is watching is a device code held for nothing
+      // — so the server is told to drop it too, not just this tab.
       generationRef.current += 1;
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = null;
+      const handle = liveHandleRef.current;
+      liveHandleRef.current = "";
+      releaseFlow(handle);
     },
     []
   );
@@ -311,7 +346,14 @@ export function useGitHubDeviceFlow(
   async function beginFlow(generation: number): Promise<void> {
     const isCurrent = () => generationRef.current === generation;
     const write = (next: DeviceFlowState) => {
-      if (isCurrent()) setState(next);
+      if (!isCurrent()) return;
+      // `awaiting` is the only state with a flow still worth releasing. Every
+      // other one the tick can write is terminal — success returns to `idle`,
+      // and the server has already settled the slot by then — so forgetting
+      // the handle here keeps a later cancel or unmount from posting a
+      // pointless release for a flow nobody holds.
+      if (next.status !== "awaiting") liveHandleRef.current = "";
+      setState(next);
     };
 
     let ok = false;
@@ -361,6 +403,7 @@ export function useGitHubDeviceFlow(
       return;
     }
 
+    liveHandleRef.current = handle;
     write({ status: "awaiting", userCode, verificationUri });
 
     const interval = readInterval(data["interval"], MIN_POLL_INTERVAL_SECONDS);
@@ -389,12 +432,19 @@ export function useGitHubDeviceFlow(
     // The server keeps ONE slot, so a second start invalidates the first
     // handle server-side anyway; superseding here keeps the two in step.
     const generation = supersede();
+    liveHandleRef.current = "";
     setState({ status: "starting" });
     void beginFlow(generation);
   }
 
   function cancel(): void {
     supersede();
+    // The server half of giving up. Without it, cancelling stops the polling
+    // but leaves a tick that is already in flight free to come back with a
+    // token and connect the account anyway.
+    const handle = liveHandleRef.current;
+    liveHandleRef.current = "";
+    releaseFlow(handle);
     setState({ status: "idle" });
   }
 

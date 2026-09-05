@@ -320,3 +320,15 @@ export const startGitHubDeviceFlowSchema = z.object({});
 export const pollGitHubDeviceFlowSchema = z.object({
   handle: z.string("handle is required").min(1, "handle is required"),
 });
+
+/**
+ * `POST /api/auth/github/device/cancel` — give up on a flow.
+ *
+ * Same shape as the poll body, and deliberately a separate schema rather than
+ * an alias: cancelling must stay handle-scoped even if polling one day is not.
+ * A cancel that dropped whatever happened to be in the slot would let a stale
+ * tab kill the sign-in a second tab is halfway through.
+ */
+export const cancelGitHubDeviceFlowSchema = z.object({
+  handle: z.string("handle is required").min(1, "handle is required"),
+});

@@ -302,6 +302,22 @@ const EXERCISED: ExercisedRoute[] = [
     },
   },
   {
+    routePath: "/api/auth/github/device/cancel",
+    method: "POST",
+    allowed: [200],
+    note:
+      "Global and project-independent, and idempotent by design: giving up on a sign-in that is already gone is the same outcome as giving up on a live one. A page that reloaded, a server that restarted and a double-clicked Annuler all land here, so 'nothing to cancel' is a 200, never a refusal.",
+    notARepository: {
+      allowed: [200],
+      note:
+        "Drops an in-memory sign-in handle; it reads neither the project row nor the checkout.",
+    },
+    invoke: async () => {
+      const { POST } = await import("@/app/api/auth/github/device/cancel/route");
+      return POST(mockNextRequest({ body: { handle: "gh-device-never-minted" } }));
+    },
+  },
+  {
     routePath: "/api/projects/[projectId]/git/connect",
     method: "POST",
     allowed: [200],

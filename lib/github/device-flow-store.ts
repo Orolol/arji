@@ -54,6 +54,16 @@ export interface DeviceFlowRecord {
   createdAt: number;
   /** Epoch ms after which the flow is dead. */
   expiresAt: number;
+  /**
+   * True while a poll tick for this flow is awaiting GitHub.
+   *
+   * A device code may only be exchanged once. Two overlapping ticks (a client
+   * that retried before the first answer came back, a double-clicked button)
+   * would race for that single exchange, and the loser earns a `slow_down` at
+   * best and burns the authorization at worst. The second tick is told to
+   * keep waiting instead of reaching GitHub at all.
+   */
+  polling: boolean;
 }
 
 /** What the browser is allowed to see. Deliberately omits `deviceCode`. */
@@ -111,6 +121,7 @@ export function rememberDeviceFlow(
       start.interval > 0 ? start.interval : DEVICE_FLOW_DEFAULT_INTERVAL_SECONDS,
     createdAt: now,
     expiresAt: now + lifetimeMs,
+    polling: false,
   };
 
   getSlot().active = record;
@@ -174,6 +185,74 @@ export function toClientDeviceFlow(
     interval: record.interval,
     expiresIn: Math.max(0, Math.round((record.expiresAt - now) / 1000)),
   };
+}
+
+/**
+ * Take the slot for `handle`, atomically, and consume it.
+ *
+ * THIS IS THE CREDENTIAL GUARD. A poll tick spends two awaits between reading
+ * the slot and writing a token — one on GitHub's token endpoint, one on the
+ * identity lookup — and the slot can change under either of them: a second
+ * `start` supersedes the flow, the user cancels, or a manual PAT save calls
+ * {@link abortDeviceFlow}. Without a re-check, a flow the user walked away
+ * from minutes ago still lands its token in `settings`, silently undoing the
+ * credential they saved in the meantime.
+ *
+ * The re-check has to be a claim rather than a read, and it has to be the last
+ * thing before the write. Returning `true` means two things at once: this
+ * handle still owned the slot, and nothing else can own it now — the caller
+ * holds an exclusive right to persist. Node's single thread does the rest:
+ * with no `await` between this call and the synchronous transaction, no other
+ * request can interleave.
+ *
+ * Consuming on success is also what settles the flow. The authorization has
+ * been spent by then whether or not the write that follows succeeds, so
+ * leaving the handle resolvable would only invite a poll of a dead code.
+ */
+export function claimDeviceFlow(handle: string): boolean {
+  const slot = getSlot();
+  if (slot.active?.handle !== handle) return false;
+  slot.active = null;
+  return true;
+}
+
+/**
+ * Mark a tick as in flight. `false` means one already is — see
+ * {@link DeviceFlowRecord.polling}; the caller must answer "keep waiting"
+ * without touching GitHub.
+ */
+export function beginDeviceFlowPoll(handle: string): boolean {
+  const record = getSlot().active;
+  if (!record || record.handle !== handle) return false;
+  if (record.polling) return false;
+  record.polling = true;
+  return true;
+}
+
+/**
+ * Release the in-flight marker. Handle-scoped, so a tick that resolves after
+ * its flow was superseded cannot unlock the flow that replaced it.
+ */
+export function endDeviceFlowPoll(handle: string): void {
+  const record = getSlot().active;
+  if (record?.handle === handle) record.polling = false;
+}
+
+/**
+ * Drop whatever flow is in the slot, whoever started it. Returns whether one
+ * was actually dropped.
+ *
+ * Unconditional on purpose, unlike {@link forgetDeviceFlow}: the callers do
+ * not hold a handle. A manual PAT save, a disconnect, or a cancel from a
+ * reloaded page all mean the same thing — the user has decided how this
+ * machine authenticates to GitHub, and an OAuth exchange still in flight has
+ * no business overruling that decision when it lands.
+ */
+export function abortDeviceFlow(): boolean {
+  const slot = getSlot();
+  if (!slot.active) return false;
+  slot.active = null;
+  return true;
 }
 
 /** Test-only: empty the slot so cases cannot leak a flow into each other. */

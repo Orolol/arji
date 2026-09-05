@@ -56,6 +56,7 @@ let pollQueue: StubResponse[];
 let validateResponse: StubResponse;
 let patchCalls: Array<Record<string, unknown>>;
 let pollBodies: Array<Record<string, unknown>>;
+let cancelBodies: Array<Record<string, unknown>>;
 let startCalls: number;
 
 function stub({ status, body }: StubResponse) {
@@ -105,6 +106,7 @@ beforeEach(() => {
   };
   patchCalls = [];
   pollBodies = [];
+  cancelBodies = [];
   startCalls = 0;
 
   global.fetch = vi.fn((url: string, opts?: RequestInit) => {
@@ -118,6 +120,13 @@ beforeEach(() => {
     if (url === "/api/auth/github/device/poll") {
       pollBodies.push(JSON.parse((opts?.body as string) ?? "{}"));
       return Promise.resolve(stub(pollQueue.shift() ?? PENDING));
+    }
+
+    if (url === "/api/auth/github/device/cancel") {
+      cancelBodies.push(JSON.parse((opts?.body as string) ?? "{}"));
+      return Promise.resolve(
+        stub({ status: 200, body: { data: { cancelled: true } } }),
+      );
     }
 
     if (url === "/api/settings" && method === "PATCH") {
@@ -312,6 +321,64 @@ describe("Settings → Intégrations — connexion GitHub par Device Flow", () =
     expect(pollBodies).toHaveLength(1);
     expect(screen.queryByTestId("github-device-flow")).not.toBeInTheDocument();
     expect(screen.getByTestId("github-connect")).toBeInTheDocument();
+  });
+
+  it("tells the server to drop the flow, not just its own timers", async () => {
+    await renderIntegrations();
+
+    fireEvent.click(screen.getByTestId("github-connect"));
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
+    await settle();
+
+    // Stopping the timers only stops THIS tab from asking. The server still
+    // holds the device code, and a tick already in flight would come back with
+    // a real token and connect the account the user just walked away from.
+    expect(cancelBodies).toEqual([{ handle: "gh-device-handle-abc" }]);
+  });
+
+  it("releases the flow when the user gives up and pastes a PAT instead", async () => {
+    await renderIntegrations();
+
+    fireEvent.click(screen.getByTestId("github-connect"));
+    await settle();
+
+    fireEvent.change(screen.getByLabelText("GitHub PAT"), {
+      target: { value: "ghp_pasted_instead" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Token" }));
+    await settle();
+
+    expect(cancelBodies).toEqual([{ handle: "gh-device-handle-abc" }]);
+  });
+
+  it("releases the flow when the card unmounts mid sign-in", async () => {
+    const { unmount } = render(<IntegrationsSettingsPage />);
+    await settle();
+
+    fireEvent.click(screen.getByTestId("github-connect"));
+    await settle();
+
+    unmount();
+    await settle();
+
+    // A device code held for a page nobody is on is a code held for nothing.
+    expect(cancelBodies).toEqual([{ handle: "gh-device-handle-abc" }]);
+  });
+
+  it("does not release anything once the flow has finished on its own", async () => {
+    pollQueue = [SUCCESS];
+    await renderIntegrations();
+
+    fireEvent.click(screen.getByTestId("github-connect"));
+    await settle();
+    await advance(1000);
+
+    expect(screen.getByTestId("github-connected")).toBeInTheDocument();
+    // The server settled the slot when it wrote the token; a release now would
+    // be a request about a flow nobody holds.
+    expect(cancelBodies).toHaveLength(0);
   });
 });
 

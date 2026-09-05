@@ -4,6 +4,9 @@ import { settings } from "@/lib/db/schema";
 import { GITHUB_PAT_SETTING_KEY, validateGitHubToken } from "@/lib/github/client";
 import { pollDeviceFlow } from "@/lib/github/device-flow";
 import {
+  beginDeviceFlowPoll,
+  claimDeviceFlow,
+  endDeviceFlowPoll,
   forgetDeviceFlow,
   resolveDeviceFlow,
   setDeviceFlowInterval,
@@ -46,6 +49,11 @@ const RETRYABLE_POLL_ERROR_CODES = new Set([
  * One transaction because a token without its meta reads in Settings as a
  * hand-pasted PAT, and meta without its token claims a connection that cannot
  * make a single API call. Neither half is usable alone.
+ *
+ * Throws whatever the database throws — a read-only file, a locked WAL, a full
+ * disk. The caller turns that into `{ error, code }`; it must never escape as
+ * a bare rejection, and the raw error must never be echoed, because the SQL
+ * that failed carries the token in its parameters.
  */
 function persistDeviceFlowToken(token: string, meta: GitHubOAuthMeta): void {
   const now = new Date().toISOString();
@@ -93,6 +101,12 @@ function persistDeviceFlowToken(token: string, meta: GitHubOAuthMeta): void {
  * - 503 — GitHub is unreachable; the flow is still alive, retry.
  * - 502 — GitHub refused the flow, or handed back a token it will not
  *   authenticate. Terminal.
+ * - 409 `DEVICE_FLOW_SUPERSEDED` — GitHub authorized this flow, but by the
+ *   time the answer arrived the slot belonged to someone else: a newer
+ *   `start`, a cancel, or a manual credential change. The token is dropped
+ *   unwritten. Terminal.
+ * - 500 `DEVICE_FLOW_PERSIST_FAILED` — the settings write itself failed. The
+ *   authorization is spent either way, so the flow is settled, not retried.
  */
 export async function POST(request: NextRequest) {
   const validated = await validateBody(pollGitHubDeviceFlowSchema, request);
@@ -122,7 +136,25 @@ export async function POST(request: NextRequest) {
   }
 
   const { record } = lookup;
-  const result = await pollDeviceFlow(record.deviceCode, record.interval);
+
+  // A device code buys exactly one token exchange. Two ticks in flight at once
+  // race for it, so the second is told to keep waiting rather than sent to
+  // GitHub — indistinguishable, from the client's side, from a tick that found
+  // the user had not authorized yet.
+  if (!beginDeviceFlowPoll(handle)) {
+    return NextResponse.json({
+      data: { state: "pending", interval: record.interval },
+    });
+  }
+
+  let result: Awaited<ReturnType<typeof pollDeviceFlow>>;
+  try {
+    result = await pollDeviceFlow(record.deviceCode, record.interval);
+  } finally {
+    // Handle-scoped: if the flow was superseded while we waited, this releases
+    // nothing rather than unlocking the flow that replaced it.
+    endDeviceFlowPoll(handle);
+  }
 
   switch (result.state) {
     case "pending":
@@ -198,8 +230,41 @@ export async function POST(request: NextRequest) {
         tokenSource: "oauth_device",
       };
 
-      persistDeviceFlowToken(result.accessToken, meta);
-      forgetDeviceFlow(handle);
+      // LAST CHECK BEFORE THE WRITE, and the reason it is a claim rather than
+      // a read: two awaits have passed since the slot was resolved, and the
+      // user may have cancelled, started again, or pasted a PAT by hand in
+      // that time. Writing now would silently overrule whichever of those they
+      // did. `claimDeviceFlow` consumes the slot, so nothing between here and
+      // the synchronous transaction can take it — see its own comment.
+      if (!claimDeviceFlow(handle)) {
+        return NextResponse.json(
+          {
+            error:
+              "This GitHub sign-in was replaced or cancelled before it finished, so nothing was saved. Start it again if you still want to connect.",
+            code: "DEVICE_FLOW_SUPERSEDED",
+          },
+          { status: 409 }
+        );
+      }
+
+      try {
+        persistDeviceFlowToken(result.accessToken, meta);
+      } catch {
+        // Deliberately not reporting the underlying error: the failing
+        // statement's parameters contain the access token, and this response
+        // and any log line built from it are exactly where it must not appear.
+        // The flow is already claimed, so it is settled rather than left
+        // resolvable — the authorization was spent on an exchange that cannot
+        // be repeated, and offering a retry of it would only 502.
+        return NextResponse.json(
+          {
+            error:
+              "GitHub authorized the sign-in but the connection could not be saved. Try again, or paste a token by hand.",
+            code: "DEVICE_FLOW_PERSIST_FAILED",
+          },
+          { status: 500 }
+        );
+      }
 
       // `meta` and nothing else. The token stays where it was written.
       return NextResponse.json({ data: { state: "success", ...meta } });
