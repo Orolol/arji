@@ -15,6 +15,10 @@ import {
   chunkElisionMarkerSplitter,
   isChunkElisionMarker,
 } from "@/lib/agent-sessions/chunk-cap";
+import {
+  chunkPruneMarkerSplitter,
+  isChunkPruneMarker,
+} from "@/lib/agent-sessions/chunk-retention";
 
 /** The bounded first page the session detail payload already carried. */
 export interface SessionStreamSeed {
@@ -43,28 +47,43 @@ interface SessionOutputStreamProps {
 }
 
 /**
- * Split the stream's text around the markers the write-path cap leaves behind
- * and give those their own element, so Arij's "the middle of this chunk is
- * gone" reads as a notice rather than as one more dim line of agent output.
+ * Split the stream's text around Arij's two elision markers — the write-path
+ * cap's "the middle of this chunk is gone" and data retention's "the head of
+ * this stream is gone" — and give each its own element, so Arij's own voice
+ * reads as a notice rather than as one more dim line of agent output.
  *
  * Split, not a line-by-line map: a page carries up to a megabyte of text, and
  * one element per line would be thousands of nodes where the flat block needs
  * one. `String.split` with a capturing pattern interleaves the markers back
- * into the parts, so the surrounding text stays in whole runs.
+ * into the parts, so the surrounding text stays in whole runs. The two passes
+ * nest rather than combine into one pattern: each marker's shape belongs to
+ * the module that writes it, and neither owns the other's regexp source.
  */
 function withElisionMarkers(text: string): React.ReactNode[] {
-  return text.split(chunkElisionMarkerSplitter()).map((part, index) =>
-    isChunkElisionMarker(part) ? (
-      <span
-        key={index}
-        data-testid="chunk-elision-marker"
-        className="text-strata-live-mid"
-      >
-        {part}
-      </span>
-    ) : (
-      part
-    )
+  return text.split(chunkElisionMarkerSplitter()).flatMap((part, index) =>
+    isChunkElisionMarker(part)
+      ? [
+          <span
+            key={`cap-${index}`}
+            data-testid="chunk-elision-marker"
+            className="text-strata-live-mid"
+          >
+            {part}
+          </span>,
+        ]
+      : part.split(chunkPruneMarkerSplitter()).map((inner, innerIndex) =>
+          isChunkPruneMarker(inner) ? (
+            <span
+              key={`prune-${index}-${innerIndex}`}
+              data-testid="chunk-prune-marker"
+              className="text-strata-live-mid"
+            >
+              {inner}
+            </span>
+          ) : (
+            inner
+          )
+        )
   );
 }
 

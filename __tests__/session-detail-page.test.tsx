@@ -29,6 +29,10 @@ import {
   chunkElisionMarker,
   SESSION_CHUNK_ELISION_LABEL,
 } from "@/lib/agent-sessions/chunk-cap";
+import {
+  chunkPruneMarker,
+  SESSION_CHUNK_PRUNE_LABEL,
+} from "@/lib/agent-sessions/chunk-retention";
 
 const mockSession = {
   id: "sess-12345678",
@@ -289,6 +293,87 @@ describe("live session — the log is the screen", () => {
     // The lines on either side are still ordinary output.
     expect(card).toHaveTextContent("npm test");
     expect(card).toHaveTextContent("34 passed, 0 failed");
+  });
+
+  it("shows the retention marker in the log pane as Arij's voice", async () => {
+    // A pruned stream opens on Arij's sentence and continues with untouched
+    // agent output — if the marker rendered as ordinary output, a reader
+    // would take "pruned by Arij data retention" for something the agent said.
+    const marker = chunkPruneMarker(2_500_000, "2026-09-05T04:30:00.000Z");
+    installFetch({
+      session: {
+        ...mockSession,
+        status: "completed",
+        chunkStreams: {
+          raw: {
+            chunks: [
+              {
+                id: "chunk-1",
+                sessionId: "sess-1",
+                streamType: "raw",
+                sequence: 1,
+                chunkKey: null,
+                content: `${marker}\n· 34 passed, 0 failed\n`,
+                createdAt: new Date().toISOString(),
+                contentLength: 60,
+                contentTruncated: false,
+                contentOffset: 0,
+              },
+            ],
+            nextAfter: 1,
+            hasMore: false,
+          },
+        },
+      },
+    });
+    render(<SessionDetailPage />);
+
+    const card = await screen.findByTestId("stream-raw");
+    const line = within(card).getByTestId("chunk-prune-marker");
+    expect(line).toHaveTextContent("2,500,000 earlier characters");
+    expect(line).toHaveTextContent(SESSION_CHUNK_PRUNE_LABEL);
+    // The retained tail beside it is still ordinary output.
+    expect(card).toHaveTextContent("34 passed, 0 failed");
+    expect(within(card).queryByTestId("chunk-elision-marker")).toBeNull();
+  });
+
+  it("shows the retention marker in the response pane too", async () => {
+    const marker = chunkPruneMarker(120_000, "2026-09-05T04:30:00.000Z");
+    installFetch({
+      session: {
+        ...mockSession,
+        status: "completed",
+        chunkStreams: {
+          response: {
+            chunks: [
+              {
+                id: "chunk-9",
+                sessionId: "sess-1",
+                streamType: "response",
+                sequence: 9,
+                chunkKey: null,
+                content: `${marker}\nAll tests passed.`,
+                createdAt: new Date().toISOString(),
+                contentLength: 90,
+                contentTruncated: false,
+                contentOffset: 0,
+              },
+            ],
+            nextAfter: 9,
+            hasMore: false,
+          },
+        },
+      },
+    });
+    render(<SessionDetailPage />);
+
+    await userEvent.click(await screen.findByText("Réponse"));
+
+    const pane = await screen.findByTestId("stream-response");
+    const line = within(pane).getByTestId("chunk-prune-marker");
+    expect(line).toHaveTextContent("120,000 earlier characters");
+    expect(line).toHaveTextContent(SESSION_CHUNK_PRUNE_LABEL);
+    expect(pane).toHaveTextContent("All tests passed.");
   });
 
   it("shows the elision marker in the response pane too", async () => {

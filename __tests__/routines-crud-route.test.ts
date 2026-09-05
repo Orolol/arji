@@ -65,7 +65,7 @@ describe("project routines CRUD routes", () => {
     expect(payload.data).toEqual([]);
     expect(
       payload.meta.availableKinds.map((entry: { kind: string }) => entry.kind),
-    ).toEqual(["night_run", "github_issue_sync", "ci_watch"]);
+    ).toEqual(["night_run", "github_issue_sync", "ci_watch", "retention"]);
     expect(payload.meta.availableKinds).not.toContainEqual(
       expect.objectContaining({ kind: "dreaming" }),
     );

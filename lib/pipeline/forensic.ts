@@ -63,17 +63,27 @@ import { resolveAgentByNamedId } from "@/lib/agent-config/agent-resolution";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import { getProjectMemoryContent } from "@/lib/documents/memory";
 import { logTransition } from "@/lib/workflow/log";
-import { PIPELINE_REASONS } from "./constants";
+import {
+  FORENSIC_OUTPUT_TAIL_MAX_CHARS,
+  FORENSIC_RAW_TAIL_MAX_CHARS,
+  PIPELINE_REASONS,
+} from "./constants";
 import { buildForensicPrompt } from "./forensic-prompt";
 import type { PipelineStageResult } from "./runner";
 
 const POLL_INTERVAL_MS = 2000;
 
-/** Tail of the dead session's 'raw' stream handed to the forensic agent. */
-export const FORENSIC_RAW_TAIL_MAX_CHARS = 8000;
-
-/** Tail of the dead session's 'output' stream handed to the forensic agent. */
-export const FORENSIC_OUTPUT_TAIL_MAX_CHARS = 4000;
+/**
+ * Tails of the dead session's streams handed to the forensic agent. Defined
+ * in the client-safe pipeline constants and re-exported here, where every
+ * existing caller reads them: the retention pruner derives what it keeps from
+ * these numbers, and importing this module for them would drag the scheduler
+ * and the process manager with it.
+ */
+export {
+  FORENSIC_OUTPUT_TAIL_MAX_CHARS,
+  FORENSIC_RAW_TAIL_MAX_CHARS,
+} from "./constants";
 
 /** Heading the diagnostic comment is filed under. */
 export const FORENSIC_COMMENT_HEADING = "**Forensic diagnostic**";

@@ -11,6 +11,7 @@ import {
 } from "@/components/piscine";
 import type { SessionStreamSeed } from "@/components/sessions/SessionOutputStream";
 import { isChunkElisionMarker } from "@/lib/agent-sessions/chunk-cap";
+import { isChunkPruneMarker } from "@/lib/agent-sessions/chunk-retention";
 
 import {
   classifyLogLine,
@@ -196,13 +197,21 @@ export function SessionLogTail({
 
     return lines.map((line, index) => {
       // Arij's own voice, not the agent's: the write-path cap dropped the
-      // middle of this chunk. Rendered in the live stratum's mid tone rather
-      // than the dim `plain` every other unrecognised line gets — read as
-      // muted mono it disappears into the output it is reporting on. Colour
-      // here is the band's own stratum, not a state.
-      if (isChunkElisionMarker(line.text)) {
+      // middle of this chunk, or data retention dropped the head of this
+      // stream. Rendered in the live stratum's mid tone rather than the dim
+      // `plain` every other unrecognised line gets — read as muted mono it
+      // disappears into the output it is reporting on. Colour here is the
+      // band's own stratum, not a state.
+      if (isChunkElisionMarker(line.text) || isChunkPruneMarker(line.text)) {
         return (
-          <span key={line.key} data-testid="chunk-elision-marker">
+          <span
+            key={line.key}
+            data-testid={
+              isChunkPruneMarker(line.text)
+                ? "chunk-prune-marker"
+                : "chunk-elision-marker"
+            }
+          >
             <Mono size={11.5} tone="live-mid">
               {line.stamp ? `${line.stamp} ` : ""}
               {line.text}

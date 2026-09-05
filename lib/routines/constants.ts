@@ -10,6 +10,7 @@ export const ROUTINE_KINDS = [
   "dreaming",
   "github_issue_sync",
   "ci_watch",
+  "retention",
 ] as const;
 
 export type RoutineKind = (typeof ROUTINE_KINDS)[number];
@@ -18,6 +19,7 @@ export const AVAILABLE_ROUTINE_KINDS = [
   "night_run",
   "github_issue_sync",
   "ci_watch",
+  "retention",
 ] as const satisfies readonly RoutineKind[];
 
 export type AvailableRoutineKind = (typeof AVAILABLE_ROUTINE_KINDS)[number];
@@ -27,6 +29,7 @@ export const ROUTINE_KIND_LABELS: Record<RoutineKind, string> = {
   dreaming: "Dreaming",
   github_issue_sync: "GitHub issue sync",
   ci_watch: "CI watch",
+  retention: "Data retention",
 };
 
 export const ROUTINE_KIND_DESCRIPTIONS: Record<AvailableRoutineKind, string> = {
@@ -36,6 +39,8 @@ export const ROUTINE_KIND_DESCRIPTIONS: Record<AvailableRoutineKind, string> = {
     "Runs daily and refreshes open GitHub issues when the configured freshness TTL has expired.",
   ci_watch:
     "Polls open pull requests and reports newly failing CI checks by head SHA.",
+  retention:
+    "Prunes stored output of terminal sessions past the retention window, keeping each session's final response and forensic tail.",
 };
 
 export function isAvailableRoutineKind(
@@ -46,8 +51,15 @@ export function isAvailableRoutineKind(
 
 export function isDailyRoutineKind(
   kind: RoutineKind,
-): kind is Extract<RoutineKind, "night_run" | "github_issue_sync"> {
-  return kind === "night_run" || kind === "github_issue_sync";
+): kind is Extract<
+  RoutineKind,
+  "night_run" | "github_issue_sync" | "retention"
+> {
+  return (
+    kind === "night_run" ||
+    kind === "github_issue_sync" ||
+    kind === "retention"
+  );
 }
 
 export function defaultRoutineConfig(
@@ -59,8 +71,19 @@ export function defaultRoutineConfig(
     case "github_issue_sync":
     case "ci_watch":
       return { intervalMinutes: 15 };
+    // The window itself is a settings key, not per-routine config: it is read
+    // by the pruner and belongs next to the other retention settings.
+    case "retention":
+      return { vacuum: true };
   }
 }
+
+/**
+ * Durable one-shot claim written by the retention routine once it has
+ * VACUUMed the database. Arij-managed, so `crud.ts` keeps it out of the
+ * configuration a user edits — see INTERNAL_CONFIG_KEYS there.
+ */
+export const RETENTION_VACUUMED_AT_CONFIG_KEY = "retentionVacuumedAt";
 
 export const TIME_OF_DAY_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
