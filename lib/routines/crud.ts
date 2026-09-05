@@ -5,12 +5,27 @@ import {
   isDailyRoutineKind,
   isAvailableRoutineKind,
   isSameLocalDay,
+  RETENTION_VACUUMED_AT_CONFIG_KEY,
   type AvailableRoutineKind,
   TIME_OF_DAY_PATTERN,
 } from "@/lib/routines/constants";
 import { createId } from "@/lib/utils/nanoid";
 
-const INTERNAL_CONFIG_KEYS = new Set(["ciWatchState", "ciWatchErrorState"]);
+const INTERNAL_CONFIG_KEYS = new Set([
+  "ciWatchState",
+  "ciWatchErrorState",
+  RETENTION_VACUUMED_AT_CONFIG_KEY,
+]);
+
+/**
+ * Kinds that keep durable state of their own inside `config`. Reconfiguring
+ * one must not lose the state; switching a routine TO a different kind must
+ * not carry the old kind's state along.
+ */
+const KINDS_WITH_INTERNAL_STATE = new Set<AvailableRoutineKind>([
+  "ci_watch",
+  "retention",
+]);
 
 export interface RoutineDto {
   id: string;
@@ -166,6 +181,12 @@ function validateConfig(
         "`config.namedAgentId` must be a string or null.",
       );
     }
+    return;
+  }
+
+  if (kind === "retention") {
+    optionalPositiveInteger(config, "maxDeletedChunks");
+    optionalBoolean(config, "vacuum");
     return;
   }
 
@@ -346,7 +367,7 @@ export function updateProjectRoutine(
         config: persistedConfig(
           next.config,
           current.config,
-          next.kind === "ci_watch",
+          KINDS_WITH_INTERNAL_STATE.has(next.kind) && next.kind === current.kind,
         ),
         lastRunAt: seeded.lastRunAt,
         lastStatus: seeded.lastStatus,

@@ -417,7 +417,9 @@ function RoutineEditor({
               ? "Supports includeBacklog, failurePolicy, circuitBreaker, costCapUsd and namedAgentId."
               : kind === "github_issue_sync"
                 ? "intervalMinutes is a freshness TTL; the selected daily time remains the schedule."
-                : "intervalMinutes sets the polling cadence and must be a positive integer."}
+                : kind === "retention"
+                  ? "maxDeletedChunks bounds one run; vacuum allows the one-off reclaim after the first prune. The window itself is the session_chunk_retention_days setting."
+                  : "intervalMinutes sets the polling cadence and must be a positive integer."}
           </p>
         </div>
       </div>

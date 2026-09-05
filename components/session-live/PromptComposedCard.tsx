@@ -11,6 +11,10 @@ import {
   SurfaceCard,
 } from "@/components/piscine";
 import { acceptsPersonaPrompt } from "@/lib/agent-config/constants";
+import {
+  isPromptElisionMarker,
+  promptElisionMarkerSplitter,
+} from "@/lib/agent-sessions/prompt-cap";
 
 import type { SessionDetail } from "./types";
 
@@ -28,6 +32,11 @@ import type { SessionDetail } from "./types";
  * and the detail route omits the column entirely unless `?include=prompt` is
  * passed. `onOpenPrompt` fires exactly once, on the first open of the pane —
  * never on mount, never on the 3-second poll.
+ *
+ * A prompt over the write-path cap is stored head + marker + tail, and this
+ * pane is where that marker has to READ — it is the one surface whose whole
+ * job is showing what went in, so it must say plainly which part of it Arij
+ * did not keep.
  */
 
 export interface PromptComposedCardProps {
@@ -37,6 +46,33 @@ export interface PromptComposedCardProps {
   prompt: string | null;
   promptState: "idle" | "loading" | "loaded" | "error";
   onRetry: () => void;
+}
+
+/**
+ * Split the stored prompt around Arij's elision marker and give the marker
+ * its own element, so it reads as a notice rather than as one more dim line
+ * of the prompt it interrupts. Colour is the band's own stratum — `next` —
+ * not a state.
+ *
+ * Split, not a line-by-line map: a stored prompt runs to 128 KiB, and one
+ * element per line would be thousands of nodes where the flat block needs
+ * one. `Mono` does not forward arbitrary props, so the test id rides a
+ * wrapping span rather than the marker's own styling.
+ */
+function withPromptElisionMarker(prompt: string): React.ReactNode[] {
+  return prompt.split(promptElisionMarkerSplitter()).map((part, index) =>
+    isPromptElisionMarker(part) ? (
+      <span
+        key={`elision-${index}`}
+        data-testid="prompt-elision-marker"
+        className="text-strata-next-deep"
+      >
+        {part}
+      </span>
+    ) : (
+      part
+    )
+  );
 }
 
 /** One included-section chip: a check glyph and a word on a white plate. */
@@ -140,7 +176,7 @@ export function PromptComposedCard({
               tone="muted"
               className="whitespace-pre-wrap break-words"
             >
-              {prompt}
+              {withPromptElisionMarker(prompt)}
             </Mono>
           ) : promptState === "loading" ? (
             <Mono size={11} tone="muted">

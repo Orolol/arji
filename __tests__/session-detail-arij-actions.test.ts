@@ -53,6 +53,7 @@ const {
 const { SESSION_DETAIL_PREVIEW_BYTES, SESSION_STREAM_TYPES } = await import(
   "@/lib/agent-sessions/session-detail"
 );
+const { seedLegacyChunks } = await import("@/__tests__/helpers/legacy-chunks");
 
 const PROJECT = "proj-1";
 const SESSION = "sess-1";
@@ -178,8 +179,10 @@ describe("session detail payload", () => {
 describe("?view=arij-actions", () => {
   it("finds the chunk-derived calls, reading the stream in bounded pages", async () => {
     // Two 2 MB filler chunks so the scan cannot finish in one call, with the
-    // tool call in the tail.
-    seedRaw([
+    // tool call in the tail. Seeded past the store: the write-path cap trims a
+    // new chunk to 256 KiB, and the rows this bound exists for are the legacy
+    // ones already in the live database — up to 8.3 MB in a single row.
+    seedLegacyChunks(SESSION, "raw", [
       `${"x".repeat(2 * 1024 * 1024)}\n`,
       `${"y".repeat(2 * 1024 * 1024)}\n`,
       toolUseLine("tu_1", "get_ticket"),

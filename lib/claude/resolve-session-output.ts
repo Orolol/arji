@@ -12,6 +12,10 @@ import { db } from "@/lib/db";
 import { agentSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { wasQuestionAskedViaMcp } from "@/lib/mcp/token-store";
+import {
+  splitCappedPrompt,
+  type CappedPromptParts,
+} from "@/lib/agent-sessions/prompt-cap";
 
 /**
  * Resolves the best available text output for a completed agent session.
@@ -83,10 +87,10 @@ export const PROMPT_ECHO_MARKER =
  * lives here, in the single choke point every dispatch path resolves
  * output through.
  *
- * Exact-substring only: `agent_sessions.prompt` is the byte-exact string the
- * CLI was spawned with, and the measured echoes were exact copies. Partial
- * echoes are caught by the prompt-side per-comment budget
- * (commentHistorySection in prompt-builder.ts).
+ * Verbatim only: the measured echoes were exact copies, and partial echoes
+ * are caught by the prompt-side per-comment budget (commentHistorySection in
+ * prompt-builder.ts). What "verbatim" can be checked against depends on what
+ * the row holds — see `replacePromptEchoes`.
  */
 function stripPromptEcho(
   output: string | null,
@@ -95,11 +99,11 @@ function stripPromptEcho(
   if (!output) return output;
   const prompt = getSessionPrompt(sessionId);
   if (!prompt || prompt.length < PROMPT_ECHO_MIN_CHARS) return output;
-  if (!output.includes(prompt)) return output;
 
-  const stripped = output
-    .split(prompt)
-    .join(PROMPT_ECHO_MARKER)
+  const replaced = replacePromptEchoes(output, prompt);
+  if (replaced === null) return output;
+
+  const stripped = replaced
     // An n-times echo (the measured case was exactly twice) collapses to one
     // marker instead of a marker per copy.
     .replaceAll(
@@ -111,6 +115,161 @@ function stripPromptEcho(
 
   // Nothing but the echo: report that as "no output", not as content.
   return stripped === PROMPT_ECHO_MARKER ? null : stripped;
+}
+
+/**
+ * Replaces every echo of the session's prompt in `output`, or null when there
+ * is none to replace.
+ *
+ * Two shapes, because `agent_sessions.prompt` has two:
+ *
+ *  - Stored whole (96% of rows) — the byte-exact string the CLI was spawned
+ *    with, so an exact-substring split is both correct and cheap.
+ *  - Stored CAPPED (`capSessionPrompt`, the rows over 128 KiB) — the row is
+ *    head + marker + tail and matches nothing in the output, because the CLI
+ *    echoed the WHOLE prompt. Matching the two kept ends and removing
+ *    everything between them recovers the echo exactly: in the original those
+ *    ends bracketed the elided middle. This is the case that matters most —
+ *    a capped prompt is a big prompt, and a big prompt is precisely what the
+ *    snowball is made of.
+ *
+ * The span search cannot fire by accident: `head` is 104 KiB of the session's
+ * own prompt, the span's length is that prompt's own byte length, and `tail`
+ * — the 20 KiB the cap kept — has to sit at exactly the offset the original
+ * had it. A head match that fails the check is stepped over, not removed.
+ */
+function replacePromptEchoes(output: string, prompt: string): string | null {
+  const capped = splitCappedPrompt(prompt);
+
+  if (!capped) {
+    const whole = output.includes(prompt)
+      ? output.split(prompt).join(PROMPT_ECHO_MARKER)
+      : output;
+    // `parseClaudeOutput` trims the run's output before this ever sees it, so
+    // a prompt ending in whitespace — 88.6% of the stored rows — cannot match
+    // as an exact substring when its echo is the LAST thing in the output.
+    // That is the echo-only run, the one whose whole payload is the snowball.
+    const trimmedEcho = trailingTrimmedEcho(whole, prompt);
+    if (trimmedEcho !== null) return trimmedEcho;
+    return whole === output ? null : whole;
+  }
+
+  // Neither end can be empty for a prompt this function actually capped, but
+  // `splitCappedPrompt` also answers for a prompt that merely QUOTED a marker;
+  // an empty needle would match at every position and never advance `cursor`.
+  if (!capped.head || !capped.tail) return null;
+
+  return replaceCappedPromptEchoes(output, capped);
+}
+
+/**
+ * Replaces a final echo whose trailing whitespace the output-side trim ate.
+ *
+ * `parseClaudeOutput` opens with `raw.trim()`, so whatever the CLI echoed
+ * reaches this file already stripped at both outer edges. A prompt that ends
+ * in a newline — 863 of the 974 stored prompts over 500 bytes, 88.6% —
+ * therefore never appears verbatim in the output when its echo runs to the
+ * end, which is precisely the echo-only run: the one that resolves to
+ * megabytes of its own prompt and classifies `answered` instead of `silent`.
+ *
+ * Only the LAST occurrence can be affected (one trim, one output), so this
+ * anchors on the end of the string rather than searching: the output must end
+ * with the prompt minus its trailing whitespace, and that shortened form must
+ * still carry content. Anything less is left alone.
+ */
+function trailingTrimmedEcho(output: string, prompt: string): string | null {
+  const trimmed = prompt.trimEnd();
+  if (trimmed === prompt || !trimmed) return null;
+  if (!output.endsWith(trimmed)) return null;
+  return `${output.slice(0, output.length - trimmed.length)}${PROMPT_ECHO_MARKER}`;
+}
+
+/**
+ * The capped-prompt case: find each echo by its LENGTH, verify it by its end.
+ *
+ * The cap is lossy but not silent — it records how many bytes it dropped — so
+ * `head + elided + tail` is the exact byte length of the prompt the CLI was
+ * handed. That length is what closes the span. Searching for `tail` instead
+ * closes it at the first place the text happens to reappear, and repeated or
+ * nested closing instructions are precisely the shape of prompt this scrub
+ * exists for: a 1.18 MB prompt carrying its instruction block twice left 1.04
+ * MB of itself behind, and a run that delivered nothing but its own prompt
+ * back was classified `answered`.
+ *
+ * Bytes, not characters, and therefore `Buffer`: the cap counted bytes, so
+ * only a byte offset can be compared against what it recorded. Every cut is
+ * on a boundary the match itself proves — an echo starts where `head` starts
+ * and ends where `tail` ends, both of them whole substrings of the prompt —
+ * so the pieces re-decode without a replacement character.
+ *
+ * The verification is what makes a length-driven removal safe. A span is
+ * removed only when the bytes at its far end are the tail the cap kept; a
+ * head occurrence that is a partial echo, or ordinary output that quotes the
+ * head, fails that and the search resumes one byte later.
+ *
+ * A digest of the original would close the last hypothetical gap — output
+ * that reproduces the 104 KiB head, then exactly the elided byte count of
+ * something else, then the 20 KiB tail. That is an echo under any reading,
+ * and storing the digest needs a column the cap does not have, so the length
+ * and the two ends are where this stops.
+ */
+function replaceCappedPromptEchoes(
+  output: string,
+  capped: CappedPromptParts,
+): string | null {
+  const head = Buffer.from(capped.head, "utf8");
+  const tail = Buffer.from(capped.tail, "utf8");
+  const promptBytes = head.length + capped.elidedBytes + tail.length;
+  const marker = Buffer.from(PROMPT_ECHO_MARKER, "utf8");
+
+  // The same output-side trim the uncapped path has to allow for, in bytes.
+  // A capped prompt is a BIG prompt, so this is the shape that costs most:
+  // without it an echo-only run of a newline-terminated prompt keeps every
+  // byte of itself. `shortfall` is what the trim would have taken off the end.
+  const tailTrimmed = Buffer.from(capped.tail.trimEnd(), "utf8");
+  const shortfall = tail.length - tailTrimmed.length;
+
+  const buffer = Buffer.from(output, "utf8");
+  const pieces: Buffer[] = [];
+  let kept = 0;
+  let search = 0;
+  let found = false;
+  for (;;) {
+    const headAt = buffer.indexOf(head, search);
+    if (headAt < 0) break;
+    const end = headAt + promptBytes;
+    const endsWithTail =
+      end <= buffer.length &&
+      buffer.compare(tail, 0, tail.length, end - tail.length, end) === 0;
+    // The trimmed variant is deliberately the narrower claim: it is allowed
+    // only when the span would finish exactly at the end of the output, which
+    // is the one position a single trailing trim can have touched.
+    const trimmedEnd = end - shortfall;
+    const endsTrimmed =
+      !endsWithTail &&
+      shortfall > 0 &&
+      tailTrimmed.length > 0 &&
+      trimmedEnd === buffer.length &&
+      buffer.compare(
+        tailTrimmed,
+        0,
+        tailTrimmed.length,
+        trimmedEnd - tailTrimmed.length,
+        trimmedEnd,
+      ) === 0;
+    if (!endsWithTail && !endsTrimmed) {
+      search = headAt + 1;
+      continue;
+    }
+    const cut = endsWithTail ? end : trimmedEnd;
+    pieces.push(buffer.subarray(kept, headAt), marker);
+    kept = cut;
+    search = cut;
+    found = true;
+  }
+  if (!found) return null;
+  pieces.push(buffer.subarray(kept));
+  return Buffer.concat(pieces).toString("utf8");
 }
 
 

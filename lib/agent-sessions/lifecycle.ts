@@ -6,6 +6,13 @@ import { agentSessions } from "@/lib/db/schema";
 import { notifySessionTerminal } from "./terminal-hooks";
 import { buildSessionFailureMessage, buildSessionLogsRecord } from "./failure-message";
 import { estimateTokens } from "@/lib/tokens/estimator";
+import { capTextHeadTail } from "./head-tail-cap";
+import {
+  promptElisionMarker,
+  SESSION_PROMPT_MAX_STORED_BYTES,
+  SESSION_PROMPT_STORED_HEAD_BYTES,
+  SESSION_PROMPT_STORED_TAIL_BYTES,
+} from "./prompt-cap";
 export type AgentSessionLifecycleStatus =
   | "queued"
   | "running"
@@ -357,6 +364,36 @@ export type CreateQueuedSessionInput = Omit<
   "status" | "startedAt" | "endedAt" | "completedAt"
 >;
 
+/**
+ * Cut a prompt down to {@link SESSION_PROMPT_MAX_STORED_BYTES} for storage.
+ *
+ * The write-path cap on `agent_sessions.prompt`. It applies to what is
+ * PERSISTED and never to what is spawned: every dispatch path hands the CLI
+ * the prompt it composed, and only the row that records it is bounded. See
+ * `prompt-cap.ts` for why the column is diagnostic and where 128 KiB comes
+ * from.
+ *
+ * Null-tolerant because the column and the insert type are. Every dispatch
+ * path today composes a prompt, but a cap that turned an absent one into an
+ * empty string would be a silent schema change, and `""` and NULL read
+ * differently everywhere downstream.
+ */
+export function capSessionPrompt(prompt: string): string;
+export function capSessionPrompt(
+  prompt: string | null | undefined
+): string | null | undefined;
+export function capSessionPrompt(
+  prompt: string | null | undefined
+): string | null | undefined {
+  if (!prompt) return prompt;
+  return capTextHeadTail(prompt, {
+    maxBytes: SESSION_PROMPT_MAX_STORED_BYTES,
+    headBytes: SESSION_PROMPT_STORED_HEAD_BYTES,
+    tailBytes: SESSION_PROMPT_STORED_TAIL_BYTES,
+    marker: promptElisionMarker,
+  }).text;
+}
+
 export function createQueuedSession(values: CreateQueuedSessionInput): void {
   let estimatedPromptTokens = values.estimatedPromptTokens;
   const estimatedPromptBreakdown = values.estimatedPromptBreakdown;
@@ -365,12 +402,18 @@ export function createQueuedSession(values: CreateQueuedSessionInput): void {
     values.prompt &&
     (estimatedPromptTokens === undefined || estimatedPromptTokens === null)
   ) {
+    // Deliberately the UNCAPPED prompt. The estimate describes what the agent
+    // is about to be handed — the same reason `appendChunk` derives
+    // `lastNonEmptyText` from uncapped content. An estimate computed off the
+    // stored row would under-report exactly the runs whose prompt size is
+    // worth knowing about.
     estimatedPromptTokens = estimateTokens(values.prompt);
   }
 
   db.insert(agentSessions)
     .values({
       ...values,
+      prompt: capSessionPrompt(values.prompt),
       estimatedPromptTokens: estimatedPromptTokens ?? null,
       estimatedPromptBreakdown: estimatedPromptBreakdown ?? null,
       status: "queued",

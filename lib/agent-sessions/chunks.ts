@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -10,6 +11,13 @@ import {
   agentSessions,
 } from "@/lib/db/schema";
 import { extractLastNonEmptyText } from "@/lib/agent-sessions/last-text";
+import {
+  chunkElisionMarker,
+  SESSION_CHUNK_MAX_STORED_BYTES,
+  SESSION_CHUNK_STORED_HEAD_BYTES,
+  SESSION_CHUNK_STORED_TAIL_BYTES,
+} from "@/lib/agent-sessions/chunk-cap";
+import { capTextHeadTail } from "@/lib/agent-sessions/head-tail-cap";
 // Type-only in the other direction, so this is not a runtime cycle.
 import { countCharacters } from "@/lib/agent-sessions/session-detail";
 
@@ -45,6 +53,10 @@ export const SESSION_CHUNK_PAGE_MAX_BYTES = 1024 * 1024;
  * so the whole chunk is still reachable. The live database holds 19 chunks
  * over 1 MB and one of 8.3 MB — a one-shot CLI result blob written as a
  * single chunk — and no row-count bound can bound those.
+ *
+ * Rows written since {@link SESSION_CHUNK_MAX_STORED_BYTES} landed cannot
+ * exceed it, so for those the split never triggers. The oversized rows above
+ * are the ones already in the database, and this stays the bound on them.
  */
 export const SESSION_CHUNK_MAX_CONTENT_BYTES = 256 * 1024;
 
@@ -142,6 +154,79 @@ export function truncateUtf8(
   let end = maxBytes;
   while (end > 0 && (buffer[end] & 0xc0) === 0x80) end--;
   return { text: buffer.subarray(0, end).toString("utf8"), truncated: true };
+}
+
+/**
+ * Cut `content` down to {@link SESSION_CHUNK_MAX_STORED_BYTES}, keeping a head
+ * and a tail with an explicit marker between them.
+ *
+ * This is the write-path cap — the change that stops the growth rather than
+ * reclaiming it afterwards. `appendChunk` used to store whatever it was
+ * handed at any size, which is how the live database came to hold a single
+ * 8.3 MB chunk and a single 51.3 MB session.
+ *
+ * The cut itself is {@link capTextHeadTail}, shared with the prompt cap: the
+ * two differ only in their numbers and their marker, and one copy of a UTF-8
+ * boundary walk is enough. The common case — every chunk is ~5.5 KB on
+ * average, and this runs once per emission on every live session — costs one
+ * `byteLength` scan and no allocation at all.
+ */
+export function capChunkContent(content: string): {
+  content: string;
+  capped: boolean;
+} {
+  const cut = capTextHeadTail(content, {
+    maxBytes: SESSION_CHUNK_MAX_STORED_BYTES,
+    headBytes: SESSION_CHUNK_STORED_HEAD_BYTES,
+    tailBytes: SESSION_CHUNK_STORED_TAIL_BYTES,
+    marker: chunkElisionMarker,
+  });
+  return { content: cut.text, capped: cut.capped };
+}
+
+/**
+ * Namespace for a chunk key Arij derives instead of receiving. Keeps a
+ * derived key disjoint from every caller-supplied one: the live database's
+ * 256,594 keys are all `stdout:N`, `stderr:N`, `final-output`,
+ * `final-response` or `result-<sessionId>`, and none of those can start here.
+ */
+export const DERIVED_CHUNK_KEY_PREFIX = "sha256-";
+
+/**
+ * The key a keyless chunk is stored under: a digest of the content the writer
+ * handed us, BEFORE the cap.
+ *
+ * Before the cap, and never after it, because the cap is lossy: it keeps a
+ * head and a tail and drops the middle. Two different chunks of equal byte
+ * length whose kept ends agree — a stream that repeats a long banner, an
+ * agent writing two answers under the same preamble — cap to the same row and
+ * would collide deterministically on a digest of the capped form. The second
+ * one is not a duplicate; discarding it drops real output AND skips the
+ * uncapped `lastNonEmptyText` extraction, so the session's final word stays
+ * whatever the first chunk said. Hashing the original makes the digest mean
+ * what its name says: same input, same key.
+ *
+ * Dedupe rides the existing (session_id, stream_type, chunk_key) unique index
+ * rather than a new hash column, so a keyless write gets exactly the
+ * duplicate semantics a keyed one already had, with no migration and no
+ * second index to keep in step. SQLite treats NULLs in a unique index as
+ * distinct from each other, which is precisely why keyless chunks never
+ * deduped before.
+ *
+ * base64url rather than hex: the same 256 bits in 43 characters instead of
+ * 64, on a column that is now written and indexed for every keyless chunk.
+ *
+ * Cost: one sha256 pass over the whole input rather than over the capped
+ * 256 KiB. Only keyless writers pay it — every row on the live database
+ * arrives with a provider key and takes the lookup-only fast path above —
+ * and at ~5.5 KB per chunk it is far below the `Buffer` work the cap already
+ * does on the same string.
+ */
+export function deriveChunkKey(content: string): string {
+  return (
+    DERIVED_CHUNK_KEY_PREFIX +
+    createHash("sha256").update(content, "utf8").digest("base64url")
+  );
 }
 
 export interface AppendSessionChunkInput {
@@ -499,14 +584,41 @@ export function createSessionChunkStore(
     input: AppendSessionChunkInput
   ): AppendSessionChunkResult {
     const createdAt = input.createdAt ?? new Date().toISOString();
-    const chunkKey = input.chunkKey ?? null;
+    const suppliedKey = input.chunkKey ?? null;
 
-    if (chunkKey) {
-      const existing = selectExistingByKeyStmt.get({
+    const findDuplicate = (chunkKey: string) =>
+      selectExistingByKeyStmt.get({
         sessionId: input.sessionId,
         streamType: input.streamType,
         chunkKey,
       });
+
+    // The fast path, unchanged: a caller-supplied key answers the duplicate
+    // question with one indexed lookup, without reading the content at all.
+    if (suppliedKey) {
+      const existing = findDuplicate(suppliedKey);
+      if (existing) {
+        return {
+          inserted: false,
+          chunk: toSessionChunk(existing),
+        };
+      }
+    }
+
+    // Hashed BEFORE the cap, then capped. The digest has to identify the
+    // chunk the writer produced, not the lossy shape storage keeps: two
+    // distinct oversized chunks sharing a head and a tail cap to the same
+    // bytes, and a digest taken afterwards would call the second one a
+    // duplicate. See `deriveChunkKey`.
+    const chunkKey = suppliedKey ?? deriveChunkKey(input.content);
+    const content = capChunkContent(input.content).content;
+
+    // Keyless writers get the same check on the derived key. Deliberately
+    // before the sequence reservation below: a deduped write must cost a
+    // lookup and nothing else — no row, and no hole in the session's
+    // sequence either.
+    if (!suppliedKey) {
+      const existing = findDuplicate(chunkKey);
       if (existing) {
         return {
           inserted: false,
@@ -531,7 +643,7 @@ export function createSessionChunkStore(
       streamType: input.streamType,
       sequence: sequenceRow.sequence,
       chunkKey,
-      content: input.content,
+      content,
       createdAt,
     };
 
@@ -546,6 +658,11 @@ export function createSessionChunkStore(
     });
 
     if (input.streamType === "output" || input.streamType === "response") {
+      // Deliberately `input.content`, not the capped chunk. The last non-empty
+      // line is the agent's final word, which is exactly the part an elided
+      // middle could swallow — and the marker itself would become the "last
+      // line" if the cap ate everything after it. Reading the uncapped text
+      // keeps the sessions list and the completion toast honest.
       const lastNonEmptyText = extractLastNonEmptyText(input.content);
       if (lastNonEmptyText) {
         updateLastNonEmptyTextStmt.run({

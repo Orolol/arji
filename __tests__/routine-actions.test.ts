@@ -44,6 +44,11 @@ function deps(): RoutineActionDeps {
       message: "CI checked",
       targetUrl: "/projects/project-1",
     })),
+    runRetention: vi.fn(async () => ({
+      status: "completed" as const,
+      message: "Pruned 2 sessions",
+      targetUrl: "/projects/project-1/sessions",
+    })),
   };
 }
 

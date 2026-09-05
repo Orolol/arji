@@ -1,20 +1,26 @@
-arij.db
-arij.db-wal
-arij.db-shm
-e2e.db
-e2e.db-wal
-e2e.db-shm
-sessions/
-logs/
-uploads/
-migrations/
-arij.db.audit37-backup*
-# Dated snapshots taken before risky operations. Unignored, they land in
-# `git status` AND in Tailwind's source scan — a 20 MB SQLite file full of
-# ticket text yields bogus utility candidates that fail the CSS build.
-arij.db.backup-*
-# Ownership manifest for lib/mcp/user-global-sync.ts: the third-party MCP
-# server names Arij last wrote into omp's mcp.json and agy's register. Machine
-# state, not project state — it records what is on THIS box.
-mcp-user-global.json
-backups/
+# Deny by default.
+#
+# Everything under data/ is runtime state, never source: the SQLite database
+# and its WAL/SHM sidecars, the isolated e2e database, session logs and
+# artifacts, uploads, applied migrations, dated pre-operation snapshots, and
+# `mcp-user-global.json` (the ownership manifest for
+# lib/mcp/user-global-sync.ts — it records which third-party MCP servers Arij
+# last wrote into omp's mcp.json and agy's register on THIS box).
+#
+# This file used to enumerate those artifacts one by one, which meant every
+# new runtime directory leaked into `git status` until a human noticed.
+# `backups/` did exactly that: 472 MB of SQLite board snapshot and comment
+# archive sat untracked, one `git add -A` away from a half-gigabyte commit of
+# ticket, session, and prompt content. Enumeration fails open; a denylist
+# fails closed, so the next artifact directory is ignored the day it appears.
+#
+# If something under data/ ever has to be tracked, un-ignore it explicitly
+# below. Note that git does not descend into an ignored directory, so a nested
+# path needs each parent un-ignored first (`!sub/`, then `!sub/file`).
+#
+# Tailwind is unaffected either way: app/globals.css pins the scan with
+# `@import "tailwindcss" source(none)` plus explicit `@source` entries for
+# app/, components/, hooks/ and lib/, so data/ is never scanned for utility
+# candidates regardless of its ignore state.
+*
+!.gitignore
