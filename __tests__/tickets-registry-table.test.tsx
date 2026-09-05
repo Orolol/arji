@@ -367,3 +367,107 @@ describe("the footer", () => {
     expect(screen.getAllByTestId("tickets-row")).toHaveLength(1);
   });
 });
+
+describe("project and exact workflow filters", () => {
+  async function select(trigger: RegExp, option: string) {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    await user.click(screen.getByRole("button", { name: trigger }));
+    await user.click(screen.getByRole("menuitem", { name: option }));
+  }
+
+  it("combines project, status, text, bug and priority filters and clears them", async () => {
+    payload = makePayload([
+      row({ epicId: "wanted", projectId: "p2", title: "Needle", status: "review", type: "bug" }),
+      row({ epicId: "other-project", title: "Needle", status: "review", type: "bug" }),
+      row({ epicId: "other-status", projectId: "p2", title: "Needle", type: "bug" }),
+      row({ epicId: "feature", projectId: "p2", title: "Needle", status: "review" }),
+      row({ epicId: "low", projectId: "p2", title: "Needle", status: "review", type: "bug", priority: 0 }),
+      row({ epicId: "text", projectId: "p2", title: "Different", status: "review", type: "bug" }),
+    ]);
+    render(<TicketsRegistryView />);
+    await select(/^Projet :/, "Ledger");
+    await select(/^État :/, "Review");
+    fireEvent.change(screen.getByLabelText("Filter tickets"), { target: { value: "Needle" } });
+    fireEvent.click(screen.getByTestId("tickets-filter-bug"));
+    fireEvent.click(screen.getByTestId("tickets-filter-high"));
+    expect(screen.getAllByTestId("tickets-row")).toHaveLength(1);
+    expect(screen.getByTestId("tickets-row")).toHaveTextContent("ARJ-wanted");
+    await select(/^Projet :/, "Tous les projets");
+    await select(/^État :/, "Tous les états");
+    fireEvent.change(screen.getByLabelText("Filter tickets"), { target: { value: "" } });
+    fireEvent.click(screen.getByTestId("tickets-filter-bug"));
+    fireEvent.click(screen.getByTestId("tickets-filter-high"));
+    fireEvent.click(screen.getByTestId("tickets-show-all"));
+    expect(screen.getAllByTestId("tickets-row")).toHaveLength(6);
+  });
+
+  it.each([
+    ["backlog", "Backlog"], ["todo", "To Do"], ["in_progress", "In Progress"],
+    ["review", "Review"], ["to_merge", "To Merge"], ["done", "Done"], ["released", "Released"],
+  ])("selects exact state %s, including states sharing a group", async (status, label) => {
+    payload = makePayload(["backlog", "todo", "in_progress", "review", "to_merge", "done", "released"].map((value) =>
+      row({ epicId: value, status: value, group: value === "released" ? "released" : ["to_merge", "done"].includes(value) ? "done" : "waiting" }),
+    ));
+    render(<TicketsRegistryView />);
+    fireEvent.click(screen.getByTestId("tickets-filter-active"));
+    await select(/^État :/, label);
+    expect(screen.getAllByTestId("tickets-row")).toHaveLength(1);
+    expect(screen.getByTestId("tickets-row")).toHaveTextContent(`ARJ-${status}`);
+    fireEvent.click(screen.getByTestId("tickets-filter-all"));
+    expect(screen.getAllByTestId("tickets-row")).toHaveLength(7);
+  });
+
+  it("honors route scope changes and allows returning to all projects", async () => {
+    payload = makePayload([row({ epicId: "a" }), row({ epicId: "b", projectId: "p2" })]);
+    const view = render(<TicketsRegistryView projectId="p1" />);
+    expect(screen.getByTestId("tickets-row")).toHaveTextContent("ARJ-a");
+    await select(/^Projet :/, "Tous les projets");
+    expect(screen.getAllByTestId("tickets-row")).toHaveLength(2);
+    view.rerender(<TicketsRegistryView projectId="p2" />);
+    expect(screen.getByTestId("tickets-row")).toHaveTextContent("ARJ-b");
+    view.rerender(<TicketsRegistryView projectId="p1" />);
+    expect(screen.getByTestId("tickets-row")).toHaveTextContent("ARJ-a");
+  });
+
+  it("renders an empty result when project and status do not intersect", async () => {
+    render(<TicketsRegistryView />);
+    await select(/^Projet :/, "Ledger");
+    await select(/^État :/, "Released");
+    expect(screen.queryAllByTestId("tickets-row")).toHaveLength(0);
+    expect(screen.getByTestId("tickets-footer-status")).toHaveTextContent("0 tickets");
+  });
+});
+
+describe("sortable headers", () => {
+  it.each([
+    ["Ticket", "asc", "a"], ["Titre", "asc", "a"], ["État", "asc", "a"],
+    ["Stories", "desc", "b"], ["Priorité", "desc", "b"],
+    ["Dernière activité", "asc", "a"], ["Coût", "desc", "b"],
+  ])("sorts %s in both directions and exposes the direction", (label, direction, first) => {
+    payload = makePayload([
+      row({ epicId: "b", title: "Zulu", status: "review", usCount: 10, priority: 3, costUsd: 10, activityAt: "2026-09-05T10:00:00Z" }),
+      row({ epicId: "a", title: "Alpha", status: "backlog", usCount: 2, priority: 1, costUsd: 2, activityAt: "2026-09-01T10:00:00Z" }),
+    ]);
+    render(<TicketsRegistryView />);
+    const header = screen.getByRole("columnheader", { name: label });
+    fireEvent.click(within(header).getByRole("button", { name: label }));
+    expect(header).toHaveAttribute("aria-sort", direction === "asc" ? "ascending" : "descending");
+    expect(screen.getAllByTestId("tickets-row")[0]).toHaveTextContent(`ARJ-${first}`);
+    fireEvent.click(within(header).getByRole("button", { name: label }));
+    expect(header).toHaveAttribute("aria-sort", direction === "asc" ? "descending" : "ascending");
+    expect(screen.getAllByTestId("tickets-row")[0]).toHaveTextContent(`ARJ-${first === "a" ? "b" : "a"}`);
+    expect(screen.getByRole("button", { name: /^sort:/ })).toHaveTextContent(direction === "asc" ? "↓" : "↑");
+  });
+
+  it("sorts from the keyboard while preserving filters", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    payload = makePayload([row({ epicId: "b", title: "Zulu" }), row({ epicId: "a", title: "Alpha" }), row({ epicId: "bug", type: "bug" })]);
+    render(<TicketsRegistryView />);
+    await user.click(screen.getByTestId("tickets-filter-high"));
+    const button = within(screen.getByRole("columnheader", { name: "Titre" })).getByRole("button");
+    button.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getAllByTestId("tickets-row")[0]).toHaveTextContent("ARJ-a");
+    expect(screen.getByTestId("tickets-filter-high")).toHaveAttribute("aria-pressed", "true");
+  });
+});

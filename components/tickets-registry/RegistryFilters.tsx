@@ -6,6 +6,10 @@ import { Search } from "lucide-react";
 import { BreathingDot, GhostInputPill, Mono, PillButton, SelectPill } from "@/components/piscine";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { fmtCount } from "@/lib/tickets-registry/aggregate";
+import type { DeskProject } from "@/lib/control-desk/types";
+import { COLUMN_LABELS, KANBAN_COLUMNS, type KanbanStatus } from "@/lib/types/kanban";
+import { REGISTRY_SORTS, type RegistrySort, type RegistrySortDirection } from "@/lib/tickets-registry/sort";
+export type { RegistrySort } from "@/lib/tickets-registry/sort";
 import type { RegistryCounts } from "@/lib/tickets-registry/types";
 import { cn } from "@/lib/utils";
 
@@ -34,7 +38,7 @@ export type RegistryStateFilter =
   | "done"
   | "released";
 
-export type RegistrySort = "activite" | "priorite" | "cout" | "ticket";
+
 
 /** Verbatim and accented, exactly as the frame writes them. */
 export const SORT_LABEL: Record<RegistrySort, string> = {
@@ -42,9 +46,12 @@ export const SORT_LABEL: Record<RegistrySort, string> = {
   priorite: "priorité",
   cout: "coût",
   ticket: "ticket",
+  titre: "titre",
+  etat: "état",
+  stories: "stories",
 };
 
-const SORT_ORDER: readonly RegistrySort[] = ["activite", "priorite", "cout", "ticket"];
+const SORT_ORDER = REGISTRY_SORTS;
 
 /** A toggled filter is a SELECTION: 2px, the system's selection weight. */
 const TOGGLE_ON = "border-2 border-foreground text-foreground";
@@ -52,6 +59,12 @@ const TOGGLE_OFF = "text-muted-foreground";
 
 export interface RegistryFiltersProps {
   counts: RegistryCounts;
+  projects: DeskProject[];
+  projectId: string | null;
+  onProjectChange: (id: string | null) => void;
+  status: KanbanStatus | "all";
+  onStatusChange: (status: KanbanStatus | "all") => void;
+  direction: RegistrySortDirection;
   state: RegistryStateFilter;
   onStateChange: (state: RegistryStateFilter) => void;
   bug: boolean;
@@ -80,6 +93,12 @@ function Divider() {
 
 export function RegistryFilters({
   counts,
+  projects,
+  projectId,
+  onProjectChange,
+  status,
+  onStatusChange,
+  direction,
   state,
   onStateChange,
   bug,
@@ -153,6 +172,19 @@ export function RegistryFilters({
         </span>
       </div>
 
+      <SelectPill className="max-w-[240px]" label={`Projet : ${projectId ? projects.find((p) => p.id === projectId)?.name ?? projectId : "Tous les projets"}`}>
+        <DropdownMenuItem onSelect={() => onProjectChange(null)}>Tous les projets</DropdownMenuItem>
+        {projects.map((project) => (
+          <DropdownMenuItem key={project.id} onSelect={() => onProjectChange(project.id)}>{project.name}</DropdownMenuItem>
+        ))}
+      </SelectPill>
+      <SelectPill label={`État : ${status === "all" ? "Tous les états" : COLUMN_LABELS[status]}`}>
+        <DropdownMenuItem onSelect={() => onStatusChange("all")}>Tous les états</DropdownMenuItem>
+        {KANBAN_COLUMNS.map((value) => (
+          <DropdownMenuItem key={value} onSelect={() => onStatusChange(value)}>{COLUMN_LABELS[value]}</DropdownMenuItem>
+        ))}
+      </SelectPill>
+
       <Divider />
 
       {statePill("all", "All", counts.all)}
@@ -195,7 +227,7 @@ export function RegistryFilters({
             twMerge, and Space Mono ships 400 — a mono element never carries a
             synthesised weight. */}
         <SelectPill
-          label={`sort: ${SORT_LABEL[sort]}`}
+          label={`sort: ${SORT_LABEL[sort]} ${direction === "asc" ? "↑" : "↓"}`}
           tone="mono"
           fill="transparent"
           className="h-[26px] px-0 font-normal text-muted-foreground"

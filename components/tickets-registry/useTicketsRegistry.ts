@@ -2,6 +2,8 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 
+import type { KanbanStatus } from "@/lib/types/kanban";
+import type { RegistrySort, RegistrySortDirection } from "@/lib/tickets-registry/sort";
 import { usePolling } from "@/hooks/usePolling";
 import {
   REGISTRY_DONE_WINDOW,
@@ -51,6 +53,9 @@ export interface UseTicketsRegistry {
 export function useTicketsRegistry(
   projectId?: string | null,
   query?: string,
+  sort: RegistrySort = "activite",
+  direction: RegistrySortDirection = "desc",
+  status: KanbanStatus | "all" = "all",
 ): UseTicketsRegistry {
   const [data, setData] = useState<TicketsRegistryPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,6 +70,9 @@ export function useTicketsRegistry(
 
   const href = useMemo(() => {
     const params = new URLSearchParams();
+    params.set("sort", sort);
+    params.set("direction", direction);
+    if (status !== "all") params.set("status", status);
     if (projectId) params.set("project", projectId);
     const trimmed = (query ?? "").trim();
     if (trimmed) params.set("q", trimmed);
@@ -74,13 +82,13 @@ export function useTicketsRegistry(
     }
     const search = params.toString();
     return search ? `/api/tickets?${search}` : "/api/tickets";
-  }, [projectId, query, win.done, win.released]);
+  }, [projectId, query, win.done, win.released, sort, direction, status]);
 
   const load = useCallback(async () => {
     const requestSeq = ++requestSeqRef.current;
     // Checked after the last await, so nothing can slip in between the check
     // and the state it guards.
-    const stale = () => requestSeq <= appliedSeqRef.current;
+    const stale = () => requestSeq !== requestSeqRef.current || requestSeq <= appliedSeqRef.current;
     try {
       const res = await fetch(href);
       if (!res.ok) {

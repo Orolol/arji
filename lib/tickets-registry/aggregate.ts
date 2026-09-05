@@ -146,7 +146,7 @@ export interface RegistryDeriveInput {
   projects: readonly DeskProject[];
   epics: readonly RegistryEpicRow[];
   /** Every `running` / `queued` session, the desk's own read. */
-  sessions: readonly SessionRow[];
+  sessions: readonly (SessionRow & { activityAt?: string | null })[];
   /** Newest-session-per-epic rows inside the 14-day failure cutoff. */
   failureSessions: readonly FailureSessionRow[];
   edges: readonly TicketDependencyEdge[];
@@ -320,6 +320,8 @@ export function deriveRegistryRows(input: RegistryDeriveInput): RegistryRow[] {
     ),
   );
 
+  const activityBySession = new Map(input.sessions.map((session) => [session.id, session.activityAt]));
+
   return input.epics.map((epic) => {
     const status = epic.status ?? "";
     const live = working.get(epic.id);
@@ -398,6 +400,8 @@ export function deriveRegistryRows(input: RegistryDeriveInput): RegistryRow[] {
       usCount: epic.usCount,
       activity,
       activityTone: tone,
+      activityAt: (live ? activityBySession.get(live.sessionId) ?? live.startedAt : null) ?? ask?.askedAt ?? failure?.failedAt ?? conflict?.at
+        ?? (status === "backlog" && blockedBy.length === 0 ? epic.createdAt : epic.updatedAt),
       costUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : null,
       projectName: project?.name ?? "",
     } satisfies RegistryRow;

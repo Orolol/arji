@@ -107,7 +107,7 @@ function failure(
 
 function derive(input: {
   epics: RegistryEpicRow[];
-  sessions?: SessionRow[];
+  sessions?: (SessionRow & { activityAt?: string | null })[];
   failures?: FailureSessionRow[];
   edges?: TicketDependencyEdge[];
   releases?: Map<string, string>;
@@ -466,4 +466,12 @@ describe("GROUP_PREVIEW", () => {
       released: 2,
     });
   });
+});
+
+ it("exposes the live session's latest output date for activity sorting", () => {
+  const [row] = derive({
+    epics: [epic({ id: "live" })],
+    sessions: [{ ...session({ id: "s", epicId: "live" }), activityAt: "2026-08-30T11:59:00Z" }],
+  });
+  expect(row.activityAt).toBe("2026-08-30T11:59:00Z");
 });

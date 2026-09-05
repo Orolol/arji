@@ -103,6 +103,8 @@ export interface RegistryRow {
   usCount: number;
   /** DERNIÈRE ACTIVITÉ, composed server-side so the CSV and the DOM agree. */
   activity: string | null;
+  /** Machine-readable activity date; never sort the relative display text. */
+  activityAt?: string | null;
   activityTone: "muted" | "you-deep";
   /** `SUM(total_cost_usd)` over the ticket's sessions. NULL is load-bearing. */
   costUsd: number | null;

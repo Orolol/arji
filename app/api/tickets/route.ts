@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 
+import { KANBAN_COLUMNS, type KanbanStatus } from "@/lib/types/kanban";
+import { REGISTRY_SORTS, type RegistrySort } from "@/lib/tickets-registry/sort";
+import { getSessionLastActivityAt } from "@/lib/agents/watchdog";
 import { db } from "@/lib/db";
 import {
   agentSessions,
@@ -198,6 +201,8 @@ export async function GET(request: Request) {
   const now = new Date();
   const url = new URL(request.url);
   const scopedProject = url.searchParams.get("project")?.trim() || null;
+  const requestedStatus = url.searchParams.get("status");
+  const scopedStatus = KANBAN_COLUMNS.includes(requestedStatus as KanbanStatus) ? requestedStatus as KanbanStatus : null;
   const qLike = likePattern(url.searchParams.get("q"));
   const doneLimit = clampLimit(url.searchParams.get("doneLimit"), REGISTRY_DONE_WINDOW);
   const releasedLimit = clampLimit(
@@ -238,7 +243,7 @@ export async function GET(request: Request) {
   const statusCountRows = db
     .select({ status: epics.status, n: sql<number>`COUNT(*)`.as("n") })
     .from(epics)
-    .where(inArray(epics.projectId, scopedProjectIds))
+    .where(and(inArray(epics.projectId, scopedProjectIds), scopedStatus ? eq(epics.status, scopedStatus) : undefined))
     .groupBy(epics.status)
     .all();
 
@@ -262,6 +267,23 @@ export async function GET(request: Request) {
     .orderBy(epics.position)
     .all();
 
+  // Order terminal tickets BEFORE limiting them, so changing a header can
+  // reveal an older ticket outside the default recency window. These scalar
+  // aggregates use the existing epic_id indexes and never read session prose.
+  const requestedSort = url.searchParams.get("sort");
+  const sort: RegistrySort = REGISTRY_SORTS.includes(requestedSort as RegistrySort)
+    ? requestedSort as RegistrySort : "activite";
+  const ascending = url.searchParams.get("direction") === "asc";
+  const terminalSortValue = {
+    ticket: sql`lower(coalesce(${epics.readableId}, ${epics.id}))`,
+    titre: sql`lower(${epics.title})`,
+    etat: sql`${epics.status}`,
+    stories: sql`(SELECT count(*) FROM user_stories WHERE user_stories.epic_id = ${epics.id})`,
+    priorite: sql`${epics.priority}`,
+    activite: sql`julianday(${epics.updatedAt})`,
+    cout: sql`(SELECT sum(total_cost_usd) FROM agent_sessions WHERE agent_sessions.epic_id = ${epics.id})`,
+  }[sort];
+
   /* ---- 4/5. the two terminal windows -------------------------------- */
 
   // `(project_id, status)` are the index's two leading columns, so this is one
@@ -270,7 +292,7 @@ export async function GET(request: Request) {
   // applied HERE and only here, so a search can reach a released ticket that
   // sits outside the default window.
   const terminalWindow = (status: "done" | "released", limit: number) =>
-    db
+    scopedStatus && scopedStatus !== status ? [] : db
       .select(epicColumns())
       .from(epics)
       .innerJoin(projects, eq(epics.projectId, projects.id))
@@ -289,7 +311,7 @@ export async function GET(request: Request) {
             : []),
         ),
       )
-      .orderBy(desc(epics.updatedAt))
+      .orderBy(sql`${terminalSortValue} IS NULL`, ascending ? asc(terminalSortValue) : desc(terminalSortValue), asc(epics.id))
       .limit(limit)
       .all();
 
@@ -555,8 +577,8 @@ export async function GET(request: Request) {
   // The one deliberately unindexed scan (`status` has no index): its answer
   // must not be truncated, and it reads only narrow columns (~0.1 ms).
   // `last_non_empty_text` is UNCAPPED at the write side — a CLI emitting one
-  // 4 MB line stores 4 MB — so the clip happens in SQL. No watchdog call: the
-  // registry draws no stale marker and `deriveWorking` handles `undefined`.
+  // 4 MB line stores 4 MB — so the clip happens in SQL. The indexed last-chunk lookup below supplies the live activity sort;
+  // no watchdog sweep or stale-state mutation runs on this read path.
   const activeRows = db
     .select({
       id: agentSessions.id,
@@ -592,7 +614,10 @@ export async function GET(request: Request) {
     )
     .all();
 
-  const sessionRows: SessionRow[] = activeRows;
+  const sessionRows: (SessionRow & { activityAt: string | null })[] = activeRows.map((session) => ({
+    ...session,
+    activityAt: getSessionLastActivityAt(session),
+  }));
 
   /* ---- 14. failures ------------------------------------------------- */
 
@@ -761,7 +786,7 @@ export async function GET(request: Request) {
     releaseVersionById,
     costByEpicId,
     now,
-  });
+  }).filter((row) => !scopedStatus || row.status === scopedStatus);
 
   const { groupTotals, groupLoaded, counts } = deriveRegistryTotals({
     rows,
