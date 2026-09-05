@@ -54,7 +54,6 @@ import { TopBarMenu } from "./TopBarMenu";
  *   Then the project chips: the ACTIVE one (the project in the URL) wears its
  *   pastel fill, the others are deep text on paper. Colour here is WHO, never
  *   state; the only state a chip carries is the breathing dot of a project with
- *   a live agent, and that is motion.
  * - CENTER is navigation, absolutely centred so it does not drift when the
  *   project list grows. FIVE pills: `Now`, then `Work`, `Chat` (a direct
  *   destination button next to Work), `Agents`, and `Réglages`.
@@ -65,10 +64,11 @@ import { TopBarMenu } from "./TopBarMenu";
  *   `Now` and `Chat` ARE DESTINATIONS, NOT CATEGORIES. They carry the same
  *   pill shape and the same active liseré as their neighbours, and nothing else
  *   of their behaviour: no menu, no hover intent, no `aria-haspopup`, no
- *   chevron. `NAV_CATEGORIES` contains the three categories; see the head of
+ *   chevron. Both reuse the `--action` ink ground, alternating cleanly with the
+ *   three category strata (action → next → action → live → feed).
+ *   `NAV_CATEGORIES` contains the three categories; see the head of
  *   `lib/piscine/nav.ts`.
  * - RIGHT never changes, on any route: ⌘K, inbox, Auto, New.
- *
  * DATA, AND WHAT IT COSTS. The bar is on every route, so it may not carry the
  * desk's poll: at rest it reads `useProjects` (one fetch, refreshed when the
  * route changes) and `useInbox` (the 5s poll the retired rail already ran). The
@@ -98,14 +98,12 @@ const PALETTE_POLL_MS = 10_000;
  * The island is absolutely centred, so the left zone cannot push it — it would
  * slide UNDERNEATH. Its cap is therefore a hard number, and a wrong one is
  * invisible until a workspace has enough projects to reach it.
- *
- * MEASURED IN CHROME, not derived: `top-bar-island` reports 490px at 1440×950
- * with the default text size, so half is 245. The Chat pill is ~85px of that,
- * plus the 7px gap it added — which is why this number moved with this change.
+ * MEASURED IN CHROME, not derived: `top-bar-island` reports 439px at 1440×950
+ * with an active category chevron (427px at rest), so half is 220.
  * `__tests__/top-bar.test.tsx` pins BOTH the resulting max-width and the pill
  * count it was measured for.
  */
-const ISLAND_HALF_WIDTH_PX = 245;
+const ISLAND_HALF_WIDTH_PX = 220;
 
 /** Breathing room between the last project chip and the island's left edge. */
 const ISLAND_CLEARANCE_PX = 15;
@@ -231,7 +229,8 @@ export function TopBar({ className }: TopBarProps) {
     is null here, which is what keeps the three bubbles unlit on the desk.
   */
   const onDesk = pathname === "/";
-  const onChat = pathname === "/chat" || pathname.startsWith("/chat/");
+  const onChat = pathname === "/chat";
+
   /* ---- menu open/close ------------------------------------------------ */
 
   const [openId, setOpenId] = React.useState<NavCategoryId | null>(null);
@@ -323,7 +322,7 @@ export function TopBar({ className }: TopBarProps) {
     <header
       data-testid="top-bar"
       className={cn(
-        "relative z-40 flex h-[60px] shrink-0 items-center gap-[16px] bg-background px-[24px]",
+        "relative z-40 flex h-[60px] shrink-0 items-center gap-[12px] bg-background px-[14px] xl:px-[24px]",
         className,
       )}
     >
@@ -396,82 +395,81 @@ export function TopBar({ className }: TopBarProps) {
       */}
       <div
         data-testid="top-bar-island"
-        className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center gap-[7px]"
+        className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center gap-[5px]"
         onMouseLeave={hoverClose}
         onKeyDown={onKeyDown}
       >
-        {/*
-          The desk, as a destination. A LINK, not a button: it has one place to
-          go and no menu to open, so it must not answer to the hover intent or
-          the arrow keys that drive its three neighbours — hence no
-          `onMouseEnter`, no `aria-haspopup` and no chevron. Its liseré is the
-          `--action-outline` of its own ground, which is the same rule the
-          three bubbles follow with their under-colours.
-        */}
-        <Link
+        <DestinationPill
           href="/"
-          data-testid="top-bar-bubble-now"
-          data-active={onDesk ? "true" : undefined}
-          aria-current={onDesk ? "page" : undefined}
-          className={cn(
-            "flex h-[32px] shrink-0 cursor-pointer items-center gap-[8px] rounded-full px-[15px]",
-            "bg-action font-sans text-[13px] leading-none text-action-foreground",
-            "no-underline outline-none",
-            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-            // Reserved at rest so the liseré never reflows the row.
-            "border-[1.5px] border-transparent",
-            onDesk ? "border-action-outline font-bold" : "font-semibold",
-          )}
-        >
-          <Radar size={14} aria-hidden="true" />
-          Now
-        </Link>
+          testId="top-bar-bubble-now"
+          label="Now"
+          icon={Radar}
+          active={onDesk}
+          onFocus={close}
+        />
 
-        {NAV_CATEGORIES.map((category) => (
-          <React.Fragment key={category.id}>
-            <CategoryBubble
-              key={category.id}
-              category={category}
-              active={activeCategory?.id === category.id}
-              expanded={openId === category.id}
-              live={categoryIsLive(category, liveSessionCount)}
-              onHoverOpen={() => hoverOpen(category.id)}
-              onFocusOpen={() => open(category.id)}
-              onActivate={() => {
-                const href = firstReachableHref(category, scopeProjectId);
-                if (href) {
-                  close();
-                  router.push(href);
-                  return;
-                }
-                // Nothing in this category is reachable yet: the bubble is then
-                // only a menu opener, and the menu explains why.
-                open(category.id);
-              }}
-            />
+        <CategoryBubble
+          category={NAV_CATEGORIES[0]}
+          active={activeCategory?.id === "work"}
+          expanded={openId === "work"}
+          live={categoryIsLive(NAV_CATEGORIES[0], liveSessionCount)}
+          onHoverOpen={() => hoverOpen("work")}
+          onFocusOpen={() => open("work")}
+          onActivate={() => {
+            const href = firstReachableHref(NAV_CATEGORIES[0], scopeProjectId);
+            if (href) {
+              close();
+              router.push(href);
+              return;
+            }
+            open("work");
+          }}
+        />
 
-            {category.id === "work" ? (
-              <Link
-                href="/chat"
-                data-testid="top-bar-bubble-chat"
-                data-active={onChat ? "true" : undefined}
-                aria-current={onChat ? "page" : undefined}
-                className={cn(
-                  "flex h-[32px] shrink-0 cursor-pointer items-center gap-[8px] rounded-full px-[15px]",
-                  "bg-strata-live font-sans text-[13px] leading-none text-strata-live-deep",
-                  "no-underline outline-none",
-                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                  // Reserved at rest so the liseré never reflows the row.
-                  "border-[1.5px] border-transparent",
-                  onChat ? "border-strata-live-under font-bold" : "font-semibold",
-                )}
-              >
-                <MessageSquare size={14} aria-hidden="true" />
-                Chat
-              </Link>
-            ) : null}
-          </React.Fragment>
-        ))}
+        <DestinationPill
+          href="/chat"
+          testId="top-bar-bubble-chat"
+          label="Chat"
+          icon={MessageSquare}
+          active={onChat}
+          onFocus={close}
+        />
+
+        <CategoryBubble
+          category={NAV_CATEGORIES[1]}
+          active={activeCategory?.id === "agents"}
+          expanded={openId === "agents"}
+          live={categoryIsLive(NAV_CATEGORIES[1], liveSessionCount)}
+          onHoverOpen={() => hoverOpen("agents")}
+          onFocusOpen={() => open("agents")}
+          onActivate={() => {
+            const href = firstReachableHref(NAV_CATEGORIES[1], scopeProjectId);
+            if (href) {
+              close();
+              router.push(href);
+              return;
+            }
+            open("agents");
+          }}
+        />
+
+        <CategoryBubble
+          category={NAV_CATEGORIES[2]}
+          active={activeCategory?.id === "settings"}
+          expanded={openId === "settings"}
+          live={categoryIsLive(NAV_CATEGORIES[2], liveSessionCount)}
+          onHoverOpen={() => hoverOpen("settings")}
+          onFocusOpen={() => open("settings")}
+          onActivate={() => {
+            const href = firstReachableHref(NAV_CATEGORIES[2], scopeProjectId);
+            if (href) {
+              close();
+              router.push(href);
+              return;
+            }
+            open("settings");
+          }}
+        />
 
         {openId ? (
           <TopBarMenu
@@ -486,7 +484,7 @@ export function TopBar({ className }: TopBarProps) {
       </div>
 
       {/* ── RIGHT: the cluster that never changes ─────────────────────── */}
-      <div className="ml-auto flex shrink-0 items-center gap-[8px]">
+      <div className="ml-auto flex shrink-0 items-center gap-[6px] sm:gap-[8px]">
         {/*
           The pill OPENS the palette; it is the same surface ⌘K reaches, and
           the bar owns both. It is not a link any more — there is nowhere to
@@ -643,6 +641,44 @@ function ProjectChip({
   );
 }
 
+function DestinationPill({
+  href,
+  testId,
+  label,
+  icon: Icon,
+  active,
+  onFocus,
+}: {
+  href: string;
+  testId: string;
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean | "true" | "false" }>;
+  active: boolean;
+  onFocus?: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      data-testid={testId}
+      data-active={active ? "true" : undefined}
+      aria-current={active ? "page" : undefined}
+      onFocus={onFocus}
+      className={cn(
+        "flex h-[32px] shrink-0 cursor-pointer items-center gap-[6px] rounded-full px-[10px]",
+        "bg-action font-sans text-[13px] leading-none text-action-foreground",
+        "no-underline outline-none",
+        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        // Reserved at rest so the liseré never reflows the row.
+        "border-[1.5px] border-transparent",
+        active ? "border-action-outline font-bold" : "font-semibold",
+      )}
+    >
+      <Icon size={14} aria-hidden="true" />
+      {label}
+    </Link>
+  );
+}
+
 function CategoryBubble({
   category,
   active,
@@ -673,7 +709,7 @@ function CategoryBubble({
       onFocus={onFocusOpen}
       onClick={onActivate}
       className={cn(
-        "flex h-[32px] shrink-0 cursor-pointer items-center gap-[8px] rounded-full px-[15px]",
+        "flex h-[32px] shrink-0 cursor-pointer items-center gap-[6px] rounded-full px-[10px]",
         "font-sans text-[13px] leading-none outline-none",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         BUBBLE_CLASS[category.stratum],

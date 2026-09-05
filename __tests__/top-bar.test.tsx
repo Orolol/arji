@@ -216,8 +216,10 @@ describe("nav model", () => {
     expect(isNavEntryActive(namedAgents, "/agentsx", null)).toBe(false);
   });
 
-  it("puts no category on the desk — Now is never a category", () => {
+  it("puts no category on the desk or on /chat — both are direct destinations", () => {
     expect(activeNavCategory("/", null)).toBeNull();
+    expect(activeNavCategory("/chat", null)).toBeNull();
+    expect(activeNavCategory("/chat", "p1")).toBeNull();
     expect(activeNavCategory("/agents", null)?.id).toBe("agents");
     expect(activeNavCategory("/projects/p1/spec", "p1")?.id).toBe("work");
     expect(activeNavCategory("/settings", null)?.id).toBe("settings");
@@ -460,6 +462,25 @@ describe("TopBar", () => {
     }
   });
 
+  it("closes an open category menu when focus moves to Chat or Now", () => {
+    render(<TopBar />);
+    const work = screen.getByTestId("top-bar-bubble-work");
+    const chat = screen.getByTestId("top-bar-bubble-chat");
+    const now = screen.getByTestId("top-bar-bubble-now");
+
+    fireEvent.focus(work);
+    expect(screen.getByTestId("top-bar-menu-work")).toBeInTheDocument();
+
+    fireEvent.focus(chat);
+    expect(screen.queryByTestId("top-bar-menu-work")).not.toBeInTheDocument();
+
+    fireEvent.focus(work);
+    expect(screen.getByTestId("top-bar-menu-work")).toBeInTheDocument();
+
+    fireEvent.focus(now);
+    expect(screen.queryByTestId("top-bar-menu-work")).not.toBeInTheDocument();
+  });
+
   it("marks Now active on the desk and inactive on every other route", () => {
     const { unmount } = render(<TopBar />);
     expect(screen.getByTestId("top-bar-bubble-now")).toHaveAttribute(
@@ -544,7 +565,7 @@ describe("TopBar", () => {
 
     const chips = screen.getByTestId("top-bar-project-chips");
     const left = chips.parentElement as HTMLElement;
-    expect(left.style.maxWidth).toBe("calc(50% - 260px)");
+    expect(left.style.maxWidth).toBe("calc(50% - 235px)");
   });
 
   it("marks no bubble on the desk and the right one elsewhere", () => {
