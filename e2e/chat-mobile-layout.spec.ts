@@ -37,12 +37,51 @@ import { withDatabase } from "./fixtures/data-root";
  * acceptance criteria name; 1280x800 and 1440x1000 are the two it forbids
  * regressing. They are swept in one test rather than four so a single run
  * proves the phone fix and the desktop non-regression against the same tree.
+ *
+ * ROUND 2 (review finding, same harness) moved the subject from the PAGE to
+ * the COMPOSER, and found the same symptom twice more:
+ *
+ *   - a long agent name took the row and left the field at 0px at 640, 768,
+ *     1024, 1280 AND 1440 — the review measured the tablet, the sweep below
+ *     measures all of them;
+ *   - the field was 41px wide at 1024 with an ordinary provider label, with no
+ *     long name involved at all, because the three columns return at `lg` and
+ *     the band is 372px there against 740px on a 768px phone layout.
+ *
+ * Both are the ticket's own third criterion, so both are asserted here rather
+ * than left to a follow-up. Field widths after, in px:
+ *
+ *                ORDINARY LABEL      107-CHAR AGENT NAME
+ *    390x844      297 (unchanged)     297 (unchanged)
+ *    640x900      267 (unchanged)     213   (was 0)
+ *    768x1024     395 (unchanged)     303   (was 0)
+ *   1024x800      307   (was 41)      307   (was 0)
+ *   1280x800      297 (unchanged)     224   (was 0)
+ *   1440x1000     457 (unchanged)     336   (was 0)
+ *
+ * The "unchanged" column is not a reading: the composer element was captured
+ * on both trees and compared. 390, 768, 1280 and 1440 are byte-identical PNGs
+ * with an ordinary label; 640 differs by 36 pixels of at most 1/255 on the
+ * attach glyph's antialiasing, with every rect equal to three decimals.
  */
 
-/** The four viewports the ticket names, phone first. */
+/**
+ * The four viewports the ticket names, phone first — plus 1024, which it does
+ * not.
+ *
+ * 1024 is the `lg` boundary: the three columns come back the moment it is
+ * reached, so the thread column (and with it the composer band) is NARROWER
+ * there than on a 768px phone layout — 372px against 740px, measured. It is
+ * the worst case of the desktop frame and the widths the ticket names step
+ * straight over it. Measured on the branch before this round: the composer
+ * field was 41px wide at 1024 with an ordinary provider label, which is the
+ * ticket's own "la saisie est masquée" symptom at a width nobody had looked
+ * at. Swept here so the guarantee covers the band rather than five points.
+ */
 const VIEWPORTS = [
   { width: 390, height: 844, stacked: true },
   { width: 768, height: 1024, stacked: true },
+  { width: 1024, height: 800, stacked: false },
   { width: 1280, height: 800, stacked: false },
   { width: 1440, height: 1000, stacked: false },
 ] as const;
@@ -55,6 +94,23 @@ const VIEWPORTS = [
  * narrowest (390) by ~137px.
  */
 const MIN_INPUT_WIDTH_PX = 160;
+
+/**
+ * The widths the long-label sweep runs at: the phone, the two the review
+ * measured (640 and 768), the `lg` boundary and the two desktop frames.
+ *
+ * 640 is `sm`, the width at which the band stopped wrapping — the review
+ * measured a 18.22px field there with a 57-character name, and a 0px one at
+ * 768 with the 107-character name below.
+ */
+const LONG_LABEL_VIEWPORTS = [
+  { width: 390, height: 844 },
+  { width: 640, height: 900 },
+  { width: 768, height: 1024 },
+  { width: 1024, height: 800 },
+  { width: 1280, height: 800 },
+  { width: 1440, height: 1000 },
+] as const;
 
 const FIRST_LABEL = "Fil du matin";
 const SECOND_LABEL = "Refonte mobile";
@@ -73,6 +129,8 @@ interface PageGeometry {
   clientWidth: number;
   threadPane: Box | null;
   composer: Box | null;
+  /** The composer's own band — the box its controls have to stay inside. */
+  band: Box | null;
   input: Box | null;
   /** `true` when the point at the composer input's centre belongs to it. */
   inputHittable: boolean;
@@ -122,8 +180,65 @@ function seedConversations(projectId: string): { first: string; second: string }
   return { first, second };
 }
 
+/**
+ * The agent label the review measured with, character for character.
+ *
+ * `createNamedAgentSchema` puts NO length bound on `name` (it only refuses
+ * blank), so this is an ordinary value the API accepts rather than an abusive
+ * one — 107 characters, which is what a "Claude Code — <role> — <effort>"
+ * naming convention produces on its own. The fix does not depend on the
+ * number: the pill is capped and truncates, so a 1000-character name lands in
+ * the same place. This one is here so the test reproduces the reported case.
+ */
+const LONG_AGENT_NAME =
+  "Claude Code — Architecture, implementation et revue des interfaces du projet Arij — raisonnement approfondi";
+
+/**
+ * Points a conversation at a named agent whose name is that long.
+ *
+ * `named_agents` rows are GLOBAL — no project column, no cascade from the
+ * project delete — and the table carries a UNIQUE index on `name`, so the row
+ * is suffixed per project and dropped by the caller in a `finally`. Written
+ * straight to the database for the same reason `seedConversations` is: the
+ * arrange step is state, not a flow under test.
+ */
+function seedLongNamedAgent(projectId: string, conversationId: string): string {
+  const agentId = `e2e-agent-${projectId}`;
+
+  withDatabase((db) => {
+    db.prepare(
+      `INSERT INTO named_agents (id, name, provider, model, options, created_at)
+       VALUES (?, ?, 'claude-code', 'opus', '{}', ?)`,
+    ).run(agentId, `${LONG_AGENT_NAME} ${projectId}`, "2026-09-01T08:00:00.000Z");
+    db.prepare(
+      `UPDATE chat_conversations SET named_agent_id = ? WHERE id = ?`,
+    ).run(agentId, conversationId);
+  });
+
+  return agentId;
+}
+
+function dropNamedAgent(agentId: string): void {
+  withDatabase((db) =>
+    db.prepare("DELETE FROM named_agents WHERE id = ?").run(agentId),
+  );
+}
+
 async function readGeometry(page: Page): Promise<PageGeometry> {
   return page.evaluate(() => {
+    /**
+     * `next dev` paints its dev-tools badge into a `<nextjs-portal>` pinned to
+     * the bottom-left corner, and at 390x844 that is exactly where the
+     * composer's attach button is: every hit test on it returns the portal.
+     * The badge is the DEV SERVER, not the product — `next start`, which is
+     * what CI runs (playwright.config.ts, SERVER_MODE), never renders it — so
+     * it is hidden for the length of the measurement rather than allowed to
+     * report a working control as covered.
+     */
+    const overlays = Array.from(document.querySelectorAll("nextjs-portal"));
+    const restore = overlays.map((node) => (node as HTMLElement).style.display);
+    for (const node of overlays) (node as HTMLElement).style.display = "none";
+
     const box = (element: Element | null | undefined): Box | null => {
       if (!element) return null;
       const rect = element.getBoundingClientRect();
@@ -156,11 +271,12 @@ async function readGeometry(page: Page): Promise<PageGeometry> {
     const band = composer?.querySelector('[data-slot="strata-band"]') ?? composer;
     const buttons = Array.from(band?.querySelectorAll("button") ?? []);
 
-    return {
+    const geometry = {
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
       threadPane: box(document.querySelector('[data-testid="chat-thread-pane"]')),
       composer: box(composer),
+      band: box(band),
       input: box(input),
       inputHittable: hittable(input),
       controls: buttons.map((button, index) => ({
@@ -176,6 +292,12 @@ async function readGeometry(page: Page): Promise<PageGeometry> {
       rosterCreateReachable:
         !!create && (create as HTMLElement).offsetParent !== null,
     };
+
+    overlays.forEach((node, index) => {
+      (node as HTMLElement).style.display = restore[index];
+    });
+
+    return geometry;
   });
 }
 
@@ -183,6 +305,81 @@ async function readGeometry(page: Page): Promise<PageGeometry> {
 function withinViewport(box: Box | null, clientWidth: number): boolean {
   if (!box) return false;
   return box.x >= -0.5 && box.x + box.width <= clientWidth + 0.5;
+}
+
+/**
+ * A box is inside another when neither of its horizontal edges escapes it.
+ *
+ * The viewport is not a strict enough frame for the composer's controls. With
+ * a long agent name the pill measured 663px inside a 628px band at 1280 — it
+ * spilled 214px past the band's right edge and was CLIPPED by the thread
+ * column, while its rect still sat comfortably inside a 1280px viewport. So a
+ * viewport check alone reports a half-drawn control as fine.
+ */
+function withinBox(box: Box | null, frame: Box | null): boolean {
+  if (!box || !frame) return false;
+  return box.x >= frame.x - 0.5 && box.x + box.width <= frame.x + frame.width + 0.5;
+}
+
+/**
+ * Everything the ticket's third criterion asks of the composer, at one width:
+ * the field is on screen, uncovered, wide enough to write in, and every
+ * control beside it is drawn whole inside the band.
+ */
+function expectComposerUsable(geometry: PageGeometry, where: string) {
+  expect(
+    withinViewport(geometry.input, geometry.clientWidth),
+    `${where}: the composer input is off screen (${JSON.stringify(geometry.input)})`,
+  ).toBe(true);
+  expect(
+    geometry.inputHittable,
+    `${where}: something covers the composer input`,
+  ).toBe(true);
+  expect(
+    geometry.input!.width,
+    `${where}: the composer input was squeezed to ${geometry.input!.width}px ` +
+      `by the controls beside it`,
+  ).toBeGreaterThanOrEqual(MIN_INPUT_WIDTH_PX);
+  expect(
+    geometry.controls.length,
+    `${where}: the composer rendered no controls to check`,
+  ).toBeGreaterThan(0);
+  for (const control of geometry.controls) {
+    expect(
+      withinViewport(control.box, geometry.clientWidth),
+      `${where}: composer control "${control.label}" is off screen ` +
+        `(${JSON.stringify(control.box)})`,
+    ).toBe(true);
+    expect(
+      withinBox(control.box, geometry.band),
+      `${where}: composer control "${control.label}" spills out of the band ` +
+        `(${JSON.stringify(control.box)} in ${JSON.stringify(geometry.band)})`,
+    ).toBe(true);
+    expect(
+      control.hittable,
+      `${where}: composer control "${control.label}" is covered`,
+    ).toBe(true);
+  }
+}
+
+/**
+ * Waits until the composer's row is the one the user ends up looking at.
+ *
+ * Two things settle late and both widen the pills beside the field, so
+ * measuring early reports a ROOMIER composer than anyone gets. The labels:
+ * both pills render "—" until `/api/control-desk` and `/api/agents` answer,
+ * which alone was worth 136px of field at 1024 against the 41px it ends at.
+ * And the webfont: Instrument Sans replacing its fallback moved the same
+ * measurement by another ~48px. The project pill losing its dash and
+ * `document.fonts.ready` are the two markers for those two waits.
+ */
+async function settleComposer(page: Page) {
+  await expect(
+    page.locator(
+      '[data-testid="chat-composer"] [data-slot="select-pill"][data-tone="project"]',
+    ),
+  ).not.toHaveText("—");
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
 }
 
 async function capture(page: Page, info: TestInfo, name: string) {
@@ -209,6 +406,7 @@ test.describe("Chat — the thread and the composer on a narrow viewport", () =>
       // AND that the thing under measurement exists.
       await expect(page.getByTestId("chat-composer")).toBeVisible();
       await expect(page.getByTestId("chat-thread")).toBeVisible();
+      await settleComposer(page);
 
       const where = `${width}x${height}`;
       const geometry = await readGeometry(page);
@@ -237,34 +435,7 @@ test.describe("Chat — the thread and the composer on a narrow viewport", () =>
       // "La saisie, le bouton d'envoi et les actions utiles ne sont ni masqués
       // ni recouverts." A rect inside the viewport is not enough — every one
       // of these has to be the element you hit at its own centre.
-      expect(
-        withinViewport(geometry.input, geometry.clientWidth),
-        `${where}: the composer input is off screen (${JSON.stringify(geometry.input)})`,
-      ).toBe(true);
-      expect(
-        geometry.inputHittable,
-        `${where}: something covers the composer input`,
-      ).toBe(true);
-      expect(
-        geometry.input!.width,
-        `${where}: the composer input was squeezed to ${geometry.input!.width}px ` +
-          `by the controls beside it`,
-      ).toBeGreaterThanOrEqual(MIN_INPUT_WIDTH_PX);
-      expect(
-        geometry.controls.length,
-        `${where}: the composer rendered no controls to check`,
-      ).toBeGreaterThan(0);
-      for (const control of geometry.controls) {
-        expect(
-          withinViewport(control.box, geometry.clientWidth),
-          `${where}: composer control "${control.label}" is off screen ` +
-            `(${JSON.stringify(control.box)})`,
-        ).toBe(true);
-        expect(
-          control.hittable,
-          `${where}: composer control "${control.label}" is covered`,
-        ).toBe(true);
-      }
+      expectComposerUsable(geometry, where);
 
       // Typing is the end of the chain: an on-screen, uncovered field that
       // does not take a keystroke is still a broken composer.
@@ -350,5 +521,81 @@ test.describe("Chat — the thread and the composer on a narrow viewport", () =>
     const geometry = await readGeometry(page);
     expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth);
     await capture(page, testInfo, "chat-390-after-switch.png");
+  });
+
+  /**
+   * The second round's finding, and the width band the first round missed.
+   *
+   * The composer's row is a glyph, a field and three controls, and the agent
+   * pill's label is a user-chosen string of any length. Measured in Chrome on
+   * the previous commit, with the 107-character name below:
+   *
+   *     viewport   band   agent pill   field
+   *       390       362      116        297   (band wrapped — the field is safe)
+   *       640       612      663          0
+   *       768       740      663          0
+   *      1024       372      663          0
+   *      1280       628      663          0
+   *      1440       788      663          0
+   *
+   * The pill took its own max-content width at every width where the band was
+   * a single row and left the field at ZERO — not just on the tablet the
+   * review measured. `scrollWidth` equalled `clientWidth` throughout, exactly
+   * as it did for the original defect, because the field collapses instead of
+   * pushing the document wide. The pill itself overflowed the band and was
+   * clipped by the thread column, which is why `expectComposerUsable` frames
+   * the controls by the BAND and not by the viewport.
+   */
+  test("keeps a usable field when the conversation's agent has a very long name", async ({
+    page,
+    project,
+  }, testInfo) => {
+    const { first } = seedConversations(project.id);
+    const agentId = seedLongNamedAgent(project.id, first);
+
+    try {
+      for (const { width, height } of LONG_LABEL_VIEWPORTS) {
+        await page.setViewportSize({ width, height });
+        await page.goto(`/chat?project=${project.id}&conversation=${first}`);
+
+        await expect(page.getByTestId("chat-composer")).toBeVisible();
+        await expect(page.getByTestId("chat-thread")).toBeVisible();
+
+        const where = `${width}x${height} (long agent name)`;
+        // The label is what makes this case: waiting on it means the pill has
+        // the long string in it before anything is measured, rather than the
+        // provider fallback the conversation renders until /api/agents lands.
+        const pill = page.locator(
+          '[data-testid="chat-composer"] [data-slot="select-pill"][data-tone="ink"]',
+        );
+        await expect(pill).toContainText(LONG_AGENT_NAME);
+        await settleComposer(page);
+
+        const geometry = await readGeometry(page);
+        await capture(page, testInfo, `chat-long-agent-${width}.png`);
+
+        expect(
+          geometry.scrollWidth,
+          `${where}: the page scrolls horizontally ` +
+            `(scrollWidth ${geometry.scrollWidth} > clientWidth ${geometry.clientWidth})`,
+        ).toBeLessThanOrEqual(geometry.clientWidth);
+        expectComposerUsable(geometry, where);
+
+        // The interaction, not a rect: a field that measures well and refuses
+        // a click is the failure the review actually hit.
+        const input = page.getByTestId("chat-composer-input");
+        await input.click();
+        await input.fill("bonjour");
+        await expect(input).toHaveValue("bonjour");
+        await input.fill("");
+
+        // Truncation has to be VISUAL. The pill is clipped by CSS, so the
+        // name stays whole in the accessibility tree and in the DOM — a fix
+        // that shortened the string would take the value with it.
+        await expect(pill).toContainText(LONG_AGENT_NAME);
+      }
+    } finally {
+      dropNamedAgent(agentId);
+    }
   });
 });

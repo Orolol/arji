@@ -165,6 +165,7 @@ vi.mock("@/hooks/useEpicCreate", () => ({
 vi.mock("@/hooks/usePolling", () => ({ usePolling: () => {} }));
 
 const { ChatPageView } = await import("@/components/chat-page/ChatPageView");
+const { ChatComposer } = await import("@/components/chat-page/ChatComposer");
 
 /**
  * jsdom ships no ResizeObserver and the roster's Radix ScrollArea constructs
@@ -194,6 +195,18 @@ async function renderChat() {
     render(<ChatPageView initialProjectId="p1" />);
   });
 }
+
+/**
+ * The width at which the composer's band stops wrapping — of the BAND, not of
+ * the window.
+ *
+ * Measured in Chrome (`e2e/chat-mobile-layout.spec.ts` carries the table): a
+ * single row costs 96px of glyph, gaps and attach button, up to 100px of
+ * project pill and up to 30% of the band for the agent pill, so the field is
+ * left `0.7 x band - 232`. At 36rem that is 171px, above the 160px the e2e
+ * calls a usable field; below it the row has to wrap.
+ */
+const COMPOSER_ONE_ROW = "36rem";
 
 /** The class list of an element, as tokens rather than as one string. */
 function classTokens(element: Element | null): string[] {
@@ -254,16 +267,22 @@ describe("chat page — the three panes on a narrow viewport", () => {
   it("gives the composer field its own row instead of squeezing it", async () => {
     await renderChat();
 
-    const band = screen
-      .getByTestId("chat-composer")
-      .querySelector('[data-slot="strata-band"]');
+    const composer = screen.getByTestId("chat-composer");
+    const band = composer.querySelector('[data-slot="strata-band"]');
     const tokens = classTokens(band);
 
-    // Below `sm` the glyph + field + three controls do not share 326px: the
-    // field measured 24px. Above it, `sm:flex-nowrap` restores the one-line
-    // band the frame draws.
+    // The glyph + field + three controls do not share a 326px row: the field
+    // measured 24px. The band wraps, and unwraps once it is wide enough.
     expect(tokens).toContain("flex-wrap");
-    expect(tokens).toContain("sm:flex-nowrap");
+    expect(tokens).toContain(`@min-[${COMPOSER_ONE_ROW}]:flex-nowrap`);
+
+    // BY ITS OWN WIDTH, NOT THE VIEWPORT'S — see the describe below. The
+    // container is what makes `@min-[…]` mean anything at all: without it the
+    // variant never matches and the band is stuck wrapped.
+    expect(classTokens(composer)).toContain("@container");
+    expect(tokens, "the band still wraps on a viewport breakpoint").not.toContain(
+      "sm:flex-nowrap",
+    );
   });
 
   it("keeps a VISIBLE focus ring on the switcher's segments", async () => {
@@ -321,5 +340,122 @@ describe("chat page — the three panes on a narrow viewport", () => {
     expect(isShowing(pane)).toBe(true);
     // The tapped card is gone with its pane, so focus would land on <body>.
     await waitFor(() => expect(document.activeElement).toBe(pane));
+  });
+});
+
+/**
+ * A named agent's name is a free string — `createNamedAgentSchema` only
+ * refuses a blank one — and it is rendered in a pill that sits on the same row
+ * as the field.
+ *
+ * THE DEFECT (review round 2, measured in Chrome with the 107-character name
+ * below): the pill took its max-content width of 663px, the field was left at
+ * ZERO at every width whose band was one row — 640, 768, 1024, 1280 and 1440 —
+ * and the pill itself spilled out of the band and was clipped. `scrollWidth`
+ * stayed equal to `clientWidth` throughout, so the page never scrolled
+ * sideways; the field simply collapsed, which is the same shape as the
+ * original ticket.
+ *
+ * jsdom cannot see any of that. What it CAN pin is the mechanism: a cap that
+ * survives every width, a pill that yields instead of pushing, and a field
+ * whose row is decided by the composer's own width. The pixels are in
+ * `e2e/chat-mobile-layout.spec.ts`.
+ */
+describe("chat composer — the row a long agent name has to share", () => {
+  const LONG_AGENT_NAME =
+    "Claude Code — Architecture, implementation et revue des interfaces du projet Arij — raisonnement approfondi";
+
+  async function renderComposer(agentLabel: string) {
+    await act(async () => {
+      render(
+        <ChatComposer
+          projectId="p1"
+          projects={[PROJECT]}
+          project={PROJECT}
+          onSelectProject={vi.fn()}
+          agentLabel={agentLabel}
+          onSelectAgent={vi.fn()}
+          agentLocked={false}
+          onSend={vi.fn()}
+        />,
+      );
+    });
+  }
+
+  /** The agent pill — `ink` toned, as against the project pill's `project`. */
+  function agentPill(): Element {
+    const pill = screen
+      .getByTestId("chat-composer")
+      .querySelector('[data-slot="select-pill"][data-tone="ink"]');
+    expect(pill, "the composer has no agent pill").not.toBeNull();
+    return pill!;
+  }
+
+  it("caps the agent pill at every width, not just below `sm`", async () => {
+    await renderComposer(LONG_AGENT_NAME);
+    const tokens = classTokens(agentPill());
+
+    // `sm:max-w-none` was the finding: it lifted the cap at 640px, the exact
+    // width at which the band also stopped wrapping, so from `sm` upward the
+    // pill was free to take the whole row. A cap in `cqw` is a share of the
+    // COMPOSER, so it holds in the three-column desktop frame — where the band
+    // is 372px at 1024 — as well as on a phone.
+    // Two caps, one per row shape: 45% of the band while it is wrapped (the
+    // pill shares that row with two small controls), 30% of the composer once
+    // it shares a row with the field.
+    expect(tokens).toContain("max-w-[45%]");
+    expect(tokens).toContain(`@min-[${COMPOSER_ONE_ROW}]:max-w-[30cqw]`);
+    for (const token of tokens) {
+      expect(token, `${token} lifts the agent pill's cap`).not.toMatch(
+        /^(\w+:)?max-w-none$/,
+      );
+    }
+  });
+
+  it("lets the agent pill yield rather than push the field to zero", async () => {
+    await renderComposer(LONG_AGENT_NAME);
+    const tokens = classTokens(agentPill());
+
+    // `SelectPill` is `shrink-0` by default, which is right for a pill whose
+    // label is a project's 8-character short name and wrong for one holding an
+    // arbitrary agent name: it made the pill the one item that could not give
+    // way, so the field gave way instead. `min-w-0` is what lets the label's
+    // own `truncate` engage below its content width.
+    expect(tokens).toContain("shrink");
+    expect(tokens, "the agent pill still refuses to shrink").not.toContain(
+      "shrink-0",
+    );
+    expect(tokens).toContain("min-w-0");
+  });
+
+  it("hands the field its own row by the composer's width, not the window's", async () => {
+    await renderComposer(LONG_AGENT_NAME);
+
+    const composer = screen.getByTestId("chat-composer");
+    expect(classTokens(composer)).toContain("@container");
+
+    // The field's flex item is the wrapper div, not the textarea
+    // (`MentionTextarea` owns its own `relative flex-1 min-w-0 w-full`).
+    const wrapper = screen.getByTestId("chat-composer-input").parentElement
+      ?.parentElement;
+    expect(wrapper, "the field's flex item is not where it was").toBeTruthy();
+    const tokens = classTokens(wrapper ?? null);
+    expect(tokens).toContain("basis-[calc(100%-29px)]");
+    expect(tokens).toContain(`@min-[${COMPOSER_ONE_ROW}]:basis-0`);
+    expect(tokens, "the field still takes its row from a viewport breakpoint").not.toContain(
+      "sm:basis-0",
+    );
+  });
+
+  it("keeps the whole name in the accessibility tree while the pill truncates", async () => {
+    await renderComposer(LONG_AGENT_NAME);
+
+    // Truncation is CSS. A fix that shortened the string instead would take
+    // the value out of the DOM with it, and the pill would stop naming the
+    // agent it selects.
+    expect(agentPill()).toHaveTextContent(LONG_AGENT_NAME);
+    expect(
+      agentPill().querySelector("span")?.getAttribute("class") ?? "",
+    ).toContain("truncate");
   });
 });
