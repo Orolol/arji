@@ -16,6 +16,13 @@
  * state says so with `{ repeatLast: true }` — a poll cadence test wants
  * every tick answered, and that is a deliberate choice, not a fallback.
  *
+ * A queued response may also carry `delayMs`, which holds it open for that
+ * long before resolving. Without it every response settles within the same
+ * microtask drain as the call, so a component's intermediate states —
+ * "request in flight" as distinct from "server said yes" — collapse into one
+ * another and a test can never observe them apart. A test that needs the
+ * in-flight window to be real asks for it explicitly.
+ *
  * This file lives in `__tests__/helpers/`: vitest's include glob is
  * `**\/*.test.{ts,tsx,mjs}`, so nothing here is collected as a test.
  */
@@ -26,6 +33,12 @@ export interface QueuedResponse {
   ok: boolean;
   /** Whatever `response.json()` should resolve to. */
   body: unknown;
+  /**
+   * Hold the response open for this many milliseconds before resolving, so
+   * the caller's in-flight state is observable rather than settling inside
+   * the same microtask drain. Omit it for the immediate default.
+   */
+  delayMs?: number;
 }
 
 export interface MockFetchSequenceOptions {
@@ -64,6 +77,9 @@ export function mockFetchSequence(
           `Queue the response this call expects, or pass ` +
           `{ repeatLast: true } if the last response really is a steady state.`
       );
+    }
+    if (queued.delayMs) {
+      await new Promise((resolve) => setTimeout(resolve, queued.delayMs));
     }
     return {
       ok: queued.ok,

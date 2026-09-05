@@ -89,6 +89,21 @@ describe("RefinementButton", () => {
     await waitFor(() => expect(onStarted).toHaveBeenCalledWith("s-42"));
   });
 
+  /**
+   * The wait condition here has to be the badge, and only the badge.
+   *
+   * The button has two busy states, and `disabled` and the spinner are both
+   * driven by `busy = running || starting` — so both are already true while
+   * the POST is merely in flight, one tick before the server has confirmed
+   * anything. Waiting on either settles on that pending state and then runs
+   * the remaining assertions against it, which is a race the test loses
+   * whenever the dispatch takes longer than a microtask. The badge is the
+   * only marker gated on `running` alone, so it is the only honest signal
+   * that the pass is actually under way.
+   *
+   * The disabled and spinner assertions stay, after the wait: the point of
+   * the test is that all three hold together once the pass is running.
+   */
   it("disables itself with a spinner and badge once a pass is under way", async () => {
     mockFetchSequence([
       idle(),
@@ -114,12 +129,68 @@ describe("RefinementButton", () => {
     fireEvent.click(await screen.findByTestId("refinement-button"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("refinement-button")).toBeDisabled();
+      expect(screen.getByTestId("refinement-button-badge")).toHaveTextContent(
+        "running"
+      );
     });
+    expect(screen.getByTestId("refinement-button")).toBeDisabled();
     expect(screen.getByTestId("refinement-button-spinner")).toBeTruthy();
-    expect(screen.getByTestId("refinement-button-badge")).toHaveTextContent(
-      "running"
+  });
+
+  /**
+   * Regression: the two busy states must stay distinguishable, and the test
+   * above must keep waiting on the one marker that separates them.
+   *
+   * With an immediate mock the dispatch resolves inside the same microtask
+   * drain as the click, so the pending window is invisible and a test that
+   * waits on `disabled` or on the spinner passes by accident. Holding the
+   * POST open for a macrotask makes that window real, and pins what the user
+   * actually sees in it: the button is already inert and spinning — so a
+   * second dispatch cannot be fired into the gap — but it does not yet claim
+   * a pass is running, because no one has said so. Only the server's answer
+   * promotes it to the badge.
+   *
+   * This is what stops the fix above from being re-relaxed: waiting on
+   * `disabled` or on the spinner reddens here rather than flaking later.
+   */
+  it("is inert while the dispatch is in flight, and only then claims a running pass", async () => {
+    mockFetchSequence([
+      idle(),
+      {
+        ok: true,
+        body: { data: { started: true, sessionId: "s-42", ticketCount: 5 } },
+        // Long enough to survive a microtask drain, so the in-flight state is
+        // observable instead of collapsing into the resolved one.
+        delayMs: 10,
+      },
+      running("s-42"),
+    ]);
+
+    render(
+      <RefinementButton
+        projectId="proj-1"
+        onError={vi.fn()}
+        pollIntervalMs={0}
+      />
     );
+
+    fireEvent.click(await screen.findByTestId("refinement-button"));
+
+    // In flight: inert and spinning, but making no claim about a pass.
+    await waitFor(() =>
+      expect(screen.getByTestId("refinement-button")).toBeDisabled()
+    );
+    expect(screen.getByTestId("refinement-button-spinner")).toBeTruthy();
+    expect(screen.queryByTestId("refinement-button-badge")).toBeNull();
+
+    // The server answers; now — and only now — the pass is declared running.
+    await waitFor(() =>
+      expect(screen.getByTestId("refinement-button-badge")).toHaveTextContent(
+        "running"
+      )
+    );
+    expect(screen.getByTestId("refinement-button")).toBeDisabled();
+    expect(screen.getByTestId("refinement-button-spinner")).toBeTruthy();
   });
 
   it("starts disabled for a pass it did not launch", async () => {
