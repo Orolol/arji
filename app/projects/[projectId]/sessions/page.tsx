@@ -176,6 +176,30 @@ export default function SessionsPage() {
   const [summaryRunId, setSummaryRunId] = useState<string | null>(null);
 
   /**
+   * Reset on project change, adjusted DURING RENDER rather than from an
+   * effect — what React documents for "a prop changed, drop the derived
+   * state", and what the rest of this codebase now does (`DismissDialog`,
+   * `DeskCommandPalette`).
+   *
+   * The difference is the frame: an effect clears one commit late, so the new
+   * project's first paint is the previous project's session list under the
+   * new project's URL. Adjusting here means that paint never happens.
+   *
+   * Not lint-enforced here, and deliberately not trusted to be: the React
+   * Compiler rules do not read this component at all. Probed by mutation — a
+   * textbook `set-state-in-effect` injected into this file draws no
+   * diagnostic, while the same injection in `hooks/useAgentPolling.ts` and in
+   * `app/projects/[projectId]/page.tsx` is reported. Filed separately.
+   */
+  const [loadedProjectId, setLoadedProjectId] = useState(projectId);
+  if (loadedProjectId !== projectId) {
+    setLoadedProjectId(projectId);
+    setItems([]);
+    setIncomplete(null);
+    setLoading(true);
+  }
+
+  /**
    * Night-run history. This list is the only durable way back into a past
    * run's morning summary — the "Night run finished" notification carrying
    * the `?nightRun=` deep link is transient.
@@ -207,11 +231,6 @@ export default function SessionsPage() {
     // writer wins, and the longer, older list does not pollute the new
     // project's list so much as replace it.
     const controller = new AbortController();
-    // Nothing of this project is loaded yet, and the previous project's rows
-    // are not an approximation of it.
-    setItems([]);
-    setIncomplete(null);
-    setLoading(true);
     loadSessions(controller.signal);
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
