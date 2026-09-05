@@ -28,6 +28,12 @@
  * loads no CSS, so the class lists are read off the rendered DOM and resolved
  * out-of-band. That the ring is actually *drawn* on screen is a visual claim,
  * measured in real Chrome by `e2e/focus-ring.spec.ts`.
+ *
+ * NOR THE OTHER SHAPE. Everything here is about a ring that IS declared and
+ * fails to paint. An element that clears the outline and declares NO focus
+ * affordance at all is invisible to this file by construction — nothing to
+ * resolve, nothing to repair. That one is `./focus-ring-undeclared.test.tsx`
+ * and `e2e/focus-ring-inputs.spec.ts` (B-arij-203).
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
