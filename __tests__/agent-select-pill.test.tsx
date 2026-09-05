@@ -11,31 +11,13 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
 
-vi.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuContent: ({ children }: { children: ReactNode }) => (
-    <div data-testid="dropdown-content">{children}</div>
-  ),
-  DropdownMenuLabel: ({ children }: { children: ReactNode }) => (
-    <div data-testid="dropdown-label">{children}</div>
-  ),
-  DropdownMenuSeparator: () => <hr />,
-  DropdownMenuItem: ({
-    children,
-    onSelect,
-    ...rest
-  }: {
-    children: ReactNode;
-    onSelect?: () => void;
-  }) => (
-    <button type="button" role="menuitem" onClick={() => onSelect?.()} {...rest}>
-      {children}
-    </button>
-  ),
-}));
+vi.mock("@/components/ui/dropdown-menu", async () => {
+  const { dropdownMenuModuleMock } = await import(
+    "@/__tests__/helpers/dropdown-menu-mock"
+  );
+  return dropdownMenuModuleMock();
+});
 
 const namedAgents = vi.hoisted(() => ({
   current: [] as { id: string; name: string; provider: string }[],
@@ -453,6 +435,61 @@ describe("the desk composer's own wiring", () => {
     expect(screen.getByTestId("desk-agent-select")).toHaveTextContent(
       DEFAULT_AGENT_LABEL,
     );
+  });
+});
+
+describe("which mode the menu says is running", () => {
+  /**
+   * The project panel used to draw this menu as a shadcn `Select`, whose
+   * items carry `aria-selected` and a check indicator. Merging the three
+   * menus onto a `DropdownMenu` turned them into plain `menuitem`s — peers,
+   * with nothing marking the conversation's current mode. A screen-reader
+   * user opening the picker heard eight equal options; the sighted check
+   * mark went the same way. Radio items restore both.
+   */
+  function checkedOption(): string | null {
+    const checked = screen
+      .queryAllByRole("menuitemradio")
+      .filter((node) => node.getAttribute("aria-checked") === "true");
+    expect(checked.length).toBeLessThanOrEqual(1);
+    return checked[0]?.getAttribute("data-testid") ?? null;
+  }
+
+  it("marks the conversation's persistent mode, and only it", () => {
+    renderPill("chat", {
+      namedAgentId: null,
+      provider: "oh-my-pi-persistent",
+    });
+
+    expect(checkedOption()).toBe("chat-option-provider-oh-my-pi-persistent");
+  });
+
+  it("marks the linked named agent rather than its provider", () => {
+    // The agent's provider is claude-code, which also has its own raw-CLI
+    // item; checking that one would name the wrong thing as running.
+    renderPill("chat", { namedAgentId: "a1", provider: "claude-code" });
+
+    expect(checkedOption()).toBe("chat-option-agent-a1");
+  });
+
+  it("marks the default entry on a dispatch surface with no agent chosen", () => {
+    renderPill("dispatch", NOTHING_SELECTED);
+
+    expect(checkedOption()).toBe("chat-option-default-agent");
+  });
+
+  it("marks nothing when the stored provider has no item left in the menu", () => {
+    // A value written before a provider cleanup. The trigger still labels it
+    // (see above); the menu must not check a neighbour to fake a match.
+    renderPill("chat", { namedAgentId: null, provider: "gemini-cli" });
+
+    expect(checkedOption()).toBeNull();
+  });
+
+  it("gives every option the radio role, in both modes", () => {
+    renderPill("chat");
+    expect(screen.queryAllByRole("menuitem")).toHaveLength(0);
+    expect(screen.getAllByRole("menuitemradio").length).toBeGreaterThan(0);
   });
 });
 

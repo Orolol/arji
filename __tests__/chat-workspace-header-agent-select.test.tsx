@@ -11,33 +11,15 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
 
 // Inline stand-in for the Radix menu: it portals on open, and these tests read
 // the items without opening anything.
-vi.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuContent: ({ children }: { children: ReactNode }) => (
-    <div data-testid="dropdown-content">{children}</div>
-  ),
-  DropdownMenuLabel: ({ children }: { children: ReactNode }) => (
-    <div data-testid="dropdown-label">{children}</div>
-  ),
-  DropdownMenuSeparator: () => <hr />,
-  DropdownMenuItem: ({
-    children,
-    onSelect,
-    ...rest
-  }: {
-    children: ReactNode;
-    onSelect?: () => void;
-  }) => (
-    <button type="button" role="menuitem" onClick={() => onSelect?.()} {...rest}>
-      {children}
-    </button>
-  ),
-}));
+vi.mock("@/components/ui/dropdown-menu", async () => {
+  const { dropdownMenuModuleMock } = await import(
+    "@/__tests__/helpers/dropdown-menu-mock"
+  );
+  return dropdownMenuModuleMock();
+});
 
 let mockAgents = [
   { id: "agent-1", name: "Claude Code", provider: "claude-code", model: "sonnet" },

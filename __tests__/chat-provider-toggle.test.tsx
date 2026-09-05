@@ -103,29 +103,12 @@ vi.mock("@/hooks/useNamedAgentsList", () => ({
 // The header's picker is the shared `AgentSelectPill` (a Piscine SelectPill on
 // a Radix dropdown). Radix portals its items on open; the inline stand-in lets
 // these tests pick an option without driving a popper in jsdom.
-vi.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="dropdown-content">{children}</div>
-  ),
-  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  DropdownMenuSeparator: () => <hr />,
-  DropdownMenuItem: ({
-    children,
-    onSelect,
-    ...rest
-  }: {
-    children: React.ReactNode;
-    onSelect?: () => void;
-  }) => (
-    <button type="button" role="menuitem" onClick={() => onSelect?.()} {...rest}>
-      {children}
-    </button>
-  ),
-}));
+vi.mock("@/components/ui/dropdown-menu", async () => {
+  const { dropdownMenuModuleMock } = await import(
+    "@/__tests__/helpers/dropdown-menu-mock"
+  );
+  return dropdownMenuModuleMock();
+});
 
 vi.mock("@/components/chat/MessageList", () => ({
   MessageList: () => <div data-testid="message-list" />,

@@ -4,8 +4,9 @@ import * as React from "react";
 
 import { SelectPill } from "@/components/piscine";
 import {
-  DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { useNamedAgentsList, type NamedAgentOption } from "@/hooks/useNamedAgentsList";
@@ -74,6 +75,31 @@ export interface AgentSelectPillProps {
   testId?: string;
 }
 
+/**
+ * The menu items are radio items, and the group carries the conversation's
+ * CURRENT mode — the affordance the project panel had while it was a shadcn
+ * `Select` (`aria-selected` plus a check indicator) and lost when the three
+ * menus merged onto a `DropdownMenu`. Plain `DropdownMenuItem`s are peers:
+ * `role="menuitem"`, no checked state, nothing marking which one is running.
+ *
+ * Values are namespaced because a named agent id and a provider string share
+ * one value space here and must not be able to collide.
+ */
+const DEFAULT_AGENT_VALUE = "default-agent";
+const agentValue = (id: string) => `agent:${id}`;
+const providerValue = (provider: string) => `provider:${provider}`;
+
+/**
+ * Which item is checked. A conversation on a provider dropped in a cleanup
+ * yields a value no item carries, so nothing is checked — correct, since no
+ * item represents it.
+ */
+function checkedValue(selection: AgentSelection): string {
+  if (selection.namedAgentId) return agentValue(selection.namedAgentId);
+  if (selection.provider) return providerValue(selection.provider);
+  return DEFAULT_AGENT_VALUE;
+}
+
 export const DEFAULT_AGENT_LABEL = "Default agent";
 export const AGENT_SELECT_LOADING_LABEL = "Loading…";
 
@@ -112,15 +138,16 @@ export function AgentSelectPill({
         (mode === "dispatch" ? DEFAULT_AGENT_LABEL : "—")));
 
   const agentItems = safeAgents.map((agent) => (
-    <DropdownMenuItem
+    <DropdownMenuRadioItem
       key={agent.id}
+      value={agentValue(agent.id)}
       data-testid={`chat-option-agent-${agent.id}`}
       onSelect={() =>
         onSelect({ namedAgentId: agent.id, provider: agent.provider })
       }
     >
       {agent.name}
-    </DropdownMenuItem>
+    </DropdownMenuRadioItem>
   ));
 
   return (
@@ -133,14 +160,19 @@ export function AgentSelectPill({
       disabled={disabled || loading}
       className={className}
     >
+      {/* ONE radio group across every group heading, not one per heading: the
+          chosen mode is a single choice, and a group per heading would let
+          the menu claim several checked items at once. */}
+      <DropdownMenuRadioGroup value={checkedValue(selection)}>
       {mode === "dispatch" ? (
         <>
-          <DropdownMenuItem
+          <DropdownMenuRadioItem
+            value={DEFAULT_AGENT_VALUE}
             data-testid="chat-option-default-agent"
             onSelect={() => onSelect({ namedAgentId: null, provider: null })}
           >
             {DEFAULT_AGENT_LABEL}
-          </DropdownMenuItem>
+          </DropdownMenuRadioItem>
           {agentItems.length > 0 ? (
             <>
               <DropdownMenuSeparator />
@@ -153,7 +185,8 @@ export function AgentSelectPill({
           <DropdownMenuLabel className="text-[11px] text-muted-foreground">
             Direct API
           </DropdownMenuLabel>
-          <DropdownMenuItem
+          <DropdownMenuRadioItem
+            value={providerValue(OPENAI_COMPATIBLE_PROVIDER)}
             data-testid="chat-option-openai-compatible"
             onSelect={() =>
               onSelect({
@@ -163,7 +196,7 @@ export function AgentSelectPill({
             }
           >
             {PROVIDER_LABELS[OPENAI_COMPATIBLE_PROVIDER]}
-          </DropdownMenuItem>
+          </DropdownMenuRadioItem>
 
           {agentItems.length > 0 ? (
             <>
@@ -180,13 +213,14 @@ export function AgentSelectPill({
             Persistent CLI
           </DropdownMenuLabel>
           {PERSISTENT_CHAT_PROVIDER_OPTIONS.map((provider) => (
-            <DropdownMenuItem
+            <DropdownMenuRadioItem
               key={provider}
+              value={providerValue(provider)}
               data-testid={`chat-option-provider-${provider}`}
               onSelect={() => onSelect({ namedAgentId: null, provider })}
             >
               {PROVIDER_LABELS[provider]}
-            </DropdownMenuItem>
+            </DropdownMenuRadioItem>
           ))}
 
           <DropdownMenuSeparator />
@@ -194,16 +228,18 @@ export function AgentSelectPill({
             CLI Providers
           </DropdownMenuLabel>
           {PROVIDER_OPTIONS.map((provider) => (
-            <DropdownMenuItem
+            <DropdownMenuRadioItem
               key={provider}
+              value={providerValue(provider)}
               data-testid={`chat-option-provider-${provider}`}
               onSelect={() => onSelect({ namedAgentId: null, provider })}
             >
               {`${PROVIDER_LABELS[provider]} (CLI)`}
-            </DropdownMenuItem>
+            </DropdownMenuRadioItem>
           ))}
         </>
       )}
+      </DropdownMenuRadioGroup>
     </SelectPill>
   );
 }
