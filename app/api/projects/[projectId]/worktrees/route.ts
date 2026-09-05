@@ -7,6 +7,10 @@ import {
   getProjectOr404,
   isErrorResponse,
 } from "@/lib/api/route-helpers";
+import {
+  assertGitRepository,
+  GitRepositoryUnavailableError,
+} from "@/lib/git/remote";
 import { listWorktrees, pruneOrphanWorktrees } from "@/lib/git/worktrees";
 import type { GitWorktreeInfo } from "@/lib/git/worktrees";
 
@@ -99,6 +103,22 @@ function summarize(
   });
 }
 
+/**
+ * A `gitRepoPath` that is not a usable repository is a configuration state the
+ * user can fix, not a server fault — the same answer `github/detect`,
+ * `git/detect-remote`, `git/status`, `git/push` and `git/pull` already give.
+ * The Git Sync page mounts the worktrees panel, so without this the console
+ * logged a 500 on every load for such a project.
+ */
+function repositoryUnavailableResponse(
+  error: GitRepositoryUnavailableError
+): NextResponse {
+  return NextResponse.json(
+    { error: error.message, code: error.code },
+    { status: 400 }
+  );
+}
+
 function payload(summaries: WorktreeSummary[]) {
   return {
     worktrees: summaries,
@@ -121,9 +141,18 @@ export async function GET(_request: NextRequest, { params }: Params) {
   if (isErrorResponse(found)) return found;
 
   try {
+    // First, before any git read: unlike an empty worktree list, an unusable
+    // path has no in-payload representation — a `count: 0` nobody can vouch
+    // for would be a fabrication, so it is a refusal.
+    await assertGitRepository(found.project.gitRepoPath);
+
     const worktrees = await listWorktrees(found.project.gitRepoPath);
     return NextResponse.json({ data: payload(summarize(projectId, worktrees)) });
   } catch (error) {
+    if (error instanceof GitRepositoryUnavailableError) {
+      return repositoryUnavailableResponse(error);
+    }
+
     return errorResponse(error, "Failed to list git worktrees.");
   }
 }
@@ -142,6 +171,10 @@ export async function POST(_request: NextRequest, { params }: Params) {
   if (isErrorResponse(found)) return found;
 
   try {
+    // Same guard as the read above: there is nothing to prune in a directory
+    // that is not a repository, and saying so is not a fault.
+    await assertGitRepository(found.project.gitRepoPath);
+
     const { pruned, remaining } = await pruneOrphanWorktrees(
       found.project.gitRepoPath
     );
@@ -149,6 +182,10 @@ export async function POST(_request: NextRequest, { params }: Params) {
       data: { pruned, ...payload(summarize(projectId, remaining)) },
     });
   } catch (error) {
+    if (error instanceof GitRepositoryUnavailableError) {
+      return repositoryUnavailableResponse(error);
+    }
+
     return errorResponse(error, "Failed to prune git worktrees.");
   }
 }
