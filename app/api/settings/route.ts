@@ -3,6 +3,10 @@ import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { GITHUB_PAT_SETTING_KEY } from "@/lib/github/client";
+import {
+  GITHUB_OAUTH_META_SETTING_KEY,
+  githubOAuthMetaSettingSchema,
+} from "@/lib/github/oauth-meta";
 import { OPENAI_API_KEY_SETTING_KEY } from "@/lib/openai/constants";
 import { PROJECTS_ROOT_SETTING_KEY } from "@/lib/projects/workspace-constants";
 import { defaultProjectsRoot } from "@/lib/projects/workspace";
@@ -90,6 +94,25 @@ export async function PATCH(request: NextRequest) {
         { error: "OpenAI API key must be saved as a string value." },
         { status: 400 }
       );
+    }
+
+    // Written by the device-flow poll route, and editable here so a user who
+    // replaces an OAuth connection with a hand-pasted PAT can clear the stale
+    // "connected as @someone" with `null`. Typed because the Settings UI reads
+    // the fields straight out of it — an arbitrary blob stored under this key
+    // would surface as a broken connection card, not as a validation error.
+    if (key === GITHUB_OAUTH_META_SETTING_KEY) {
+      const parsed = githubOAuthMetaSettingSchema.safeParse(value);
+      if (!parsed.success) {
+        return NextResponse.json(
+          {
+            error:
+              "GitHub connection metadata must be null, or an object with login, scopes, obtainedAt and tokenSource.",
+            details: parsed.error.flatten().fieldErrors,
+          },
+          { status: 400 }
+        );
+      }
     }
 
     // A non-string root would resolve to garbage in path.resolve() and send

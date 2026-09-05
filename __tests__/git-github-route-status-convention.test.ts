@@ -254,6 +254,54 @@ let notARepoPath = "";
 
 const EXERCISED: ExercisedRoute[] = [
   {
+    routePath: "/api/auth/github/device/start",
+    method: "POST",
+    allowed: [400],
+    note:
+      "Global and project-independent. With no OAuth App client ID it refuses as configuration, not as a fault — that refusal is exactly what tells Settings to fall back to a manual PAT.",
+    code: "CLIENT_ID_NOT_CONFIGURED",
+    notARepository: {
+      allowed: [400],
+      code: "CLIENT_ID_NOT_CONFIGURED",
+      note:
+        "Reads neither a project row nor a checkout, so an unusable repository path cannot change its answer.",
+    },
+    invoke: async () => {
+      // The client ID is read from the environment at call time, so a value in
+      // the developer's shell would send this pin over the network to
+      // github.com. Cleared for the call, so the refusal asserted here is the
+      // local, deterministic one the convention is about.
+      const previous = process.env.ARIJ_GITHUB_OAUTH_CLIENT_ID;
+      delete process.env.ARIJ_GITHUB_OAUTH_CLIENT_ID;
+      try {
+        const { POST } = await import("@/app/api/auth/github/device/start/route");
+        return await POST(mockNextRequest({ method: "POST" }));
+      } finally {
+        if (previous !== undefined) {
+          process.env.ARIJ_GITHUB_OAUTH_CLIENT_ID = previous;
+        }
+      }
+    },
+  },
+  {
+    routePath: "/api/auth/github/device/poll",
+    method: "POST",
+    allowed: [404],
+    note:
+      "Global and project-independent. A handle no sign-in was minted for is a missing resource, refused before any GitHub call — and it is what the client gets after a restart drops the in-memory flow.",
+    code: "DEVICE_FLOW_NOT_FOUND",
+    notARepository: {
+      allowed: [404],
+      code: "DEVICE_FLOW_NOT_FOUND",
+      note:
+        "Resolves an in-memory sign-in handle; it reads neither the project row nor the checkout.",
+    },
+    invoke: async () => {
+      const { POST } = await import("@/app/api/auth/github/device/poll/route");
+      return POST(mockNextRequest({ body: { handle: "gh-device-never-minted" } }));
+    },
+  },
+  {
     routePath: "/api/projects/[projectId]/git/connect",
     method: "POST",
     allowed: [200],
