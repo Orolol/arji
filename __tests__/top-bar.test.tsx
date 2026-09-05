@@ -8,7 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 import {
   LAST_PROJECT_STORAGE_KEY,
@@ -362,10 +362,11 @@ describe("route helpers", () => {
 /* ------------------------------------------------------------------ */
 
 describe("TopBar", () => {
-  it("renders the logo pill, three bubbles and the fixed right cluster", () => {
+  it("renders the logo mark, four island pills and the fixed right cluster", () => {
     render(<TopBar />);
 
     expect(screen.getByTestId("top-bar-home")).toHaveAttribute("href", "/");
+    expect(screen.getByTestId("top-bar-bubble-now")).toHaveTextContent("Now");
     expect(screen.getByTestId("top-bar-bubble-work")).toHaveTextContent("Work");
     expect(screen.getByTestId("top-bar-bubble-agents")).toHaveTextContent("Agents");
     expect(screen.getByTestId("top-bar-bubble-settings")).toHaveTextContent("Réglages");
@@ -374,6 +375,112 @@ describe("TopBar", () => {
     expect(screen.getByTestId("top-bar-inbox")).toBeInTheDocument();
     expect(screen.getByTestId("top-bar-auto")).toHaveTextContent("Auto");
     expect(screen.getByTestId("top-bar-new")).toHaveTextContent("New");
+  });
+
+  /* ---- Now, the fourth pill ------------------------------------------ */
+
+  it("puts Now first in the centred island, ahead of the three categories", () => {
+    render(<TopBar />);
+
+    const island = screen.getByTestId("top-bar-island");
+    // The four pills are the island's own children; the open menu is a fifth,
+    // so filter to the pills rather than reading `children` positionally.
+    const pills = Array.from(island.children).filter((node) =>
+      node.getAttribute("data-testid")?.startsWith("top-bar-bubble-"),
+    );
+    expect(pills.map((node) => node.getAttribute("data-testid"))).toEqual([
+      "top-bar-bubble-now",
+      "top-bar-bubble-work",
+      "top-bar-bubble-agents",
+      "top-bar-bubble-settings",
+    ]);
+  });
+
+  it("marks Now active on the desk and inactive on every other route", () => {
+    const { unmount } = render(<TopBar />);
+    expect(screen.getByTestId("top-bar-bubble-now")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    unmount();
+
+    for (const pathname of ["/agents/prompts", "/tickets", "/projects/p1", "/settings"]) {
+      barState.pathname = pathname;
+      const view = render(<TopBar />);
+      expect(screen.getByTestId("top-bar-bubble-now")).not.toHaveAttribute(
+        "data-active",
+      );
+      view.unmount();
+    }
+  });
+
+  it("takes a click back to the desk from anywhere", () => {
+    barState.pathname = "/settings";
+    render(<TopBar />);
+
+    // A real <a href="/">, so navigation is the browser's, not router.push's.
+    expect(screen.getByTestId("top-bar-bubble-now")).toHaveAttribute("href", "/");
+  });
+
+  it("gives Now no menu: no popup role, and hover opens nothing", () => {
+    barState.pathname = "/tickets";
+    // The bubbles open on a 120ms hover intent, so the wait has to be real
+    // time-travel — asserting immediately after the mouseEnter would pass even
+    // if Now DID open a menu.
+    vi.useFakeTimers();
+    try {
+      render(<TopBar />);
+      const now = screen.getByTestId("top-bar-bubble-now");
+
+      expect(now).not.toHaveAttribute("aria-haspopup");
+      expect(now).not.toHaveAttribute("aria-expanded");
+
+      fireEvent.mouseEnter(now);
+      fireEvent.focus(now);
+      act(() => void vi.advanceTimersByTime(1000));
+
+      for (const id of ["now", "work", "agents", "settings"]) {
+        expect(screen.queryByTestId(`top-bar-menu-${id}`)).not.toBeInTheDocument();
+      }
+
+      // Control: the SAME gesture on a real bubble does open one, so the
+      // assertion above is about Now and not about the timers.
+      fireEvent.mouseEnter(screen.getByTestId("top-bar-bubble-work"));
+      act(() => void vi.advanceTimersByTime(1000));
+      expect(screen.getByTestId("top-bar-menu-work")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves the left zone as the logo alone — no Now label beside it", () => {
+    render(<TopBar />);
+    const logo = screen.getByTestId("top-bar-home");
+
+    // The mark keeps its accessible name; the word moved to the island.
+    expect(logo).toHaveAttribute("aria-label", "Now — control desk");
+    expect(logo).toHaveTextContent("A");
+    expect(logo.textContent).not.toMatch(/Now/);
+  });
+
+  /**
+   * The island is absolutely centred, so the left zone's cap is a hard number
+   * measured against a KNOWN pill count. Pin the count: adding a fifth pill
+   * without re-measuring would slide the project chips under the island, which
+   * only shows up on a workspace with enough projects to reach the cap.
+   */
+  it("caps the left zone against the island it was measured for", () => {
+    render(<TopBar />);
+
+    const island = screen.getByTestId("top-bar-island");
+    const pills = Array.from(island.children).filter((node) =>
+      node.getAttribute("data-testid")?.startsWith("top-bar-bubble-"),
+    );
+    expect(pills).toHaveLength(4);
+
+    const chips = screen.getByTestId("top-bar-project-chips");
+    const left = chips.parentElement as HTMLElement;
+    expect(left.style.maxWidth).toBe("calc(50% - 214px)");
   });
 
   it("marks no bubble on the desk and the right one elsewhere", () => {

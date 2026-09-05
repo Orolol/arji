@@ -8,6 +8,7 @@ import {
   Inbox,
   Infinity as InfinityIcon,
   Plus,
+  Radar,
   Search,
 } from "lucide-react";
 
@@ -48,16 +49,23 @@ import { TopBarMenu } from "./TopBarMenu";
  *
  * THE THREE ZONES, and what each is allowed to say:
  *
- * - LEFT is identity. "A · Now" always returns to the desk — Now is never a
- *   category and never appears in a bubble. Then the project chips: the ACTIVE
- *   one (the project in the URL) wears its pastel fill, the others are deep
- *   text on paper. Colour here is WHO, never state; the only state a chip
- *   carries is the breathing dot of a project with a live agent, and that is
- *   motion.
+ * - LEFT is identity, and ONLY identity: the `A` mark, which links to the desk.
+ *   Then the project chips: the ACTIVE one (the project in the URL) wears its
+ *   pastel fill, the others are deep text on paper. Colour here is WHO, never
+ *   state; the only state a chip carries is the breathing dot of a project with
+ *   a live agent, and that is motion.
  * - CENTER is navigation, absolutely centred so it does not drift when the
- *   project list grows. Three bubbles reusing three strata grounds. Hover opens
- *   the menu, click goes to the menu's first reachable entry, the active bubble
- *   wears a 1.5px border in its own under-colour plus a chevron.
+ *   project list grows. FOUR pills: `Now`, then the three category bubbles
+ *   reusing three strata grounds. On a bubble, hover opens the menu and click
+ *   goes to the menu's first reachable entry; the active one wears a 1.5px
+ *   border in its own under-colour plus a chevron.
+ *
+ *   `Now` IS A DESTINATION, NOT A CATEGORY. It carries the same pill shape and
+ *   the same active liseré as its three neighbours, and nothing else of their
+ *   behaviour: no menu, no hover intent, no `aria-haspopup`, no chevron. It sat
+ *   in the LEFT zone as "A · Now" until this change, which read as branding —
+ *   the desk is one of the app's four destinations, so it is drawn as one.
+ *   `NAV_CATEGORIES` is unchanged; see the head of `lib/piscine/nav.ts`.
  * - RIGHT never changes, on any route: ⌘K, inbox, Auto, New.
  *
  * DATA, AND WHAT IT COSTS. The bar is on every route, so it may not carry the
@@ -81,6 +89,26 @@ const HOVER_OPEN_MS = 120;
 const HOVER_CLOSE_MS = 260;
 /** Desk poll cadence while ⌘K is held open. Slower than the desk's own 4s. */
 const PALETTE_POLL_MS = 10_000;
+
+/**
+ * Half the centred pill island, in px, and the clearance the left zone keeps
+ * from it.
+ *
+ * The island is absolutely centred, so the left zone cannot push it — it would
+ * slide UNDERNEATH. Its cap is therefore a hard number, and a wrong one is
+ * invisible until a workspace has enough projects to reach it.
+ *
+ * MEASURED IN CHROME, not derived: `top-bar-island` reports 398px at 1440×950
+ * with the default text size, so half is 199. The fourth pill is 89px of that,
+ * plus the 7px gap it added — which is why this number moved with this change.
+ * `__tests__/top-bar.test.tsx` pins BOTH the resulting max-width and the pill
+ * count it was measured for, so a fifth pill fails loudly instead of silently
+ * sliding the project chips under the island.
+ */
+const ISLAND_HALF_WIDTH_PX = 199;
+
+/** Breathing room between the last project chip and the island's left edge. */
+const ISLAND_CLEARANCE_PX = 15;
 
 /** Bubble colours per stratum. Written out in full — Tailwind scans literals. */
 const BUBBLE_CLASS: Record<NavCategory["stratum"], string> = {
@@ -197,6 +225,13 @@ export function TopBar({ className }: TopBarProps) {
 
   const activeCategory = activeNavCategory(pathname, scopeProjectId);
 
+  /*
+    The desk is EXACTLY `/`, never a prefix: every other route in the app is a
+    child of `/`, so `startsWith` would light Now everywhere. `activeCategory`
+    is null here, which is what keeps the three bubbles unlit on the desk.
+  */
+  const onDesk = pathname === "/";
+
   /* ---- menu open/close ------------------------------------------------ */
 
   const [openId, setOpenId] = React.useState<NavCategoryId | null>(null);
@@ -294,26 +329,26 @@ export function TopBar({ className }: TopBarProps) {
     >
       {/* ── LEFT: identity ────────────────────────────────────────────── */}
       {/*
-        The centre bubbles are absolutely positioned, so a growing project list
+        The centre pills are absolutely positioned, so a growing project list
         would slide UNDER them instead of pushing them. The cap keeps the left
-        zone clear of the bubble group (~310px wide, i.e. 155px either side of
-        the middle) with 15px to spare, and the chips scroll inside it.
+        zone clear of the pill group — measured, not guessed: see
+        ISLAND_HALF_WIDTH_PX — and the chips scroll inside it.
       */}
-      <div className="flex min-w-0 max-w-[calc(50%-170px)] items-center gap-[10px]">
+      <div
+        className="flex min-w-0 items-center gap-[10px]"
+        style={{ maxWidth: `calc(50% - ${ISLAND_HALF_WIDTH_PX + ISLAND_CLEARANCE_PX}px)` }}
+      >
         <Link
           href="/"
           data-testid="top-bar-home"
           aria-label="Now — control desk"
           className={cn(
-            "flex h-[34px] shrink-0 items-center gap-[9px] rounded-full",
-            "bg-action pr-[13px] pl-[5px] text-action-foreground no-underline outline-none",
+            "flex size-[34px] shrink-0 items-center justify-center rounded-full",
+            "bg-action text-action-foreground no-underline outline-none",
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
           )}
         >
-          <span className="flex size-[26px] items-center justify-center rounded-full bg-action-foreground font-display text-[13px] font-bold text-action">
-            A
-          </span>
-          <span className="font-display text-[13.5px] font-bold">Now</span>
+          <span className="font-display text-[15px] font-bold leading-none">A</span>
         </Link>
 
         <span aria-hidden="true" className="h-[18px] w-[1.5px] shrink-0 bg-border" />
@@ -360,10 +395,38 @@ export function TopBar({ className }: TopBarProps) {
         pointer never leaves this subtree on its way down; see TopBarMenu.
       */}
       <div
+        data-testid="top-bar-island"
         className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center gap-[7px]"
         onMouseLeave={hoverClose}
         onKeyDown={onKeyDown}
       >
+        {/*
+          The desk, as a destination. A LINK, not a button: it has one place to
+          go and no menu to open, so it must not answer to the hover intent or
+          the arrow keys that drive its three neighbours — hence no
+          `onMouseEnter`, no `aria-haspopup` and no chevron. Its liseré is the
+          `--action-outline` of its own ground, which is the same rule the
+          three bubbles follow with their under-colours.
+        */}
+        <Link
+          href="/"
+          data-testid="top-bar-bubble-now"
+          data-active={onDesk ? "true" : undefined}
+          aria-current={onDesk ? "page" : undefined}
+          className={cn(
+            "flex h-[32px] shrink-0 cursor-pointer items-center gap-[8px] rounded-full px-[15px]",
+            "bg-action font-sans text-[13px] leading-none text-action-foreground",
+            "no-underline outline-none",
+            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+            // Reserved at rest so the liseré never reflows the row.
+            "border-[1.5px] border-transparent",
+            onDesk ? "border-action-outline font-bold" : "font-semibold",
+          )}
+        >
+          <Radar size={14} aria-hidden="true" />
+          Now
+        </Link>
+
         {NAV_CATEGORIES.map((category) => (
           <CategoryBubble
             key={category.id}

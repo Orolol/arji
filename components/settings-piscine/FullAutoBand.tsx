@@ -7,13 +7,18 @@ import {
   CheckMark,
   Mono,
   SegmentedControl,
+  SelectPill,
   StrataBand,
 } from "@/components/piscine";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { useNamedAgentsList } from "@/hooks/useNamedAgentsList";
 import {
   AGENT_MAX_CONCURRENT_GLOBAL_SETTING_KEY,
 } from "@/lib/agents/scheduler-constants";
 import {
+  AUTO_MODE_BUILD_AGENT_SETTING_KEY,
   AUTO_MODE_ENABLED_SETTING_KEY,
+  AUTO_MODE_REVIEW_AGENT_SETTING_KEY,
   AUTO_MODE_SMART_DISPATCH_SETTING_KEY,
   FULL_AUTO_SECOND_OPINION_SETTING_KEY,
   parseAutoModeEnabled,
@@ -47,6 +52,13 @@ import type { SettingsDraft } from "./useSettingsDraft";
  * does not exist. "Chaîner review puis land automatiquement si clean" is what
  * the supervisor always does; it moved into the footnote. The two toggle slots
  * carry two real global booleans instead.
+ *
+ * THE TWO ROLE PILLS are the workspace default for `resolveAutoModeConfig`'s
+ * project → global → built-in chain, and the only place it can be set: before
+ * this band, `auto_mode_build_agent` / `auto_mode_review_agent` were reachable
+ * only through AutoModeDialog, which writes the SUFFIXED per-project keys.
+ * "Default" is the empty value — no workspace default, so the chain falls
+ * through to the built-in Claude Code — not an agent whose name is blank.
  */
 export interface FullAutoBandProps {
   draft: SettingsDraft;
@@ -59,6 +71,7 @@ type ConcurrencySegment = "2" | "4" | "8" | "inf" | "";
 const LADDER: readonly ConcurrencySegment[] = ["2", "4", "8", "inf"];
 
 export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
+  const { agents: namedAgents } = useNamedAgentsList();
   const enabled = draft.flag(AUTO_MODE_ENABLED_SETTING_KEY);
   const dimmed = !enabled;
 
@@ -136,6 +149,34 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
               ) : null}
             </SettingField>
 
+            <SettingField
+              kicker="AGENTS PAR DÉFAUT"
+              stratum="live"
+              flex={1}
+              testId="full-auto-agents"
+            >
+              <div className="flex items-center gap-[6px]">
+                <RolePill
+                  role="build"
+                  settingKey={AUTO_MODE_BUILD_AGENT_SETTING_KEY}
+                  label="Build"
+                  testId="auto-build-agent"
+                  draft={draft}
+                  agents={namedAgents}
+                  disabled={dimmed}
+                />
+                <RolePill
+                  role="review"
+                  settingKey={AUTO_MODE_REVIEW_AGENT_SETTING_KEY}
+                  label="Review"
+                  testId="auto-review-agent"
+                  draft={draft}
+                  agents={namedAgents}
+                  disabled={dimmed}
+                />
+              </div>
+            </SettingField>
+
             <div className="flex min-w-[260px] flex-[1.6] flex-col justify-end gap-[8px]">
               <SettingRow
                 toggle={
@@ -192,5 +233,57 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
         </BandDim>
       </StrataBand>
     </SettingsSection>
+  );
+}
+
+/**
+ * One role's workspace default. The pill shows the agent's NAME, never its id:
+ * an id on screen is unreadable, and a stored id whose agent has since been
+ * deleted must not render as if it still resolved — it falls back to
+ * "Default", which is what the resolution chain will actually do.
+ */
+function RolePill({
+  role,
+  settingKey,
+  label,
+  testId,
+  draft,
+  agents,
+  disabled,
+}: {
+  role: "build" | "review";
+  settingKey: string;
+  label: string;
+  testId: string;
+  draft: SettingsDraft;
+  agents: readonly { id: string; name: string }[];
+  disabled: boolean;
+}) {
+  const selected = draft.text(settingKey);
+  const name = agents.find((agent) => agent.id === selected)?.name ?? "Default";
+
+  return (
+    <div data-testid={testId} className="min-w-0">
+      <SelectPill
+        label={`${label} · ${name}`}
+        tone="ink"
+        fill="card"
+        disabled={disabled}
+        className="h-[30px]"
+      >
+        <DropdownMenuItem onSelect={() => draft.set(settingKey, "")}>
+          Default
+        </DropdownMenuItem>
+        {agents.map((agent) => (
+          <DropdownMenuItem
+            key={agent.id}
+            onSelect={() => draft.set(settingKey, agent.id)}
+          >
+            {agent.name}
+          </DropdownMenuItem>
+        ))}
+      </SelectPill>
+      <span className="sr-only">{`Agent ${role} par défaut`}</span>
+    </div>
   );
 }

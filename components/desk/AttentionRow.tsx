@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { GitMerge, Hammer, RefreshCw, Send } from "lucide-react";
+import { GitMerge, Hammer, RefreshCw, Send, X } from "lucide-react";
 
 import {
   GhostInputPill,
@@ -24,9 +24,14 @@ import { cn } from "@/lib/utils";
  * The three rows of the coral stratum.
  *
  * One skeleton, three contents: `Stamp` · `IdentityChip` · flexible content ·
- * fixed extras · EXACTLY ONE filled button and one outline button. The filled
- * one is `--action` deep water-green, never coral: colour names the stratum,
- * the WORD names the state ("ASKS YOU" / "FAILED" / "CONFLICT").
+ * fixed extras · EXACTLY ONE filled button and one outline button, then the
+ * dismiss ✕. The filled one is `--action` deep water-green, never coral:
+ * colour names the stratum, the WORD names the state ("ASKS YOU" / "FAILED" /
+ * "CONFLICT").
+ *
+ * The ✕ is the row's only NON-action: it wipes a signal the user has already
+ * handled somewhere else. It resolves nothing, so it is the quietest thing on
+ * the row — a neutral hairline circle, last in the tab order.
  *
  * Rows are tab-walkable; ⏎ on a focused row focuses its reply field, which is
  * what the header hint "↹ parcourir · ⏎ répondre" promises.
@@ -43,6 +48,38 @@ const ROW_CLASS = cn(
   "animate-in fade-in slide-in-from-bottom-2 motion-reduce:animate-none",
   "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
 );
+
+/**
+ * "I have handled this elsewhere."
+ *
+ * Deliberately a real <button> with a spelled-out accessible name rather than
+ * a hover-revealed glyph: the row is tab-walkable, so the dismiss has to be
+ * reachable and announceable by keyboard too.
+ */
+function DismissButton({
+  label,
+  onDismiss,
+  disabled,
+}: {
+  label: string;
+  onDismiss: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <PillButton
+      variant="outline"
+      outlineTone="neutral"
+      iconOnly
+      icon={X}
+      onClick={onDismiss}
+      disabled={disabled}
+      data-testid="desk-dismiss"
+      className="shrink-0"
+    >
+      {label}
+    </PillButton>
+  );
+}
 
 function useRowEnter(onEnter: () => void) {
   return React.useCallback(
@@ -65,6 +102,8 @@ export interface AsksYouRowProps {
   project: DeskProject | undefined;
   onReply: (item: DeskAwaitingReply, message: string) => void | Promise<void>;
   onSendToDev: (item: DeskAwaitingReply, message: string) => void | Promise<void>;
+  /** Omit to hide the ✕ — the row still works without a dismissal store. */
+  onDismiss?: (item: DeskAwaitingReply) => void | Promise<void>;
   pending?: boolean;
   className?: string;
 }
@@ -74,6 +113,7 @@ export function AsksYouRow({
   project,
   onReply,
   onSendToDev,
+  onDismiss,
   pending = false,
   className,
 }: AsksYouRowProps) {
@@ -136,6 +176,13 @@ export function AsksYouRow({
       >
         Send to dev
       </PillButton>
+      {onDismiss ? (
+        <DismissButton
+          label="Écarter cette question"
+          onDismiss={() => void onDismiss(item)}
+          disabled={pending}
+        />
+      ) : null}
     </SurfaceCard>
   );
 }
@@ -149,6 +196,8 @@ export interface FailedRowProps {
   project: DeskProject | undefined;
   onRetry: (item: DeskFailure) => void | Promise<void>;
   onOpenLog: (item: DeskFailure) => void;
+  /** Omit to hide the ✕ — the row still works without a dismissal store. */
+  onDismiss?: (item: DeskFailure) => void | Promise<void>;
   pending?: boolean;
   className?: string;
 }
@@ -173,6 +222,7 @@ export function FailedRow({
   project,
   onRetry,
   onOpenLog,
+  onDismiss,
   pending = false,
   className,
 }: FailedRowProps) {
@@ -213,6 +263,13 @@ export function FailedRow({
       <PillButton variant="outline" size="md" onClick={() => onOpenLog(item)}>
         Log
       </PillButton>
+      {onDismiss ? (
+        <DismissButton
+          label="Écarter cet échec"
+          onDismiss={() => void onDismiss(item)}
+          disabled={pending}
+        />
+      ) : null}
     </SurfaceCard>
   );
 }
@@ -226,6 +283,8 @@ export interface ConflictRowProps {
   project: DeskProject | undefined;
   onResolve: (item: DeskConflict) => void | Promise<void>;
   onOpenDiff: (item: DeskConflict) => void;
+  /** Omit to hide the ✕ — the row still works without a dismissal store. */
+  onDismiss?: (item: DeskConflict) => void | Promise<void>;
   pending?: boolean;
   className?: string;
 }
@@ -235,6 +294,7 @@ export function ConflictRow({
   project,
   onResolve,
   onOpenDiff,
+  onDismiss,
   pending = false,
   className,
 }: ConflictRowProps) {
@@ -283,6 +343,13 @@ export function ConflictRow({
       <PillButton variant="outline" size="md" onClick={() => onOpenDiff(item)}>
         Diff
       </PillButton>
+      {onDismiss ? (
+        <DismissButton
+          label="Écarter ce conflit"
+          onDismiss={() => void onDismiss(item)}
+          disabled={pending}
+        />
+      ) : null}
     </SurfaceCard>
   );
 }

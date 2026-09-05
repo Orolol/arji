@@ -66,7 +66,7 @@ function fetchList<T>(
   return fetch(url)
     .then((res) => res.json())
     .then((json) => {
-      if (!isStale()) setLoaded({ key: url, data: (json.data || []) as T[] });
+      if (!isStale()) setLoaded({ key: url, data: Array.isArray(json?.data) ? json.data as T[] : EMPTY_LIST });
     })
     .catch(() => {
       // Record the failure against *this* URL and nothing else. Carrying the

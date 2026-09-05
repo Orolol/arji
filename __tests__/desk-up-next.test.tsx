@@ -121,24 +121,62 @@ describe("queue chips", () => {
 });
 
 describe("row geometry", () => {
-  it("turns the last slot into a +N chip past three tickets", () => {
+  it("turns the last slot into a +N chip past four tickets", () => {
     renderBand([
       {
         projectId: "p1",
         tickets: [1, 2, 3, 4, 5].map((n) => ticket({ epicId: String(n), rank: n })),
       },
     ]);
-    expect(screen.getAllByTestId("desk-queue-chip")).toHaveLength(2);
-    expect(screen.getByTestId("desk-queue-overflow")).toHaveTextContent("+3");
+    // SLOTS is 4: three chips plus the overflow marker for the remaining two.
+    expect(screen.getAllByTestId("desk-queue-chip")).toHaveLength(3);
+    expect(screen.getByTestId("desk-queue-overflow")).toHaveTextContent("+2");
   });
 
-  it("pads a short row so chips line up on the same three columns", () => {
+  it("shows four tickets without an overflow marker", () => {
+    renderBand([
+      {
+        projectId: "p1",
+        tickets: [1, 2, 3, 4].map((n) => ticket({ epicId: String(n), rank: n })),
+      },
+    ]);
+    expect(screen.getAllByTestId("desk-queue-chip")).toHaveLength(4);
+    expect(screen.queryByTestId("desk-queue-overflow")).toBeNull();
+  });
+
+  /**
+   * jsdom has no layout, so this asserts the CLASS rather than the paint. The
+   * paint was checked in Chrome on a scratch stack: with `line-clamp-1` a
+   * wrapped label put its second line BELOW the pill, sliced in half
+   * (`scrollHeight` 50 against `clientHeight` 31); with `truncate` the chip is
+   * one line with an ellipsis inside the pill. Four slots make chips narrow
+   * enough that most labels wrap, so this guards the fourth slot as much as
+   * the chip.
+   */
+  it("keeps a chip on one line — truncate, never a line clamp", () => {
+    renderBand([
+      {
+        projectId: "p1",
+        tickets: [
+          ticket({
+            epicId: "1",
+            title: "Refonte complete du pipeline autonome avec garde-fous mecaniques",
+          }),
+        ],
+      },
+    ]);
+    const chip = screen.getAllByTestId("desk-queue-chip")[0];
+    expect(chip.className).toContain("truncate");
+    expect(chip.className).not.toContain("line-clamp");
+  });
+
+  it("pads a short row so chips line up on the same four columns", () => {
     const { container } = renderBand([
       { projectId: "p1", tickets: [ticket({ epicId: "1" })] },
     ]);
     const spacer = container.querySelector('[aria-hidden="true"][style]');
     expect(spacer).toBeTruthy();
-    expect(spacer).toHaveStyle({ flex: "2" });
+    expect(spacer).toHaveStyle({ flex: "3" });
   });
 
   it("names each project in its own identity colour", () => {

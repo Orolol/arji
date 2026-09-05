@@ -49,7 +49,7 @@ function payload(readyEpicIds: string[]): ControlDeskPayload {
       agentBusy: false,
     })),
     heldBackCount: 0,
-    upNext: [],
+      upNext: [],
   };
 }
 

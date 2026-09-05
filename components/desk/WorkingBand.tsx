@@ -10,6 +10,7 @@ import type {
 import { cn } from "@/lib/utils";
 
 import { LiveSessionCard } from "./LiveSessionCard";
+import { WaveRunChips } from "./WaveRunChips";
 import { QueuedTile } from "./QueuedTile";
 import { TodayTile } from "./TodayTile";
 
@@ -28,12 +29,16 @@ import { TodayTile } from "./TodayTile";
  *   (`overflow-y:auto` + `min-h-0`), with QUEUED and TODAY pinned as the last
  *   two cells so they never scroll out of reach.
  *
- * THE NIGHT-RUN HEADER LINE IS ABSENT ON PURPOSE. The frame's
- * "Ledger night run · wave 2/3 · $4.20" needs a wave concept: night runs are
- * per-project and live in an in-process registry (lost on restart), and no
- * durable row aggregates them. The documented fallback is to omit the right
- * slot rather than fabricate one — the header then renders label + counter
- * only, exactly as an empty stratum does.
+ * THE NIGHT-RUN HEADER LINE IS ABSENT ON "/" ON PURPOSE. It needs a wave
+ * concept: night runs are per-project and live in an in-process registry (lost
+ * on restart), and no durable row aggregates them ACROSS projects. The
+ * documented fallback is to omit the right slot rather than fabricate one, and
+ * the cross-project desk still does exactly that.
+ *
+ * A PROJECT desk is the case that decision could not cover: there, one
+ * `projectId` names one registry, and `WaveRunChips` fills the right slot with
+ * the wave counter, the night-run marker and "Stop night run" — the three
+ * things that had no home but the pre-redesign `AgentMonitor` bar.
  */
 export interface WorkingBandProps {
   working: readonly DeskWorkingSession[];
@@ -42,6 +47,8 @@ export interface WorkingBandProps {
   projectsById: ReadonlyMap<string, DeskProject>;
   onOpenTicket?: (epicId: string) => void;
   onStopSession?: (sessionId: string) => void;
+  /** Set on a project desk; omit on "/" — see the note above. */
+  projectId?: string;
   className?: string;
 }
 
@@ -52,6 +59,7 @@ export function WorkingBand({
   projectsById,
   onOpenTicket,
   onStopSession,
+  projectId,
   className,
 }: WorkingBandProps) {
   const meta = `${working.length} agent${working.length === 1 ? "" : "s"} · ${queued.length} queued`;
@@ -72,6 +80,11 @@ export function WorkingBand({
         stratum="live"
         labelSize={13}
         meta={meta}
+        right={
+          projectId ? (
+            <WaveRunChips projectId={projectId} />
+          ) : undefined
+        }
       />
 
       <div

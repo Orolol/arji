@@ -29,7 +29,9 @@
  */
 
 import {
+  AUTO_MODE_BUILD_AGENT_SETTING_KEY,
   AUTO_MODE_ENABLED_SETTING_KEY,
+  AUTO_MODE_REVIEW_AGENT_SETTING_KEY,
   AUTO_MODE_SMART_DISPATCH_SETTING_KEY,
   FULL_AUTO_SECOND_OPINION_SETTING_KEY,
   parseAutoModeEnabled,
@@ -173,6 +175,30 @@ const SPECS: readonly SettingFieldSpec[] = [
     read: (data) =>
       parseAutoModeEnabled(data[FULL_AUTO_SECOND_OPINION_SETTING_KEY]) ?? false,
     parse: (editor) => ({ value: bool(editor) }),
+  },
+  /*
+    The two Full Auto roles. Editor value is a named-agent id, or "" for the
+    "Default" row — which is the ABSENCE of a workspace default, not an agent
+    named "". It parses to null and is WRITTEN, so clearing actually clears:
+    `resolveAutoModeConfig` then falls through project → global → built-in.
+    Bare keys only, as the file header says — the `:<projectId>` overrides are
+    the Full Auto popover's to write.
+  */
+  {
+    key: AUTO_MODE_BUILD_AGENT_SETTING_KEY,
+    read: (data) =>
+      typeof data[AUTO_MODE_BUILD_AGENT_SETTING_KEY] === "string"
+        ? (data[AUTO_MODE_BUILD_AGENT_SETTING_KEY] as string)
+        : "",
+    parse: (editor) => ({ value: String(editor) || null }),
+  },
+  {
+    key: AUTO_MODE_REVIEW_AGENT_SETTING_KEY,
+    read: (data) =>
+      typeof data[AUTO_MODE_REVIEW_AGENT_SETTING_KEY] === "string"
+        ? (data[AUTO_MODE_REVIEW_AGENT_SETTING_KEY] as string)
+        : "",
+    parse: (editor) => ({ value: String(editor) || null }),
   },
   {
     // Shared with components/agents-workshop/LimitsView.tsx — SAME key, SAME
@@ -436,6 +462,8 @@ export const SETTINGS_INVENTORY: readonly SettingsInventoryEntry[] = [
   { key: AUTO_MODE_ENABLED_SETTING_KEY, tab: "workspace", testId: "full-auto-master", batched: true },
   { key: AUTO_MODE_SMART_DISPATCH_SETTING_KEY, tab: "workspace", testId: "auto-smart-dispatch", batched: true },
   { key: FULL_AUTO_SECOND_OPINION_SETTING_KEY, tab: "workspace", testId: "auto-second-opinion", batched: true },
+  { key: AUTO_MODE_BUILD_AGENT_SETTING_KEY, tab: "workspace", testId: "auto-build-agent", batched: true },
+  { key: AUTO_MODE_REVIEW_AGENT_SETTING_KEY, tab: "workspace", testId: "auto-review-agent", batched: true },
   { key: AGENT_MAX_CONCURRENT_GLOBAL_SETTING_KEY, tab: "workspace", testId: "agent-max-concurrent", batched: true },
   { key: NIGHT_COST_CAP_SETTING_KEY, tab: "workspace", testId: "night-cost-cap-setting", batched: true },
   { key: NIGHT_CIRCUIT_BREAKER_SETTING_KEY, tab: "workspace", testId: "night-circuit-breaker-setting", batched: true },

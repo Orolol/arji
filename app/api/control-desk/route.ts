@@ -13,6 +13,7 @@ import {
   ticketDependencies,
   ticketReadCursors,
   userStories,
+  deskDismissals,
 } from "@/lib/db/schema";
 import {
   autoModeEnabledSettingKey,
@@ -30,6 +31,7 @@ import { isSessionStale } from "@/lib/agents/watchdog";
 import { getSessionLastActivityAt } from "@/lib/agents/watchdog";
 import type { TicketDependencyEdge } from "@/lib/types/kanban";
 import {
+  applyDeskDismissals,
   deriveAwaitingReply,
   deriveConflicts,
   deriveFailures,
@@ -39,6 +41,7 @@ import {
   deriveToday,
   deriveUpNext,
   deriveWorking,
+  type DeskDismissalRow,
   type EpicRow,
   type FailureSessionRow,
   type SessionRow,
@@ -757,6 +760,36 @@ export async function GET() {
 
   const { rows: readyToLand, heldBackCount } = deriveReadyToLand(deskEpics, busyEpicIds);
 
+  /* ---- YOUR TURN ---------------------------------------------------- */
+
+  // Bounded by the epics already in hand, so this stays one indexed lookup on
+  // the (epic_id, kind) primary key rather than a scan of the whole table.
+  const dismissals: DeskDismissalRow[] = deskEpics.length
+    ? db
+        .select({
+          epicId: deskDismissals.epicId,
+          kind: deskDismissals.kind,
+          signalAt: deskDismissals.signalAt,
+        })
+        .from(deskDismissals)
+        .where(
+          inArray(
+            deskDismissals.epicId,
+            deskEpics.map((epic) => epic.id),
+          ),
+        )
+        .all()
+    : [];
+
+  // Derive first, then subtract what the user has waved off: the dismissal is
+  // a read-side filter and must never change how a signal is computed.
+  const derived = {
+    awaitingReply: deriveAwaitingReply(deskEpics),
+    failed: deriveFailures(failureSessions, epicsById, runningEpicIds),
+    conflicts: deriveConflicts(deskEpics),
+  };
+  const yourTurn = applyDeskDismissals(derived, dismissals);
+
   const payload: ControlDeskPayload = {
     generatedAt: now.toISOString(),
     projects: deskProjects,
@@ -769,11 +802,7 @@ export async function GET() {
       projects: todaySessions?.projects ?? null,
       sessions: todaySessions?.sessions ?? null,
     }),
-    yourTurn: {
-      awaitingReply: deriveAwaitingReply(deskEpics),
-      failed: deriveFailures(failureSessions, epicsById, runningEpicIds),
-      conflicts: deriveConflicts(deskEpics),
-    },
+    yourTurn,
     readyToLand,
     heldBackCount,
     upNext: deriveUpNext(deskProjects, deskEpics, edges, busyEpicIds),

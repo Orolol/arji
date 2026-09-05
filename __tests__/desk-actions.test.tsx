@@ -19,8 +19,17 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn() }),
 }));
 
+// Mutable so one test can give the agent pills a name to resolve; the mock
+// factory is hoisted, so the box has to be too.
+const namedAgents = vi.hoisted(() => ({
+  current: [] as { id: string; name: string; provider: string }[],
+}));
 vi.mock("@/hooks/useNamedAgentsList", () => ({
-  useNamedAgentsList: () => ({ agents: [], loading: false, refresh: vi.fn() }),
+  useNamedAgentsList: () => ({
+    agents: namedAgents.current,
+    loading: false,
+    refresh: vi.fn(),
+  }),
 }));
 
 const payload: ControlDeskPayload = {
@@ -97,10 +106,11 @@ type FetchCall = [string, RequestInit | undefined];
 
 function mockFetch(
   handler: (url: string, init?: RequestInit) => { status?: number; body: unknown },
+  desk: ControlDeskPayload = payload,
 ) {
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === "/api/control-desk") {
-      return { ok: true, status: 200, json: async () => ({ data: payload }) };
+      return { ok: true, status: 200, json: async () => ({ data: desk }) };
     }
     const result = handler(url, init);
     const status = result.status ?? 200;
@@ -120,6 +130,7 @@ describe("desk mutations", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     push.mockClear();
+    namedAgents.current = [];
   });
 
   it("retries through buildRetryDispatch — single-epic route, resumed session", async () => {
@@ -137,6 +148,46 @@ describe("desk mutations", () => {
     // Reuses the failed session's agent and continues its conversation.
     expect(body.namedAgentId).toBe("a1");
     expect(body.resumeSessionId).toBe("s9");
+  });
+
+  it("dismisses a signal with its own timestamp, then re-reads the desk", async () => {
+    // The payload's only YOUR TURN row is the e1 failure, failedAt 08:39.
+    const fetchMock = mockFetch(() => ({ body: { data: { ok: true } } }));
+    render(<NowDesk />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Écarter cet échec" }));
+
+    await waitFor(() => expect(calls(fetchMock, "/api/desk/dismiss").length).toBe(1));
+    const [url, init] = calls(fetchMock, "/api/desk/dismiss")[0];
+    expect(url).toBe("/api/desk/dismiss");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(String(init!.body))).toEqual({
+      epicId: "e1",
+      kind: "failed",
+      // The SIGNAL's timestamp, not the moment of the click — that is what
+      // lets a newer failure on the same epic bring the row back.
+      signalAt: "2026-08-28T08:39:00.000Z",
+    });
+
+    // The optimistic hide is a re-read, not local state: useControlDesk's
+    // requestSeq/mutationSeq guards are what keep the 4s poll from undoing it.
+    await waitFor(() =>
+      expect(calls(fetchMock, "/api/control-desk").length).toBeGreaterThan(1),
+    );
+  });
+
+  it("says so when a dismiss fails instead of hiding the row anyway", async () => {
+    const fetchMock = mockFetch((url) =>
+      url.includes("/api/desk/dismiss")
+        ? { status: 400, body: { error: "Validation failed", details: {} } }
+        : { body: { data: {} } },
+    );
+    render(<NowDesk />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Écarter cet échec" }));
+
+    expect(await screen.findByText("Impossible d'écarter ce signal")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it("turns a 409 into a toast that links to the session in the way", async () => {
@@ -269,10 +320,16 @@ describe("desk mutations", () => {
     expect(document.querySelector('input[type="checkbox"]')).toBeNull();
 
     fireEvent.click(row);
-    await waitFor(() =>
-      expect(calls(fetchMock, "/auto-mode").length).toBeGreaterThan(0),
-    );
-    const [, init] = calls(fetchMock, "/auto-mode")[0];
+    // The popover also GETs each project's effective agents when it opens, so
+    // the toggle is identified by its method, not by call order.
+    const puts = () =>
+      calls(fetchMock, "/auto-mode").filter(
+        ([, init]) => init?.method === "PUT",
+      );
+    await waitFor(() => expect(puts().length).toBeGreaterThan(0));
+    const [, init] = puts()[0];
+    // Only `enabled`: the route keys off `"buildAgent" in payload`, so the
+    // on/off box must not carry — and therefore cannot clobber — the agents.
     expect(JSON.parse(String(init!.body))).toEqual({ enabled: true });
   });
 
@@ -394,5 +451,40 @@ describe("desk mutations", () => {
     expect(await screen.findByTestId("desk-full-auto")).toHaveTextContent(
       "Full Auto · 0/1",
     );
+  });
+
+  it("reads each project's effective Full Auto agents when the popover opens", async () => {
+    // The pills render a NAME, so the hook has to know this id.
+    namedAgents.current = [{ id: "a1", name: "Opus Builder", provider: "claude-code" }];
+    // The pills only exist on an armed project.
+    const armed: ControlDeskPayload = {
+      ...payload,
+      projects: [{ ...payload.projects[0], autoModeEnabled: true }],
+    };
+    const fetchMock = mockFetch(
+      (url) =>
+        url.includes("/auto-mode")
+          ? { body: { data: { buildAgent: "a1", reviewAgent: null } } }
+          : { body: { data: {} } },
+      armed,
+    );
+    render(<NowDesk />);
+
+    // Closed, the desk's 4s poll must not drag one request per project with it.
+    const trigger = await screen.findByTestId("desk-full-auto");
+    expect(calls(fetchMock, "/auto-mode")).toHaveLength(0);
+
+    await userEvent.click(trigger);
+
+    // The regression this pins: NowDesk gates that read on `autoPopoverOpen`,
+    // so an UNCONTROLLED <Popover> — which is what merging main's version of
+    // this file reintroduces — leaves the gate shut forever. The popover still
+    // opens, the request never fires, and every row silently reads "Default"
+    // whatever the project actually resolves to.
+    await waitFor(() => expect(calls(fetchMock, "/auto-mode")).toHaveLength(1));
+    expect(calls(fetchMock, "/auto-mode")[0][0]).toBe("/api/projects/p1/auto-mode");
+    expect(
+      await screen.findByRole("button", { name: /Opus Builder/ }),
+    ).toBeInTheDocument();
   });
 });

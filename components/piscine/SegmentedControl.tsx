@@ -112,7 +112,7 @@ export function SegmentedControl<T extends string>({
               wrap
                 ? "min-h-[30px] basis-auto py-[5px] sm:h-full sm:min-h-0 sm:basis-0 sm:py-0"
                 : "h-full",
-              "text-[12px] leading-none outline-none",
+              "cursor-pointer text-[12px] leading-none outline-none",
               "transition-[background-color,color,opacity] duration-150 motion-reduce:transition-none",
               "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
               "disabled:pointer-events-none disabled:opacity-45",

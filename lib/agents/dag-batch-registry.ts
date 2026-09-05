@@ -12,7 +12,8 @@ import type { WaveFailurePolicy } from "@/lib/dependencies/wave-runner";
  * cancelled by boot cleanup like any other orphan).
  *
  * Exposed to clients via GET /api/projects/[projectId]/build/waves and
- * rendered by the AgentMonitor as a compact "Wave 2/4" indicator.
+ * rendered by `components/desk/WaveRunChips` as a compact "Wave 2/4" indicator
+ * in WORKING's header.
  */
 
 export type DagBatchCounts = Record<TicketExecutionStatus, number>;

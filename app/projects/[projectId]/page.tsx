@@ -5,7 +5,6 @@ import { useParams, useSearchParams } from "next/navigation";
 import { NowDesk } from "@/components/desk/NowDesk";
 import { TicketOverlay } from "@/components/ticket/TicketOverlay";
 import { UnifiedChatPanel, type UnifiedChatPanelHandle } from "@/components/chat/UnifiedChatPanel";
-import { AgentMonitor } from "@/components/monitor/AgentMonitor";
 import { useAgentPolling } from "@/hooks/useAgentPolling";
 import { useBatchSelection } from "@/hooks/useBatchSelection";
 import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
@@ -725,12 +724,6 @@ export default function ProjectDeskPage() {
                 onOpenTicket={handlePrimaryTicketClick}
               />
             </div>
-
-            {/* Agent monitor bar */}
-            {/* No `highlightedActivityId`: the linked-agent hover that used to
-                feed it belonged to the board this desk replaced, so the monitor
-                keeps its own default of "nothing highlighted". */}
-            <AgentMonitor projectId={projectId} activities={activities} />
           </div>
         </UnifiedChatPanel>
       </div>

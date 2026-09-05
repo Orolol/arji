@@ -28,7 +28,7 @@ export interface ReleaseHeaderClusterProps {
  * chat, 8a chrono + Stop, 8d the range control), which is precisely why the
  * shared project layout cannot own any of them.
  *
- * Deliberately NOT RepoStatusBar: that bar also draws PR pills and a behind
+ * Deliberately NOT RepoStrataBand (Git Sync): that band also draws PR pills and a behind
  * count the frame does not have, and its testids are asserted on by an existing
  * test. Same hooks, different composition.
  */

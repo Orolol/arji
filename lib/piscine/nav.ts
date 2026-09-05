@@ -10,8 +10,17 @@
  *   Réglages  linden     (feed)  Workspace & Full Auto · Night runs ·
  *                                Notifications · Intégrations
  *
- * "Now" is NEVER a category. The logo pill returns to the desk and that is the
- * whole of its behaviour; nothing here describes it.
+ * "Now" is NEVER a category, and nothing here describes it — but the bar now
+ * DRAWS it as a fourth pill, first in the centred island, ahead of these three.
+ *
+ * The distinction is the whole point. A category owns a menu, a strata ground,
+ * an entry list and a panel; the model above is what supplies all four. Now
+ * owns none of them: it is a plain link to the desk, with no menu, no
+ * `aria-haspopup` and no hover intent. It shares the pill shape and the active
+ * liseré with its neighbours because it is a peer DESTINATION, not because it
+ * is a peer category — and it is drawn in the bar rather than declared here so
+ * that `activeNavCategory` keeps returning `null` on `/`, which is what stops
+ * the three real bubbles from lighting up on the desk.
  *
  * TWO KINDS OF UNREACHABLE ENTRY, and they are different on purpose:
  *
@@ -221,7 +230,8 @@ export function isNavEntryActive(
  * The category the current route belongs to, or `null`.
  *
  * `null` on the desk is CORRECT and load-bearing: "Now" is not a category, so
- * no bubble carries a border there.
+ * no CATEGORY bubble carries a border there. The bar lights its own Now pill
+ * from `pathname === "/"` and never from this function.
  */
 export function activeNavCategory(
   pathname: string,

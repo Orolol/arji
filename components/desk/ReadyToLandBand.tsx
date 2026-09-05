@@ -124,7 +124,7 @@ export function ReadyToLandBand({
               disabled={!onOpenTicket}
               onClick={(event) => onOpenTicket?.(row.epicId, event)}
               className={cn(
-                "line-clamp-1 min-w-0 flex-1 cursor-pointer border-0 bg-transparent p-0 text-left",
+                "line-clamp-1 min-w-0 flex-1 border-0 bg-transparent p-0 text-left",
                 "font-sans text-[13px] font-medium text-foreground",
                 "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                 "disabled:cursor-default",

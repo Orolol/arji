@@ -77,7 +77,7 @@ describe("0048_mcp_servers — migration bookkeeping", () => {
     expect(entry?.when).toBe(when);
   });
 
-  it("keeps the journal strictly increasing, with this branch at the tail", () => {
+  it("keeps the journal strictly increasing, with 0049 right after 0048", () => {
     // Drizzle keeps ONE high-water mark and applies only migrations strictly
     // above it, so equality is a collision rather than valid ordering.
     const whens = journal.entries.map((e) => e.when);
@@ -85,13 +85,18 @@ describe("0048_mcp_servers — migration bookkeeping", () => {
     const idxs = journal.entries.map((e) => e.idx);
     expect(idxs.every((v, i) => i === 0 || v > idxs[i - 1])).toBe(true);
 
-    // The two migrations are adjacent and last, in order. 0049 creates indexes
-    // ON the table 0048 creates, so the relative order is load-bearing, not
-    // just tidy.
-    expect(journal.entries.slice(-2).map((e) => e.tag)).toEqual([
-      MIGRATION_TAG,
-      SCOPE_UNIQUE_TAG,
-    ]);
+    // The two migrations are adjacent, in order. 0049 creates indexes ON the
+    // table 0048 creates, so the relative order is load-bearing, not just tidy.
+    //
+    // Deliberately NOT "and last": that held only while this branch was the
+    // newest thing in the repo, and it failed the moment a later migration
+    // landed — reporting a collision that did not exist. What must be true is
+    // the dependency, and it is asserted positionally so an entry slipped
+    // BETWEEN them still fails.
+    const tags = journal.entries.map((e) => e.tag);
+    const create = tags.indexOf(MIGRATION_TAG);
+    expect(create).toBeGreaterThanOrEqual(0);
+    expect(tags[create + 1]).toBe(SCOPE_UNIQUE_TAG);
   });
 
   it("is a hand-written CREATE TABLE with no drizzle-kit snapshot", () => {

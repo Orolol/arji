@@ -34,14 +34,6 @@ vi.mock("@/components/github/GitHubConnectBanner", () => ({
   GitHubConnectBanner: () => <div data-testid="github-connect-banner" />,
 }));
 
-// The repo bar is covered by its own test; stub it here so the layout test
-// stays about the chrome and not about its pollers.
-vi.mock("@/components/layout/RepoStatusBar", () => ({
-  RepoStatusBar: ({ ownerRepo }: { ownerRepo: string | null }) => (
-    <div data-testid="repo-status-bar" data-owner-repo={ownerRepo ?? ""} />
-  ),
-}));
-
 import ProjectLayout from "@/app/projects/[projectId]/layout";
 
 describe("project layout chrome", () => {
@@ -247,19 +239,17 @@ describe("project layout chrome", () => {
     expect(screen.getByTestId("project-content")).toBeInTheDocument();
   });
 
-  it("mounts the repo bar on the board route only", async () => {
+  // The board no longer carries a repository footer at all: that surface
+  // moved to /projects/:id/git-sync as a stratum (see repo-strata-band).
+  // Pinned here because it used to reappear only on the board route, which is
+  // exactly what made it look intermittent.
+  it("mounts no repository bar, on the board route or anywhere else", async () => {
     await renderLayout();
+    expect(screen.queryByTestId("repo-status-bar")).not.toBeInTheDocument();
+    expect(document.querySelector(".bg-sidebar")).toBeNull();
 
-    expect(screen.getByTestId("repo-status-bar")).toHaveAttribute(
-      "data-owner-repo",
-      "owner/repo",
-    );
-  });
-
-  it("hides the repo bar on secondary pages", async () => {
     nav.pathname = "/projects/proj-1/sessions";
     await renderLayout();
-
     expect(screen.queryByTestId("repo-status-bar")).not.toBeInTheDocument();
   });
 });

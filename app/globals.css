@@ -449,4 +449,23 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* Tailwind v4 dropped `cursor: pointer` from the preflight <button> reset,
+     which is why the whole redesign shipped with the default arrow: a CTA was
+     indistinguishable from plain text on hover.
+
+     Restored here rather than on ~24 individual controls. The Piscine
+     primitives state the rule explicitly in their own recipes (that is their
+     contract, and their tests assert it); this base rule is what catches the
+     bespoke chromeless buttons, the Radix triggers and anything added later,
+     without a `cursor-pointer` patch at every call site.
+
+     `:not(:disabled)` keeps the hand off a dead control, and base-layer rules
+     lose to utilities — so `cursor-not-allowed`, `cursor-default` and friends
+     still win wherever a caller means them. */
+  button:not(:disabled):not([aria-disabled="true"]),
+  [role="button"]:not(:disabled):not([aria-disabled="true"]),
+  summary {
+    cursor: pointer;
+  }
 }

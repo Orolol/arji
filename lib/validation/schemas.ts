@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isAgentProvider } from "@/lib/agent-config/constants";
 import { MAX_TICKET_IMAGES } from "@/lib/uploads/image-attachments";
+import { DESK_DISMISSAL_KINDS } from "@/lib/control-desk/aggregate";
 
 // --- Project schemas ---
 
@@ -269,6 +270,29 @@ export const createReleaseSchema = z.object({
 
 export const markInboxReadSchema = z.object({
   epicId: z.string().min(1, "epicId is required"),
+});
+
+// --- Desk schemas ---
+
+/**
+ * Dismissing a "Your turn" signal.
+ *
+ * `signalAt` is the timestamp of the signal being waved off — the row's own
+ * `askedAt` / `failedAt` / `at`, echoed back by the client. It is validated as
+ * a PARSEABLE INSTANT rather than with `z.iso.datetime()`: the three families
+ * read from different columns and the older ones store timestamps without a
+ * trailing `Z`, which the strict ISO check rejects. Null is legitimate — a
+ * session that never recorded an `ended_at` still produces a row the user must
+ * be able to dismiss.
+ */
+export const dismissDeskSignalSchema = z.object({
+  epicId: z.string().min(1, "epicId is required"),
+  kind: z.enum(DESK_DISMISSAL_KINDS, "kind must be one of asks, failed, conflict"),
+  signalAt: z
+    .string()
+    .refine((v) => !Number.isNaN(Date.parse(v)), "signalAt must be a valid timestamp")
+    .nullable()
+    .optional(),
 });
 
 // --- Sync schemas ---

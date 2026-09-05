@@ -21,7 +21,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { RepoStatusBar } from "@/components/layout/RepoStatusBar";
 
 /**
  * The project shell — frame 13a's retrofit.
@@ -155,10 +154,7 @@ export default function ProjectLayout({
             */}
             <DropdownMenuTrigger
               data-testid="header-new-button"
-              className={cn(
-                pillButtonVariants({ variant: "filled", size: "md" }),
-                "cursor-pointer",
-              )}
+              className={pillButtonVariants({ variant: "filled", size: "md" })}
             >
               <Plus size={13} aria-hidden="true" />
               New
@@ -233,15 +229,6 @@ export default function ProjectLayout({
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 overflow-auto">{children}</div>
       </div>
-
-      {isBoard && (
-        <RepoStatusBar
-          projectId={projectId}
-          ownerRepo={projectSummary.githubOwnerRepo}
-          gitRepoPath={projectSummary.gitRepoPath}
-          defaultBranch={projectSummary.defaultBranch}
-        />
-      )}
     </div>
   );
 }

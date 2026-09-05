@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
+import { RepoStrataBand } from "@/components/github/RepoStrataBand";
 import { SessionPicker } from "@/components/shared/SessionPicker";
 import {
   Tooltip,
@@ -80,6 +81,38 @@ export default function GitSyncPage() {
   const params = useParams();
   const projectId = params.projectId as string;
 
+  /**
+   * The project record, for the band below: ahead/behind must be measured
+   * against the STORED default branch (the one worktrees are cut from), not
+   * against whatever branch this page currently has typed in its input.
+   */
+  const [project, setProject] = useState<{
+    gitRepoPath: string | null;
+    githubOwnerRepo: string | null;
+    defaultBranch: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/projects/${projectId}`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled || !json?.data) return;
+        setProject({
+          gitRepoPath: json.data.gitRepoPath ?? null,
+          githubOwnerRepo: json.data.githubOwnerRepo ?? null,
+          defaultBranch: json.data.defaultBranch ?? null,
+        });
+      })
+      .catch(() => {
+        // The band renders its own "not connected" state; a failed project
+        // read must not blank the rest of the page.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
   const [remote, setRemote] = useState("origin");
   const [branch, setBranch] = useState("");
   const [ahead, setAhead] = useState(0);
@@ -102,7 +135,31 @@ export default function GitSyncPage() {
   const [pulling, setPulling] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * The error line, plus WHERE it came from.
+   *
+   * On a project with no local repository the status read cannot succeed, and
+   * the Repository band above already says so in prose — so that one failure
+   * is not repeated in coral underneath it. Every other error is the answer to
+   * something the user asked for and is always shown.
+   *
+   * The provenance is bundled with the message rather than kept beside it: as
+   * two independent `useState`s the flag survived an action's `setError(null)`
+   * and went on suppressing the action's own failure. Set them together and
+   * that cannot drift — `setError` is the ordinary path and always clears the
+   * flag; only `refreshStatus` reaches for `setStatusReadError`.
+   */
+  const [errorState, setErrorState] = useState<{
+    message: string | null;
+    fromStatusRead: boolean;
+  }>({ message: null, fromStatusRead: false });
+  const error = errorState.message;
+  const setError = useCallback((message: string | null) => {
+    setErrorState({ message, fromStatusRead: false });
+  }, []);
+  const setStatusReadError = useCallback((message: string) => {
+    setErrorState({ message, fromStatusRead: true });
+  }, []);
   const [namedAgentId, setNamedAgentId] = useState<string | null>(null);
   const [resumeSessionId, setResumeSessionId] = useState<string | undefined>(undefined);
   const { agents } = useNamedAgentsList();
@@ -135,7 +192,7 @@ export default function GitSyncPage() {
       const res = await fetch(statusUrl);
       const json = (await res.json()) as StatusResponse;
       if (!res.ok || !json.data) {
-        setError(json.error || "Failed to fetch git status");
+        setStatusReadError(json.error || "Failed to fetch git status");
         return;
       }
 
@@ -159,11 +216,14 @@ export default function GitSyncPage() {
       setLastFetchedAt(json.data.lastFetchedAt ?? null);
       setLastFetchError(json.data.lastFetchError ?? null);
     } catch {
-      setError("Failed to fetch git status");
+      setStatusReadError("Failed to fetch git status");
     } finally {
       setLoadingStatus(false);
     }
-  }, [statusUrl]);
+    // Both setters are useCallback([]) and so never change; listed because the
+    // exhaustive-deps rule cannot see that, and a silenced warning here is how
+    // a real missing dependency gets in later.
+  }, [statusUrl, setError, setStatusReadError]);
 
   useEffect(() => {
     refreshStatus();
@@ -196,6 +256,8 @@ export default function GitSyncPage() {
   async function reportMissingRemote(json: { error?: string }) {
     showToast("error", "No git remote configured");
     await refreshStatus();
+    // The user pressed Push; this is their answer, not the status read's, and
+    // `setError` marks it as such.
     setError(json?.error || "No git remote is configured for this repository.");
   }
 
@@ -372,7 +434,22 @@ export default function GitSyncPage() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 gap-[22px] overflow-y-auto px-[26px] pb-[26px]">
+      <div className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-y-auto px-[26px] pb-[26px]">
+        {/*
+          Repository state, relocated from the pre-redesign RepoStatusBar that
+          used to hang under the project board. Full width above the two
+          columns: it is the headline of this page.
+        */}
+        {project ? (
+          <RepoStrataBand
+            projectId={projectId}
+            ownerRepo={project.githubOwnerRepo}
+            gitRepoPath={project.gitRepoPath}
+            defaultBranch={project.defaultBranch}
+          />
+        ) : null}
+
+        <div className="flex min-h-0 gap-[22px]">
         <div className="flex min-w-0 flex-1 flex-col gap-[18px]">
           <div className="flex flex-col gap-[18px] rounded-[12px] border border-border bg-card p-[20px]">
             <div className="flex flex-wrap gap-[16px]">
@@ -547,7 +624,22 @@ export default function GitSyncPage() {
             </div>
 
             {message && <p className="text-[13px] text-agent">{message}</p>}
-            {error && <p className="text-[13px] text-destructive">{error}</p>}
+            {/*
+              Missing configuration is not an error. With no repository path
+              the status read cannot succeed, and the band above already names
+              what is missing and how to supply it; repeating that in coral
+              would make an unconfigured project look broken.
+
+              ONLY the status read is silenced. An action's failure is the
+              user's own request answering back — a mid-session 409 from Push
+              on a repository whose remote disappeared has to be visible, and
+              suppressing every error on an unconfigured project swallowed it.
+            */}
+            {error && !(errorState.fromStatusRead && project?.gitRepoPath === null) && (
+              <p data-testid="git-sync-error" className="text-[13px] text-destructive">
+                {error}
+              </p>
+            )}
           </div>
 
           {conflictDiffs.length > 0 && (
@@ -658,6 +750,7 @@ export default function GitSyncPage() {
             </span>
           </div>
         </aside>
+        </div>
       </div>
 
       {toasts.length > 0 && (

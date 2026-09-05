@@ -110,7 +110,7 @@ export function LiveSessionCard({
         disabled={!session.epicId || !onOpenTicket}
         onClick={() => session.epicId && onOpenTicket?.(session.epicId)}
         className={cn(
-          "line-clamp-2 min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left",
+          "line-clamp-2 min-w-0 border-0 bg-transparent p-0 text-left",
           "font-sans text-[14.5px] leading-[1.35] font-semibold text-foreground",
           "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
           "disabled:cursor-default",

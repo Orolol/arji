@@ -5,6 +5,7 @@ import {
   real,
   index,
   uniqueIndex,
+  primaryKey,
   check,
   AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
@@ -872,6 +873,43 @@ export const ticketReadCursors = sqliteTable("ticket_read_cursors", {
 
 export type TicketReadCursor = typeof ticketReadCursors.$inferSelect;
 export type NewTicketReadCursor = typeof ticketReadCursors.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Desk dismissals
+// ---------------------------------------------------------------------------
+
+/**
+ * A "Your turn" signal the user has waved off.
+ *
+ * The three coral families are DERIVED, never marked: an asks-you row lives as
+ * long as `isAwaitingReply` holds, a failure until a newer session supersedes
+ * it, a conflict until it is resolved. So there was no way to say "I handled
+ * this elsewhere" — hence this table.
+ *
+ * `signal_at` is the timestamp of the DISMISSED signal, not the moment of the
+ * dismissal: the row stays hidden only while the epic's current signal is no
+ * newer than the one waved off. A new question, a new failure or a fresh
+ * conflict on the same epic therefore comes back. A permanent dismissal would
+ * hide real failures, which is exactly what this stratum exists to prevent.
+ *
+ * No FK, on the same reasoning as `ticket_read_cursors` above: this is pure
+ * bookkeeping, and a row left behind by a deleted epic is inert.
+ */
+export const deskDismissals = sqliteTable(
+  "desk_dismissals",
+  {
+    epicId: text("epic_id").notNull(),
+    /** One of `asks` | `failed` | `conflict`. */
+    kind: text("kind").notNull(),
+    /** ISO timestamp of the signal that was waved off. */
+    signalAt: text("signal_at"),
+    dismissedAt: text("dismissed_at").notNull(), // ISO timestamp
+  },
+  (table) => [primaryKey({ columns: [table.epicId, table.kind] })],
+);
+
+export type DeskDismissal = typeof deskDismissals.$inferSelect;
+export type NewDeskDismissal = typeof deskDismissals.$inferInsert;
 
 // ---------------------------------------------------------------------------
 // Provider usage snapshots

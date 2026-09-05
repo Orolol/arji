@@ -139,9 +139,6 @@ vi.mock("@/components/chat/UnifiedChatPanel", () => ({
   ),
 }));
 
-vi.mock("@/components/monitor/AgentMonitor", () => ({
-  AgentMonitor: () => null,
-}));
 
 vi.mock("@/components/auto-mode/AutoModeToggle", () => ({
   AutoModeToggle: () => null,

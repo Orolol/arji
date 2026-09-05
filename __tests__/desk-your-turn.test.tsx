@@ -9,6 +9,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { relativeAge } from "@/components/desk/AttentionRow";
 import { YourTurnBand } from "@/components/desk/YourTurnBand";
@@ -264,5 +265,229 @@ describe("row order", () => {
     expect(stamps[0]).toContain("ASKS");
     expect(stamps[1]).toContain("FAILED");
     expect(stamps[2]).toContain("CONFLICT");
+  });
+});
+
+/**
+ * Give the coral stratum's scroll container a fold, and its rows a height.
+ *
+ * jsdom has no layout: every height is 0, so the band measures "nothing
+ * overflows". These tests install the one thing a viewport would provide —
+ * a container whose rect ends at `foldPx` and rows of `ROW_HEIGHT` each.
+ */
+const ROW_HEIGHT = 96;
+
+function stubLayout(foldPx: number) {
+  const list = screen.getByTestId("desk-your-turn-rows");
+  const rows = Array.from(list.children) as HTMLElement[];
+
+  Object.defineProperty(list, "clientHeight", { value: foldPx, configurable: true });
+  Object.defineProperty(list, "scrollHeight", {
+    value: rows.length * ROW_HEIGHT,
+    configurable: true,
+  });
+  list.getBoundingClientRect = () => ({ top: 0, bottom: foldPx }) as DOMRect;
+  rows.forEach((row, index) => {
+    row.getBoundingClientRect = () =>
+      ({
+        top: index * ROW_HEIGHT,
+        bottom: (index + 1) * ROW_HEIGHT,
+      }) as DOMRect;
+  });
+  // Re-run the component's measure(): the effect subscribes to scroll.
+  fireEvent.scroll(list);
+}
+
+/**
+ * The coral stratum used to spread one or two rows over 40vh (`justify-around`)
+ * and crush READY TO LAND / UP NEXT underneath. It now sizes to its content and
+ * admits when it is hiding rows.
+ */
+describe("band sizing", () => {
+  const band = () => document.querySelector('[data-slot="strata-band"]');
+
+  function manyAsks(n: number): DeskAwaitingReply[] {
+    return Array.from({ length: n }, (_, i) =>
+      asks({ epicId: `e-${i}`, title: `Ticket ${i}` }),
+    );
+  }
+
+  it("keeps an empty band folded to its header — no floor, no filler", () => {
+    renderBand();
+    expect(screen.queryByTestId("desk-your-turn-rows")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("desk-your-turn-overflow")).not.toBeInTheDocument();
+    // Never grows: WORKING is the desk's only growing band.
+    expect(band()!.className).toContain("shrink-0");
+    expect(band()!.className).not.toContain("flex-1");
+  });
+
+  it("stops spreading rows over the whole band", () => {
+    renderBand({ awaitingReply: [asks()] });
+    const rows = screen.getByTestId("desk-your-turn-rows");
+    expect(rows.className).toContain("justify-start");
+    // The regression this whole story is about.
+    expect(rows.className).not.toContain("justify-around");
+    expect(rows.className).not.toContain("flex-1");
+  });
+
+  it("caps at 30vh and scrolls rather than pushing WORKING off screen", () => {
+    renderBand({ awaitingReply: manyAsks(6) });
+    expect(band()!.className).toContain("max-h-[30vh]");
+    expect(band()!.className).not.toContain("max-h-[40vh]");
+    expect(screen.getByTestId("desk-your-turn-rows").className).toContain("overflow-y-auto");
+  });
+
+  it("stays quiet when nothing is cut off", () => {
+    renderBand({ awaitingReply: manyAsks(3) });
+    stubLayout(4 * ROW_HEIGHT);
+    expect(screen.queryByTestId("desk-your-turn-overflow")).not.toBeInTheDocument();
+  });
+
+  it("counts the hidden rows in the overflow line", () => {
+    renderBand({ awaitingReply: manyAsks(6) });
+    stubLayout(3 * ROW_HEIGHT);
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+3 de plus");
+  });
+
+  it("counts overflow across all three families, not just one", () => {
+    // Four rows spanning the three families; the fold sits after three, so the
+    // count must span families rather than counting one list.
+    renderBand({
+      awaitingReply: [asks({ epicId: "a1" }), asks({ epicId: "a2" })],
+      failed: [failure({ epicId: "f1" })],
+      conflicts: [conflict({ epicId: "c1" })],
+    });
+    stubLayout(3 * ROW_HEIGHT);
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+1 de plus");
+  });
+});
+
+/**
+ * Dismissing a signal.
+ *
+ * The band hands the row's OWN timestamp back up, not the moment of the click:
+ * that is what lets the server bring the row back when a newer question,
+ * failure or conflict lands on the same epic.
+ */
+describe("dismiss", () => {
+  it("offers the action on all three families", () => {
+    renderBand({
+      awaitingReply: [asks()],
+      failed: [failure()],
+      conflicts: [conflict()],
+      onDismiss: vi.fn(),
+    });
+    expect(screen.getAllByTestId("desk-dismiss")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Écarter cette question" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Écarter cet échec" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Écarter ce conflit" })).toBeInTheDocument();
+  });
+
+  it("stays hidden when the host wires no dismissal store", () => {
+    renderBand({ awaitingReply: [asks()] });
+    expect(screen.queryByTestId("desk-dismiss")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["asks", "Écarter cette question", "e1", "2026-08-28T09:00:00"],
+    ["conflict", "Écarter ce conflit", "e3", "2026-08-28T08:00:00"],
+  ])("reports the %s signal's own timestamp", (kind, label, epicId, signalAt) => {
+    const onDismiss = vi.fn();
+    renderBand({
+      awaitingReply: [asks({ askedAt: "2026-08-28T09:00:00" })],
+      conflicts: [conflict({ at: "2026-08-28T08:00:00" })],
+      onDismiss,
+    });
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    expect(onDismiss).toHaveBeenCalledWith(kind, { epicId, signalAt });
+  });
+
+  it("reports the failure's failedAt", () => {
+    const onDismiss = vi.fn();
+    const item = failure({ failedAt: "2026-08-28T07:30:00" });
+    renderBand({ failed: [item], onDismiss });
+    fireEvent.click(screen.getByRole("button", { name: "Écarter cet échec" }));
+    expect(onDismiss).toHaveBeenCalledWith("failed", {
+      epicId: item.epicId,
+      signalAt: "2026-08-28T07:30:00",
+    });
+  });
+
+  it("is reachable and operable from the keyboard", async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    renderBand({ awaitingReply: [asks()], onDismiss });
+
+    const button = screen.getByRole("button", { name: "Écarter cette question" });
+    button.focus();
+    expect(button).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+
+    await user.keyboard(" ");
+    expect(onDismiss).toHaveBeenCalledTimes(2);
+  });
+
+  it("goes quiet while the row has a mutation in flight", () => {
+    renderBand({
+      awaitingReply: [asks()],
+      pendingIds: new Set(["e1"]),
+      onDismiss: vi.fn(),
+    });
+    expect(screen.getByRole("button", { name: "Écarter cette question" })).toBeDisabled();
+  });
+});
+
+/**
+ * The overflow marker states a COUNT, so the count has to be true.
+ *
+ * It used to be `count - 3` on the assumption that three rows fit. jsdom has no
+ * layout, so these tests install one: a fold at a chosen height and rows of a
+ * known height, which is exactly what a viewport gives the real component.
+ */
+describe("YourTurnBand overflow marker", () => {
+  function renderRows(n: number, foldPx: number) {
+    const rows = Array.from({ length: n }, (_, i) =>
+      asks({ epicId: `e${i}`, readableId: `PXB-${i}` }),
+    );
+    render(
+      <YourTurnBand
+        awaitingReply={rows}
+        failed={[]}
+        conflicts={[]}
+        projectsById={projectsById}
+        onReply={vi.fn()}
+        onSendToDev={vi.fn()}
+        onRetry={vi.fn()}
+        onOpenLog={vi.fn()}
+        onResolveConflict={vi.fn()}
+        onOpenDiff={vi.fn()}
+      />,
+    );
+    stubLayout(foldPx);
+  }
+
+  it("counts the rows past the fold on a short viewport", () => {
+    // 30vh of 950px ≈ 285px ≈ 3 rows of 96px. 6 rows ⇒ 3 hidden.
+    renderRows(6, 3 * ROW_HEIGHT);
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+3 de plus");
+  });
+
+  it("says +2, not +3, on the taller viewport where a fourth row fits", () => {
+    // The measured regression: at 1440x1300 the band grows to ~390px and shows
+    // a fourth row, but the old fixed VISIBLE_ROWS = 3 still claimed "+3".
+    renderRows(6, 4 * ROW_HEIGHT);
+    expect(screen.getByTestId("desk-your-turn-overflow")).toHaveTextContent("+2 de plus");
+  });
+
+  it("stays silent when every row is on screen", () => {
+    renderRows(3, 4 * ROW_HEIGHT);
+    expect(screen.queryByTestId("desk-your-turn-overflow")).toBeNull();
+  });
+
+  it("keeps the marker outside the scroll container", () => {
+    renderRows(6, 3 * ROW_HEIGHT);
+    const marker = screen.getByTestId("desk-your-turn-overflow");
+    expect(screen.getByTestId("desk-your-turn-rows").contains(marker)).toBe(false);
   });
 });

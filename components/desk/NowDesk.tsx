@@ -4,13 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Infinity as InfinityIcon } from "lucide-react";
 
-import {
-  CheckMark,
-  Mono,
-  PillButton,
-  SurfaceCard,
-  projectTone,
-} from "@/components/piscine";
+import { PillButton, SurfaceCard, projectTone } from "@/components/piscine";
 import {
   Popover,
   PopoverContent,
@@ -19,6 +13,7 @@ import {
 import { useControlDesk } from "@/hooks/useControlDesk";
 import { useTicketOverlay } from "@/components/ticket/TicketOverlayProvider";
 import { buildRetryDispatch } from "@/lib/agent-sessions/retry-dispatch";
+import type { DeskDismissalKind } from "@/lib/control-desk/aggregate";
 import type {
   DeskAwaitingReply,
   DeskConflict,
@@ -27,6 +22,7 @@ import type {
 } from "@/lib/control-desk/types";
 import { cn } from "@/lib/utils";
 
+import { FullAutoProjectRow } from "./FullAutoProjectRow";
 import { DeskComposer } from "./DeskComposer";
 import { DeskProjectMenu } from "./DeskProjectMenu";
 import { ReadyToLandBand } from "./ReadyToLandBand";
@@ -342,6 +338,43 @@ export function NowDesk({
     [markPending, namedAgentId, raise, reportFailure, changed],
   );
 
+  /**
+   * Dismiss a "Your turn" signal.
+   *
+   * The optimistic hide goes through `refresh()` rather than local state on
+   * purpose: `useControlDesk`'s requestSeq/mutationSeq guards make the refresh
+   * win against the in-flight 4s poll, whereas a local hidden-set would fight
+   * that poll and flicker the row back.
+   *
+   * This writes no ticket status and no activity entry — it is bookkeeping.
+   */
+  const handleDismiss = React.useCallback(
+    async (
+      kind: DeskDismissalKind,
+      item: { epicId: string; signalAt: string | null },
+    ) => {
+      markPending(item.epicId, true);
+      try {
+        const res = await fetch("/api/desk/dismiss", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ epicId: item.epicId, kind, signalAt: item.signalAt }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body.error) {
+          raise("error", "Impossible d'écarter ce signal");
+          return;
+        }
+        changed();
+      } catch {
+        raise("error", "Impossible d'écarter ce signal");
+      } finally {
+        markPending(item.epicId, false);
+      }
+    },
+    [markPending, raise, changed],
+  );
+
   const handleResolveConflict = React.useCallback(
     async (item: DeskConflict) => {
       markPending(item.epicId, true);
@@ -529,6 +562,80 @@ export function NowDesk({
     [raise, reportFailure, changed],
   );
 
+  /**
+   * Effective Full Auto agents per project, as the auto-mode route resolves
+   * them. Read only while the popover is open — one request per project, on
+   * open, not on the 4s desk poll.
+   */
+  const [autoPopoverOpen, setAutoPopoverOpen] = React.useState(false);
+  const [autoAgents, setAutoAgents] = React.useState<
+    Record<string, { buildAgent: string | null; reviewAgent: string | null }>
+  >({});
+
+  React.useEffect(() => {
+    if (!autoPopoverOpen || projects.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const entries = await Promise.all(
+        projects.map(async (project) => {
+          try {
+            const res = await fetch(`/api/projects/${project.id}/auto-mode`);
+            const json = await res.json();
+            return [
+              project.id,
+              {
+                buildAgent: json?.data?.buildAgent ?? null,
+                reviewAgent: json?.data?.reviewAgent ?? null,
+              },
+            ] as const;
+          } catch {
+            return [project.id, { buildAgent: null, reviewAgent: null }] as const;
+          }
+        }),
+      );
+      if (!cancelled) setAutoAgents(Object.fromEntries(entries));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [autoPopoverOpen, projects]);
+
+  /**
+   * Write ONE per-project override. The PUT route keys off `"buildAgent" in
+   * payload`, so a body carrying only the agent leaves the enabled flag
+   * untouched — the on/off box and these pills cannot clobber each other.
+   */
+  const setAutoModeAgent = React.useCallback(
+    async (
+      targetProjectId: string,
+      role: "buildAgent" | "reviewAgent",
+      namedAgentId: string | null,
+    ) => {
+      try {
+        const res = await fetch(`/api/projects/${targetProjectId}/auto-mode`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [role]: namedAgentId }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body?.error) {
+          raise("error", "Failed to change the Full Auto agent");
+          return;
+        }
+        setAutoAgents((current) => ({
+          ...current,
+          [targetProjectId]: {
+            buildAgent: body?.data?.buildAgent ?? null,
+            reviewAgent: body?.data?.reviewAgent ?? null,
+          },
+        }));
+      } catch {
+        raise("error", "Failed to change the Full Auto agent");
+      }
+    },
+    [raise],
+  );
+
   const toggleAutoMode = React.useCallback(
     async (targetProjectId: string, enabled: boolean) => {
       try {
@@ -584,7 +691,7 @@ export function NowDesk({
                 switches rather than pretending to be one toggle. The bar's
                 "Auto" pill is the read-only rollup and leads to Réglages; this
                 is where the switches actually live. */}
-            <Popover>
+            <Popover open={autoPopoverOpen} onOpenChange={setAutoPopoverOpen}>
               <PopoverTrigger asChild>
                 <PillButton
                   variant="filled"
@@ -597,7 +704,7 @@ export function NowDesk({
               </PopoverTrigger>
               <PopoverContent
                 align="end"
-                className="w-[260px] rounded-[12px] border-[1.5px] border-border bg-card p-2 shadow-none"
+                className="w-[320px] rounded-[12px] border-[1.5px] border-border bg-card p-2 shadow-none"
               >
                 <div className="flex flex-col gap-1">
                   {/*
@@ -606,30 +713,19 @@ export function NowDesk({
                     here: Tailwind's preflight sets `border: 0` on inputs, so the
                     `border-border` it carried never rendered, and its `rounded`
                     was off the 10/12/14/9999 scale the system allows.
+
+                    The row also carries the two per-project agent overrides —
+                    the only place they can be set, since /settings writes the
+                    bare workspace keys. See FullAutoProjectRow.
                   */}
                   {projects.map((project) => (
-                    <button
+                    <FullAutoProjectRow
                       key={project.id}
-                      type="button"
-                      role="checkbox"
-                      aria-checked={project.autoModeEnabled}
-                      onClick={() =>
-                        void toggleAutoMode(project.id, !project.autoModeEnabled)
-                      }
-                      className={cn(
-                        "flex w-full cursor-pointer items-center gap-2 rounded-[10px] px-2 py-[6px] text-left",
-                        "outline-none hover:bg-muted",
-                        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                      )}
-                    >
-                      <CheckMark checked={project.autoModeEnabled} />
-                      <span className="min-w-0 flex-1 truncate font-sans text-[12.5px] text-foreground">
-                        {project.name}
-                      </span>
-                      <Mono size={10.5} tone="muted">
-                        {project.activeAgents > 0 ? `${project.activeAgents} live` : "—"}
-                      </Mono>
-                    </button>
+                      project={project}
+                      onToggle={toggleAutoMode}
+                      onSetAgent={setAutoModeAgent}
+                      agents={autoAgents[project.id]}
+                    />
                   ))}
                 </div>
               </PopoverContent>
@@ -653,6 +749,7 @@ export function NowDesk({
         projectsById={projectsById}
         onOpenTicket={handleOpenTicket}
         onStopSession={handleStopSession}
+        projectId={projectId ?? undefined}
       />
 
       <YourTurnBand
@@ -669,9 +766,15 @@ export function NowDesk({
         }
         onResolveConflict={handleResolveConflict}
         onOpenDiff={(item) => handleOpenTicket(item.epicId)}
+        onDismiss={handleDismiss}
       />
 
-      <div className="mx-[14px] mt-[10px] grid shrink-0 grid-cols-2 gap-3">
+      {/*
+        A floor, not a growth rule: the grid stays `shrink-0` (WORKING remains
+        the desk's only growing band) but can no longer be squeezed to nothing
+        by a tall YOUR TURN above it.
+      */}
+      <div className="mx-[14px] mt-[10px] grid min-h-[168px] shrink-0 grid-cols-2 gap-3">
         <ReadyToLandBand
           rows={data?.readyToLand ?? []}
           heldBackCount={data?.heldBackCount ?? 0}

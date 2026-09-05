@@ -76,7 +76,7 @@ export function SelectPill({
           disabled={disabled}
           className={cn(
             "flex h-[30px] shrink-0 items-center gap-[7px] rounded-full border-0 px-3",
-            "leading-none shadow-none outline-none",
+            "cursor-pointer leading-none shadow-none outline-none",
             "transition-[background-color,opacity] duration-150 motion-reduce:transition-none",
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
             "disabled:pointer-events-none disabled:opacity-50",
