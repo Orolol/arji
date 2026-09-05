@@ -464,7 +464,16 @@ export default function SessionsPage() {
             value={ticketQuery}
             onChange={(e) => setTicketQuery(e.target.value)}
             placeholder="Filter by ticket"
-            className="w-full min-w-0 bg-transparent text-[12.5px] text-foreground placeholder:text-muted-foreground focus:outline-none sm:w-[150px]"
+            data-testid="sessions-ticket-filter"
+            // There is no field box here — the label is a bare icon + input
+            // row — so the ring belongs to the input itself. It replaces a
+            // focus:outline-none that removed the browser's default and put
+            // nothing in its place (B-arij-203).
+            className={cn(
+              "w-full min-w-0 bg-transparent text-[12.5px] text-foreground placeholder:text-muted-foreground sm:w-[150px]",
+              "outline-none",
+              "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
+            )}
           />
         </label>
       </div>

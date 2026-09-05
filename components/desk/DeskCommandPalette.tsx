@@ -225,7 +225,16 @@ export function DeskCommandPalette({
                 onClose();
               }
             }}
-            className="min-w-0 flex-1 border-0 bg-transparent p-0 font-sans text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
+            // The ring is the input's own, not the field box's: an ancestor
+            // lighting up on focus-within is invisible to the sweep in
+            // __tests__/focus-ring-paints.test.tsx, which reads one element's
+            // classes. Positive offset, because the box's px-3 py-2 leaves
+            // room for it and p-0 leaves none inside.
+            className={cn(
+              "min-w-0 flex-1 border-0 bg-transparent p-0 font-sans text-[13px] text-foreground",
+              "outline-none placeholder:text-muted-foreground",
+              "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
+            )}
           />
         </div>
 
