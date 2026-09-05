@@ -389,7 +389,7 @@ const AGENT_TOOLS = [
     },
   },
   // --- Board refinement -------------------------------------------------
-  // These five reshape the planning half of the board. Every one requires a
+  // These reshape the planning half of the board. Every one requires a
   // `reason`: Arij records it in the ticket's activity log, so a ticket the
   // agent moved always explains itself. They are refused outside the
   // Backlog and To do columns.
@@ -551,6 +551,137 @@ const AGENT_TOOLS = [
         },
       },
       required: ["ticket_id", "status", "reason"],
+      additionalProperties: false,
+    },
+  },
+  // These three CREATE or DESTROY board rows and are answered only for a
+  // board refinement pass — every other session gets 403 REFINEMENT_ONLY
+  // from the route, and claude-code spawns are not even offered them (see
+  // AGENT_TYPE_EXCLUSIVE_TOOL_NAMES in lib/claude/mcp-injection.ts).
+  {
+    name: "merge_tickets",
+    description:
+      "Fold one or more Backlog/To do tickets into a single one that can be built in one go. The target survives; every source ticket is absorbed (its user stories, the user's comments and its screenshots move to the target, its dependency edges are re-pointed, its full text is recorded on the target) and then PERMANENTLY DELETED. Pass `title`/`description` to rewrite the surviving ticket so it covers the merged scope. Refused for any ticket that already has agent session history.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticket_id: {
+          type: "string",
+          minLength: 1,
+          description: "The surviving ticket everything is merged INTO.",
+        },
+        source_ticket_ids: {
+          type: "array",
+          minItems: 1,
+          maxItems: 8,
+          items: { type: "string", minLength: 1 },
+          description:
+            "The tickets to absorb and delete. Must be in Backlog or To do, and must not include the target.",
+        },
+        reason: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
+          description:
+            "Required justification — why these are one piece of work. Recorded on the surviving ticket.",
+        },
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description:
+            "Optional new title for the merged ticket. Set it when the target's own title no longer describes the combined scope.",
+        },
+        description: {
+          type: "string",
+          maxLength: 20000,
+          description:
+            "Optional new description for the merged ticket, covering the whole scope.",
+        },
+      },
+      required: ["ticket_id", "source_ticket_ids", "reason"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "discard_ticket",
+    description:
+      "PERMANENTLY DELETE a Backlog/To do ticket that is no longer worth doing. There is no undo and no archive: the ticket, its stories and its comments go. Its full text is preserved in the pass's report so the user can restore it by hand. Refused when the ticket has agent session history, and refused while another ticket still depends on it (drop those edges with remove_dependency first). Use merge_tickets instead when the work is a duplicate rather than obsolete.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticket_id: {
+          type: "string",
+          minLength: 1,
+          description: "The ticket to delete.",
+        },
+        reason: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
+          description:
+            "Required justification — why this work no longer needs doing. It is the record the user reads.",
+        },
+      },
+      required: ["ticket_id", "reason"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "create_planning_ticket",
+    description:
+      "Add a ticket to Backlog (or To do) for work the board is missing. Refused when an undelivered ticket already carries the same title, and capped at 10 per pass. Use it for a real gap you found while reading the board — not to restate a ticket that exists.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: 200 },
+        description: {
+          type: "string",
+          maxLength: 20000,
+          description: "What the work is and why it is needed.",
+        },
+        type: {
+          type: "string",
+          enum: ["feature", "bug"],
+          description: "Defaults to feature.",
+        },
+        priority: {
+          type: "integer",
+          enum: [0, 1, 2, 3],
+          // Must stay in sync with PRIORITY_LABELS (lib/types/kanban.ts).
+          description: "0 low, 1 medium, 2 high, 3 critical. Defaults to 0.",
+        },
+        status: {
+          type: "string",
+          enum: ["backlog", "todo"],
+          description:
+            "Which planning column to create it in. Defaults to backlog.",
+        },
+        user_stories: {
+          type: "array",
+          maxItems: 20,
+          description:
+            "Optional stories. Give each one acceptance criteria, or the ticket lands as unready as the ones you are sending back.",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string", minLength: 1, maxLength: 300 },
+              description: { type: "string", maxLength: 4000 },
+              acceptance_criteria: { type: "string", maxLength: 8000 },
+            },
+            required: ["title"],
+            additionalProperties: false,
+          },
+        },
+        reason: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
+          description:
+            "Required justification — what gap on the board this fills. Recorded in the new ticket's activity log.",
+        },
+      },
+      required: ["title", "reason"],
       additionalProperties: false,
     },
   },

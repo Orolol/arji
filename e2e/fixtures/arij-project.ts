@@ -393,7 +393,11 @@ export async function epicFindings(
  * `build` is the epic build route's, `review_feature` the one
  * `REVIEW_TYPE_TO_AGENT_TYPE` maps the dialog's default review type to.
  */
-export const PINNED_AGENT_TYPES = ["build", "review_feature"] as const;
+export const PINNED_AGENT_TYPES = [
+  "build",
+  "review_feature",
+  "refinement",
+] as const;
 
 /**
  * Pins this project's dispatches to claude-code.

@@ -159,6 +159,9 @@ describe("buildClaudeArgs — MCP config injection", () => {
       "mcp__arij__add_dependency",
       "mcp__arij__remove_dependency",
       "mcp__arij__promote_ticket",
+      "mcp__arij__merge_tickets",
+      "mcp__arij__discard_ticket",
+      "mcp__arij__create_planning_ticket",
     ]);
   });
 
@@ -247,13 +250,46 @@ describe("buildClaudeArgs — MCP config injection", () => {
 });
 
 describe("allowedToolNamesForAgentType", () => {
-  it("gives an ordinary agent type the full agent toolset", () => {
-    expect(allowedToolNamesForAgentType("build")).toEqual([
-      ...ARIJ_MCP_ALLOWED_TOOL_NAMES,
-    ]);
-    expect(allowedToolNamesForAgentType(null)).toEqual([
-      ...ARIJ_MCP_ALLOWED_TOOL_NAMES,
-    ]);
+  /**
+   * The agent toolset MINUS the three refinement-exclusive tools — what any
+   * ordinary agent type is offered. Spelled out rather than derived from
+   * `allowedToolNamesForAgentType` itself, so a bug in the narrowing cannot
+   * make this expectation agree with it.
+   */
+  const REFINEMENT_EXCLUSIVE = [
+    "mcp__arij__merge_tickets",
+    "mcp__arij__discard_ticket",
+    "mcp__arij__create_planning_ticket",
+  ];
+  const ORDINARY_AGENT_TOOLS = ARIJ_MCP_ALLOWED_TOOL_NAMES.filter(
+    (tool) => !REFINEMENT_EXCLUSIVE.includes(tool),
+  );
+
+  it("gives an ordinary agent type every tool except the refinement-exclusive ones", () => {
+    expect(allowedToolNamesForAgentType("build")).toEqual(ORDINARY_AGENT_TOOLS);
+    expect(allowedToolNamesForAgentType(null)).toEqual(ORDINARY_AGENT_TOOLS);
+  });
+
+  /**
+   * merge_tickets and discard_ticket permanently delete board rows and
+   * create_planning_ticket invents them. A build or review session has no
+   * business doing either, so they never reach its allowlist — and the
+   * routes refuse its token outright (requireRefinementSessionToken).
+   */
+  it("withholds the row-creating and row-destroying tools from every other agent type", () => {
+    for (const agentType of ["build", "review", "grading", "merge", null]) {
+      const tools = allowedToolNamesForAgentType(agentType);
+      for (const exclusive of REFINEMENT_EXCLUSIVE) {
+        expect(tools).not.toContain(exclusive);
+      }
+    }
+  });
+
+  it("offers them to a refinement pass", () => {
+    const tools = allowedToolNamesForAgentType("refinement");
+    for (const exclusive of REFINEMENT_EXCLUSIVE) {
+      expect(tools).toContain(exclusive);
+    }
   });
 
   /**
@@ -701,7 +737,9 @@ describe("buildMcpSpawnConfig", () => {
     expect(arijChannelSpec(config).args[0].startsWith(process.cwd())).toBe(true);
     expect(arijChannelSpec(config).env.ARIJ_MCP_TOKEN).toBe(TOKEN);
     expect(arijChannelSpec(config).env.ARIJ_BASE_URL.length).toBeGreaterThan(0);
-    expect(config.allowedToolNames).toEqual([...ARIJ_MCP_ALLOWED_TOOL_NAMES]);
+    // No agent type named, so the refinement-exclusive tools are withheld.
+    expect(config.allowedToolNames).toEqual(allowedToolNamesForAgentType(null));
+    expect(config.allowedToolNames).not.toContain("mcp__arij__discard_ticket");
   });
 
   it("keeps the default (agent) config free of any toolset selector", () => {

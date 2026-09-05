@@ -1,6 +1,7 @@
 /**
  * Shared guardrails for the refinement MCP tools (set-priority,
- * reorder-tickets, add-dependency, remove-dependency, promote-ticket).
+ * reorder-tickets, add-dependency, remove-dependency, promote-ticket,
+ * merge-tickets, discard-ticket, create-planning-ticket).
  *
  * Refinement is a re-pass over the planning half of the board: it may only
  * touch the Backlog and To do columns — never in progress, review, done or
@@ -16,6 +17,10 @@
  * Every refinement write also requires a non-empty justification. The board
  * is user-owned: a ticket that moved because an agent decided so must carry
  * why, in its own activity log.
+ *
+ * The three tools that CREATE or DESTROY board rows carry a fourth layer:
+ * `requireRefinementSessionToken` narrows them to the refinement agent type,
+ * where the other five are open to any non-chat session. See its comment.
  */
 
 import { NextResponse } from "next/server";
@@ -23,9 +28,10 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { epics } from "@/lib/db/schema";
+import { REFINEMENT_AGENT_TYPE } from "@/lib/refinement/constants";
+import type { McpTokenRecord } from "./token-store";
 
 type Epic = typeof epics.$inferSelect;
-import type { McpTokenRecord } from "./token-store";
 
 /** The columns a refinement re-pass is allowed to read and write. */
 export const REFINEMENT_STATUSES = ["backlog", "todo"] as const;
@@ -97,6 +103,35 @@ export function requireAgentSessionToken(
     {
       error: `${toolName} is only available to agent sessions.`,
       code: "AGENT_ONLY",
+    },
+    { status: 403 }
+  );
+}
+
+/**
+ * 403 for any session that is not a board-refinement pass; null otherwise.
+ *
+ * A STRICTER boundary than `requireAgentSessionToken`, for the three tools
+ * that destroy or create board rows (`merge_tickets`, `discard_ticket`,
+ * `create_planning_ticket`). The other refinement tools reshape a ticket a
+ * build or review session could also legitimately be asked about — a
+ * priority, an edge, a column inside the planning half. These do not: a
+ * build session that deletes a Backlog ticket, or invents new ones while it
+ * is meant to be writing code, is a runaway, not a re-pass.
+ *
+ * `allowedToolNamesForAgentType` withholds these tools from every other
+ * agent type's allowlist, but an allowlist only shapes what a model reaches
+ * for — and only claude-code consumes it at all. This is the guard.
+ */
+export function requireRefinementSessionToken(
+  auth: McpTokenRecord,
+  toolName: string
+): NextResponse | null {
+  if (auth.agentType === REFINEMENT_AGENT_TYPE) return null;
+  return NextResponse.json(
+    {
+      error: `${toolName} is only available to a board refinement pass.`,
+      code: "REFINEMENT_ONLY",
     },
     { status: 403 }
   );
