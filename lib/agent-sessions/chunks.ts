@@ -10,6 +10,12 @@ import {
   agentSessions,
 } from "@/lib/db/schema";
 import { extractLastNonEmptyText } from "@/lib/agent-sessions/last-text";
+import {
+  chunkElisionMarker,
+  SESSION_CHUNK_MAX_STORED_BYTES,
+  SESSION_CHUNK_STORED_HEAD_BYTES,
+  SESSION_CHUNK_STORED_TAIL_BYTES,
+} from "@/lib/agent-sessions/chunk-cap";
 // Type-only in the other direction, so this is not a runtime cycle.
 import { countCharacters } from "@/lib/agent-sessions/session-detail";
 
@@ -45,6 +51,10 @@ export const SESSION_CHUNK_PAGE_MAX_BYTES = 1024 * 1024;
  * so the whole chunk is still reachable. The live database holds 19 chunks
  * over 1 MB and one of 8.3 MB — a one-shot CLI result blob written as a
  * single chunk — and no row-count bound can bound those.
+ *
+ * Rows written since {@link SESSION_CHUNK_MAX_STORED_BYTES} landed cannot
+ * exceed it, so for those the split never triggers. The oversized rows above
+ * are the ones already in the database, and this stays the bound on them.
  */
 export const SESSION_CHUNK_MAX_CONTENT_BYTES = 256 * 1024;
 
@@ -142,6 +152,53 @@ export function truncateUtf8(
   let end = maxBytes;
   while (end > 0 && (buffer[end] & 0xc0) === 0x80) end--;
   return { text: buffer.subarray(0, end).toString("utf8"), truncated: true };
+}
+
+/**
+ * Cut `content` down to {@link SESSION_CHUNK_MAX_STORED_BYTES}, keeping a head
+ * and a tail with an explicit marker between them.
+ *
+ * This is the write-path cap — the change that stops the growth rather than
+ * reclaiming it afterwards. `appendChunk` used to store whatever it was
+ * handed at any size, which is how the live database came to hold a single
+ * 8.3 MB chunk and a single 51.3 MB session.
+ *
+ * The common case — every chunk is ~5.5 KB on average, and this runs once per
+ * emission on every live session — costs one `byteLength` scan and no
+ * allocation at all. Only a chunk actually over the cap is buffered, and then
+ * out of ONE copy: head and tail are cut from the same buffer, because the
+ * chunks this matters for are megabytes and a `Buffer.from` per end would
+ * double the peak allocation for no gain. `headEnd < tailStart` always holds,
+ * because head + tail is under the cap and the cap is under `buffer.length`.
+ */
+export function capChunkContent(content: string): {
+  content: string;
+  capped: boolean;
+} {
+  if (Buffer.byteLength(content, "utf8") <= SESSION_CHUNK_MAX_STORED_BYTES) {
+    return { content, capped: false };
+  }
+  const buffer = Buffer.from(content, "utf8");
+
+  // Walk off any continuation byte (0b10xxxxxx) so neither cut lands inside a
+  // character and decodes to U+FFFD: back for the head's end, forward for the
+  // tail's start.
+  let headEnd = SESSION_CHUNK_STORED_HEAD_BYTES;
+  while (headEnd > 0 && (buffer[headEnd] & 0xc0) === 0x80) headEnd--;
+  let tailStart = buffer.length - SESSION_CHUNK_STORED_TAIL_BYTES;
+  while (tailStart < buffer.length && (buffer[tailStart] & 0xc0) === 0x80) {
+    tailStart++;
+  }
+
+  // Newlines around the marker so it is a line of its own however the head
+  // and the tail happen to end — the session log renders line by line.
+  return {
+    content:
+      `${buffer.subarray(0, headEnd).toString("utf8")}\n` +
+      `${chunkElisionMarker(tailStart - headEnd)}\n` +
+      `${buffer.subarray(tailStart).toString("utf8")}`,
+    capped: true,
+  };
 }
 
 export interface AppendSessionChunkInput {
@@ -531,7 +588,7 @@ export function createSessionChunkStore(
       streamType: input.streamType,
       sequence: sequenceRow.sequence,
       chunkKey,
-      content: input.content,
+      content: capChunkContent(input.content).content,
       createdAt,
     };
 
@@ -546,6 +603,11 @@ export function createSessionChunkStore(
     });
 
     if (input.streamType === "output" || input.streamType === "response") {
+      // Deliberately `input.content`, not the capped chunk. The last non-empty
+      // line is the agent's final word, which is exactly the part an elided
+      // middle could swallow — and the marker itself would become the "last
+      // line" if the cap ate everything after it. Reading the uncapped text
+      // keeps the sessions list and the completion toast honest.
       const lastNonEmptyText = extractLastNonEmptyText(input.content);
       if (lastNonEmptyText) {
         updateLastNonEmptyTextStmt.run({

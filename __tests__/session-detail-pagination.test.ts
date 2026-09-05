@@ -40,6 +40,7 @@ vi.mock("@/lib/agent-sessions/backfill", () => ({
 const { db } = await import("@/lib/db");
 const { projects, agentSessions } = await import("@/lib/db/schema");
 const { appendSessionChunk } = await import("@/lib/agent-sessions/chunks");
+const { seedLegacyChunks } = await import("@/__tests__/helpers/legacy-chunks");
 const { GET } = await import(
   "@/app/api/projects/[projectId]/sessions/[sessionId]/route"
 );
@@ -184,7 +185,9 @@ describe("chunk streams", () => {
     const blob = Array.from({ length: 700_000 }, (_, i) =>
       String.fromCharCode(97 + (i % 26))
     ).join("");
-    seedChunks("response", [blob, "|tail"]);
+    // Past the store: the write-path cap would trim this to 256 KiB, and the
+    // row this test is about is a legacy one written before the cap existed.
+    seedLegacyChunks(SESSION, "response", [blob, "|tail"]);
 
     let after: number | null = null;
     let offset = 0;
@@ -329,10 +332,11 @@ describe("worst-case payload", () => {
       .set({ prompt: "p".repeat(1_800_000) })
       .run();
     seedChunks("raw", Array.from({ length: 200 }, () => "r".repeat(64 * 1024)));
-    seedChunks("response", ["R".repeat(8_300_000)]);
-    // One 4 MB line with no newline in it: `last_non_empty_text` is written
-    // from the last non-empty LINE of a chunk, so this is what an unbounded
-    // preview column looks like. Nothing caps it at the write side.
+    seedLegacyChunks(SESSION, "response", ["R".repeat(8_300_000)]);
+    // One 4 MB line with no newline in it. The CHUNK is capped on the way in
+    // now, but `last_non_empty_text` is deliberately derived from the uncapped
+    // text — so the derived column is still what an unbounded preview column
+    // looks like, and the route is what has to bound it.
     seedChunks("output", ["o".repeat(4_000_000)]);
     const logsPath = path.join(tempDir, "logs.json");
     fs.writeFileSync(

@@ -10,6 +10,7 @@ import {
   TimelineLine,
 } from "@/components/piscine";
 import type { SessionStreamSeed } from "@/components/sessions/SessionOutputStream";
+import { isChunkElisionMarker } from "@/lib/agent-sessions/chunk-cap";
 
 import {
   classifyLogLine,
@@ -194,6 +195,22 @@ export function SessionLogTail({
     }
 
     return lines.map((line, index) => {
+      // Arij's own voice, not the agent's: the write-path cap dropped the
+      // middle of this chunk. Rendered in the live stratum's mid tone rather
+      // than the dim `plain` every other unrecognised line gets — read as
+      // muted mono it disappears into the output it is reporting on. Colour
+      // here is the band's own stratum, not a state.
+      if (isChunkElisionMarker(line.text)) {
+        return (
+          <span key={line.key} data-testid="chunk-elision-marker">
+            <Mono size={11.5} tone="live-mid">
+              {line.stamp ? `${line.stamp} ` : ""}
+              {line.text}
+            </Mono>
+          </span>
+        );
+      }
+
       const { kind, body: text } = classifyLogLine(line.text);
       // The trailing row of a running session IS the running line, whatever
       // its glyph would otherwise have been. That is the frame's last row.

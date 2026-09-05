@@ -9,7 +9,7 @@
  * still refuses to print a zero where it has no number.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 
@@ -25,6 +25,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 import SessionDetailPage from "@/app/projects/[projectId]/sessions/[sessionId]/page";
+import {
+  chunkElisionMarker,
+  SESSION_CHUNK_ELISION_LABEL,
+} from "@/lib/agent-sessions/chunk-cap";
 
 const mockSession = {
   id: "sess-12345678",
@@ -243,6 +247,87 @@ describe("live session — the log is the screen", () => {
     const card = await screen.findByTestId("stream-raw");
     expect(card).toHaveTextContent("read spec.md");
     expect(card).toHaveTextContent("34 passed, 0 failed");
+  });
+
+  it("shows the write-path cap's elision marker as Arij's own line, not as output", async () => {
+    const marker = chunkElisionMarker(8_123_456);
+    installFetch({
+      session: {
+        ...mockSession,
+        status: "running",
+        chunkStreams: {
+          raw: {
+            chunks: [
+              {
+                id: "chunk-1",
+                sessionId: "sess-1",
+                streamType: "raw",
+                sequence: 1,
+                chunkKey: "stdout:0",
+                content: `$ npm test\n${marker}\n· 34 passed, 0 failed\n`,
+                createdAt: new Date().toISOString(),
+                contentLength: 60,
+                contentTruncated: false,
+                contentOffset: 0,
+              },
+            ],
+            nextAfter: 1,
+            hasMore: false,
+          },
+        },
+      },
+    });
+    render(<SessionDetailPage />);
+
+    const card = await screen.findByTestId("stream-raw");
+    // Legible: the whole sentence is on screen, in one element of its own —
+    // not folded into the dim run of agent output around it.
+    const line = within(card).getByTestId("chunk-elision-marker");
+    expect(line).toHaveTextContent("8,123,456 bytes elided");
+    expect(line).toHaveTextContent(SESSION_CHUNK_ELISION_LABEL);
+    expect(line.textContent).toContain(marker);
+    // The lines on either side are still ordinary output.
+    expect(card).toHaveTextContent("npm test");
+    expect(card).toHaveTextContent("34 passed, 0 failed");
+  });
+
+  it("shows the elision marker in the response pane too", async () => {
+    const marker = chunkElisionMarker(4_000_000);
+    installFetch({
+      session: {
+        ...mockSession,
+        status: "completed",
+        chunkStreams: {
+          response: {
+            chunks: [
+              {
+                id: "chunk-9",
+                sessionId: "sess-1",
+                streamType: "response",
+                sequence: 9,
+                chunkKey: "final-response",
+                content: `Implemented.\n${marker}\nAll tests passed.`,
+                createdAt: new Date().toISOString(),
+                contentLength: 90,
+                contentTruncated: false,
+                contentOffset: 0,
+              },
+            ],
+            nextAfter: 9,
+            hasMore: false,
+          },
+        },
+      },
+    });
+    render(<SessionDetailPage />);
+
+    await userEvent.click(await screen.findByText("Réponse"));
+
+    const pane = await screen.findByTestId("stream-response");
+    const line = within(pane).getByTestId("chunk-elision-marker");
+    expect(line).toHaveTextContent("4,000,000 bytes elided");
+    expect(line).toHaveTextContent(SESSION_CHUNK_ELISION_LABEL);
+    expect(pane).toHaveTextContent("All tests passed.");
   });
 });
 
