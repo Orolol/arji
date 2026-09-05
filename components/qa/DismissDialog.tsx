@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useState } from "react";
 
 import { GhostInputPill, PillButton } from "@/components/piscine";
 import {
@@ -56,12 +56,23 @@ export function DismissDialog({
   onConfirm,
   pending = false,
 }: DismissDialogProps) {
-  const [reason, setReason] = React.useState("");
+  const [reason, setReason] = useState("");
 
-  // A new finding is a new reason: never carry the previous one over.
-  React.useEffect(() => {
+  /*
+    A new finding is a new reason: never carry the previous one over.
+
+    Adjusted during render rather than from an effect. The dialog is mounted
+    for the whole screen's life (QaScreen keeps it rendered and drives it with
+    `open`), so the reset has to happen on the render that swaps the finding in
+    — an effect clears it one commit late, which is a frame of the previous
+    finding's text sitting in the new finding's box.
+  */
+  const resetKey = `${finding?.findingId ?? ""}:${open}`;
+  const [lastResetKey, setLastResetKey] = useState(resetKey);
+  if (lastResetKey !== resetKey) {
+    setLastResetKey(resetKey);
     setReason("");
-  }, [finding?.findingId, open]);
+  }
 
   const submit = () => {
     const trimmed = reason.trim();

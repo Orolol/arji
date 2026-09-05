@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Infinity as InfinityIcon } from "lucide-react";
 
@@ -108,14 +109,14 @@ export function NowDesk({
   const activeProjectId = projectId ?? null;
 
   const { data, refresh } = useControlDesk(activeProjectId);
-  const [toasts, setToasts] = React.useState<ToastItem[]>([]);
-  const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(new Set());
-  const [landingEpicId, setLandingEpicId] = React.useState<string | null>(null);
-  const [landingAll, setLandingAll] = React.useState(false);
-  const [composerProjectId, setComposerProjectId] = React.useState<string | null>(null);
-  const [namedAgentId, setNamedAgentId] = React.useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
+  const [landingEpicId, setLandingEpicId] = useState<string | null>(null);
+  const [landingAll, setLandingAll] = useState(false);
+  const [composerProjectId, setComposerProjectId] = useState<string | null>(null);
+  const [namedAgentId, setNamedAgentId] = useState<string | null>(null);
 
-  const raise = React.useCallback(
+  const raise = useCallback(
     (tone: DeskToastTone, message: string, action?: DeskToastAction) => {
       if (onToast) {
         onToast(tone, message, action);
@@ -130,16 +131,16 @@ export function NowDesk({
     [onToast],
   );
 
-  const dismissToast = React.useCallback((id: string) => {
+  const dismissToast = useCallback((id: string) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
   }, []);
 
-  const changed = React.useCallback(() => {
+  const changed = useCallback(() => {
     void refresh();
     onChanged?.();
   }, [refresh, onChanged]);
 
-  const markPending = React.useCallback((epicId: string, pending: boolean) => {
+  const markPending = useCallback((epicId: string, pending: boolean) => {
     setPendingIds((current) => {
       const next = new Set(current);
       if (pending) next.add(epicId);
@@ -150,14 +151,14 @@ export function NowDesk({
 
   /* ---- derived ----------------------------------------------------- */
 
-  const projects = React.useMemo(() => data?.projects ?? [], [data]);
-  const projectsById = React.useMemo(
+  const projects = useMemo(() => data?.projects ?? [], [data]);
+  const projectsById = useMemo(
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
   );
   const autoOn = projects.filter((project) => project.autoModeEnabled).length;
 
-  const handleOpenTicket = React.useCallback(
+  const handleOpenTicket = useCallback(
     (epicId: string) => {
       if (onOpenTicket) {
         onOpenTicket(epicId);
@@ -176,7 +177,7 @@ export function NowDesk({
    * One gesture, two meanings, and the selecting one leaves no chrome behind
    * when nothing is selected.
    */
-  const handleTicketClick = React.useCallback(
+  const handleTicketClick = useCallback(
     (epicId: string, event: React.MouseEvent) => {
       if ((event.metaKey || event.ctrlKey) && onToggleSelect) {
         event.preventDefault();
@@ -195,7 +196,7 @@ export function NowDesk({
    * unless the toast can take them to the session that is in the way. The
    * payload shape comes from lib/agents/client-error.ts.
    */
-  const reportFailure = React.useCallback(
+  const reportFailure = useCallback(
     (res: Response, body: { error?: string; code?: string; data?: { activeSessionId?: string; sessionUrl?: string } }, fallback: string, ownerProjectId: string) => {
       if (
         res.status === 409 &&
@@ -215,7 +216,7 @@ export function NowDesk({
     [raise],
   );
 
-  const handleReply = React.useCallback(
+  const handleReply = useCallback(
     async (item: DeskAwaitingReply, message: string) => {
       markPending(item.epicId, true);
       try {
@@ -250,7 +251,7 @@ export function NowDesk({
     [markPending, raise, reportFailure, changed],
   );
 
-  const handleSendToDev = React.useCallback(
+  const handleSendToDev = useCallback(
     async (item: DeskAwaitingReply, message: string) => {
       markPending(item.epicId, true);
       try {
@@ -293,7 +294,7 @@ export function NowDesk({
    * `buildRetryDispatch`, because the badged session can be a review or a story
    * build rather than the epic build this button dispatches.
    */
-  const handleRetry = React.useCallback(
+  const handleRetry = useCallback(
     async (item: DeskFailure) => {
       markPending(item.epicId, true);
       try {
@@ -342,7 +343,7 @@ export function NowDesk({
    *
    * This writes no ticket status and no activity entry — it is bookkeeping.
    */
-  const handleDismiss = React.useCallback(
+  const handleDismiss = useCallback(
     async (
       kind: DeskDismissalKind,
       item: { epicId: string; signalAt: string | null },
@@ -369,7 +370,7 @@ export function NowDesk({
     [markPending, raise, changed],
   );
 
-  const handleResolveConflict = React.useCallback(
+  const handleResolveConflict = useCallback(
     async (item: DeskConflict) => {
       markPending(item.epicId, true);
       try {
@@ -410,7 +411,7 @@ export function NowDesk({
    * ONE can be in flight at a time; `landingEpicId` / `landingAll` are that
    * lock, and they guard git's `index.lock` rather than a double click.
    */
-  const landOne = React.useCallback(
+  const landOne = useCallback(
     async (row: DeskLandRow): Promise<"merged" | "agent" | "failed"> => {
       try {
         const res = await fetch(
@@ -434,7 +435,7 @@ export function NowDesk({
     [reportFailure],
   );
 
-  const handleLand = React.useCallback(
+  const handleLand = useCallback(
     async (row: DeskLandRow) => {
       if (landingEpicId !== null || landingAll) return;
       setLandingEpicId(row.epicId);
@@ -447,7 +448,7 @@ export function NowDesk({
     [landingEpicId, landingAll, landOne, raise, changed],
   );
 
-  const handleLandAll = React.useCallback(
+  const handleLandAll = useCallback(
     async (rows: readonly DeskLandRow[]) => {
       if (landingEpicId !== null || landingAll) return;
       setLandingAll(true);
@@ -476,7 +477,7 @@ export function NowDesk({
     [landingEpicId, landingAll, landOne, raise, changed],
   );
 
-  const handleStopSession = React.useCallback(
+  const handleStopSession = useCallback(
     async (sessionId: string) => {
       const session = data?.working.find((row) => row.sessionId === sessionId);
       if (!session) return;
@@ -498,7 +499,7 @@ export function NowDesk({
     [data, raise, changed],
   );
 
-  const handleCompose = React.useCallback(
+  const handleCompose = useCallback(
     async (input: {
       title: string;
       projectId: string;
@@ -566,12 +567,12 @@ export function NowDesk({
    * them. Read only while the popover is open — one request per project, on
    * open, not on the 4s desk poll.
    */
-  const [autoPopoverOpen, setAutoPopoverOpen] = React.useState(false);
-  const [autoAgents, setAutoAgents] = React.useState<
+  const [autoPopoverOpen, setAutoPopoverOpen] = useState(false);
+  const [autoAgents, setAutoAgents] = useState<
     Record<string, { buildAgent: string | null; reviewAgent: string | null }>
   >({});
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!autoPopoverOpen || projects.length === 0) return;
     let cancelled = false;
     void (async () => {
@@ -604,7 +605,7 @@ export function NowDesk({
    * payload`, so a body carrying only the agent leaves the enabled flag
    * untouched — the on/off box and these pills cannot clobber each other.
    */
-  const setAutoModeAgent = React.useCallback(
+  const setAutoModeAgent = useCallback(
     async (
       targetProjectId: string,
       role: "buildAgent" | "reviewAgent",
@@ -635,7 +636,7 @@ export function NowDesk({
     [raise],
   );
 
-  const toggleAutoMode = React.useCallback(
+  const toggleAutoMode = useCallback(
     async (targetProjectId: string, enabled: boolean) => {
       try {
         const res = await fetch(`/api/projects/${targetProjectId}/auto-mode`, {

@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useState } from "react";
 
 import { GhostInputPill, SelectPill } from "@/components/piscine";
 import {
@@ -37,7 +37,7 @@ export function VersionPill({
   onSelect,
   readOnly = false,
 }: VersionPillProps) {
-  const [draft, setDraft] = React.useState("");
+  const [draft, setDraft] = useState("");
 
   if (readOnly) {
     return (

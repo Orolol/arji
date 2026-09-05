@@ -25,6 +25,7 @@
  */
 
 import * as React from "react";
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { cn } from "@/lib/utils";
 import { TicketOverlay } from "@/components/ticket/TicketOverlay";
@@ -56,7 +57,7 @@ const TicketOverlayContext = React.createContext<TicketOverlayContextValue | nul
  * need the whole app shell to mount.
  */
 export function useTicketOverlay(): TicketOverlayContextValue {
-  const value = React.useContext(TicketOverlayContext);
+  const value = useContext(TicketOverlayContext);
   return value ?? NOOP_OVERLAY;
 }
 
@@ -85,10 +86,10 @@ export function TicketOverlayProvider({
   children,
   renderPanel,
 }: TicketOverlayProviderProps) {
-  const [ticketId, setTicketId] = React.useState<string | null>(null);
-  const [projectId, setProjectId] = React.useState<string | null>(null);
+  const [ticketId, setTicketId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
 
-  const openTicket = React.useCallback(
+  const openTicket = useCallback(
     (epicId: string, options?: OpenTicketOptions) => {
       setTicketId(epicId);
       setProjectId(options?.projectId ?? null);
@@ -96,7 +97,7 @@ export function TicketOverlayProvider({
     [],
   );
 
-  const closeTicket = React.useCallback(() => {
+  const closeTicket = useCallback(() => {
     setTicketId(null);
     setProjectId(null);
   }, []);
@@ -105,7 +106,7 @@ export function TicketOverlayProvider({
   // thing that knows whether one of its own dialogs is up and should swallow
   // the key instead; a custom `renderPanel` keeps the provider's plain rule.
   const escapeHandledByPanel = renderPanel === undefined;
-  React.useEffect(() => {
+  useEffect(() => {
     if (!ticketId || escapeHandledByPanel) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeTicket();
@@ -114,7 +115,7 @@ export function TicketOverlayProvider({
     return () => window.removeEventListener("keydown", onKey);
   }, [ticketId, closeTicket, escapeHandledByPanel]);
 
-  const value = React.useMemo<TicketOverlayContextValue>(
+  const value = useMemo<TicketOverlayContextValue>(
     () => ({
       ticketId,
       projectId,

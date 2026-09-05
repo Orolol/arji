@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { AlertTriangle } from "lucide-react";
 
@@ -72,14 +72,14 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
   const { openTicket } = useTicketOverlay();
   const { data, error, refresh } = useQaFindings(projectId ?? null);
 
-  const [filter, setFilter] = React.useState<FindingFilter>("all");
-  const [toasts, setToasts] = React.useState<QaToast[]>([]);
-  const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(new Set());
-  const [dismissTarget, setDismissTarget] = React.useState<QaFinding | null>(null);
-  const [dismissPending, setDismissPending] = React.useState(false);
-  const [runPending, setRunPending] = React.useState(false);
+  const [filter, setFilter] = useState<FindingFilter>("all");
+  const [toasts, setToasts] = useState<QaToast[]>([]);
+  const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
+  const [dismissTarget, setDismissTarget] = useState<QaFinding | null>(null);
+  const [dismissPending, setDismissPending] = useState(false);
+  const [runPending, setRunPending] = useState(false);
 
-  const raise = React.useCallback(
+  const raise = useCallback(
     (tone: QaToastTone, message: string, action?: QaToastAction) => {
       if (onToast) {
         onToast(tone, message, action);
@@ -97,7 +97,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
     [onToast],
   );
 
-  const markPending = React.useCallback((findingId: string, pending: boolean) => {
+  const markPending = useCallback((findingId: string, pending: boolean) => {
     setPendingIds((current) => {
       const next = new Set(current);
       if (pending) next.add(findingId);
@@ -110,7 +110,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
    * 409 AGENT_ALREADY_RUNNING is not an error the user can do anything with
    * unless the toast can take them to the session that is in the way.
    */
-  const reportFailure = React.useCallback(
+  const reportFailure = useCallback(
     (
       res: Response,
       body: DispatchErrorBody,
@@ -137,13 +137,13 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
 
   /* ---- derived ------------------------------------------------------ */
 
-  const projects = React.useMemo(() => data?.projects ?? [], [data]);
-  const projectsById = React.useMemo(
+  const projects = useMemo(() => data?.projects ?? [], [data]);
+  const projectsById = useMemo(
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
   );
-  const findings = React.useMemo(() => data?.findings ?? [], [data]);
-  const visibleFindings = React.useMemo(
+  const findings = useMemo(() => data?.findings ?? [], [data]);
+  const visibleFindings = useMemo(
     () => applyFindingFilter(findings, filter),
     [findings, filter],
   );
@@ -153,7 +153,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
       ? "—"
       : `${data.coveragePercent}%`;
 
-  const handleOpenTicket = React.useCallback(
+  const handleOpenTicket = useCallback(
     (epicId: string, ownerProjectId?: string | null) => {
       openTicket(epicId, { projectId: ownerProjectId ?? projectId ?? null });
     },
@@ -172,7 +172,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
    * before this screen existed. No `namedAgentId` and no `pipeline`: omitting
    * `pipeline` lets the server's `pipeline_enabled` setting chain decide.
    */
-  const handleFix = React.useCallback(
+  const handleFix = useCallback(
     async (finding: QaFinding) => {
       markPending(finding.findingId, true);
       try {
@@ -215,7 +215,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
    * If the ticket-comment echo fails the first write is NOT rolled back:
    * losing the dismissal is worse than losing its echo.
    */
-  const handleDismiss = React.useCallback(
+  const handleDismiss = useCallback(
     async (finding: QaFinding, reason: string) => {
       setDismissPending(true);
       markPending(finding.findingId, true);
@@ -280,7 +280,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
    * four types would create four sessions on one ticket: the route creates one
    * per review type.
    */
-  const handleRunPass = React.useCallback(
+  const handleRunPass = useCallback(
     async (target: QaReviewTarget) => {
       setRunPending(true);
       try {
@@ -308,7 +308,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
     [raise, reportFailure, refresh],
   );
 
-  const handleStopRun = React.useCallback(
+  const handleStopRun = useCallback(
     async (sessionId: string) => {
       const run = data?.runs.find((row) => row.sessionId === sessionId);
       if (!run) return;
