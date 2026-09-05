@@ -26,7 +26,10 @@ import {
 import { isLegacyConversationGenerating } from "@/lib/chat/parity-contract";
 import type { ControlDeskPayload, DeskProject } from "@/lib/control-desk/types";
 
-import { agentSelectionPatch } from "./agent-selection";
+import {
+  agentSelectionPatch,
+  selectionForConversation,
+} from "./agent-selection";
 import { ChatComposer } from "./ChatComposer";
 import { ChatThread, type ChatThreadResolvedTicket } from "./ChatThread";
 import { ContextRail } from "./ContextRail";
@@ -494,11 +497,7 @@ function ChatWorkspace({
    * the roster name the same agent, and only the pill derives its own label.
    */
   const activeAgentSelection: AgentSelection = React.useMemo(
-    () => ({
-      namedAgentId: activeConversation?.namedAgentId ?? null,
-      provider:
-        (activeConversation?.provider as ChatModeProvider | undefined) ?? null,
-    }),
+    () => selectionForConversation(activeConversation),
     [activeConversation],
   );
 

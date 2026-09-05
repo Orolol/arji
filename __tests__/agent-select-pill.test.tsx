@@ -10,7 +10,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 vi.mock("@/components/ui/dropdown-menu", () => ({
@@ -50,7 +50,10 @@ vi.mock("@/hooks/useNamedAgentsList", () => ({
   }),
 }));
 
-import { agentSelectionPatch } from "@/components/chat-page/agent-selection";
+import {
+  agentSelectionPatch,
+  selectionForConversation,
+} from "@/components/chat-page/agent-selection";
 import {
   AGENT_SELECT_LOADING_LABEL,
   AgentSelectPill,
@@ -59,6 +62,7 @@ import {
   type AgentSelection,
 } from "@/components/shared/AgentSelectPill";
 import { ChatWorkspaceHeader } from "@/components/chat/ChatWorkspaceHeader";
+import { ChatComposer } from "@/components/chat-page/ChatComposer";
 import { DeskComposer } from "@/components/desk/DeskComposer";
 import {
   PERSISTENT_CHAT_PROVIDER_OPTIONS,
@@ -128,6 +132,12 @@ function groupLabels(): string[] {
 }
 
 beforeEach(() => {
+  // ChatComposer mounts MentionTextarea, which loads the project's documents
+  // on mount; without this every render leaves an un-acted update behind.
+  global.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve({ data: [] }),
+  }) as unknown as typeof fetch;
   namedAgents.current = [
     { id: "a1", name: "Opus Planner", provider: "claude-code" },
     { id: "a2", name: "Codex Builder", provider: "codex" },
@@ -443,6 +453,146 @@ describe("the desk composer's own wiring", () => {
     expect(screen.getByTestId("desk-agent-select")).toHaveTextContent(
       DEFAULT_AGENT_LABEL,
     );
+  });
+});
+
+describe("the chat page composer's own wiring", () => {
+  /**
+   * The mirror of the desk block above, in the other direction. `/chat` is
+   * where the new `claude-code-persistent` default is CHANGED, so it is the
+   * one surface that must keep every chat mode reachable — and nothing
+   * asserted that it asks for `mode="chat"`. Its own test file renders the
+   * real Radix menu, which portals nothing while closed, so the claim can
+   * only be made here, against the inline stand-in.
+   */
+  async function renderChatComposer() {
+    const onSelectAgent = vi.fn();
+    await act(async () => {
+      render(
+        <ChatComposer
+          projectId="p1"
+          projects={[DESK_PROJECT]}
+          project={DESK_PROJECT}
+          onSelectProject={vi.fn()}
+          agentSelection={{ namedAgentId: "a1", provider: "claude-code" }}
+          onSelectAgent={onSelectAgent}
+          agentLocked={false}
+          onSend={vi.fn()}
+        />,
+      );
+    });
+    return { onSelectAgent };
+  }
+
+  it("mounts its picker in chat mode — all four groups reach /chat", async () => {
+    await renderChatComposer();
+
+    expect(groupLabels()).toEqual([
+      "Direct API",
+      "Named Agents",
+      "Persistent CLI",
+      "CLI Providers",
+    ]);
+    expect(screen.getByTestId("chat-option-openai-compatible")).toBeInTheDocument();
+    for (const provider of PERSISTENT_CHAT_PROVIDER_OPTIONS) {
+      expect(
+        screen.getByTestId(`chat-option-provider-${provider}`),
+      ).toBeInTheDocument();
+    }
+    // The dispatch-only entry is the tell: its presence would mean the
+    // composer had been flipped to the desk's mode.
+    expect(screen.queryByTestId("chat-option-default-agent")).toBeNull();
+  });
+
+  it("emits a chat-only mode the desk could never offer", async () => {
+    const { onSelectAgent } = await renderChatComposer();
+
+    fireEvent.click(
+      screen.getByTestId("chat-option-provider-claude-code-persistent"),
+    );
+    expect(onSelectAgent).toHaveBeenCalledWith({
+      namedAgentId: null,
+      provider: "claude-code-persistent",
+    });
+  });
+});
+
+describe("one conversation, one selection", () => {
+  /**
+   * The chat page and the project panel each used to build the selection by
+   * hand from `provider` + `namedAgentId`, casting a free-form text column to
+   * the narrow union on the way. Two copies of a mapping is how a label rule
+   * drifts: rename a provider, touch one copy, and the two surfaces then name
+   * the same conversation differently with nothing comparing them. This is
+   * that comparison.
+   */
+  function conversationOn(provider: string, namedAgentId: string | null = null): Conversation {
+    return {
+      id: "conv-1",
+      projectId: "p1",
+      type: "chat",
+      label: "Chat",
+      status: "active",
+      epicId: null,
+      provider,
+      namedAgentId,
+      createdAt: "2026-01-01",
+    };
+  }
+
+  it("reads a stored conversation without asserting anything about its provider", () => {
+    // A value written before a provider cleanup: not in the union, not in the
+    // menu, and it must still survive the trip to the trigger.
+    expect(selectionForConversation(conversationOn("gemini-cli"))).toEqual({
+      namedAgentId: null,
+      provider: "gemini-cli",
+    });
+    expect(selectionForConversation(conversationOn("codex", "a2"))).toEqual({
+      namedAgentId: "a2",
+      provider: "codex",
+    });
+    expect(selectionForConversation(null)).toEqual({
+      namedAgentId: null,
+      provider: null,
+    });
+  });
+
+  it.each([
+    ["a linked named agent", conversationOn("claude-code", "a1"), "Opus Planner"],
+    ["a persistent mode", conversationOn("oh-my-pi-persistent"), "Oh My Pi — persistent"],
+    ["a provider dropped in a cleanup", conversationOn("gemini-cli"), "gemini-cli"],
+  ])("names %s the same on both chat surfaces", async (_case, conversation, expected) => {
+    await act(async () => {
+      render(
+        <>
+          <ChatComposer
+            projectId="p1"
+            projects={[DESK_PROJECT]}
+            project={DESK_PROJECT}
+            onSelectProject={vi.fn()}
+            agentSelection={selectionForConversation(conversation)}
+            onSelectAgent={vi.fn()}
+            agentLocked={false}
+            onSend={vi.fn()}
+          />
+          <ChatWorkspaceHeader
+            activeConversation={conversation}
+            activeProvider={conversation.provider}
+            hasMessages={false}
+            isBusy={false}
+            onSelectAgentOrProvider={vi.fn()}
+          />
+        </>,
+      );
+    });
+
+    // Both are `chat-agent-select` — the two chat surfaces share the id, and
+    // only the desk overrides it. So the query returns both pills, and the
+    // point is that they read the same without a second hand-written mapping.
+    const triggers = screen.getAllByTestId("chat-agent-select");
+    expect(triggers).toHaveLength(2);
+    expect(triggers[0]).toHaveTextContent(expected);
+    expect(triggers[1].textContent).toBe(triggers[0].textContent);
   });
 });
 

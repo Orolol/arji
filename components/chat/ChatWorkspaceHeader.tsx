@@ -7,12 +7,10 @@ import {
   AgentSelectPill,
   type AgentSelection,
 } from "@/components/shared/AgentSelectPill";
+import { selectionForConversation } from "@/components/chat-page/agent-selection";
 import type { Conversation } from "@/hooks/useConversations";
 import { resolveLegacyConversationLabel } from "@/lib/chat/parity-contract";
-import {
-  isPersistentChatProvider,
-  type ChatModeProvider,
-} from "@/lib/agent-config/constants";
+import { isPersistentChatProvider } from "@/lib/agent-config/constants";
 
 interface ChatWorkspaceHeaderProps {
   activeConversation: Conversation | null;
@@ -39,15 +37,11 @@ export function ChatWorkspaceHeader({
   onRestartPersistentSession = () => {},
 }: ChatWorkspaceHeaderProps) {
   const isPersistent = isPersistentChatProvider(activeConversation?.provider);
-  // `provider` is a free-form column: a conversation stored before a provider
-  // cleanup (`gemini-cli`, `pi`) has no item in the menu, and the pill labels
-  // it with the raw string rather than blanking the trigger. Same rule the
-  // chat page's `agentLabelFor` already applied.
-  const selection: AgentSelection = {
-    namedAgentId: activeConversation?.namedAgentId ?? null,
-    provider:
-      (activeConversation?.provider as ChatModeProvider | undefined) ?? null,
-  };
+  // Shared with the chat page: `provider` is a free-form column, and a
+  // conversation stored before a provider cleanup (`gemini-cli`, `pi`) has no
+  // item in the menu — the pill labels it with the raw string rather than
+  // blanking the trigger.
+  const selection: AgentSelection = selectionForConversation(activeConversation);
   const isHot = activeConversation?.persistentSessionState === "hot";
   return (
     <div className="flex items-center gap-2">

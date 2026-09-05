@@ -1,5 +1,8 @@
 import type { AgentSelection } from "@/components/shared/AgentSelectPill";
-import type { UpdateConversationInput } from "@/hooks/useConversations";
+import type {
+  Conversation,
+  UpdateConversationInput,
+} from "@/hooks/useConversations";
 
 /**
  * The picker's own contract, not a second copy of it — one shape for the desk,
@@ -29,4 +32,24 @@ export function agentSelectionPatch(
   if (selection.namedAgentId) return { namedAgentId: selection.namedAgentId };
   if (!selection.provider) return null;
   return { provider: selection.provider, namedAgentId: null };
+}
+
+/**
+ * What the picker selects on for a stored conversation — the READ direction,
+ * where `agentSelectionPatch` is the write one.
+ *
+ * Both chat surfaces derived this by hand from the same two columns, with the
+ * same cast of a free-form text column to the narrow provider union. Two
+ * copies of a mapping is how the label rule drifts: rename a provider, touch
+ * one of them, and the composer pill and the roster row then name the same
+ * conversation differently. `AgentSelection` accepts the legacy value
+ * outright, so no call site has to assert anything here.
+ */
+export function selectionForConversation(
+  conversation: Pick<Conversation, "provider" | "namedAgentId"> | null | undefined,
+): AgentSelection {
+  return {
+    namedAgentId: conversation?.namedAgentId ?? null,
+    provider: conversation?.provider ?? null,
+  };
 }

@@ -52,7 +52,15 @@ export type AgentSelectMode = "chat" | "dispatch";
  */
 export interface AgentSelection {
   namedAgentId: string | null;
-  provider: ChatModeProvider | null;
+  /**
+   * `(string & {})` is not slop: `conversations.provider` is a free-form text
+   * column, so a row written before a provider cleanup carries a value this
+   * union cannot name (`gemini-cli`, `pi`). The pill is built to render those
+   * — `providerLabel` falls back to the raw string — so typing the field as
+   * the narrow union would have made every call site assert something false
+   * with a cast. The union half survives for autocompletion.
+   */
+  provider: ChatModeProvider | (string & {}) | null;
 }
 
 export interface AgentSelectPillProps {
@@ -67,12 +75,12 @@ export interface AgentSelectPillProps {
 }
 
 export const DEFAULT_AGENT_LABEL = "Default agent";
-export const AGENT_SELECT_LOADING_LABEL = "Chargement…";
+export const AGENT_SELECT_LOADING_LABEL = "Loading…";
 
 /** Label of a provider, tolerating a legacy value stored before a cleanup. */
-function providerLabel(provider: ChatModeProvider | null): string | null {
+function providerLabel(provider: AgentSelection["provider"]): string | null {
   if (!provider) return null;
-  return PROVIDER_LABELS[provider] ?? provider;
+  return (PROVIDER_LABELS as Record<string, string>)[provider] ?? provider;
 }
 
 export function AgentSelectPill({
