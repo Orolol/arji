@@ -49,20 +49,26 @@ import { withDatabase } from "./fixtures/data-root";
  *     the band is 372px there against 740px on a 768px phone layout.
  *
  * Both are the ticket's own third criterion, so both are asserted here rather
- * than left to a follow-up. Field widths after, in px:
+ * than left to a follow-up. Field widths, one probe, both trees, in px:
  *
- *                ORDINARY LABEL      107-CHAR AGENT NAME
- *    390x844      297 (unchanged)     297 (unchanged)
- *    640x900      267 (unchanged)     213   (was 0)
- *    768x1024     395 (unchanged)     303   (was 0)
- *   1024x800      307   (was 41)      307   (was 0)
- *   1280x800      297 (unchanged)     224   (was 0)
- *   1440x1000     457 (unchanged)     336   (was 0)
+ *                ORDINARY LABEL        107-CHAR AGENT NAME
+ *    390x844      297 -> 297            297 -> 297
+ *    768x1024     409 -> 409              0 -> 303
+ *   1024x800       41 -> 307              0 -> 307
+ *   1280x800      297 -> 297              0 -> 224
+ *   1440x1000     457 -> 457              0 -> 336
  *
- * The "unchanged" column is not a reading: the composer element was captured
- * on both trees and compared. 390, 768, 1280 and 1440 are byte-identical PNGs
+ * 640x900 is in the sweep but not in that table (the probe measured it
+ * separately): with an ordinary label every rect there is equal to three
+ * decimals across the two trees, and with the long name the field goes from
+ * 0px to a value the sweep only asserts against its 160px floor.
+ *
+ * The unchanged column is a comparison, not a reading: the composer element
+ * was captured on both trees. 390, 768, 1280 and 1440 are byte-identical PNGs
  * with an ordinary label; 640 differs by 36 pixels of at most 1/255 on the
- * attach glyph's antialiasing, with every rect equal to three decimals.
+ * attach glyph's antialiasing. Full-page captures are NOT usable evidence
+ * here — two runs of the same tree disagree, in the thread rather than in the
+ * composer.
  */
 
 /**
