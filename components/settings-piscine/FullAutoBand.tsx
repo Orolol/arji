@@ -66,9 +66,17 @@ import type { SettingsDraft } from "./useSettingsDraft";
  * workspace with the bare key off can be armed and dispatching. These two
  * pills are that dispatch's fallback rung: their value keeps deciding which
  * agent runs unattended work, and disabling them locks a user who arms
- * projects one at a time out of a live setting. Every OTHER control in the
- * body is a global whose effect the master switch really does suspend, so it
- * keeps the frame's disable-with-the-band behaviour.
+ * projects one at a time out of a live setting.
+ *
+ * THE REST OF THE BAND KEEPS THE FRAME'S DISABLE AS A SCOPE LINE, NOT AS A
+ * RUNTIME GUARANTEE. Their values are not suspended either: for a project
+ * armed on its own, `resolveAutoModeConfigForProject` inherits the global
+ * `auto_mode_smart_dispatch` and `full_auto_second_opinion` through the same
+ * fallback chain, and `resolveMaxConcurrentForProject` applies
+ * `agent_max_concurrent` without ever reading `auto_mode_enabled`. They stay
+ * disabled here because unlocking them is a separate product decision; the
+ * pills are the control the bug report names, so they are the one that
+ * changes.
  */
 export interface FullAutoBandProps {
   draft: SettingsDraft;
@@ -160,10 +168,10 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
             </SettingField>
 
             {/*
-              THE ONE FIELD THAT OUTLIVES THE MASTER SWITCH. It dims with the
-              band — that state is honest — but it stays operable, so the two
-              pills opt back out of BandDim's two disabling halves and nothing
-              here passes `dimmed` down:
+              THE ONE FIELD THIS BAND KEEPS OPERABLE. It dims with the band —
+              that state is honest — but it stays clickable, so the two pills
+              opt back out of BandDim's two disabling halves and nothing here
+              passes `dimmed` down:
               - `pointer-events-auto` undoes the body's `pointer-events-none`;
               - `aria-disabled={false}` stops the body's `aria-disabled="true"`
                 propagating, which is how assistive tech (and Playwright's

@@ -2,6 +2,23 @@ import { createEpic, expect, storedEpicStatus, test } from "./fixtures/arij-proj
 import { withDatabase } from "./fixtures/data-root";
 import { assertCliStubInstalled, cleanupScenarios, readInvocations, writeScenario } from "./fixtures/cli-stub";
 
+/**
+ * ONE WORKER FOR THIS FILE — the project fixture does not isolate what these
+ * cases actually write.
+ *
+ * Both of them set and restore the BARE workspace keys (`auto_mode_enabled`,
+ * `auto_mode_build_agent`), and every worker drives the SAME server and the
+ * same database; only project-suffixed state is per-test. `playwright.config.ts`
+ * sets `fullyParallel: true`, so by default the two ran concurrently and the
+ * bare-off case read the other one's `<project> workspace build` back after its
+ * reload — measured 1 passed / 1 failed at the post-reload assertion below,
+ * 2 passed with `--workers=1`.
+ *
+ * `mode: "default"`, not `"serial"`: once they stop overlapping the cases are
+ * independent, and a failure in the first must not skip the second.
+ */
+test.describe.configure({ mode: "default" });
+
 // This case changes workspace defaults: keep it off a reused personal server.
 test("persists Full Auto agents, resolves project overrides and dispatches the selected roles", async ({
   page, request, project, baseURL,
@@ -104,11 +121,13 @@ test("persists Full Auto agents, resolves project overrides and dispatches the s
  * agent runs that project's unattended work while this screen's switch is off,
  * and they must stay operable.
  *
- * A REAL BROWSER IS THE POINT. The bug had two halves — `disabled` on the
- * button, and `pointer-events-none` on the dimmed body around it. jsdom loads
- * no stylesheet, so it can only see the first; Playwright's actionability
- * check ("receives pointer events") is what covers the second. The click here
- * is the exact one that timed out on the report.
+ * A REAL BROWSER IS THE POINT. The disable had three halves — `disabled` on
+ * the button, and `pointer-events-none` plus `aria-disabled="true"` on the
+ * dimmed body around it. jsdom loads no stylesheet and does not propagate
+ * `aria-disabled` to descendants, so it can only see the first; Playwright's
+ * actionability check (receives pointer events, no `aria-disabled` ancestor)
+ * is what covers the other two. The click here is the exact one that timed out
+ * on the report.
  */
 test("keeps the workspace default agents editable while the bare master is off", async ({
   page, request, project,
@@ -138,7 +157,9 @@ test("keeps the workspace default agents editable while the bare master is off",
     await expect(page.getByTestId("full-auto-master")).toHaveAttribute("aria-checked", "false");
     // Dim stays: the band still says Full Auto is not armed workspace-wide.
     await expect(page.getByTestId("full-auto-body")).toHaveAttribute("aria-disabled", "true");
-    // …and so does the disable, for every control the master really suspends.
+    // …and so does the disable on every other control. That is this change's
+    // scope — the bug report names the agents field — and not a claim that a
+    // bare-off master suspends what the others do; see FullAutoBand.
     await expect(page.getByTestId("auto-smart-dispatch")).toBeDisabled();
 
     await page.getByTestId("auto-build-agent").getByRole("button").click();

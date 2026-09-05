@@ -303,9 +303,13 @@ describe("Settings — Full Auto agents while the bare master is off", () => {
   });
 
   /**
-   * The scope line: the pills are the ONE control here whose value keeps
-   * having an effect while the master is off. Everything else in the band
-   * still dims and disables together.
+   * The scope line — and it is scope, not a claim that the master switch
+   * suspends everything else. It does not: a project armed on its own still
+   * inherits the global smart-dispatch and second-opinion values through the
+   * same fallback chain, and the concurrency budget never consults
+   * `auto_mode_enabled` at all. The pills are the control the bug report
+   * names, so they are the only one unlocked here; the rest keep the band's
+   * disable until someone decides otherwise.
    */
   it("keeps the rest of the band disabled", async () => {
     await renderStored(ARMED_FROM_THE_DESK);
