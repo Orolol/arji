@@ -5,10 +5,12 @@ import {
   errorResponse,
 } from "@/lib/api/route-helpers";
 import {
+  assertGitRepository,
   fetchGitRemote,
   getBranchSyncStatus,
   getCurrentGitBranch,
   getRemoteAvailability,
+  GitRepositoryUnavailableError,
   type GitRemoteAvailability,
 } from "@/lib/git/remote";
 
@@ -88,32 +90,43 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { project } = found;
 
   const remote = request.nextUrl.searchParams.get("remote") || "origin";
-
-  // Read the repository's remote list first. This is the state the Git Sync
-  // page derives its "no remote to sync with" affordance from, so it has to
-  // come back on every status read rather than only in a failed push/pull
-  // response the client would lose on the next mount.
-  let availability: GitRemoteAvailability | null = null;
-  try {
-    availability = await getRemoteAvailability(project.gitRepoPath, remote);
-  } catch {
-    // An unreadable remote list (bad path, flag-like remote name) is not a
-    // precondition answer: leave it unknown rather than claiming the remote is
-    // missing, and let the branch read below report the real failure.
-    availability = null;
-  }
-
-  // Fetching a remote that does not exist can only produce a misleading
-  // `lastFetchError`; the missing remote is the honest answer.
-  const freshness =
-    availability && !availability.fetchConfigured
-      ? { lastFetchedAt: null, lastFetchError: null }
-      : await refreshRemoteIfStale(project.gitRepoPath, remote);
-
   const requestedBranch = request.nextUrl.searchParams.get("branch")?.trim() || "";
-  const branch = requestedBranch || (await getCurrentGitBranch(project.gitRepoPath));
 
+  // Everything below reaches git, so the whole body sits inside the try. The
+  // branch read used to live above it: on a `gitRepoPath` that is not a
+  // repository, git's `fatal: not a git repository` escaped the handler
+  // entirely and Next answered its default 500 page — no `{ error }` envelope,
+  // so the Git Sync page's `json.error` read came back undefined.
   try {
+    // First, before any git read: an unusable path is a configuration state
+    // the user can fix, answered 400 with the shared code exactly as
+    // `github/detect` and `git/detect-remote` already do. Unlike the missing
+    // remote below, it has no in-payload representation — every counter in
+    // this response would be a fabrication.
+    await assertGitRepository(project.gitRepoPath);
+
+    // Read the repository's remote list first. This is the state the Git Sync
+    // page derives its "no remote to sync with" affordance from, so it has to
+    // come back on every status read rather than only in a failed push/pull
+    // response the client would lose on the next mount.
+    let availability: GitRemoteAvailability | null = null;
+    try {
+      availability = await getRemoteAvailability(project.gitRepoPath, remote);
+    } catch {
+      // An unreadable remote list (a flag-like remote name) is not a
+      // precondition answer: leave it unknown rather than claiming the remote
+      // is missing, and let the branch read below report the real failure.
+      availability = null;
+    }
+
+    // Fetching a remote that does not exist can only produce a misleading
+    // `lastFetchError`; the missing remote is the honest answer.
+    const freshness =
+      availability && !availability.fetchConfigured
+        ? { lastFetchedAt: null, lastFetchError: null }
+        : await refreshRemoteIfStale(project.gitRepoPath, remote);
+
+    const branch = requestedBranch || (await getCurrentGitBranch(project.gitRepoPath));
     const status = await getBranchSyncStatus(project.gitRepoPath, branch, remote);
     return NextResponse.json({
       data: {
@@ -140,6 +153,13 @@ export async function GET(request: NextRequest, { params }: Params) {
       },
     });
   } catch (error) {
+    if (error instanceof GitRepositoryUnavailableError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: 400 }
+      );
+    }
+
     return errorResponse(error, "Failed to read branch status.");
   }
 }

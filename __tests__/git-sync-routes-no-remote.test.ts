@@ -6,6 +6,9 @@ import {
   mockNextRequest,
   mockRouteContext,
 } from "@/__tests__/helpers/db-mock";
+// Resolves through the mock above, which spreads the real module — so this is
+// the very class the routes compare against.
+import { GitRemoteNotConfiguredError } from "@/lib/git/remote";
 
 /**
  * A project whose repository has no usable remote is an ordinary, recoverable
@@ -24,56 +27,38 @@ const mockGetBranchSyncStatus = vi.hoisted(() => vi.fn());
 const mockGetCurrentGitBranch = vi.hoisted(() => vi.fn());
 const mockFetchGitRemote = vi.hoisted(() => vi.fn());
 const mockWriteGitSyncLog = vi.hoisted(() => vi.fn());
-const MockPushValidationError = vi.hoisted(
-  () =>
-    class PushValidationError extends Error {
-      code: string;
-      constructor(code: string, message: string) {
-        super(message);
-        this.name = "PushValidationError";
-        this.code = code;
-      }
-    }
-);
-const MockGitRemoteNotConfiguredError = vi.hoisted(
-  () =>
-    class GitRemoteNotConfiguredError extends Error {
-      readonly code = "remote_not_configured";
-      readonly remote: string;
-      readonly configuredRemotes: string[];
-      readonly operation: "fetch" | "push";
-      constructor(
-        remote: string,
-        configuredRemotes: string[],
-        operation: "fetch" | "push"
-      ) {
-        super(`No ${operation} URL is configured for git remote '${remote}'.`);
-        this.name = "GitRemoteNotConfiguredError";
-        this.remote = remote;
-        this.configuredRemotes = configuredRemotes;
-        this.operation = operation;
-      }
-    }
-);
+/**
+ * Answers the repository-shape guard the routes now run before any git read.
+ * The fixture paths here are synthetic (`/repo`), so the real guard would
+ * refuse every one of them for a reason this file is not about.
+ */
+const mockAssertGitRepository = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", async () => {
   const { dbModuleMock } = await import("@/__tests__/helpers/db-mock");
   return dbModuleMock();
 });
 
-vi.mock("@/lib/git/remote", () => ({
-  assertRemoteConfigured: mockAssertRemoteConfigured,
-  getRemoteAvailability: mockGetRemoteAvailability,
-  pullGitBranchWithConflictSupport: mockPullGitBranchWithConflictSupport,
-  getConflictFileDiffs: mockGetConflictFileDiffs,
-  pushGitBranch: mockPushGitBranch,
-  validatePushPreconditions: mockValidatePushPreconditions,
-  getBranchSyncStatus: mockGetBranchSyncStatus,
-  getCurrentGitBranch: mockGetCurrentGitBranch,
-  fetchGitRemote: mockFetchGitRemote,
-  PushValidationError: MockPushValidationError,
-  GitRemoteNotConfiguredError: MockGitRemoteNotConfiguredError,
-}));
+// Only the git-touching FUNCTIONS are replaced. The real module is spread
+// back in so every exported error class keeps its identity: the routes branch
+// on `instanceof`, which a bare factory silently breaks.
+vi.mock("@/lib/git/remote", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/git/remote")>("@/lib/git/remote");
+  return {
+    ...actual,
+    assertGitRepository: mockAssertGitRepository,
+    assertRemoteConfigured: mockAssertRemoteConfigured,
+    getRemoteAvailability: mockGetRemoteAvailability,
+    pullGitBranchWithConflictSupport: mockPullGitBranchWithConflictSupport,
+    getConflictFileDiffs: mockGetConflictFileDiffs,
+    pushGitBranch: mockPushGitBranch,
+    validatePushPreconditions: mockValidatePushPreconditions,
+    getBranchSyncStatus: mockGetBranchSyncStatus,
+    getCurrentGitBranch: mockGetCurrentGitBranch,
+    fetchGitRemote: mockFetchGitRemote,
+  };
+});
 
 vi.mock("@/lib/agent-config/agent-resolution", () => ({
   resolveAgentByNamedId: vi.fn(() => ({
@@ -113,7 +98,7 @@ function noRemoteConfigured(
   operation: "fetch" | "push" = "fetch"
 ) {
   mockAssertRemoteConfigured.mockRejectedValue(
-    new MockGitRemoteNotConfiguredError(remote, configuredRemotes, operation)
+    new GitRemoteNotConfiguredError(remote, configuredRemotes, operation)
   );
   mockGetRemoteAvailability.mockResolvedValue({
     remote,
@@ -130,6 +115,8 @@ describe("git push/pull with no usable remote", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
+    mockAssertGitRepository.mockReset();
+    mockAssertGitRepository.mockResolvedValue(undefined);
     mockAssertRemoteConfigured.mockReset();
     mockAssertRemoteConfigured.mockResolvedValue(undefined);
     mockGetRemoteAvailability.mockReset();
@@ -295,6 +282,8 @@ describe("GET git status remote configuration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
+    mockAssertGitRepository.mockReset();
+    mockAssertGitRepository.mockResolvedValue(undefined);
     mockAssertRemoteConfigured.mockReset();
     mockAssertRemoteConfigured.mockResolvedValue(undefined);
     mockGetRemoteAvailability.mockReset();

@@ -6,6 +6,9 @@ import {
   mockNextRequest,
   mockRouteContext,
 } from "@/__tests__/helpers/db-mock";
+// Resolves through the mock above, which spreads the real module — so this is
+// the very class the routes compare against.
+import { PushValidationError } from "@/lib/git/remote";
 
 const mockAssertRemoteConfigured = vi.hoisted(() => vi.fn());
 const mockGetRemoteAvailability = vi.hoisted(() => vi.fn());
@@ -17,33 +20,12 @@ const mockGetBranchSyncStatus = vi.hoisted(() => vi.fn());
 const mockGetCurrentGitBranch = vi.hoisted(() => vi.fn());
 const mockFetchGitRemote = vi.hoisted(() => vi.fn());
 const mockWriteGitSyncLog = vi.hoisted(() => vi.fn());
-/** Mirrors lib/git/remote's precondition error so the routes' `instanceof`
- *  branch is reachable through the module mock. */
-const MockGitRemoteNotConfiguredError = vi.hoisted(
-  () =>
-    class GitRemoteNotConfiguredError extends Error {
-      readonly code = "remote_not_configured";
-      readonly remote: string;
-      readonly configuredRemotes: string[];
-      constructor(remote: string, configuredRemotes: string[]) {
-        super(`No git remote named '${remote}' is configured for this repository.`);
-        this.name = "GitRemoteNotConfiguredError";
-        this.remote = remote;
-        this.configuredRemotes = configuredRemotes;
-      }
-    }
-);
-const MockPushValidationError = vi.hoisted(
-  () =>
-    class PushValidationError extends Error {
-      code: string;
-      constructor(code: string, message: string) {
-        super(message);
-        this.name = "PushValidationError";
-        this.code = code;
-      }
-    }
-);
+/**
+ * Answers the repository-shape guard the routes now run before any git read.
+ * The fixture path here is synthetic (`/repo`), so the real guard would refuse
+ * every case in this file for a reason it is not about.
+ */
+const mockAssertGitRepository = vi.hoisted(() => vi.fn());
 
 // Real drizzle-orm + real @/lib/db/schema; the shared chain mock ignores
 // column identity, so no fake column maps.
@@ -52,19 +34,26 @@ vi.mock("@/lib/db", async () => {
   return dbModuleMock();
 });
 
-vi.mock("@/lib/git/remote", () => ({
-  assertRemoteConfigured: mockAssertRemoteConfigured,
-  getRemoteAvailability: mockGetRemoteAvailability,
-  pullGitBranchWithConflictSupport: mockPullGitBranchWithConflictSupport,
-  getConflictFileDiffs: mockGetConflictFileDiffs,
-  pushGitBranch: mockPushGitBranch,
-  validatePushPreconditions: mockValidatePushPreconditions,
-  getBranchSyncStatus: mockGetBranchSyncStatus,
-  getCurrentGitBranch: mockGetCurrentGitBranch,
-  fetchGitRemote: mockFetchGitRemote,
-  PushValidationError: MockPushValidationError,
-  GitRemoteNotConfiguredError: MockGitRemoteNotConfiguredError,
-}));
+// Only the git-touching FUNCTIONS are replaced. The real module is spread
+// back in so every exported error class keeps its identity: the routes branch
+// on `instanceof`, which a bare factory silently breaks.
+vi.mock("@/lib/git/remote", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/git/remote")>("@/lib/git/remote");
+  return {
+    ...actual,
+    assertGitRepository: mockAssertGitRepository,
+    assertRemoteConfigured: mockAssertRemoteConfigured,
+    getRemoteAvailability: mockGetRemoteAvailability,
+    pullGitBranchWithConflictSupport: mockPullGitBranchWithConflictSupport,
+    getConflictFileDiffs: mockGetConflictFileDiffs,
+    pushGitBranch: mockPushGitBranch,
+    validatePushPreconditions: mockValidatePushPreconditions,
+    getBranchSyncStatus: mockGetBranchSyncStatus,
+    getCurrentGitBranch: mockGetCurrentGitBranch,
+    fetchGitRemote: mockFetchGitRemote,
+  };
+});
 
 vi.mock("@/lib/agent-config/agent-resolution", () => ({
   resolveAgentByNamedId: vi.fn(() => ({
@@ -105,6 +94,8 @@ describe("Project git sync routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
+    mockAssertGitRepository.mockReset();
+    mockAssertGitRepository.mockResolvedValue(undefined);
     mockAssertRemoteConfigured.mockReset();
     mockAssertRemoteConfigured.mockResolvedValue(undefined);
     mockGetRemoteAvailability.mockReset();
@@ -222,7 +213,7 @@ describe("Project git sync routes", () => {
   it("POST push returns 409 when validation fails", async () => {
     dbMockState.getQueue = [{ id: "proj-1", gitRepoPath: "/repo" }];
     mockValidatePushPreconditions.mockRejectedValue(
-      new MockPushValidationError(
+      new PushValidationError(
         "working_tree_dirty",
         "Push rejected: working tree has uncommitted changes."
       )
@@ -277,6 +268,8 @@ describe("GET git status implicit fetch (TTL)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetDbMockState();
+    mockAssertGitRepository.mockReset();
+    mockAssertGitRepository.mockResolvedValue(undefined);
     mockGetRemoteAvailability.mockReset();
     mockGetRemoteAvailability.mockResolvedValue({
       remote: "origin",
