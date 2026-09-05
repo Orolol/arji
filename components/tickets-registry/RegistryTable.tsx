@@ -104,11 +104,20 @@ export function RegistryTable({
       gap={0}
       className={cn("min-h-0 flex-1 overflow-hidden p-0", className)}
     >
+      {/*
+        The legend stands down below `lg`, with the table it labels.
+
+        Seven sort kickers over the stacked row's two tracks would wrap into
+        four lines of chrome above every group, and they would be labelling a
+        layout that no longer has columns. Sorting itself is NOT lost: the
+        filter row's `sort:` pill offers the same seven sorts and the same
+        direction toggle at touch size (`components/tickets-registry/RegistryFilters.tsx`).
+      */}
       <div
         role="row"
         className={cn(
           REGISTRY_GRID,
-          "shrink-0 border-b-[1.5px] border-border px-[18px] py-[9px]",
+          "hidden shrink-0 border-b-[1.5px] border-border px-[18px] py-[9px] lg:grid",
         )}
       >
         {COLUMNS.map(([label, key], index) => {
@@ -193,7 +202,10 @@ export function RegistryTable({
         })}
       </div>
 
-      <div className="flex shrink-0 items-center gap-[14px] border-t-[1.5px] border-border px-[18px] py-[9px]">
+      {/* Wraps on a phone: the status line, the 30-day total and Export CSV
+          are ~370px of content before padding, and a nowrap row would squeeze
+          the export link out of reach rather than moving it down a line. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-[14px] gap-y-[4px] border-t-[1.5px] border-border px-[18px] py-[9px] lg:flex-nowrap">
         {/* `Mono` is frozen and takes no arbitrary DOM props, so the test id
             rides on a wrapper rather than forking the primitive. */}
         <span data-testid="tickets-footer-status">
