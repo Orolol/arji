@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRef, useState } from "react";
 import { ImagePlus, Sparkles } from "lucide-react";
 
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
@@ -80,8 +81,8 @@ export function ChatComposer({
   disabled = false,
   onSend,
 }: ChatComposerProps) {
-  const [value, setValue] = React.useState("");
-  const composingRef = React.useRef(false);
+  const [value, setValue] = useState("");
+  const composingRef = useRef(false);
   const { agents } = useNamedAgentsList();
   const safeAgents = Array.isArray(agents) ? agents : [];
 

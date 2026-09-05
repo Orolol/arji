@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { BandHeader, Mono, QuietLink, Stamp, StrataBand } from "@/components/piscine";
@@ -37,7 +38,7 @@ export function ReleaseHistory({
   onInspect,
 }: ReleaseHistoryProps) {
   // One at a time: a history card with four open rows is a list, not a history.
-  const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   return (
     <StrataBand

@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 
 /*
@@ -68,17 +68,29 @@ export function DeskCommandPalette({
   onOpenTicket,
   onSelectProject,
 }: DeskCommandPaletteProps) {
-  const [query, setQuery] = React.useState("");
-  const [cursor, setCursor] = React.useState(0);
+  const [query, setQuery] = useState("");
+  const [cursor, setCursor] = useState(0);
 
-  React.useEffect(() => {
+  /*
+    Closing clears the query, so the next open starts empty rather than on the
+    previous search. Adjusted during render rather than from an effect.
+
+    TopBar's only call site mounts this behind `{paletteOpen ? … : null}` and
+    passes `open` bare, so today the component unmounts on close and this branch
+    never runs. It stays because `open` is a declared prop: a caller that keeps
+    the palette mounted and toggles the prop is exactly the case the reset is
+    for, and the guard is one comparison when it is not.
+  */
+  const [wasOpen, setWasOpen] = useState(open);
+  if (wasOpen !== open) {
+    setWasOpen(open);
     if (!open) {
       setQuery("");
       setCursor(0);
     }
-  }, [open]);
+  }
 
-  const entries = React.useMemo<Entry[]>(() => {
+  const entries = useMemo<Entry[]>(() => {
     if (!payload) return [];
     const projectsById = new Map(payload.projects.map((p) => [p.id, p]));
     const seen = new Set<string>();
@@ -152,7 +164,7 @@ export function DeskCommandPalette({
     return rows;
   }, [payload, onOpenTicket, onSelectProject]);
 
-  const results = React.useMemo(
+  const results = useMemo(
     () => entries.filter((entry) => fuzzyMatches(entry.label, query)).slice(0, 12),
     [entries, query],
   );

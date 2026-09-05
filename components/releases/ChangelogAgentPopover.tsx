@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useState } from "react";
 
 import { FieldKicker, QuietLink } from "@/components/piscine";
 import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
@@ -43,7 +43,7 @@ export function ChangelogAgentPopover({
   resumeSessionId,
   onResumeSessionChange,
 }: ChangelogAgentPopoverProps) {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = useState(false);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

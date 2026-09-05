@@ -13,6 +13,7 @@
  */
 
 import * as React from "react";
+import { useEffect, useRef } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -47,10 +48,10 @@ export function GhostInputPill({
   className,
   ...props
 }: GhostInputPillProps) {
-  const inputRef = React.useRef<HTMLInputElement>(null);
-  const composingRef = React.useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const composingRef = useRef(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (autoFocusKey === undefined) return;
     inputRef.current?.focus();
   }, [autoFocusKey]);

@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useState } from "react";
 import { Play } from "lucide-react";
 
 import { IdentityChip, Mono, PillButton, projectTone } from "@/components/piscine";
@@ -45,7 +45,7 @@ export function RunQaPassButton({
   pending = false,
   className,
 }: RunQaPassButtonProps) {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = useState(false);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

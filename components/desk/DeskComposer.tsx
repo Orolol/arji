@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 
 import { SelectPill, StrataBand, projectTone } from "@/components/piscine";
@@ -55,9 +55,9 @@ export function DeskComposer({
   disabled = false,
   className,
 }: DeskComposerProps) {
-  const [title, setTitle] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const composingRef = React.useRef(false);
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const composingRef = useRef(false);
   const { agents } = useNamedAgentsList();
 
   const project =

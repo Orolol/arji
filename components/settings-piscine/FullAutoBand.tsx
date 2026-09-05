@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useMemo } from "react";
 
 import {
   BandHeader,
@@ -104,7 +104,7 @@ export function FullAutoBand({ draft, projectCount }: FullAutoBandProps) {
   // would silently rewrite the scheduler's budget.
   const offLadder = stored !== "" && segment === "";
 
-  const optedOut = React.useMemo(() => {
+  const optedOut = useMemo(() => {
     const prefix = `${AUTO_MODE_ENABLED_SETTING_KEY}:`;
     let count = 0;
     for (const [key, value] of Object.entries(draft.data)) {

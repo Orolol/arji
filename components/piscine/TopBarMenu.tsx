@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { Moon } from "lucide-react";
 
@@ -108,7 +109,7 @@ export function TopBarMenu({
   const stratum = STRATUM_CLASS[category.stratum];
   const geometry = CARD[category.panel ?? "none"];
 
-  const statuses = React.useMemo(() => deriveStatuses(data), [data]);
+  const statuses = useMemo(() => deriveStatuses(data), [data]);
 
   /*
    * The 8px offset below the bar is PADDING on a transparent wrapper, never a
@@ -388,7 +389,7 @@ function MorningPanel({
  * agent falls back to its dispatch role, which is what the desk's own cards do.
  */
 function RightNowPanel({ data }: { data: ReturnType<typeof useControlDesk>["data"] }) {
-  const groups = React.useMemo(() => {
+  const groups = useMemo(() => {
     if (!data) return [];
     const counts = new Map<string, number>();
     for (const session of data.working) {

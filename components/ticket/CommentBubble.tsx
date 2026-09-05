@@ -14,7 +14,7 @@
  * (`lib/kanban/activity-feed.ts`), expandable in place.
  */
 
-import * as React from "react";
+import { useState } from "react";
 
 import { Mono, QuietLink } from "@/components/piscine";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,7 @@ export interface CommentBubbleProps {
 }
 
 export function CommentBubble({ comment }: CommentBubbleProps) {
-  const [expanded, setExpanded] = React.useState(false);
+  const [expanded, setExpanded] = useState(false);
   const isUser = comment.author === "user";
   const long = isLongComment(comment.content);
   const body = long && !expanded ? commentPreview(comment.content) : comment.content;
