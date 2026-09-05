@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { Activity, Plus, RefreshCw } from "lucide-react";
 import { ReportDetail } from "@/components/qa/ReportDetail";
 import { StartQaCheckDialog } from "@/components/qa/StartQaCheckDialog";
 import { Button } from "@/components/ui/button";
 import { useQaReports } from "@/hooks/useQaReports";
+import { consumeQueryParam } from "@/lib/navigation/deep-link";
 import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/utils/format-date";
 
@@ -34,7 +35,6 @@ function checkTypeBadgeLabel(checkType: string): string {
 
 export default function QAPage() {
   const params = useParams();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
   const { reports, loading, error, refresh } = useQaReports(projectId);
@@ -45,30 +45,33 @@ export default function QAPage() {
 
   // Source links from generated tickets select the referenced report once,
   // then remove the transient parameter so later navigation does not restore
-  // a stale selection.
+  // a stale selection. Same two-part shape as the desk's ?ticket=/?nightRun=
+  // links (app/projects/[projectId]/page.tsx).
+  //
+  // The selection is plain state of this component, so it is adjusted during
+  // render rather than from an effect; only the URL rewrite is a side effect.
+  //
+  // That rewrite goes through `window.history.replaceState`, not
+  // `router.replace`: a replace() is a navigation, and the App Router leaves
+  // the spent parameter in the address bar until the destination's RSC payload
+  // commits. Inside that window the user can pick another report and reload,
+  // and the deep link replays. Nothing on the server reads ?reportId=, so the
+  // synchronous query-only rewrite is the right tool — see
+  // lib/navigation/deep-link.ts.
+  const reportIdParam = searchParams.get("reportId");
+  const [handledReportId, setHandledReportId] = useState<string | null>(null);
+
+  if (reportIdParam !== handledReportId) {
+    setHandledReportId(reportIdParam);
+    if (reportIdParam) {
+      setSelectedReportId(reportIdParam);
+    }
+  }
+
   useEffect(() => {
-    const reportId = searchParams.get("reportId");
-    if (!reportId) return;
-
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("reportId");
-    const query = next.toString();
-
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled) return;
-      setSelectedReportId(reportId);
-      router.replace(
-        query
-          ? `/projects/${projectId}/qa?${query}`
-          : `/projects/${projectId}/qa`,
-      );
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, router, searchParams]);
+    if (!searchParams.get("reportId")) return;
+    consumeQueryParam(searchParams, "reportId", `/projects/${projectId}/qa`);
+  }, [projectId, searchParams]);
 
   const filteredReports = useMemo(() => {
     if (!filterCheckType) return reports;
