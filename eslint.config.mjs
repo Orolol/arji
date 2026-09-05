@@ -29,6 +29,11 @@ const eslintConfig = defineConfig([
   },
   // Override default ignores of eslint-config-next.
   globalIgnores([
+    // Agent worktrees and runtime data contain independent or historical
+    // source trees; lint this checkout, as the Vitest exclude list does.
+    ".claude/**",
+    "projects/**",
+    "data/**",
     // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",
