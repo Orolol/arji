@@ -225,7 +225,18 @@ export function DeskCommandPalette({
                 onClose();
               }
             }}
-            className="min-w-0 flex-1 border-0 bg-transparent p-0 font-sans text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
+            // The ring belongs to the input, not to the field box around it.
+            // Ringing the box on focus-within would look the same here, but it
+            // would leave this element still declaring no affordance of its
+            // own — the shape B-arij-203 is about — and every guard that reads
+            // one element's classes would keep reporting it as bare.
+            // Positive offset: the box's px-3 py-2 leaves room outside the
+            // input, and p-0 leaves none inside.
+            className={cn(
+              "min-w-0 flex-1 border-0 bg-transparent p-0 font-sans text-[13px] text-foreground",
+              "outline-none placeholder:text-muted-foreground",
+              "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
+            )}
           />
         </div>
 
