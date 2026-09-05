@@ -279,7 +279,7 @@ function MenuRow({
         ROW_CLASS,
         "text-foreground no-underline outline-none",
         "transition-colors motion-reduce:transition-none",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
         active ? cn("font-semibold", stratum.activeRow) : "font-medium hover:bg-muted",
       )}
     >
@@ -371,7 +371,7 @@ function MorningPanel({
         onClick={onNavigate}
         className={cn(
           "mt-auto font-sans text-[12px] font-semibold no-underline outline-none",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
           linkClass,
         )}
       >

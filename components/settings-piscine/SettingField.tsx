@@ -73,7 +73,7 @@ export interface SettingInputProps
 }
 
 export const SETTING_INPUT_BASE =
-  "h-[34px] w-full min-w-0 rounded-[10px] px-[12px] font-mono text-[12px] tabular-nums text-foreground outline-none placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:opacity-50";
+  "h-[34px] w-full min-w-0 rounded-[10px] px-[12px] font-mono text-[12px] tabular-nums text-foreground outline-none placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:opacity-50";
 
 const CHROME: Record<"paper" | "ground", string> = {
   paper: "border-[1.5px] border-input bg-field",
@@ -114,7 +114,7 @@ export function SettingTextarea({
         "w-full min-w-0 resize-y rounded-[10px] px-[12px] py-[9px]",
         "font-mono text-[11.5px] leading-[1.55] text-foreground outline-none",
         "placeholder:text-muted-foreground",
-        "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
         "disabled:opacity-50",
         CHROME[chrome],
         className,

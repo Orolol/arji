@@ -83,7 +83,7 @@ export function CliDropdown({
             "border-[1.5px] border-border bg-transparent px-3",
             "font-sans text-[13px] font-normal text-foreground",
             "outline-none focus-visible:border-border-strong",
-            "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+            "focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
             "disabled:pointer-events-none disabled:opacity-50",
             className,
           )}

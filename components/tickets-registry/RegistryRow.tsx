@@ -201,7 +201,7 @@ export function RegistryRow({ row, project, striped, onOpen }: RegistryRowProps)
       className={cn(
         REGISTRY_GRID,
         "w-full px-[18px] py-[8px] text-left outline-none",
-        "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
         "hover:bg-muted/40",
         striped && "bg-background",
         row.group === "released" && "text-muted-foreground",
