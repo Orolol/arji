@@ -91,7 +91,16 @@ test("centres Now and keeps eight project chips clear of the navigation island",
     expect(await now.getAttribute("aria-haspopup")).toBeNull();
     await expect(page.getByTestId("top-bar-home")).toHaveText("A");
     const chips = page.getByTestId("top-bar-project-chips");
-    await expect(chips.getByRole("link")).toHaveCount(9);
+    // BY ID, not by count. The bar draws every project in the workspace and the
+    // e2e database is shared under `fullyParallel`, so a sibling spec's project
+    // is a legitimate extra chip: `toHaveCount(9)` raced its own file-mate
+    // (each test's `project` fixture is a ninth project) and failed locally at
+    // `workers: 4` while passing on CI at `workers: 1`. These eight ids plus
+    // the add-project affordance are what the test is actually about.
+    for (const id of [project.id, ...ids]) {
+      await expect(chips.getByTestId(`top-bar-project-${id}`)).toBeAttached();
+    }
+    await expect(page.getByTestId("top-bar-add-project")).toBeAttached();
     const islandBox = (await page.getByTestId("top-bar-island").boundingBox())!;
     const chipsBox = (await chips.boundingBox())!;
     expect(chipsBox.x + chipsBox.width).toBeLessThan(islandBox.x);
