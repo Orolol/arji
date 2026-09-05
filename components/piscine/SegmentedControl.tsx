@@ -22,6 +22,17 @@
  * idiom as the `--dot-color` / `--track-color` scopes in app/globals.css.
  *
  * No dividers between segments — the filled active segment does the work.
+ *
+ * FOCUS RING: `focus-visible:outline-solid` on the segment is load-bearing,
+ * not noise. In Tailwind v4 `outline-none` sets `--tw-outline-style: none`,
+ * and `outline-2` only sets a WIDTH — it resolves its style from that same
+ * variable. Measured in Chrome before that class existed: the segment matched
+ * `:focus-visible`, computed `outline-width: 2px` and `outline-color`
+ * correctly, and still painted nothing because `outline-style` stayed `none`.
+ * Same mechanism as B-arij-194 on TopBar. The explanation lives up here rather
+ * than beside the class because a backticked comment inside the `cn(…)`
+ * argument list hides the whole control from the source scan in
+ * `__tests__/focus-ring-paints.test.tsx`.
  */
 
 import * as React from "react";
@@ -55,6 +66,12 @@ export interface SegmentedControlProps<T extends string> {
    * breakpoint restores `basis-0`, `flex-nowrap` and the fixed height.
    */
   wrap?: boolean;
+  /**
+   * Accessible name for the `role="group"` rail. A control that only switches
+   * a view (the chat page's Conversations | Fil | Contexte) is otherwise an
+   * unnamed group of three toggle buttons to a screen reader.
+   */
+  "aria-label"?: string;
   className?: string;
 }
 
@@ -65,12 +82,14 @@ export function SegmentedControl<T extends string>({
   chrome = "bordered",
   size = "md",
   wrap = false,
+  "aria-label": ariaLabel,
   className,
 }: SegmentedControlProps<T>) {
   return (
     <div
       data-slot="segmented-control"
       role="group"
+      aria-label={ariaLabel}
       className={cn(
         "flex overflow-hidden font-sans",
         wrap && "flex-wrap sm:flex-nowrap",
