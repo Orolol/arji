@@ -2,9 +2,16 @@
 
 import { useCallback, useMemo, useState } from "react";
 
-import { AlertTriangle } from "lucide-react";
-
-import { Mono, SurfaceCard } from "@/components/piscine";
+import { Mono } from "@/components/piscine";
+import {
+  ToastStack,
+  type ToastAction,
+  type ToastTone,
+} from "@/components/notifications/ToastStack";
+import {
+  useDispatchFailureReporter,
+  useToastStack,
+} from "@/components/notifications/useToastStack";
 import { useTicketOverlay } from "@/components/ticket/TicketOverlayProvider";
 import { useQaFindings } from "@/hooks/useQaFindings";
 import { QA_COVERAGE_DAYS, type QaFinding, type QaReviewTarget } from "@/lib/qa/types";
@@ -38,12 +45,8 @@ import { VerdictsBand } from "./VerdictsBand";
  * exactly one finding and records why; Fix with agent dispatches a build; Run
  * QA pass dispatches a review. No status is moved from this screen.
  */
-export type QaToastTone = "success" | "error" | "warning";
-
-export interface QaToastAction {
-  href: string;
-  label?: string;
-}
+export type QaToastTone = ToastTone;
+export type QaToastAction = ToastAction;
 
 export interface QaScreenProps {
   /** Pre-filter the screen to one project. The `/qa` route renders it unfiltered. */
@@ -53,49 +56,16 @@ export interface QaScreenProps {
   className?: string;
 }
 
-interface QaToast {
-  id: string;
-  tone: QaToastTone;
-  message: string;
-  href?: string;
-  actionLabel?: string;
-}
-
-/** The 409 payload shape, from `lib/agents/client-error.ts`. */
-interface DispatchErrorBody {
-  error?: string;
-  code?: string;
-  data?: { activeSessionId?: string; sessionUrl?: string };
-}
-
 export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
   const { openTicket } = useTicketOverlay();
   const { data, error, refresh } = useQaFindings(projectId ?? null);
 
   const [filter, setFilter] = useState<FindingFilter>("all");
-  const [toasts, setToasts] = useState<QaToast[]>([]);
+  const { toasts, raise, dismiss: dismissToast } = useToastStack(onToast);
   const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
   const [dismissTarget, setDismissTarget] = useState<QaFinding | null>(null);
   const [dismissPending, setDismissPending] = useState(false);
   const [runPending, setRunPending] = useState(false);
-
-  const raise = useCallback(
-    (tone: QaToastTone, message: string, action?: QaToastAction) => {
-      if (onToast) {
-        onToast(tone, message, action);
-        return;
-      }
-      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      setToasts((current) => [
-        ...current,
-        { id, tone, message, href: action?.href, actionLabel: action?.label },
-      ]);
-      setTimeout(() => {
-        setToasts((current) => current.filter((toast) => toast.id !== id));
-      }, 5000);
-    },
-    [onToast],
-  );
 
   const markPending = useCallback((findingId: string, pending: boolean) => {
     setPendingIds((current) => {
@@ -106,34 +76,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
     });
   }, []);
 
-  /**
-   * 409 AGENT_ALREADY_RUNNING is not an error the user can do anything with
-   * unless the toast can take them to the session that is in the way.
-   */
-  const reportFailure = useCallback(
-    (
-      res: Response,
-      body: DispatchErrorBody,
-      fallback: string,
-      ownerProjectId: string,
-    ) => {
-      if (
-        res.status === 409 &&
-        body.code === "AGENT_ALREADY_RUNNING" &&
-        body.data?.activeSessionId
-      ) {
-        raise("error", body.error ?? fallback, {
-          href:
-            body.data.sessionUrl ||
-            `/projects/${ownerProjectId}/sessions/${body.data.activeSessionId}`,
-          label: "Open active session",
-        });
-        return;
-      }
-      raise("error", body.error || fallback);
-    },
-    [raise],
-  );
+  const reportFailure = useDispatchFailureReporter(raise);
 
   /* ---- derived ------------------------------------------------------ */
 
@@ -437,32 +380,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
       />
 
       {onToast ? null : (
-        <div className="fixed right-4 bottom-4 z-50 flex flex-col gap-2">
-          {/* The body stays ink whatever the tone: a toast floats over the
-              screen and belongs to no stratum, so it has no deep to borrow. */}
-          {toasts.map((toast) => (
-            <SurfaceCard
-              key={toast.id}
-              radius={11}
-              data-testid="qa-toast"
-              className="flex items-center gap-2 px-[14px] py-[10px] font-sans text-[13px] text-foreground"
-            >
-              {toast.tone === "success" ? null : (
-                <AlertTriangle
-                  size={13}
-                  aria-hidden="true"
-                  className="shrink-0 text-muted-foreground"
-                />
-              )}
-              <span>{toast.message}</span>
-              {toast.href ? (
-                <a href={toast.href} className="text-[12px] whitespace-nowrap underline">
-                  {toast.actionLabel || "Open session"}
-                </a>
-              ) : null}
-            </SurfaceCard>
-          ))}
-        </div>
+        <ToastStack items={toasts} onDismiss={dismissToast} testId="qa-toast" />
       )}
     </div>
   );

@@ -10,22 +10,18 @@ import { CommentThread } from "@/components/story/CommentThread";
 import { AgentActionsBar } from "@/components/shared/AgentActionsBar";
 import { Button } from "@/components/ui/button";
 import { PermanentDeleteDialog } from "@/components/shared/PermanentDeleteDialog";
-import { ArrowLeft, Loader2, XCircle, X } from "lucide-react";
+import { ToastStack } from "@/components/notifications/ToastStack";
+import { useToastStack } from "@/components/notifications/useToastStack";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { isAgentAlreadyRunningError } from "@/lib/agents/client-error";
-
-interface Toast {
-  id: string;
-  message: string;
-  href?: string;
-}
 
 export default function StoryDetailPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.projectId as string;
   const storyId = params.storyId as string;
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const { toasts, raise, dismiss: dismissToast } = useToastStack();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingStory, setDeletingStory] = useState(false);
   const deleteInFlightRef = useRef(false);
@@ -56,12 +52,9 @@ export default function StoryDetailPage() {
     epicId: story?.epicId,
   });
 
+  /** Everything this page reports is a failure, so every toast is an error. */
   function addToast(message: string, href?: string) {
-    const id = Date.now().toString();
-    setToasts((prev) => [...prev, { id, message, href }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((toast) => toast.id !== id));
-    }, 5000);
+    raise("error", message, href ? { href } : undefined);
   }
 
   function handleAgentActionError(error: unknown) {
@@ -200,28 +193,7 @@ export default function StoryDetailPage() {
         </div>
       </div>
 
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg shadow-lg text-sm bg-red-900/90 text-red-100"
-          >
-            <XCircle className="h-4 w-4 shrink-0" />
-            <span>{toast.message}</span>
-            {toast.href && (
-              <Link href={toast.href} className="text-red-50 underline text-xs whitespace-nowrap">
-                Open session
-              </Link>
-            )}
-            <button
-              onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
-              aria-label="Close notification"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        ))}
-      </div>
+      <ToastStack items={toasts} onDismiss={dismissToast} testId="story-toast" />
 
       <PermanentDeleteDialog
         open={deleteDialogOpen}

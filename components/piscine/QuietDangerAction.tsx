@@ -23,6 +23,12 @@ export interface QuietDangerActionProps {
   icon?: LucideIcon;
   onClick: () => void;
   size?: 11.5 | 12;
+  /**
+   * `data-testid` on the button itself — same contract as `QuietLink`.
+   * Additive: a test has to be able to CLICK the delete, so the id cannot
+   * live on a wrapper.
+   */
+  testId?: string;
   className?: string;
   children: React.ReactNode;
 }
@@ -31,6 +37,7 @@ export function QuietDangerAction({
   icon: Icon,
   onClick,
   size = 12,
+  testId,
   className,
   children,
 }: QuietDangerActionProps) {
@@ -38,6 +45,7 @@ export function QuietDangerAction({
     <button
       type="button"
       data-slot="quiet-danger-action"
+      data-testid={testId}
       onClick={onClick}
       className={cn(
         "inline-flex items-center gap-1.5 border-0 bg-transparent p-0",

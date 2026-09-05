@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { ToastStack, MAX_TOASTS, type ToastItem } from "@/components/notifications/ToastStack";
+import { ToastStack, type ToastItem } from "@/components/notifications/ToastStack";
+import { useToastStack } from "@/components/notifications/useToastStack";
 import { NowDesk } from "@/components/desk/NowDesk";
 import { TicketOverlay } from "@/components/ticket/TicketOverlay";
 import { UnifiedChatPanel, type UnifiedChatPanelHandle } from "@/components/chat/UnifiedChatPanel";
@@ -73,7 +74,7 @@ export default function ProjectDeskPage() {
   const [nightDialogOpen, setNightDialogOpen] = useState(false);
   const [autoModeDialogOpen, setAutoModeDialogOpen] = useState(false);
   const [nightSummaryRunId, setNightSummaryRunId] = useState<string | null>(null);
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const { toasts, raise: addToast, dismiss: dismissRaised } = useToastStack();
   // Session completions are spotted during render (see below); the tick feeds
   // `refreshKey` and the id list feeds the completion toasts.
   const [completionTick, setCompletionTick] = useState(0);
@@ -132,24 +133,6 @@ export default function ProjectDeskPage() {
     return () => window.removeEventListener("arji:synced", onSynced);
   }, []);
 
-  const addToast = useCallback((
-    type: "success" | "error" | "warning",
-    message: string,
-    action?: { href: string; label?: string }
-  ) => {
-    const id = crypto.randomUUID();
-    setToasts((t) => [
-      ...t.slice(-(MAX_TOASTS - 1)),
-      {
-        id,
-        type,
-        message,
-        href: action?.href,
-        actionLabel: action?.label || "Open session",
-      },
-    ]);
-  }, []);
-
   /**
    * A refinement pass reshapes columns, priorities and dependency edges
    * without emitting one event per write, so everything is reloaded once when
@@ -178,19 +161,11 @@ export default function ProjectDeskPage() {
 
   const dismissToast = useCallback((id: string) => {
     if (id === "deleted-notice") setDeletedNotice(null);
-    else setToasts((items) => items.filter((item) => item.id !== id));
-  }, []);
+    else dismissRaised(id);
+  }, [dismissRaised]);
 
-  const visibleToasts: ToastItem[] = deletedNotice
-    ? [
-        ...toasts,
-        {
-          id: "deleted-notice",
-          type: "success",
-          message: deletedNotice,
-          actionLabel: "Open session",
-        },
-      ]
+  const visibleToasts: readonly ToastItem[] = deletedNotice
+    ? [...toasts, { id: "deleted-notice", type: "success", message: deletedNotice }]
     : toasts;
 
   useEffect(() => {
