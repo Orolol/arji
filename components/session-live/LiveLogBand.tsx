@@ -83,7 +83,7 @@ function TailToggle({
       className={cn(
         "flex items-center gap-[6px] border-0 bg-transparent p-0",
         "font-sans text-[12px] font-semibold leading-none outline-none",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
         "text-strata-live-deep",
       )}
     >

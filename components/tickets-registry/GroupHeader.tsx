@@ -61,7 +61,7 @@ export function GroupHeader({
       data-group={group}
       className={cn(
         "flex w-full items-center gap-[10px] px-[18px] pb-[6px] text-left outline-none",
-        "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
         first ? "pt-[10px]" : "pt-[12px]",
         className,
       )}

@@ -70,7 +70,7 @@ export function ReleaseHistory({
                   data-testid={`release-history-row-${release.id}`}
                   aria-expanded={expanded}
                   onClick={() => setExpandedId(expanded ? null : release.id)}
-                  className={`flex w-full items-center gap-[10px] px-[2px] py-[10px] text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+                  className={`flex w-full items-center gap-[10px] px-[2px] py-[10px] text-left outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring ${
                     isLast && !expanded ? "" : "border-b-[1.5px] border-muted"
                   }`}
                 >

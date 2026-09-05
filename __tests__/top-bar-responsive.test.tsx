@@ -343,3 +343,70 @@ describe("TopBar — the three zones share the row at every width", () => {
     expect(hasBaseUtility(island, "self-stretch")).toBe(true);
   });
 });
+
+/**
+ * B-arij-hEtMTczybUgx — "la TopBar superpose ses liens et actions sur mobile",
+ * reported at 390×844 on `/projects/:id`.
+ *
+ * THE REPORTED DEFECT IS ALREADY FIXED. The report names the mechanism —
+ * "TopBar.tsx centre une île en position absolue tout en conservant les
+ * contrôles de droite" — and that mechanism is what `052e062` removed; the
+ * tests above are its guards. Re-measured in Chrome on this branch (six
+ * projects, `/`, `/projects/:id`, `/settings`, `/agents` × 17 widths from 320
+ * to 1280): no overlap, no page scroll, no covered pill anywhere. Restoring
+ * `052e062^` on disk reproduces the report verbatim at 390 on `/projects/:id`
+ * — island × right cluster 266.3px, page scrollWidth 405 vs 390, and Work 36%
+ * / Agents 88% / Réglages 84% hit-testing to ⌘K / Auto / New, which is the
+ * exact pairing the report describes.
+ *
+ * WHAT IS STILL UNGUARDED, AND WHY THIS TEST EXISTS. The fix has two halves:
+ * the island leaves `position: absolute` (pinned above), AND the three zones
+ * are re-ordered so the wrapped line is the ISLAND'S, not the right cluster's.
+ * Only the first half was pinned. Measured in Chrome with the `order-*`
+ * utilities deleted and nothing else changed:
+ *
+ *   390px  header 124px tall instead of 88 — three lines, one per zone
+ *   320px  header 124px tall instead of 88
+ *   1024px unchanged (the header stops wrapping, so order is moot)
+ *
+ * No overlap, so every geometric assertion in `e2e/top-bar-responsive.spec.ts`
+ * stays green; no class-list change any test above looks at, so all 67 existing
+ * unit tests stay green too. The bar just quietly eats a third of the vertical
+ * budget of a phone. That is the shape this pins.
+ *
+ * DOM order is left → island → right, so the mobile row is NOT the DOM's: the
+ * right cluster has to be pulled up beside the chips (`order-2`) and the island
+ * pushed down (`order-3`) for the two flanks to share line 1. Above `lg` the
+ * header no longer wraps and the island takes the middle slot again
+ * (`lg:order-2` / `lg:order-3`).
+ */
+describe("TopBar — the wrapped line below lg is the island's, not the right cluster's", () => {
+  it("orders the flanks onto the first line and the island onto its own", () => {
+    render(<TopBar />);
+    const { island, left, right } = zones();
+
+    // Line 1 — identity, then the four actions. Without `order-2` the right
+    // cluster follows the full-width island in DOM order and lands on a third
+    // line of its own.
+    expect(
+      hasBaseUtility(left, "order-1"),
+      "the left zone must be first on the wrapped bar",
+    ).toBe(true);
+    expect(
+      hasBaseUtility(right, "order-2"),
+      "the right cluster must be pulled up beside the project chips; in DOM " +
+        "order it comes after the full-width island, so without `order-2` it " +
+        "wraps onto a third line and the bar grows to 124px on a phone",
+    ).toBe(true);
+
+    // Line 2 — the island, last, which is what `w-full` breaks onto its own row.
+    expect(
+      hasBaseUtility(island, "order-3"),
+      "the island must be ordered last, or the line it forces is not its own",
+    ).toBe(true);
+
+    // And above `lg` the three go back to left / island / right in a single row.
+    expect(island.className).toContain("lg:order-2");
+    expect(right.className).toContain("lg:order-3");
+  });
+});

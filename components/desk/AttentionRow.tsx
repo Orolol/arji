@@ -46,7 +46,7 @@ const ROW_CLASS = cn(
   "flex items-center gap-3 px-[14px] py-[10px]",
   // New rows slide-fade in, using the existing tw-animate-css utilities.
   "animate-in fade-in slide-in-from-bottom-2 motion-reduce:animate-none",
-  "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+  "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
 );
 
 /**

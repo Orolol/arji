@@ -225,7 +225,10 @@ export function RegistryRow({ row, project, striped, onOpen }: RegistryRowProps)
         // Taller on a phone: two stacked lines plus this padding clear the 44px
         // touch target, and the desktop density comes back with the table.
         "w-full px-[18px] py-[10px] text-left outline-none lg:py-[8px]",
-        "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+        // outline-solid from B-arij-JJ5FdaHpX7d6: outline-none sets the STYLE
+        // to none, so outline-2 alone paints nothing and the row would have no
+        // keyboard affordance at all.
+        "focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
         "hover:bg-muted/40",
         striped && "bg-background",
         row.group === "released" && "text-muted-foreground",

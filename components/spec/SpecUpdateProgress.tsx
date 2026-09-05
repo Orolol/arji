@@ -100,7 +100,7 @@ export function SpecUpdateProgress({
               type="button"
               onClick={onDismiss}
               aria-label="Dismiss spec update result"
-              className="flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className="flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               <X size={12} aria-hidden="true" />
             </button>

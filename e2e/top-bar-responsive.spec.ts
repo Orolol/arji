@@ -33,13 +33,34 @@ import { expect, test } from "./fixtures/arij-project";
  *
  * THE BAR IS SHARED CHROME, so the widths are swept on more than one route:
  * a regression that only shows on `/agents` would still be on every screen.
+ *
+ * B-arij-hEtMTczybUgx re-measured this on the fixed bar and found nothing to
+ * fix: it reported the same collision at 390×844, but on `/projects/:id`, and
+ * against the bar as it stood BEFORE `052e062` — the ticket even names the
+ * retired mechanism ("une île en position absolue"). Re-measured in Chrome on
+ * six projects across `/`, `/projects/:id`, `/settings` and `/agents` at 17
+ * widths from 320 to 1280: no overlap, no page scroll, no covered pill. What
+ * the report did expose is that the route it names was never swept, so
+ * `ROUTES` now includes the project board.
  */
 
 /** The audit's five widths (the ticket's own 320/390, plus the comment's). */
 const WIDTHS = [320, 390, 768, 1280, 1440] as const;
 
-/** The bar is mounted by `app/layout.tsx`; these three prove "every screen". */
-const ROUTES = ["/", "/agents", "/tickets"] as const;
+/**
+ * The bar is mounted by `app/layout.tsx`; these prove "every screen".
+ *
+ * `null` is the project board, `/projects/:id` — the fixture's own id is not a
+ * constant, so it is substituted per run. It is here because B-arij-hEtMTczybUgx
+ * reported the collision on that route specifically, at 390×844, and the three
+ * static routes above never visit it. It is also the one route where a project
+ * chip is ACTIVE: an active chip wears a pastel fill and is the widest the left
+ * zone ever draws, which is exactly what the retired `calc(50% - 235px)` cap
+ * used to govern. That defect is fixed (see this spec's header), but the route
+ * the report was filed against was never swept, and an unswept route is where
+ * the next one lands.
+ */
+const ROUTES = ["/", "/agents", "/tickets", null] as const;
 
 /**
  * B-arij-Gr4WgnOaRDQs — the band the sweep above jumps straight over.
@@ -164,7 +185,10 @@ test.describe("TopBar — responsive geometry", () => {
     const second = await createScratchProject(request, "Piscine Design");
 
     try {
-      for (const route of ROUTES) {
+      for (const entry of ROUTES) {
+        // `null` is the project board — resolved here because the fixture's
+        // project id only exists at run time.
+        const route = entry ?? project.boardUrl;
         for (const width of WIDTHS) {
           await page.setViewportSize({ width, height: 844 });
           await page.goto(route);
