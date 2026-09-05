@@ -3,6 +3,11 @@ import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { GITHUB_PAT_SETTING_KEY } from "@/lib/github/client";
+import { abortDeviceFlow } from "@/lib/github/device-flow-store";
+import {
+  GITHUB_OAUTH_META_SETTING_KEY,
+  githubOAuthMetaSettingSchema,
+} from "@/lib/github/oauth-meta";
 import { OPENAI_API_KEY_SETTING_KEY } from "@/lib/openai/constants";
 import { PROJECTS_ROOT_SETTING_KEY } from "@/lib/projects/workspace-constants";
 import { defaultProjectsRoot } from "@/lib/projects/workspace";
@@ -92,6 +97,25 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    // Written by the device-flow poll route, and editable here so a user who
+    // replaces an OAuth connection with a hand-pasted PAT can clear the stale
+    // "connected as @someone" with `null`. Typed because the Settings UI reads
+    // the fields straight out of it — an arbitrary blob stored under this key
+    // would surface as a broken connection card, not as a validation error.
+    if (key === GITHUB_OAUTH_META_SETTING_KEY) {
+      const parsed = githubOAuthMetaSettingSchema.safeParse(value);
+      if (!parsed.success) {
+        return NextResponse.json(
+          {
+            error:
+              "GitHub connection metadata must be null, or an object with login, scopes, obtainedAt and tokenSource.",
+            details: parsed.error.flatten().fieldErrors,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
     // A non-string root would resolve to garbage in path.resolve() and send
     // clones somewhere unexpected. Blank IS valid: it clears the override.
     if (key === PROJECTS_ROOT_SETTING_KEY && typeof value !== "string") {
@@ -100,6 +124,27 @@ export async function PATCH(request: NextRequest) {
         { status: 400 }
       );
     }
+  }
+
+  // Settling the GitHub credential by hand ends any device flow in progress.
+  //
+  // Pasting a PAT, or disconnecting, is the user answering the same question
+  // an OAuth sign-in asks — and answering it last. Without this, a poll still
+  // waiting on GitHub comes back afterwards holding a token and writes it over
+  // the answer just given, reconnecting an account that was disconnected or
+  // replacing a token that was deliberately pasted. Dropping the slot makes
+  // that poll's pre-write claim fail, so it discards its token instead.
+  //
+  // Before the transaction, and it has to be: this runs synchronously to
+  // completion, so an in-flight poll either loses its claim here or had
+  // already committed — it cannot land in between.
+  if (
+    entries.some(
+      ([key]) =>
+        key === GITHUB_PAT_SETTING_KEY || key === GITHUB_OAUTH_META_SETTING_KEY
+    )
+  ) {
+    abortDeviceFlow();
   }
 
   const now = new Date().toISOString();

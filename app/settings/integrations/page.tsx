@@ -9,6 +9,11 @@ import {
   GITHUB_PAT_SETTING_KEY,
 } from "@/components/settings-piscine";
 import {
+  GITHUB_OAUTH_META_SETTING_KEY,
+  githubOAuthMetaSchema,
+  type GitHubOAuthMeta,
+} from "@/lib/github/oauth-meta";
+import {
   OPENAI_API_KEY_SETTING_KEY,
   OPENAI_BASE_URL_SETTING_KEY,
   OPENAI_MODEL_SETTING_KEY,
@@ -36,6 +41,9 @@ interface MaskedSecret {
 
 export default function IntegrationsSettingsPage() {
   const [hasGitHubToken, setHasGitHubToken] = useState(false);
+  const [gitHubOAuthMeta, setGitHubOAuthMeta] = useState<GitHubOAuthMeta | null>(
+    null,
+  );
   const [hasOpenAiKey, setHasOpenAiKey] = useState(false);
   const [openAiBaseUrl, setOpenAiBaseUrl] = useState("");
   const [openAiModel, setOpenAiModel] = useState("");
@@ -53,6 +61,15 @@ export default function IntegrationsSettingsPage() {
         setHasGitHubToken(
           Boolean((data[GITHUB_PAT_SETTING_KEY] as MaskedSecret | undefined)?.hasToken),
         );
+        // Parsed with the same schema the PATCH validates against, so a
+        // hand-edited row reads as "not connected" instead of rendering a
+        // half-built connection card. Nothing secret lives under this key —
+        // it is served in the clear next to the masked `github_pat`.
+        const metaRead = githubOAuthMetaSchema.safeParse(
+          data[GITHUB_OAUTH_META_SETTING_KEY],
+        );
+        setGitHubOAuthMeta(metaRead.success ? metaRead.data : null);
+
         setHasOpenAiKey(
           Boolean(
             (data[OPENAI_API_KEY_SETTING_KEY] as MaskedSecret | undefined)?.hasToken,
@@ -75,7 +92,7 @@ export default function IntegrationsSettingsPage() {
 
   return (
     <div className="flex flex-col gap-[10px]">
-      <GitHubCard hasSavedToken={hasGitHubToken} />
+      <GitHubCard hasSavedToken={hasGitHubToken} oauthMeta={gitHubOAuthMeta} />
       <OpenAiCard
         baseUrl={openAiBaseUrl}
         model={openAiModel}

@@ -6,6 +6,11 @@
  * save model each of them needs. The PAT is a masked secret with its own
  * buttons — batching it would offer to save an always-empty field. The global
  * prompt is an ordinary batched key and rides the tab footer.
+ *
+ * Scope note: this file pins the MANUAL path, which is now the fallback under
+ * "Se connecter avec GitHub". The OAuth Device Flow half of the same card —
+ * and the no-regression case for this path standing beside it — lives in
+ * `settings-github-device-flow-ui.test.tsx`.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -97,9 +102,24 @@ describe("Settings → Intégrations — GitHub", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save Token" }));
 
+    // The token still goes out under the SAME key it always did — that is
+    // what keeps clone/PR/issue/release code unchanged. What is new is the
+    // provenance riding along, so a hand-pasted PAT cannot leave a stale
+    // "connecté en tant que @someone-else" from an earlier OAuth sign-in.
+    // Whole-object equality is deliberate: it fails if a third key appears.
     await waitFor(() => {
-      expect(patchCalls).toContainEqual({ body: { github_pat: "ghp_123" } });
+      expect(patchCalls).toHaveLength(1);
     });
+    expect(patchCalls[0].body.github_pat).toBe("ghp_123");
+    expect(patchCalls[0].body.github_oauth_meta).toMatchObject({
+      login: "octocat",
+      scopes: [],
+      tokenSource: "manual",
+    });
+    expect(Object.keys(patchCalls[0].body).sort()).toEqual([
+      "github_oauth_meta",
+      "github_pat",
+    ]);
     // The masked secret never round-trips: the field empties on success.
     expect(screen.getByLabelText("GitHub PAT")).toHaveValue("");
   });

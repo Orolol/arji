@@ -300,3 +300,35 @@ export const dismissDeskSignalSchema = z.object({
 export const syncProjectSchema = z.object({
   action: z.enum(["export", "import"], 'action must be "export" or "import"'),
 });
+
+// --- GitHub Device Flow schemas ---
+
+/**
+ * `POST /api/auth/github/device/start` takes no input, and the empty object
+ * is the point: scopes are fixed in `lib/github/device-flow.ts`, so a client
+ * cannot widen what Arij asks GitHub for. Unknown keys are stripped rather
+ * than rejected — zod's default — so a future client sending extra fields
+ * gets a flow, not a 400.
+ */
+export const startGitHubDeviceFlowSchema = z.object({});
+
+/**
+ * `POST /api/auth/github/device/poll` — one tick per call. The handle is the
+ * browser's opaque reference to a flow; the device code it stands for never
+ * leaves the server (see `lib/github/device-flow-store.ts`).
+ */
+export const pollGitHubDeviceFlowSchema = z.object({
+  handle: z.string("handle is required").min(1, "handle is required"),
+});
+
+/**
+ * `POST /api/auth/github/device/cancel` — give up on a flow.
+ *
+ * Same shape as the poll body, and deliberately a separate schema rather than
+ * an alias: cancelling must stay handle-scoped even if polling one day is not.
+ * A cancel that dropped whatever happened to be in the slot would let a stale
+ * tab kill the sign-in a second tab is halfway through.
+ */
+export const cancelGitHubDeviceFlowSchema = z.object({
+  handle: z.string("handle is required").min(1, "handle is required"),
+});
