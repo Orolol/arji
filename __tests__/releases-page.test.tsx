@@ -320,7 +320,7 @@ describe("Releases screen — Create release", () => {
     await user.click(screen.getByTestId("release-create-button"));
 
     const toast = await screen.findByTestId("release-toast");
-    expect(toast).toHaveAttribute("data-type", "error");
+    expect(toast).toHaveAttribute("data-toast-type", "error");
     expect(toast.textContent).toContain("created, but GitHub sync failed");
     expect(toast.textContent).toContain("Tag push failed: boom");
 
@@ -340,7 +340,7 @@ describe("Releases screen — Create release", () => {
     await user.click(screen.getByTestId("release-create-button"));
 
     const toast = await screen.findByTestId("release-toast");
-    expect(toast).toHaveAttribute("data-type", "success");
+    expect(toast).toHaveAttribute("data-toast-type", "success");
     expect(toast.textContent).toBe("Release v0.4.3 created");
   });
 
@@ -356,7 +356,7 @@ describe("Releases screen — Create release", () => {
     await user.click(screen.getByTestId("release-create-button"));
 
     const toast = await screen.findByTestId("release-toast");
-    expect(toast).toHaveAttribute("data-type", "error");
+    expect(toast).toHaveAttribute("data-toast-type", "error");
     expect(toast.textContent).toBe("Version 0.4.3 already exists");
   });
 });

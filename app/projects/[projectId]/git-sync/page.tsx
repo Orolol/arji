@@ -5,6 +5,8 @@ import type { ReactNode } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ToastStack } from "@/components/notifications/ToastStack";
+import { useToastStack } from "@/components/notifications/useToastStack";
 import { NamedAgentSelect } from "@/components/shared/NamedAgentSelect";
 import { RepoStrataBand } from "@/components/github/RepoStrataBand";
 import { SessionPicker } from "@/components/shared/SessionPicker";
@@ -24,12 +26,6 @@ import {
   RefreshCw,
   TriangleAlert,
 } from "lucide-react";
-
-interface Toast {
-  id: string;
-  type: "success" | "error";
-  message: string;
-}
 
 interface StatusResponse {
   data?: {
@@ -166,17 +162,9 @@ export default function GitSyncPage() {
 
   const selectedProvider =
     agents.find((agent) => agent.id === namedAgentId)?.provider || "claude-code";
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const { toasts, raise: showToast, dismiss: dismissToast } = useToastStack();
   const [conflictDiffs, setConflictDiffs] = useState<ConflictDiff[]>([]);
   const [autoResolveConflicts, setAutoResolveConflicts] = useState(true);
-
-  const showToast = useCallback((type: "success" | "error", message: string) => {
-    const id = crypto.randomUUID();
-    setToasts((prev) => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-  }, []);
 
   const statusUrl = useMemo(() => {
     const q = new URLSearchParams();
@@ -761,23 +749,7 @@ export default function GitSyncPage() {
         </div>
       </div>
 
-      {toasts.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-          {toasts.map((toast) => (
-            <div
-              key={toast.id}
-              className={cn(
-                "animate-in fade-in slide-in-from-bottom-2 rounded-[10px] px-4 py-2 text-[13px] font-medium shadow-[0_8px_20px_rgba(58,48,44,.16)] transition-all",
-                toast.type === "success"
-                  ? "bg-agent text-background"
-                  : "bg-destructive text-background"
-              )}
-            >
-              {toast.message}
-            </div>
-          ))}
-        </div>
-      )}
+      <ToastStack items={toasts} onDismiss={dismissToast} testId="git-sync-toast" />
     </div>
   );
 }
