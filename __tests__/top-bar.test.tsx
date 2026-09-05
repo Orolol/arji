@@ -9,6 +9,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 
 import {
   LAST_PROJECT_STORAGE_KEY,
@@ -17,8 +18,12 @@ import {
   firstReachableHref,
   isNavEntryActive,
   navHrefBlockedReason,
+  readLastVisitedProjectId,
+  readNoVisitedProjectId,
+  rememberVisitedProjectId,
   resolveNavHref,
   resolveScopeProjectId,
+  subscribeLastVisitedProjectId,
 } from "@/lib/piscine/nav";
 import type { NavEntry } from "@/lib/piscine/nav";
 import type { ControlDeskPayload } from "@/lib/control-desk/types";
@@ -145,6 +150,66 @@ beforeEach(() => {
   barState.autoLoaded = true;
   barState.armed = new Map();
   window.localStorage.clear();
+});
+
+/* ------------------------------------------------------------------ */
+/* The last-visited project store                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `localStorage` is an external store, and the bar reads it through
+ * `useSyncExternalStore`. That only stays live if a write tells React the
+ * snapshot moved, so the notification is part of the contract, not an
+ * implementation detail.
+ */
+describe("last visited project store", () => {
+  it("notifies its subscribers when a visit is recorded", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeLastVisitedProjectId(listener);
+
+    rememberVisitedProjectId("p9");
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(readLastVisitedProjectId()).toBe("p9");
+    unsubscribe();
+  });
+
+  it("reads nothing on the server, whatever storage holds", () => {
+    window.localStorage.setItem(LAST_PROJECT_STORAGE_KEY, "p9");
+
+    // The server snapshot of `useSyncExternalStore`. jsdom has a `window`, so
+    // only an unconditional `null` keeps the server render independent of the
+    // browser's storage.
+    expect(readNoVisitedProjectId()).toBeNull();
+    expect(readLastVisitedProjectId()).toBe("p9");
+  });
+
+  it("stops notifying once unsubscribed", () => {
+    const listener = vi.fn();
+    subscribeLastVisitedProjectId(listener)();
+
+    rememberVisitedProjectId("p9");
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("still notifies when the write itself is refused", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeLastVisitedProjectId(listener);
+    // Safari private mode throws on `setItem`. The snapshot is worth re-reading
+    // either way, and a swallowed write must not swallow the notification.
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("QuotaExceededError");
+      });
+
+    expect(() => rememberVisitedProjectId("p9")).not.toThrow();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    setItem.mockRestore();
+    unsubscribe();
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -512,6 +577,34 @@ describe("TopBar", () => {
     expect(screen.queryByTestId("top-bar-menu-agents")).not.toBeInTheDocument();
   });
 
+  /**
+   * Both dismissals used to run from `useEffect`, so the new route painted once
+   * with the old menu or palette still on screen. They are adjusted during
+   * render now; these pin the behaviour either way, which is the point — the
+   * refactor that reopened this file to the React Compiler had to keep it.
+   */
+  it("dismisses an open menu when the route changes", () => {
+    const { rerender } = render(<TopBar />);
+    fireEvent.focus(screen.getByTestId("top-bar-bubble-agents"));
+    expect(screen.getByTestId("top-bar-menu-agents")).toBeInTheDocument();
+
+    barState.pathname = "/tickets";
+    rerender(<TopBar />);
+
+    expect(screen.queryByTestId("top-bar-menu-agents")).not.toBeInTheDocument();
+  });
+
+  it("keeps the menu open across a re-render that is not a navigation", () => {
+    const { rerender } = render(<TopBar />);
+    fireEvent.focus(screen.getByTestId("top-bar-bubble-agents"));
+
+    rerender(<TopBar />);
+
+    // The guard compares pathnames; an unconditional reset would close it here
+    // and make the menu unusable.
+    expect(screen.getByTestId("top-bar-menu-agents")).toBeInTheDocument();
+  });
+
   it("navigates to the menu's first reachable entry on click", () => {
     render(<TopBar />);
     fireEvent.click(screen.getByTestId("top-bar-bubble-agents"));
@@ -590,6 +683,24 @@ describe("TopBar", () => {
     render(<TopBar />);
 
     expect(window.localStorage.getItem(LAST_PROJECT_STORAGE_KEY)).toBe("p9");
+  });
+
+  /**
+   * The remembered project is read from `localStorage` through
+   * `useSyncExternalStore`, which requires a server snapshot: without one the
+   * server render throws outright rather than degrading. The bar is in
+   * `app/layout.tsx`, so that would be every route at once.
+   *
+   * This does not pin *which* value the server sees — `lastVisitedProjectId`
+   * only reaches the menu, which mounts on interaction, so it leaves no mark
+   * on the bar's own markup to mismatch against. `readNoVisitedProjectId`
+   * carries that half of the contract, below.
+   */
+  it("renders on the server, where there is no storage to read", () => {
+    window.localStorage.setItem(LAST_PROJECT_STORAGE_KEY, "b");
+    barState.projects = [project({ id: "a" }), project({ id: "b", name: "B" })];
+
+    expect(() => renderToString(<TopBar />)).not.toThrow();
   });
 
   it("stays soft when the remembered project is gone", () => {
@@ -690,6 +801,26 @@ describe("the command palette", () => {
     expect(screen.queryByTestId("desk-command-palette")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("top-bar-search"));
+    expect(screen.getByTestId("desk-command-palette")).toBeInTheDocument();
+  });
+
+  it("dismisses the palette when the route changes", () => {
+    const { rerender } = render(<TopBar />);
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.getByTestId("desk-command-palette")).toBeInTheDocument();
+
+    barState.pathname = "/projects/p1";
+    rerender(<TopBar />);
+
+    expect(screen.queryByTestId("desk-command-palette")).not.toBeInTheDocument();
+  });
+
+  it("keeps the palette open across a re-render that is not a navigation", () => {
+    const { rerender } = render(<TopBar />);
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+
+    rerender(<TopBar />);
+
     expect(screen.getByTestId("desk-command-palette")).toBeInTheDocument();
   });
 

@@ -295,6 +295,32 @@ export function readLastVisitedProjectId(): string | null {
   }
 }
 
+/**
+ * `localStorage` is an external store, so the bar reads it through
+ * `useSyncExternalStore` rather than mirroring it into state from an effect.
+ * These listeners are what makes that read live: a write has to be able to
+ * tell React the snapshot moved.
+ *
+ * Same-document only, deliberately. The bar never tracked another tab's
+ * writes, and starting to would change which project the nav resolves against
+ * under the user without a route change — a `storage` listener belongs to
+ * whoever decides that, not to this.
+ */
+const lastVisitedListeners = new Set<() => void>();
+
+/** Subscribe to `rememberVisitedProjectId` writes. Returns the unsubscribe. */
+export function subscribeLastVisitedProjectId(onStoreChange: () => void): () => void {
+  lastVisitedListeners.add(onStoreChange);
+  return () => {
+    lastVisitedListeners.delete(onStoreChange);
+  };
+}
+
+/** The server snapshot: there is no storage to read, and no project in scope. */
+export function readNoVisitedProjectId(): null {
+  return null;
+}
+
 /** Record a real visit. Called from a `/projects/:id` route and nowhere else. */
 export function rememberVisitedProjectId(projectId: string): void {
   if (typeof window === "undefined") return;
@@ -303,6 +329,9 @@ export function rememberVisitedProjectId(projectId: string): void {
   } catch {
     // Best effort: the bar falls back to "no project in scope".
   }
+  // Outside the `try`: a refused write still leaves the snapshot worth
+  // re-reading, and a listener must never be skipped by a storage failure.
+  for (const listener of lastVisitedListeners) listener();
 }
 
 export interface ScopeProjectInput {
