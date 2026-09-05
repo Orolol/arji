@@ -91,12 +91,11 @@ describe("Top bar — usage entry point", () => {
     routerState.pathname = "/projects/p1";
   });
 
-  it("sits last in the Agents category, after Named agents · Sessions · Chat", () => {
+  it("sits last in the Agents category, after Named agents · Sessions", () => {
     const agents = NAV_CATEGORIES.find((category) => category.id === "agents");
     expect(agents?.entries.map((entry) => entry.id)).toEqual([
       "named-agents",
       "sessions",
-      "chat",
       "usage",
     ]);
   });

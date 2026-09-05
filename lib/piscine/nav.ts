@@ -6,21 +6,22 @@
  * each reusing a strata ground, each with an ordered list of entries:
  *
  *   Work      pool blue  (next)  Tickets · Spec & Memory · QA · Releases
- *   Agents    turquoise  (live)  Named agents · Sessions · Chat · Usage
+ *   Agents    turquoise  (live)  Named agents · Sessions · Usage
  *   Réglages  linden     (feed)  Workspace & Full Auto · Night runs ·
  *                                Notifications · Intégrations
  *
- * "Now" is NEVER a category, and nothing here describes it — but the bar now
- * DRAWS it as a fourth pill, first in the centred island, ahead of these three.
+ * "Now" and "Chat" are NEVER categories, and nothing here describes them —
+ * but the bar DRAWS them as direct destination pills in the centred island:
+ * "Now" first, and "Chat" directly next to "Work".
  *
  * The distinction is the whole point. A category owns a menu, a strata ground,
- * an entry list and a panel; the model above is what supplies all four. Now
- * owns none of them: it is a plain link to the desk, with no menu, no
- * `aria-haspopup` and no hover intent. It shares the pill shape and the active
- * liseré with its neighbours because it is a peer DESTINATION, not because it
- * is a peer category — and it is drawn in the bar rather than declared here so
- * that `activeNavCategory` keeps returning `null` on `/`, which is what stops
- * the three real bubbles from lighting up on the desk.
+ * an entry list and a panel; the model above is what supplies all four. Now and
+ * Chat own none of them: they are plain direct links, with no menu, no
+ * `aria-haspopup` and no hover intent. They share the pill shape and the active
+ * liseré with their neighbours because they are peer DESTINATIONS, not because
+ * they are peer categories — and they are drawn in the bar rather than declared
+ * here so that `activeNavCategory` keeps returning `null` on `/` and `/chat`,
+ * which is what stops the three real bubbles from lighting up on those routes.
  *
  * TWO KINDS OF UNREACHABLE ENTRY, and they are different on purpose:
  *
@@ -47,7 +48,6 @@ import {
   Gauge,
   Github,
   Layers,
-  MessageSquare,
   Moon,
   Rows3,
   ShieldCheck,
@@ -136,8 +136,6 @@ export const NAV_CATEGORIES: readonly NavCategory[] = [
         href: "/projects/:projectId/sessions",
         forProject: (projectId) => `/projects/${projectId}/sessions`,
       },
-      // 11a — chat as a full page.
-      { id: "chat", label: "Chat", icon: MessageSquare, href: "/chat" },
       { id: "usage", label: "Usage", icon: Gauge, href: "/usage" },
     ],
   },
