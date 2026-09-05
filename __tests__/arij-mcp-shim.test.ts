@@ -15,6 +15,10 @@ import { once } from "node:events";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  MAX_MERGE_SOURCES,
+  MAX_REFINEMENT_CREATED_TICKETS,
+} from "@/lib/refinement/constants";
 
 const SHIM_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -329,6 +333,41 @@ describe("tools/list", () => {
     ]); // to_merge comes from the review verdict, done from the merge, and
     // "released" is system-only — none of the three may be offered
     expect(updateStatus.inputSchema.required).toEqual(["status"]);
+
+    /**
+     * The shim is plain .mjs and cannot import the routes' constants, so the
+     * caps it advertises are hand-mirrored — and a client that validates
+     * against the advertised schema would reject a legitimate call the route
+     * accepts. Pinned from this side, which can import both.
+     */
+    const merge: any = byName.get("merge_tickets");
+    expect(merge.inputSchema.required).toEqual([
+      "ticket_id",
+      "source_ticket_ids",
+      "reason",
+    ]);
+    expect(merge.inputSchema.properties.source_ticket_ids.maxItems).toBe(
+      MAX_MERGE_SOURCES
+    );
+    expect(merge.inputSchema.properties.source_ticket_ids.minItems).toBe(1);
+
+    const discard: any = byName.get("discard_ticket");
+    expect(discard.inputSchema.required).toEqual(["ticket_id", "reason"]);
+    // The tool description is the agent's only warning that this is final.
+    expect(discard.description).toContain("PERMANENTLY DELETE");
+
+    const createPlanning: any = byName.get("create_planning_ticket");
+    expect(createPlanning.inputSchema.required).toEqual(["title", "reason"]);
+    expect(createPlanning.inputSchema.properties.status.enum).toEqual([
+      "backlog",
+      "todo",
+    ]);
+    expect(createPlanning.description).toContain(
+      `capped at ${MAX_REFINEMENT_CREATED_TICKETS} per pass`
+    );
+    expect(createPlanning.inputSchema.properties.priority.description).toContain(
+      PRIORITY_SCALE_TEXT
+    );
 
     const submitFindings: any = byName.get("submit_findings");
     expect(submitFindings.inputSchema.required).toEqual([

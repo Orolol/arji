@@ -57,20 +57,16 @@ import { logWorkflowDecision } from "@/lib/workflow/transition-service";
 import { emitTicketUpdated } from "@/lib/events/emit";
 import { tryExportArjiJson } from "@/lib/sync/export";
 import { recordRefinementChange } from "@/lib/refinement/registry";
+// Shared with the shim's advertised `maxItems` through the shim test.
+import { MAX_MERGE_SOURCES } from "@/lib/refinement/constants";
 import {
   captureTicketSnapshot,
+  carryTicketUploads,
   formatTicketSnapshot,
   retireTicket,
   ticketRetirementGuard,
   type RetiredTicketSnapshot,
 } from "@/lib/refinement/retire";
-
-/**
- * Sources per call. A merge is a judgement about a small cluster of
- * near-duplicates; a call naming twenty tickets is a runaway, not a merge,
- * and every one of them is a permanent delete.
- */
-export const MAX_MERGE_SOURCES = 8;
 
 const bodySchema = z
   .object({
@@ -130,6 +126,7 @@ export async function POST(request: NextRequest) {
   const now = new Date().toISOString();
   let storiesMoved = 0;
   let commentsMoved = 0;
+  let imagesCarried = 0;
   let edgesRepointed = 0;
   const skippedEdges: string[] = [];
 
@@ -156,6 +153,22 @@ export async function POST(request: NextRequest) {
         .run();
       storiesMoved++;
     }
+
+    // --- screenshots -----------------------------------------------------
+    // Before the comments and the delete: `retireTicket` unlinks whatever
+    // `chat_attachments` still points at the source.
+    imagesCarried += carryTicketUploads(auth.projectId, source.id, {
+      id: target.id,
+      // Re-read rather than closed over: each source appends to the same
+      // column, so a stale `target.images` would drop every carry but the
+      // last.
+      images:
+        db
+          .select({ images: epics.images })
+          .from(epics)
+          .where(eq(epics.id, target.id))
+          .get()?.images ?? null,
+    });
 
     // --- the user's own comments ----------------------------------------
     const moved = db
@@ -196,6 +209,12 @@ export async function POST(request: NextRequest) {
     const candidates = [
       ...outgoing
         .filter((edge) => edge.dependsOnTicketId !== target.id)
+        // A prerequisite that is itself being absorbed needs no edge: it is
+        // about to be deleted, so `T → B` would be created, counted, and
+        // dropped again by B's own retire — and if B transitively depends on
+        // T, refused as a cycle and reported as an edge the merge "could not
+        // carry", which is worse than misleading.
+        .filter((edge) => !sourceIds.includes(edge.dependsOnTicketId))
         .map((edge) => ({
           ticketId: target.id,
           dependsOnTicketId: edge.dependsOnTicketId,
@@ -269,6 +288,12 @@ export async function POST(request: NextRequest) {
       ""
     );
   }
+  if (imagesCarried > 0) {
+    commentLines.push(
+      `${imagesCarried} ${imagesCarried === 1 ? "screenshot" : "screenshots"} carried onto this ticket.`,
+      ""
+    );
+  }
   if (skippedEdges.length > 0) {
     commentLines.push(
       `Dependency edges not carried over: ${skippedEdges.join("; ")}.`,
@@ -311,13 +336,19 @@ export async function POST(request: NextRequest) {
     merged: absorbedLabels,
   });
 
+  // Deliberately no `snapshot`: the absorption comment above already carries
+  // the sources' full text, on this very ticket. Repeating it in the recap
+  // comment — which usually lands on the same ticket, since a merge target is
+  // first among the pass's structural changes — would publish every absorbed
+  // story's acceptance criteria twice in one feed, into the table the board's
+  // status poll reads. A discard has no such comment, which is why its record
+  // keeps its snapshot.
   recordRefinementChange(auth, {
     kind: "merged",
     ticketId: target.id,
     label: ticketLabel(target),
     detail: `absorbed ${absorbedLabels.join(", ")}`,
     reason: body.reason,
-    snapshot: snapshots.map(formatTicketSnapshot).join("\n\n"),
   });
 
   tryExportArjiJson(auth.projectId);
@@ -334,6 +365,7 @@ export async function POST(request: NextRequest) {
       })),
       storiesMoved,
       commentsMoved,
+      imagesCarried,
       dependencyEdgesRepointed: edgesRepointed,
       skippedEdges,
     },

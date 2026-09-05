@@ -19,12 +19,15 @@
  *   4. a refused merge writes NOTHING, because there is no retry against a
  *      half-absorbed cluster.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import type { NextRequest } from "next/server";
 import { createTestDb } from "@/lib/db/test-utils";
 import { mockNextRequest } from "@/__tests__/helpers/db-mock";
 import {
   agentSessions,
+  chatAttachments,
   epics,
   projects,
   ticketActivityLog,
@@ -63,7 +66,7 @@ vi.mock("@/lib/sync/export", () => ({ tryExportArjiJson: vi.fn() }));
 import { POST as mergeTickets } from "@/app/api/mcp/merge-tickets/route";
 import { POST as discardTicket } from "@/app/api/mcp/discard-ticket/route";
 import { POST as createPlanningTicket } from "@/app/api/mcp/create-planning-ticket/route";
-import { MAX_REFINEMENT_CREATED_TICKETS } from "@/app/api/mcp/create-planning-ticket/route";
+import { MAX_REFINEMENT_CREATED_TICKETS } from "@/lib/refinement/constants";
 import {
   _resetRefinementRegistryForTests,
   peekRefinementChanges,
@@ -133,6 +136,40 @@ function edges() {
     .all();
 }
 
+function attachmentsOf(epicId: string) {
+  return db()
+    .select()
+    .from(chatAttachments)
+    .where(eq(chatAttachments.epicId, epicId))
+    .all();
+}
+
+/** A bug's pasted screenshot: the `epics.images` entry and the row owning it. */
+function addScreenshot(epicId: string, fileName: string) {
+  const filePath = `data/uploads/${projectId}/${fileName}`;
+  db()
+    .insert(chatAttachments)
+    .values({
+      id: createId(),
+      projectId,
+      epicId,
+      fileName,
+      filePath,
+      mimeType: "image/png",
+      sizeBytes: 4,
+      createdAt: new Date().toISOString(),
+    })
+    .run();
+  const current = db().select().from(epics).where(eq(epics.id, epicId)).get();
+  const images: string[] = current?.images ? JSON.parse(current.images) : [];
+  db()
+    .update(epics)
+    .set({ images: JSON.stringify([...images, filePath]) })
+    .where(eq(epics.id, epicId))
+    .run();
+  return filePath;
+}
+
 function addEdge(ticketId: string, dependsOnTicketId: string) {
   db()
     .insert(ticketDependencies)
@@ -147,6 +184,15 @@ function addEdge(ticketId: string, dependsOnTicketId: string) {
     })
     .run();
 }
+
+/** Real upload directories a test wrote into, removed afterwards. */
+const scratchUploadDirs: string[] = [];
+
+afterEach(() => {
+  while (scratchUploadDirs.length > 0) {
+    fs.rmSync(scratchUploadDirs.pop()!, { recursive: true, force: true });
+  }
+});
 
 beforeEach(() => {
   testDb.instance = createTestDb();
@@ -493,6 +539,64 @@ describe("discard_ticket", () => {
     expect(epicRow(sourceId)).toBeDefined();
   });
 
+  /**
+   * `remove_dependency` holds the DEPENDENT to the Backlog/To do guardrail,
+   * so blocking on a dependent outside those columns named a remedy that
+   * answered 409 in turn — a closed loop that left the ticket undiscardable
+   * by any refinement pass. A dependent already in progress or beyond has
+   * passed the dependency gate anyway: deleting its prerequisite cannot
+   * unblock work that already started.
+   */
+  it("does not block on a dependent that has already passed the gate", async () => {
+    addEdge(inProgressId, sourceId);
+
+    const res = await call(
+      discardTicket,
+      { ticket_id: sourceId, reason: "obsolete" },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    expect(epicRow(sourceId)).toBeUndefined();
+    // The historical edge went with the row.
+    expect(edges()).toHaveLength(0);
+  });
+
+  it("still blocks when at least one dependent is still waiting", async () => {
+    addEdge(inProgressId, sourceId);
+    addEdge(todoId, sourceId);
+
+    const res = await call(
+      discardTicket,
+      { ticket_id: sourceId, reason: "obsolete" },
+      token
+    );
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("TICKET_HAS_DEPENDENTS");
+    // Only the one the agent can actually detach is named.
+    expect(body.error).toContain("E-main-004");
+    expect(body.error).not.toContain("E-main-005");
+  });
+
+  it("names the discarded ticket's screenshots in the tombstone", async () => {
+    addScreenshot(sourceId, "crash-1.png");
+
+    const res = await call(
+      discardTicket,
+      { ticket_id: sourceId, reason: "not reproducible any more" },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    // The files are unlinked with the row, so the tombstone is the only
+    // record that the evidence was ever attached.
+    const [change] = peekRefinementChanges(sessionId);
+    expect(change.snapshot).toContain("Screenshots (1)");
+    expect(change.snapshot).toContain("crash-1.png");
+  });
+
   it("removes the edges the discarded ticket itself owned", async () => {
     addEdge(sourceId, todoId);
     expect(edges()).toHaveLength(1);
@@ -610,6 +714,110 @@ describe("merge_tickets", () => {
     expect(change.ticketGone).toBeUndefined();
   });
 
+  /**
+   * A bug's pasted screenshots are its actual evidence.
+   * `deleteEpicPermanently` deletes the source's `chat_attachments` rows and
+   * unlinks the files, so a merge that carried the prose and dropped the
+   * images would be a discard wearing a merge's contract.
+   */
+  it("carries the absorbed ticket's screenshots onto the survivor", async () => {
+    const existing = addScreenshot(targetId, "already-here.png");
+    const shotA = addScreenshot(sourceId, "crash-1.png");
+    const shotB = addScreenshot(sourceId, "crash-2.png");
+
+    const res = await call(
+      mergeTickets,
+      { ticket_id: targetId, source_ticket_ids: [sourceId], reason: "Same screen" },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.imagesCarried).toBe(2);
+
+    // The column the ticket surface and the prompt builder read...
+    expect(JSON.parse(epicRow(targetId)!.images!)).toEqual([
+      existing,
+      shotA,
+      shotB,
+    ]);
+    // ...and the rows that own the bytes, so the source's delete unlinks
+    // nothing.
+    expect(attachmentsOf(targetId)).toHaveLength(3);
+    expect(attachmentsOf(sourceId)).toHaveLength(0);
+    // The user is told they moved.
+    expect(commentsOf(targetId)[0].content).toContain("2 screenshots carried");
+  });
+
+  /**
+   * The real damage the row move prevents. `deleteEpicPermanently` reads the
+   * source's `chat_attachments` rows for their `file_path` and unlinks the
+   * bytes after the transaction commits — so this asserts the FILE, not just
+   * the row.
+   */
+  it("leaves the absorbed ticket's screenshot file on disk", async () => {
+    const filePath = addScreenshot(sourceId, "crash-1.png");
+    const absolute = path.join(process.cwd(), filePath);
+    fs.mkdirSync(path.dirname(absolute), { recursive: true });
+    fs.writeFileSync(absolute, "png");
+    scratchUploadDirs.push(path.dirname(absolute));
+
+    const res = await call(
+      mergeTickets,
+      { ticket_id: targetId, source_ticket_ids: [sourceId], reason: "Same screen" },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    expect(epicRow(sourceId)).toBeUndefined();
+    expect(fs.existsSync(absolute)).toBe(true);
+  });
+
+  it("carries an attachment row the images column never listed", async () => {
+    db()
+      .insert(chatAttachments)
+      .values({
+        id: createId(),
+        projectId,
+        epicId: sourceId,
+        fileName: "orphan.png",
+        filePath: `data/uploads/${projectId}/orphan.png`,
+        mimeType: "image/png",
+        sizeBytes: 4,
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    const res = await call(
+      mergeTickets,
+      { ticket_id: targetId, source_ticket_ids: [sourceId], reason: "Same screen" },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    // Moved, so nothing unlinks the file when the source row goes.
+    expect(attachmentsOf(targetId)).toHaveLength(1);
+    expect(attachmentsOf(sourceId)).toHaveLength(0);
+  });
+
+  it("appends each source's screenshots rather than overwriting the last", async () => {
+    const first = addScreenshot(sourceId, "one.png");
+    const second = addScreenshot(secondSourceId, "two.png");
+
+    const res = await call(
+      mergeTickets,
+      {
+        ticket_id: targetId,
+        source_ticket_ids: [sourceId, secondSourceId],
+        reason: "One search epic",
+      },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.imagesCarried).toBe(2);
+    expect(JSON.parse(epicRow(targetId)!.images!)).toEqual([first, second]);
+  });
+
   it("leaves the target's own text alone when no rewrite is given", async () => {
     const res = await call(
       mergeTickets,
@@ -721,6 +929,55 @@ describe("merge_tickets", () => {
     expect(edges()).toEqual([{ ticketId: targetId, dependsOnTicketId: todoId }]);
     // And the user still learns which edge was dropped.
     expect(commentsOf(targetId)[0].content).toContain("not carried over");
+  });
+
+  /**
+   * An edge between two sources needs no re-pointing: the prerequisite is
+   * about to be deleted too. Creating `T → B` anyway counted an edge that
+   * B's own retire immediately dropped — and when B transitively depended on
+   * T, it was refused as a cycle and reported to the user as a dependency
+   * the merge "could not carry", which it never needed to.
+   */
+  it("does not re-point an edge between two tickets it is both absorbing", async () => {
+    addEdge(sourceId, secondSourceId);
+
+    const res = await call(
+      mergeTickets,
+      {
+        ticket_id: targetId,
+        source_ticket_ids: [sourceId, secondSourceId],
+        reason: "One search epic",
+      },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.dependencyEdgesRepointed).toBe(0);
+    expect(body.data.skippedEdges).toEqual([]);
+    expect(edges()).toEqual([]);
+  });
+
+  it("does not report a phantom cycle for an edge between two sources", async () => {
+    // The target already depends on the second source, and the first source
+    // depends on it too. Re-pointing `T → secondSource` would close a cycle
+    // that only exists because the edge should never have been created.
+    addEdge(secondSourceId, targetId);
+    addEdge(sourceId, secondSourceId);
+
+    const res = await call(
+      mergeTickets,
+      {
+        ticket_id: targetId,
+        source_ticket_ids: [sourceId, secondSourceId],
+        reason: "One search epic",
+      },
+      token
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.skippedEdges).toEqual([]);
+    expect(commentsOf(targetId)[0].content).not.toContain("not carried over");
   });
 
   it("merges several sources in one call", async () => {

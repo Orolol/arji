@@ -2207,8 +2207,9 @@ Concretely, for the whole set:
    the epic next to it — fold them together with \`merge_tickets\`: name the
    one that survives, list the ones it absorbs, and pass \`title\` /
    \`description\` so the surviving ticket describes the *combined* scope
-   rather than only its own half. The sources' stories, your user's comments
-   and the dependency edges move across; the sources are then deleted.
+   rather than only its own half. The sources' stories, your user's comments,
+   their screenshots and the dependency edges move across; the sources are
+   then deleted.
 8. **Discard what no longer needs doing.** A ticket whose feature shipped
    another way, whose bug is long gone, or that the project has moved past
    goes with \`discard_ticket\`. This is a permanent delete with no undo, so

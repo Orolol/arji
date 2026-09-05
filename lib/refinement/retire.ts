@@ -33,13 +33,15 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
   agentSessions,
+  chatAttachments,
   epics,
   ticketDependencies,
   userStories,
 } from "@/lib/db/schema";
+import { storedTicketImagePaths } from "@/lib/uploads/ticket-images";
 import { emitTicketDeleted } from "@/lib/events/emit";
 import { deleteEpicPermanently } from "@/lib/planning/permanent-delete";
-import { ticketLabel } from "@/lib/mcp/refinement";
+import { REFINEMENT_STATUSES, ticketLabel } from "@/lib/mcp/refinement";
 
 type Epic = typeof epics.$inferSelect;
 
@@ -66,6 +68,16 @@ export interface RetiredTicketSnapshot {
   dependsOn: string[];
   /** Readable labels of the tickets that depended on it. */
   blockedTickets: string[];
+  /**
+   * The ticket's stored screenshot paths.
+   *
+   * A bug filed through the bug form owns real files under `data/uploads/`,
+   * and `deleteEpicPermanently` unlinks them — so on a discard this list is
+   * the only record that the evidence ever existed, and the tombstone has to
+   * say so. On a merge they are carried to the survivor instead
+   * (`carryTicketUploads`) and nothing is unlinked.
+   */
+  images: string[];
 }
 
 /** Has any agent session ever been attached to this ticket or its stories? */
@@ -93,7 +105,21 @@ export function ticketHasAgentSessions(epicId: string): boolean {
   return Boolean(session);
 }
 
-/** The tickets that depend on this one — they lose an edge if it goes. */
+/**
+ * The tickets that depend on this one and are still WAITING on it.
+ *
+ * Scoped to the planning columns, and both halves of that matter:
+ *
+ *   - a dependent already in `in_progress` or beyond has passed the
+ *     dependency gate — it is running, reviewed or shipped, and deleting its
+ *     prerequisite cannot unblock work that never started. Its edge is
+ *     history, and `retireTicket` drops it with the row;
+ *   - it is also the only set `remove_dependency` can act on. That route
+ *     holds the DEPENDENT to the Backlog/To do guardrail (deliberately, see
+ *     its own comment), so blocking a discard on a dependent the agent
+ *     cannot detach was a closed loop: the 409 named a remedy that answered
+ *     409 in turn, and the ticket was undiscardable by any refinement pass.
+ */
 export function ticketDependents(projectId: string, epicId: string): Epic[] {
   const rows = db
     .select({ ticketId: ticketDependencies.ticketId })
@@ -114,6 +140,7 @@ export function ticketDependents(projectId: string, epicId: string): Epic[] {
     .where(
       and(
         eq(epics.projectId, projectId),
+        inArray(epics.status, [...REFINEMENT_STATUSES]),
         inArray(
           epics.id,
           rows.map((row) => row.ticketId),
@@ -216,7 +243,65 @@ export function captureTicketSnapshot(
     blockedTickets: edges
       .filter((edge) => edge.dependsOnTicketId === epic.id)
       .map((edge) => labels.get(edge.ticketId) ?? edge.ticketId),
+    images: storedTicketImagePaths(epic.images).filter(
+      (entry): entry is string => typeof entry === "string" && entry.length > 0,
+    ),
   };
+}
+
+/**
+ * Move a ticket's screenshots to another ticket, before the first one is
+ * deleted.
+ *
+ * Both halves matter and they are stored separately: `epics.images` is what
+ * the ticket surface renders and what the prompt builder reads, while the
+ * `chat_attachments` row is what OWNS the bytes — `deleteEpicPermanently`
+ * reads that row for the file path and unlinks it. Re-pointing the row
+ * without copying the path would leave the survivor with files nothing
+ * displays; copying the path without re-pointing the row would have the
+ * source's delete unlink files the survivor now shows.
+ *
+ * Returns how many image paths were carried over.
+ */
+export function carryTicketUploads(
+  projectId: string,
+  fromEpicId: string,
+  toEpic: Pick<Epic, "id" | "images">,
+): number {
+  const source = db
+    .select({ images: epics.images })
+    .from(epics)
+    .where(eq(epics.id, fromEpicId))
+    .get();
+
+  const carried = storedTicketImagePaths(source?.images).filter(
+    (entry): entry is string => typeof entry === "string" && entry.length > 0,
+  );
+
+  // The row move runs even with no `epics.images` entry: an attachment can be
+  // owned by a ticket whose column was written by another path, and an
+  // orphaned row would take its file down with the source.
+  db.update(chatAttachments)
+    .set({ epicId: toEpic.id, projectId })
+    .where(eq(chatAttachments.epicId, fromEpicId))
+    .run();
+
+  if (carried.length === 0) return 0;
+
+  const existing = storedTicketImagePaths(toEpic.images).filter(
+    (entry): entry is string => typeof entry === "string" && entry.length > 0,
+  );
+  const merged = [...existing];
+  for (const path of carried) {
+    if (!merged.includes(path)) merged.push(path);
+  }
+
+  db.update(epics)
+    .set({ images: JSON.stringify(merged), updatedAt: new Date().toISOString() })
+    .where(eq(epics.id, toEpic.id))
+    .run();
+
+  return carried.length;
 }
 
 /**
@@ -254,6 +339,15 @@ export function formatTicketSnapshot(snapshot: RetiredTicketSnapshot): string {
   }
   if (snapshot.blockedTickets.length > 0) {
     lines.push(`Blocked: ${snapshot.blockedTickets.join(", ")}`, "");
+  }
+  if (snapshot.images.length > 0) {
+    // Named, not just counted: on a discard the files are unlinked with the
+    // row, so this list is the only surviving trace that the evidence was
+    // ever attached.
+    lines.push(
+      `Screenshots (${snapshot.images.length}): ${snapshot.images.join(", ")}`,
+      "",
+    );
   }
 
   return lines.join("\n").trim();

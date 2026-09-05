@@ -46,13 +46,8 @@ import {
   peekRefinementChanges,
   recordRefinementChange,
 } from "@/lib/refinement/registry";
-
-/**
- * Tickets one pass may add. A re-pass that notices a dozen gaps has stopped
- * refining and started planning a project from scratch — which is the epic
- * creation flow's job, with a human in it.
- */
-export const MAX_REFINEMENT_CREATED_TICKETS = 10;
+// Shared with the shim's advertised cap through the shim test.
+import { MAX_REFINEMENT_CREATED_TICKETS } from "@/lib/refinement/constants";
 
 const bodySchema = z
   .object({

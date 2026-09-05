@@ -13,10 +13,13 @@
  *   - refused for a ticket carrying agent session history — deleting it
  *     would take the transcripts and usage figures with it
  *     (lib/refinement/retire.ts);
- *   - refused while another planning ticket depends on it, because dropping
- *     that edge silently unblocks work whose prerequisite never happened.
- *     The agent is told to call `remove_dependency` first, which forces the
- *     unblocking to carry its own justification;
+ *   - refused while another BACKLOG/TO DO ticket depends on it, because
+ *     dropping that edge silently unblocks work whose prerequisite never
+ *     happened. The agent is told to call `remove_dependency` first, which
+ *     forces the unblocking to carry its own justification — and which it
+ *     can actually do, since that route accepts exactly those dependents.
+ *     A dependent already in progress or beyond has passed the gate; its
+ *     edge is history and goes with the row;
  *   - and it leaves a tombstone: the ticket's full text is captured before
  *     the delete and published in the end-of-run recap comment and the
  *     notification, so the user can retype it if they disagree.
@@ -71,6 +74,9 @@ export async function POST(request: NextRequest) {
   const historyGuard = ticketRetirementGuard(epic, "discard_ticket");
   if (historyGuard) return historyGuard;
 
+  // Only dependents still WAITING on it block — see `ticketDependents` for
+  // why, and for why naming `remove_dependency` here is now an instruction
+  // the agent can actually carry out.
   const dependents = ticketDependents(auth.projectId, epic.id);
   if (dependents.length > 0) {
     return NextResponse.json(

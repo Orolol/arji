@@ -19,17 +19,29 @@
  * justification, and a comment per reorder would bury the feed.
  *
  * Discarded tickets are the one thing here that has no ticket left to be
- * filed on, so their tombstones ride BOTH surfaces: the recap comment (on a
- * ticket that survived the pass) and the notification's `message`, which is
- * durable even when the pass deleted everything it touched and left no host
- * at all. What is not covered: a server restart mid-pass drops the in-process
- * registry, so a discard whose run never settles loses its tombstone — the
- * same exposure every other refinement change already has, and the reason
- * lib/refinement/retire.ts refuses tickets carrying agent history.
+ * filed on, so their tombstones ride BOTH surfaces: the recap comment, and
+ * the notification's `message`.
+ *
+ * The comment is the one that matters, and it always gets a host: the pass's
+ * own surviving tickets first, then — for a pass that deleted everything it
+ * touched — any ticket the project still has (`fallbackCommentHost`), with
+ * the comment saying why it is filed there. The notification is a duplicate,
+ * not a fallback: nothing in the app renders `notifications` today
+ * (hooks/useNotifications.ts has no consumer; the chrome reads /api/inbox,
+ * built from ticket_comments and agent_sessions), so a tombstone that lived
+ * only there would be a permanently deleted ticket with no readable record.
+ *
+ * What is not covered: a project with no tickets left at all has no host, and
+ * a server restart mid-pass drops the in-process registry, so a discard whose
+ * run never settles loses its tombstone — the same exposure every other
+ * refinement change already has, and the reason lib/refinement/retire.ts
+ * refuses tickets carrying agent history.
  */
 
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { ticketComments } from "@/lib/db/schema";
+import { epics, ticketComments } from "@/lib/db/schema";
+import { REFINEMENT_STATUSES } from "@/lib/mcp/refinement";
 import { createId } from "@/lib/utils/nanoid";
 import {
   buildEpicTargetUrl,
@@ -142,23 +154,23 @@ function changeList(
     lines.push(
       `- ${ticketLink(projectId, change)} — ${change.detail}. ${change.reason}`
     );
-    // The deleted ticket's own text, indented under its line. For a discard
-    // this is the only surviving copy — see the module header.
+    // The deleted ticket's own text, indented under its line. Only a discard
+    // carries one — a merge's absorbed text is already posted on the survivor
+    // as the absorption comment, and re-rendering it here would publish it
+    // twice in the same feed (see the merge route's record).
     //
     // Indentation rather than a `<details>` fold-out: ticket comments are
     // rendered as plain text under `whitespace-pre-wrap`
     // (components/ticket/CommentBubble.tsx), never as markdown or HTML, so a
     // fold-out would show the user its own tags.
-    if (change.snapshot) {
-      // A merge's record is filed against the SURVIVING ticket, so its
-      // snapshot is the absorbed sources' text, not this ticket's — the
-      // heading has to say which, or it reads as a description of a ticket
-      // that is still on the board.
-      const heading =
-        change.kind === "merged"
-          ? `  What ${change.label} absorbed:`
-          : `  What ${change.label} contained:`;
-      lines.push("", heading, "", change.snapshot.replace(/^/gm, "  "), "");
+    if (change.snapshot && change.kind === "discarded") {
+      lines.push(
+        "",
+        `  What ${change.label} contained:`,
+        "",
+        change.snapshot.replace(/^/gm, "  "),
+        ""
+      );
     }
   }
   lines.push("");
@@ -195,7 +207,16 @@ export function formatRefinementComment(
   projectId: string,
   report: RefinementReport,
   focusTicketId?: string,
-  options: { includeFullList?: boolean; fullListTicketId?: string } = {}
+  options: {
+    includeFullList?: boolean;
+    fullListTicketId?: string;
+    /**
+     * The host ticket was not itself touched by the pass — it is standing in
+     * because everything the pass changed was deleted. Say so, or the entry
+     * reads as something that happened to this ticket.
+     */
+    unrelatedHost?: boolean;
+  } = {}
 ): string {
   const lines: string[] = [];
   const focus = focusTicketId
@@ -221,6 +242,14 @@ export function formatRefinementComment(
     `### ${REFINEMENT_LABEL} — ${formatRefinementSummary(report)}`,
     ""
   );
+
+  if (options.unrelatedHost) {
+    lines.push(
+      "Filed here because every ticket this pass changed was deleted by it — " +
+        "this ticket was not touched. The record below is board-wide.",
+      ""
+    );
+  }
 
   if (options.includeFullList) {
     lines.push(
@@ -285,6 +314,54 @@ export function formatDiscardedTombstones(
   return `${body.slice(0, REFINEMENT_NOTIFICATION_MESSAGE_MAX_CHARS)}\n\n[truncated — the full text is in the recap comment]`;
 }
 
+/** Which of these ids are still rows in the project. */
+function survivingTicketIds(
+  projectId: string,
+  ticketIds: readonly string[]
+): Set<string> {
+  const distinct = Array.from(new Set(ticketIds));
+  if (distinct.length === 0) return new Set();
+
+  return new Set(
+    db
+      .select({ id: epics.id })
+      .from(epics)
+      .where(and(eq(epics.projectId, projectId), inArray(epics.id, distinct)))
+      .all()
+      .map((row) => row.id)
+  );
+}
+
+/**
+ * A ticket to file the board-wide record on when the pass left none of its
+ * own — the top of the planning columns, else any ticket the project has.
+ *
+ * Deterministic (board order, then id) so two runs of the same pass do not
+ * scatter their records across different tickets.
+ */
+export function fallbackCommentHost(projectId: string): string | null {
+  const planning = db
+    .select({ id: epics.id, position: epics.position })
+    .from(epics)
+    .where(
+      and(
+        eq(epics.projectId, projectId),
+        inArray(epics.status, [...REFINEMENT_STATUSES])
+      )
+    )
+    .orderBy(asc(epics.position), asc(epics.id))
+    .get();
+  if (planning) return planning.id;
+
+  const any = db
+    .select({ id: epics.id })
+    .from(epics)
+    .where(eq(epics.projectId, projectId))
+    .orderBy(asc(epics.id))
+    .get();
+  return any?.id ?? null;
+}
+
 export interface PublishRefinementReportInput {
   projectId: string;
   sessionId: string;
@@ -319,21 +396,37 @@ export function publishRefinementReport(
   const summary = formatRefinementSummary(report);
   const now = new Date().toISOString();
 
+  // Which of the ids the pass named are still rows, asked of the DATABASE
+  // rather than derived from the records.
+  //
+  // `ticketGone` is set on the record of the deleting call and on no other,
+  // so a ticket that got an earlier record in the same pass — a priority
+  // change, a promotion — and was retired afterwards still looks alive
+  // there. Trusting the flag put such an id forward as a comment host, the
+  // insert violated the FK, the catch below swallowed it, and the pass
+  // published its whole breakdown nowhere.
+  const alive = survivingTicketIds(
+    input.projectId,
+    changes.map((change) => change.ticketId)
+  );
+  const surviving = (candidates: RefinementChange[]): string[] =>
+    Array.from(
+      new Set(
+        candidates
+          .map((change) => change.ticketId)
+          .filter((ticketId) => alive.has(ticketId))
+      )
+    );
+
   // One comment per ticket the pass reshaped structurally — a column move, a
   // merge it absorbed others into, or a ticket it added. See the module
   // header for why those and not every touched ticket.
-  //
-  // `ticketGone` is filtered out at every step below rather than once: a
-  // discarded ticket's id still appears in the change list (that is the
-  // point of the record), and inserting a comment against it would violate
-  // the FK — or, with the pragma off, orphan a comment nobody can ever read.
-  const movedTicketIds = Array.from(
-    new Set(
-      [...report.promoted, ...report.demoted, ...report.merged, ...report.created]
-        .filter((c) => !c.ticketGone)
-        .map((c) => c.ticketId)
-    )
-  );
+  const movedTicketIds = surviving([
+    ...report.promoted,
+    ...report.demoted,
+    ...report.merged,
+    ...report.created,
+  ]);
 
   // ...but the itemised, ticket-linked breakdown has to be published
   // SOMEWHERE, and it only ever lives inside a comment. A conservative pass
@@ -343,10 +436,23 @@ export function publishRefinementReport(
   // produce no comment at all, losing the ticket links the acceptance
   // criteria ask for. When nothing changed column, fall back to the first
   // ticket the pass touched at all.
-  const touchedTicketIds = Array.from(
-    new Set(changes.filter((c) => !c.ticketGone).map((c) => c.ticketId))
-  );
-  const fullListTicketId = movedTicketIds[0] ?? touchedTicketIds[0];
+  const touchedTicketIds = surviving(changes);
+
+  // And when the pass DELETED everything it touched, to any ticket the
+  // project still has. That reads as a board-wide record filed on an
+  // unrelated ticket, which is odd — but it is the only readable surface
+  // there is: `notifications` has no consumer in the app (hooks/
+  // useNotifications.ts is unmounted; the chrome reads /api/inbox, which is
+  // built from ticket_comments and agent_sessions), so without this a pass
+  // that discarded two Backlog tickets and nothing else leaves the user with
+  // two tickets gone and no explanation anywhere they will look. The comment
+  // says why it is filed there.
+  const fullListTicketId =
+    movedTicketIds[0] ??
+    touchedTicketIds[0] ??
+    (report.discarded.length > 0
+      ? (fallbackCommentHost(input.projectId) ?? undefined)
+      : undefined);
 
   // Comment on every moved ticket, plus the fallback host when there are no
   // moved tickets but the pass did change something.
@@ -356,6 +462,11 @@ export function publishRefinementReport(
       : fullListTicketId
         ? [fullListTicketId]
         : [];
+
+  const unrelatedHost =
+    movedTicketIds.length === 0 &&
+    touchedTicketIds.length === 0 &&
+    Boolean(fullListTicketId);
 
   const commentedTicketIds: string[] = [];
   for (const ticketId of commentTargets) {
@@ -369,6 +480,7 @@ export function publishRefinementReport(
           content: formatRefinementComment(input.projectId, report, ticketId, {
             includeFullList: isFullList,
             fullListTicketId: isFullList ? undefined : fullListTicketId,
+            unrelatedHost,
           }),
           agentSessionId: input.sessionId,
           createdAt: now,
@@ -386,10 +498,9 @@ export function publishRefinementReport(
     sessionId: input.sessionId,
     summary,
     succeeded: input.succeeded,
-    // The discard tombstones travel on the notification as well as in the
-    // recap comment, because a pass that deleted every ticket it touched
-    // leaves no comment host at all — and that is exactly the pass whose
-    // record the user most needs.
+    // A duplicate of what the recap comment carries, kept for the day the
+    // notification surface is mounted — and the only copy when the project
+    // has no ticket left to host a comment at all.
     message: formatDiscardedTombstones(report),
   });
 

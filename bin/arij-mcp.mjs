@@ -561,7 +561,7 @@ const AGENT_TOOLS = [
   {
     name: "merge_tickets",
     description:
-      "Fold one or more Backlog/To do tickets into a single one that can be built in one go. The target survives; every source ticket is absorbed (its user stories and your comments move to the target, its dependency edges are re-pointed, its full text is recorded on the target) and then PERMANENTLY DELETED. Pass `title`/`description` to rewrite the surviving ticket so it covers the merged scope. Refused for any ticket that already has agent session history.",
+      "Fold one or more Backlog/To do tickets into a single one that can be built in one go. The target survives; every source ticket is absorbed (its user stories, the user's comments and its screenshots move to the target, its dependency edges are re-pointed, its full text is recorded on the target) and then PERMANENTLY DELETED. Pass `title`/`description` to rewrite the surviving ticket so it covers the merged scope. Refused for any ticket that already has agent session history.",
     inputSchema: {
       type: "object",
       properties: {
