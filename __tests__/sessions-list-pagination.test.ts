@@ -221,4 +221,28 @@ describe("sessions list route — keyset pagination", () => {
     // instead of erroring or silently returning nothing.
     expect((await fetchPage({ cursor: "garbage" })).data).toHaveLength(12);
   });
+
+  /**
+   * The ceiling, on a project big enough for it to bite.
+   *
+   * The clamp assertions above seed 12 rows, so `limit=10000` returns 12
+   * whether or not the upper clamp exists — they pin the floor and the
+   * default, and cannot see the ceiling at all. That matters because the
+   * ceiling is the half of the clamp that keeps the promise: a caller asking
+   * for everything is exactly how this route returned a 44 MB response
+   * before it was paged, and dropping `Math.min` restores that in full
+   * while every other test on this route stays green.
+   */
+  it("caps a page at the ceiling however large a limit is asked for", async () => {
+    seedSessions(SESSION_LIST_MAX_PAGE_SIZE + 5);
+
+    const page = await fetchPage({ limit: "999999" });
+
+    expect(page.data).toHaveLength(SESSION_LIST_MAX_PAGE_SIZE);
+    // Capped, not truncated: the rows past the ceiling stay reachable.
+    expect(page.nextCursor).toBeTruthy();
+    const { rows } = await fetchAllPages(SESSION_LIST_MAX_PAGE_SIZE * 10);
+    expect(rows).toHaveLength(SESSION_LIST_MAX_PAGE_SIZE + 5);
+    expect(new Set(key(rows)).size).toBe(rows.length);
+  });
 });
