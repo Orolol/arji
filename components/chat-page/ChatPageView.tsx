@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
-import { PillButton, SurfaceCard, projectTone } from "@/components/piscine";
+import { PillButton, projectTone } from "@/components/piscine";
+import { ToastStack } from "@/components/notifications/ToastStack";
+import { useToastStack } from "@/components/notifications/useToastStack";
 import { useTicketOverlay } from "@/components/ticket/TicketOverlayProvider";
 import { useChat } from "@/hooks/useChat";
 import { useControlDesk } from "@/hooks/useControlDesk";
@@ -59,12 +61,6 @@ export interface ChatPageViewProps {
   initialProjectId?: string;
   /** `?conversation=` — a deep link to one conversation. */
   initialConversationId?: string;
-}
-
-interface ToastRow {
-  id: string;
-  tone: "success" | "error";
-  message: string;
 }
 
 /** Every desk collection that can tell us about a ticket, flattened. */
@@ -239,18 +235,7 @@ export function ChatPageView({
     projects.find((row) => row.id === activeProjectId) ?? null;
   const tone = projectTone(project?.colorIndex ?? 0);
 
-  const [toasts, setToasts] = useState<ToastRow[]>([]);
-  const raise = useCallback(
-    (tone: "success" | "error", message: string) => {
-      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      setToasts((current) => [...current, { id, tone, message }]);
-      setTimeout(
-        () => setToasts((current) => current.filter((row) => row.id !== id)),
-        5000,
-      );
-    },
-    [],
-  );
+  const { toasts, raise, dismiss } = useToastStack();
 
   return (
     <div
@@ -279,32 +264,7 @@ export function ChatPageView({
         <EmptyChatWorkspace />
       )}
 
-      {toasts.length > 0 ? (
-        <div className="fixed right-4 bottom-4 z-50 flex flex-col gap-2">
-          {/*
-            The body stays ink whatever the tone. A toast floats over the page
-            and belongs to no stratum, so it has no deep to borrow — the
-            failure is in the wording and in the icon beside it.
-          */}
-          {toasts.map((toast) => (
-            <SurfaceCard
-              key={toast.id}
-              radius={11}
-              data-testid="chat-toast"
-              className="flex items-center gap-2 px-[14px] py-[10px] font-sans text-[13px] text-foreground"
-            >
-              {toast.tone === "success" ? null : (
-                <AlertTriangle
-                  size={13}
-                  aria-hidden="true"
-                  className="shrink-0 text-muted-foreground"
-                />
-              )}
-              <span>{toast.message}</span>
-            </SurfaceCard>
-          ))}
-        </div>
-      ) : null}
+      <ToastStack items={toasts} onDismiss={dismiss} testId="chat-toast" />
     </div>
   );
 }

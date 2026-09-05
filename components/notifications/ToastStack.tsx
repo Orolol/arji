@@ -7,20 +7,41 @@ import { SurfaceCard } from "@/components/piscine/SurfaceCard";
 
 export interface ToastItem {
   id: string;
-  type: "success" | "error" | "warning";
+  type: ToastTone;
   message: string;
   href?: string;
   actionLabel?: string;
 }
 
+/**
+ * The ONE tone vocabulary. Every surface aliases this rather than re-declaring
+ * the union — three copies of it had already drifted out of one file each.
+ */
+export type ToastTone = "success" | "error" | "warning";
+
+/** The optional deep link a toast can carry, e.g. to the session in the way. */
+export interface ToastAction {
+  href: string;
+  label?: string;
+}
+
+/** What a surface calls to raise one. See `useToastStack`. */
+export type RaiseToast = (
+  tone: ToastTone,
+  message: string,
+  action?: ToastAction,
+) => void;
+
 export const TOAST_DURATION_MS = 8000;
 export const MAX_TOASTS = 4;
+/** Where an action-less link lands, when the caller names nothing better. */
+export const TOAST_DEFAULT_ACTION_LABEL = "Open session";
 
 const subscribe = () => () => {};
 const clientSnapshot = () => true;
 const serverSnapshot = () => false;
 
-/** Shared by the global desk and its project host; portals escape scroll containers. */
+/** The app's ONE toast stack; the portal is what escapes a page's scroll containers. */
 export function ToastStack({ items, onDismiss, testId }: {
   items: readonly ToastItem[];
   onDismiss: (id: string) => void;
@@ -71,7 +92,7 @@ function Toast({ item, onDismiss, testId }: {
         <p>{item.message}</p>
         {item.href ? (
           <a href={item.href} className="mt-2 inline-block font-semibold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring">
-            {item.actionLabel || "Open session"}
+            {item.actionLabel || TOAST_DEFAULT_ACTION_LABEL}
           </a>
         ) : null}
       </div>

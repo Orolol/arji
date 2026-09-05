@@ -22,7 +22,15 @@ import type {
   DeskLandRow,
 } from "@/lib/control-desk/types";
 import { cn } from "@/lib/utils";
-import { ToastStack, MAX_TOASTS, type ToastItem } from "@/components/notifications/ToastStack";
+import {
+  ToastStack,
+  type ToastAction,
+  type ToastTone,
+} from "@/components/notifications/ToastStack";
+import {
+  useDispatchFailureReporter,
+  useToastStack,
+} from "@/components/notifications/useToastStack";
 
 import { FullAutoProjectRow } from "./FullAutoProjectRow";
 import { DeskComposer } from "./DeskComposer";
@@ -56,12 +64,8 @@ import { YourTurnBand } from "./YourTurnBand";
  * `/projects/:id` route already owns a toast stack for its dialogs and deep
  * links, and two stacks would overlap in the same corner.
  */
-export type DeskToastTone = "success" | "error" | "warning";
-
-export interface DeskToastAction {
-  href: string;
-  label?: string;
-}
+export type DeskToastTone = ToastTone;
+export type DeskToastAction = ToastAction;
 
 export interface NowDeskProps {
   /** Pre-filter the desk to one project (`/projects/:id`). */
@@ -109,31 +113,12 @@ export function NowDesk({
   const activeProjectId = projectId ?? null;
 
   const { data, refresh } = useControlDesk(activeProjectId);
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const { toasts, raise, dismiss: dismissToast } = useToastStack(onToast);
   const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
   const [landingEpicId, setLandingEpicId] = useState<string | null>(null);
   const [landingAll, setLandingAll] = useState(false);
   const [composerProjectId, setComposerProjectId] = useState<string | null>(null);
   const [namedAgentId, setNamedAgentId] = useState<string | null>(null);
-
-  const raise = useCallback(
-    (tone: DeskToastTone, message: string, action?: DeskToastAction) => {
-      if (onToast) {
-        onToast(tone, message, action);
-        return;
-      }
-      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      setToasts((current) => [
-        ...current.slice(-(MAX_TOASTS - 1)),
-        { id, type: tone, message, href: action?.href, actionLabel: action?.label },
-      ]);
-    },
-    [onToast],
-  );
-
-  const dismissToast = useCallback((id: string) => {
-    setToasts((current) => current.filter((toast) => toast.id !== id));
-  }, []);
 
   const changed = useCallback(() => {
     void refresh();
@@ -191,30 +176,7 @@ export function NowDesk({
 
   /* ---- mutations ---------------------------------------------------- */
 
-  /**
-   * 409 AGENT_ALREADY_RUNNING is not an error the user can do anything with
-   * unless the toast can take them to the session that is in the way. The
-   * payload shape comes from lib/agents/client-error.ts.
-   */
-  const reportFailure = useCallback(
-    (res: Response, body: { error?: string; code?: string; data?: { activeSessionId?: string; sessionUrl?: string } }, fallback: string, ownerProjectId: string) => {
-      if (
-        res.status === 409 &&
-        body.code === "AGENT_ALREADY_RUNNING" &&
-        body.data?.activeSessionId
-      ) {
-        raise("error", body.error ?? fallback, {
-          href:
-            body.data.sessionUrl ||
-            `/projects/${ownerProjectId}/sessions/${body.data.activeSessionId}`,
-          label: "Open active session",
-        });
-        return;
-      }
-      raise("error", body.error || fallback);
-    },
-    [raise],
-  );
+  const reportFailure = useDispatchFailureReporter(raise);
 
   const handleReply = useCallback(
     async (item: DeskAwaitingReply, message: string) => {
