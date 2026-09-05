@@ -6,6 +6,7 @@ import { createId } from "@/lib/utils/nanoid";
 import { resolveAgent } from "@/lib/agent-config/agent-resolution";
 import { isChatProvider } from "@/lib/agent-config/constants";
 import { normalizeConversationAgentType } from "@/lib/chat/conversation-agent";
+import { resolveDefaultChatMode } from "@/lib/chat/default-chat-mode";
 import {
   normalizeLegacyConversationStatus,
   sortConversationsForLegacyParity,
@@ -58,7 +59,7 @@ export async function GET(
   if (conversations.length === 0) {
     const id = createId();
     const now = new Date().toISOString();
-    const resolved = resolveAgent("chat", projectId);
+    const resolved = await resolveDefaultChatMode(projectId);
 
     db.insert(chatConversations)
       .values({
@@ -67,7 +68,7 @@ export async function GET(
         type: "brainstorm",
         label: "Brainstorm",
         provider: resolved.provider,
-        namedAgentId: resolved.namedAgentId ?? null,
+        namedAgentId: resolved.namedAgentId,
         createdAt: now,
       })
       .run();
@@ -146,10 +147,16 @@ export async function POST(
   }
 
   if (!isChatProvider(provider)) {
-    const resolved = resolveAgent("chat", projectId);
-    provider = resolved.provider;
-    if (!namedAgentId) {
-      namedAgentId = resolved.namedAgentId ?? null;
+    if (namedAgentId) {
+      // The conversation carries a named agent, and the stream route ignores
+      // the stored provider whenever it does — a chat-only default would be
+      // dead state here. This branch (a legacy agent row naming a provider
+      // that no longer exists) therefore keeps the historical resolution.
+      provider = resolveAgent("chat", projectId).provider;
+    } else {
+      const resolved = await resolveDefaultChatMode(projectId);
+      provider = resolved.provider;
+      namedAgentId = resolved.namedAgentId;
     }
   }
 

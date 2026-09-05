@@ -3,10 +3,12 @@ import {
   dbMockState,
   resetDbMockState,
 } from "@/__tests__/helpers/db-mock";
+import type { ResolvedChatMode } from "@/lib/chat/default-chat-mode";
 
 const {
   runCutoverMigrationOnce,
   resolveAgent: mockResolveAgent,
+  resolveDefaultChatMode: mockResolveDefaultChatMode,
   restartPersistentChatSession,
 } = vi.hoisted(() => ({
   runCutoverMigrationOnce: vi.fn(),
@@ -14,6 +16,13 @@ const {
     provider: "claude-code",
     namedAgentId: null,
   })),
+  resolveDefaultChatMode: vi.fn(
+    async (): Promise<ResolvedChatMode> => ({
+      provider: "claude-code-persistent",
+      namedAgentId: null,
+      source: "persistent-cli",
+    }),
+  ),
   restartPersistentChatSession: vi.fn(() => true),
 }));
 
@@ -28,6 +37,13 @@ vi.mock("@/lib/utils/nanoid", () => ({
 
 vi.mock("@/lib/agent-config/agent-resolution", () => ({
   resolveAgent: mockResolveAgent,
+}));
+
+// The chat-mode default is resolved, not restated: it probes the real PATH
+// and the real settings table, so leaving it live would make these
+// assertions depend on which CLIs this machine happens to have installed.
+vi.mock("@/lib/chat/default-chat-mode", () => ({
+  resolveDefaultChatMode: mockResolveDefaultChatMode,
 }));
 
 vi.mock("@/lib/chat/unified-cutover-migration", () => ({
@@ -47,6 +63,12 @@ describe("conversations route", () => {
     mockResolveAgent.mockReturnValue({
       provider: "claude-code",
       namedAgentId: null,
+    });
+    mockResolveDefaultChatMode.mockReset();
+    mockResolveDefaultChatMode.mockResolvedValue({
+      provider: "claude-code-persistent",
+      namedAgentId: null,
+      source: "persistent-cli",
     });
   });
 
@@ -149,7 +171,7 @@ describe("conversations route", () => {
     );
   });
 
-  it("POST falls back to the configured default for unknown providers", async () => {
+  it("POST opens a conversation on the resolved default chat mode", async () => {
     dbMockState.getQueue.push({ id: "proj-1" });
     dbMockState.getQueue.push({ id: "conv-created" });
 
@@ -161,9 +183,95 @@ describe("conversations route", () => {
       { params: Promise.resolve({ projectId: "proj-1" }) },
     );
 
-    expect(mockResolveAgent).toHaveBeenCalledWith("chat", "proj-1");
+    // The default is the chat-mode resolution, not resolveAgent(): the latter
+    // returns an AgentProvider and so can never name a persistent mode.
+    expect(mockResolveDefaultChatMode).toHaveBeenCalledWith("proj-1");
+    expect(mockResolveAgent).not.toHaveBeenCalled();
     expect(dbMockState.insertCalls).toContainEqual(
-      expect.objectContaining({ provider: "claude-code" })
+      expect.objectContaining({
+        provider: "claude-code-persistent",
+        namedAgentId: null,
+      })
+    );
+  });
+
+  it("POST carries the fallback rung's named agent onto the conversation", async () => {
+    mockResolveDefaultChatMode.mockResolvedValue({
+      provider: "codex",
+      namedAgentId: "agent-7",
+      source: "agent-resolution",
+    });
+    dbMockState.getQueue.push({ id: "proj-1" });
+    dbMockState.getQueue.push({ id: "conv-created" });
+
+    const { POST } = await import("@/app/api/projects/[projectId]/conversations/route");
+    await POST(
+      { json: async () => ({ type: "chat" }) } as never,
+      { params: Promise.resolve({ projectId: "proj-1" }) },
+    );
+
+    expect(dbMockState.insertCalls).toContainEqual(
+      expect.objectContaining({ provider: "codex", namedAgentId: "agent-7" })
+    );
+  });
+
+  it("POST keeps the agent resolution when a named agent names a dead provider", async () => {
+    dbMockState.getQueue.push({ id: "proj-1" });
+    // A legacy row whose provider was removed in the 2026-08 cleanup: the
+    // stream route ignores a stored provider whenever a named agent is set,
+    // so a persistent default here would be state nothing reads.
+    dbMockState.getQueue.push({ id: "agent-legacy", provider: "carrier-pigeon" });
+    dbMockState.getQueue.push({ id: "conv-created" });
+
+    const { POST } = await import("@/app/api/projects/[projectId]/conversations/route");
+    await POST(
+      {
+        json: async () => ({ type: "chat", namedAgentId: "agent-legacy" }),
+      } as never,
+      { params: Promise.resolve({ projectId: "proj-1" }) },
+    );
+
+    expect(mockResolveAgent).toHaveBeenCalledWith("chat", "proj-1");
+    expect(mockResolveDefaultChatMode).not.toHaveBeenCalled();
+    expect(dbMockState.insertCalls).toContainEqual(
+      expect.objectContaining({
+        provider: "claude-code",
+        namedAgentId: "agent-legacy",
+      })
+    );
+  });
+
+  it("GET auto-creates the first conversation on the resolved default chat mode", async () => {
+    dbMockState.getQueue.push({ id: "proj-1" });
+    dbMockState.allQueue.push([]); // no conversations yet
+    dbMockState.allQueue.push([
+      {
+        id: "conv-created",
+        projectId: "proj-1",
+        type: "brainstorm",
+        label: "Brainstorm",
+        status: null,
+        epicId: null,
+        provider: "claude-code-persistent",
+        namedAgentId: null,
+        createdAt: "2026-02-12T12:00:00.000Z",
+      },
+    ]);
+
+    const { GET } = await import("@/app/api/projects/[projectId]/conversations/route");
+    await GET({} as never, {
+      params: Promise.resolve({ projectId: "proj-1" }),
+    });
+
+    expect(mockResolveDefaultChatMode).toHaveBeenCalledWith("proj-1");
+    expect(mockResolveAgent).not.toHaveBeenCalled();
+    expect(dbMockState.insertCalls).toContainEqual(
+      expect.objectContaining({
+        id: "conv-created",
+        label: "Brainstorm",
+        provider: "claude-code-persistent",
+        namedAgentId: null,
+      })
     );
   });
 
