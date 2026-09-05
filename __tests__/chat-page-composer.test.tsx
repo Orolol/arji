@@ -64,7 +64,9 @@ async function renderComposer(
     projects: [PROJECT],
     project: PROJECT,
     onSelectProject: vi.fn(),
-    agentLabel: "Opus Planner",
+    // The pill derives its own label from this selection and the mocked
+    // roster above — "Opus Planner" is not passed in as a string any more.
+    agentSelection: { namedAgentId: "a1", provider: "claude-code" },
     onSelectAgent,
     agentLocked: false,
     onSend,

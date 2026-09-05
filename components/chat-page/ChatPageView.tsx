@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, Sparkles } from "lucide-react";
 
 import { PillButton, SurfaceCard, projectTone } from "@/components/piscine";
+import type { AgentSelection } from "@/components/shared/AgentSelectPill";
 import { useTicketOverlay } from "@/components/ticket/TicketOverlayProvider";
 import { useChat } from "@/hooks/useChat";
 import { useControlDesk } from "@/hooks/useControlDesk";
@@ -26,7 +27,7 @@ import { isLegacyConversationGenerating } from "@/lib/chat/parity-contract";
 import type { ControlDeskPayload, DeskProject } from "@/lib/control-desk/types";
 
 import { agentSelectionPatch } from "./agent-selection";
-import { ChatComposer, type ChatAgentChoice } from "./ChatComposer";
+import { ChatComposer } from "./ChatComposer";
 import { ChatThread, type ChatThreadResolvedTicket } from "./ChatThread";
 import { ContextRail } from "./ContextRail";
 import { ConversationRoster } from "./ConversationRoster";
@@ -296,6 +297,12 @@ export function ChatPageView({
   );
 }
 
+/** No conversation to run: the pill names nothing rather than a default. */
+const EMPTY_AGENT_SELECTION: AgentSelection = {
+  namedAgentId: null,
+  provider: null,
+};
+
 /**
  * The page with no project to scope to — while the desk read is in flight, or
  * because the database has none.
@@ -329,7 +336,7 @@ function EmptyChatWorkspace() {
           projects={[]}
           project={null}
           onSelectProject={() => {}}
-          agentLabel="—"
+          agentSelection={EMPTY_AGENT_SELECTION}
           onSelectAgent={() => {}}
           agentLocked
           disabled
@@ -481,6 +488,19 @@ function ChatWorkspace({
   const activeAgentLabel = activeConversation
     ? agentLabelFor(activeConversation)
     : "—";
+
+  /**
+   * What the composer's pill selects on. `agentLabelFor` stays: the thread and
+   * the roster name the same agent, and only the pill derives its own label.
+   */
+  const activeAgentSelection: AgentSelection = React.useMemo(
+    () => ({
+      namedAgentId: activeConversation?.namedAgentId ?? null,
+      provider:
+        (activeConversation?.provider as ChatModeProvider | undefined) ?? null,
+    }),
+    [activeConversation],
+  );
 
   /* ---- per-message epics ----------------------------------------------- */
 
@@ -675,10 +695,12 @@ function ChatWorkspace({
   );
 
   const handleSelectAgent = React.useCallback(
-    (choice: ChatAgentChoice) => {
+    (choice: AgentSelection) => {
       // The agent cannot change mid-conversation.
       if (!activeId || hasMessages) return;
-      void updateConversation(activeId, agentSelectionPatch(choice));
+      const patch = agentSelectionPatch(choice);
+      if (!patch) return;
+      void updateConversation(activeId, patch);
     },
     [activeId, hasMessages, updateConversation],
   );
@@ -818,7 +840,7 @@ function ChatWorkspace({
           projects={projects}
           project={project}
           onSelectProject={onSelectProject}
-          agentLabel={activeAgentLabel}
+          agentSelection={activeAgentSelection}
           onSelectAgent={handleSelectAgent}
           agentLocked={!activeId || hasMessages}
           attachmentsDisabled={activeProvider === OPENAI_COMPATIBLE_PROVIDER}

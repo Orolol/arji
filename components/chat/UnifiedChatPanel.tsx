@@ -24,7 +24,8 @@ import {
   ChatProposalCard,
   ChatWorkspaceHeader,
 } from "@/components/chat/ChatWorkspaceHeader";
-import type { ChatAgentSelection } from "@/components/chat/ChatProviderSelect";
+import { agentSelectionPatch } from "@/components/chat-page/agent-selection";
+import type { AgentSelection } from "@/components/shared/AgentSelectPill";
 import { MessageList } from "@/components/chat/MessageList";
 import { MessageInput } from "@/components/chat/MessageInput";
 import { QuestionCards } from "@/components/chat/QuestionCards";
@@ -251,21 +252,16 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
     );
 
 
-    async function handleSelectAgentOrProvider({
-      namedAgentId,
-      provider,
-    }: ChatAgentSelection) {
+    async function handleSelectAgentOrProvider(selection: AgentSelection) {
       if (!activeId || hasMessages) {
         return;
       }
-      // A named agent owns its provider: the PATCH route re-derives it from
-      // the agent row, so sending one here would be silently ignored. Direct
-      // API and raw CLI providers both travel as a provider with the
-      // named-agent link explicitly cleared.
-      await updateConversation(
-        activeId,
-        namedAgentId ? { namedAgentId } : { provider, namedAgentId: null },
-      );
+      // Shared with the chat page: a named agent owns its provider, and a raw
+      // provider has to clear the link explicitly or the stale agent keeps
+      // winning server-side.
+      const patch = agentSelectionPatch(selection);
+      if (!patch) return;
+      await updateConversation(activeId, patch);
     }
 
     async function handleCreateEpic() {

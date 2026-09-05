@@ -34,7 +34,14 @@ const PROJECT_TEXT: Record<ProjectTone, string> = {
   4: "text-project-4-deep",
 };
 
-export interface SelectPillProps {
+/**
+ * Extends the button's own props so `data-testid`, `aria-*` and friends reach
+ * the DOM. Without the spread they type-check on the call site and then
+ * vanish — the recurring Piscine trap (`Mono`, `StrataBand`), and the reason a
+ * test cannot find a testid it can see in the source.
+ */
+export interface SelectPillProps
+  extends Omit<React.ComponentPropsWithoutRef<"button">, "children"> {
   /** The current selection, rendered in the trigger. */
   label: string;
   /**
@@ -65,11 +72,13 @@ export function SelectPill({
   disabled = false,
   className,
   children,
+  ...rest
 }: SelectPillProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
+          {...rest}
           type="button"
           data-slot="select-pill"
           data-tone={tone}

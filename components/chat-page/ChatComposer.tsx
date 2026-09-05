@@ -5,22 +5,13 @@ import { ImagePlus, Sparkles } from "lucide-react";
 
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import { PillButton, SelectPill, StrataBand, projectTone } from "@/components/piscine";
+import {
+  AgentSelectPill,
+  type AgentSelection,
+} from "@/components/shared/AgentSelectPill";
 import { ImageAttachmentStrip } from "@/components/shared/ImageAttachmentStrip";
-import {
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useImageAttachments } from "@/hooks/useImageAttachments";
-import { useNamedAgentsList } from "@/hooks/useNamedAgentsList";
-import {
-  OPENAI_COMPATIBLE_PROVIDER,
-  PERSISTENT_CHAT_PROVIDER_OPTIONS,
-  PROVIDER_LABELS,
-  PROVIDER_OPTIONS,
-  type AgentProvider,
-  type ChatModeProvider,
-} from "@/lib/agent-config/constants";
 import type { DeskProject } from "@/lib/control-desk/types";
 
 export const CHAT_COMPOSER_PLACEHOLDER =
@@ -47,19 +38,14 @@ export const CHAT_COMPOSER_PLACEHOLDER =
  * NO DRAG-AND-DROP: `useImageAttachments` exposes drop handlers and this screen
  * deliberately does not wire them (house rule).
  */
-export interface ChatAgentChoice {
-  namedAgentId: string | null;
-  provider: ChatModeProvider;
-}
-
 export interface ChatComposerProps {
   projectId: string | null;
   projects: readonly DeskProject[];
   project: DeskProject | null;
   onSelectProject: (projectId: string) => void;
-  /** Label for the agent pill — a named agent, or the provider's label. */
-  agentLabel: string;
-  onSelectAgent: (choice: ChatAgentChoice) => void;
+  /** What the conversation runs on; the pill names it itself. */
+  agentSelection: AgentSelection;
+  onSelectAgent: (choice: AgentSelection) => void;
   /** The picker is locked once the conversation has a message. */
   agentLocked: boolean;
   /** The active provider cannot take images (OpenAI-compatible fast mode). */
@@ -73,7 +59,7 @@ export function ChatComposer({
   projects,
   project,
   onSelectProject,
-  agentLabel,
+  agentSelection,
   onSelectAgent,
   agentLocked,
   attachmentsDisabled = false,
@@ -82,8 +68,6 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const [value, setValue] = React.useState("");
   const composingRef = React.useRef(false);
-  const { agents } = useNamedAgentsList();
-  const safeAgents = Array.isArray(agents) ? agents : [];
 
   const {
     attachments,
@@ -200,80 +184,12 @@ export function ChatComposer({
           ))}
         </SelectPill>
 
-        <SelectPill label={agentLabel} tone="ink" disabled={agentLocked}>
-          <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-            Direct API
-          </DropdownMenuLabel>
-          <DropdownMenuItem
-            data-testid="chat-option-openai-compatible"
-            onSelect={() =>
-              onSelectAgent({
-                namedAgentId: null,
-                provider: OPENAI_COMPATIBLE_PROVIDER,
-              })
-            }
-          >
-            {PROVIDER_LABELS[OPENAI_COMPATIBLE_PROVIDER]}
-          </DropdownMenuItem>
-
-          {safeAgents.length > 0 ? (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-                Named Agents
-              </DropdownMenuLabel>
-              {safeAgents.map((agent) => (
-                <DropdownMenuItem
-                  key={agent.id}
-                  data-testid={`chat-option-agent-${agent.id}`}
-                  onSelect={() =>
-                    // A named agent OWNS its provider: the PATCH route
-                    // re-derives it from the agent row, so sending a provider
-                    // alongside it is silently ignored.
-                    onSelectAgent({
-                      namedAgentId: agent.id,
-                      provider: agent.provider as ChatModeProvider,
-                    })
-                  }
-                >
-                  {agent.name}
-                </DropdownMenuItem>
-              ))}
-            </>
-          ) : null}
-
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-            Persistent CLI
-          </DropdownMenuLabel>
-          {PERSISTENT_CHAT_PROVIDER_OPTIONS.map((provider) => (
-            <DropdownMenuItem
-              key={provider}
-              data-testid={`chat-option-provider-${provider}`}
-              onSelect={() =>
-                onSelectAgent({ namedAgentId: null, provider })
-              }
-            >
-              {PROVIDER_LABELS[provider]}
-            </DropdownMenuItem>
-          ))}
-
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-            CLI Providers
-          </DropdownMenuLabel>
-          {PROVIDER_OPTIONS.map((provider: AgentProvider) => (
-            <DropdownMenuItem
-              key={provider}
-              data-testid={`chat-option-provider-${provider}`}
-              onSelect={() =>
-                onSelectAgent({ namedAgentId: null, provider })
-              }
-            >
-              {`${PROVIDER_LABELS[provider]} (CLI)`}
-            </DropdownMenuItem>
-          ))}
-        </SelectPill>
+        <AgentSelectPill
+          mode="chat"
+          selection={agentSelection}
+          onSelect={onSelectAgent}
+          disabled={agentLocked}
+        />
 
         <input {...fileInputProps} />
       </StrataBand>

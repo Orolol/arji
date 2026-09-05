@@ -100,39 +100,31 @@ vi.mock("@/hooks/useNamedAgentsList", () => ({
   }),
 }));
 
-vi.mock("@/components/ui/select", () => ({
-  Select: ({
-    value,
-    onValueChange,
-    children,
-    disabled,
-  }: {
-    value: string | undefined;
-    onValueChange?: (v: string) => void;
-    children: React.ReactNode;
-    disabled?: boolean;
-  }) => (
-    <select
-      data-testid="chat-agent-select"
-      value={value ?? ""}
-      disabled={disabled}
-      onChange={(e) => onValueChange?.(e.target.value)}
-    >
-      {children}
-    </select>
+// The header's picker is the shared `AgentSelectPill` (a Piscine SelectPill on
+// a Radix dropdown). Radix portals its items on open; the inline stand-in lets
+// these tests pick an option without driving a popper in jsdom.
+vi.mock("@/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="dropdown-content">{children}</div>
   ),
-  SelectTrigger: () => null,
-  SelectValue: () => null,
-  SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SelectGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SelectLabel: ({ children }: { children: React.ReactNode }) => <optgroup label={String(children)} />,
-  SelectItem: ({
-    value,
+  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DropdownMenuSeparator: () => <hr />,
+  DropdownMenuItem: ({
     children,
+    onSelect,
+    ...rest
   }: {
-    value: string;
     children: React.ReactNode;
-  }) => <option value={value}>{children}</option>,
+    onSelect?: () => void;
+  }) => (
+    <button type="button" role="menuitem" onClick={() => onSelect?.()} {...rest}>
+      {children}
+    </button>
+  ),
 }));
 
 vi.mock("@/components/chat/MessageList", () => ({
@@ -196,12 +188,12 @@ describe("UnifiedChatPanel named-agent toggle", () => {
     }
   }
 
-  it("renders named-agent select in unified chat header", () => {
+  it("renders the agent picker in the unified chat header", () => {
     renderExpandedPanel();
     expect(screen.getByTestId("chat-agent-select")).toBeInTheDocument();
   });
 
-  it("shows current conversation namedAgentId", () => {
+  it("names the conversation's current named agent on the trigger", () => {
     mockConversations = [
       {
         id: "conv1",
@@ -217,11 +209,10 @@ describe("UnifiedChatPanel named-agent toggle", () => {
     ];
 
     renderExpandedPanel();
-    const select = screen.getByTestId("chat-agent-select") as HTMLSelectElement;
-    expect(select.value).toBe("agent-2");
+    expect(screen.getByTestId("chat-agent-select")).toHaveTextContent("Agent 2");
   });
 
-  it("named-agent select is disabled when messages exist", () => {
+  it("locks the picker when messages exist", () => {
     mockMessages = [
       {
         id: "m1",
@@ -236,30 +227,28 @@ describe("UnifiedChatPanel named-agent toggle", () => {
     expect(screen.getByTestId("chat-agent-select")).toBeDisabled();
   });
 
-  it("named-agent select is disabled while sending", () => {
+  it("locks the picker while sending", () => {
     mockSending = true;
     renderExpandedPanel();
     expect(screen.getByTestId("chat-agent-select")).toBeDisabled();
   });
 
-  /** Selects `value` in the header dropdown, returns the PATCH mock. */
-  async function selectAndCapturePatch(value: string) {
+  /** Picks the option carrying `testId` in the header menu; returns the PATCH mock. */
+  async function selectAndCapturePatch(testId: string) {
     const mockFetch = vi.fn().mockResolvedValue({
       json: () => Promise.resolve({ data: {} }),
     });
     global.fetch = mockFetch;
 
     renderExpandedPanel();
-    fireEvent.change(screen.getByTestId("chat-agent-select"), {
-      target: { value },
-    });
+    fireEvent.click(screen.getByTestId(testId));
 
     await waitFor(() => expect(mockFetch).toHaveBeenCalled());
     return mockFetch;
   }
 
   it("calls PATCH API when named agent changes", async () => {
-    const mockFetch = await selectAndCapturePatch("agent-1");
+    const mockFetch = await selectAndCapturePatch("chat-option-agent-agent-1");
 
     // Exactly one write: a single selection must not fan out into competing
     // PATCHes that can undo each other.
@@ -276,7 +265,7 @@ describe("UnifiedChatPanel named-agent toggle", () => {
   });
 
   it("PATCHes the direct API provider with the named-agent link cleared", async () => {
-    const mockFetch = await selectAndCapturePatch("openai-compatible");
+    const mockFetch = await selectAndCapturePatch("chat-option-openai-compatible");
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledWith(
@@ -289,7 +278,7 @@ describe("UnifiedChatPanel named-agent toggle", () => {
   });
 
   it("PATCHes a raw CLI provider with the named-agent link cleared", async () => {
-    const mockFetch = await selectAndCapturePatch("codex");
+    const mockFetch = await selectAndCapturePatch("chat-option-provider-codex");
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledWith(
