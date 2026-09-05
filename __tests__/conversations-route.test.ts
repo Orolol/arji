@@ -241,6 +241,56 @@ describe("conversations route", () => {
     );
   });
 
+  it("POST lets an explicit named agent win over the resolved default", async () => {
+    dbMockState.getQueue.push({ id: "proj-1" });
+    dbMockState.getQueue.push({ id: "agent-9", provider: "codex" });
+    dbMockState.getQueue.push({ id: "conv-created" });
+
+    const { POST } = await import("@/app/api/projects/[projectId]/conversations/route");
+    const response = await POST(
+      {
+        json: async () => ({
+          type: "chat",
+          // Both keys are sent on purpose: a named agent owns its provider, so
+          // the body's provider is what must lose here — not the agent. Same
+          // rule the PATCH payload builder documents in
+          // components/chat-page/agent-selection.ts.
+          provider: "openai-compatible",
+          namedAgentId: "agent-9",
+        }),
+      } as never,
+      { params: Promise.resolve({ projectId: "proj-1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockResolveDefaultChatMode).not.toHaveBeenCalled();
+    expect(mockResolveAgent).not.toHaveBeenCalled();
+    expect(dbMockState.insertCalls).toContainEqual(
+      expect.objectContaining({ provider: "codex", namedAgentId: "agent-9" }),
+    );
+  });
+
+  it("POST refuses an unknown namedAgentId instead of falling back to the default", async () => {
+    dbMockState.getQueue.push({ id: "proj-1" });
+    // The named-agent lookup then finds nothing (empty queue -> null). The
+    // default resolution must not rescue a request that named a row it
+    // believed in: silently opening on another mode would hide the stale id.
+
+    const { POST } = await import("@/app/api/projects/[projectId]/conversations/route");
+    const response = await POST(
+      {
+        json: async () => ({ type: "chat", namedAgentId: "agent-missing" }),
+      } as never,
+      { params: Promise.resolve({ projectId: "proj-1" }) },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(json.error).toBe("namedAgentId not found");
+    expect(mockResolveDefaultChatMode).not.toHaveBeenCalled();
+    expect(dbMockState.insertCalls).toHaveLength(0);
+  });
+
   it("GET auto-creates the first conversation on the resolved default chat mode", async () => {
     dbMockState.getQueue.push({ id: "proj-1" });
     dbMockState.allQueue.push([]); // no conversations yet
@@ -273,6 +323,48 @@ describe("conversations route", () => {
         namedAgentId: null,
       })
     );
+  });
+
+  it("GET reports the warm-process state only for a conversation on a persistent mode", async () => {
+    // Now that a fresh conversation can default to a persistent mode, the
+    // state the picker draws has to survive the same GET that created it.
+    dbMockState.getQueue.push({ id: "proj-1" });
+    dbMockState.allQueue.push([
+      {
+        id: "conv-persistent",
+        projectId: "proj-1",
+        type: "chat",
+        label: "Chat",
+        status: null,
+        epicId: null,
+        provider: "claude-code-persistent",
+        namedAgentId: null,
+        createdAt: "2026-02-12T11:00:00.000Z",
+      },
+      {
+        id: "conv-one-shot",
+        projectId: "proj-1",
+        type: "chat",
+        label: "Chat",
+        status: null,
+        epicId: null,
+        provider: "claude-code",
+        namedAgentId: null,
+        createdAt: "2026-02-12T12:00:00.000Z",
+      },
+    ]);
+
+    const { GET } = await import("@/app/api/projects/[projectId]/conversations/route");
+    const response = await GET({} as never, {
+      params: Promise.resolve({ projectId: "proj-1" }),
+    });
+    const json = await response.json();
+
+    const byId = (id: string) =>
+      json.data.find((conversation: { id: string }) => conversation.id === id);
+    expect(byId("conv-persistent").persistentSessionState).toBe("cold");
+    // A one-shot CLI has no warm process to report — null, not "cold".
+    expect(byId("conv-one-shot").persistentSessionState).toBeNull();
   });
 
   it("PATCH accepts the openai-compatible provider and clears named-agent linkage", async () => {
