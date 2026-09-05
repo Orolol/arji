@@ -230,14 +230,42 @@ describe("merges, discards and creations in the report", () => {
     expect(body).toContain("[E-arij-004](/projects/proj-1?ticket=epic-4)");
   });
 
-  /** For a discard this fold-out is the only surviving copy of the ticket. */
+  /** For a discard this block is the only surviving copy of the ticket. */
   it("carries the deleted ticket's own text", () => {
     const body = formatRefinementComment("proj-1", report, undefined, {
       includeFullList: true,
     });
-    expect(body).toContain("What E-arij-009 contained");
+    expect(body).toContain("What E-arij-009 contained:");
     expect(body).toContain("Legacy exporter");
     expect(body).toContain("The exporter was removed in 0.3.");
+  });
+
+  /**
+   * A merge is filed against the ticket that SURVIVED, so its snapshot is
+   * the absorbed sources' text. "What E-arij-001 contained" would read as a
+   * description of a ticket that is still sitting on the board.
+   */
+  it("says a merge absorbed its snapshot rather than contained it", () => {
+    const body = formatRefinementComment("proj-1", report, undefined, {
+      includeFullList: true,
+    });
+    expect(body).toContain("What E-arij-001 absorbed:");
+    expect(body).not.toContain("What E-arij-001 contained:");
+  });
+
+  /**
+   * Ticket comments are rendered as plain text under `whitespace-pre-wrap`
+   * (components/ticket/CommentBubble.tsx) — never as markdown, never as HTML.
+   * A `<details>` fold-out therefore shows the user its own tags, which is
+   * what this recap used to do.
+   */
+  it("puts no raw HTML in a body the feed renders verbatim", () => {
+    const body = formatRefinementComment("proj-1", report, undefined, {
+      includeFullList: true,
+    });
+    expect(body).not.toContain("<details>");
+    expect(body).not.toContain("<summary>");
+    expect(body).not.toMatch(/<\/?[a-z][^>]*>/);
   });
 
   it("leads a merge and a creation with their own headline", () => {

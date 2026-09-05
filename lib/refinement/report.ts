@@ -142,18 +142,23 @@ function changeList(
     lines.push(
       `- ${ticketLink(projectId, change)} — ${change.detail}. ${change.reason}`
     );
-    // The deleted ticket's own text, folded so a long pass stays scannable.
-    // For a discard this is the only surviving copy — see the module header.
+    // The deleted ticket's own text, indented under its line. For a discard
+    // this is the only surviving copy — see the module header.
+    //
+    // Indentation rather than a `<details>` fold-out: ticket comments are
+    // rendered as plain text under `whitespace-pre-wrap`
+    // (components/ticket/CommentBubble.tsx), never as markdown or HTML, so a
+    // fold-out would show the user its own tags.
     if (change.snapshot) {
-      lines.push(
-        "",
-        `  <details><summary>What ${change.label} contained</summary>`,
-        "",
-        change.snapshot.replace(/^/gm, "  "),
-        "",
-        "  </details>",
-        ""
-      );
+      // A merge's record is filed against the SURVIVING ticket, so its
+      // snapshot is the absorbed sources' text, not this ticket's — the
+      // heading has to say which, or it reads as a description of a ticket
+      // that is still on the board.
+      const heading =
+        change.kind === "merged"
+          ? `  What ${change.label} absorbed:`
+          : `  What ${change.label} contained:`;
+      lines.push("", heading, "", change.snapshot.replace(/^/gm, "  "), "");
     }
   }
   lines.push("");
