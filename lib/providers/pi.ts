@@ -304,7 +304,19 @@ export abstract class PiProvider extends BaseCliProvider {
     return args;
   }
 
-  extractResult(stdout: string): string {
+  /**
+   * The full base signature, not the one parameter this actually reads: a
+   * narrowed override is only legal until something calls it through the
+   * subclass. `handleExit` below does exactly that, and when it passed the
+   * base's three arguments the call resolved against a one-parameter override
+   * and failed to compile (TS2554) — green unit suite, broken `next build`.
+   * Pinned by __tests__/provider-extract-result-contract.test.ts.
+   */
+  extractResult(
+    stdout: string,
+    _stderr?: string,
+    _spawnContext?: ProviderSpawnContext,
+  ): string {
     return extractPiResult(stdout);
   }
 
