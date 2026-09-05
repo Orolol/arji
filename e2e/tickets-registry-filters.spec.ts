@@ -79,3 +79,67 @@ test("filtering keeps shipped prerequisites satisfied and real blockers readable
   await expect(page.getByRole("menu")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("tickets-registry-dependencies.png"), fullPage: true, animations: "disabled" });
 });
+
+
+/**
+ * The filters ARE the URL (epic 5sCe4w0bxRYl).
+ *
+ * The unit coverage in `__tests__/tickets-registry-url-state.test.tsx` drives a
+ * stand-in address bar; this is the real one — a real reload, a real Back and a
+ * real Forward through Chrome's session history, against the real route.
+ */
+test("keeps the filters in the URL across a reload and browser history", async ({ page, project }, testInfo) => {
+  const otherId = `${project.id}-url`;
+  withDatabase((db) => {
+    db.prepare("INSERT INTO projects (id, name, git_repo_path) VALUES (?, ?, ?)").run(otherId, "Other URL project", project.repoPath);
+    const insert = db.prepare("INSERT INTO epics (id, project_id, title, status, priority, position) VALUES (?, ?, ?, ?, ?, ?)");
+    insert.run(`${project.id}-scoped`, project.id, "Scoped registry ticket", "todo", 1, 0);
+    insert.run(`${project.id}-other`, otherId, "Other URL ticket", "todo", 1, 0);
+  });
+  try {
+    await page.goto(`/tickets?project=${project.id}`);
+    const rows = page.getByTestId("tickets-row");
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first()).toContainText("Scoped registry ticket");
+
+    // Selecting another project moves the parameter with it, synchronously.
+    await page.getByRole("button", { name: /^Projet :/ }).click();
+    await page.getByRole("menuitem", { name: "Other URL project", exact: true }).click();
+    await expect(page).toHaveURL(`/tickets?project=${otherId}`);
+    await expect(rows.first()).toContainText("Other URL ticket");
+
+    // A sort and a state pill join it rather than replacing it.
+    await page.getByRole("columnheader", { name: "Titre" }).getByRole("button").click();
+    await expect(page).toHaveURL(`/tickets?project=${otherId}&sort=titre`);
+    await page.getByTestId("tickets-filter-done").click();
+    await expect(page).toHaveURL(`/tickets?project=${otherId}&state=done&sort=titre`);
+    await expect(rows).toHaveCount(0);
+
+    // THE RELOAD the ticket is about: the screen comes back as it was left.
+    await page.reload();
+    await expect(page.getByTestId("tickets-filter-done")).toHaveAttribute("data-active", "true");
+    await expect(page.getByRole("button", { name: /^Projet :/ })).toContainText("Other URL project");
+    await expect(page.getByRole("button", { name: /^sort:/ })).toContainText("titre ↑");
+    await expect(rows).toHaveCount(0);
+
+    // Back walks the filters one gesture at a time; Forward replays them.
+    await page.goBack();
+    await expect(page).toHaveURL(`/tickets?project=${otherId}&sort=titre`);
+    await expect(rows.first()).toContainText("Other URL ticket");
+    await page.goBack();
+    await expect(page).toHaveURL(`/tickets?project=${otherId}`);
+    await page.goBack();
+    await expect(page).toHaveURL(`/tickets?project=${project.id}`);
+    await expect(rows.first()).toContainText("Scoped registry ticket");
+    await page.goForward();
+    await expect(page).toHaveURL(`/tickets?project=${otherId}`);
+    await expect(rows.first()).toContainText("Other URL ticket");
+
+    await page.screenshot({ path: testInfo.outputPath("tickets-registry-url-filters.png"), fullPage: true });
+  } finally {
+    withDatabase((db) => {
+      db.prepare("DELETE FROM epics WHERE project_id = ?").run(otherId);
+      db.prepare("DELETE FROM projects WHERE id = ?").run(otherId);
+    });
+  }
+});

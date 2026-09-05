@@ -15,8 +15,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { RegistryRow, TicketsRegistryPayload } from "@/lib/tickets-registry/types";
 import { mockFetchSequence } from "@/__tests__/helpers/mock-fetch";
+import { installAppRouterUrl } from "@/__tests__/helpers/app-router-url";
 
 const openTicket = vi.fn();
+
+// The screen's scope is a URL parameter now (epic 5sCe4w0bxRYl), so a mounted
+// registry needs an address bar to read: `useSearchParams()` is the App
+// Router's, and returns null outside its provider.
+vi.mock("next/navigation", async () => {
+  const { useMockSearchParams } = await import("@/__tests__/helpers/app-router-url");
+  return { useSearchParams: () => useMockSearchParams() };
+});
 
 vi.mock("@/components/ticket/TicketOverlayProvider", () => ({
   useTicketOverlay: () => ({
@@ -169,6 +178,9 @@ beforeEach(() => {
   refreshSpy.mockClear();
   openTicket.mockClear();
   payload = makePayload([row({ epicId: "1" })]);
+  // Filters live in the URL, so an unreset address bar leaks a scope from one
+  // case into the next.
+  installAppRouterUrl("/tickets");
 });
 
 afterEach(() => {
@@ -178,7 +190,8 @@ afterEach(() => {
 describe("scoped registry", () => {
   it("mounts the button for the route's project, with no project picker", async () => {
     const fetchMock = mockFetchSequence([idle()]);
-    render(<TicketsRegistryView projectId="p1" />);
+    installAppRouterUrl("/tickets?project=p1");
+    render(<TicketsRegistryView />);
 
     const button = await screen.findByTestId("refinement-button");
     expect(button).not.toBeDisabled();
@@ -199,7 +212,8 @@ describe("scoped registry", () => {
         },
       },
     ]);
-    render(<TicketsRegistryView projectId="p1" />);
+    installAppRouterUrl("/tickets?project=p1");
+    render(<TicketsRegistryView />);
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
 
@@ -269,7 +283,8 @@ describe("unscoped registry", () => {
         },
       },
     ]);
-    render(<TicketsRegistryView projectId="p1" />);
+    installAppRouterUrl("/tickets?project=p1");
+    render(<TicketsRegistryView />);
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
 
@@ -283,7 +298,8 @@ describe("unscoped registry", () => {
     // idle again — the running→idle edge is what fires onFinished, and it
     // also re-runs the status effect, hence the fourth response.
     mockFetchSequence([idle(), started(), idle(), idle()]);
-    render(<TicketsRegistryView projectId="p1" />);
+    installAppRouterUrl("/tickets?project=p1");
+    render(<TicketsRegistryView />);
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
 

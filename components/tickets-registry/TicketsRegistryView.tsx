@@ -7,18 +7,19 @@ import { Mono, SelectPill } from "@/components/piscine";
 import { useTicketOverlay } from "@/components/ticket/TicketOverlayProvider";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { DeskProject } from "@/lib/control-desk/types";
-import { defaultSortDirection, sortRegistryRows, type RegistrySortDirection } from "@/lib/tickets-registry/sort";
-import type { KanbanStatus } from "@/lib/types/kanban";
+import { defaultSortDirection, sortRegistryRows } from "@/lib/tickets-registry/sort";
 import { REGISTRY_GROUP_ORDER } from "@/lib/tickets-registry/aggregate";
 import {
   REGISTRY_WINDOW_MAX,
   type RegistryGroup,
   type RegistryRow,
 } from "@/lib/tickets-registry/types";
+import type { RegistryStateFilter } from "@/lib/tickets-registry/url-state";
 
-import { RegistryFilters, type RegistryStateFilter, type RegistrySort } from "./RegistryFilters";
+import { RegistryFilters, type RegistrySort } from "./RegistryFilters";
 import { RegistryTable } from "./RegistryTable";
 import { downloadCsv } from "./csv";
+import { useRegistryUrlState } from "./useRegistryUrlState";
 import { useTicketsRegistry } from "./useTicketsRegistry";
 
 /**
@@ -63,29 +64,27 @@ function matchesQuery(row: RegistryRow, needle: string): boolean {
   );
 }
 
-export interface TicketsRegistryViewProps {
-  projectId?: string;
-}
-
-export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
-  // A route scope change takes precedence over the screen's local selection.
-  const [projectSelection, setProjectSelection] = useState<{
-    scope?: string;
-    value: string | null;
-  }>({ scope: projectId, value: projectId ?? null });
-  if (projectSelection.scope !== projectId) {
-    setProjectSelection({ scope: projectId, value: projectId ?? null });
-  }
-  const selectedProjectId = projectSelection.scope === projectId
-    ? projectSelection.value
-    : projectId ?? null;
-  const [status, setStatus] = useState<KanbanStatus | "all">("all");
-  const [direction, setDirection] = useState<RegistrySortDirection>("desc");
-  const [state, setState] = useState<RegistryStateFilter>("all");
+export function TicketsRegistryView() {
+  /**
+   * THE SCOPE AND THE SORT LIVE IN THE URL, not in this component.
+   *
+   * `?project=` was always the way in, and used to be the only thing the URL
+   * knew: a later selection stayed here, so the address bar kept naming the
+   * project the user had left and a reload restored it. Now `project`,
+   * `status`, `state`, `sort` and `direction` are all read from and written
+   * back to the query string (`lib/tickets-registry/url-state.ts`), which
+   * makes a filtered registry reloadable, linkable, and reachable through Back
+   * and Forward — and gives navigation its priority for free, since there is
+   * no local selection left to outrank.
+   *
+   * The ⌘F query, the two type toggles and the group windows below stay
+   * component state on purpose; the module comment says why.
+   */
+  const { filters, setFilters } = useRegistryUrlState();
+  const { projectId: selectedProjectId, status, state, sort, direction } = filters;
   const [bug, setBug] = useState(false);
   const [highPlus, setHighPlus] = useState(false);
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<RegistrySort>("activite");
   // `undefined` until the first ⌘F: `GhostInputPill` focuses whenever
   // `autoFocusKey` changes identity and returns early only while it is
   // undefined, so seeding it with a number would steal focus on page load.
@@ -325,10 +324,18 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
     </div>
   );
 
+  // Re-picking the current column flips it; a new column starts at its own
+  // natural direction. Both keys are written together, so Back undoes the
+  // whole gesture rather than half of it.
   const onSortChange = useCallback((next: RegistrySort) => {
-    setDirection(next === sort ? direction === "asc" ? "desc" : "asc" : defaultSortDirection(next));
-    setSort(next);
-  }, [sort, direction]);
+    setFilters({
+      sort: next,
+      direction:
+        next === sort
+          ? direction === "asc" ? "desc" : "asc"
+          : defaultSortDirection(next),
+    });
+  }, [setFilters, sort, direction]);
   const ticketCount = (() => {
     // Local filters count visible rows; state pills include unloaded rows in
     // their groups, while All uses the exact-status scope's server total.
@@ -361,12 +368,12 @@ export function TicketsRegistryView({ projectId }: TicketsRegistryViewProps) {
         counts={counts}
         projects={data?.projects ?? []}
         projectId={selectedProjectId}
-        onProjectChange={(value) => setProjectSelection({ scope: projectId, value })}
+        onProjectChange={(value) => setFilters({ projectId: value })}
         status={status}
-        onStatusChange={(value) => { setStatus(value); setState("all"); }}
+        onStatusChange={(value) => setFilters({ status: value, state: "all" })}
         direction={direction}
         state={state}
-        onStateChange={(value) => { setState(value); setStatus("all"); }}
+        onStateChange={(value) => setFilters({ state: value, status: "all" })}
         bug={bug}
         onBugChange={setBug}
         highPlus={highPlus}
