@@ -200,6 +200,17 @@ describe("TopBar — every control paints a keyboard focus ring", () => {
  * shape), and it cannot see a class list composed across components at all.
  * Every site it does find is a real one; "no sites left" would not prove the
  * codebase is clean. The rendered assertions above are what cover composition.
+ *
+ * IT MUST SKIP COMMENTS, and used to not. A regex over quote characters reads
+ * the apostrophe in "the user's words" as an opening string, swallows the class
+ * list that follows it, and drops a real control from the scan — silently, and
+ * reported only as an unhelpful floor failure ("expected 39 to be greater than
+ * or equal to 40"). Worse, the parity is global: an unrelated edit ANYWHERE
+ * earlier in the file moves which quotes pair up, so the set of scanned sites
+ * shifted under diffs that never touched a class list. `literalsOf` walks the
+ * source instead, which is why the floor below is 45 and not the 40 the regex
+ * could see — 8 of the sites it now checks (five in `TopBar.tsx`, the very
+ * component this file is about) had never been checked at all.
  */
 const SOURCE_ROOTS = ["app", "components", "hooks"];
 /** Vendored shadcn: its focus affordance is `ring-*` (a box-shadow), not an outline. */
@@ -219,34 +230,75 @@ function sourceFiles(): string[] {
  * base array, where `outline-none` and the focus ring routinely sit on
  * different lines of the same element's classes.
  */
-const LITERAL = /(["'`])((?:\\.|(?!\1)[\s\S])*?)\1/g;
 const JOINABLE = /^(?:\s|,|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*$/;
+
+type Literal = { start: number; end: number; value: string };
+
+/**
+ * String literals of a TS/TSX source, comments skipped — prose is not code, and
+ * an apostrophe in it is not a quote (see the note above).
+ */
+function literalsOf(source: string): Literal[] {
+  const out: Literal[] = [];
+  let i = 0;
+  while (i < source.length) {
+    const c = source[i];
+    if (c === "/" && source[i + 1] === "/") {
+      const nl = source.indexOf("\n", i);
+      if (nl < 0) break;
+      i = nl;
+      continue;
+    }
+    if (c === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      i = end < 0 ? source.length : end + 2;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      const start = i;
+      i += 1;
+      let value = "";
+      while (i < source.length) {
+        if (source[i] === "\\") {
+          value += source[i + 1] ?? "";
+          i += 2;
+          continue;
+        }
+        if (source[i] === c) break;
+        value += source[i];
+        i += 1;
+      }
+      out.push({ start, end: i + 1, value });
+      i += 1;
+      continue;
+    }
+    i += 1;
+  }
+  return out;
+}
 
 type Site = { file: string; line: number; classes: string[] };
 
 function classListsPairingOutlineNone(file: string): Site[] {
   const source = readFileSync(file, "utf8");
-  const literals = [...source.matchAll(LITERAL)];
+  const literals = literalsOf(source);
 
-  const clusters: (typeof literals)[] = [];
-  for (const [index, literal] of literals.entries()) {
+  const clusters: Literal[][] = [];
+  literals.forEach((literal, index) => {
     const previous = literals[index - 1];
-    const gap =
-      previous === undefined
-        ? null
-        : source.slice(previous.index + previous[0].length, literal.index);
+    const gap = previous === undefined ? null : source.slice(previous.end, literal.start);
     if (gap !== null && JOINABLE.test(gap)) clusters.at(-1)!.push(literal);
     else clusters.push([literal]);
-  }
+  });
 
   const sites: Site[] = [];
   for (const cluster of clusters) {
-    const classes = classTokens(cluster.map((m) => m[2]).join(" "));
+    const classes = classTokens(cluster.map((l) => l.value).join(" "));
     if (!classes.includes("outline-none")) continue;
     if (!classes.some((c) => /^focus-visible:outline-\d/.test(c))) continue;
     sites.push({
       file,
-      line: source.slice(0, cluster[0].index).split("\n").length,
+      line: source.slice(0, cluster[0].start).split("\n").length,
       classes,
     });
   }
@@ -262,7 +314,7 @@ describe("every class list that pairs outline-none with an outline focus ring", 
    * would report a green run over nothing.
    */
   it("finds the sites to check", () => {
-    expect(sites.length).toBeGreaterThanOrEqual(40);
+    expect(sites.length).toBeGreaterThanOrEqual(45);
   });
 
   it.each(sites.map((s) => [`${s.file}:${s.line}`, s] as const))(
