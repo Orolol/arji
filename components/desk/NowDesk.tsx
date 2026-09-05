@@ -2,9 +2,9 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Infinity as InfinityIcon } from "lucide-react";
+import { Infinity as InfinityIcon } from "lucide-react";
 
-import { PillButton, SurfaceCard, projectTone } from "@/components/piscine";
+import { PillButton, projectTone } from "@/components/piscine";
 import {
   Popover,
   PopoverContent,
@@ -21,6 +21,7 @@ import type {
   DeskLandRow,
 } from "@/lib/control-desk/types";
 import { cn } from "@/lib/utils";
+import { ToastStack, MAX_TOASTS, type ToastItem } from "@/components/notifications/ToastStack";
 
 import { FullAutoProjectRow } from "./FullAutoProjectRow";
 import { DeskComposer } from "./DeskComposer";
@@ -86,14 +87,6 @@ export interface NowDeskProps {
   className?: string;
 }
 
-interface DeskToast {
-  id: string;
-  tone: DeskToastTone;
-  message: string;
-  href?: string;
-  actionLabel?: string;
-}
-
 export function NowDesk({
   projectId,
   onToast,
@@ -115,7 +108,7 @@ export function NowDesk({
   const activeProjectId = projectId ?? null;
 
   const { data, refresh } = useControlDesk(activeProjectId);
-  const [toasts, setToasts] = React.useState<DeskToast[]>([]);
+  const [toasts, setToasts] = React.useState<ToastItem[]>([]);
   const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(new Set());
   const [landingEpicId, setLandingEpicId] = React.useState<string | null>(null);
   const [landingAll, setLandingAll] = React.useState(false);
@@ -130,15 +123,16 @@ export function NowDesk({
       }
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       setToasts((current) => [
-        ...current,
-        { id, tone, message, href: action?.href, actionLabel: action?.label },
+        ...current.slice(-(MAX_TOASTS - 1)),
+        { id, type: tone, message, href: action?.href, actionLabel: action?.label },
       ]);
-      setTimeout(() => {
-        setToasts((current) => current.filter((toast) => toast.id !== id));
-      }, 5000);
     },
     [onToast],
   );
+
+  const dismissToast = React.useCallback((id: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
 
   const changed = React.useCallback(() => {
     void refresh();
@@ -528,29 +522,34 @@ export function NowDesk({
           return false;
         }
         const epicId: string | undefined = body.data?.id;
+        const ticketAction = epicId ? {
+          href: `/projects/${input.projectId}?ticket=${epicId}`,
+          label: "Voir le ticket",
+        } : undefined;
+        const confirmation = `Ticket créé dans le backlog : ${input.title}`;
         if (!input.dispatch || !epicId) {
-          raise("success", "Epic créé dans le backlog");
+          raise("success", confirmation, ticketAction);
           changed();
           return true;
         }
-        const dispatched = await fetch(
-          `/api/projects/${input.projectId}/epics/${epicId}/build`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(input.namedAgentId ? { namedAgentId: input.namedAgentId } : {}),
-          },
-        );
-        const dispatchBody = await dispatched.json().catch(() => ({}));
-        if (!dispatched.ok || dispatchBody.error) {
-          reportFailure(
-            dispatched,
-            dispatchBody,
-            "Epic créé, mais le build n'a pas démarré",
-            input.projectId,
+        // Creation is durable already: a dispatch failure must not invite a duplicate.
+        try {
+          const dispatched = await fetch(
+            `/api/projects/${input.projectId}/epics/${epicId}/build`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(input.namedAgentId ? { namedAgentId: input.namedAgentId } : {}),
+            },
           );
-        } else {
-          raise("success", "Epic créé et envoyé en dev");
+          const dispatchBody = await dispatched.json().catch(() => ({}));
+          if (!dispatched.ok || dispatchBody.error) {
+            raise("warning", `Ticket créé, mais le lancement du build a échoué : ${dispatchBody.error || input.title}`, ticketAction);
+          } else {
+            raise("success", `Ticket créé et envoyé en dev : ${input.title}`, ticketAction);
+          }
+        } catch {
+          raise("warning", `Ticket créé, mais le lancement du build n'a pas pu être confirmé : ${input.title}`, ticketAction);
         }
         changed();
         return true;
@@ -559,7 +558,7 @@ export function NowDesk({
         return false;
       }
     },
-    [raise, reportFailure, changed],
+    [raise, changed],
   );
 
   /**
@@ -804,37 +803,7 @@ export function NowDesk({
       />
 
       {onToast ? null : (
-        <div className="fixed right-4 bottom-4 z-50 flex flex-col gap-2">
-          {/*
-            The body stays ink whatever the tone. A toast floats over the desk
-            and belongs to no stratum, so it has no deep to borrow — and colour
-            here would be encoding state, which the strata do not do either.
-            The failure is in the wording (every error message names what
-            failed) and in the icon beside it.
-          */}
-          {toasts.map((toast) => (
-            <SurfaceCard
-              key={toast.id}
-              radius={11}
-              data-testid="desk-toast"
-              className="flex items-center gap-2 px-[14px] py-[10px] font-sans text-[13px] text-foreground"
-            >
-              {toast.tone === "success" ? null : (
-                <AlertTriangle
-                  size={13}
-                  aria-hidden="true"
-                  className="shrink-0 text-muted-foreground"
-                />
-              )}
-              <span>{toast.message}</span>
-              {toast.href ? (
-                <a href={toast.href} className="text-[12px] whitespace-nowrap underline">
-                  {toast.actionLabel || "Open session"}
-                </a>
-              ) : null}
-            </SurfaceCard>
-          ))}
-        </div>
+        <ToastStack items={toasts} onDismiss={dismissToast} testId="desk-toast" />
       )}
     </div>
   );
