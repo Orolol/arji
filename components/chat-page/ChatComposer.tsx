@@ -154,7 +154,9 @@ export function ChatComposer({
         />
 
         <MentionTextarea
-          projectId={projectId ?? ""}
+          // NOT `?? ""`: an empty segment is what produced the
+          // `/api/projects/documents` 404s on every /chat load.
+          projectId={projectId}
           value={value}
           onValueChange={setValue}
           onKeyDown={handleKeyDown}
