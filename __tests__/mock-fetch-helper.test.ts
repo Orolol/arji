@@ -64,4 +64,40 @@ describe("mockFetchSequence", () => {
     expect(await (await fetch("/s")).json()).toEqual(status.body);
     expect(await (await fetch("/s")).json()).toEqual(status.body);
   });
+
+  it("settles within the microtask drain by default", async () => {
+    mockFetchSequence([status]);
+    let settled = false;
+
+    const inFlight = fetch("/s").then(() => {
+      settled = true;
+    });
+    // Nothing macrotask-sized in the way, so awaiting the promise chain is
+    // enough — no timer has to run for this to resolve.
+    await inFlight;
+    expect(settled).toBe(true);
+  });
+
+  /**
+   * `delayMs` is what lets a test observe a caller's in-flight state. Without
+   * it every response settles in the same microtask drain as the call, so
+   * "request pending" and "server answered" are indistinguishable and a test
+   * asserting on the pending state passes or fails on scheduling luck.
+   */
+  it("holds a response open for delayMs so the in-flight window is observable", async () => {
+    mockFetchSequence([{ ...status, delayMs: 20 }]);
+    let settled = false;
+
+    const inFlight = fetch("/s").then(() => {
+      settled = true;
+    });
+
+    // Drain the microtask queue: an undelayed response would already be in.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    await inFlight;
+    expect(settled).toBe(true);
+  });
 });
