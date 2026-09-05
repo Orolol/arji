@@ -8,6 +8,14 @@
  * because omp kept pi's `--mode json` event stream byte-compatible, so all
  * the parsing below is shared.
  *
+ * Decision (epic H3WaoKFiwd8j, "delete or register?"): NEITHER. Deleting the
+ * module breaks `oh-my-pi`, which extends this class; registering `pi` would
+ * admit a CLI with no MCP channel, which lib/providers/types.ts forbids. It
+ * stays an abstract base with no registry key of its own — reached through
+ * inheritance, which is why a key-based audit misreads it as dead code.
+ * `__tests__/provider-registry-single-source.test.ts` pins that reachability
+ * so the question does not have to be re-litigated from the registry map.
+ *
  * CLI: pi --mode json [--tools <allowlist>] [--session <ID>] [--model <M>] -p <PROMPT>
  *
  * Oversized prompts: pi's positional messages accept a `@path` form that
