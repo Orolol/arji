@@ -12,6 +12,12 @@ import { cn } from "@/lib/utils";
  * `pointer-events-none` does not stop Tab, so every control inside must ALSO
  * receive `disabled` — callers pass the same boolean down. `aria-disabled`
  * states the fact for assistive tech.
+ *
+ * A control whose value keeps having an effect while the master is off is the
+ * documented exception: it opts back in with `pointer-events-auto` and is
+ * never passed `disabled` (Full Auto's two workspace-default agent pills are
+ * the one instance — see FullAutoBand). Dim is the state; disabled is the
+ * claim that editing it would change nothing, and that claim has to be true.
  */
 export interface BandDimProps {
   dimmed: boolean;

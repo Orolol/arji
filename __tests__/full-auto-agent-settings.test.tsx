@@ -25,6 +25,7 @@ import {
   AUTO_MODE_ENABLED_SETTING_KEY,
   AUTO_MODE_REVIEW_AGENT_SETTING_KEY,
   autoModeBuildAgentSettingKey,
+  autoModeEnabledSettingKey,
   resolveAutoModeConfig,
 } from "@/lib/auto-mode/constants";
 
@@ -64,9 +65,10 @@ function mockSettings(stored: Record<string, unknown>) {
 }
 
 /**
- * Full Auto has to be ARMED for the band's body to be interactive — the two
- * pills are disabled while the master switch is off, exactly like the
- * concurrency ladder beside them.
+ * The band's body is dimmed while the master switch is off, and every control
+ * in it but the two role pills is disabled with it. These cases arm the bare
+ * key so they read the ordinary armed workspace; the bare-off case is its own
+ * describe block at the bottom of the file.
  */
 const ARMED = { [AUTO_MODE_ENABLED_SETTING_KEY]: true };
 
@@ -218,5 +220,112 @@ describe("resolveAutoModeConfig — precedence for the bare keys", () => {
       resolveAutoModeConfig({ [AUTO_MODE_BUILD_AGENT_SETTING_KEY]: "" }, "p1")
         .buildAgent,
     ).toBeNull();
+  });
+});
+
+/**
+ * THE MASTER SWITCH ON THIS BAND IS NOT THE ONE THE SUPERVISOR READS.
+ *
+ * The band's toggle writes the BARE `auto_mode_enabled`; the desk popover
+ * arms one project through `auto_mode_enabled:<projectId>`, and
+ * `resolveAutoModeConfigForProject` reads the suffixed key FIRST. So a
+ * workspace whose bare key is absent can be armed and dispatching — observed
+ * live: build + review sessions created, worktree, CLI spawned — while this
+ * band believes Full Auto is off.
+ *
+ * Dimming the band under a bare-off master is the frame's pattern and stays.
+ * DISABLING the two role pills does not: they are the workspace default rung
+ * of the project → global → built-in chain, so their value is what decides
+ * which agent runs that armed project's unattended work. A user who arms
+ * projects one at a time — the flow the desk popover encourages — could not
+ * reach the setting at all.
+ */
+describe("Settings — Full Auto agents while the bare master is off", () => {
+  /** Armed the way the desk popover arms it: the suffixed key only. */
+  const ARMED_FROM_THE_DESK = {
+    [autoModeEnabledSettingKey("p1")]: true,
+  };
+
+  async function renderStored(stored: Record<string, unknown>) {
+    mockSettings(stored);
+    render(<SettingsPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("full-auto-settings")).toBeInTheDocument(),
+    );
+  }
+
+  it("leaves both role pills enabled", async () => {
+    await renderStored(ARMED_FROM_THE_DESK);
+
+    // The reported symptom, verbatim: `element is not enabled`, click never lands.
+    expect(
+      within(screen.getByTestId("auto-build-agent")).getByRole("button"),
+    ).toBeEnabled();
+    expect(
+      within(screen.getByTestId("auto-review-agent")).getByRole("button"),
+    ).toBeEnabled();
+  });
+
+  it("still writes the workspace default a bare-off master keeps in force", async () => {
+    await renderStored(ARMED_FROM_THE_DESK);
+
+    await choose("auto-build-agent", "Opus Builder");
+    fireEvent.click(screen.getByTestId("settings-save"));
+
+    await waitFor(() => expect(patchBodies).toHaveLength(1));
+    expect(patchBodies[0]).toEqual({
+      [AUTO_MODE_BUILD_AGENT_SETTING_KEY]: "a1",
+    });
+  });
+
+  /**
+   * The dimmed body disables its contents twice over — `pointer-events-none`
+   * and `aria-disabled="true"` — and jsdom reports neither as a click that
+   * fails: it loads no stylesheet, and it does not propagate `aria-disabled`
+   * to descendants the way assistive tech and Playwright's actionability
+   * check do. Both opt-outs are asserted here as attributes because that is
+   * the only observable this layer has; the browser-level proof that the
+   * click lands is `e2e/full-auto-agents.spec.ts`.
+   */
+  it("opts the pills out of both halves of the dimmed body", async () => {
+    await renderStored(ARMED_FROM_THE_DESK);
+
+    expect(screen.getByTestId("full-auto-body")).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    const live = screen.getByTestId("full-auto-agents-live");
+    expect(live.className).toContain("pointer-events-auto");
+    expect(live).toHaveAttribute("aria-disabled", "false");
+    // …and they really are inside it, not beside it.
+    expect(live).toContainElement(screen.getByTestId("auto-build-agent"));
+    expect(live).toContainElement(screen.getByTestId("auto-review-agent"));
+  });
+
+  /**
+   * The scope line: the pills are the ONE control here whose value keeps
+   * having an effect while the master is off. Everything else in the band
+   * still dims and disables together.
+   */
+  it("keeps the rest of the band disabled", async () => {
+    await renderStored(ARMED_FROM_THE_DESK);
+
+    expect(screen.getByTestId("auto-smart-dispatch")).toBeDisabled();
+    expect(screen.getByTestId("auto-second-opinion")).toBeDisabled();
+    expect(
+      within(screen.getByTestId("agent-max-concurrent")).getAllByRole("button")[0],
+    ).toBeDisabled();
+  });
+
+  it("still disables nothing extra once the bare master is armed", async () => {
+    await renderStored({ [AUTO_MODE_ENABLED_SETTING_KEY]: true });
+
+    expect(screen.getByTestId("full-auto-body")).not.toHaveAttribute(
+      "aria-disabled",
+    );
+    expect(screen.getByTestId("auto-smart-dispatch")).toBeEnabled();
+    expect(
+      within(screen.getByTestId("auto-build-agent")).getByRole("button"),
+    ).toBeEnabled();
   });
 });

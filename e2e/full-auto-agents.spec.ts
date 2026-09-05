@@ -96,3 +96,74 @@ test("persists Full Auto agents, resolves project overrides and dispatches the s
     cleanupScenarios();
   }
 });
+
+/**
+ * The band's master switch is the BARE `auto_mode_enabled`; arming one project
+ * from the desk writes `auto_mode_enabled:<projectId>`, which the supervisor
+ * reads FIRST. The two workspace-default pills therefore keep deciding which
+ * agent runs that project's unattended work while this screen's switch is off,
+ * and they must stay operable.
+ *
+ * A REAL BROWSER IS THE POINT. The bug had two halves — `disabled` on the
+ * button, and `pointer-events-none` on the dimmed body around it. jsdom loads
+ * no stylesheet, so it can only see the first; Playwright's actionability
+ * check ("receives pointer events") is what covers the second. The click here
+ * is the exact one that timed out on the report.
+ */
+test("keeps the workspace default agents editable while the bare master is off", async ({
+  page, request, project,
+}) => {
+  page.setDefaultTimeout(15_000);
+  const original = (await (await request.get("/api/settings")).json()).data;
+  const keys = ["auto_mode_enabled", "auto_mode_build_agent"];
+  let agentId: string | null = null;
+  try {
+    const created = await request.post("/api/agent-config/named-agents", {
+      data: { name: `${project.id} bare-off build`, provider: "claude-code", model: "sonnet" },
+    });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    agentId = (await created.json()).data.id;
+
+    // The workspace master OFF, one project armed on its own — the state the
+    // desk popover produces, and the one the band used to lock the user out of.
+    await request.patch("/api/settings", { data: { auto_mode_enabled: false } });
+    const armed = await request.put(`/api/projects/${project.id}/auto-mode`, {
+      data: { enabled: true, secondOpinion: false },
+    });
+    expect(armed.ok(), await armed.text()).toBeTruthy();
+    const stored = (await (await request.get("/api/settings")).json()).data;
+    expect(stored[`auto_mode_enabled:${project.id}`]).toBe(true);
+
+    await page.goto("/settings");
+    await expect(page.getByTestId("full-auto-master")).toHaveAttribute("aria-checked", "false");
+    // Dim stays: the band still says Full Auto is not armed workspace-wide.
+    await expect(page.getByTestId("full-auto-body")).toHaveAttribute("aria-disabled", "true");
+    // …and so does the disable, for every control the master really suspends.
+    await expect(page.getByTestId("auto-smart-dispatch")).toBeDisabled();
+
+    await page.getByTestId("auto-build-agent").getByRole("button").click();
+    await page.getByRole("menuitem", { name: `${project.id} bare-off build`, exact: true }).click();
+    await page.getByTestId("settings-save").click();
+    await expect(page.getByTestId("settings-save")).toBeDisabled();
+
+    await page.reload();
+    await expect(page.getByTestId("auto-build-agent")).toContainText(`${project.id} bare-off build`);
+    // The BARE key, still — a bare-off master does not turn this screen into
+    // an editor of the armed project's override.
+    const after = (await (await request.get("/api/settings")).json()).data;
+    expect(after.auto_mode_build_agent).toBe(agentId);
+    expect(after[`auto_mode_build_agent:${project.id}`]).toBeUndefined();
+  } finally {
+    await request.put(`/api/projects/${project.id}/auto-mode`, { data: { enabled: false } });
+    await request.patch("/api/settings", {
+      data: Object.fromEntries(keys.map(key => [key, original[key] ?? ""])),
+    });
+    if (agentId) await request.delete(`/api/agent-config/named-agents/${agentId}`);
+    withDatabase(db => {
+      for (const key of keys) {
+        if (!(key in original)) db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+      }
+      db.prepare("DELETE FROM settings WHERE substr(key, -?) = ?").run(project.id.length + 1, `:${project.id}`);
+    });
+  }
+});
