@@ -28,14 +28,22 @@ interface NamedAgentSelectProps {
   disabled?: boolean;
   className?: string;
   /**
+   * Id placed on the trigger. The trigger renders a `<button>`, which is a
+   * labelable element, so a caller holding a visible `<label>` can associate
+   * it the plain HTML way (`htmlFor` → this id) instead of reaching for
+   * `aria-labelledby`.
+   */
+  id?: string;
+  /**
    * Accessible name for the trigger. A visible label sitting next to the
-   * control is not programmatically associated with it (the trigger is a
-   * button, not an input), so screen readers otherwise announce it as an
-   * unlabeled combobox — worth passing wherever several of these sit in one
-   * form.
+   * control is not programmatically associated with it unless the caller says
+   * so, so screen readers otherwise announce it as an unlabeled combobox —
+   * worth passing wherever several of these sit in one form.
    */
   "aria-label"?: string;
   "aria-labelledby"?: string;
+  /** Id of the helper text describing the picker, if the caller renders one. */
+  "aria-describedby"?: string;
   /**
    * Adds a "No agent" row so an already-attached agent can be detached.
    * Dispatch dialogs require an agent and leave this off; the chat header
@@ -59,17 +67,24 @@ export function NamedAgentSelect({
   onChange,
   disabled = false,
   className,
+  id,
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledBy,
+  "aria-describedby": ariaDescribedBy,
   allowClear = false,
   clearLabel = "No agent",
   dispatchRole,
 }: NamedAgentSelectProps) {
   const { agents, loading } = useNamedAgentsList();
   const reliability = useDispatchReliability(dispatchRole);
+  // Carried by every branch below: the loading and empty states render a
+  // trigger too, and a picker that is only named once its agents arrive is
+  // still an unlabeled combobox for the reader who reaches it first.
   const labelProps = {
+    ...(id ? { id } : {}),
     ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
     ...(ariaLabelledBy ? { "aria-labelledby": ariaLabelledBy } : {}),
+    ...(ariaDescribedBy ? { "aria-describedby": ariaDescribedBy } : {}),
   };
 
   if (loading) {
