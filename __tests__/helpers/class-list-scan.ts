@@ -2,35 +2,40 @@
  * Find the Tailwind class lists in a source file, without being fooled by the
  * punctuation that surrounds them.
  *
- * WHY THIS IS NOT A REGEX. `__tests__/focus-ring-paints.test.tsx` used to pull
- * literals out with `/(["'`])((?:\\.|(?!\1)[\s\S])*?)\1/g` and treat comments as
- * a joinable separator. That regex has no idea what a comment is, so this
- * repository's own comment convention — naming a utility between backticks —
- * reads as a template literal:
+ * WHY THIS PARSES INSTEAD OF PATTERN-MATCHING. Two scanners have now lost a
+ * control to their own guesswork, and both failed silently:
  *
- *     "… outline-none",
- *     // the backticked name of a utility, in a comment
- *     "focus-visible:outline-2 …",
+ *   1. A regex pass that treated comments as a joinable separator had no idea
+ *      what a comment was, so this repository's own convention — naming a
+ *      utility between backticks — read as a template literal, cut one
+ *      element's class list in two, and dropped it from the sweep
+ *      (B-arij-206). The failure surfaced as `expected 39 to be greater than
+ *      or equal to 40`.
  *
- * The comment's two backticks open and close a phantom literal, the gap between
- * the real literals stops looking like whitespace, and the cluster is cut in
- * two. Neither half then carries both `outline-none` and the focus ring, so the
- * control drops out of the sweep with no assertion naming it — the failure
- * surfaced as `expected 39 to be greater than or equal to 40` (B-arij-206).
- * The same hole swallows an apostrophe in prose (`it's`) and a `//` inside a URL
- * string.
+ *   2. Its hand-rolled replacement knew about comments but still guessed at
+ *      TSX: it opened a regex on any `/` whose previous significant character
+ *      could not end an expression. In `</span><input className="…" />` the
+ *      slash of the closing tag follows `<`, so that "regex" ran on to the
+ *      slash of the next self-closing tag and swallowed the className between
+ *      them. Zero literals, no assertion naming the loss.
  *
- * So this module lexes instead: one pass over the source that knows the
- * difference between a string, a comment and a regex literal. Comments and
- * string *contents* are blanked out into a `skeleton` of the same length, which
- * keeps every offset valid for line numbers and makes brace/paren balancing
- * safe.
+ * Both holes are one mistake at different depths: TSX is not a regular
+ * language, and every approximation of it drops sites without saying so. So
+ * this module hands the file to the TypeScript parser — already a direct
+ * dependency, and the same one the build uses. A `/` is then never ambiguous,
+ * because the parser knows whether it sits in an expression, a JSX child or a
+ * regex.
+ *
+ * String contents, template holes, regex bodies, JSX text and comments are
+ * blanked into a `skeleton` of the same length, which keeps every offset valid
+ * for line numbers and makes brace/paren balancing safe.
  *
  * It lives in `__tests__/helpers/` on purpose: vitest's include glob is
  * `**\/*.test.{ts,tsx,mjs}`, so nothing here is collected as a test.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 
 /* ------------------------------------------------------------------ */
 /* Lexing                                                              */
@@ -56,121 +61,144 @@ export interface LexedSource {
    * preserved). Same length as the input, so every offset still lines up.
    */
   skeleton: string;
+  /**
+   * `const BOX = "flex h-[34px] … border-[1.5px] border-border"` — a class
+   * string held in a named constant and spread into `cn(BOX, …)` at the use
+   * site. The declaration is not inside any `className` or `cn(…)`, so element
+   * grouping cannot see it as a literal; without resolving the name, half of
+   * the element's class list is invisible. See {@link elementClassLists}.
+   */
+  constants: Map<string, string>;
 }
 
-/** A `/` starts a regex only when the previous significant char cannot end an expression. */
-const ENDS_EXPRESSION = /[\w)\]]/;
+/**
+ * Both rules lex every file, and the sweep runs both over the whole tree.
+ * Parsing each source once keeps that to one pass per file.
+ */
+const lexed = new Map<string, LexedSource>();
 
 /**
- * One pass over a TS/TSX source, emitting its string and template literals and
+ * One parse of a TS/TSX source, emitting its string and template literals and
  * blanking everything a class list can hide behind.
  */
 export function lexSource(source: string): LexedSource {
+  const memoized = lexed.get(source);
+  if (memoized) return memoized;
+
+  const tree = ts.createSourceFile(
+    "scanned.tsx",
+    source,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ false,
+    ts.ScriptKind.TSX,
+  );
+
   const literals: SourceLiteral[] = [];
+  /** Ranges the comment pass must step over rather than read. */
+  const opaque: Span[] = [];
   const skeleton = source.split("");
   const blank = (from: number, to: number) => {
-    for (let k = from; k < to && k < skeleton.length; k++) {
+    for (let k = Math.max(from, 0); k < to && k < skeleton.length; k++) {
       if (skeleton[k] !== "\n") skeleton[k] = " ";
     }
   };
 
-  let lastSignificant = "";
+  const keep = (node: ts.Node, value: string) => {
+    const start = node.getStart(tree);
+    literals.push({
+      start,
+      end: node.end,
+      value,
+      quote: source[start] as SourceLiteral["quote"],
+    });
+    blank(start + 1, node.end - 1);
+    opaque.push({ start, end: node.end });
+  };
+
+  const constants = new Map<string, string>();
+
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer !== undefined &&
+      (ts.isStringLiteral(node.initializer) ||
+        ts.isNoSubstitutionTemplateLiteral(node.initializer))
+    ) {
+      constants.set(node.name.text, node.initializer.text);
+    }
+
+    switch (node.kind) {
+      case ts.SyntaxKind.StringLiteral:
+      case ts.SyntaxKind.NoSubstitutionTemplateLiteral:
+        keep(node, (node as ts.LiteralLikeNode).text);
+        return;
+
+      case ts.SyntaxKind.TemplateExpression: {
+        // `${…}` is code, not classes: join the fixed chunks with a space so
+        // `a-${x}b` never yields the token `a-b`, and do not descend into the
+        // holes — an expression's own literals are not this element's list.
+        const template = node as ts.TemplateExpression;
+        keep(
+          node,
+          [
+            template.head.text,
+            ...template.templateSpans.map((span) => span.literal.text),
+          ].join(" "),
+        );
+        return;
+      }
+
+      // Neither can hold a class list, and both can hold punctuation that
+      // would derail the comment pass — a `//` inside a URL-shaped regex, an
+      // apostrophe in prose. Blank them and step over them.
+      case ts.SyntaxKind.RegularExpressionLiteral:
+      case ts.SyntaxKind.JsxText:
+        blank(node.pos, node.end);
+        opaque.push({ start: node.pos, end: node.end });
+        return;
+    }
+    node.forEachChild(visit);
+  };
+  visit(tree);
+
+  // The parser reports comments as trivia rather than as nodes. Everything
+  // that could disguise one is blanked and recorded above, so a `//` or `/*`
+  // outside those ranges is unambiguously a comment.
+  literals.sort((a, b) => a.start - b.start);
+  opaque.sort((a, b) => a.start - b.start);
+  let range = 0;
   let i = 0;
   while (i < source.length) {
-    const char = source[i];
-
-    if (char === "/" && source[i + 1] === "/") {
+    while (range < opaque.length && opaque[range].end <= i) range++;
+    if (range < opaque.length && i >= opaque[range].start) {
+      i = opaque[range].end;
+      continue;
+    }
+    if (source[i] === "/" && source[i + 1] === "/") {
       let j = i;
       while (j < source.length && source[j] !== "\n") j++;
       blank(i, j);
       i = j;
       continue;
     }
-
-    if (char === "/" && source[i + 1] === "*") {
+    if (source[i] === "/" && source[i + 1] === "*") {
       const close = source.indexOf("*/", i + 2);
       const j = close === -1 ? source.length : close + 2;
       blank(i, j);
       i = j;
       continue;
     }
-
-    if (char === '"' || char === "'" || char === "`") {
-      const quote = char as SourceLiteral["quote"];
-      let j = i + 1;
-      let value = "";
-      while (j < source.length) {
-        const inner = source[j];
-        if (inner === "\\") {
-          value += source[j + 1] ?? "";
-          j += 2;
-          continue;
-        }
-        if (inner === quote) break;
-        // `${…}` is code, not classes. Skip it, balancing braces, and leave a
-        // space so `a-${x}b` never yields the token `a-b`.
-        if (quote === "`" && inner === "$" && source[j + 1] === "{") {
-          let depth = 1;
-          let k = j + 2;
-          while (k < source.length && depth > 0) {
-            if (source[k] === "{") depth++;
-            else if (source[k] === "}") depth--;
-            k++;
-          }
-          value += " ";
-          j = k;
-          continue;
-        }
-        // An unterminated single/double-quoted literal is an apostrophe in a
-        // JSX text node, not a string. Bail at the line end rather than
-        // swallowing the rest of the file.
-        if (quote !== "`" && inner === "\n") break;
-        value += inner;
-        j++;
-      }
-      const end = Math.min(j + 1, source.length);
-      literals.push({ start: i, end, value, quote });
-      blank(i + 1, end - 1);
-      lastSignificant = quote;
-      i = end;
-      continue;
-    }
-
-    // A regex literal can carry quotes and slashes; blank its body so they are
-    // not mistaken for a string. `/>` (JSX self-close) and division never
-    // reach here or never terminate on the line, and fall through unchanged.
-    if (char === "/" && !ENDS_EXPRESSION.test(lastSignificant)) {
-      let j = i + 1;
-      let inClass = false;
-      let closed = false;
-      while (j < source.length) {
-        const inner = source[j];
-        if (inner === "\\") {
-          j += 2;
-          continue;
-        }
-        if (inner === "\n") break;
-        if (inner === "[") inClass = true;
-        else if (inner === "]") inClass = false;
-        else if (inner === "/" && !inClass) {
-          closed = true;
-          break;
-        }
-        j++;
-      }
-      if (closed && j > i + 1) {
-        blank(i + 1, j);
-        lastSignificant = "/";
-        i = j + 1;
-        continue;
-      }
-    }
-
-    if (!/\s/.test(char)) lastSignificant = char;
     i++;
   }
 
-  return { literals, skeleton: skeleton.join("") };
+  const result: LexedSource = {
+    literals,
+    skeleton: skeleton.join(""),
+    constants,
+  };
+  lexed.set(source, result);
+  return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -253,7 +281,7 @@ export function elementClassLists(
   source: string,
   file: string,
 ): ClassListSite[] {
-  const { literals, skeleton } = lexSource(source);
+  const { literals, skeleton, constants } = lexSource(source);
   const spans = outermostSpans(skeleton);
 
   const grouped = new Map<number, SourceLiteral[]>();
@@ -271,9 +299,42 @@ export function elementClassLists(
     .map(([span, group]) => ({
       file,
       line: lineOf(source, spans[span].start),
-      classes: classTokens(group.map((l) => l.value).join(" ")),
+      classes: classTokens(
+        [
+          ...referencedConstants(
+            skeleton.slice(spans[span].start, spans[span].end),
+            constants,
+          ),
+          ...group.map((l) => l.value),
+        ].join(" "),
+      ),
     }))
     .sort((a, b) => a.line - b.line);
+}
+
+/**
+ * The class strings a span pulls in by name.
+ *
+ * `FieldBoxInput` is why this exists: it renders `cn(BOX, "… outline-none",
+ * "focus-visible:border-border-strong", …)`, and its 1.5px border lives in
+ * `BOX`. Reading only the inline literals makes that a border COLOUR with no
+ * border width — which paints nothing — so the element reads as having no
+ * affordance when in fact it has a real one. Resolving the name is what tells
+ * the two cases apart.
+ *
+ * The skeleton has string contents blanked, so an identifier-shaped word
+ * inside a class string can never be mistaken for a reference.
+ */
+function referencedConstants(
+  spanText: string,
+  constants: Map<string, string>,
+): string[] {
+  const resolved: string[] = [];
+  for (const match of spanText.matchAll(/[A-Za-z_$][\w$]*/g)) {
+    const value = constants.get(match[0]);
+    if (value !== undefined) resolved.push(value);
+  }
+  return resolved;
 }
 
 interface Span {
@@ -358,9 +419,182 @@ export function outlinePairingSites(
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Is a focus utility an affordance, or only a focus utility?          */
+/* ------------------------------------------------------------------ */
+
 /**
- * Elements that clear the outline and put NOTHING in its place — no ring, no
- * border, no outline, no focus variant of any kind (B-arij-203).
+ * A focus VARIANT is not a focus AFFORDANCE, and the difference is the whole
+ * point of this rule. `focus-visible:outline-offset-2` positions a ring that
+ * is not there; `focus-visible:ring-0` and `focus-visible:shadow-none` draw
+ * nothing by definition; `focus-visible:outline-ring` names a colour for an
+ * outline whose style `outline-none` already set to `none`. Accepting any
+ * `focus-visible:*` as a replacement is exactly how the reported shape — clears
+ * the outline, offers nothing — walks past this rule, and the paint sweep does
+ * not catch these either: it only looks at lists declaring
+ * `focus-visible:outline-<n>`, and none of them do.
+ */
+type Family =
+  | "outline"
+  | "ring"
+  | "border"
+  | "shadow"
+  | "background"
+  | "decoration"
+  /** Something we do not model. Assumed to paint — see `declares`. */
+  | "other";
+
+type Effect = "paints" | "clears" | "inert";
+
+interface Declaration {
+  family: Family;
+  effect: Effect;
+}
+
+/** A width: `-2`, `-[3px]`. Zero widths are rejected before this is reached. */
+const WIDTH = /^(?:\d|\[)/;
+
+/** Drop every variant prefix: `md:focus-visible:outline-2` → `outline-2`. */
+function utility(token: string): string {
+  let depth = 0;
+  let cut = -1;
+  for (let i = 0; i < token.length; i++) {
+    const char = token[i];
+    if (char === "[" || char === "(") depth++;
+    else if (char === "]" || char === ")") depth--;
+    else if (char === ":" && depth === 0) cut = i;
+  }
+  return token.slice(cut + 1);
+}
+
+/**
+ * Families for which the element declares a non-zero width ANYWHERE — base
+ * classes included.
+ *
+ * A colour is an affordance only when there is something to colour in. On an
+ * element that already draws a 1px border, `focus-visible:border-accent` is a
+ * real, visible change; on one that does not, it paints nothing, because
+ * Tailwind's preflight sets `border-width: 0` on every element. Same for a
+ * ring colour without a ring width.
+ */
+function declaredWidths(classes: string[]): Set<Family> {
+  const widths = new Set<Family>();
+  for (const token of classes) {
+    const u = utility(token).replace(/^-/, "");
+    if (/^outline-(?:\d|\[)/.test(u) && u !== "outline-0") widths.add("outline");
+    if (u === "ring" || (/^ring-(?:\d|\[)/.test(u) && u !== "ring-0")) {
+      widths.add("ring");
+    }
+    if (
+      u === "border" ||
+      (/^border-(?:\d|\[)/.test(u) && u !== "border-0") ||
+      /^border-[trblxyse]-(?:\d|\[)/.test(u)
+    ) {
+      widths.add("border");
+    }
+  }
+  return widths;
+}
+
+/**
+ * What one utility does to the pixels, given the widths the element declares.
+ *
+ * Deliberately generous at the end: a utility this function does not recognise
+ * counts as painting. The rule's job is to catch elements that offer *nothing*,
+ * and a guard that accused every affordance its author had not enumerated
+ * would be worse than the hole it closes — the same false-accusation trade-off
+ * that made this rule group by element rather than by adjacency.
+ */
+function declares(token: string, widths: Set<Family>): Declaration {
+  const u = utility(token).replace(/^-/, "");
+
+  if (u === "outline" || u.startsWith("outline-")) {
+    const rest = u.slice("outline-".length);
+    if (u === "outline") return { family: "outline", effect: "paints" };
+    if (/^(?:none|hidden|0|transparent)$/.test(rest)) {
+      return { family: "outline", effect: "clears" };
+    }
+    if (rest.startsWith("offset-")) return { family: "outline", effect: "inert" };
+    if (/^(?:solid|dashed|dotted|double)$/.test(rest)) {
+      return { family: "outline", effect: "paints" };
+    }
+    if (WIDTH.test(rest)) return { family: "outline", effect: "paints" };
+    // A colour. `outline-none` set the style to `none`, so it needs a width
+    // (and, per the paint sweep, a style) before it shows anything.
+    return {
+      family: "outline",
+      effect: widths.has("outline") ? "paints" : "inert",
+    };
+  }
+
+  if (u === "ring" || u.startsWith("ring-")) {
+    const rest = u.slice("ring-".length);
+    if (u === "ring") return { family: "ring", effect: "paints" };
+    if (/^(?:0|transparent)$/.test(rest)) {
+      return { family: "ring", effect: "clears" };
+    }
+    if (rest.startsWith("offset-") || rest === "inset") {
+      return { family: "ring", effect: "inert" };
+    }
+    if (WIDTH.test(rest)) return { family: "ring", effect: "paints" };
+    return { family: "ring", effect: widths.has("ring") ? "paints" : "inert" };
+  }
+
+  if (u === "border" || u.startsWith("border-")) {
+    const rest = u.slice("border-".length);
+    if (u === "border") return { family: "border", effect: "paints" };
+    if (/^(?:0|transparent)$/.test(rest)) {
+      return { family: "border", effect: "clears" };
+    }
+    if (WIDTH.test(rest) || /^[trblxyse]-(?:\d|\[)/.test(rest)) {
+      return { family: "border", effect: "paints" };
+    }
+    return {
+      family: "border",
+      effect: widths.has("border") ? "paints" : "inert",
+    };
+  }
+
+  if (u === "shadow" || u.startsWith("shadow-")) {
+    if (u === "shadow-none") return { family: "shadow", effect: "clears" };
+    return { family: "shadow", effect: "paints" };
+  }
+
+  if (u.startsWith("bg-")) {
+    if (u === "bg-transparent") return { family: "background", effect: "clears" };
+    return { family: "background", effect: "paints" };
+  }
+
+  if (u === "no-underline") return { family: "decoration", effect: "clears" };
+  if (/^(?:underline|overline|line-through)$/.test(u)) {
+    return { family: "decoration", effect: "paints" };
+  }
+
+  return { family: "other", effect: "paints" };
+}
+
+/** Does anything this element declares under focus actually draw? */
+function paintsUnderFocus(classes: string[]): boolean {
+  const widths = declaredWidths(classes);
+  const paints = new Set<Family>();
+  const cleared = new Set<Family>();
+
+  for (const token of classes) {
+    if (!FOCUS_VARIANT.test(token)) continue;
+    const declaration = declares(token, widths);
+    if (declaration.effect === "paints") paints.add(declaration.family);
+    else if (declaration.effect === "clears") cleared.add(declaration.family);
+  }
+
+  // A family the same element cancels under focus is not an affordance:
+  // `focus-visible:outline-2 focus-visible:outline-transparent` computes a
+  // width and paints nothing.
+  return [...paints].some((family) => !cleared.has(family));
+}
+
+/**
+ * Elements that clear the outline and put NOTHING visible in its place — no
+ * ring, no border, no outline, no focus affordance that draws (B-arij-203).
  *
  * Distinct from {@link outlinePairingSites} by construction: there is no ring
  * declaration to repair here, so `focus-visible:outline-solid` fixes nothing.
@@ -373,9 +607,7 @@ export function undeclaredFocusSites(
 ): ClassListSite[] {
   return elementClassLists(source, file).filter((site) => {
     if (!site.classes.some((c) => CLEARS_OUTLINE.test(c))) return false;
-    return !site.classes.some(
-      (c) => FOCUS_VARIANT.test(c) && !CLEARS_OUTLINE.test(c),
-    );
+    return !paintsUnderFocus(site.classes);
   });
 }
 

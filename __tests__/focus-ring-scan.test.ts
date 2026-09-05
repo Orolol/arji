@@ -151,6 +151,49 @@ ${component("// after a self-closing tag")}`;
 
     expect(outlinePairingSites(source, "f.tsx")).toHaveLength(1);
   });
+
+  /**
+   * THE SECOND REGRESSION, same shape as the first: a lexer that guesses at
+   * TSX rather than parsing it. `/` after `<` cannot end an expression, so a
+   * hand-rolled "is this a regex?" test opens a regex on the slash of a
+   * closing tag and blanks everything up to the next slash — here the whole
+   * `className` of the next element on the line. The control leaves the sweep
+   * with nothing naming it, and a second site anywhere else in the file keeps
+   * the per-file inventory green.
+   */
+  it("does not read a JSX closing tag's slash as a regex", () => {
+    const source =
+      `<div><span>x</span>` +
+      `<input className="outline-none focus-visible:outline-2" /></div>`;
+    const sites = outlinePairingSites(source, "f.tsx");
+
+    expect(
+      sites,
+      "the slash of </span> must not swallow the next element's class list",
+    ).toHaveLength(1);
+    expect(sites[0].classes).toContain("outline-none");
+  });
+
+  /** The self-closing slash of a *preceding* sibling, on the same line. */
+  it("keeps a control visible after a same-line self-closed sibling", () => {
+    const source = `<Row><Badge label="x" /><input className="outline-none" /></Row>`;
+
+    expect(undeclaredFocusSites(source, "f.tsx")).toHaveLength(1);
+  });
+
+  it("emits both literals of two same-line JSX siblings", () => {
+    const source = `<b><i className="a" />text</i><u className="b" /></b>`;
+
+    expect(lexSource(source).literals.map((l) => l.value)).toEqual(["a", "b"]);
+  });
+
+  /** And a real division still is not a regex. */
+  it("does not lose a class list after a division", () => {
+    const source = `const half = width / 2;
+${component("// after an arithmetic slash")}`;
+
+    expect(outlinePairingSites(source, "f.tsx")).toHaveLength(1);
+  });
 });
 
 describe("lexSource blanks what it consumes, keeping every offset", () => {
@@ -190,10 +233,109 @@ describe("elements that clear the outline and declare nothing", () => {
     expect(sites[0].classes).toContain("focus:outline-none");
   });
 
-  it("clears an element that declares any focus affordance", () => {
-    const source = `<input className="outline-none focus-visible:border-ring" />`;
+  it("clears an element that declares a focus affordance that draws", () => {
+    const source = `<input className="border outline-none focus-visible:border-ring" />`;
 
     expect(undeclaredFocusSites(source, "f.tsx")).toHaveLength(0);
+  });
+
+  /**
+   * A focus VARIANT is not a focus AFFORDANCE. An offset positions a ring that
+   * is not there; a zero-width ring draws nothing; a colour with no width or
+   * style paints nothing either. Accepting any `focus-visible:*` as a
+   * replacement is how the reported shape — clears the outline, offers
+   * nothing — walks straight past this rule.
+   *
+   * Neither does the paint sweep catch these: it only looks at class lists
+   * declaring `focus-visible:outline-<n>`, and none of them do.
+   *
+   * A COLOUR IS NOT A WIDTH. Tailwind's preflight sets `border: 0 solid` on
+   * every element, so `focus-visible:border-<colour>` on an element that
+   * declares no border width paints nothing — the same shape as this epic's
+   * original defect, one property over. The colour cases below are therefore
+   * split by whether the element declares a width for that family to colour.
+   */
+  it.each([
+    ["an outline offset alone", "focus-visible:outline-offset-2"],
+    ["a negative outline offset alone", "focus-visible:-outline-offset-2"],
+    ["a zero-width ring", "focus-visible:ring-0"],
+    ["a ring offset alone", "focus-visible:ring-offset-2"],
+    ["an outline colour alone", "focus-visible:outline-ring"],
+    ["a ring colour alone", "focus-visible:ring-ring"],
+    ["a transparent outline", "focus-visible:outline-2 focus-visible:outline-transparent"],
+    ["a cleared shadow", "focus-visible:shadow-none"],
+    ["a border colour with no border width", "focus-visible:border-border-strong"],
+  ])("flags an element whose only focus utility is %s", (_what, utility) => {
+    const source = `<input className="outline-none ${utility}" />`;
+    const sites = undeclaredFocusSites(source, "f.tsx");
+
+    expect(
+      sites,
+      `${utility} draws nothing, so it is not a replacement affordance`,
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    ["an outline width", "focus-visible:outline-2"],
+    ["an arbitrary outline width", "focus-visible:outline-[3px]"],
+    ["an outline style", "focus-visible:outline-dashed"],
+    ["a ring width", "focus-visible:ring-2 focus-visible:ring-ring"],
+    ["a bare ring", "focus-visible:ring"],
+    ["a border colour over a real border", "border focus-visible:border-border-strong"],
+    ["a border width", "focus-visible:border-2"],
+    ["a shadow", "focus-visible:shadow-lg"],
+    ["a background change", "focus-visible:bg-elevated"],
+    ["an underline", "focus-visible:underline"],
+  ])("accepts %s as a replacement affordance", (_what, utility) => {
+    const source = `<input className="outline-none ${utility}" />`;
+
+    expect(undeclaredFocusSites(source, "f.tsx")).toHaveLength(0);
+  });
+
+  /** Stacked variants must not hide the utility from the whitelist. */
+  it("reads the utility through a stacked variant", () => {
+    const source = `<input className="outline-none md:focus-visible:outline-2" />`;
+
+    expect(undeclaredFocusSites(source, "f.tsx")).toHaveLength(0);
+  });
+
+  /**
+   * Half of a control's class list routinely lives in a named constant that
+   * `cn(…)` spreads in — `FieldBoxInput` keeps its 1.5px border in `BOX`.
+   * Reading only the inline literals turns that into a border colour with no
+   * border to colour, and the rule accuses a control whose affordance is real.
+   */
+  it("resolves a class constant the use site spreads in", () => {
+    const source = `const BOX = "rounded-[10px] border-[1.5px] border-border";
+export function Field() {
+  return (
+    <input
+      className={cn(BOX, "outline-none", "focus-visible:border-border-strong")}
+    />
+  );
+}`;
+
+    expect(
+      undeclaredFocusSites(source, "f.tsx"),
+      "BOX declares the border width that makes the focus colour visible",
+    ).toHaveLength(0);
+  });
+
+  /**
+   * The same resolution in the other direction, and the reason it is not
+   * merely a way to silence the rule: a constant carrying `outline-none` used
+   * to hide the clear itself, so the element was never even examined.
+   */
+  it("flags a control whose constant clears the outline for nothing", () => {
+    const source = `const CHIP = "rounded-full px-2 outline-none";
+export function Chip() {
+  return <button className={cn(CHIP, "text-muted-foreground")} />;
+}`;
+
+    const sites = undeclaredFocusSites(source, "f.tsx");
+
+    expect(sites).toHaveLength(1);
+    expect(sites[0].classes).toContain("outline-none");
   });
 
   /**
