@@ -454,20 +454,28 @@ export default function GitSyncPage() {
           <div className="flex flex-col gap-[18px] rounded-[12px] border border-border bg-card p-[20px]">
             <div className="flex flex-wrap gap-[16px]">
               <div className="flex flex-col gap-[6px]">
-                <label className="text-[12px] text-muted-foreground">
+                <label
+                  htmlFor="git-sync-remote"
+                  className="text-[12px] text-muted-foreground"
+                >
                   Remote
                 </label>
                 <Input
+                  id="git-sync-remote"
                   value={remote}
                   onChange={(e) => setRemote(e.target.value)}
                   className="h-[34px] w-[160px] rounded-[8px] font-mono text-[12.5px]"
                 />
               </div>
               <div className="flex flex-col gap-[6px]">
-                <label className="text-[12px] text-muted-foreground">
+                <label
+                  htmlFor="git-sync-branch"
+                  className="text-[12px] text-muted-foreground"
+                >
                   Branch
                 </label>
                 <Input
+                  id="git-sync-branch"
                   value={branch}
                   onChange={(e) => setBranch(e.target.value)}
                   className="h-[34px] w-[160px] rounded-[8px] font-mono text-[12.5px]"

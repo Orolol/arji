@@ -413,28 +413,41 @@ export default function GitHubIssuesPage() {
               Label mapping
             </span>
             <div className="flex flex-col gap-[6px]">
-              <label className="text-[12.5px] text-muted-foreground">
+              <label
+                htmlFor="label-mapping-feature"
+                className="text-[12.5px] text-muted-foreground"
+              >
                 Feature labels (comma-separated)
               </label>
               <Input
+                id="label-mapping-feature"
                 value={featureLabels}
                 onChange={(e) => setFeatureLabels(e.target.value)}
                 placeholder="feature, enhancement, epic"
                 className="h-[34px] rounded-[8px] font-mono text-[12.5px]"
+                aria-describedby="label-mapping-hint"
               />
             </div>
             <div className="flex flex-col gap-[6px]">
-              <label className="text-[12.5px] text-muted-foreground">
+              <label
+                htmlFor="label-mapping-bug"
+                className="text-[12.5px] text-muted-foreground"
+              >
                 Bug labels (comma-separated)
               </label>
               <Input
+                id="label-mapping-bug"
                 value={bugLabels}
                 onChange={(e) => setBugLabels(e.target.value)}
                 placeholder="bug, defect, error"
                 className="h-[34px] rounded-[8px] font-mono text-[12.5px]"
+                aria-describedby="label-mapping-hint"
               />
             </div>
-            <p className="text-[12.5px] leading-[1.5] text-muted-foreground">
+            <p
+              id="label-mapping-hint"
+              className="text-[12.5px] leading-[1.5] text-muted-foreground"
+            >
               Configure which GitHub labels map to Feature (Epic) or Bug ticket
               types.
             </p>
