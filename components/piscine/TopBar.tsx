@@ -1,6 +1,14 @@
 "use client";
 
-import * as React from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -27,8 +35,10 @@ import {
   activeNavCategory,
   firstReachableHref,
   readLastVisitedProjectId,
+  readNoVisitedProjectId,
   rememberVisitedProjectId,
   resolveScopeProjectId,
+  subscribeLastVisitedProjectId,
 } from "@/lib/piscine/nav";
 import { projectTone } from "@/lib/piscine/tokens";
 import type { DashboardProject } from "@/lib/types/dashboard";
@@ -143,8 +153,8 @@ export function TopBar({ className }: TopBarProps) {
    * cheapest honest moment to re-read, and it keeps the bar off the poll
    * budget the desk already spends.
    */
-  const firstRun = React.useRef(true);
-  React.useEffect(() => {
+  const firstRun = useRef(true);
+  useEffect(() => {
     if (firstRun.current) {
       firstRun.current = false;
       // useProjects loads itself on mount; auto-mode has no initial load.
@@ -161,7 +171,7 @@ export function TopBar({ className }: TopBarProps) {
    * hiding one must not re-colour the others). Same rule as
    * `deriveProjects()` in lib/control-desk/aggregate.ts.
    */
-  const colorIndexById = React.useMemo(() => {
+  const colorIndexById = useMemo(() => {
     const ordered = [...allProjects].sort((a, b) => {
       const byCreated = (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
       if (byCreated !== 0) return byCreated;
@@ -172,7 +182,7 @@ export function TopBar({ className }: TopBarProps) {
     return map;
   }, [allProjects]);
 
-  const visibleProjects = React.useMemo(
+  const visibleProjects = useMemo(
     () => allProjects.filter((project) => project.status !== "archived"),
     [allProjects],
   );
@@ -184,25 +194,32 @@ export function TopBar({ className }: TopBarProps) {
    * resolve against — see `resolveScopeProjectId`.
    *
    * READ AFTER MOUNT, NEVER DURING RENDER. `localStorage` does not exist on the
-   * server, so the first client render has to match the server's: the state
-   * starts `null` and the effect fills it in. Every visit to a `/projects/:id`
-   * route writes it back.
+   * server, so the first client render has to match the server's: the server
+   * snapshot is `null` and the client snapshot takes over on hydration. Every
+   * visit to a `/projects/:id` route writes it back.
+   *
+   * This is a read of an external store, so it is one — mirroring it into state
+   * from an effect was the same value held twice, and the copy cost a second
+   * render on every project visit.
+   *
+   * That store is document-local and merely SEEDED from `localStorage`; see
+   * `readLastVisitedProjectId`. The shared key is where the choice persists,
+   * never the live value, so another tab cannot move this bar's project scope
+   * and a refused write cannot lose the visit that just happened.
    */
-  const [lastVisitedProjectId, setLastVisitedProjectId] = React.useState<string | null>(
-    null,
+  const lastVisitedProjectId = useSyncExternalStore(
+    subscribeLastVisitedProjectId,
+    readLastVisitedProjectId,
+    readNoVisitedProjectId,
   );
 
-  React.useEffect(() => {
-    setLastVisitedProjectId(readLastVisitedProjectId());
-  }, []);
-
-  React.useEffect(() => {
+  useEffect(() => {
     if (!routeProjectId) return;
+    // The write notifies the store, which is what re-renders the bar.
     rememberVisitedProjectId(routeProjectId);
-    setLastVisitedProjectId(routeProjectId);
   }, [routeProjectId]);
 
-  const knownProjectIds = React.useMemo(
+  const knownProjectIds = useMemo(
     () => visibleProjects.map((project) => project.id),
     [visibleProjects],
   );
@@ -234,26 +251,27 @@ export function TopBar({ className }: TopBarProps) {
 
   /* ---- menu open/close ------------------------------------------------ */
 
-  const [openId, setOpenId] = React.useState<NavCategoryId | null>(null);
-  const openTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const closeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [openId, setOpenId] = useState<NavCategoryId | null>(null);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const clearTimers = React.useCallback(() => {
+  const clearTimers = useCallback(() => {
     if (openTimer.current) clearTimeout(openTimer.current);
     if (closeTimer.current) clearTimeout(closeTimer.current);
     openTimer.current = null;
     closeTimer.current = null;
   }, []);
 
-  React.useEffect(() => clearTimers, [clearTimers]);
+  useEffect(() => clearTimers, [clearTimers]);
 
-  // A navigation always dismisses the menu, however it was triggered.
-  React.useEffect(() => {
+  // A navigation always dismisses the menu, however it was triggered. The
+  // pending hover-intent timers are an external resource, so cancelling them
+  // stays in an effect; the state reset itself is the guard below.
+  useEffect(() => {
     clearTimers();
-    setOpenId(null);
   }, [pathname, clearTimers]);
 
-  const open = React.useCallback(
+  const open = useCallback(
     (id: NavCategoryId) => {
       clearTimers();
       setOpenId(id);
@@ -261,7 +279,7 @@ export function TopBar({ className }: TopBarProps) {
     [clearTimers],
   );
 
-  const hoverOpen = React.useCallback(
+  const hoverOpen = useCallback(
     (id: NavCategoryId) => {
       clearTimers();
       openTimer.current = setTimeout(() => setOpenId(id), HOVER_OPEN_MS);
@@ -269,17 +287,17 @@ export function TopBar({ className }: TopBarProps) {
     [clearTimers],
   );
 
-  const hoverClose = React.useCallback(() => {
+  const hoverClose = useCallback(() => {
     clearTimers();
     closeTimer.current = setTimeout(() => setOpenId(null), HOVER_CLOSE_MS);
   }, [clearTimers]);
 
-  const close = React.useCallback(() => {
+  const close = useCallback(() => {
     clearTimers();
     setOpenId(null);
   }, [clearTimers]);
 
-  const onKeyDown = (event: React.KeyboardEvent) => {
+  const onKeyDown = (event: ReactKeyboardEvent) => {
     if (event.key === "Escape" && openId) {
       event.stopPropagation();
       close();
@@ -295,9 +313,9 @@ export function TopBar({ className }: TopBarProps) {
    * of state off the same keystroke. The bar is on every route, so the shortcut
    * belongs here and nowhere else; `NowDesk` no longer binds it.
    */
-  const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== "k") return;
       if (!event.metaKey && !event.ctrlKey) return;
@@ -308,10 +326,23 @@ export function TopBar({ className }: TopBarProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // A navigation dismisses the palette, exactly as it dismisses a menu.
-  React.useEffect(() => setPaletteOpen(false), [pathname]);
+  /**
+   * A navigation dismisses the palette, exactly as it dismisses a menu.
+   *
+   * Adjusted during render rather than from an effect. Both resets used to run
+   * in `useEffect`, which meant the new route painted for one frame with the
+   * old menu or palette still open before a second render tore it down. React
+   * re-runs this component before committing, so the route change and the
+   * dismissal land in the same paint.
+   */
+  const [renderedPathname, setRenderedPathname] = useState(pathname);
+  if (renderedPathname !== pathname) {
+    setRenderedPathname(pathname);
+    setOpenId(null);
+    setPaletteOpen(false);
+  }
 
-  const openPaletteResult = React.useCallback(
+  const openPaletteResult = useCallback(
     (href: string) => {
       setPaletteOpen(false);
       router.push(href);

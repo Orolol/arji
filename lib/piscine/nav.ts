@@ -281,12 +281,28 @@ export function firstReachableHref(
 export const LAST_PROJECT_STORAGE_KEY = "arij:piscine:last-project";
 
 /**
- * The remembered project, or `null` on the server and whenever storage is
- * unavailable (Safari private mode throws on `localStorage` access, and a bar
- * that crashed the whole app over a nav convenience would be absurd).
+ * THE STORE IS DOCUMENT-LOCAL. `localStorage` is where it persists, not what it
+ * reads on every render — and that distinction is the whole contract.
+ *
+ * Reading the shared key on every snapshot broke the nav two ways, because
+ * `useSyncExternalStore` calls the read on every render: another tab writing
+ * the key moved THIS document's project scope at the next render, with no route
+ * change here at all; and a refused `setItem` (Safari private mode, a full
+ * quota) lost the visit that had just happened, leaving the menu pointed at the
+ * previously stored project or at nothing. Only a real visit may move scope.
+ *
+ * So storage SEEDS this snapshot once, and after that only `rememberVisited-
+ * ProjectId` moves it. `undefined` means "not seeded yet"; `null` means
+ * "seeded, and no project is remembered".
  */
-export function readLastVisitedProjectId(): string | null {
-  if (typeof window === "undefined") return null;
+let lastVisitedSnapshot: string | null | undefined;
+
+/**
+ * The persisted value, or `null` when storage is unreadable — Safari private
+ * mode throws on `localStorage` access, and a bar that crashed the whole app
+ * over a nav convenience would be absurd.
+ */
+function readStoredProjectId(): string | null {
   try {
     const stored = window.localStorage.getItem(LAST_PROJECT_STORAGE_KEY);
     return stored && stored.length > 0 ? stored : null;
@@ -295,14 +311,70 @@ export function readLastVisitedProjectId(): string | null {
   }
 }
 
+/**
+ * The remembered project: `null` on the server, and otherwise the last visit
+ * this document recorded — or, until it records one, whatever storage held when
+ * the document first asked.
+ */
+export function readLastVisitedProjectId(): string | null {
+  if (typeof window === "undefined") return null;
+  if (lastVisitedSnapshot === undefined) {
+    lastVisitedSnapshot = readStoredProjectId();
+  }
+  return lastVisitedSnapshot;
+}
+
+/**
+ * Drop the snapshot, the way closing the document would.
+ *
+ * A browser gets a fresh module per document, so nothing in the app calls this.
+ * jsdom keeps one module registry across the cases of a test file, and a case
+ * that seeds `localStorage` to stand for an earlier document needs the snapshot
+ * unseeded for that seed to be read at all.
+ */
+export function resetLastVisitedProjectId(): void {
+  lastVisitedSnapshot = undefined;
+}
+
+/**
+ * The bar reads this store through `useSyncExternalStore` rather than mirroring
+ * it into state from an effect. These listeners are what makes that read live:
+ * a write has to be able to tell React the snapshot moved.
+ *
+ * Same-document only, deliberately. The bar never tracked another tab's
+ * writes, and starting to would change which project the nav resolves against
+ * under the user without a route change — a `storage` listener belongs to
+ * whoever decides that, not to this.
+ */
+const lastVisitedListeners = new Set<() => void>();
+
+/** Subscribe to `rememberVisitedProjectId` writes. Returns the unsubscribe. */
+export function subscribeLastVisitedProjectId(onStoreChange: () => void): () => void {
+  lastVisitedListeners.add(onStoreChange);
+  return () => {
+    lastVisitedListeners.delete(onStoreChange);
+  };
+}
+
+/** The server snapshot: there is no storage to read, and no project in scope. */
+export function readNoVisitedProjectId(): null {
+  return null;
+}
+
 /** Record a real visit. Called from a `/projects/:id` route and nowhere else. */
 export function rememberVisitedProjectId(projectId: string): void {
   if (typeof window === "undefined") return;
+  // The visit happened. This document remembers it whether or not it can be
+  // handed to the next one — persistence is the optimisation, not the store.
+  lastVisitedSnapshot = projectId;
   try {
     window.localStorage.setItem(LAST_PROJECT_STORAGE_KEY, projectId);
   } catch {
-    // Best effort: the bar falls back to "no project in scope".
+    // Best effort: the choice simply does not outlive this document.
   }
+  // Outside the `try`: a refused write still moved the snapshot, and a listener
+  // must never be skipped by a storage failure.
+  for (const listener of lastVisitedListeners) listener();
 }
 
 export interface ScopeProjectInput {
