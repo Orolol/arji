@@ -30,12 +30,14 @@
  * measured in real Chrome by `e2e/focus-ring.spec.ts`.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
+import {
+  describeSite,
+  outlinePairingSites,
+  scanSources,
+} from "./helpers/class-list-scan";
 import {
   classTokens,
   resolveFocusVisibleOutline,
@@ -189,6 +191,11 @@ describe("TopBar — every control paints a keyboard focus ring", () => {
   });
 });
 
+
+/* ================================================================== */
+/* The sweep                                                          */
+/* ================================================================== */
+
 /**
  * The bar was not the only place the pairing occurred — it was 41 files.
  *
@@ -196,73 +203,94 @@ describe("TopBar — every control paints a keyboard focus ring", () => {
  * ADJACENT string literals, which is the shape of a `cn(…)` argument list and
  * of a `cva` base array, so it sees `outline-none` and a focus ring written on
  * two different lines of the same element. It does NOT see a base class and a
- * conditional variant separated by an expression (`CheckMark.tsx` is that
- * shape), and it cannot see a class list composed across components at all.
- * Every site it does find is a real one; "no sites left" would not prove the
- * codebase is clean. The rendered assertions above are what cover composition.
+ * conditional variant separated by an expression, and it cannot see a class
+ * list composed across components at all. Every site it does find is a real
+ * one; "no sites left" would not prove the codebase is clean. The rendered
+ * assertions above are what cover composition.
+ *
+ * IT ALSO USED TO UNDER-REPORT BY ACCIDENT (B-arij-206). The literal/comment
+ * grouping was two regexes that did not know about each other, so a comment
+ * naming a utility between backticks read as a template literal and split one
+ * element's class list in two — silently, since the only guard was a total
+ * count. Over this tree the hole hid 8 sites, `top-bar-home` and
+ * `top-bar-add-project` among them. The scanner now lexes
+ * (`./helpers/class-list-scan`, tested by `./focus-ring-scan.test.ts`).
  */
-const SOURCE_ROOTS = ["app", "components", "hooks"];
-/** Vendored shadcn: its focus affordance is `ring-*` (a box-shadow), not an outline. */
-const VENDORED = path.join("components", "ui");
-
-function sourceFiles(): string[] {
-  return SOURCE_ROOTS.flatMap((root) =>
-    readdirSync(root, { recursive: true, encoding: "utf8" })
-      .map((entry) => path.join(root, entry))
-      .filter((file) => /\.tsx?$/.test(file) && !file.startsWith(VENDORED)),
-  ).sort();
-}
+const sites = scanSources(outlinePairingSites);
 
 /**
- * Adjacent string literals separated only by commas, whitespace or comments are
- * one class list: that is the shape of a `cn(…)` argument list and of a `cva`
- * base array, where `outline-none` and the focus ring routinely sit on
- * different lines of the same element's classes.
+ * The files known to carry at least one site, so that a site DISAPPEARING is a
+ * named failure rather than a count that drifts back under a threshold. A file
+ * gaining a site needs no edit here; a file losing its last one does, and the
+ * failure says which.
+ *
+ * Recorded 2026-09-05 over 50 sites in these 40 files.
  */
-const LITERAL = /(["'`])((?:\\.|(?!\1)[\s\S])*?)\1/g;
-const JOINABLE = /^(?:\s|,|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*$/;
-
-type Site = { file: string; line: number; classes: string[] };
-
-function classListsPairingOutlineNone(file: string): Site[] {
-  const source = readFileSync(file, "utf8");
-  const literals = [...source.matchAll(LITERAL)];
-
-  const clusters: (typeof literals)[] = [];
-  for (const [index, literal] of literals.entries()) {
-    const previous = literals[index - 1];
-    const gap =
-      previous === undefined
-        ? null
-        : source.slice(previous.index + previous[0].length, literal.index);
-    if (gap !== null && JOINABLE.test(gap)) clusters.at(-1)!.push(literal);
-    else clusters.push([literal]);
-  }
-
-  const sites: Site[] = [];
-  for (const cluster of clusters) {
-    const classes = classTokens(cluster.map((m) => m[2]).join(" "));
-    if (!classes.includes("outline-none")) continue;
-    if (!classes.some((c) => /^focus-visible:outline-\d/.test(c))) continue;
-    sites.push({
-      file,
-      line: source.slice(0, cluster[0].index).split("\n").length,
-      classes,
-    });
-  }
-  return sites;
-}
-
-const sites = sourceFiles().flatMap(classListsPairingOutlineNone);
+const SCANNED_FILES = [
+  "app/projects/[projectId]/sessions/page.tsx",
+  "components/agents-workshop/AddAgentCard.tsx",
+  "components/agents-workshop/AgentRosterCard.tsx",
+  "components/agents-workshop/CliDropdown.tsx",
+  "components/agents-workshop/PersonaBand.tsx",
+  "components/agents-workshop/PromptsView.tsx",
+  "components/chat-page/CreatedHereCard.tsx",
+  "components/chat-page/NewConversationCard.tsx",
+  "components/desk/AttentionRow.tsx",
+  "components/desk/DeskCommandPalette.tsx",
+  "components/desk/DeskComposer.tsx",
+  "components/desk/FullAutoProjectRow.tsx",
+  "components/desk/LiveSessionCard.tsx",
+  "components/desk/QueuedTile.tsx",
+  "components/desk/ReadyToLandBand.tsx",
+  "components/piscine/GhostInputPill.tsx",
+  "components/piscine/IdentityChip.tsx",
+  "components/piscine/PillButton.tsx",
+  "components/piscine/QuietDangerAction.tsx",
+  "components/piscine/QuietLink.tsx",
+  "components/piscine/SegmentedControl.tsx",
+  "components/piscine/SelectPill.tsx",
+  "components/piscine/TopBar.tsx",
+  "components/piscine/TopBarMenu.tsx",
+  "components/qa/FindingFilterPills.tsx",
+  "components/qa/QaQueuedTile.tsx",
+  "components/qa/QaRunCard.tsx",
+  "components/qa/RunQaPassButton.tsx",
+  "components/releases/ReleaseHistory.tsx",
+  "components/session-live/LiveLogBand.tsx",
+  "components/settings-piscine/OpenAiCard.tsx",
+  "components/settings-piscine/SettingField.tsx",
+  "components/settings-piscine/SettingToggle.tsx",
+  "components/spec/DocsCard.tsx",
+  "components/spec/SpecUpdateProgress.tsx",
+  "components/ticket/TicketScreenshots.tsx",
+  "components/tickets-registry/GroupHeader.tsx",
+  "components/tickets-registry/NewTicketView.tsx",
+  "components/tickets-registry/RegistryRow.tsx",
+  "components/usage/MonthlyCapTile.tsx",
+] as const;
 
 describe("every class list that pairs outline-none with an outline focus ring", () => {
   /**
-   * Guards the guard: if the scan stops finding sites — a refactor moves the
-   * classes into a variable, a glob goes stale — `it.each` over an empty array
-   * would report a green run over nothing.
+   * Guards the guard. `it.each` over an empty array is a green run over
+   * nothing, and the previous version of this — a bare `>= 40` — is what
+   * turned a lost site into `expected 39 to be greater than or equal to 40`.
    */
-  it("finds the sites to check", () => {
-    expect(sites.length).toBeGreaterThanOrEqual(40);
+  it("still finds every file it is meant to sweep", () => {
+    const found = new Set(sites.map((s) => s.file));
+    const missing = SCANNED_FILES.filter((file) => !found.has(file));
+
+    expect(
+      missing,
+      `these files carried a scanned class list and no longer do — either the ` +
+        `classes moved somewhere the scan cannot see, or the file was deleted ` +
+        `and this inventory needs the same edit:\n  ${missing.join("\n  ")}`,
+    ).toEqual([]);
+  });
+
+  it("sweeps every file it lists", () => {
+    // The inventory is one-directional: a NEW file is swept without an edit
+    // here. This only pins that the recorded ones are still the floor.
+    expect(sites.length).toBeGreaterThanOrEqual(SCANNED_FILES.length);
   });
 
   it.each(sites.map((s) => [`${s.file}:${s.line}`, s] as const))(
@@ -272,8 +300,10 @@ describe("every class list that pairs outline-none with an outline focus ring", 
 
       expect(
         resolved.paints,
-        `outline-none cancels the focus ring here: outline-style resolves to ` +
-          `${resolved.style} under :focus-visible. State the style explicitly ` +
+        `${describeSite(site)}\n\n` +
+          `outline-none cancels the focus ring here: outline-style resolves to ` +
+          `${resolved.style} under :focus-visible (width ${resolved.width}, ` +
+          `colour ${resolved.color}). State the style explicitly ` +
           `(focus-visible:outline-solid) or drop outline-none.`,
       ).toBe(true);
     },
