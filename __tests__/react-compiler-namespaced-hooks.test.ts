@@ -40,8 +40,26 @@ import { ESLint } from "eslint";
  */
 
 const ROOTS = ["components", "app", "hooks", "lib"] as const;
-const NAMESPACE_IMPORT = /^import \* as React from "react";$/m;
 const NAMESPACED_HOOK = /React\.(use[A-Z]\w*)\s*[(<]/g;
+
+/**
+ * The scan below reads the CALL, never the import.
+ *
+ * MEASURED: what silences the rules is the `React.` member expression, not the
+ * statement that bound `React`. `import React from "react"` with a
+ * `React.useEffect` is exactly as dark as the namespace form — probed on
+ * `components/ui/input.tsx`, no diagnostic either way.
+ *
+ * This scan used to require a literal `import * as React from "react";` before
+ * it would look at a file, which was the same blind spot one level up: the 16
+ * shadcn files in `components/ui/` write that import with NO trailing
+ * semicolon, so a planted `React.useState` + `React.useEffect` violation in
+ * `Input` passed this test while ESLint said nothing about it either. Matching
+ * on the call site alone costs nothing and cannot be sidestepped by a
+ * formatter, a default import, or an aliased one.
+ */
+const namespacedHookSites = (source: string): string[] =>
+  source.match(NAMESPACED_HOOK) ?? [];
 const EFFECT_RULE = "react-hooks/set-state-in-effect";
 
 /**
@@ -269,12 +287,32 @@ describe("React Compiler rules and `React.`-namespaced hooks", () => {
     expect(config.rules?.["react-hooks/rules-of-hooks"]?.[0]).toBe(2);
   });
 
+  it("flags a namespaced hook whatever bound `React`", () => {
+    /*
+      The scanner's own regression test. Every form below is dark to the
+      compiler rules — measured, not assumed — so every form has to be caught,
+      including the semicolon-less namespace import that `components/ui/*` uses
+      and that this scan once skipped entirely.
+    */
+    const body = `\n  const [n, setN] = React.useState(0)\n  React.useEffect(() => setN(1), [])\n`;
+
+    expect(namespacedHookSites(`import * as React from "react";${body}`)).toHaveLength(2);
+    expect(namespacedHookSites(`import * as React from "react"${body}`)).toHaveLength(2);
+    expect(namespacedHookSites(`import React from "react"${body}`)).toHaveLength(2);
+
+    // Type positions are not call sites: `React.ComponentProps` and friends
+    // are what most converted files keep the namespace import FOR.
+    expect(
+      namespacedHookSites(
+        `import * as React from "react";\nfunction I(p: React.ComponentProps<"input">) {\n  const [n, setN] = useState(0);\n  useEffect(() => setN(1), []);\n}`,
+      ),
+    ).toEqual([]);
+  });
+
   it("has no source file calling its hooks through the React namespace", () => {
     const offenders = sourceFiles()
       .map((rel) => {
-        const source = read(rel);
-        if (!NAMESPACE_IMPORT.test(source)) return null;
-        const sites = source.match(NAMESPACED_HOOK) ?? [];
+        const sites = namespacedHookSites(read(rel));
         return sites.length > 0 ? `${rel} (${sites.length} call sites)` : null;
       })
       .filter((row): row is string => row !== null);
