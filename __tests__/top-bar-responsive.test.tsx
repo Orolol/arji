@@ -265,6 +265,70 @@ describe("TopBar — the three zones share the row at every width", () => {
   });
 
   /**
+   * THE RIGHT GUARDRAIL — the half B-arij-Gr4WgnOaRDQs was filed about.
+   *
+   * The bug report describes the bar as it stood at `f6b0179`: the island
+   * centred with `absolute left-1/2 -translate-x-1/2` and protected on ONE
+   * side only, by the `max-width: calc(50% - 235px)` this file's second test
+   * already forbids. Nothing held the right, so the `ml-auto` cluster walked
+   * inward under the out-of-flow island and captured its clicks — a click on
+   * the right of "Réglages" opened the ⌘K palette instead.
+   *
+   * `052e062` removed the whole mechanism rather than adding a mirror cap, so
+   * the right guard is now a NEGATIVE fact about the class list, and negative
+   * facts rot silently: adding `min-w-0` to this zone is a one-token edit that
+   * looks like tidying up after its neighbour. That is what this test exists
+   * to catch.
+   *
+   * The asymmetry is deliberate and load-bearing. The left zone carries
+   * `min-w-0`, so its chips scroll when the row is tight; this one does not,
+   * so its `min-width: auto` floor is the row's hard floor and these four
+   * controls are the last thing to give. Remove that asymmetry and the squeeze
+   * has nowhere to go but back into the island.
+   *
+   * MARKUP ONLY, as everywhere in this file. That the cluster and the island
+   * are actually clear of each other through the 820–1272 band the report
+   * measured is a visual claim, and it is measured in Chrome by
+   * `e2e/top-bar-responsive.spec.ts`.
+   */
+  it("keeps the right cluster in flow and lets it floor the row, never yield to the island", () => {
+    render(<TopBar />);
+    const { island, right, left } = zones();
+
+    // In flow. An out-of-flow island was half the reported defect; an
+    // out-of-flow right cluster is the same defect mirrored, and `ml-auto` is
+    // the utility that used to walk it inward with nothing to stop it.
+    for (const utility of ["absolute", "fixed", "ml-auto"]) {
+      expect(
+        hasBaseUtility(right, utility),
+        `the right cluster still carries "${utility}" with no breakpoint prefix, ` +
+          `so it does not reserve width against the island and the two can overlap`,
+      ).toBe(false);
+    }
+    expect(
+      hasBaseUtility(right, "justify-end"),
+      "a flex-1 flank reaches the edge on its own; `justify-end` is what puts " +
+        "the four controls at the far end of it without `ml-auto`",
+    ).toBe(true);
+
+    // The asymmetry, asserted as a PAIR so neither half can drift alone.
+    expect(
+      hasBaseUtility(left, "min-w-0"),
+      "the left zone must shrink past its content — its chips are what absorbs the squeeze",
+    ).toBe(true);
+    expect(
+      hasBaseUtility(right, "min-w-0"),
+      "the right cluster must NOT shrink past its content: its min-content width " +
+        "is the row's hard floor, and that floor is the only thing reserving " +
+        "space against the island once the left-hand `calc(50% - 235px)` cap is gone",
+    ).toBe(false);
+
+    // And the island may not take that space back by refusing to yield the
+    // row: it is `shrink-0`, so what gives under pressure is the left zone.
+    expect(hasBaseUtility(island, "shrink-0")).toBe(true);
+  });
+
+  /**
    * The island is the menu's positioning context (`top-full` on
    * `TopBarMenu`). Taking it out of `absolute` would silently re-anchor the
    * menu on the <header>, so the replacement has to declare `relative`

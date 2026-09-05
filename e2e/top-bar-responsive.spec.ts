@@ -41,6 +41,34 @@ const WIDTHS = [320, 390, 768, 1280, 1440] as const;
 /** The bar is mounted by `app/layout.tsx`; these three prove "every screen". */
 const ROUTES = ["/", "/agents", "/tickets"] as const;
 
+/**
+ * B-arij-Gr4WgnOaRDQs — the band the sweep above jumps straight over.
+ *
+ * `WIDTHS` steps 768 → 1280, and the report's collision lived entirely inside
+ * that gap: it measured the onset at ~1002px on a route whose island carries an
+ * active chevron, and ~981px on one at rest. Five widths that skip the whole
+ * 769–1279 range cannot see it, so the sweep above passing said nothing about
+ * the range the report was actually about.
+ *
+ * These are the report's own measured widths, plus the two edges of the
+ * transition: 1024 (`lg`, where the island rejoins the row and the clearance is
+ * at its tightest) and 1272 (`components/ticket/TicketOverlay.tsx` handles
+ * `max-[1272px]` explicitly, so it is a width the app claims to support).
+ */
+const GUARDRAIL_WIDTHS = [820, 900, 960, 980, 1002, 1024, 1100, 1272] as const;
+
+/**
+ * `/settings` FIRST, because its island is the widest the bar ever draws — the
+ * active category wears a chevron, which the resting island does not. Measured
+ * in Chrome at 1024: 439.7px on `/settings` against 421.2px on `/`, and it is
+ * the widest island that collides first. `/` is kept as the contrasting
+ * resting case.
+ */
+const GUARDRAIL_ROUTES = ["/settings", "/"] as const;
+
+/** The five island pills, by the test ids the bar exposes. */
+const ISLAND_PILLS = ["now", "work", "chat", "agents", "settings"] as const;
+
 interface Box {
   x: number;
   y: number;
@@ -258,5 +286,122 @@ test.describe("TopBar — responsive geometry", () => {
     const entry = page.getByTestId("top-bar-entry-tickets");
     await expect(entry).toBeVisible();
     expect((await entry.boundingBox())!.width).toBeGreaterThan(150);
+  });
+
+  /**
+   * B-arij-Gr4WgnOaRDQs — the island's RIGHT edge against the ⌘K/Auto/New
+   * cluster, through the band the five-width sweep skips.
+   *
+   * The report measured, on `f6b0179` and identically on its merge-base
+   * `e415564`: the island centred absolutely and guarded only on its left, the
+   * right cluster walking inward on `ml-auto`, and the island painted UNDERNEATH
+   * it — so a click on the right of "Réglages" opened the palette. It quantified
+   * the harm as the share of the "Réglages" pill that `elementFromPoint` does not
+   * return: 4% at 1002px, 22% at 960, 51% at 900, 80% at 820.
+   *
+   * WHAT THIS ASSERTS, AND WHY IT IS NOT THE REPORT'S OWN METRIC. The report's
+   * `clear` is one-dimensional — `top-bar-search.left − island.right` — and
+   * since `052e062` the island takes its own LINE below `lg`. Comparing x
+   * coordinates across two different rows now reads −272px at 820px on a bar
+   * with no collision at all, so porting that metric verbatim would assert a
+   * failure that is not one. The pass condition here is therefore the harm
+   * itself, in two dimensions:
+   *
+   *   1. the island and the cluster never intersect as boxes (`overlapPx`
+   *      already requires a vertical overlap, so a wrapped island is clear by
+   *      construction rather than by exception);
+   *   2. where they DO share a row, the island's right edge is strictly left of
+   *      the cluster — a real gap, not a shared edge;
+   *   3. every island pill is the topmost element across its own width, which
+   *      is the user-facing claim: the pill you click is the pill you get.
+   *
+   * (3) is the one that cannot be satisfied by accident. A pill can be clear of
+   * the cluster's BOX and still be covered by something else painted over it,
+   * and stacking order is exactly what the report found broken.
+   */
+  test("keeps the island clear of the right cluster across the 820–1272 band", async ({
+    page,
+    project,
+  }) => {
+    for (const route of GUARDRAIL_ROUTES) {
+      // Navigate once per route, then sweep by resizing. The breakpoints are
+      // pure CSS, so a resize relayouts exactly as a reload would — and this is
+      // what a user dragging a window actually does.
+      await page.setViewportSize({ width: GUARDRAIL_WIDTHS[0], height: 900 });
+      await page.goto(route);
+      await expect(page.getByTestId("top-bar")).toBeVisible();
+      await expect(page.getByTestId(`top-bar-project-${project.id}`)).toBeAttached();
+
+      for (const width of GUARDRAIL_WIDTHS) {
+        await page.setViewportSize({ width, height: 900 });
+        const where = `${route} @ ${width}px`;
+
+        const bar = await readBar(page, []);
+        expect(bar.island, `${where}: no island`).not.toBeNull();
+        expect(bar.right, `${where}: no right cluster`).not.toBeNull();
+
+        expect(
+          overlapPx(bar.island, bar.right),
+          `${where}: the nav island and the ⌘K/Inbox/Auto/New cluster overlap`,
+        ).toBe(0);
+
+        // When the two share a row, "not overlapping" is not enough — they must
+        // be separated by a real gap. `overlapPx` treats a sub-pixel touch as
+        // clear, and a 0px clearance is a collision waiting for one more pill.
+        const sharesRow =
+          Math.min(bar.island!.y + bar.island!.height, bar.right!.y + bar.right!.height) -
+            Math.max(bar.island!.y, bar.right!.y) >
+          0.5;
+        if (sharesRow) {
+          const clearance = bar.right!.x - (bar.island!.x + bar.island!.width);
+          expect(
+            clearance,
+            `${where}: the island's right edge reaches the right cluster ` +
+              `(clearance ${clearance.toFixed(1)}px)`,
+          ).toBeGreaterThan(0);
+        }
+
+        // The harm, measured the way the report measured it: the share of each
+        // island pill that hit-tests to something else.
+        const covered = await page.evaluate((ids: readonly string[]) => {
+          const SAMPLES = 25;
+          return ids.map((id) => {
+            const pill = document.querySelector(`[data-testid="top-bar-bubble-${id}"]`);
+            if (!pill) return { id, width: 0, missPercent: 100 };
+            const rect = pill.getBoundingClientRect();
+            if (rect.width <= 0) return { id, width: 0, missPercent: 100 };
+            const y = rect.y + rect.height / 2;
+            let miss = 0;
+            for (let i = 0; i < SAMPLES; i++) {
+              // Clamped inside the right edge: a sample exactly ON it belongs
+              // to the neighbour, which would be a false positive.
+              const x = Math.min(
+                rect.x + (rect.width * i) / (SAMPLES - 1),
+                rect.x + rect.width - 0.5,
+              );
+              const hit = document.elementFromPoint(x, y);
+              if (!hit || !pill.contains(hit)) miss++;
+            }
+            return { id, width: rect.width, missPercent: (miss / SAMPLES) * 100 };
+          });
+        }, ISLAND_PILLS);
+
+        for (const pill of covered) {
+          expect(pill.width, `${where}: island pill "${pill.id}" has no width`).toBeGreaterThan(0);
+          expect(
+            pill.missPercent,
+            `${where}: ${pill.missPercent.toFixed(0)}% of the island pill ` +
+              `"${pill.id}" is covered by another control — a click there does ` +
+              `not reach it`,
+          ).toBe(0);
+        }
+
+        expect(
+          bar.scrollWidth,
+          `${where}: the page scrolls horizontally ` +
+            `(scrollWidth ${bar.scrollWidth} > clientWidth ${bar.clientWidth})`,
+        ).toBeLessThanOrEqual(bar.clientWidth);
+      }
+    }
   });
 });
