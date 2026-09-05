@@ -138,9 +138,18 @@ export function TopBarMenu({
         className,
       )}
     >
+      {/*
+        The card is a fixed 540-560px, which is wider than the phone the bar
+        now fits (B-arij-164). A menu opened by the keyboard at 320px would
+        otherwise be the one thing left scrolling the page sideways, so the
+        width becomes a ceiling there — and the side panel, which carries a
+        second fixed 190-200px column, steps out below `sm` rather than
+        squeezing the entries it sits next to.
+      */}
       <div
         className={cn(
           "flex gap-[12px] rounded-[16px] border-[1.5px] border-border bg-card p-[14px]",
+          "max-w-[calc(100vw-20px)]",
         )}
         style={{ width: `${geometry.card}px` }}
       >
@@ -170,9 +179,9 @@ export function TopBarMenu({
 
       {category.panel ? (
         <>
-          <span aria-hidden="true" className="w-[1.5px] shrink-0 bg-muted" />
+          <span aria-hidden="true" className="hidden w-[1.5px] shrink-0 bg-muted sm:block" />
           <div
-            className="flex shrink-0 flex-col gap-[6px] px-[2px] py-[4px]"
+            className="hidden shrink-0 flex-col gap-[6px] px-[2px] py-[4px] sm:flex"
             style={{ width: `${geometry.panel}px` }}
           >
             {category.panel === "morning" ? (

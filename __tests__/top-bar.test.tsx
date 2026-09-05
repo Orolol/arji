@@ -94,6 +94,22 @@ import { deriveStatuses } from "@/components/piscine/TopBarMenu";
 /* Fixtures                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The island's pills, in DOM order.
+ *
+ * They sit in a scroll rail one level inside `top-bar-island` (B-arij-164:
+ * `overflow-x` on the island itself would clip the menu that opens below it),
+ * and the open menu is a sibling of that rail — so read them by test id rather
+ * than positionally off `children`.
+ */
+function islandPills(): HTMLElement[] {
+  return Array.from(
+    screen.getByTestId("top-bar-island").querySelectorAll<HTMLElement>(
+      '[data-testid^="top-bar-bubble-"]',
+    ),
+  );
+}
+
 function project(overrides: Record<string, unknown> = {}) {
   return {
     id: "p1",
@@ -483,12 +499,7 @@ describe("TopBar", () => {
   it("puts Now first, Work second, Chat next to Work in the centred island", () => {
     render(<TopBar />);
 
-    const island = screen.getByTestId("top-bar-island");
-    // The five pills are the island's own children; the open menu is a sixth,
-    // so filter to the pills rather than reading `children` positionally.
-    const pills = Array.from(island.children).filter((node) =>
-      node.getAttribute("data-testid")?.startsWith("top-bar-bubble-"),
-    );
+    const pills = islandPills();
     expect(pills.map((node) => node.getAttribute("data-testid"))).toEqual([
       "top-bar-bubble-now",
       "top-bar-bubble-work",
@@ -649,23 +660,26 @@ describe("TopBar", () => {
   });
 
   /**
-   * The island is absolutely centred, so the left zone's cap is a hard number
-   * measured against a KNOWN pill count. Pin the count: adding a fifth pill
-   * without re-measuring would slide the project chips under the island, which
-   * only shows up on a workspace with enough projects to reach the cap.
+   * The left zone used to be capped by an inline `calc(50% - 235px)`, a number
+   * MEASURED against a known pill count — and one that went negative (so:
+   * clamped to zero, chips gone) below 470px. B-arij-164 replaced it with a
+   * flex share: both flanks grow from a zero basis, which centres the island by
+   * arithmetic and needs no re-measuring when a sixth pill lands.
+   *
+   * The count is still pinned here, because the numbers in
+   * `__tests__/top-bar-responsive.test.tsx` and in `e2e/top-bar-responsive.spec.ts`
+   * were measured against five pills — a sixth needs the 320px fit re-checked.
    */
-  it("caps the left zone against the island it was measured for", () => {
+  it("holds the island's middle with a flex share, not a measured cap", () => {
     render(<TopBar />);
 
-    const island = screen.getByTestId("top-bar-island");
-    const pills = Array.from(island.children).filter((node) =>
-      node.getAttribute("data-testid")?.startsWith("top-bar-bubble-"),
-    );
-    expect(pills).toHaveLength(5);
+    expect(islandPills()).toHaveLength(5);
 
     const chips = screen.getByTestId("top-bar-project-chips");
     const left = chips.parentElement as HTMLElement;
-    expect(left.style.maxWidth).toBe("calc(50% - 235px)");
+    expect(left.style.maxWidth).toBe("");
+    expect(left.className).toContain("flex-1");
+    expect(left.className).toContain("basis-0");
   });
 
   it("marks no bubble on the desk and the right one elsewhere", () => {
