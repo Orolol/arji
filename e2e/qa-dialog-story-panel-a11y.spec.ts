@@ -80,5 +80,47 @@ test.describe("Story detail panel accessibility", () => {
     await expect(editor).toBeFocused();
     await expect(editor).toHaveJSProperty("tagName", "TEXTAREA");
     await expect(editor).toHaveValue("The panel must name its fields.");
+
+    // Leaving edit mode unmounts the focused textarea. Focus must land back on
+    // the field rather than on <body>, or the next Tab restarts at the top of
+    // the document and the keyboard user has to re-traverse the whole page
+    // (WCAG 2.4.3). Measured in Chrome, not modelled in jsdom.
+    await editor.press("Escape");
+    await expect(description).toBeFocused();
+    await expect(
+      page.locator("body:focus"),
+      "focus fell to <body> after Escape",
+    ).toHaveCount(0);
+  });
+
+  test("does not pull focus back when the user leaves the editor deliberately", async ({
+    page,
+    project,
+    request,
+  }) => {
+    const epic = await createEpic(request, project.id, "Focus boundary epic");
+    const created = await request.post(
+      `/api/projects/${project.id}/user-stories`,
+      {
+        data: {
+          epicId: epic.id,
+          title: "Respect a deliberate blur",
+          description: "Focus belongs where the user put it.",
+          acceptanceCriteria: "Given a blur, focus is not yanked back.",
+        },
+      },
+    );
+    const { data: story } = (await created.json()) as { data: { id: string } };
+
+    await page.goto(`/projects/${project.id}/stories/${story.id}`);
+
+    const description = page.getByRole("button", { name: "Description" });
+    await description.press("Enter");
+    await expect(page.getByLabel("Description")).toBeFocused();
+
+    // Tabbing out is the user aiming somewhere else. The restore must not
+    // fight that — the field is the one place focus may NOT end up.
+    await page.keyboard.press("Tab");
+    await expect(description).not.toBeFocused();
   });
 });

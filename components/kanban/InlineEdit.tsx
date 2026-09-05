@@ -41,15 +41,29 @@ export function InlineEdit({
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  const readRef = useRef<HTMLDivElement>(null);
+  /**
+   * Set only by the keyboard exits below. Leaving edit mode unmounts the
+   * focused control, so without this focus falls to <body> and the next Tab
+   * restarts at the top of the document — WCAG 2.4.3, on the very journey the
+   * read state's `role="button"` exists to enable.
+   *
+   * A blur is deliberately NOT a keyboard exit: clicking or tabbing elsewhere
+   * is the user aiming somewhere, and pulling focus back would fight them.
+   */
+  const restoreFocusRef = useRef(false);
 
   useEffect(() => {
     setEditValue(value);
   }, [value]);
 
   useEffect(() => {
-    if (editing && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    } else if (restoreFocusRef.current) {
+      restoreFocusRef.current = false;
+      readRef.current?.focus();
     }
   }, [editing]);
 
@@ -63,9 +77,11 @@ export function InlineEdit({
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !multiline) {
       e.preventDefault();
+      restoreFocusRef.current = true;
       handleSave();
     }
     if (e.key === "Escape") {
+      restoreFocusRef.current = true;
       setEditValue(value);
       setEditing(false);
     }
@@ -74,6 +90,7 @@ export function InlineEdit({
   if (!editing) {
     return (
       <div
+        ref={readRef}
         role="button"
         tabIndex={0}
         aria-labelledby={ariaLabelledBy}

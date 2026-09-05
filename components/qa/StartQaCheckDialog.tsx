@@ -296,7 +296,11 @@ export function StartQaCheckDialog({
             <div className="flex items-center gap-2">
               <NamedAgentSelect
                 id={namedAgentFieldId}
-                aria-describedby={namedAgentHintId}
+                // The hint below renders only while no agent is picked, so the
+                // reference is claimed only while its target exists. Chrome
+                // ignores a dangling one silently, which is exactly why the
+                // markup should not assert a description it doesn't have.
+                aria-describedby={namedAgentId ? undefined : namedAgentHintId}
                 value={namedAgentId}
                 onChange={setNamedAgentId}
                 className="w-56 h-[34px] rounded-[8px] text-[13px]"
