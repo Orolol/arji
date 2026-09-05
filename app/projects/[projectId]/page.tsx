@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
+import { ToastStack, MAX_TOASTS, type ToastItem } from "@/components/notifications/ToastStack";
 import { NowDesk } from "@/components/desk/NowDesk";
 import { TicketOverlay } from "@/components/ticket/TicketOverlay";
 import { UnifiedChatPanel, type UnifiedChatPanelHandle } from "@/components/chat/UnifiedChatPanel";
@@ -22,7 +23,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Hammer, Layers, Loader2, X, CheckCircle2, XCircle, Users, Search, GitMerge, Bot, TriangleAlert } from "lucide-react";
+import { Hammer, Layers, Loader2, Users, Search, GitMerge, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BugCreateDialog } from "@/components/kanban/BugCreateDialog";
 import { EpicCreateDialog } from "@/components/kanban/EpicCreateDialog";
@@ -52,14 +53,6 @@ import { useProjectEvents } from "@/hooks/useProjectEvents";
  *   something is selected, so at rest the route is the desk and nothing else.
  */
 
-interface Toast {
-  id: string;
-  type: "success" | "error" | "warning";
-  message: string;
-  href?: string;
-  actionLabel?: string;
-}
-
 export default function ProjectDeskPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -80,7 +73,7 @@ export default function ProjectDeskPage() {
   const [nightDialogOpen, setNightDialogOpen] = useState(false);
   const [autoModeDialogOpen, setAutoModeDialogOpen] = useState(false);
   const [nightSummaryRunId, setNightSummaryRunId] = useState<string | null>(null);
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
   // Session completions are spotted during render (see below); the tick feeds
   // `refreshKey` and the id list feeds the completion toasts.
   const [completionTick, setCompletionTick] = useState(0);
@@ -144,9 +137,9 @@ export default function ProjectDeskPage() {
     message: string,
     action?: { href: string; label?: string }
   ) => {
-    const id = Date.now().toString();
+    const id = crypto.randomUUID();
     setToasts((t) => [
-      ...t,
+      ...t.slice(-(MAX_TOASTS - 1)),
       {
         id,
         type,
@@ -155,9 +148,6 @@ export default function ProjectDeskPage() {
         actionLabel: action?.label || "Open session",
       },
     ]);
-    setTimeout(() => {
-      setToasts((t) => t.filter((toast) => toast.id !== id));
-    }, 5000);
   }, []);
 
   /**
@@ -172,10 +162,7 @@ export default function ProjectDeskPage() {
 
   // ?deleted=story|epic — the notice the deleted ticket's own page hands over.
   //
-  // It is raised during render rather than through `addToast` in an effect:
-  // `addToast` also schedules the dismissal timer, and scheduling a timer is a
-  // side effect that must not run from a render pass. This notice therefore
-  // carries its own dismissal effect and is appended to the rendered list.
+  // Derived from the deep link; ToastStack owns its dismissal lifecycle.
   const deletedParam = searchParams.get("deleted");
   const [handledDeleted, setHandledDeleted] = useState<string | null>(null);
   const [deletedNotice, setDeletedNotice] = useState<string | null>(null);
@@ -189,13 +176,12 @@ export default function ProjectDeskPage() {
     }
   }
 
-  useEffect(() => {
-    if (!deletedNotice) return;
-    const timer = setTimeout(() => setDeletedNotice(null), 5000);
-    return () => clearTimeout(timer);
-  }, [deletedNotice]);
+  const dismissToast = useCallback((id: string) => {
+    if (id === "deleted-notice") setDeletedNotice(null);
+    else setToasts((items) => items.filter((item) => item.id !== id));
+  }, []);
 
-  const visibleToasts: Toast[] = deletedNotice
+  const visibleToasts: ToastItem[] = deletedNotice
     ? [
         ...toasts,
         {
@@ -759,45 +745,7 @@ export default function ProjectDeskPage() {
         />
       )}
 
-      {/* Toast notifications */}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-        {visibleToasts.map((toast) => (
-          <div
-            key={toast.id}
-            data-testid="board-toast"
-            data-toast-type={toast.type}
-            className={cn(
-              "flex items-center gap-2 rounded-[11px] border px-[14px] py-[10px] text-[13px]",
-              toast.type === "success"
-                ? "border-agent-border bg-agent-bg text-agent"
-                : toast.type === "warning"
-                  ? "border-border-strong bg-card text-strata-land-deep"
-                  : "border-destructive/40 bg-card text-destructive"
-            )}
-          >
-            {toast.type === "success" ? (
-              <CheckCircle2 className="h-4 w-4" />
-            ) : toast.type === "warning" ? (
-              <TriangleAlert className="h-4 w-4" />
-            ) : (
-              <XCircle className="h-4 w-4" />
-            )}
-            <span>{toast.message}</span>
-            {toast.href && (
-              <a href={toast.href} className="underline text-xs whitespace-nowrap">
-                {toast.actionLabel || "Open session"}
-              </a>
-            )}
-            <button
-              onClick={() =>
-                setToasts((t) => t.filter((x) => x.id !== toast.id))
-              }
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        ))}
-      </div>
+      <ToastStack items={visibleToasts} onDismiss={dismissToast} testId="board-toast" />
 
       <EpicCreateDialog
         projectId={projectId}

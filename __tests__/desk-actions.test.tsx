@@ -419,6 +419,40 @@ describe("desk mutations", () => {
     await waitFor(() => expect((input as HTMLInputElement).value).toBe(""));
   });
 
+  it("announces creation and links to the captured ticket in a dismissible toast", async () => {
+    mockFetch(() => ({ body: { data: { id: "new-epic" } } }));
+    render(<NowDesk />);
+    const input = await screen.findByTestId("desk-composer-input");
+    fireEvent.change(input, { target: { value: "Visible confirmation" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("Visible confirmation");
+    expect(screen.getByRole("link", { name: "Voir le ticket" })).toHaveAttribute(
+      "href", "/projects/p1?ticket=new-epic",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Fermer la notification" }));
+    expect(screen.queryByTestId("desk-toast")).not.toBeInTheDocument();
+  });
+
+  it("keeps creation confirmed when the build request loses its connection", async () => {
+    const fetchMock = mockFetch((url) => {
+      if (url.endsWith("/build")) throw new Error("Network offline");
+      return { body: { data: { id: "new-epic" } } };
+    });
+    render(<NowDesk />);
+    const input = await screen.findByTestId("desk-composer-input");
+    fireEvent.change(input, { target: { value: "Created before disconnect" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Ticket créé");
+    expect(alert).toHaveTextContent("lancement du build");
+    expect(input).toHaveValue("");
+    expect(calls(fetchMock, "/epics").filter((call) => !call[0].endsWith("/build"))).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Voir le ticket" })).toHaveAttribute(
+      "href", "/projects/p1?ticket=new-epic",
+    );
+  });
+
   it("⇧⏎ chains the build dispatch onto the new epic", async () => {
     const fetchMock = mockFetch(() => ({ body: { data: { id: "new-epic" } } }));
     render(<NowDesk />);
@@ -431,6 +465,18 @@ describe("desk mutations", () => {
     expect(calls(fetchMock, "/build")[0][0]).toBe(
       "/api/projects/p1/epics/new-epic/build",
     );
+  });
+
+  it("reports a rejected build without treating the saved ticket as a failed creation", async () => {
+    mockFetch((url) => url.endsWith("/build")
+      ? { status: 409, body: { error: "Build already running" } }
+      : { body: { data: { id: "new-epic" } } });
+    render(<NowDesk />);
+    const input = await screen.findByTestId("desk-composer-input");
+    fireEvent.change(input, { target: { value: "Saved ticket" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ticket créé, mais le lancement du build a échoué : Build already running");
+    expect(input).toHaveValue("");
   });
 
   it("keeps the typed title when creation fails", async () => {
