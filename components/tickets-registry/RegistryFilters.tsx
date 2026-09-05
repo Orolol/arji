@@ -10,6 +10,10 @@ import type { DeskProject } from "@/lib/control-desk/types";
 import { COLUMN_LABELS, KANBAN_COLUMNS, type KanbanStatus } from "@/lib/types/kanban";
 import { REGISTRY_SORTS, type RegistrySort, type RegistrySortDirection } from "@/lib/tickets-registry/sort";
 export type { RegistrySort } from "@/lib/tickets-registry/sort";
+// The pills are the UI of a URL parameter now — the vocabulary is the
+// query string's, and lives beside its parser.
+import type { RegistryStateFilter } from "@/lib/tickets-registry/url-state";
+export type { RegistryStateFilter } from "@/lib/tickets-registry/url-state";
 import type { RegistryCounts } from "@/lib/tickets-registry/types";
 import { cn } from "@/lib/utils";
 
@@ -29,16 +33,6 @@ import { cn } from "@/lib/utils";
  * TYPE toggles are never filled: they are selections, and a selection is 2px
  * border weight, not a third filled button.
  */
-
-export type RegistryStateFilter =
-  | "all"
-  | "open"
-  | "active"
-  | "your_turn"
-  | "done"
-  | "released";
-
-
 
 /** Verbatim and accented, exactly as the frame writes them. */
 export const SORT_LABEL: Record<RegistrySort, string> = {

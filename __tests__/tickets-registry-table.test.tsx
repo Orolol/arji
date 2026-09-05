@@ -8,9 +8,18 @@
  */
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 
 const openTicket = vi.fn();
+
+// The filters live in the URL now (epic 5sCe4w0bxRYl): `useSearchParams()` is
+// the App Router's hook and returns null outside its provider, so a mounted
+// registry needs the stand-in address bar.
+vi.mock("next/navigation", async () => {
+  const { useMockSearchParams } = await import("@/__tests__/helpers/app-router-url");
+  return { useSearchParams: () => useMockSearchParams() };
+});
+
 vi.mock("@/components/ticket/TicketOverlayProvider", () => ({
   useTicketOverlay: () => ({
     ticketId: null,
@@ -43,6 +52,7 @@ const { TicketsRegistryView } = await import(
 const { deriveProjects } = await import("@/lib/control-desk/aggregate");
 
 import type { RegistryRow, TicketsRegistryPayload } from "@/lib/tickets-registry/types";
+import { installAppRouterUrl, navigateTo } from "@/__tests__/helpers/app-router-url";
 
 const projects = deriveProjects([
   { id: "p1", name: "Arij", createdAt: "2026-01-01T00:00:00.000Z" },
@@ -116,6 +126,9 @@ beforeEach(() => {
   setWindow.mockClear();
   loadError = null;
   payload = makePayload([row({ epicId: "1" })]);
+  // A filter is a query parameter, so the address bar has to be reset between
+  // cases or one case's scope survives into the next.
+  installAppRouterUrl("/tickets");
 });
 
 describe("the column header", () => {
@@ -419,14 +432,17 @@ describe("project and exact workflow filters", () => {
   });
 
   it("honors route scope changes and allows returning to all projects", async () => {
+    // The scope arrives as `?project=`, and a navigation still outranks
+    // whatever was selected — see tickets-registry-url-state.test.tsx.
     payload = makePayload([row({ epicId: "a" }), row({ epicId: "b", projectId: "p2" })]);
-    const view = render(<TicketsRegistryView projectId="p1" />);
+    installAppRouterUrl("/tickets?project=p1");
+    render(<TicketsRegistryView />);
     expect(screen.getByTestId("tickets-row")).toHaveTextContent("ARJ-a");
     await select(/^Projet :/, "Tous les projets");
     expect(screen.getAllByTestId("tickets-row")).toHaveLength(2);
-    view.rerender(<TicketsRegistryView projectId="p2" />);
+    act(() => navigateTo("/tickets?project=p2"));
     expect(screen.getByTestId("tickets-row")).toHaveTextContent("ARJ-b");
-    view.rerender(<TicketsRegistryView projectId="p1" />);
+    act(() => navigateTo("/tickets?project=p1"));
     expect(screen.getByTestId("tickets-row")).toHaveTextContent("ARJ-a");
   });
 
