@@ -47,6 +47,20 @@ export interface UpNextBandProps {
  *  gave back when it stopped spreading its rows over 40vh. Short rows pad. */
 const SLOTS = 4;
 
+/**
+ * Chips a STACKED row shows — B-arij-M9zsQujUTCoR.
+ *
+ * Below `lg` the band stops being half the desk and the row wraps, so the four
+ * desktop slots stop being a geometry and become a budget. Four of them at
+ * 390px left each chip 22px against a 294px label; two of them, one per line,
+ * give a chip the whole 290px band.
+ *
+ * The two layouts therefore hide DIFFERENT numbers of tickets, and one "+N"
+ * cannot be right for both — hence a second marker, each hidden on the other
+ * side of the breakpoint. Both counts are computed here, from the same list.
+ */
+const MOBILE_SLOTS = 2;
+
 const PROJECT_LABEL_CLASS: Record<ProjectTone, string> = {
   1: "text-project-1-deep",
   2: "text-project-2-deep",
@@ -98,7 +112,12 @@ export function chipLabel(ticket: DeskQueueTicket): string {
  * unaffected: READY TO LAND's row was checked with a 140-character title and
  * clamps correctly, because its row is not height-capped.
  */
-const CHIP_BASE = "min-w-0 flex-1 truncate rounded-full px-[11px] py-[6px] text-[12.5px] text-left";
+const CHIP_BASE = cn(
+  "min-w-0 flex-1 truncate rounded-full px-[11px] py-[6px] text-[12.5px] text-left",
+  // Stacked: two chips a line from `sm` up, one full-width chip on a phone —
+  // 290px carries ~38 characters of title where 140px carries 18.
+  "max-lg:basis-[calc(50%-4.5px)] max-sm:basis-full",
+);
 
 const CHIP_RANK: Record<QueueChipRank, string> = {
   1: "bg-card font-medium text-foreground",
@@ -146,12 +165,17 @@ export function UpNextBand({
         // Short rows pad with empty spacers so every row's chips share the same
         // three columns; the spacer takes the width of the slots it replaces.
         const spacerFlex = SLOTS - visible.length - (overflowing ? 1 : 0);
+        // The stacked budget. The chips past it stay MOUNTED and go
+        // `display:none` below lg: the desktop layout still needs them, and a
+        // resize must not depend on a re-render to be right.
+        const mobileVisible = Math.min(MOBILE_SLOTS, row.tickets.length);
+        const mobileOverflow = row.tickets.length - mobileVisible;
 
         return (
           <div
             key={row.projectId}
             data-testid="desk-up-next-row"
-            className="flex items-center gap-[9px]"
+            className="flex items-center gap-[9px] max-lg:flex-wrap"
           >
             {/*
               Mono, not a hand-rolled `font-mono` run: the primitive is what
@@ -164,12 +188,14 @@ export function UpNextBand({
             <Mono
               size={10}
               weight={700}
-              className={cn("w-[70px] shrink-0", PROJECT_LABEL_CLASS[tone])}
+              // Its own line once the row wraps: 70px of the 211px a phone
+              // leaves for chips is a quarter of the row spent on a rail label.
+              className={cn("w-[70px] shrink-0 max-lg:w-full", PROJECT_LABEL_CLASS[tone])}
             >
               {project?.shortName ?? "—"}
             </Mono>
 
-            {visible.map((ticket) => {
+            {visible.map((ticket, index) => {
               const rank = chipRank(ticket);
               return (
                 <button
@@ -192,6 +218,7 @@ export function UpNextBand({
                       "ring-2 ring-foreground",
                     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                     "disabled:cursor-default",
+                    index >= mobileVisible && "max-lg:hidden",
                   )}
                 >
                   {chipLabel(ticket)}
@@ -202,14 +229,25 @@ export function UpNextBand({
             {overflowing ? (
               <span
                 data-testid="desk-queue-overflow"
-                className={cn(CHIP_BASE, CHIP_RANK[3], "font-sans")}
+                className={cn(CHIP_BASE, CHIP_RANK[3], "font-sans max-lg:hidden")}
               >
                 {`+${overflow}`}
               </span>
             ) : null}
 
+            {mobileOverflow > 0 ? (
+              <span
+                data-testid="desk-queue-overflow-mobile"
+                className={cn(CHIP_BASE, CHIP_RANK[3], "font-sans lg:hidden")}
+              >
+                {`+${mobileOverflow}`}
+              </span>
+            ) : null}
+
+            {/* Column padding is a four-column geometry; a wrapped row has no
+                columns to line up, so the spacer goes with them. */}
             {spacerFlex > 0 ? (
-              <span aria-hidden="true" style={{ flex: spacerFlex }} />
+              <span aria-hidden="true" className="max-lg:hidden" style={{ flex: spacerFlex }} />
             ) : null}
           </div>
         );

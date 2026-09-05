@@ -663,6 +663,18 @@ export function NowDesk({
       data-testid="now-desk"
       className={cn(
         "flex h-full min-h-0 w-full flex-col bg-background font-sans text-foreground",
+        /*
+          THE DESK SCROLLS ITSELF BELOW `lg` — B-arij-M9zsQujUTCoR.
+
+          Five strata do not fit 844px once each of them is legible, and
+          neither host would let the column spill: `/` gives the desk `h-full`
+          inside an `overflow-auto` main (so the desk squeezes rather than the
+          page scrolling), and `/projects/:id` wraps it in an `overflow-hidden`
+          box that would simply cut UP NEXT off. Owning the scroll here is the
+          one answer that is right in both. Unchanged from `lg` up: the desk is
+          exactly one viewport tall and nothing scrolls but WORKING.
+        */
+        "max-lg:overflow-y-auto",
         className,
       )}
     >
@@ -749,6 +761,14 @@ export function NowDesk({
         onOpenTicket={handleOpenTicket}
         onStopSession={handleStopSession}
         projectId={projectId ?? undefined}
+        /*
+          A floor for the one band that grows. In a scrolling column its
+          `flex-1 min-h-0` is not a claim on space, it is permission to be
+          squeezed to zero by the `shrink-0` strata under it — which is exactly
+          what a legible READY TO LAND and UP NEXT would do on a phone. Two
+          tile rows is what the band is for.
+        */
+        className="max-lg:min-h-[190px]"
       />
 
       <YourTurnBand
@@ -772,8 +792,13 @@ export function NowDesk({
         A floor, not a growth rule: the grid stays `shrink-0` (WORKING remains
         the desk's only growing band) but can no longer be squeezed to nothing
         by a tall YOUR TURN above it.
+
+        ONE COLUMN BELOW `lg`. Half of a 390px desk is 139px, which is what
+        reduced the land rows' titles and the queue chips to nothing (22px of
+        chip against a 294px label). `lg` and not `md`: at 768 the two columns
+        are 328px each and the land title still measured 0px.
       */}
-      <div className="mx-[14px] mt-[10px] grid min-h-[168px] shrink-0 grid-cols-2 gap-3">
+      <div className="mx-[14px] mt-[10px] grid min-h-[168px] shrink-0 grid-cols-1 gap-3 lg:grid-cols-2">
         <ReadyToLandBand
           rows={data?.readyToLand ?? []}
           heldBackCount={data?.heldBackCount ?? 0}

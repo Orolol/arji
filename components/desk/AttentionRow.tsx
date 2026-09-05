@@ -36,18 +36,75 @@ import { cn } from "@/lib/utils";
  * Rows are tab-walkable; ⏎ on a focused row focuses its reply field, which is
  * what the header hint "↹ parcourir · ⏎ répondre" promises.
  *
- * NARROW VIEWPORTS: the frame gives the row six children of which one flexes
- * and pins the reply field at 300px. Below roughly 1200px that overflows, so
- * the field falls back to a flexible width and the row keeps its single-line
- * shape instead of wrapping into two.
+ * NARROW VIEWPORTS — B-arij-M9zsQujUTCoR.
+ *
+ * The row used to be ONE flex line at every width, and the note that stood
+ * here claimed a flexible field kept it single-line "instead of wrapping into
+ * two". It did not: every child but the message is `shrink-0` (the stamp, the
+ * chip, all three buttons) or floored at `min-w-[120px]` (the field), so the
+ * line has a ~544px min-content width it cannot go under. Measured in Chrome
+ * at 390×844 on a 326px card: content 570px, the question span 0px wide,
+ * `Send to dev` ending at x=561 and the ✕ at x=573 — both outside the
+ * viewport. At 768 the line fitted (702 in 704) and the question was STILL 0px.
+ *
+ * So the row folds. Below `lg` it is a COLUMN of two groups — identity and
+ * message, then field and actions — each of which wraps internally, so the
+ * browser decides how many lines a given width needs rather than a breakpoint
+ * guessing. From `lg` up both groups are `display: contents`: the card gets
+ * its original six children back as direct flex items and the desktop
+ * proportions are unchanged by construction, not by re-tuning.
+ *
+ * `lg` (1024px), not `md`: at 768 a single line still fits arithmetically and
+ * the measurement is what rejected it — the fixed children take 544px of a
+ * 676px card, leaving the message nothing.
  */
 
 const ROW_CLASS = cn(
   "flex items-center gap-3 px-[14px] py-[10px]",
+  "max-lg:flex-col max-lg:items-stretch max-lg:gap-2",
   // New rows slide-fade in, using the existing tw-animate-css utilities.
   "animate-in fade-in slide-in-from-bottom-2 motion-reduce:animate-none",
   "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
 );
+
+/**
+ * Identity and message. `contents` at `lg` — the wrapper exists only to give
+ * the phone a line to wrap inside, and above the breakpoint it is not a box at
+ * all, so it cannot change a single desktop measurement.
+ */
+const ROW_HEAD_CLASS = cn(
+  "contents",
+  "max-lg:flex max-lg:min-w-0 max-lg:flex-wrap max-lg:items-center max-lg:gap-x-2 max-lg:gap-y-1.5",
+);
+
+/** Field, buttons and the ✕ — same rule, right-aligned while it is a box. */
+const ROW_ACTIONS_CLASS = cn(
+  "contents",
+  "max-lg:flex max-lg:min-w-0 max-lg:flex-wrap max-lg:items-center max-lg:justify-end max-lg:gap-2",
+);
+
+/**
+ * The send/dismiss cluster of the ASKS YOU row, kept on ONE line below `lg`.
+ *
+ * Without it the three buttons wrap individually against the reply field, and
+ * every width has its own arbitrary split — at 390 "Send" stayed beside the
+ * field while "Send to dev" and the ✕ dropped. As a single unwrappable unit
+ * they either all share the field's line or all take the next one, and the
+ * threshold is the cluster's own width rather than a breakpoint.
+ */
+const ROW_BUTTONS_CLASS = cn(
+  "contents",
+  "max-lg:flex max-lg:shrink-0 max-lg:items-center max-lg:gap-2",
+);
+
+/**
+ * The row's message — the question, the error, the conflicted branch.
+ *
+ * `basis-full` below `sm` only: on a phone it is the whole point of the row and
+ * the identity chips leave it 142px, while from 640px up the head line has
+ * enough width to carry all three.
+ */
+const ROW_MESSAGE_CLASS = "min-w-0 flex-1 max-sm:basis-full";
 
 /**
  * "I have handled this elsewhere."
@@ -136,53 +193,74 @@ export function AsksYouRow({
       data-testid="desk-asks-you-row"
       className={cn(ROW_CLASS, className)}
     >
-      <Stamp tone="asks">ASKS YOU</Stamp>
-      <IdentityChip
-        label={item.readableId ?? project?.shortName ?? "—"}
-        tone={projectTone(project?.colorIndex ?? 0)}
-        size="sm"
-      />
-      <span className="line-clamp-1 min-w-0 flex-1 font-sans text-[14px] font-medium text-foreground">
-        {item.question ? `« ${item.question} »` : item.title}
-      </span>
-      <GhostInputPill
-        value={draft}
-        onChange={setDraft}
-        onSubmit={send}
-        placeholder="Répondre à l'agent…"
-        fill="field"
-        autoFocusKey={focusKey}
-        disabled={pending}
-        className="w-full max-w-[300px] min-w-[120px] shrink"
-        aria-label="Répondre à l'agent"
-      />
-      <PillButton
-        variant="filled"
-        size="md"
-        icon={Send}
-        onClick={send}
-        disabled={pending || draft.trim().length === 0}
-        className="gap-1.5 px-[14px]"
-      >
-        Send
-      </PillButton>
-      <PillButton
-        variant="outline"
-        size="md"
-        icon={Hammer}
-        onClick={() => void onSendToDev(item, draft.trim())}
-        disabled={pending}
-        className="gap-1.5"
-      >
-        Send to dev
-      </PillButton>
-      {onDismiss ? (
-        <DismissButton
-          label="Écarter cette question"
-          onDismiss={() => void onDismiss(item)}
-          disabled={pending}
+      <div data-testid="desk-row-head" className={ROW_HEAD_CLASS}>
+        <Stamp tone="asks">ASKS YOU</Stamp>
+        <IdentityChip
+          label={item.readableId ?? project?.shortName ?? "—"}
+          tone={projectTone(project?.colorIndex ?? 0)}
+          size="sm"
         />
-      ) : null}
+        <span
+          className={cn(
+            ROW_MESSAGE_CLASS,
+            "line-clamp-1 font-sans text-[14px] font-medium text-foreground",
+            // Two lines on a phone, where the row has one line of its own to
+            // spend and 40 characters is not a question.
+            "max-sm:line-clamp-2",
+          )}
+        >
+          {item.question ? `« ${item.question} »` : item.title}
+        </span>
+      </div>
+      <div data-testid="desk-row-actions" className={ROW_ACTIONS_CLASS}>
+        <GhostInputPill
+          value={draft}
+          onChange={setDraft}
+          onSubmit={send}
+          placeholder="Répondre à l'agent…"
+          fill="field"
+          autoFocusKey={focusKey}
+          disabled={pending}
+          // `flex-[1 1 200px]` below lg, NOT the desktop `min-w-[120px]` floor:
+          // a 200px hypothetical size is what makes the three buttons wrap onto
+          // their own line at 390px and stay beside the field at 768px, with the
+          // browser — not a breakpoint — deciding which.
+          className={cn(
+            "w-full max-w-[300px] min-w-[120px] shrink",
+            "max-lg:max-w-none max-lg:flex-[1_1_240px]",
+          )}
+          aria-label="Répondre à l'agent"
+        />
+        <div data-testid="desk-row-buttons" className={ROW_BUTTONS_CLASS}>
+          <PillButton
+            variant="filled"
+            size="md"
+            icon={Send}
+            onClick={send}
+            disabled={pending || draft.trim().length === 0}
+            className="gap-1.5 px-[14px]"
+          >
+            Send
+          </PillButton>
+          <PillButton
+            variant="outline"
+            size="md"
+            icon={Hammer}
+            onClick={() => void onSendToDev(item, draft.trim())}
+            disabled={pending}
+            className="gap-1.5"
+          >
+            Send to dev
+          </PillButton>
+          {onDismiss ? (
+            <DismissButton
+              label="Écarter cette question"
+              onDismiss={() => void onDismiss(item)}
+              disabled={pending}
+            />
+          ) : null}
+        </div>
+      </div>
     </SurfaceCard>
   );
 }
@@ -237,39 +315,43 @@ export function FailedRow({
       data-testid="desk-failed-row"
       className={cn(ROW_CLASS, className)}
     >
-      <Stamp tone="failed">FAILED</Stamp>
-      <IdentityChip
-        label={item.readableId ?? project?.shortName ?? "—"}
-        tone={projectTone(project?.colorIndex ?? 0)}
-        size="sm"
-      />
-      <Mono size={12.5} tone="you-deep" clamp={1} className="min-w-0 flex-1">
-        {item.error}
-      </Mono>
-      <Mono size={10.5} tone="you-mid" className="shrink-0">
-        {meta}
-      </Mono>
-      <PillButton
-        variant="filled"
-        size="md"
-        icon={RefreshCw}
-        onClick={() => void onRetry(item)}
-        pending={pending}
-        pendingLabel="Retrying"
-        className="gap-1.5 px-[14px]"
-      >
-        Retry
-      </PillButton>
-      <PillButton variant="outline" size="md" onClick={() => onOpenLog(item)}>
-        Log
-      </PillButton>
-      {onDismiss ? (
-        <DismissButton
-          label="Écarter cet échec"
-          onDismiss={() => void onDismiss(item)}
-          disabled={pending}
+      <div data-testid="desk-row-head" className={ROW_HEAD_CLASS}>
+        <Stamp tone="failed">FAILED</Stamp>
+        <IdentityChip
+          label={item.readableId ?? project?.shortName ?? "—"}
+          tone={projectTone(project?.colorIndex ?? 0)}
+          size="sm"
         />
-      ) : null}
+        <Mono size={12.5} tone="you-deep" clamp={1} className={ROW_MESSAGE_CLASS}>
+          {item.error}
+        </Mono>
+        <Mono size={10.5} tone="you-mid" className="shrink-0">
+          {meta}
+        </Mono>
+      </div>
+      <div data-testid="desk-row-actions" className={ROW_ACTIONS_CLASS}>
+        <PillButton
+          variant="filled"
+          size="md"
+          icon={RefreshCw}
+          onClick={() => void onRetry(item)}
+          pending={pending}
+          pendingLabel="Retrying"
+          className="gap-1.5 px-[14px]"
+        >
+          Retry
+        </PillButton>
+        <PillButton variant="outline" size="md" onClick={() => onOpenLog(item)}>
+          Log
+        </PillButton>
+        {onDismiss ? (
+          <DismissButton
+            label="Écarter cet échec"
+            onDismiss={() => void onDismiss(item)}
+            disabled={pending}
+          />
+        ) : null}
+      </div>
     </SurfaceCard>
   );
 }
@@ -315,41 +397,51 @@ export function ConflictRow({
       data-testid="desk-conflict-row"
       className={cn(ROW_CLASS, className)}
     >
-      <Stamp tone="conflict">CONFLICT</Stamp>
-      <IdentityChip
-        label={item.readableId ?? project?.shortName ?? "—"}
-        tone={projectTone(project?.colorIndex ?? 0)}
-        size="sm"
-      />
-      <span className="line-clamp-1 min-w-0 flex-1 font-sans text-[14px] font-medium text-foreground">
-        {resolvable ? "Conflit avec main · " : "Marqueurs de conflit commités · "}
-        <Mono size={12} tone="muted">
-          {item.branchName ?? item.title}
-        </Mono>
-      </span>
-      {resolvable ? (
-        <PillButton
-          variant="filled"
-          size="md"
-          icon={GitMerge}
-          onClick={() => void onResolve(item)}
-          pending={pending}
-          pendingLabel="Resolving"
-          className="gap-1.5 px-[14px]"
-        >
-          Resolve with agent
-        </PillButton>
-      ) : null}
-      <PillButton variant="outline" size="md" onClick={() => onOpenDiff(item)}>
-        Diff
-      </PillButton>
-      {onDismiss ? (
-        <DismissButton
-          label="Écarter ce conflit"
-          onDismiss={() => void onDismiss(item)}
-          disabled={pending}
+      <div data-testid="desk-row-head" className={ROW_HEAD_CLASS}>
+        <Stamp tone="conflict">CONFLICT</Stamp>
+        <IdentityChip
+          label={item.readableId ?? project?.shortName ?? "—"}
+          tone={projectTone(project?.colorIndex ?? 0)}
+          size="sm"
         />
-      ) : null}
+        <span
+          className={cn(
+            ROW_MESSAGE_CLASS,
+            "line-clamp-1 font-sans text-[14px] font-medium text-foreground",
+            "max-sm:line-clamp-2",
+          )}
+        >
+          {resolvable ? "Conflit avec main · " : "Marqueurs de conflit commités · "}
+          <Mono size={12} tone="muted">
+            {item.branchName ?? item.title}
+          </Mono>
+        </span>
+      </div>
+      <div data-testid="desk-row-actions" className={ROW_ACTIONS_CLASS}>
+        {resolvable ? (
+          <PillButton
+            variant="filled"
+            size="md"
+            icon={GitMerge}
+            onClick={() => void onResolve(item)}
+            pending={pending}
+            pendingLabel="Resolving"
+            className="gap-1.5 px-[14px]"
+          >
+            Resolve with agent
+          </PillButton>
+        ) : null}
+        <PillButton variant="outline" size="md" onClick={() => onOpenDiff(item)}>
+          Diff
+        </PillButton>
+        {onDismiss ? (
+          <DismissButton
+            label="Écarter ce conflit"
+            onDismiss={() => void onDismiss(item)}
+            disabled={pending}
+          />
+        ) : null}
+      </div>
     </SurfaceCard>
   );
 }
