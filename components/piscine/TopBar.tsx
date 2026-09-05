@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Inbox,
   Infinity as InfinityIcon,
+  MessageSquare,
   Plus,
   Radar,
   Search,
@@ -55,17 +56,17 @@ import { TopBarMenu } from "./TopBarMenu";
  *   state; the only state a chip carries is the breathing dot of a project with
  *   a live agent, and that is motion.
  * - CENTER is navigation, absolutely centred so it does not drift when the
- *   project list grows. FOUR pills: `Now`, then the three category bubbles
- *   reusing three strata grounds. On a bubble, hover opens the menu and click
- *   goes to the menu's first reachable entry; the active one wears a 1.5px
- *   border in its own under-colour plus a chevron.
+ *   project list grows. FIVE pills: `Now`, then `Work`, `Chat` (a direct
+ *   destination button next to Work), `Agents`, and `Réglages`.
+ *   On a category bubble, hover opens the menu and click goes to the menu's
+ *   first reachable entry; the active one wears a 1.5px border in its own
+ *   under-colour plus a chevron.
  *
- *   `Now` IS A DESTINATION, NOT A CATEGORY. It carries the same pill shape and
- *   the same active liseré as its three neighbours, and nothing else of their
- *   behaviour: no menu, no hover intent, no `aria-haspopup`, no chevron. It sat
- *   in the LEFT zone as "A · Now" until this change, which read as branding —
- *   the desk is one of the app's four destinations, so it is drawn as one.
- *   `NAV_CATEGORIES` is unchanged; see the head of `lib/piscine/nav.ts`.
+ *   `Now` and `Chat` ARE DESTINATIONS, NOT CATEGORIES. They carry the same
+ *   pill shape and the same active liseré as their neighbours, and nothing else
+ *   of their behaviour: no menu, no hover intent, no `aria-haspopup`, no
+ *   chevron. `NAV_CATEGORIES` contains the three categories; see the head of
+ *   `lib/piscine/nav.ts`.
  * - RIGHT never changes, on any route: ⌘K, inbox, Auto, New.
  *
  * DATA, AND WHAT IT COSTS. The bar is on every route, so it may not carry the
@@ -98,14 +99,13 @@ const PALETTE_POLL_MS = 10_000;
  * slide UNDERNEATH. Its cap is therefore a hard number, and a wrong one is
  * invisible until a workspace has enough projects to reach it.
  *
- * MEASURED IN CHROME, not derived: `top-bar-island` reports 398px at 1440×950
- * with the default text size, so half is 199. The fourth pill is 89px of that,
+ * MEASURED IN CHROME, not derived: `top-bar-island` reports 490px at 1440×950
+ * with the default text size, so half is 245. The Chat pill is ~85px of that,
  * plus the 7px gap it added — which is why this number moved with this change.
  * `__tests__/top-bar.test.tsx` pins BOTH the resulting max-width and the pill
- * count it was measured for, so a fifth pill fails loudly instead of silently
- * sliding the project chips under the island.
+ * count it was measured for.
  */
-const ISLAND_HALF_WIDTH_PX = 199;
+const ISLAND_HALF_WIDTH_PX = 245;
 
 /** Breathing room between the last project chip and the island's left edge. */
 const ISLAND_CLEARANCE_PX = 15;
@@ -231,7 +231,7 @@ export function TopBar({ className }: TopBarProps) {
     is null here, which is what keeps the three bubbles unlit on the desk.
   */
   const onDesk = pathname === "/";
-
+  const onChat = pathname === "/chat" || pathname.startsWith("/chat/");
   /* ---- menu open/close ------------------------------------------------ */
 
   const [openId, setOpenId] = React.useState<NavCategoryId | null>(null);
@@ -428,26 +428,49 @@ export function TopBar({ className }: TopBarProps) {
         </Link>
 
         {NAV_CATEGORIES.map((category) => (
-          <CategoryBubble
-            key={category.id}
-            category={category}
-            active={activeCategory?.id === category.id}
-            expanded={openId === category.id}
-            live={categoryIsLive(category, liveSessionCount)}
-            onHoverOpen={() => hoverOpen(category.id)}
-            onFocusOpen={() => open(category.id)}
-            onActivate={() => {
-              const href = firstReachableHref(category, scopeProjectId);
-              if (href) {
-                close();
-                router.push(href);
-                return;
-              }
-              // Nothing in this category is reachable yet: the bubble is then
-              // only a menu opener, and the menu explains why.
-              open(category.id);
-            }}
-          />
+          <React.Fragment key={category.id}>
+            <CategoryBubble
+              key={category.id}
+              category={category}
+              active={activeCategory?.id === category.id}
+              expanded={openId === category.id}
+              live={categoryIsLive(category, liveSessionCount)}
+              onHoverOpen={() => hoverOpen(category.id)}
+              onFocusOpen={() => open(category.id)}
+              onActivate={() => {
+                const href = firstReachableHref(category, scopeProjectId);
+                if (href) {
+                  close();
+                  router.push(href);
+                  return;
+                }
+                // Nothing in this category is reachable yet: the bubble is then
+                // only a menu opener, and the menu explains why.
+                open(category.id);
+              }}
+            />
+
+            {category.id === "work" ? (
+              <Link
+                href="/chat"
+                data-testid="top-bar-bubble-chat"
+                data-active={onChat ? "true" : undefined}
+                aria-current={onChat ? "page" : undefined}
+                className={cn(
+                  "flex h-[32px] shrink-0 cursor-pointer items-center gap-[8px] rounded-full px-[15px]",
+                  "bg-strata-live font-sans text-[13px] leading-none text-strata-live-deep",
+                  "no-underline outline-none",
+                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                  // Reserved at rest so the liseré never reflows the row.
+                  "border-[1.5px] border-transparent",
+                  onChat ? "border-strata-live-under font-bold" : "font-semibold",
+                )}
+              >
+                <MessageSquare size={14} aria-hidden="true" />
+                Chat
+              </Link>
+            ) : null}
+          </React.Fragment>
         ))}
 
         {openId ? (

@@ -180,7 +180,6 @@ describe("nav model", () => {
       "releases /projects/:projectId/releases",
       "named-agents /agents",
       "sessions /projects/:projectId/sessions",
-      "chat /chat",
       "usage /usage",
       "workspace /settings",
       "night-runs /settings#night-runs",
@@ -362,28 +361,28 @@ describe("route helpers", () => {
 /* ------------------------------------------------------------------ */
 
 describe("TopBar", () => {
-  it("renders the logo mark, four island pills and the fixed right cluster", () => {
+  it("renders the logo mark, five island pills and the fixed right cluster", () => {
     render(<TopBar />);
 
     expect(screen.getByTestId("top-bar-home")).toHaveAttribute("href", "/");
     expect(screen.getByTestId("top-bar-bubble-now")).toHaveTextContent("Now");
     expect(screen.getByTestId("top-bar-bubble-work")).toHaveTextContent("Work");
+    expect(screen.getByTestId("top-bar-bubble-chat")).toHaveTextContent("Chat");
     expect(screen.getByTestId("top-bar-bubble-agents")).toHaveTextContent("Agents");
     expect(screen.getByTestId("top-bar-bubble-settings")).toHaveTextContent("Réglages");
-
     expect(screen.getByTestId("top-bar-search")).toHaveTextContent("⌘K");
     expect(screen.getByTestId("top-bar-inbox")).toBeInTheDocument();
     expect(screen.getByTestId("top-bar-auto")).toHaveTextContent("Auto");
     expect(screen.getByTestId("top-bar-new")).toHaveTextContent("New");
   });
 
-  /* ---- Now, the fourth pill ------------------------------------------ */
+  /* ---- Island destinations and category pills ------------------------- */
 
-  it("puts Now first in the centred island, ahead of the three categories", () => {
+  it("puts Now first, Work second, Chat next to Work in the centred island", () => {
     render(<TopBar />);
 
     const island = screen.getByTestId("top-bar-island");
-    // The four pills are the island's own children; the open menu is a fifth,
+    // The five pills are the island's own children; the open menu is a sixth,
     // so filter to the pills rather than reading `children` positionally.
     const pills = Array.from(island.children).filter((node) =>
       node.getAttribute("data-testid")?.startsWith("top-bar-bubble-"),
@@ -391,9 +390,74 @@ describe("TopBar", () => {
     expect(pills.map((node) => node.getAttribute("data-testid"))).toEqual([
       "top-bar-bubble-now",
       "top-bar-bubble-work",
+      "top-bar-bubble-chat",
       "top-bar-bubble-agents",
       "top-bar-bubble-settings",
     ]);
+  });
+
+  /* ---- Chat, the fifth pill next to Work ------------------------------- */
+
+  it("marks Chat active on /chat and inactive on every other route", () => {
+    barState.pathname = "/chat";
+    const { unmount } = render(<TopBar />);
+    expect(screen.getByTestId("top-bar-bubble-chat")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    expect(screen.getByTestId("top-bar-bubble-chat")).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByTestId("top-bar-bubble-now")).not.toHaveAttribute("data-active");
+    expect(screen.getByTestId("top-bar-bubble-work")).not.toHaveAttribute("data-active");
+    expect(screen.getByTestId("top-bar-bubble-agents")).not.toHaveAttribute("data-active");
+    expect(screen.getByTestId("top-bar-bubble-settings")).not.toHaveAttribute("data-active");
+    unmount();
+
+    for (const pathname of ["/", "/agents/prompts", "/tickets", "/projects/p1", "/settings"]) {
+      barState.pathname = pathname;
+      const view = render(<TopBar />);
+      expect(screen.getByTestId("top-bar-bubble-chat")).not.toHaveAttribute(
+        "data-active",
+      );
+      view.unmount();
+    }
+  });
+
+  it("takes a click directly to /chat from anywhere", () => {
+    barState.pathname = "/settings";
+    render(<TopBar />);
+
+    // A real <a href="/chat">, so navigation is the browser's, not router.push's.
+    expect(screen.getByTestId("top-bar-bubble-chat")).toHaveAttribute("href", "/chat");
+  });
+
+  it("gives Chat no menu: no popup role, and hover opens nothing", () => {
+    barState.pathname = "/tickets";
+    vi.useFakeTimers();
+    try {
+      render(<TopBar />);
+      const chat = screen.getByTestId("top-bar-bubble-chat");
+
+      expect(chat).not.toHaveAttribute("aria-haspopup");
+      expect(chat).not.toHaveAttribute("aria-expanded");
+
+      fireEvent.mouseEnter(chat);
+      fireEvent.focus(chat);
+      act(() => void vi.advanceTimersByTime(1000));
+
+      for (const id of ["now", "chat", "work", "agents", "settings"]) {
+        expect(screen.queryByTestId(`top-bar-menu-${id}`)).not.toBeInTheDocument();
+      }
+
+      // Control: the SAME gesture on a real bubble does open one.
+      fireEvent.mouseEnter(screen.getByTestId("top-bar-bubble-work"));
+      act(() => void vi.advanceTimersByTime(1000));
+      expect(screen.getByTestId("top-bar-menu-work")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("marks Now active on the desk and inactive on every other route", () => {
@@ -476,11 +540,11 @@ describe("TopBar", () => {
     const pills = Array.from(island.children).filter((node) =>
       node.getAttribute("data-testid")?.startsWith("top-bar-bubble-"),
     );
-    expect(pills).toHaveLength(4);
+    expect(pills).toHaveLength(5);
 
     const chips = screen.getByTestId("top-bar-project-chips");
     const left = chips.parentElement as HTMLElement;
-    expect(left.style.maxWidth).toBe("calc(50% - 214px)");
+    expect(left.style.maxWidth).toBe("calc(50% - 260px)");
   });
 
   it("marks no bubble on the desk and the right one elsewhere", () => {
@@ -529,7 +593,11 @@ describe("TopBar", () => {
     );
     expect(screen.getByTestId("top-bar-entry-qa")).toHaveAttribute("href", "/qa");
     fireEvent.focus(screen.getByTestId("top-bar-bubble-agents"));
-    expect(screen.getByTestId("top-bar-entry-chat")).toHaveAttribute("href", "/chat");
+    expect(screen.getByTestId("top-bar-entry-named-agents")).toHaveAttribute(
+      "href",
+      "/agents",
+    );
+    expect(screen.getByTestId("top-bar-entry-usage")).toHaveAttribute("href", "/usage");
   });
 
   it("softens a per-project entry until a project is active", () => {
