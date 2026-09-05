@@ -21,6 +21,7 @@ import {
   readLastVisitedProjectId,
   readNoVisitedProjectId,
   rememberVisitedProjectId,
+  resetLastVisitedProjectId,
   resolveNavHref,
   resolveScopeProjectId,
   subscribeLastVisitedProjectId,
@@ -150,6 +151,10 @@ beforeEach(() => {
   barState.autoLoaded = true;
   barState.armed = new Map();
   window.localStorage.clear();
+  // The snapshot lives as long as the document does; jsdom gives every case the
+  // same one, so each starts it over. Without this a case that seeds storage to
+  // stand for an earlier visit would read the previous case's snapshot instead.
+  resetLastVisitedProjectId();
 });
 
 /* ------------------------------------------------------------------ */
@@ -191,6 +196,36 @@ describe("last visited project store", () => {
     rememberVisitedProjectId("p9");
 
     expect(listener).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `localStorage` is shared by every tab, and nothing announces another tab's
+   * write to this one. The snapshot is read on every render, so treating the
+   * shared key as the live value let a second tab move this document's project
+   * scope silently.
+   */
+  it("holds the snapshot a foreign write never announced", () => {
+    rememberVisitedProjectId("a");
+
+    window.localStorage.setItem(LAST_PROJECT_STORAGE_KEY, "b");
+
+    expect(readLastVisitedProjectId()).toBe("a");
+  });
+
+  it("keeps a visit it could not persist", () => {
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("QuotaExceededError");
+      });
+
+    rememberVisitedProjectId("p9");
+    setItem.mockRestore();
+
+    // Nothing was written, and the visit is remembered all the same: the store
+    // is this document's, storage is only where it survives the document.
+    expect(window.localStorage.getItem(LAST_PROJECT_STORAGE_KEY)).toBeNull();
+    expect(readLastVisitedProjectId()).toBe("p9");
   });
 
   it("still notifies when the write itself is refused", () => {
@@ -712,6 +747,58 @@ describe("TopBar", () => {
     expect(screen.getByTestId("top-bar-entry-spec")).toHaveAttribute(
       "data-disabled",
       "true",
+    );
+  });
+
+  /**
+   * Only a route change may move the project scope. A second tab writing the
+   * shared key is not one — and this document is never told about it, so the
+   * bar must not pick it up on the next render it happens to do.
+   */
+  it("keeps its scope when another document overwrites shared storage", () => {
+    barState.projects = [project({ id: "a" }), project({ id: "b", name: "B" })];
+    barState.pathname = "/projects/a/spec";
+    const { rerender } = render(<TopBar />);
+
+    barState.pathname = "/";
+    rerender(<TopBar />);
+
+    window.localStorage.setItem(LAST_PROJECT_STORAGE_KEY, "b");
+    // Opening the menu is a render like any other; it must not import the
+    // other tab's project.
+    fireEvent.focus(screen.getByTestId("top-bar-bubble-work"));
+
+    expect(screen.getByTestId("top-bar-entry-spec")).toHaveAttribute(
+      "href",
+      "/projects/a/spec",
+    );
+  });
+
+  /**
+   * Safari private mode throws on `setItem`. The visit still happened, so the
+   * bar has to keep resolving against it — falling back to whatever an earlier
+   * document left in storage points the menu at the wrong project.
+   */
+  it("resolves against a visit it could not persist", () => {
+    window.localStorage.setItem(LAST_PROJECT_STORAGE_KEY, "b");
+    barState.projects = [project({ id: "a" }), project({ id: "b", name: "B" })];
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("QuotaExceededError");
+      });
+
+    barState.pathname = "/projects/a/spec";
+    const { rerender } = render(<TopBar />);
+    barState.pathname = "/";
+    rerender(<TopBar />);
+    setItem.mockRestore();
+
+    fireEvent.focus(screen.getByTestId("top-bar-bubble-work"));
+
+    expect(screen.getByTestId("top-bar-entry-spec")).toHaveAttribute(
+      "href",
+      "/projects/a/spec",
     );
   });
 

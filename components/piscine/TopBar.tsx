@@ -201,6 +201,11 @@ export function TopBar({ className }: TopBarProps) {
    * This is a read of an external store, so it is one — mirroring it into state
    * from an effect was the same value held twice, and the copy cost a second
    * render on every project visit.
+   *
+   * That store is document-local and merely SEEDED from `localStorage`; see
+   * `readLastVisitedProjectId`. The shared key is where the choice persists,
+   * never the live value, so another tab cannot move this bar's project scope
+   * and a refused write cannot lose the visit that just happened.
    */
   const lastVisitedProjectId = useSyncExternalStore(
     subscribeLastVisitedProjectId,

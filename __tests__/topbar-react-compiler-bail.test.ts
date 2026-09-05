@@ -21,12 +21,33 @@ import { ESLint } from "eslint";
  *
  * So a lint run of TopBar proves nothing on its own, and this file does not
  * rely on one. It asserts that the analysis is OPEN, by mutation: inject a
- * violation and require the rule to report it. That is the only assertion that
- * can tell a fixed component from an unread one, and it is the assertion that
- * fails if anyone reintroduces the namespace form, a `"use no memo"` directive,
- * a disable comment or a suppressions entry.
+ * violation and require the rule to report it. A component the rules never
+ * enter is silent, so an error under mutation is the only thing that tells a
+ * fixed component from an unread one.
  *
- * `npm run lint` covers the same rules, but CI runs the Vitest suite.
+ * WHAT THE PROBES CATCH, measured on eslint-plugin-react-hooks 7.0.1 against
+ * this file (both probes report 1 error unmasked):
+ *
+ *   namespace form (`React.useEffect`)  effect probe silent, bail probe still
+ *                                       reports — the effect probe is the
+ *                                       load-bearing one, and the source
+ *                                       assertion below names the mask outright
+ *   blanket `eslint-disable` of these
+ *   rules                               both probes silent
+ *   `"use no memo"` directive           BOTH PROBES STILL REPORT
+ *
+ * That last row is why this file cannot claim to prove compilation. The
+ * directive opts the component out of the compiler's OUTPUT, not out of its
+ * lint rules, so no diagnostic here can see it and it is asserted on the source
+ * instead. What these probes establish is that the rules read TopBar — which is
+ * the gate that actually exists today, `next.config.ts` not enabling the
+ * compiler at build time. Proving successful transformation would mean reading
+ * compiler output, which nothing in this repo does.
+ *
+ * `npm run lint` covers the same rules, but CI runs the Vitest suite. The
+ * suppressions baseline is applied in ESLint's CLI layer (`lib/cli.js`) and not
+ * by the `ESLint` class used here, so baselining the violation would keep
+ * `npm run lint` green while leaving every assertion below untouched.
  */
 
 const TOP_BAR_PATH = path.join(process.cwd(), "components/piscine/TopBar.tsx");
@@ -47,10 +68,8 @@ let source: string;
 let eslint: ESLint;
 
 /**
- * ESLint 9 applies `eslint-suppressions.json` in its CLI layer, not in the
+ * ESLint 9 reads `eslint-suppressions.json` in its CLI layer, not in the
  * `ESLint` class, so these messages are unsuppressed — which is what we want.
- * Baselining a violation here would keep `npm run lint` green while the
- * component stayed unread.
  */
 async function lint(text: string) {
   const [result] = await eslint.lintText(text, { filePath: TOP_BAR_PATH });
@@ -86,6 +105,22 @@ describe("TopBar and the React Compiler", () => {
     expect(namespaced).toEqual([]);
   });
 
+  it("carries no opt-out the probes below cannot see", () => {
+    /*
+      `"use no memo"` is the one mask no diagnostic here can report: with
+      eslint-plugin-react-hooks 7.0.1 the directive left BOTH probes below
+      reporting exactly as they do without it, because it opts the component out
+      of the compiler's output rather than out of its lint rules. Injecting it
+      is therefore a change that passes every other assertion in this file, and
+      only a source assertion refuses it.
+
+      The blanket disable is covered by the probes as well; asserting it here
+      names the mask rather than leaving it to a puzzling silence.
+    */
+    expect(source).not.toMatch(/["'`]use no memo["'`]/);
+    expect(source).not.toMatch(/eslint-disable[^\n]*react-hooks/);
+  });
+
   it("reports an injected effect violation, so the analysis is open", async () => {
     expect(source.split(CALLBACK_ANCHOR).length - 1).toBe(1);
 
@@ -96,8 +131,9 @@ describe("TopBar and the React Compiler", () => {
     expect(mutated).not.toBe(source);
 
     // The load-bearing assertion. This exact probe was silent while the file
-    // used `React.`-namespaced hooks, and a component the compiler has given up
-    // on is silent too — so an error here is the evidence, and nothing else is.
+    // used `React.`-namespaced hooks, and it is silent under a blanket
+    // `eslint-disable` of the rule — so an error here is the evidence that the
+    // rules read this component, and nothing else is.
     expect(errorsFrom(await lint(mutated), EFFECT_RULE)).toHaveLength(1);
   });
 
