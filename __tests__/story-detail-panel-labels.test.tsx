@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { StoryDetailPanel } from "@/components/story/StoryDetailPanel";
 import {
+  THEMES,
   classTokens,
+  colorPaints,
   resolveFocusVisibleOutline,
 } from "./helpers/tailwind-outline";
 
@@ -104,6 +106,14 @@ describe("Story detail panel accessibility", () => {
     expect(resolved.paints).toBe(true);
     expect(resolved.style).toBe("solid");
     expect(resolved.width).toBe("2px");
+    // And a colour that is not transparent, in either theme — resolved from
+    // app/globals.css (`focus-ring-color.test.ts` pins the mechanism).
+    for (const theme of THEMES) {
+      expect(
+        colorPaints(resolved.colorIn[theme]),
+        `outline-color resolves to ${resolved.colorIn[theme]} in ${theme}`,
+      ).toBe(true);
+    }
   });
 
   it("leaves no label in the panel that names nothing", () => {

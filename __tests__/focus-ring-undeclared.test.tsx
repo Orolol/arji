@@ -35,7 +35,9 @@ import {
   undeclaredFocusSites,
 } from "./helpers/class-list-scan";
 import {
+  THEMES,
   classTokens,
+  colorPaints,
   resolveFocusVisibleOutline,
 } from "./helpers/tailwind-outline";
 
@@ -186,11 +188,21 @@ async function expectPaintedRing(element: Element, where: string) {
       `so no ring is painted. Class list: ${element.className}`,
   ).toBe(true);
   expect(resolved.width, `${where} outline-width`).toBe("2px");
-  // Not asserted: the colour. `outline-ring` resolves through `--color-ring`,
-  // which lives in `app/globals.css`, and the helper compiles against the bare
-  // `@import "tailwindcss"` theme — so `resolved.color` is undefined here for
-  // every control in the app, correct ones included. The painted colour is
-  // read in real Chrome by `e2e/focus-ring.spec.ts`.
+  // The colour, once per theme. `outline-ring` resolves through `--color-ring`
+  // to `--ring`, which `app/globals.css` sets under `:root` for day and `.dark`
+  // for night; the helper compiles that sheet and substitutes both. A ring the
+  // style and width assertions accept can still be `transparent`, or a token
+  // blanked in one theme — that is what this catches (`focus-ring-color.test.ts`).
+  // Whether the colour contrasts with the ground it sits on is read in real
+  // Chrome by `e2e/focus-ring-inputs.spec.ts`.
+  expect(resolved.color, `${where} outline-color`).toBeDefined();
+  for (const theme of THEMES) {
+    expect(
+      colorPaints(resolved.colorIn[theme]),
+      `${where}: outline-color resolves to ${resolved.colorIn[theme]} in ` +
+        `${theme} (declared ${resolved.color}), which paints nothing`,
+    ).toBe(true);
+  }
 }
 
 describe("the ⌘K command palette input", () => {

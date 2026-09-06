@@ -68,7 +68,9 @@ import {
   undeclaredFocusSites,
 } from "./helpers/class-list-scan";
 import {
+  THEMES,
   classTokens,
+  colorPaints,
   resolveFocusVisibleOutline,
 } from "./helpers/tailwind-outline";
 
@@ -247,10 +249,19 @@ async function expectPaintedRing(element: Element, where: string) {
       `${element.className}`,
   ).toBe(true);
   expect(resolved.width, `${where} outline-width`).toBe("2px");
-  // Not asserted: the colour. `outline-ring` resolves through `--color-ring`,
-  // which lives in app/globals.css, while the helper compiles against the bare
-  // `@import "tailwindcss"` theme — so it is undefined here for every control
-  // in the app. The painted colour is read in Chrome by the e2e spec.
+  // The colour, once per theme: the helper compiles app/globals.css, so
+  // `outline-ring` resolves to the day `--ring` and the night one. A ring that
+  // is `transparent`, or blanked in one theme, passes the two assertions above
+  // and fails here (`focus-ring-color.test.ts`). Contrast against the pane's
+  // ground is the e2e spec's claim.
+  expect(resolved.color, `${where} outline-color`).toBeDefined();
+  for (const theme of THEMES) {
+    expect(
+      colorPaints(resolved.colorIn[theme]),
+      `${where}: outline-color resolves to ${resolved.colorIn[theme]} in ` +
+        `${theme} (declared ${resolved.color}), which paints nothing`,
+    ).toBe(true);
+  }
 }
 
 describe("the chat thread pane — the element the phone hands focus to", () => {
@@ -347,6 +358,14 @@ describe("the rule still reaches both renders of the pane", () => {
         `${describeSite(site)}\n\nresolves outline-style: ${resolved.style} ` +
           `under :focus-visible — this mount of the pane draws nothing.`,
       ).toBe(true);
+      for (const theme of THEMES) {
+        expect(
+          colorPaints(resolved.colorIn[theme]),
+          `${describeSite(site)}\n\nresolves outline-color: ` +
+            `${resolved.colorIn[theme]} in ${theme} — this mount of the pane ` +
+            `draws a ring nobody can see.`,
+        ).toBe(true);
+      }
     }
   });
 
