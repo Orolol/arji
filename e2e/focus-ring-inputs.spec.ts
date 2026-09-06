@@ -26,9 +26,11 @@ import { expect, test } from "./fixtures/arij-project";
  *
  * WHY BOTH THEMES. The ring's colour is `--color-ring`, and day and night give
  * it different values; a ring that resolves against the wrong ground is
- * invisible in exactly one of them. The unit files cannot see this at all —
- * they compile against the bare Tailwind theme and never load
- * `app/globals.css` — so the two-theme claim is this spec's alone.
+ * invisible in exactly one of them. The unit files resolve that colour from
+ * `app/globals.css` per theme too (`__tests__/focus-ring-color.test.ts`), but
+ * only as a literal — that it is not `transparent` and not a token one theme
+ * forgot. Whether it is visible against the ground the field actually sits on
+ * is a claim about a rendered page, and that claim is this spec's alone.
  *
  * KEYBOARD FOCUS, NOT `.focus()`. `:focus-visible` is a heuristic on how the
  * element took focus. Only real `Tab` presses put Chrome in the state the bug
