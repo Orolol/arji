@@ -135,7 +135,13 @@ export function DeskComposer({
         )}
       />
 
+      {/* `data-testid`, unlike on `StrataBand` above, actually reaches the
+          DOM: `SelectPill` extends the button's props and spreads `...rest`.
+          It is what lets a test change the target — the trigger's own label is
+          the CURRENT project's `shortName`, which a test cannot know, and the
+          cross-project desk has no project of its own to fall back on. */}
       <SelectPill
+        data-testid="desk-project-select"
         label={project?.shortName ?? "—"}
         tone="project"
         projectTone={projectTone(project?.colorIndex ?? 0)}
