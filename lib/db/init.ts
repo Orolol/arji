@@ -174,6 +174,8 @@ const POST_BASELINE_COLUMN_MIGRATIONS: Array<{
     table: "agent_sessions",
     column: "estimated_prompt_breakdown",
   },
+  // 0052_refinement_actions
+  { folderMillis: 1786714900000, table: "agent_sessions", column: "refinement_actions" },
 ];
 
 /** Default on-disk location of the drizzle migration files. */

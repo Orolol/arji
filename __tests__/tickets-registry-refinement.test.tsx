@@ -153,6 +153,10 @@ function makePayload(rows: RegistryRow[]): TicketsRegistryPayload {
   };
 }
 
+vi.mock("@/hooks/useNamedAgentsList", () => ({
+  useNamedAgentsList: () => ({ agents: [], loading: false, refresh: vi.fn() }),
+}));
+
 const originalFetch = global.fetch;
 
 const idle = () => ({
@@ -216,6 +220,7 @@ describe("scoped registry", () => {
     render(<TicketsRegistryView />);
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     const notice = await screen.findByTestId("refinement-notice");
     expect(notice).toHaveTextContent("already running");
@@ -257,6 +262,7 @@ describe("unscoped registry", () => {
     expect(pickTrigger("refine: LEDGER")).not.toBeDisabled();
 
     fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -287,6 +293,7 @@ describe("unscoped registry", () => {
     render(<TicketsRegistryView />);
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     const notice = await screen.findByTestId("refinement-notice");
     expect(notice).toHaveTextContent("nothing to refine");
@@ -302,6 +309,7 @@ describe("unscoped registry", () => {
     render(<TicketsRegistryView />);
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     await waitFor(() => expect(refreshSpy).toHaveBeenCalledTimes(1));
     expect(await screen.findByTestId("refinement-notice")).toHaveTextContent(
@@ -318,6 +326,7 @@ describe("unscoped registry", () => {
     fireEvent.click(screen.getByTestId("refine-project-p1"));
     const first = await screen.findByTestId("refinement-button");
     fireEvent.click(first);
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
     await waitFor(() =>
       expect(screen.getByTestId("refinement-button-badge")).toHaveTextContent("running"),
     );

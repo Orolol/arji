@@ -23,7 +23,7 @@ import fs from "fs";
 import path from "path";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { agentSessions, projects } from "@/lib/db/schema";
+import { agentSessions, projects, namedAgents } from "@/lib/db/schema";
 import { createId } from "@/lib/utils/nanoid";
 import { buildRefinementPrompt } from "@/lib/claude/prompt-builder";
 import { processManager } from "@/lib/claude/process-manager";
@@ -46,6 +46,7 @@ import {
   isMcpToolsEnabled,
   providerSupportsMcp,
 } from "@/lib/claude/mcp-injection";
+import { refinementOptionsSchema, REFINEMENT_ACTION_IDS, type RefinementOptions } from "./options";
 import { REFINEMENT_AGENT_TYPE } from "./constants";
 import { loadRefinementSnapshot, snapshotSize } from "./snapshot";
 import { publishRefinementReport, type RefinementReport } from "./report";
@@ -109,9 +110,8 @@ export function getActiveRefinementSession(
     .get();
 }
 
-export interface DispatchRefinementInput {
+export interface DispatchRefinementInput extends RefinementOptions {
   projectId: string;
-  namedAgentId?: string | null;
 }
 
 /**
@@ -121,6 +121,18 @@ export interface DispatchRefinementInput {
 export async function dispatchRefinementSession(
   input: DispatchRefinementInput,
 ): Promise<DispatchRefinementResult> {
+  const { projectId: _projectId, ...rawOptions } = input;
+  const parsed = refinementOptionsSchema.safeParse(rawOptions);
+  if (!parsed.success) {
+    throw new RefinementDispatchError("Invalid refinement options", 400, "INVALID_REFINEMENT_OPTIONS");
+  }
+  const options = parsed.data;
+  const actions = options.actions ?? [...REFINEMENT_ACTION_IDS];
+  if (options.namedAgentId && !db.select({ id: namedAgents.id }).from(namedAgents)
+    .where(eq(namedAgents.id, options.namedAgentId)).get()) {
+    throw new RefinementDispatchError("Selected agent no longer exists", 404, "AGENT_NOT_FOUND");
+  }
+
   const project = db
     .select()
     .from(projects)
@@ -154,13 +166,13 @@ export async function dispatchRefinementSession(
     REFINEMENT_AGENT_TYPE,
     input.projectId,
   );
-  const prompt = buildRefinementPrompt(project, snapshot, systemPrompt);
+  const prompt = buildRefinementPrompt(project, snapshot, systemPrompt, options);
   // No dispatch context: that argument exists for review-provider
   // segregation, and a planning pass has no builder to be segregated from.
   const resolvedAgent = await resolveAgentForDispatch(
     REFINEMENT_AGENT_TYPE,
     input.projectId,
-    input.namedAgentId ?? null,
+    options.namedAgentId ?? null,
   );
 
   // The pass's entire deliverable is mutating MCP calls, but the tool channel
@@ -224,6 +236,7 @@ export async function dispatchRefinementSession(
     namedAgentName: resolvedAgent.name ?? null,
     model: resolvedAgent.model ?? null,
     agentType: REFINEMENT_AGENT_TYPE,
+    refinementActions: JSON.stringify(actions),
     createdAt: now,
   });
 

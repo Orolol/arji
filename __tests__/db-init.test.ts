@@ -275,6 +275,7 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_tokens");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_breakdown");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN refinement_actions");
     });
 
     withDb(file, (conn) => {
@@ -375,6 +376,7 @@ describe("initDb", () => {
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_tokens");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_breakdown");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN refinement_actions");
       conn.exec("DROP TABLE ticket_read_cursors");
     });
 
@@ -505,6 +507,7 @@ describe("migration journal", () => {
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_tokens");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_breakdown");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN refinement_actions");
 
       expect(() => initDb(conn)).not.toThrow();
 

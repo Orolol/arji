@@ -13,6 +13,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RefinementButton } from "@/components/kanban/RefinementButton";
 import { mockFetchSequence } from "@/__tests__/helpers/mock-fetch";
 
+vi.mock("@/hooks/useNamedAgentsList", () => ({
+  useNamedAgentsList: () => ({ agents: [], loading: false, refresh: vi.fn() }),
+}));
+
 const originalFetch = global.fetch;
 
 function idle(ticketCount = 5) {
@@ -79,6 +83,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -127,6 +132,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("refinement-button-badge")).toHaveTextContent(
@@ -175,6 +181,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     // In flight: inert and spinning, but making no claim about a pass.
     await waitFor(() =>
@@ -231,6 +238,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     await waitFor(() =>
       expect(onError).toHaveBeenCalledWith(
@@ -269,6 +277,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     // A 200 saying "nothing to do" is an answer, not a red toast.
     await waitFor(() =>
@@ -298,6 +307,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
     await waitFor(() =>
       expect(onError).toHaveBeenCalledWith("Nothing to refine")
     );
@@ -481,5 +491,32 @@ describe("RefinementButton", () => {
 
     const button = await screen.findByTestId("refinement-button");
     expect(button).not.toBeDisabled();
+  });
+});
+
+describe("REfinment 2 — configuration dialog", () => {
+  it("opens without dispatching and cancels without dispatching", async () => {
+    const fetchMock = mockFetchSequence([idle()]);
+    render(<RefinementButton projectId="proj-1" onError={vi.fn()} pollIntervalMs={0} />);
+    fireEvent.click(await screen.findByTestId("refinement-button"));
+    expect(screen.getByRole("dialog", { name: "Configure board refinement" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Agent" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("requires a checked action and submits only the chosen actions plus instructions", async () => {
+    const fetchMock = mockFetchSequence([idle(), { ok: true, body: { data: { started: true, sessionId: "s-config" } } }, running("s-config")]);
+    render(<RefinementButton projectId="proj-1" onError={vi.fn()} pollIntervalMs={0} />);
+    fireEvent.click(await screen.findByTestId("refinement-button"));
+    for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box);
+    expect(screen.getByRole("button", { name: "Start refinement" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Select at least one action");
+    fireEvent.click(screen.getByRole("checkbox", { name: /Priorities and deprioritization/ }));
+    fireEvent.change(screen.getByLabelText("Additional instructions (optional)"), { target: { value: "  Focus on onboarding  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/projects/proj-1/refinement", expect.objectContaining({ body: JSON.stringify({ namedAgentId: null, instructions: "Focus on onboarding", actions: ["priorities"] }) })));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 });

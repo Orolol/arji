@@ -8,8 +8,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import { errorResponse } from "@/lib/api/route-helpers";
+import { validateOptionalBody } from "@/lib/validation/validate";
+import { refinementOptionsSchema } from "@/lib/refinement/options";
+import { errorResponse, isErrorResponse } from "@/lib/api/route-helpers";
 import {
   RefinementDispatchError,
   dispatchRefinementSession,
@@ -43,42 +44,19 @@ export async function GET(
   }
 }
 
-const bodySchema = z
-  .object({
-    namedAgentId: z.string().min(1).nullish(),
-  })
-  .strict();
-
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
   const { projectId } = await params;
 
-  // Read the body by hand rather than through validateBody: everything here
-  // is optional, and "start a refinement pass" is a legitimate POST with no
-  // body at all — which validateBody rejects as invalid JSON.
-  let raw: unknown = {};
-  try {
-    raw = (await request.json()) ?? {};
-  } catch {
-    raw = {};
-  }
-  const parsed = bodySchema.safeParse(raw);
-  if (!parsed.success) {
-    return NextResponse.json(
-      {
-        error: "Validation failed",
-        details: parsed.error.flatten().fieldErrors,
-      },
-      { status: 400 },
-    );
-  }
+  const parsed = await validateOptionalBody(refinementOptionsSchema, request);
+  if (isErrorResponse(parsed)) return parsed;
 
   try {
     const result = await dispatchRefinementSession({
       projectId,
-      namedAgentId: parsed.data.namedAgentId ?? null,
+      ...parsed.data,
     });
 
     if (result.skipped) {

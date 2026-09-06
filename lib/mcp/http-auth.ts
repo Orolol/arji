@@ -15,8 +15,10 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { epics } from "@/lib/db/schema";
+import { agentSessions, epics } from "@/lib/db/schema";
 import { resolveMcpToken, type McpTokenRecord } from "./token-store";
+
+import { parseRefinementActions, refinementToolAllowed } from "@/lib/refinement/options";
 
 type Epic = typeof epics.$inferSelect;
 
@@ -49,6 +51,17 @@ export function requireMcpToken(
       { error: "Invalid or expired MCP token", code: "UNAUTHORIZED" },
       { status: 401 }
     );
+  }
+  if (record.agentType === "refinement") {
+    const session = db.select({ actions: agentSessions.refinementActions })
+      .from(agentSessions).where(eq(agentSessions.id, record.sessionId)).get();
+    const tool = new URL(request.url).pathname.split("/").filter(Boolean).pop()?.replaceAll("-", "_") ?? "";
+    if (session?.actions != null && !refinementToolAllowed(parseRefinementActions(session.actions), tool)) {
+      return NextResponse.json({
+        error: `${tool} is not enabled for this refinement pass.`,
+        code: "REFINEMENT_ACTION_DISABLED",
+      }, { status: 403 });
+    }
   }
   return record;
 }

@@ -188,6 +188,8 @@ describe("0046_core_table_indexes", () => {
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')
         .run(MIGRATION_WHEN);
+      // Later ADD COLUMN migrations must be rewound with the ledger.
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN refinement_actions");
 
       expect(() => initDb(conn)).not.toThrow();
 

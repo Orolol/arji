@@ -99,13 +99,14 @@ test.describe("Board refinement — merge, discard, create", () => {
     ]);
 
     // Dispatch through the board's own control, not the API.
-    await page.goto(`/projects/${project.id}`);
+    await openRegistry(page, project.id);
     const button = page.getByTestId("refinement-button");
     await expect(button).toBeEnabled({ timeout: 45_000 });
     const dispatched = page.waitForResponse(
       (r) => r.url().includes(`/projects/${project.id}/refinement`) && r.request().method() === "POST",
     );
     await button.click();
+    await page.getByRole("button", { name: "Start refinement" }).click();
     const started = await dispatched;
     expect(started.ok(), await started.text()).toBeTruthy();
     expect((await started.json()).data.started).toBe(true);
