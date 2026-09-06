@@ -78,6 +78,7 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       conversations,
       activeId,
       setActiveId,
+      loading: conversationsLoading,
       createConversation,
       deleteConversation,
       updateConversation,
@@ -198,6 +199,16 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
         return;
       }
 
+      // An empty list is also what the mount fetch leaves behind while it is
+      // still in flight. Creating from it made a second, permanent "Brainstorm"
+      // next to the one the project already had whenever the strip was clicked
+      // before the fetch landed. Only the hook's own `loading` tells the two
+      // states apart: the click is honoured (the panel is open) and the hook
+      // selects the first row itself once the payload arrives.
+      if (conversationsLoading) {
+        return;
+      }
+
       if (tabConversations.length > 0) {
         const fallbackId = tabConversations[0].id;
         setActiveId(fallbackId);
@@ -205,7 +216,14 @@ export const UnifiedChatPanel = forwardRef<UnifiedChatPanelHandle, UnifiedChatPa
       }
 
       await createNewConversationTab({ type: "brainstorm", label: "Brainstorm" });
-    }, [activeId, tabConversations, setActiveId, setPanelState, createNewConversationTab]);
+    }, [
+      activeId,
+      conversationsLoading,
+      tabConversations,
+      setActiveId,
+      setPanelState,
+      createNewConversationTab,
+    ]);
 
     useImperativeHandle(
       ref,
