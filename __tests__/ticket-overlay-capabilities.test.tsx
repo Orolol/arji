@@ -27,7 +27,7 @@ const mockUseEpicDependencies = vi.hoisted(() => vi.fn());
 const mockUseProjectEpicsList = vi.hoisted(() => vi.fn());
 const mockUseNamedAgentsList = vi.hoisted(() => vi.fn());
 const mockUseEpicActivity = vi.hoisted(() => vi.fn());
-const mockFetchUnifiedSessions = vi.hoisted(() => vi.fn());
+const mockFindUnifiedSession = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/useEpicDetail", () => ({
   useEpicDetail: (...args: unknown[]) => mockUseEpicDetail(...args),
@@ -60,7 +60,7 @@ vi.mock("@/hooks/useProjectEvents", () => ({
   useProjectEvents: () => ({ status: "connected", pollTick: 0 }),
 }));
 vi.mock("@/lib/agent-sessions/session-list", () => ({
-  fetchUnifiedSessions: (...args: unknown[]) => mockFetchUnifiedSessions(...args),
+  findUnifiedSession: (...args: unknown[]) => mockFindUnifiedSession(...args),
 }));
 vi.mock("@/components/review/DiffViewer", () => ({
   DiffViewer: () => <div data-testid="diff-viewer" />,
@@ -192,7 +192,7 @@ beforeEach(() => {
   mockUseProjectEpicsList.mockReturnValue({ epics: [] });
   mockUseNamedAgentsList.mockReturnValue({ agents: [] });
   mockUseEpicActivity.mockReturnValue({ entries: [], refresh: vi.fn() });
-  mockFetchUnifiedSessions.mockResolvedValue([]);
+  mockFindUnifiedSession.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -504,7 +504,7 @@ describe("ticket activity in the agent band", () => {
 
   it("keeps the band collapsed to its label line with nothing recorded", async () => {
     renderSubject();
-    await waitFor(() => expect(mockFetchUnifiedSessions).toHaveBeenCalled());
+    await waitFor(() => expect(mockFindUnifiedSession).toHaveBeenCalled());
     expect(screen.queryByTestId("ticket-agent-timeline")).toBeNull();
     expect(screen.getByText("What the agent is doing")).toBeInTheDocument();
   });
