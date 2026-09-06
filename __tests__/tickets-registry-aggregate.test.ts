@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from "vitest";
 
-import { relativeAge as deskRelativeAge } from "@/components/desk/AttentionRow";
+import { formatRelative } from "@/lib/i18n/format";
 import { deriveProjects, type FailureSessionRow } from "@/lib/control-desk/aggregate";
 import {
   GROUP_PREVIEW,
@@ -16,7 +16,6 @@ import {
   deriveRegistryRows,
   type RegistrySessionRow,
   deriveRegistryTotals,
-  relativeAge,
   type RegistryEpicRow,
 } from "@/lib/tickets-registry/aggregate";
 import type { TicketDependencyEdge } from "@/lib/types/kanban";
@@ -123,6 +122,7 @@ function derive(input: {
     edges: input.edges ?? [],
     releaseVersionById: input.releases ?? new Map(),
     costByEpicId: input.costs ?? new Map(),
+    locale: "en",
     now: NOW,
   });
 }
@@ -254,11 +254,14 @@ describe("the waiting group", () => {
     expect(byId.get("3")!.activity).toBe("blocked · 1d ago");
   });
 
+  // 10.5 days before NOW reads "10d ago": the shared `formatRelative` floors
+  // whole units the way `timeAgo` and the French formatters always did; the
+  // registry's retired copy was the one variant that rounded half-days up.
   it("marks a backlog epic as a draft and dates it from creation", () => {
     const [row] = derive({ epics: [epic({ id: "1", status: "backlog" })] });
     expect(row.isDraft).toBe(true);
     expect(row.queueLabel).toBe("Backlog");
-    expect(row.activity).toBe("created · 11d ago");
+    expect(row.activity).toBe("created · 10d ago");
   });
 
   it("marks a ticket a queued session already owns", () => {
@@ -289,6 +292,7 @@ describe("composeActivity", () => {
     openFindings: null,
     createdAt: "2026-08-20T00:00:00.000Z",
     updatedAt: "2026-08-29T12:00:00.000Z",
+    locale: "en",
     now: NOW,
   } as const;
 
@@ -343,7 +347,7 @@ describe("composeActivity", () => {
     );
     expect(
       composeActivity({ ...base, group: "waiting", status: "backlog" }).activity,
-    ).toBe("created · 11d ago");
+    ).toBe("created · 10d ago");
     expect(composeActivity({ ...base, group: "waiting" }).activity).toBe(
       "updated · 1d ago",
     );
@@ -400,19 +404,49 @@ describe("data gaps", () => {
   });
 });
 
-describe("relativeAge", () => {
-  it("is byte-identical to the desk's formatter", () => {
-    const samples = [
-      null,
-      "not a date",
+describe("activity ages", () => {
+  /**
+   * The registry used to keep a byte-identical copy of the desk's
+   * `relativeAge` and pin the two together here. Both are the shared
+   * `formatRelative` now, so what this pins is that the column really goes
+   * through it — seconds while fresh, SQLite stamps read as UTC, an em dash
+   * for an unreadable one.
+   */
+  it("are the shared formatRelative, seconds precision", () => {
+    const stamp = (at: string | null) =>
+      formatRelative(at, { locale: "en", now: NOW, precision: "second" }) || "—";
+    const composed = (updatedAt: string | null) =>
+      composeActivity({
+        group: "released",
+        yourTurnKind: null,
+        status: "released",
+        blocked: false,
+        mergeReady: false,
+        lastLogLine: null,
+        askedAt: null,
+        failedAt: null,
+        failureError: null,
+        conflictAt: null,
+        branchName: null,
+        prNumber: null,
+        openFindings: null,
+        createdAt: null,
+        updatedAt,
+        locale: "en",
+        now: NOW,
+      }).activity;
+    for (const sample of [
       "2026-08-30T11:59:30.000Z",
       "2026-08-30T11:39:00.000Z",
       "2026-08-30 11:00:00",
       "2026-08-20T00:00:00.000Z",
-    ];
-    for (const sample of samples) {
-      expect(relativeAge(sample, NOW)).toBe(deskRelativeAge(sample, NOW));
+      "not a date",
+    ]) {
+      expect(composed(sample)).toBe(`released · ${stamp(sample)}`);
     }
+    expect(stamp("2026-08-30T11:59:30.000Z")).toBe("30s ago");
+    expect(stamp("2026-08-30 11:00:00")).toBe("1h ago");
+    expect(stamp("not a date")).toBe("—");
   });
 });
 

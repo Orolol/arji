@@ -1,5 +1,8 @@
 "use client";
 
+import { useLocale } from "next-intl";
+import { formatDateTime } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 /**
  * "MCP servers" settings surface, used at BOTH scopes.
  *
@@ -147,20 +150,24 @@ function secretKeys(server: McpServerView): string[] {
   return Object.keys(server.transport === "http" ? server.headers : server.env);
 }
 
-function healthLabel(server: McpServerView): {
+function healthLabel(
+  server: McpServerView,
+  locale: UiLocale,
+): {
   text: string;
   variant: "secondary" | "destructive" | "outline";
 } {
   if (server.lastCheckOk === null || server.lastCheckedAt === null) {
     return { text: "Never tested", variant: "outline" };
   }
-  const when = new Date(server.lastCheckedAt).toLocaleString();
+  const when = formatDateTime(server.lastCheckedAt, { locale, style: "dateTimeSeconds" });
   return server.lastCheckOk
     ? { text: `OK — ${when}`, variant: "secondary" }
     : { text: `Failed — ${when}`, variant: "destructive" };
 }
 
 export function McpServersSection({ projectId }: { projectId?: string | null }) {
+  const locale = useLocale();
   const scopedProjectId = projectId ?? null;
   const baseUrl = scopedProjectId
     ? `/api/projects/${scopedProjectId}/mcp-servers`
@@ -372,7 +379,7 @@ export function McpServersSection({ projectId }: { projectId?: string | null }) 
           </li>
         )}
         {servers.map((server) => {
-          const health = healthLabel(server);
+          const health = healthLabel(server, locale);
           return (
             <li
               key={server.id}

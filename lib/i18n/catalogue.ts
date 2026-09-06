@@ -117,6 +117,22 @@ export function messagesFor(locale: UiLocale): Messages {
   return messages;
 }
 
+/**
+ * One catalogue string by its full key, outside React — for the formatting
+ * family, which is pure and reads its two locale-data values this way.
+ * Everything that renders goes through `useTranslations` / `getTranslations`.
+ */
+export function catalogueValue(locale: UiLocale, key: TranslationKey): string {
+  const value = key
+    .split(".")
+    .reduce<unknown>(
+      (node, part) =>
+        node && typeof node === "object" ? (node as Record<string, unknown>)[part] : undefined,
+      messagesFor(locale),
+    );
+  return typeof value === "string" ? value : key;
+}
+
 /** The raw partial catalogue as checked in — what a translator edits. */
 export function partialCatalogueFor(locale: UiLocale): MessageTree {
   return locale === DEFAULT_UI_LOCALE ? (en as MessageTree) : PARTIAL_CATALOGUES[locale];

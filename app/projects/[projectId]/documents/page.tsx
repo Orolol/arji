@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { UploadZone } from "@/components/documents/UploadZone";
@@ -8,7 +9,7 @@ import { DocumentViewer } from "@/components/documents/DocumentViewer";
 import { Button } from "@/components/ui/button";
 import { FileText, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 import { isInternalMemoryDocKind } from "@/lib/documents/memory-constants";
 
 interface Doc {
@@ -23,6 +24,7 @@ interface Doc {
 }
 
 export default function DocumentsPage() {
+  const locale = useLocale();
   const params = useParams();
   const projectId = params.projectId as string;
   const [documents, setDocuments] = useState<Doc[]>([]);
@@ -127,7 +129,7 @@ export default function DocumentsPage() {
                   </span>
                   <span className="font-mono text-[11px] text-meta">
                     {formatSize(doc.sizeBytes)}
-                    {doc.createdAt ? ` · ${timeAgo(doc.createdAt)}` : ""}
+                    {doc.createdAt ? ` · ${formatRelative(doc.createdAt, { locale })}` : ""}
                   </span>
                 </button>
                 <span className="w-fit rounded-full bg-band px-[9px] py-[3px] text-[11.5px] text-muted-foreground">

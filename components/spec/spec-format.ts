@@ -5,11 +5,14 @@
  * prompt-anatomy route and the band agree on one row shape.
  *
  * CHARACTER FIDELITY IS LOAD-BEARING here: the em dash is U+2014, the middle
- * dot U+00B7, the arrow U+2192. The thousands separator is a PLAIN U+0020 —
- * `Intl.NumberFormat("fr-FR")` emits U+202F (narrow no-break space), which the
- * frame does not use and which Space Mono renders at a different advance.
+ * dot U+00B7, the arrow U+2192. Thousands grouping and relative time come
+ * from the shared family in `lib/i18n/format.ts`, which keeps the frame's
+ * PLAIN U+0020 where a locale would group with U+202F (measured there) — this
+ * file no longer formats anything by hand.
  */
 
+import { formatNumber, formatRelative } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 import type { PromptAnatomySegment } from "@/lib/tokens/estimator";
 
 /** The em dash every "unavailable numeral" collapses to. Never a zero. */
@@ -55,45 +58,28 @@ export function formatTokens(value: number | null | undefined): string {
 }
 
 /**
- * Thousands grouping with a PLAIN space: `1240` → `1 240`, per the frame.
- * See the file header for why this is not `Intl.NumberFormat`.
+ * The word count as the frame prints it: `1 240` in French (plain space),
+ * `1,240` in English — one call into the shared family, no hand-rolled
+ * grouping. A rounded whole number: a word count has no decimals.
  */
-export function formatCount(value: number): string {
-  return String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+export function formatCount(value: number, locale: UiLocale): string {
+  return formatNumber(Math.round(value), { locale });
 }
 
 /**
- * French relative time for the spec footer.
- *
- * `lib/utils/format-date.ts:timeAgo()` returns English ("12m ago") and is used
- * by 20+ other screens — this is a local French sibling, not a change to it.
- *
- * Never renders "il y a 0 s": under five seconds the answer is "à l'instant".
+ * The footer's two strings, resolved by the caller from the `Spec` namespace:
+ * `{ unsaved: t("footer.unsaved"), saved: (age) => t("footer.saved", { age }) }`.
  */
-export function formatFrenchRelative(
-  iso: string | null | undefined,
-  now: number = Date.now(),
-): string {
-  if (!iso) return EM_DASH;
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return EM_DASH;
-
-  const seconds = Math.max(0, Math.floor((now - then) / 1000));
-  if (seconds < 5) return "à l'instant";
-  if (seconds < 60) return `il y a ${seconds} s`;
-
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `il y a ${minutes} min`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `il y a ${hours} h`;
-
-  return `il y a ${Math.floor(hours / 24)} j`;
+export interface SpecFooterCopy {
+  unsaved: string;
+  saved: (age: string) => string;
 }
 
 /**
  * The trailing clause of the spec editor's mono footer:
- * `sauvegardé il y a 12 s` / `non sauvegardé` / `—`.
+ * `saved 12s ago` / `unsaved` / `—` (`sauvegardé il y a 12 s` /
+ * `non sauvegardé` under fr). Seconds are counted because the stamp is
+ * watched while typing; under five seconds it reads "just now", never "0s".
  */
 export function formatSaveState(
   {
@@ -103,11 +89,20 @@ export function formatSaveState(
     dirty: boolean;
     savedAt: string | null | undefined;
   },
-  now: number = Date.now(),
+  {
+    locale,
+    now = Date.now(),
+    copy,
+  }: {
+    locale: UiLocale;
+    now?: number;
+    copy: SpecFooterCopy;
+  },
 ): string {
-  if (dirty) return "non sauvegardé";
+  if (dirty) return copy.unsaved;
   if (!savedAt) return EM_DASH;
-  return `sauvegardé ${formatFrenchRelative(savedAt, now)}`;
+  const age = formatRelative(savedAt, { locale, now, precision: "second" });
+  return age ? copy.saved(age) : EM_DASH;
 }
 
 /**

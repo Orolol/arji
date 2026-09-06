@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Activity, Plus, RefreshCw } from "lucide-react";
@@ -13,7 +14,7 @@ import { useQaReports } from "@/hooks/useQaReports";
 import { checkTypeLabel } from "@/lib/qa/aggregate";
 import { consumeQueryParam } from "@/lib/navigation/deep-link";
 import { cn } from "@/lib/utils";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 
 type FilterCheckType = "tech_check" | "e2e_test" | "failure_digest" | null;
 
@@ -32,6 +33,7 @@ function statusTone(status: string): string {
 }
 
 export default function QAPage() {
+  const locale = useLocale();
   const params = useParams();
   const searchParams = useSearchParams();
   const projectId = params.projectId as string;
@@ -213,7 +215,7 @@ export default function QAPage() {
                   {report.status}
                 </span>
                 <span className="ml-auto font-mono text-[11px] text-meta">
-                  {timeAgo(report.createdAt)}
+                  {formatRelative(report.createdAt, { locale })}
                 </span>
               </div>
               <span className="line-clamp-2 text-[13.5px] font-medium leading-[1.35]">

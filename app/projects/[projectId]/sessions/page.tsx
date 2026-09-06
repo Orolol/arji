@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -26,7 +27,7 @@ import {
 } from "@/components/night/night-run-format";
 import { useNightRuns } from "@/hooks/useNightRuns";
 import { formatCostUsd } from "@/lib/utils/format-usage";
-import { formatTime } from "@/lib/utils/format-date";
+import { formatDateTime } from "@/lib/i18n/format";
 import { isNightRunId, type NightRunListEntry } from "@/lib/night/constants";
 import { cn } from "@/lib/utils";
 import {
@@ -737,10 +738,11 @@ function NightRunRow({
   run: NightRunListEntry;
   onOpen: () => void;
 }) {
+  const locale = useLocale();
   const isLive = run.state === "running" && !run.interrupted;
   const subline = [
     run.runId,
-    formatTime(run.startedAt),
+    formatDateTime(run.startedAt, { locale, style: "dayTime" }),
     formatNightRunDuration(run.startedAt, run.endedAt),
     run.interrupted ? "rebuilt from history" : null,
     run.abortReason,
@@ -984,6 +986,7 @@ function LastActivity({
   value: string | null;
   sessionId: string;
 }) {
+  const locale = useLocale();
   return (
     <span
       data-testid={`session-activity-${sessionId}`}
@@ -993,7 +996,7 @@ function LastActivity({
       )}
       title={value ?? undefined}
     >
-      {value ? formatTime(value) : "—"}
+      {value ? formatDateTime(value, { locale, style: "dayTime" }) : "—"}
     </span>
   );
 }

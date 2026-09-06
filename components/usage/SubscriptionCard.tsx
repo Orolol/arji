@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { TriangleAlert } from "lucide-react";
 
 import {
@@ -10,10 +11,9 @@ import {
 } from "@/components/piscine";
 import { cn } from "@/lib/utils";
 import { formatCostUsd, formatTokens } from "@/lib/utils/format-usage";
+import { formatDayLabel, formatRelative } from "@/lib/i18n/format";
 import {
   formatCountdown,
-  formatDayLabel,
-  formatRelativeAge,
   numberOrDash,
   parseIsoMs,
   providerLabel,
@@ -153,6 +153,7 @@ function ClaudeLiveBody({
   live: ClaudeQuota;
   nowMs: number;
 }) {
+  const locale = useLocale();
   const capturedMs =
     sub.capturedAt === null ? null : new Date(sub.capturedAt).getTime();
   const ageMs =
@@ -225,7 +226,7 @@ function ClaudeLiveBody({
           data-testid="usage-sub-claude-captured"
         >
           {stale && <StaleMark />}
-          Live · polled {formatRelativeAge(ageMs)} ago · claude CLI
+          Live · polled {formatRelative(nowMs - ageMs, { locale, now: nowMs })} · claude CLI
           {stale ? " — stale" : ""}
         </p>
       )}
@@ -327,6 +328,7 @@ function CodexLiveBody({
   live: CodexLiveQuota;
   nowMs: number;
 }) {
+  const locale = useLocale();
   const capturedMs =
     sub.capturedAt === null ? null : new Date(sub.capturedAt).getTime();
   const ageMs =
@@ -357,7 +359,7 @@ function CodexLiveBody({
           data-testid="usage-sub-codex-captured"
         >
           {stale && <StaleMark />}
-          Live · polled {formatRelativeAge(ageMs)} ago · codex app-server
+          Live · polled {formatRelative(nowMs - ageMs, { locale, now: nowMs })} · codex app-server
           {stale ? " — stale" : ""}
         </p>
       )}
@@ -431,6 +433,7 @@ function CodexBucketRow({
  * calendar dates, not Arij's local ones.
  */
 function CodexHistoryStrip({ live }: { live: CodexLiveQuota }) {
+  const locale = useLocale();
   const days = live.dailyUsage.slice(-30);
   if (days.length === 0 && live.lifetimeTokens === null) return null;
 
@@ -469,10 +472,10 @@ function CodexHistoryStrip({ live }: { live: CodexLiveQuota }) {
               than at the tracked-mono 9.5/10.5 allowance. */}
           <div className="mt-[6px] flex justify-between">
             <Mono size={11} tone="muted">
-              {formatDayLabel(days[0].date)}
+              {formatDayLabel(days[0].date, locale)}
             </Mono>
             <Mono size={11} tone="muted">
-              {formatDayLabel(days[days.length - 1].date)}
+              {formatDayLabel(days[days.length - 1].date, locale)}
             </Mono>
           </div>
         </>
@@ -523,6 +526,7 @@ function ProviderReportedBody({
   sub: SubscriptionStatus;
   nowMs: number;
 }) {
+  const locale = useLocale();
   if (sub.capturedAt === null) {
     return (
       <p
@@ -569,7 +573,7 @@ function ProviderReportedBody({
         data-testid="usage-sub-codex-captured"
       >
         {stale && <StaleMark />}
-        Captured {formatRelativeAge(ageMs)} ago · ~/.codex/sessions
+        Captured {formatRelative(nowMs - ageMs, { locale, now: nowMs })} · ~/.codex/sessions
         {stale ? " — stale" : ""}
       </p>
     </>

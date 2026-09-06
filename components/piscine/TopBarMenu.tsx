@@ -38,11 +38,6 @@ import { Mono } from "./Mono";
 /** Poll cadence while a menu is held open. Slower than the desk's own 4s. */
 const OPEN_POLL_MS = 10_000;
 
-/** French agreement for the digest lines — one is not "1 prêts". */
-function plural(count: number, one: string, many: string): string {
-  return count > 1 ? many : one;
-}
-
 /** Per-panel geometry, measured off the frame. */
 const CARD: Record<string, { card: number; panel: number }> = {
   morning: { card: 560, panel: 200 },
@@ -323,30 +318,32 @@ function MorningPanel({
   linkClass: string;
   onNavigate: () => void;
 }) {
+  // Agreement lives in the catalogue as ICU plurals (`{count, plural, …}`),
+  // where the language that needs it declares it — not in a helper here.
+  const t = useTranslations("TopBar");
   const lines: { key: string; text: string; danger?: boolean }[] = [];
 
   if (data) {
     const shipped = data.today.ticketsShipped;
     if (shipped !== null && shipped > 0) {
-      lines.push({ key: "shipped", text: `${shipped} land${plural(shipped, "é", "és")} aujourd'hui` });
+      lines.push({ key: "shipped", text: t("digest.shipped", { count: shipped }) });
     }
     if (data.heldBackCount > 0) {
       lines.push({
         key: "blocking",
-        text: `${data.heldBackCount} bloqu${plural(data.heldBackCount, "é", "és")} par une finding`,
+        text: t("digest.blocking", { count: data.heldBackCount }),
         danger: true,
       });
     }
     if (data.readyToLand.length > 0) {
-      const ready = data.readyToLand.length;
-      lines.push({ key: "ready", text: `${ready} prêt${plural(ready, "", "s")} à lander` });
+      lines.push({ key: "ready", text: t("digest.ready", { count: data.readyToLand.length }) });
     }
     const waiting =
       data.yourTurn.awaitingReply.length +
       data.yourTurn.failed.length +
       data.yourTurn.conflicts.length;
     if (waiting > 0) {
-      lines.push({ key: "waiting", text: `${waiting} en attente de toi` });
+      lines.push({ key: "waiting", text: t("digest.waiting", { count: waiting }) });
     }
   }
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { useLocale } from "next-intl";
+import { formatDateTime } from "@/lib/i18n/format";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -45,6 +47,7 @@ interface ChatMessage {
 }
 
 export default function ChatDetailPage() {
+  const locale = useLocale();
   const params = useParams();
   const projectId = params.projectId as string;
   const conversationId = params.conversationId as string;
@@ -230,8 +233,7 @@ export default function ChatDetailPage() {
             Created
           </span>
           <span className="text-[13px]">
-            {new Date(meta.createdAt).toLocaleDateString()}{" "}
-            {new Date(meta.createdAt).toLocaleTimeString()}
+            {formatDateTime(meta.createdAt, { locale, style: "dateTimeSeconds" })}
           </span>
         </div>
         <div className="flex items-center justify-between gap-4 border-y border-border-soft py-[11px]">

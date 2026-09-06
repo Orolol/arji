@@ -1,11 +1,12 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Loader2, Plus, Sparkles, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MarkdownContent } from "@/components/chat/MarkdownContent";
 import { usePolling } from "@/hooks/usePolling";
-import { formatDateTime } from "@/lib/utils/format-date";
+import { formatDateTime } from "@/lib/i18n/format";
 import { cn } from "@/lib/utils";
 
 interface QaReport {
@@ -177,6 +178,7 @@ export function ReportDetail({
   onCreateEpics,
   onReportUpdated,
 }: ReportDetailProps) {
+  const locale = useLocale();
   const [report, setReport] = useState<QaReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -386,7 +388,7 @@ export function ReportDetail({
           {duration ? ` · ${duration}` : ""}
         </span>
         <span className="ml-auto font-mono text-[11px] text-meta">
-          {formatDateTime(report.createdAt)}
+          {formatDateTime(report.createdAt, { locale, style: "dateTimeSeconds" }) || "-"}
         </span>
       </div>
 

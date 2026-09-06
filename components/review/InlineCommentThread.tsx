@@ -1,10 +1,11 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Check, Trash2, User, Bot } from "lucide-react";
 import type { ReviewComment } from "@/hooks/useReviewComments";
-import { formatTime } from "@/lib/utils/format-date";
+import { formatDateTime } from "@/lib/i18n/format";
 
 interface InlineCommentThreadProps {
   comments: ReviewComment[];
@@ -17,6 +18,7 @@ export function InlineCommentThread({
   onUpdate,
   onDelete,
 }: InlineCommentThreadProps) {
+  const locale = useLocale();
   return (
     <div className="space-y-1">
       {comments.map((comment) => (
@@ -38,7 +40,7 @@ export function InlineCommentThread({
               {comment.author === "agent" ? "Agent" : "You"}
             </span>
             <span className="text-muted-foreground">
-              {formatTime(comment.createdAt)}
+              {formatDateTime(comment.createdAt, { locale, style: "dayTime" })}
             </span>
             {comment.status === "resolved" && (
               <Badge variant="outline" className="text-[10px] h-4 px-1">

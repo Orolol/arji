@@ -2,14 +2,14 @@
 
 import * as React from "react";
 import { RotateCcw } from "lucide-react";
+import { useLocale } from "next-intl";
 
 import { Mono, PillButton, SurfaceCard } from "@/components/piscine";
 import type { Conversation } from "@/hooks/useConversations";
 import { isPersistentChatProvider } from "@/lib/agent-config/constants";
 import { resolveLegacyConversationLabel } from "@/lib/chat/parity-contract";
 import type { DeskProject } from "@/lib/control-desk/types";
-
-import { relativeAge } from "./relative-age";
+import { formatRelative } from "@/lib/i18n/format";
 
 /**
  * One row of the 300px conversation roster (frame 11a, left column).
@@ -49,8 +49,10 @@ export function ConversationRosterCard({
     conversation.label,
   );
   const shortName = project?.shortName?.toUpperCase() ?? "—";
-  const age = relativeAge(conversation.createdAt, now);
-  const meta = `${shortName} · ${agentLabel} · ${age ?? "—"}`;
+  const locale = useLocale();
+  // An unreadable timestamp is an em dash upstream of the join, never a guess.
+  const age = formatRelative(conversation.createdAt, { locale, now }) || "—";
+  const meta = `${shortName} · ${agentLabel} · ${age}`;
 
   const persistent = isPersistentChatProvider(conversation.provider);
   const hot = conversation.persistentSessionState === "hot";

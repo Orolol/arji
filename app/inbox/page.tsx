@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -13,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useInbox, type InboxItem } from "@/hooks/useInbox";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 import {
   isBuildableStatus,
   COLUMN_LABELS,
@@ -63,6 +64,7 @@ function InboxRow({
   ) => Promise<void>;
   onMarkRead: (epicId: string) => Promise<void>;
 }) {
+  const locale = useLocale();
   const [replyText, setReplyText] = useState("");
   const [busy, setBusy] = useState<"reply" | "dispatch" | "read" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -193,7 +195,7 @@ function InboxRow({
       )}
       <p className="text-xs text-muted-foreground">
         {item.latestCommentAuthor ? `${item.latestCommentAuthor} · ` : ""}
-        {timeAgo(item.latestCommentCreatedAt)}
+        {formatRelative(item.latestCommentCreatedAt, { locale })}
       </p>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">

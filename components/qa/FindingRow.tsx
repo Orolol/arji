@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { Hammer } from "lucide-react";
 
 import {
@@ -9,7 +10,8 @@ import {
   SurfaceCard,
   projectTone,
 } from "@/components/piscine";
-import { formatRelativeAge } from "@/components/usage/formatters";
+import { formatRelative } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 import type { DeskProject } from "@/lib/control-desk/types";
 import type { QaFinding } from "@/lib/qa/types";
 import { cn } from "@/lib/utils";
@@ -67,21 +69,16 @@ export interface FindingRowProps {
 }
 
 /**
- * "6m" / "1h" / "2h" — `components/usage/formatters.ts`, already shipped and
- * client-safe. An unparseable stamp is an em-dash, never "just now".
- *
- * SQLite's CURRENT_TIMESTAMP writes "2026-08-30 06:00:00" while the routes
- * write ISO; the space form is normalised to UTC first, the same way
- * `AttentionRow.relativeAge` does it.
+ * "6m ago" / "1h ago" / "2h ago" — the shared `formatRelative`, which also
+ * reads SQLite's zone-less "2026-08-30 06:00:00" as UTC. An unparseable stamp
+ * is an em-dash, never "just now".
  */
-export function findingAge(filedAt: string | null, now: number = Date.now()): string {
-  if (!filedAt) return "—";
-  const normalized = filedAt.includes("T")
-    ? filedAt
-    : `${filedAt.replace(" ", "T")}Z`;
-  const then = Date.parse(normalized);
-  if (Number.isNaN(then)) return "—";
-  return formatRelativeAge(Math.max(0, now - then));
+export function findingAge(
+  filedAt: string | null,
+  locale: UiLocale,
+  now: number = Date.now(),
+): string {
+  return formatRelative(filedAt, { locale, now }) || "—";
 }
 
 export function FindingRow({
@@ -93,6 +90,7 @@ export function FindingRow({
   pending = false,
   className,
 }: FindingRowProps) {
+  const locale = useLocale();
   const minor = finding.tier === "minor";
   const tone = projectTone(project?.colorIndex ?? 0);
 
@@ -148,7 +146,7 @@ export function FindingRow({
         className="order-none ml-auto min-w-0 truncate lg:ml-0 lg:shrink-0"
       >
         <Mono size={10} tone={minor ? "you-mid" : "muted"}>
-          {`${finding.reviewer ?? "—"} · ${findingAge(finding.filedAt)}`}
+          {`${finding.reviewer ?? "—"} · ${findingAge(finding.filedAt, locale)}`}
         </Mono>
       </span>
 

@@ -51,6 +51,10 @@ export function findOversizedArg(args: string[]): string | undefined {
  * The error shown instead of a bare `spawn E2BIG` when a provider has no way
  * to move the prompt off argv. It names the measured size and the cap so the
  * next step (trim the ticket, or switch provider) is obvious.
+ *
+ * PINNED TO "en-US" ON PURPOSE. This text is persisted on the session as its
+ * error and read back by agents and by the forensic pass; it is not interface
+ * copy and must never follow the interface locale (see lib/i18n/format.ts).
  */
 export function oversizedArgMessage(cliName: string, bytes: number): string {
   return (

@@ -1,5 +1,7 @@
 import { PROVIDER_LABELS } from "@/lib/agent-config/constants";
 import { projectTone, type ProjectTone } from "@/components/piscine";
+import { formatDateTime } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 
 /**
  * Pure formatting helpers for the Usage observatory.
@@ -15,14 +17,8 @@ export function providerLabel(provider: string): string {
 }
 
 /** Local wall clock, 24h — the report's own generation time. */
-export function formatClock(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+export function formatClock(iso: string, locale: UiLocale): string {
+  return formatDateTime(iso, { locale, style: "clock" }) || "—";
 }
 
 /** "3d 2h" / "4h 12m" / "12m" — coarse by design, never seconds-accurate. */
@@ -52,41 +48,11 @@ export function numberOrDash(value: number | null): string {
   return value === null ? "—" : String(value);
 }
 
-/** Age of a snapshot: "less than a minute" / "42m" / "5h" / "62d". */
-export function formatRelativeAge(ms: number): string {
-  const minutes = Math.floor(ms / 60000);
-  if (minutes < 1) return "less than a minute";
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
-}
-
-export const MONTH_LABELS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-
-/**
- * "2026-08-18" -> "Aug 18". Parsed by hand: `new Date("2026-08-18")` is UTC
- * midnight and would render the previous day west of Greenwich, while these
- * keys are already local calendar dates.
+/*
+ * The snapshot age ("polled 42m ago") and the day labels ("Aug 18") used to
+ * be formatted here in English by hand; both now come from the shared family
+ * — `formatRelative` and `formatDayLabel` in lib/i18n/format.ts.
  */
-export function formatDayLabel(date: string): string {
-  const [year, month, day] = date.split("-").map(Number);
-  if (!year || !month || !day || month < 1 || month > 12) return date;
-  return `${MONTH_LABELS[month - 1]} ${day}`;
-}
 
 /**
  * Window label derived from what the provider actually emitted — never

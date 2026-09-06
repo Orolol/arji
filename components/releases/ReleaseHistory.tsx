@@ -1,11 +1,12 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import * as React from "react";
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { BandHeader, Mono, QuietLink, Stamp, StrataBand } from "@/components/piscine";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 
 import {
   displayVersion,
@@ -37,6 +38,7 @@ export function ReleaseHistory({
   loading,
   onInspect,
 }: ReleaseHistoryProps) {
+  const locale = useLocale();
   // One at a time: a history card with four open rows is a list, not a history.
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -94,7 +96,7 @@ export function ReleaseHistory({
                     {displayVersion(release.version)}
                   </Mono>
                   <Mono size={10.5} tone="muted" clamp={1}>
-                    {`${ticketIds.length} ticket${ticketIds.length === 1 ? "" : "s"} · ${timeAgo(release.createdAt)}`}
+                    {`${ticketIds.length} ticket${ticketIds.length === 1 ? "" : "s"} · ${formatRelative(release.createdAt, { locale })}`}
                   </Mono>
                   {hasStamps ? (
                     <span className="ml-auto flex shrink-0 items-center gap-[10px]">

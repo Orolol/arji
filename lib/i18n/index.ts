@@ -20,5 +20,21 @@ export {
 } from "./locales";
 export type { UiLocale } from "./locales";
 
-export { messagesFor, partialCatalogueFor } from "./catalogue";
+export { catalogueValue, messagesFor, partialCatalogueFor } from "./catalogue";
 export type { Messages, TranslationKey } from "./catalogue";
+
+export {
+  formatDateTime,
+  formatDayLabel,
+  formatNumber,
+  formatRelative,
+  parseTimestamp,
+  pluralCategory,
+} from "./format";
+export type {
+  DateTimeStyle,
+  FormatDateTimeOptions,
+  FormatNumberOptions,
+  FormatRelativeOptions,
+  Timestamp,
+} from "./format";

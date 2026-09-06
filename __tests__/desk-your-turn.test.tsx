@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { relativeAge } from "@/components/desk/AttentionRow";
+import { formatRelative } from "@/lib/i18n/format";
 import { YourTurnBand } from "@/components/desk/YourTurnBand";
 import { deriveProjects } from "@/lib/control-desk/aggregate";
 import type {
@@ -204,13 +204,17 @@ describe("FAILED", () => {
   });
 
   it("formats the age in the frame's units", () => {
+    // The failure row's stamp is the shared `formatRelative`, counted in
+    // seconds while fresh; the row prints an em dash for an unreadable one.
     const now = new Date("2026-08-28T12:00:00.000Z");
-    expect(relativeAge("2026-08-28T11:59:30.000Z", now)).toBe("30s ago");
-    expect(relativeAge("2026-08-28T11:39:00.000Z", now)).toBe("21m ago");
-    expect(relativeAge("2026-08-28T09:00:00.000Z", now)).toBe("3h ago");
+    const age = (at: string | null) =>
+      formatRelative(at, { locale: "en", now, precision: "second" });
+    expect(age("2026-08-28T11:59:30.000Z")).toBe("30s ago");
+    expect(age("2026-08-28T11:39:00.000Z")).toBe("21m ago");
+    expect(age("2026-08-28T09:00:00.000Z")).toBe("3h ago");
     // SQLite CURRENT_TIMESTAMP has no zone marker and is UTC.
-    expect(relativeAge("2026-08-28 11:39:00", now)).toBe("21m ago");
-    expect(relativeAge(null, now)).toBe("—");
+    expect(age("2026-08-28 11:39:00")).toBe("21m ago");
+    expect(age(null)).toBe("");
   });
 });
 

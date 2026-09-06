@@ -1,5 +1,8 @@
 "use client";
 
+import { useLocale } from "next-intl";
+import { formatDateTime } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Check, Copy } from "lucide-react";
 
@@ -54,13 +57,12 @@ export interface GitHubCardProps {
 /** How long the "Copié" acknowledgement stays up. */
 const COPIED_RESET_MS = 1600;
 
-function formatObtainedAt(iso: string): string {
-  const parsed = Date.parse(iso);
-  if (Number.isNaN(parsed)) return "";
-  return new Date(parsed).toLocaleDateString();
+function formatObtainedAt(iso: string, locale: UiLocale): string {
+  return formatDateTime(iso, { locale, style: "date" });
 }
 
 export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps) {
+  const locale = useLocale();
   const [token, setToken] = useState("");
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
@@ -424,7 +426,7 @@ export function GitHubCard({ hasSavedToken, oauthMeta = null }: GitHubCardProps)
     }
 
     if (hasToken && meta) {
-      const obtainedAt = formatObtainedAt(meta.obtainedAt);
+      const obtainedAt = formatObtainedAt(meta.obtainedAt, locale);
       return (
         <div data-testid="github-connected" className="flex flex-col gap-[8px]">
           <Mono size={12} tone="ink" as="div">

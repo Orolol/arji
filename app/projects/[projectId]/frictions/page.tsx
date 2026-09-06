@@ -1,5 +1,7 @@
 "use client";
 
+import { useLocale } from "next-intl";
+import { formatDateTime } from "@/lib/i18n/format";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -40,6 +42,7 @@ function isOpen(friction: Friction): boolean {
 }
 
 export default function ProjectFrictionsPage() {
+  const locale = useLocale();
   const { projectId } = useParams<{ projectId: string }>();
   const [frictions, setFrictions] = useState<Friction[]>([]);
   const [openCount, setOpenCount] = useState(0);
@@ -233,7 +236,7 @@ export default function ProjectFrictionsPage() {
                           Source session
                         </Link>
                         <time dateTime={friction.createdAt}>
-                          {new Date(friction.createdAt).toLocaleString()}
+                          {formatDateTime(friction.createdAt, { locale, style: "dateTimeSeconds" })}
                         </time>
                       </div>
                     </div>

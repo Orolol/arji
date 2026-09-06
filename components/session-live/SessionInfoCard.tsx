@@ -1,5 +1,7 @@
 "use client";
 
+import { useLocale } from "next-intl";
+import { formatDateTime } from "@/lib/i18n/format";
 import type { ReactNode } from "react";
 import { Brain, Download, RefreshCw } from "lucide-react";
 
@@ -97,6 +99,7 @@ export function SessionInfoCard({
   distilling,
   distillError,
 }: SessionInfoCardProps) {
+  const locale = useLocale();
   // Read from the SESSION ROW, never from the named agent: the agent can be
   // edited or deleted after the run and the trace has to stay true.
   const cliOptions = describeProviderOptions(
@@ -158,7 +161,7 @@ export function SessionInfoCard({
         <KeyValueRow label="Started">
           <Mono size={11.5}>
             {session.startedAt
-              ? new Date(session.startedAt).toLocaleTimeString()
+              ? formatDateTime(session.startedAt, { locale, style: "time" })
               : "—"}
           </Mono>
         </KeyValueRow>
@@ -185,7 +188,7 @@ export function SessionInfoCard({
         <KeyValueRow label="Completed">
           <Mono size={11.5}>
             {completedAt
-              ? new Date(completedAt).toLocaleString()
+              ? formatDateTime(completedAt, { locale, style: "dateTimeSeconds" })
               : isRunning
                 ? "In progress..."
                 : "—"}

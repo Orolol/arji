@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams } from "next/navigation";
@@ -18,7 +19,7 @@ import {
 import { useNamedAgentsList } from "@/hooks/useNamedAgentsList";
 import { useWorktrees, type WorktreeState } from "@/hooks/useWorktrees";
 import { cn } from "@/lib/utils";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 import {
   Loader2,
   ArrowDownToLine,
@@ -74,6 +75,7 @@ function diffLineTone(line: string): string {
 }
 
 export default function GitSyncPage() {
+  const locale = useLocale();
   const params = useParams();
   const projectId = params.projectId as string;
 
@@ -380,7 +382,7 @@ export default function GitSyncPage() {
                 }
               >
                 {lastFetchedAt !== null
-                  ? `Synced ${timeAgo(new Date(lastFetchedAt).toISOString())}`
+                  ? `Synced ${formatRelative(lastFetchedAt, { locale })}`
                   : "Never synced"}
               </span>
             </TooltipTrigger>

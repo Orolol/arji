@@ -3,7 +3,7 @@
  *
  * No React, no imports from `components/`: everything here is a plain function
  * over the API row shapes, so the screen's arithmetic is unit-testable without
- * a DOM. Formatting that already exists elsewhere in the repo (`timeAgo`) is
+ * a DOM. Formatting that already exists elsewhere in the repo (`formatRelative`) is
  * NOT re-implemented here — the screen imports it from `lib/utils/format-date`.
  */
 
@@ -155,7 +155,7 @@ export function buildChangelogPreview(
 }
 
 /**
- * `timeAgo` output → the stat-caption casing the frame draws: only the unit
+ * `formatRelative` output → the stat-caption casing the frame draws: only the unit
  * word is uppercased, so "4d ago" reads "4d AGO" and not "4D AGO".
  * An unknown age is an em-dash, never a zero and never "just now".
  */

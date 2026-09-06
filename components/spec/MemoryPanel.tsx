@@ -1,5 +1,7 @@
 "use client";
 
+import { useLocale } from "next-intl";
+import { formatDateTime } from "@/lib/i18n/format";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AlertTriangle, FileText, Moon, RotateCcw, Sparkles } from "lucide-react";
@@ -116,6 +118,7 @@ export function MemoryPanel({
   mode,
   className,
 }: MemoryPanelProps) {
+  const locale = useLocale();
   const hookParams = useParams();
   const router = useRouter();
   const projectId = propsProjectId || (hookParams?.projectId as string) || "";
@@ -564,7 +567,7 @@ export function MemoryPanel({
                 <span className="text-[12px] text-muted-foreground">
                   A pre-dream snapshot exists
                   {archive.updatedAt
-                    ? ` (from ${new Date(archive.updatedAt).toLocaleString()})`
+                    ? ` (from ${formatDateTime(archive.updatedAt, { locale, style: "dateTimeSeconds" })})`
                     : ""}
                   .
                 </span>
@@ -632,7 +635,7 @@ export function MemoryPanel({
                 <Mono size={11} tone="live-mid" clamp={1}>
                   {`${sourceLabel(provenance?.source)}${
                     provenanceStamp
-                      ? ` · ${new Date(provenanceStamp).toLocaleString()}`
+                      ? ` · ${formatDateTime(provenanceStamp, { locale, style: "dateTimeSeconds" })}`
                       : ""
                   }`}
                 </Mono>

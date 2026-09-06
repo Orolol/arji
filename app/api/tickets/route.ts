@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { KANBAN_COLUMNS, type KanbanStatus } from "@/lib/types/kanban";
 import { REGISTRY_SORTS, type RegistrySort } from "@/lib/tickets-registry/sort";
 import { getSessionLastActivityAt } from "@/lib/agents/watchdog";
+import { resolveUiLocaleForRequest } from "@/lib/i18n/resolve-request-locale";
 import { db } from "@/lib/db";
 import {
   agentSessions,
@@ -806,6 +807,7 @@ export async function GET(request: Request) {
     dependencyEpics,
     releaseVersionById,
     costByEpicId,
+    locale: resolveUiLocaleForRequest(request),
     now,
   });
   const rows = derivedRows.filter((row) => !scopedStatus || row.status === scopedStatus);

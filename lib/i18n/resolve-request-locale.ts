@@ -32,6 +32,19 @@ export function readStoredUiLocale(): unknown {
 }
 
 /**
+ * The locale for an API route that composes interface strings on the server
+ * (the tickets registry's activity stamps). Reads the route's own `Request`
+ * rather than `next/headers`, so it works wherever a handler already holds
+ * the request — including unit tests that never enter a request scope.
+ */
+export function resolveUiLocaleForRequest(request: Request): UiLocale {
+  return resolveUiLocale({
+    stored: readStoredUiLocale(),
+    acceptLanguage: request.headers.get("accept-language"),
+  });
+}
+
+/**
  * The locale this request renders in. Called once per request by
  * `lib/i18n/request.ts`.
  *

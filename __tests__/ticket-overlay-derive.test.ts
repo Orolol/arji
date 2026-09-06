@@ -281,24 +281,27 @@ describe("session derivations", () => {
 
 describe("descriptionMeta", () => {
   it("builds priority and created from the columns that exist", () => {
-    const meta = descriptionMeta({
-      priority: 2,
-      createdAt: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-    });
+    const meta = descriptionMeta(
+      {
+        priority: 2,
+        createdAt: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
+      },
+      "en",
+    );
     expect(meta).toBe("priority high · created 2d ago");
   });
 
   it("adds the GitHub issue only when the column is set", () => {
     expect(
-      descriptionMeta({ priority: 1, createdAt: null, githubIssueNumber: 412 }),
+      descriptionMeta({ priority: 1, createdAt: null, githubIssueNumber: 412 }, "en"),
     ).toBe("priority medium · from GH #412");
-    expect(descriptionMeta({ priority: 1, createdAt: null })).toBe(
+    expect(descriptionMeta({ priority: 1, createdAt: null }, "en")).toBe(
       "priority medium",
     );
   });
 
   it("drops the created segment rather than printing a dash for it", () => {
-    expect(descriptionMeta({ priority: 0, createdAt: null })).toBe(
+    expect(descriptionMeta({ priority: 0, createdAt: null }, "en")).toBe(
       "priority low",
     );
   });

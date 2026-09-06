@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useCallback, useState } from "react";
 import { GitMerge, Hammer, RefreshCw, Send, X } from "lucide-react";
+import { useLocale } from "next-intl";
 
 import {
   GhostInputPill,
@@ -19,6 +20,7 @@ import type {
   DeskFailure,
   DeskProject,
 } from "@/lib/control-desk/types";
+import { formatRelative } from "@/lib/i18n/format";
 import { cn } from "@/lib/utils";
 
 /**
@@ -281,21 +283,6 @@ export interface FailedRowProps {
   className?: string;
 }
 
-/** "21m ago" — the frame's relative stamp, in the row's mono meta. */
-export function relativeAge(at: string | null, now: Date = new Date()): string {
-  if (!at) return "—";
-  const normalized = at.includes("T") ? at : `${at.replace(" ", "T")}Z`;
-  const then = Date.parse(normalized);
-  if (Number.isNaN(then)) return "—";
-  const seconds = Math.max(0, Math.round((now.getTime() - then) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
-}
-
 export function FailedRow({
   item,
   project,
@@ -306,7 +293,10 @@ export function FailedRow({
   className,
 }: FailedRowProps) {
   const onKeyDown = useRowEnter(() => void onRetry(item));
-  const meta = [relativeAge(item.failedAt), item.agentName].filter(Boolean).join(" · ");
+  const locale = useLocale();
+  // "21m ago" — the frame's relative stamp, counted in seconds while fresh.
+  const age = formatRelative(item.failedAt, { locale, precision: "second" }) || "—";
+  const meta = [age, item.agentName].filter(Boolean).join(" · ");
 
   return (
     <SurfaceCard

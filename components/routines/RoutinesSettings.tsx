@@ -1,5 +1,8 @@
 "use client";
 
+import { useLocale } from "next-intl";
+import { formatDateTime } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -103,19 +106,19 @@ function parseConfig(config: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function formatLastRun(value: string | null, serverTimezone: string): string {
+function formatLastRun(
+  value: string | null,
+  serverTimezone: string,
+  locale: UiLocale,
+): string {
   if (!value) return "Never run";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
+  return (
+    formatDateTime(value, {
+      locale,
+      style: "dateTime",
       ...(serverTimezone !== "local" ? { timeZone: serverTimezone } : {}),
-    }).format(date);
-  } catch {
-    return date.toLocaleString();
-  }
+    }) || value
+  );
 }
 
 function statusLabel(status: string | null): string {
@@ -149,6 +152,7 @@ function RoutineEditor({
   onDeleted,
   onCancelNew,
 }: RoutineEditorProps) {
+  const locale = useLocale();
   const initialKind = routine?.kind ?? kindOptions[0]?.kind ?? "night_run";
   const [kind, setKind] = useState<AvailableRoutineKind>(initialKind);
   const [enabled, setEnabled] = useState(routine?.enabled ?? true);
@@ -435,7 +439,7 @@ function RoutineEditor({
       {!isNew && routine.lastStatus !== "scheduled" && (
         <div className="mt-[13px] flex items-center gap-[7px] text-[11.5px] text-muted-foreground">
           <Clock3 className="h-[13px] w-[13px]" />
-          Last run: {formatLastRun(routine.lastRunAt, serverTimezone)}
+          Last run: {formatLastRun(routine.lastRunAt, serverTimezone, locale)}
           <span aria-hidden="true">·</span>
           Status: {statusLabel(routine.lastStatus)}
         </div>

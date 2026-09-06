@@ -1,18 +1,32 @@
 /**
- * The pure helpers behind frame 8b: token/word formatting, the French
- * relative save time, and the eight-keys-onto-six-segments folding that the
+ * The pure helpers behind frame 8b: token/word formatting, the relative save
+ * time (through the shared `formatRelative`, under the French seed and under
+ * English), and the eight-keys-onto-six-segments folding that the
  * prompt-anatomy route and the anatomy band both depend on.
+ *
+ * The French strings below are the ones the retired `formatFrenchRelative`
+ * printed; they now come from `lib/i18n/format.ts` under `locale: "fr"`.
  */
+import { createTranslator } from "next-intl";
 import { describe, expect, it } from "vitest";
 
 import {
   EM_DASH,
   countWords,
   formatCount,
-  formatFrenchRelative,
   formatSaveState,
   formatTokens,
+  type SpecFooterCopy,
 } from "@/components/spec/spec-format";
+import { messagesFor } from "@/lib/i18n/catalogue";
+import { formatRelative } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
+
+/** The footer copy exactly as SpecBand resolves it, from the real catalogue. */
+function footerCopy(locale: UiLocale): SpecFooterCopy {
+  const t = createTranslator({ locale, messages: messagesFor(locale), namespace: "Spec" });
+  return { unsaved: t("footer.unsaved"), saved: (age) => t("footer.saved", { age }) };
+}
 import {
   PROMPT_ANATOMY_ORDER,
   estimatePromptTokensBySections,
@@ -55,55 +69,63 @@ describe("formatTokens", () => {
 });
 
 describe("formatCount", () => {
-  it("groups thousands with a PLAIN space, not a narrow no-break space", () => {
-    expect(formatCount(1240)).toBe("1 240");
-    expect(formatCount(1240)).toContain(" ");
-    expect(formatCount(1240)).not.toContain(" ");
-    expect(formatCount(999)).toBe("999");
-    expect(formatCount(1234567)).toBe("1 234 567");
+  it("groups French thousands with a PLAIN space, not a narrow no-break space", () => {
+    expect(formatCount(1240, "fr")).toBe("1 240");
+    expect(formatCount(1240, "fr")).toContain(" ");
+    expect(formatCount(1240, "fr")).not.toContain("\u202f");
+    expect(formatCount(999, "fr")).toBe("999");
+    expect(formatCount(1234567, "fr")).toBe("1 234 567");
+  });
+
+  it("groups English thousands with the comma English uses", () => {
+    expect(formatCount(1240, "en")).toBe("1,240");
+    expect(formatCount(1234567, "en")).toBe("1,234,567");
+    expect(formatCount(999.6, "en")).toBe("1,000");
   });
 });
 
-describe("formatFrenchRelative", () => {
+describe("the spec footer's relative time (formatRelative, precision: second)", () => {
   const now = Date.parse("2026-08-28T12:00:00.000Z");
   const ago = (ms: number) => new Date(now - ms).toISOString();
+  const fr = (iso: string | null) =>
+    formatRelative(iso, { locale: "fr", now, precision: "second" });
 
   it("never says 'il y a 0 s'", () => {
-    expect(formatFrenchRelative(ago(4_000), now)).toBe("à l'instant");
-    expect(formatFrenchRelative(ago(0), now)).toBe("à l'instant");
+    expect(fr(ago(4_000))).toBe("à l'instant");
+    expect(fr(ago(0))).toBe("à l'instant");
   });
 
   it("counts seconds, minutes, hours and days", () => {
-    expect(formatFrenchRelative(ago(12_000), now)).toBe("il y a 12 s");
-    expect(formatFrenchRelative(ago(90_000), now)).toBe("il y a 1 min");
-    expect(formatFrenchRelative(ago(3 * 3_600_000), now)).toBe("il y a 3 h");
-    expect(formatFrenchRelative(ago(50 * 3_600_000), now)).toBe("il y a 2 j");
+    expect(fr(ago(12_000))).toBe("il y a 12 s");
+    expect(fr(ago(90_000))).toBe("il y a 1 min");
+    expect(fr(ago(3 * 3_600_000))).toBe("il y a 3 h");
+    expect(fr(ago(50 * 3_600_000))).toBe("il y a 2 j");
   });
 
-  it("renders an em dash for a missing or unparsable timestamp", () => {
-    expect(formatFrenchRelative(null, now)).toBe(EM_DASH);
-    expect(formatFrenchRelative("not-a-date", now)).toBe(EM_DASH);
+  it("is empty for a missing or unparsable timestamp — the em dash is the caller's", () => {
+    expect(fr(null)).toBe("");
+    expect(fr("not-a-date")).toBe("");
   });
 });
 
 describe("formatSaveState", () => {
   const now = Date.parse("2026-08-28T12:00:00.000Z");
+  const fr = { locale: "fr" as const, now, copy: footerCopy("fr") };
+  const en = { locale: "en" as const, now, copy: footerCopy("en") };
 
   it("reports unsaved edits", () => {
-    expect(formatSaveState({ dirty: true, savedAt: null }, now)).toBe(
-      "non sauvegardé",
-    );
+    expect(formatSaveState({ dirty: true, savedAt: null }, fr)).toBe("non sauvegardé");
+    expect(formatSaveState({ dirty: true, savedAt: null }, en)).toBe("unsaved");
   });
 
   it("reports an em dash when nothing was ever saved", () => {
-    expect(formatSaveState({ dirty: false, savedAt: null }, now)).toBe(EM_DASH);
+    expect(formatSaveState({ dirty: false, savedAt: null }, fr)).toBe(EM_DASH);
   });
 
-  it("reports the French relative time when clean", () => {
+  it("reports the relative time in the interface language when clean", () => {
     const savedAt = new Date(now - 12_000).toISOString();
-    expect(formatSaveState({ dirty: false, savedAt }, now)).toBe(
-      "sauvegardé il y a 12 s",
-    );
+    expect(formatSaveState({ dirty: false, savedAt }, fr)).toBe("sauvegardé il y a 12 s");
+    expect(formatSaveState({ dirty: false, savedAt }, en)).toBe("saved 12s ago");
   });
 });
 

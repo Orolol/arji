@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useLocale, useTranslations } from "next-intl";
 
 import {
   BandHeader,
@@ -84,8 +85,17 @@ export function SpecBand({
     return () => clearInterval(interval);
   }, []);
 
-  const words = loaded ? formatCount(countWords(spec)) : EM_DASH;
-  const saveState = formatSaveState({ dirty, savedAt }, now);
+  const locale = useLocale();
+  const t = useTranslations("Spec");
+  const words = loaded ? formatCount(countWords(spec), locale) : EM_DASH;
+  const saveState = formatSaveState(
+    { dirty, savedAt },
+    {
+      locale,
+      now,
+      copy: { unsaved: t("footer.unsaved"), saved: (age) => t("footer.saved", { age }) },
+    },
+  );
 
   function handleCardKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {

@@ -55,6 +55,9 @@ export const SESSION_CHUNK_ELISION_LABEL = `chunk capped by Arij at ${
  * Counted in BYTES, not characters: bytes are what the cap is expressed in
  * and what the cut is measured against, and reporting characters here would
  * be a second, differently-derived number for the same elision.
+ *
+ * Persisted into the stored chunk and parsed back by regex, so the numeral
+ * is pinned to "en-US" and never follows the interface locale.
  */
 export function chunkElisionMarker(elidedBytes: number): string {
   return `[… ${elidedBytes.toLocaleString(

@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { Check, ExternalLink, Tag, Upload } from "lucide-react";
 
 import {
@@ -11,7 +12,7 @@ import {
   pillButtonVariants,
   type ProjectTone,
 } from "@/components/piscine";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 import { cn } from "@/lib/utils";
 
 import { ChangelogAgentPopover } from "./ChangelogAgentPopover";
@@ -106,6 +107,7 @@ export function NextReleaseBand({
   publishError,
   onPublish,
 }: NextReleaseBandProps) {
+  const locale = useLocale();
   const inspecting = inspectRelease !== null;
   // Only reached after loading: an unknown candidate list is not an empty one.
   const composeEmpty = !inspecting && !loading && candidates.length === 0;
@@ -184,7 +186,7 @@ export function NextReleaseBand({
                   reason={ticketExclusionReason(epic)}
                   // There is no mergedAt column; for a `done` epic updatedAt IS
                   // the transition timestamp. An unknown one is an em-dash.
-                  meta={`merged ${timeAgo(epic.updatedAt ?? null) || "—"}`}
+                  meta={`merged ${formatRelative(epic.updatedAt, { locale }) || "—"}`}
                   onToggle={() => onToggleEpic(epic.id)}
                 />
               ))}

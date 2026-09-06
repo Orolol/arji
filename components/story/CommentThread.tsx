@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
@@ -8,7 +9,7 @@ import { TicketCommentContent } from "@/components/verify/TicketCommentContent";
 import { Send, User, Bot, Loader2, Hammer } from "lucide-react";
 import type { TicketComment } from "@/hooks/useTicketComments";
 import { useFeedAutoScroll } from "@/hooks/useFeedAutoScroll";
-import { formatTime } from "@/lib/utils/format-date";
+import { formatDateTime } from "@/lib/i18n/format";
 
 interface CommentThreadProps {
   projectId: string;
@@ -32,6 +33,7 @@ export function CommentThread({
   sendToDevDisabled,
   sendToDevLoading,
 }: CommentThreadProps) {
+  const locale = useLocale();
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +100,7 @@ export function CommentThread({
                     {comment.author === "agent" ? "Agent" : "You"}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {formatTime(comment.createdAt)}
+                    {formatDateTime(comment.createdAt, { locale, style: "dayTime" })}
                   </span>
                 </div>
                 <div className="text-sm">

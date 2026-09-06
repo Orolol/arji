@@ -14,7 +14,8 @@ import type { FeedItem } from "@/lib/kanban/activity-feed";
 import { MCP_CREATE_BUG_ACTIVITY_PREFIX } from "@/lib/mcp/create-bug-contract";
 import type { ProjectTone } from "@/lib/piscine/tokens";
 import { COLUMN_LABELS, PRIORITY_LABELS } from "@/lib/types/kanban";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 
 /* ------------------------------------------------------------------ */
 /* Identity                                                            */
@@ -470,14 +471,14 @@ export function descriptionMeta(epic: {
   priority?: number | null;
   createdAt?: string | null;
   githubIssueNumber?: number | null;
-}): string {
+}, locale: UiLocale): string {
   const segments: string[] = [];
 
   const priorityLabel =
     typeof epic.priority === "number" ? PRIORITY_LABELS[epic.priority] : undefined;
   if (priorityLabel) segments.push(`priority ${priorityLabel.toLowerCase()}`);
 
-  const created = epic.createdAt ? timeAgo(epic.createdAt) : "";
+  const created = formatRelative(epic.createdAt, { locale });
   if (created) segments.push(`created ${created}`);
 
   if (typeof epic.githubIssueNumber === "number") {

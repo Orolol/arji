@@ -1,5 +1,8 @@
 "use client";
 
+import { useLocale } from "next-intl";
+import { formatDateTime } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 import { Card } from "@/components/ui/card";
 import {
   ArrowRightLeft,
@@ -62,11 +65,8 @@ export function arijActionColor(kind: ArijActionItem["kind"]): string {
   return ARIJ_ACTION_COLORS[kind] ?? "text-muted-foreground";
 }
 
-export function formatArijActionTime(at: string | null): string | null {
-  if (!at) return null;
-  const date = new Date(at);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleTimeString();
+export function formatArijActionTime(at: string | null, locale: UiLocale): string | null {
+  return formatDateTime(at, { locale, style: "time" }) || null;
 }
 
 /**
@@ -76,6 +76,7 @@ export function formatArijActionTime(at: string | null): string | null {
  * sessions without MCP injection stay visually unchanged.
  */
 export function ArijActionsList({ actions }: { actions?: ArijActionItem[] | null }) {
+  const locale = useLocale();
   if (!actions || actions.length === 0) return null;
 
   return (
@@ -87,7 +88,7 @@ export function ArijActionsList({ actions }: { actions?: ArijActionItem[] | null
         {actions.map((action, idx) => {
           const Icon = arijActionIcon(action.kind);
           const color = arijActionColor(action.kind);
-          const time = formatArijActionTime(action.at);
+          const time = formatArijActionTime(action.at, locale);
           return (
             <li
               key={idx}

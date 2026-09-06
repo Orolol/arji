@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import Link from "next/link";
 
 import {
@@ -12,7 +13,7 @@ import {
 import type { DeskProject } from "@/lib/control-desk/types";
 import type { QaCheck } from "@/lib/qa/types";
 import { cn } from "@/lib/utils";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 
 /**
  * One line of QA CHECKS: a tech check, an E2E pass or a failure digest.
@@ -42,6 +43,7 @@ export interface QaCheckRowProps {
 }
 
 export function QaCheckRow({ check, project, className }: QaCheckRowProps) {
+  const locale = useLocale();
   /**
    * A check with no summary yet has genuinely nothing to say — an em-dash,
    * never an invented sentence.
@@ -89,7 +91,7 @@ export function QaCheckRow({ check, project, className }: QaCheckRowProps) {
           {line}
         </span>
         <Mono size={10} tone="muted" className="shrink-0">
-          {timeAgo(check.createdAt)}
+          {formatRelative(check.createdAt, { locale })}
         </Mono>
       </SurfaceCard>
     </Link>

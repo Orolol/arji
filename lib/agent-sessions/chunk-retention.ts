@@ -23,6 +23,9 @@ export const SESSION_CHUNK_PRUNE_LABEL = "pruned by Arij data retention";
  * Counted in CHARACTERS, not bytes: the retention tail budgets are character
  * budgets (`readChunkTail` slices characters), and reporting bytes here would
  * be a second, differently-derived number for the same elision.
+ *
+ * Persisted into the stored stream and parsed back by regex, so the numeral
+ * is pinned to "en-US" and never follows the interface locale.
  */
 export function chunkPruneMarker(prunedChars: number, prunedAt: string): string {
   return `[… ${prunedChars.toLocaleString(

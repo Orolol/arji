@@ -28,5 +28,23 @@
       "integrations": "Integrations",
       "appearance": "Appearance"
     }
+  },
+  "Format": {
+    "justNow": "just now",
+    "relativeStyle": "narrow"
+  },
+  "TopBar": {
+    "digest": {
+      "shipped": "{count} landed today",
+      "blocking": "{count} blocked by a finding",
+      "ready": "{count} ready to land",
+      "waiting": "{count} waiting on you"
+    }
+  },
+  "Spec": {
+    "footer": {
+      "unsaved": "unsaved",
+      "saved": "saved {age}"
+    }
   }
 }

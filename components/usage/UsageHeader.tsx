@@ -1,6 +1,7 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
+import { useLocale } from "next-intl";
 
 import { Mono, PillButton, SegmentedControl } from "@/components/piscine";
 import { formatClock } from "@/components/usage/formatters";
@@ -50,6 +51,7 @@ export function UsageHeader({
   loading,
   onRefresh,
 }: UsageHeaderProps) {
+  const locale = useLocale();
   return (
     <div
       data-testid="usage-controls"
@@ -75,7 +77,7 @@ export function UsageHeader({
           </span>
         )}
         <Mono size={10.5} tone="muted">
-          {`Updated ${formatClock(generatedAt)}`}
+          {`Updated ${formatClock(generatedAt, locale)}`}
         </Mono>
         <PillButton
           variant="outline"

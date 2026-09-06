@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import { useEffect, useState } from "react";
 import { GitMerge, RefreshCw } from "lucide-react";
 
@@ -8,7 +9,7 @@ import { PrBadge } from "@/components/github/PrBadge";
 import { useGitHubConfig } from "@/hooks/useGitHubConfig";
 import { useGitStatus } from "@/hooks/useGitStatus";
 import { useWorktrees } from "@/hooks/useWorktrees";
-import { timeAgo } from "@/lib/utils/format-date";
+import { formatRelative } from "@/lib/i18n/format";
 
 /**
  * Repository state, on Git Sync.
@@ -52,6 +53,7 @@ export function RepoStrataBand({
   gitRepoPath,
   defaultBranch,
 }: RepoStrataBandProps) {
+  const locale = useLocale();
   const config = useGitHubConfig(projectId);
   const repo = ownerRepo ?? config.ownerRepo;
   const enabled = Boolean(gitRepoPath);
@@ -112,7 +114,7 @@ export function RepoStrataBand({
   }
 
   const fetchedLabel = lastFetchedAt
-    ? `fetched ${timeAgo(new Date(lastFetchedAt).toISOString())}`
+    ? `fetched ${formatRelative(lastFetchedAt, { locale })}`
     : "never fetched";
 
   return (

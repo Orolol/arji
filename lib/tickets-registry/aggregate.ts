@@ -22,6 +22,8 @@
  *   released/done/waiting membership → `lib/types/kanban.ts` statuses
  */
 
+import { formatRelative } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 import {
   deriveAwaitingReply,
   deriveConflicts,
@@ -93,32 +95,6 @@ export const GROUP_PREVIEW: Record<RegistryGroup, number> = {
   released: 2,
 };
 
-/**
- * "21m ago" — the registry's relative stamp.
- *
- * DUPLICATED, deliberately and identically, from `relativeAge` in
- * `components/desk/AttentionRow.tsx`. That module is `"use client"`, so
- * importing it from this one would drag a client reference into the route
- * handler's server graph, where the export is a proxy rather than a function.
- * `__tests__/tickets-registry-aggregate.test.ts` pins the two implementations
- * to identical output so the duplication cannot rot into two different
- * roundings. If the desk ever moves this into a shared module, delete this
- * copy and import that one — never write a third.
- */
-export function relativeAge(at: string | null, now: Date = new Date()): string {
-  if (!at) return "—";
-  const normalized = at.includes("T") ? at : `${at.replace(" ", "T")}Z`;
-  const then = Date.parse(normalized);
-  if (Number.isNaN(then)) return "—";
-  const seconds = Math.max(0, Math.round((now.getTime() - then) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
-}
-
 /** `null` → the em-dash. A count that does not exist is never a zero. */
 export function fmtCount(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : "—";
@@ -161,6 +137,13 @@ export interface RegistryDeriveInput {
   releaseVersionById: ReadonlyMap<string, string>;
   /** `SUM(total_cost_usd)` per epic. Absent AND null both mean "no cost". */
   costByEpicId: ReadonlyMap<string, number | null>;
+  /**
+   * The interface locale the activity stamps are written in. The route
+   * composes these strings on the server, so it resolves the request's
+   * locale (`resolveUiLocaleForRequest`) and passes it down: the shared
+   * `formatRelative` never guesses one.
+   */
+  locale: UiLocale;
   now?: Date;
 }
 
@@ -202,6 +185,7 @@ export interface ActivityInput {
   openFindings: number | null;
   createdAt: string | null;
   updatedAt: string | null;
+  locale: UiLocale;
   now?: Date;
 }
 
@@ -212,12 +196,16 @@ export interface ActivityInput {
  * Real codepoints throughout: `›` U+203A, `…` U+2026, `·` U+00B7. ASCII
  * lookalikes break Space Mono's tabular alignment (see `components/piscine/
  * Mono.tsx`).
+ *
+ * "21m ago" is the shared `formatRelative` (seconds while fresh, the same
+ * stamp the desk's failure rows print); an unreadable timestamp is an em dash.
  */
 export function composeActivity(input: ActivityInput): {
   activity: string | null;
   tone: "muted" | "you-deep";
 } {
-  const age = (at: string | null) => relativeAge(at, input.now ?? new Date());
+  const age = (at: string | null) =>
+    formatRelative(at, { locale: input.locale, now: input.now, precision: "second" }) || "—";
 
   if (input.group === "active") {
     return { activity: `› ${input.lastLogLine ?? "…"}`, tone: "muted" };
@@ -362,6 +350,7 @@ export function deriveRegistryRows(input: RegistryDeriveInput): RegistryRow[] {
 
     const blockedBy = queue?.blockedBy ?? [];
     const { activity, tone } = composeActivity({
+      locale: input.locale,
       group,
       yourTurnKind,
       status,
