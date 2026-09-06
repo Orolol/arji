@@ -4,7 +4,10 @@ import { useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 
 import { SelectPill, StrataBand, projectTone } from "@/components/piscine";
-import { AgentSelectPill } from "@/components/shared/AgentSelectPill";
+import {
+  AGENT_PILL_IN_COMPOSER,
+  AgentSelectPill,
+} from "@/components/shared/AgentSelectPill";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { DeskProject } from "@/lib/control-desk/types";
 import { cn } from "@/lib/utils";
@@ -81,88 +84,127 @@ export function DeskComposer({
   }
 
   return (
-    // The linden ground is StrataBand's, not this file's: the hand-rolled
-    // version repeated the recipe (radius, `bg-strata-feed`, the
-    // `.stratum-feed` scope class the breathing/progress figures read) and
-    // would have drifted from it the first time the band changed. `flex-row`
-    // + `py-0` are the two things a composer legitimately overrides — it is a
-    // single-row bar of fixed height, not a stacked band.
-    // NO `data-testid` here: unlike `SurfaceCard`, `StrataBand` does not
-    // forward extra `<div>` props, so one would be silently dropped. The band
-    // stamps `data-slot="strata-band" data-stratum="feed"` itself, which is
-    // what the tests select on.
-    <StrataBand
-      stratum="feed"
-      gap={13}
-      className={cn(
-        "mx-[14px] mt-[10px] mb-3 h-[58px] flex-row items-center px-[18px] py-0",
-        className,
-      )}
+    /*
+      `@container`: the band's row is decided by the COMPOSER's width, not by
+      the window's (B-arij-OZUKyqpxmKaT, and B-arij-180 before it on /chat).
+      The two are not the same number: `/projects/:id` mounts this desk beside
+      a resizable chat panel (`min-w-[400px]` for the desk column), so the band
+      there is a few hundred pixels wide at a 1440px window. A viewport
+      breakpoint reads the window and gets that backwards.
+
+      THE OUTER MARGINS MOVED HERE from the band, so the container's box IS the
+      band's box — the `30cqw` cap below is a share of the band, which is the
+      width the arithmetic in `AGENT_PILL_IN_COMPOSER` is written about.
+      `className` still lands on the band: no caller passes one, and the two
+      things a caller would style are the band's ground and its padding.
+    */
+    <div
+      data-testid="desk-composer"
+      className="@container mx-[14px] mt-[10px] mb-3 shrink-0"
     >
-      <Sparkles size={16} aria-hidden="true" className="shrink-0 text-strata-feed-deep" />
+      {/* The linden ground is StrataBand's, not this file's: the hand-rolled
+          version repeated the recipe (radius, `bg-strata-feed`, the
+          `.stratum-feed` scope class the breathing/progress figures read) and
+          would have drifted from it the first time the band changed. `flex-row`
+          and the padding overrides are what a composer legitimately overrides.
 
-      <input
-        type="text"
-        value={title}
-        disabled={disabled || busy || !project}
-        placeholder={COMPOSER_PLACEHOLDER}
-        aria-label="Décris une feature"
-        data-testid="desk-composer-input"
-        onChange={(event) => setTitle(event.target.value)}
-        onCompositionStart={() => {
-          composingRef.current = true;
-        }}
-        onCompositionEnd={() => {
-          composingRef.current = false;
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter") return;
-          // Never swallow Enter while an IME candidate window is open.
-          if (composingRef.current || event.nativeEvent.isComposing) return;
-          event.preventDefault();
-          void submit(event.shiftKey);
-        }}
+          ONE ROW FROM 36rem OF BAND, TWO BELOW IT. Measured in Chrome with a
+          107-character named agent, before this fix: the band was `h-[58px]`
+          with no `flex-wrap`, the pill took its 739.6px max-content width, and
+          the field — the one item on a `flex-1` basis of 0 — was left at 0px at
+          390, 640 and 768 and at 88.8px at 1024. Wrapping gives the field its
+          own row and drops the two pills underneath; `min-h` rather than `h` is
+          what lets that second row exist at all.
+
+          NO `data-testid` here: unlike `SurfaceCard`, `StrataBand` does not
+          forward extra `<div>` props, so one would be silently dropped. The band
+          stamps `data-slot="strata-band" data-stratum="feed"` itself, which is
+          what the tests select on. */}
+      <StrataBand
+        stratum="feed"
+        gap={13}
         className={cn(
-          "min-w-0 flex-1 border-0 bg-transparent p-0",
-          // What the user types is INK. The linden deep belongs to the band's
-          // own chrome — the sparkle and the placeholder — and colouring the
-          // typed title with it made the user's words read as decoration of
-          // the stratum rather than as content.
-          "font-sans text-[13.5px] font-medium text-foreground",
-          "placeholder:text-strata-feed-deep placeholder:opacity-80",
-          "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
-          "disabled:opacity-60",
+          "min-h-[58px] flex-row flex-wrap items-center px-[18px] py-[9px]",
+          "@min-[36rem]:flex-nowrap @min-[36rem]:py-0",
+          className,
         )}
-      />
-
-      <SelectPill
-        label={project?.shortName ?? "—"}
-        tone="project"
-        projectTone={projectTone(project?.colorIndex ?? 0)}
-        disabled={projects.length === 0}
       >
-        {projects.map((candidate) => (
-          <DropdownMenuItem
-            key={candidate.id}
-            onSelect={() => onTargetProjectChange(candidate.id)}
-          >
-            {candidate.name}
-          </DropdownMenuItem>
-        ))}
-      </SelectPill>
+        <Sparkles size={16} aria-hidden="true" className="shrink-0 text-strata-feed-deep" />
 
-      {/* `dispatch`: named agents only. A build runs neither on the direct API
-          nor on a persistent CLI — both are chat-only — so the desk keeps
-          exactly the options it had, and gains the shared component's
-          selection contract. */}
-      <AgentSelectPill
-        mode="dispatch"
-        // Its own id: `/projects/:id` mounts this composer AND the chat
-        // panel's picker, and one shared id there resolves to two elements.
-        testId="desk-agent-select"
-        selection={{ namedAgentId, provider: null }}
-        onSelect={(selection) => onNamedAgentChange(selection.namedAgentId)}
-      />
-    </StrataBand>
+        <input
+          type="text"
+          value={title}
+          disabled={disabled || busy || !project}
+          placeholder={COMPOSER_PLACEHOLDER}
+          aria-label="Décris une feature"
+          data-testid="desk-composer-input"
+          onChange={(event) => setTitle(event.target.value)}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            // Never swallow Enter while an IME candidate window is open.
+            if (composingRef.current || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            void submit(event.shiftKey);
+          }}
+          className={cn(
+            // 29px is the sparkle (16) plus the band's gap (13): wrapped, the
+            // field takes the whole first row minus what sits before it, and the
+            // pills are pushed onto the second. `basis-0` from 36rem puts it
+            // back to sharing one row with them.
+            "min-w-0 grow shrink basis-[calc(100%-29px)] @min-[36rem]:basis-0",
+            "border-0 bg-transparent p-0",
+            // What the user types is INK. The linden deep belongs to the band's
+            // own chrome — the sparkle and the placeholder — and colouring the
+            // typed title with it made the user's words read as decoration of
+            // the stratum rather than as content.
+            "font-sans text-[13.5px] font-medium text-foreground",
+            "placeholder:text-strata-feed-deep placeholder:opacity-80",
+            "outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
+            "disabled:opacity-60",
+          )}
+        />
+
+        <SelectPill
+          label={project?.shortName ?? "—"}
+          tone="project"
+          projectTone={projectTone(project?.colorIndex ?? 0)}
+          disabled={projects.length === 0}
+        >
+          {projects.map((candidate) => (
+            <DropdownMenuItem
+              key={candidate.id}
+              onSelect={() => onTargetProjectChange(candidate.id)}
+            >
+              {candidate.name}
+            </DropdownMenuItem>
+          ))}
+        </SelectPill>
+
+        {/* `dispatch`: named agents only. A build runs neither on the direct
+            API nor on a persistent CLI — both are chat-only — so the desk keeps
+            exactly the options it had, and gains the shared component's
+            selection contract.
+
+            The cap is `AGENT_PILL_IN_COMPOSER`, shared with `ChatComposer`
+            rather than copied: both surfaces put this pill on a row with a
+            field and they have to yield the same way. See that constant for
+            the measurement and for the 45% / 30cqw split. */}
+        <AgentSelectPill
+          mode="dispatch"
+          // Its own id: `/projects/:id` mounts this composer AND the chat
+          // panel's picker, and one shared id there resolves to two elements.
+          testId="desk-agent-select"
+          selection={{ namedAgentId, provider: null }}
+          onSelect={(selection) => onNamedAgentChange(selection.namedAgentId)}
+          className={AGENT_PILL_IN_COMPOSER}
+        />
+      </StrataBand>
+    </div>
   );
 }

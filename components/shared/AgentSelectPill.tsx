@@ -40,6 +40,72 @@ import {
  */
 export type AgentSelectMode = "chat" | "dispatch";
 
+/* ------------------------------------------------------------------ */
+/* The composer row's two shared numbers                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * `ChatComposer` and `DeskComposer` are the only mounts of this pill whose row
+ * also holds a text FIELD that can be squeezed to nothing — the project
+ * panel's header and the ticket's AGENTS band do not — and the cap therefore
+ * still travels with the mount rather than becoming this component's default.
+ * What changed with B-arij-OZUKyqpxmKaT is that there are now TWO such mounts,
+ * and a class string copied into the second one is a value that drifts the
+ * first time either is tuned. So the strings live here and the call sites opt
+ * in.
+ *
+ * A named agent's name is an arbitrary string — `createNamedAgentSchema`
+ * (lib/validation/schemas.ts) only refuses a blank one — and `SelectPill` is
+ * `shrink-0`, which is right for the project pill's 8-character short name and
+ * wrong here. Measured on `/chat` with a 107-character name (437d4c7) and
+ * again on `/` (B-arij-OZUKyqpxmKaT): the pill took its max-content width,
+ * overflowed its band, and left the field at ZERO at every width whose band
+ * was a single row. Neither page ever scrolled sideways — the field simply
+ * collapsed.
+ */
+
+/**
+ * The band width from which a composer's row fits a field AND its controls.
+ *
+ * Arithmetic, not taste. A single chat row spends 96px on the glyph, the gaps
+ * and the attach button and up to 100px on the project pill, which leaves the
+ * field `0.7 x band - 232`; that crosses the 160px the e2e calls a usable
+ * field at 560px of band, and 36rem is the first round number above it. The
+ * desk row is the same shape MINUS the attach button — 36px of padding, a 16px
+ * glyph, three 13px gaps and a project pill measured at 76.7px — so it clears
+ * the same threshold with room to spare (219px of field at 36rem).
+ *
+ * Exported as a bare string for tests and documentation: Tailwind cannot see a
+ * computed class, so the literal `@min-[36rem]:` below is the one that ships.
+ */
+export const COMPOSER_ONE_ROW = "36rem";
+
+/**
+ * What the agent pill may take of a composer that also holds a field.
+ *
+ * Three tokens, one behaviour: `max-w` in `cqw` is a share of the COMPOSER
+ * rather than of the window, so the cap holds in a narrow three-column band as
+ * well as on a phone; `min-w-0` lets the label's own `truncate` engage;
+ * `shrink` makes the PILL the item that yields when the row is
+ * over-subscribed, which is what the field used to do.
+ *
+ * TWO CAPS, ONE PER ROW SHAPE. Wrapped, the pill shares its row with the
+ * project pill (and, on chat, the attach button) and nothing else, so 45% of
+ * the band is affordable and is what a phone has always rendered — measured,
+ * giving the wrapped row the tighter cap truncated "Claude Code", an ordinary
+ * provider label, from 116px to 109px at 390. In one row it shares with the
+ * FIELD, and 30% of the composer is the share {@link COMPOSER_ONE_ROW} is
+ * computed from. The single-row cap is in `cqw` rather than `%` because a
+ * percentage resolves against the band's content box while the threshold that
+ * justifies it is expressed on the container; keeping both on the container is
+ * what makes that arithmetic checkable.
+ *
+ * Requires an `@container` on the composer — without one the `@min-[…]` half
+ * never matches and the pill stays on its wrapped cap.
+ */
+export const AGENT_PILL_IN_COMPOSER =
+  "max-w-[45%] @min-[36rem]:max-w-[30cqw] min-w-0 shrink";
+
 /**
  * One selection, one shape, for both modes.
  *
