@@ -445,6 +445,20 @@ describe("isCheckLive / checkStatusLabel", () => {
       "running",
     );
   });
+
+  /**
+   * The two words the REQUEST-TIME writers store (lib/qa/report-lifecycle.ts):
+   * a rejected launch closure writes `failed`, a cancelled queue entry writes
+   * `cancelled`. Both are ordinary finished-report words here — the screens
+   * need no branch for them, which is the whole point of settling the column
+   * instead of teaching every reader another special case.
+   */
+  it("needs no special case for a request-time terminal write", () => {
+    for (const status of ["failed", "cancelled"]) {
+      expect(checkStatusLabel({ status, sessionStatus: "cancelled" })).toBe(status);
+      expect(isCheckLive({ status, sessionStatus: "running" })).toBe(false);
+    }
+  });
 });
 
 describe("sumCheckTotals", () => {

@@ -31,6 +31,10 @@ import {
 import { agentScheduler } from "@/lib/agents/scheduler";
 import { collectFailureDigestEvidence } from "@/lib/telescope/collect";
 import {
+  failQaReportLaunch,
+  QA_REPORT_SUMMARY_MAX_CHARS,
+} from "@/lib/qa/report-lifecycle";
+import {
   TELESCOPE_MAX_WINDOW_DAYS,
   TELESCOPE_WINDOW_DAYS,
 } from "@/lib/telescope/constants";
@@ -101,10 +105,10 @@ function extractSummary(content: string, checkType: CheckType): string {
     .filter((paragraph) => paragraph.length > 0 && !paragraph.startsWith("#"));
 
   if (paragraphs.length > 0) {
-    return paragraphs[0].slice(0, 500);
+    return paragraphs[0].slice(0, QA_REPORT_SUMMARY_MAX_CHARS);
   }
 
-  return normalized.slice(0, 500);
+  return normalized.slice(0, QA_REPORT_SUMMARY_MAX_CHARS);
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
@@ -219,21 +223,54 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   // Scheduled QA launch via the per-project scheduler: the closure spawns
   // the agent, waits for completion, and finalizes the report.
-  agentScheduler.submit(projectId, sessionId, async () => {
-    markSessionRunning(sessionId);
+  //
+  // Both halves are wrapped because the scheduler's safety net
+  // (`handleLaunchFailure`) finalizes the SESSION when a launch rejects and
+  // knows nothing about `qa_reports` — without this the row would sit on
+  // `running` until the next boot sweep, which on a long-lived dev server can
+  // be days away. The report write lives here rather than in the scheduler so
+  // the generic queue never has to know what a QA report is.
+  //
+  // THE PROLOGUE IS DELIBERATELY NOT INSIDE AN `async` FUNCTION. Spawning is
+  // synchronous, and a missing CLI or a vanished worktree is the launch failure
+  // that actually happens; a plain try/catch catches it in the same tick, so
+  // the report is already terminal when this request returns. Wrapping the same
+  // code in `async` would defer the catch to a microtask and make that a timing
+  // accident instead of a guarantee. The scheduler documents the synchronous
+  // throw as a supported path and funnels it into the same rejection handling.
+  agentScheduler.submit(projectId, sessionId, () => {
+    try {
+      markSessionRunning(sessionId);
 
-    processManager.start(
-      sessionId,
-      {
-        mode,
-        prompt,
-        cwd: project.gitRepoPath,
-        model: resolvedAgent.model,
-        cliSessionId,
-      },
-      resolvedAgent.provider,
-    );
+      processManager.start(
+        sessionId,
+        {
+          mode,
+          prompt,
+          cwd: project.gitRepoPath,
+          model: resolvedAgent.model,
+          cliSessionId,
+        },
+        resolvedAgent.provider,
+      );
+    } catch (error) {
+      failQaReportLaunch(reportId, error);
+      // Rethrown unchanged: the scheduler still owns the session row and the
+      // slot; this catch adds a report write, it does not swallow a failure.
+      throw error;
+    }
 
+    // Everything after the spawn. A rejection here (the process manager
+    // settling abnormally, the finalizing statements throwing) reaches the
+    // report a microtask later rather than synchronously, which is the best
+    // available and still ends the same way: no boot sweep needed.
+    return awaitCheckCompletion().catch((error) => {
+      failQaReportLaunch(reportId, error);
+      throw error;
+    });
+  });
+
+  async function awaitCheckCompletion(): Promise<void> {
     const info = await waitForProcessCompletion(sessionId, POLL_INTERVAL_MS);
 
     const completedAt = new Date().toISOString();
@@ -281,7 +318,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       })
       .where(eq(qaReports.id, reportId))
       .run();
-  });
+  }
 
   return NextResponse.json({
     data: {
