@@ -23,7 +23,7 @@ const bodySchema = z
   .strict();
 
 export async function POST(request: NextRequest) {
-  const auth = requireMcpToken(request);
+  const auth = requireMcpToken(request, "attach_artifact");
   if (isErrorResponse(auth)) return auth;
 
   if (auth.agentType === "chat") {

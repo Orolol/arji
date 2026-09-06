@@ -177,44 +177,53 @@ export function RefinementButton({
 
   return (
     <>
-    <button
-      type="button"
-      onClick={() => setConfiguring(true)}
-      disabled={busy}
-      data-testid="refinement-button"
-      aria-busy={busy}
-      title={
-        running
-          ? "A board refinement pass is running"
-          : "Agent Refinement — re-pass Backlog and To do: questions, priorities, order, dependencies, promotion, merges, discards and missing tickets"
-      }
-      className={cn(
-        "flex shrink-0 items-center gap-[6px] rounded-[7px] border px-[10px] py-[4px] text-[12px] font-medium transition-colors",
-        busy
-          ? "cursor-not-allowed border-agent-border bg-agent-bg text-agent"
-          : "border-border bg-background text-foreground shadow-sm hover:border-agent-border hover:bg-agent-bg/40 hover:text-agent"
-      )}
-    >
-      {busy ? (
-        <Loader2
-          className="h-[13px] w-[13px] animate-spin"
-          data-testid="refinement-button-spinner"
-          aria-hidden
-        />
-      ) : (
-        <ListOrdered className="h-[13px] w-[13px]" aria-hidden />
-      )}
-      Agent Refinement
-      {running && (
-        <span
-          data-testid="refinement-button-badge"
-          className="rounded-full bg-agent/10 px-[6px] py-[1px] text-[11px]"
-        >
+      <button
+        type="button"
+        onClick={() => setConfiguring(true)}
+        disabled={busy}
+        data-testid="refinement-button"
+        aria-busy={busy}
+        title={
           running
-        </span>
+            ? "A board refinement pass is running"
+            : "Agent Refinement — re-pass Backlog and To do: questions, priorities, order, dependencies, promotion, merges, discards and missing tickets"
+        }
+        className={cn(
+          "flex shrink-0 items-center gap-[6px] rounded-[7px] border px-[10px] py-[4px] text-[12px] font-medium transition-colors",
+          busy
+            ? "cursor-not-allowed border-agent-border bg-agent-bg text-agent"
+            : "border-border bg-background text-foreground shadow-sm hover:border-agent-border hover:bg-agent-bg/40 hover:text-agent"
+        )}
+      >
+        {busy ? (
+          <Loader2
+            className="h-[13px] w-[13px] animate-spin"
+            data-testid="refinement-button-spinner"
+            aria-hidden
+          />
+        ) : (
+          <ListOrdered className="h-[13px] w-[13px]" aria-hidden />
+        )}
+        Agent Refinement
+        {running && (
+          <span
+            data-testid="refinement-button-badge"
+            className="rounded-full bg-agent/10 px-[6px] py-[1px] text-[11px]"
+          >
+            running
+          </span>
+        )}
+      </button>
+      {configuring && (
+        <RefinementDialog
+          key={projectId}
+          open={configuring}
+          onOpenChange={setConfiguring}
+          running={running}
+          starting={starting}
+          onStart={start}
+        />
       )}
-    </button>
-    {configuring && <RefinementDialog key={projectId} open={configuring} onOpenChange={setConfiguring} busy={busy} onStart={start} />}
     </>
   );
 }

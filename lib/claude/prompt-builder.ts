@@ -6,7 +6,11 @@
  * in the agent configuration.
  */
 
-import { REFINEMENT_ACTION_IDS, type RefinementOptions } from "@/lib/refinement/options";
+import {
+  REFINEMENT_ACTION_IDS,
+  type RefinementAction,
+  type RefinementOptions,
+} from "@/lib/refinement/options";
 
 import {
   section,
@@ -2183,34 +2187,34 @@ even if additional instructions request them. Arij enforces this on tool calls.
 
 Selected actions: ${actions.join(", ")}
 
-${[
-{ action: "grooming", text: `1. **Surface unanswered questions.** Any ticket still waiting on the user is
+${([
+{ action: "grooming", text: `**Surface unanswered questions.** Any ticket still waiting on the user is
    marked \`awaitingReply\` below. Do not move those. Instead, post one
    \`post_comment\` per project — or per ticket where it belongs — naming the
    main questions that are still blocking work, so they are visible in one
    place.` },
-{ action: "dependencies", text: `2. **Fix the dependency graph.** Add the edges that are obviously missing
+{ action: "dependencies", text: `**Fix the dependency graph.** Add the edges that are obviously missing
    (\`add_dependency\`) and drop the ones that no longer hold
    (\`remove_dependency\`). The ticket you are editing must be in Backlog or
    To do, but what it depends on need not be — depending on work already in
    Review, or pruning an edge to something that has since shipped, are both
    fine. A cycle is refused; if one is reported, rethink the direction rather
    than forcing it.` },
-{ action: "ordering", text: `3. **Re-rank To do.** Call \`reorder_tickets\` once with every To do ticket
+{ action: "ordering", text: `**Re-rank To do.** Call \`reorder_tickets\` once with every To do ticket
    and its new 0-based position, so the column reads top-to-bottom in the
    order the work should actually happen: unblocked before blocked,
    dependencies before dependents, higher priority earlier.` },
-{ action: "priorities", text: `4. **Set priorities** where the current value clearly misrepresents the work
+{ action: "priorities", text: `**Set priorities** where the current value clearly misrepresents the work
    (\`set_priority\`).` },
-{ action: "readiness", text: `5. **Promote what is ready.** A Backlog ticket is ready when its goal is
+{ action: "readiness", text: `**Promote what is ready.** A Backlog ticket is ready when its goal is
    unambiguous, its acceptance criteria are concrete enough to verify, and
    nothing is waiting on a human answer. Promote it with
    \`promote_ticket\` \`status: "todo"\`.` },
-{ action: "readiness", text: `6. **Send back what is not.** A To do ticket that cannot be started as
+{ action: "readiness", text: `**Send back what is not.** A To do ticket that cannot be started as
    written goes back with \`promote_ticket\` \`status: "backlog"\` and the
    \`question\` that has to be answered first. That question is posted on the
    ticket, so make it specific and answerable.` },
-{ action: "merge", text: `7. **Merge what is one piece of work.** When several tickets would be built
+{ action: "merge", text: `**Merge what is one piece of work.** When several tickets would be built
    in a single sitting — near-duplicates, or a bug that is really a slice of
    the epic next to it — fold them together with \`merge_tickets\`: name the
    one that survives, list the ones it absorbs, and pass \`title\` /
@@ -2218,23 +2222,30 @@ ${[
    rather than only its own half. The sources' stories, your user's comments,
    their screenshots and the dependency edges move across; the sources are
    then deleted.` },
-{ action: "discard", text: `8. **Discard what no longer needs doing.** A ticket whose feature shipped
+{ action: "discard", text: `**Discard what no longer needs doing.** A ticket whose feature shipped
    another way, whose bug is long gone, or that the project has moved past
    goes with \`discard_ticket\`. This is a permanent delete with no undo, so
-   the bar is high: obsolete, not merely unclear — unclear goes back to
-   Backlog with a question. Duplicated work is a merge, not a discard.` },
-{ action: "create", text: `9. **Add what is missing.** If reading the board end to end makes an absent
+   the bar is high: obsolete, not merely unclear. Leave unclear or duplicated
+   work alone.${actions.includes("readiness")
+     ? " Unclear work can go back to Backlog with a question using promote_ticket."
+     : ""}${actions.includes("merge")
+     ? " Use merge_tickets for duplicated work."
+     : ""}` },
+{ action: "create", text: `**Add what is missing.** If reading the board end to end makes an absent
    piece of work obvious — the migration nobody wrote a ticket for, the
    follow-up half of a ticket that only covers one side — create it with
    \`create_planning_ticket\`, with acceptance criteria concrete enough that
    it would survive your own readiness check.` }
-].filter((item) => actions.includes(item.action as typeof actions[number])).map((item) => item.text).join("\n\n")}
+] satisfies Array<{ action: RefinementAction; text: string }>)
+  .filter((item) => actions.includes(item.action))
+  .map((item, index) => `${index + 1}. ${item.text}`)
+  .join("\n\n")}
 
 ## Rules
 
-- **Every tool call requires a \`reason\`.** It is written into the ticket's
-  activity log and it is what the user reads to understand why their board
-  changed. Make it a real justification, not a restatement of the action.
+- **Supply a justification wherever the tool requires a \`reason\`.** It is
+  written into the ticket's activity log so the user understands why their
+  board changed. Use each tool's schema; do not add unsupported fields.
 - **You may only touch Backlog and To do.** In Progress, Review, Done and
   Released are out of scope; Arij refuses those writes, so do not attempt
   them. Tickets in those columns appear below only as dependency endpoints.
@@ -2244,14 +2255,16 @@ ${[
   better one than a churny move you cannot justify. Do not promote a ticket
   just to have promoted something, and do not delete or invent one to have a
   fuller report.
-- **Deletion is real.** \`discard_ticket\` and the sources of
-  \`merge_tickets\` are removed from the database permanently — Arij has no
+- **Deletion is real.** Discarded tickets and absorbed merge sources
+  are removed from the database permanently — Arij has no
   archive column. Arij refuses to delete any ticket an agent has already run
   on, and records the full text of everything you retire in the report, but
   that is a safety net, not a licence. If you are unsure whether the user
-  still wants a ticket, leave it and say so in a comment.
-- Every tool call names its ticket explicitly with \`ticket_id\` — this
-  session is attached to the board, not to a single ticket.
+  still wants a ticket, leave it and ${actions.includes("grooming")
+    ? "say so in a comment using post_comment"
+    : "mention the uncertainty in your final summary"}.
+- Ticket-scoped calls name their target explicitly with \`ticket_id\` —
+  this session is attached to the board, not to a single ticket.
 
 ## Board Snapshot
 

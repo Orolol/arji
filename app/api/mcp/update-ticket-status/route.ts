@@ -36,7 +36,7 @@ const bodySchema = z
   .strict();
 
 export async function POST(request: NextRequest) {
-  const auth = requireMcpToken(request);
+  const auth = requireMcpToken(request, "update_ticket_status");
   if (isErrorResponse(auth)) return auth;
 
   // A board refinement pass is confined to Backlog/To do by the

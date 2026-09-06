@@ -108,7 +108,7 @@ export function createBoardToolRouteHandler<T extends Record<string, unknown>>(
   }
 
   return async function POST(request: NextRequest): Promise<NextResponse> {
-    const auth = requireMcpToken(request);
+    const auth = requireMcpToken(request, toolName);
     if (isErrorResponse(auth)) return auth;
 
     // Ahead of validation and of the executor: a refused call must leave

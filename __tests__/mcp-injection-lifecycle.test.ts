@@ -29,6 +29,7 @@ const pmState = vi.hoisted(() => ({
         epicId: string | null;
         userStoryId: string | null;
         agentType: string | null;
+        refinementActions?: string | null;
       },
   settingsRow: null as null | { value: string },
   /** When true, any db.select() call throws — injection must degrade. */
@@ -54,6 +55,7 @@ const tables = vi.hoisted(() => ({
     epicId: "agent_sessions.epic_id",
     userStoryId: "agent_sessions.user_story_id",
     agentType: "agent_sessions.agent_type",
+    refinementActions: "agent_sessions.refinement_actions",
   },
   settings: { key: "settings.key", value: "settings.value" },
   projects: { id: "projects.id", name: "projects.name" },
@@ -78,7 +80,7 @@ vi.mock("@/lib/db/schema", () => tables);
 
 vi.mock("@/lib/db", () => ({
   db: {
-    select: vi.fn(() => {
+    select: vi.fn((fields?: Record<string, unknown>) => {
       if (pmState.throwOnSelect) {
         throw new Error("db exploded");
       }
@@ -89,7 +91,10 @@ vi.mock("@/lib/db", () => ({
               pmState.selectGets.push(table);
               return table === tables.settings
                 ? pmState.settingsRow
-                : pmState.sessionRow;
+                : pmState.sessionRow && fields
+                  ? Object.fromEntries(Object.entries(pmState.sessionRow)
+                    .filter(([key]) => key in fields))
+                  : pmState.sessionRow;
             }),
             // Row LISTS: only the extra-MCP-server resolution reads this way.
             all: vi.fn(() =>
@@ -277,6 +282,24 @@ describe("processManager.start() — MCP injection gating", () => {
     expect(record!.projectId).toBe("proj-1");
     expect(record!.epicId).toBe("epic-1");
     expect(record!.agentType).toBe("build");
+  });
+
+  it("reads persisted refinement choices into both the spawn allowlist and prompt", () => {
+    pmState.sessionRow = {
+      ...sessionRow({ agentType: "refinement", epicId: null }),
+      refinementActions: '["dependencies","merge","discard"]',
+    };
+    processManager.start("s-refinement-subset", { mode: "chat", prompt: "BASE" });
+    const tools = spawnedMcp()!.allowedToolNames;
+    const prompt = pmState.spawnedOptions[0].prompt as string;
+    for (const tool of ["create_bug", "post_comment", "set_priority", "promote_ticket"]) {
+      expect(tools).not.toContain(`mcp__arij__${tool}`);
+      expect(prompt).not.toContain(tool);
+    }
+    for (const tool of ["attach_artifact", "add_dependency", "merge_tickets", "discard_ticket"]) {
+      expect(tools).toContain(`mcp__arij__${tool}`);
+      expect(prompt).toContain(tool);
+    }
   });
 
   it("re-persists the prompt WITH the appended tools section (echo-scrub contract)", () => {

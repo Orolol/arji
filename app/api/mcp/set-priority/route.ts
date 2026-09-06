@@ -34,7 +34,7 @@ const bodySchema = z
   .strict();
 
 export async function POST(request: NextRequest) {
-  const auth = requireMcpToken(request);
+  const auth = requireMcpToken(request, "set_priority");
   if (isErrorResponse(auth)) return auth;
 
   const agentOnly = requireAgentSessionToken(auth, "set_priority");

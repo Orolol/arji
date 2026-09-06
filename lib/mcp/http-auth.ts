@@ -5,7 +5,9 @@
  *
  * 1. `requireMcpToken` — the ONLY way a request authenticates. The bearer
  *    token resolves to the spawning session's identity; there is no cookie,
- *    header, or body fallback.
+ *    header, or body fallback. It also applies persisted refinement action
+ *    permissions to the explicit tool name; route-specific role and scope
+ *    guards still apply after it returns.
  * 2. `resolveTicketForToken` — the ONLY way a request picks a ticket. An
  *    explicit `ticket_id` must live in the token's project (cross-project ids
  *    404, same as the getEpicOr404 scoping rule in lib/api/route-helpers.ts);
@@ -41,9 +43,12 @@ export function resolveOptionalMcpToken(
  * Authenticate an MCP request from its `Authorization: Bearer` header.
  * Returns the token record, or a ready-to-return 401 response for missing,
  * unknown, and revoked tokens alike (indistinguishable on purpose).
+ * A disabled refinement action returns 403. The caller supplies its tool name
+ * explicitly, so permission checks never depend on route naming or nesting.
  */
 export function requireMcpToken(
-  request: Request
+  request: Request,
+  tool: string,
 ): McpTokenRecord | NextResponse {
   const record = resolveOptionalMcpToken(request);
   if (!record) {
@@ -55,7 +60,6 @@ export function requireMcpToken(
   if (record.agentType === "refinement") {
     const session = db.select({ actions: agentSessions.refinementActions })
       .from(agentSessions).where(eq(agentSessions.id, record.sessionId)).get();
-    const tool = new URL(request.url).pathname.split("/").filter(Boolean).pop()?.replaceAll("-", "_") ?? "";
     if (session?.actions != null && !refinementToolAllowed(parseRefinementActions(session.actions), tool)) {
       return NextResponse.json({
         error: `${tool} is not enabled for this refinement pass.`,

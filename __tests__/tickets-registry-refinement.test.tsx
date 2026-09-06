@@ -157,6 +157,14 @@ vi.mock("@/hooks/useNamedAgentsList", () => ({
   useNamedAgentsList: () => ({ agents: [], loading: false, refresh: vi.fn() }),
 }));
 
+// The picker owns a separate statistics read; keep the refinement queue
+// scoped to status and dispatch responses, as in refinement-button.test.tsx.
+vi.mock("@/hooks/useDispatchReliability", () => ({
+  useDispatchReliability: () => ({
+    byAgentId: new Map(), minSample: 5, windowDays: 30, loading: false,
+  }),
+}));
+
 const originalFetch = global.fetch;
 
 const idle = () => ({

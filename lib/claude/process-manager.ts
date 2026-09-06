@@ -1,3 +1,4 @@
+import { parseRefinementActions } from "@/lib/refinement/options";
 import { spawnClaude, type ClaudeOptions, type ClaudeResult } from "./spawn";
 import { getProvider, type ProviderType, type ProviderSession } from "@/lib/providers";
 import {
@@ -131,6 +132,7 @@ class ClaudeProcessManager {
           userStoryId: string | null;
           agentType: string | null;
           namedAgentId: string | null;
+          refinementActions: string | null;
         }
       | undefined;
     try {
@@ -141,6 +143,7 @@ class ClaudeProcessManager {
           userStoryId: agentSessions.userStoryId,
           agentType: agentSessions.agentType,
           namedAgentId: agentSessions.namedAgentId,
+          refinementActions: agentSessions.refinementActions,
         })
         .from(agentSessions)
         .where(eq(agentSessions.id, sessionId))
@@ -316,15 +319,21 @@ class ClaudeProcessManager {
                 "only global servers are injected for it",
             );
           }
+          const refinementActions = row.agentType === "refinement"
+            ? parseRefinementActions(row.refinementActions ?? null)
+            : undefined;
           options.mcp = buildMcpSpawnConfig({
             token,
             agentType: row.agentType,
             provider,
             extraServers: extras.servers,
+            refinementActions,
           });
           options.prompt +=
             "\n" +
-            arijToolsSection(row.agentType ?? null, arijMcpToolPrefix(provider)) +
+            arijToolsSection(
+              row.agentType ?? null, arijMcpToolPrefix(provider), refinementActions,
+            ) +
             extraMcpServersSection(extras.servers, provider);
           // Re-persist the prompt WITH the appended section — same display
           // argument as the persona re-persist above, plus a hard requirement

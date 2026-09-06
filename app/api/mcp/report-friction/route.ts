@@ -61,7 +61,7 @@ async function parseBody(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireMcpToken(request);
+  const auth = requireMcpToken(request, "report_friction");
   if (isErrorResponse(auth)) return auth;
 
   // CLI chat tokens name a synthetic turn rather than a durable agent

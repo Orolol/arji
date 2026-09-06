@@ -55,7 +55,7 @@ const bodySchema = z
   .strict();
 
 export async function POST(request: NextRequest) {
-  const auth = requireMcpToken(request);
+  const auth = requireMcpToken(request, "discard_ticket");
   if (isErrorResponse(auth)) return auth;
 
   const agentOnly = requireAgentSessionToken(auth, "discard_ticket");
