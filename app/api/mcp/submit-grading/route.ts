@@ -34,7 +34,7 @@ const bodySchema = z
   .strict();
 
 export async function POST(request: NextRequest) {
-  const auth = requireMcpToken(request);
+  const auth = requireMcpToken(request, "submit_grading");
   if (isErrorResponse(auth)) return auth;
 
   // Chat turns have project-scoped tokens but no grader session or launch

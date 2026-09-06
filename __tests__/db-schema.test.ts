@@ -196,6 +196,7 @@ const TABLE_COLUMNS: Record<string, { sqlName: string; columns: ColumnSpec }> = 
       namedAgentName: "named_agent_name",
       model: "model",
       cliOptions: "cli_options",
+      refinementActions: "refinement_actions",
       cliCommand: "cli_command",
       createdAt: "created_at",
     },

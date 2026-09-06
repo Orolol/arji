@@ -26,7 +26,7 @@ const bodySchema = z
   .strict();
 
 export async function POST(request: NextRequest) {
-  const auth = requireMcpToken(request);
+  const auth = requireMcpToken(request, "post_comment");
   if (isErrorResponse(auth)) return auth;
 
   const validated = await validateBody(bodySchema, request);

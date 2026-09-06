@@ -9,9 +9,19 @@
  */
 import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RefinementButton } from "@/components/kanban/RefinementButton";
 import { mockFetchSequence } from "@/__tests__/helpers/mock-fetch";
+
+vi.mock("@/hooks/useNamedAgentsList", () => ({
+  useNamedAgentsList: () => ({ agents: [], loading: false, refresh: vi.fn() }),
+}));
+
+vi.mock("@/hooks/useDispatchReliability", () => ({
+  useDispatchReliability: () => ({
+    byAgentId: new Map(), minSample: 5, windowDays: 30, loading: false,
+  }),
+}));
 
 const originalFetch = global.fetch;
 
@@ -79,6 +89,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -127,6 +138,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("refinement-button-badge")).toHaveTextContent(
@@ -175,6 +187,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     // In flight: inert and spinning, but making no claim about a pass.
     await waitFor(() =>
@@ -231,6 +244,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     await waitFor(() =>
       expect(onError).toHaveBeenCalledWith(
@@ -269,6 +283,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
 
     // A 200 saying "nothing to do" is an answer, not a red toast.
     await waitFor(() =>
@@ -298,6 +313,7 @@ describe("RefinementButton", () => {
     );
 
     fireEvent.click(await screen.findByTestId("refinement-button"));
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
     await waitFor(() =>
       expect(onError).toHaveBeenCalledWith("Nothing to refine")
     );
@@ -482,4 +498,90 @@ describe("RefinementButton", () => {
     const button = await screen.findByTestId("refinement-button");
     expect(button).not.toBeDisabled();
   });
+});
+
+describe("REfinment 2 — configuration dialog", () => {
+  it("opens without dispatching and cancels without dispatching", async () => {
+    const fetchMock = mockFetchSequence([idle()]);
+    render(<RefinementButton projectId="proj-1" onError={vi.fn()} pollIntervalMs={0} />);
+    fireEvent.click(await screen.findByTestId("refinement-button"));
+    expect(screen.getByRole("dialog", { name: "Configure board refinement" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Agent" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("requires a checked action and submits only the chosen actions plus instructions", async () => {
+    const fetchMock = mockFetchSequence([idle(), { ok: true, body: { data: { started: true, sessionId: "s-config" } } }, running("s-config")]);
+    render(<RefinementButton projectId="proj-1" onError={vi.fn()} pollIntervalMs={0} />);
+    fireEvent.click(await screen.findByTestId("refinement-button"));
+    for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box);
+    expect(screen.getByRole("button", { name: "Start refinement" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Select at least one action");
+    fireEvent.click(screen.getByRole("checkbox", { name: /Priorities and deprioritization/ }));
+    fireEvent.change(screen.getByLabelText("Additional instructions (optional)"), { target: { value: "  Focus on onboarding  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/projects/proj-1/refinement", expect.objectContaining({ body: JSON.stringify({ namedAgentId: null, instructions: "Focus on onboarding", actions: ["priorities"] }) })));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+});
+
+
+describe("REfinment 2 — a concurrent pass never traps the dialog", () => {
+  it.each(["Cancel", "Close", "Escape"])(
+    "allows %s after a 409 followed by a running status refresh",
+    async (exit) => {
+      let serverRunning = false;
+      const onError = vi.fn();
+      global.fetch = vi.fn(async (_url, init) => {
+        if (init?.method === "POST") {
+          return { ok: false, status: 409, json: async () => ({
+            error: "A board refinement pass is already running for this project.",
+            code: "REFINEMENT_ALREADY_RUNNING",
+          }) } as Response;
+        }
+        return { ok: true, json: async () =>
+          serverRunning ? running("other-pass").body : idle().body,
+        } as Response;
+      });
+      const view = (refreshTrigger: number) => (
+        <RefinementButton projectId="proj-1" onError={onError}
+          refreshTrigger={refreshTrigger} pollIntervalMs={0} />
+      );
+      const { rerender } = render(view(0));
+      fireEvent.click(await screen.findByTestId("refinement-button"));
+      fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
+      await waitFor(() => expect(onError).toHaveBeenCalled());
+      serverRunning = true;
+      rerender(view(1));
+      await waitFor(() => expect(screen.getByTestId("refinement-button-badge"))
+        .toHaveTextContent("running"));
+      expect(screen.getByRole("button", { name: /Start/ })).toBeDisabled();
+      if (exit === "Escape") fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+      else fireEvent.click(screen.getByRole("button", { name: exit }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    }
+  );
+});
+
+
+it("protects a pending POST without trapping the dialog after it settles", async () => {
+  let finish!: (response: Response) => void;
+  global.fetch = vi.fn(async (_url, init) => {
+    if (init?.method === "POST") return new Promise<Response>((resolve) => { finish = resolve; });
+    return { ok: true, json: async () => idle().body } as Response;
+  });
+  render(<RefinementButton projectId="proj-1" onError={vi.fn()} pollIntervalMs={0} />);
+  fireEvent.click(await screen.findByTestId("refinement-button"));
+  fireEvent.click(screen.getByRole("button", { name: "Start refinement" }));
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.getByRole("dialog")).toBeVisible();
+  await act(async () => finish({
+    ok: false, json: async () => ({ error: "Try again" }),
+  } as Response));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
 });

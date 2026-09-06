@@ -78,7 +78,7 @@ function orNull(value: string | undefined): string | null {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireMcpToken(request);
+  const auth = requireMcpToken(request, "create_planning_ticket");
   if (isErrorResponse(auth)) return auth;
 
   const agentOnly = requireAgentSessionToken(auth, "create_planning_ticket");

@@ -18,7 +18,7 @@ const bodySchema = z
   .strict();
 
 export async function POST(request: NextRequest) {
-  const auth = requireMcpToken(request);
+  const auth = requireMcpToken(request, "create_bug");
   if (isErrorResponse(auth)) return auth;
 
   // CLI/direct chat already has the broader create_ticket board tool. Keep

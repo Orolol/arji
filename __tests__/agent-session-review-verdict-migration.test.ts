@@ -203,6 +203,7 @@ describe("0034_agent_session_review_verdict — applied schema", () => {
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_tokens");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_breakdown");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN refinement_actions");
       const entry = journal.entries.find((e) => e.tag === MIGRATION_TAG);
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')
@@ -276,6 +277,7 @@ describe("0034_agent_session_review_verdict — applied schema", () => {
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN cli_options");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_tokens");
       conn.exec("ALTER TABLE agent_sessions DROP COLUMN estimated_prompt_breakdown");
+      conn.exec("ALTER TABLE agent_sessions DROP COLUMN refinement_actions");
       conn
         .prepare('DELETE FROM "__drizzle_migrations" WHERE created_at >= ?')
         .run(PREVIOUS_MIGRATION_WHEN);

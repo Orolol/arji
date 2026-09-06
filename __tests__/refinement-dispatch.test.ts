@@ -534,3 +534,52 @@ describe("refinement route", () => {
     expect((await response.json()).code).toBe("PROJECT_NOT_FOUND");
   });
 });
+
+describe("REfinment 2 — configuration", () => {
+  it("passes the selected agent to resolution and persists actions and instructions", async () => {
+    const { namedAgents } = await import("@/lib/db/schema");
+    const { resolveAgentForDispatch } = await import("@/lib/agent-config/agent-resolution");
+    const projectId = seedProject(["backlog"]);
+    const agentId = `refiner-${projectId}`;
+    db.insert(namedAgents).values({ id: agentId, name: "Refiner", provider: "codex", model: "custom-model" }).run();
+    vi.mocked(resolveAgentForDispatch).mockResolvedValueOnce({ provider: "codex", namedAgentId: agentId, name: "Refiner", model: "custom-model" });
+    const response = await POST(mockJsonRequest({ namedAgentId: ` ${agentId} `, actions: ["grooming"], instructions: "  Focus on onboarding  " }), mockRouteContext({ projectId }));
+    expect(response.status).toBe(200);
+    const { data } = await response.json();
+    expect(resolveAgentForDispatch).toHaveBeenCalledWith("refinement", projectId, agentId);
+    const row = db.select().from(agentSessions).where(eq(agentSessions.id, data.sessionId)).get()!;
+    expect(row).toMatchObject({ namedAgentId: agentId, provider: "codex", model: "custom-model", refinementActions: '["grooming"]' });
+    expect(row.prompt).toContain("Focus on onboarding");
+    expect(row.prompt).not.toContain("**Merge what is one piece of work.**");
+    expect(processManagerState.startedOptions.at(-1)).toMatchObject({ model: "custom-model", prompt: row.prompt });
+  });
+
+  it.each([
+    { actions: [] }, { actions: ["unknown"] }, { actions: ["merge", "merge"] },
+    { instructions: "x".repeat(4001) }, { instructions: 123 }, { actions: null }, { extra: true },
+  ])("rejects invalid options before spawning: %j", async (body) => {
+    const projectId = seedProject(["backlog"]);
+    const response = await POST(mockJsonRequest(body), mockRouteContext({ projectId }));
+    expect(response.status).toBe(400);
+    expect(processManagerState.started).toHaveLength(0);
+  });
+
+  it("rejects a deleted explicit agent instead of silently using a default", async () => {
+    const projectId = seedProject(["todo"]);
+    const response = await POST(mockJsonRequest({ namedAgentId: "deleted-agent" }), mockRouteContext({ projectId }));
+    expect(response.status).toBe(404);
+    expect((await response.json()).code).toBe("AGENT_NOT_FOUND");
+    expect(processManagerState.started).toHaveLength(0);
+  });
+
+  it("rejects malformed JSON but still accepts an absent body", async () => {
+    const { NextRequest } = await import("next/server");
+    const projectId = seedProject(["todo"]);
+    const url = `http://localhost/api/projects/${projectId}/refinement`;
+    const invalid = await POST(new NextRequest(url, { method: "POST", body: "{" }), mockRouteContext({ projectId }));
+    expect(invalid.status).toBe(400);
+    expect(processManagerState.started).toHaveLength(0);
+    const empty = await POST(new NextRequest(url, { method: "POST" }), mockRouteContext({ projectId }));
+    expect(empty.status).toBe(200);
+  });
+});

@@ -76,7 +76,7 @@ const bodySchema = z
   .strict();
 
 export async function POST(request: NextRequest) {
-  const auth = requireMcpToken(request);
+  const auth = requireMcpToken(request, "submit_findings");
   if (isErrorResponse(auth)) {
     // A rejected review is invisible everywhere else: the session still ends
     // "answered" and simply files nothing, which every downstream gate used

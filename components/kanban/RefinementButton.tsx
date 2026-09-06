@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ListOrdered, Loader2 } from "lucide-react";
+import { RefinementDialog } from "./RefinementDialog";
+import type { RefinementOptions } from "@/lib/refinement/options";
 import { cn } from "@/lib/utils";
 import type { RefinementStatus } from "@/app/api/projects/[projectId]/refinement/route";
 
@@ -72,6 +74,7 @@ export function RefinementButton({
   idlePollIntervalMs = 30000,
 }: RefinementButtonProps) {
   const [status, setStatus] = useState<RefinementStatus | null>(null);
+  const [configuring, setConfiguring] = useState(false);
   const [starting, setStarting] = useState(false);
   const isRunning = status?.running === true;
   /**
@@ -131,13 +134,14 @@ export function RefinementButton({
     onFinished,
   ]);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (options: RefinementOptions) => {
+    if (starting || isRunning) return;
     setStarting(true);
     try {
       const response = await fetch(`/api/projects/${projectId}/refinement`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(options),
       });
       const payload = await response.json().catch(() => null);
 
@@ -149,9 +153,11 @@ export function RefinementButton({
         // Nothing to refine — a real answer on a 200, not a failure.
         const reason = payload.data.reason ?? "Nothing to refine right now";
         (onNotice ?? onError)(reason);
+        setConfiguring(false);
         return;
       }
 
+      setConfiguring(false);
       wasRunning.current = true;
       setStatus({
         running: true,
@@ -164,48 +170,60 @@ export function RefinementButton({
     } finally {
       setStarting(false);
     }
-  }, [projectId, onError, onNotice, onStarted]);
+  }, [projectId, onError, onNotice, onStarted, starting, isRunning]);
 
   const running = status?.running === true;
   const busy = running || starting;
 
   return (
-    <button
-      type="button"
-      onClick={start}
-      disabled={busy}
-      data-testid="refinement-button"
-      aria-busy={busy}
-      title={
-        running
-          ? "A board refinement pass is running"
-          : "Agent Refinement — re-pass Backlog and To do: questions, priorities, order, dependencies, promotion, merges, discards and missing tickets"
-      }
-      className={cn(
-        "flex shrink-0 items-center gap-[6px] rounded-[7px] border px-[10px] py-[4px] text-[12px] font-medium transition-colors",
-        busy
-          ? "cursor-not-allowed border-agent-border bg-agent-bg text-agent"
-          : "border-border bg-background text-foreground shadow-sm hover:border-agent-border hover:bg-agent-bg/40 hover:text-agent"
-      )}
-    >
-      {busy ? (
-        <Loader2
-          className="h-[13px] w-[13px] animate-spin"
-          data-testid="refinement-button-spinner"
-          aria-hidden
-        />
-      ) : (
-        <ListOrdered className="h-[13px] w-[13px]" aria-hidden />
-      )}
-      Agent Refinement
-      {running && (
-        <span
-          data-testid="refinement-button-badge"
-          className="rounded-full bg-agent/10 px-[6px] py-[1px] text-[11px]"
-        >
+    <>
+      <button
+        type="button"
+        onClick={() => setConfiguring(true)}
+        disabled={busy}
+        data-testid="refinement-button"
+        aria-busy={busy}
+        title={
           running
-        </span>
+            ? "A board refinement pass is running"
+            : "Agent Refinement — re-pass Backlog and To do: questions, priorities, order, dependencies, promotion, merges, discards and missing tickets"
+        }
+        className={cn(
+          "flex shrink-0 items-center gap-[6px] rounded-[7px] border px-[10px] py-[4px] text-[12px] font-medium transition-colors",
+          busy
+            ? "cursor-not-allowed border-agent-border bg-agent-bg text-agent"
+            : "border-border bg-background text-foreground shadow-sm hover:border-agent-border hover:bg-agent-bg/40 hover:text-agent"
+        )}
+      >
+        {busy ? (
+          <Loader2
+            className="h-[13px] w-[13px] animate-spin"
+            data-testid="refinement-button-spinner"
+            aria-hidden
+          />
+        ) : (
+          <ListOrdered className="h-[13px] w-[13px]" aria-hidden />
+        )}
+        Agent Refinement
+        {running && (
+          <span
+            data-testid="refinement-button-badge"
+            className="rounded-full bg-agent/10 px-[6px] py-[1px] text-[11px]"
+          >
+            running
+          </span>
+        )}
+      </button>
+      {configuring && (
+        <RefinementDialog
+          key={projectId}
+          open={configuring}
+          onOpenChange={setConfiguring}
+          running={running}
+          starting={starting}
+          onStart={start}
+        />
       )}
-    </button>
+    </>
   );
 }

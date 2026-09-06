@@ -847,3 +847,23 @@ describe("chat-toolset spawn configs — provider wiring", () => {
     expect(command).toContain("mcp_servers.arij.env=<redacted>");
   });
 });
+
+
+it("filters refinement spawn tools by selected actions and preserves all-checked legacy tools", () => {
+  const actions = ["dependencies", "merge", "discard"] as const;
+  const config = buildMcpSpawnConfig({
+    token: "test-token", agentType: "refinement", refinementActions: actions,
+  });
+  for (const tool of ["post_comment", "promote_ticket", "create_bug", "set_priority",
+    "reorder_tickets", "create_planning_ticket"]) {
+    expect(config.allowedToolNames).not.toContain(`mcp__arij__${tool}`);
+  }
+  for (const tool of ["attach_artifact", "get_ticket", "add_dependency",
+    "remove_dependency", "merge_tickets", "discard_ticket"]) {
+    expect(config.allowedToolNames).toContain(`mcp__arij__${tool}`);
+  }
+  expect(allowedToolNamesForAgentType("refinement", "claude-code", [
+    "grooming", "dependencies", "ordering", "priorities", "readiness",
+    "merge", "discard", "create",
+  ])).toEqual(allowedToolNamesForAgentType("refinement"));
+});

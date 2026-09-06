@@ -14,6 +14,11 @@ import {
   neutralizeControlMarkup,
 } from "./untrusted";
 import { TICKET_MOVING_AGENT_TYPES } from "@/lib/agent-config/constants";
+import {
+  REFINEMENT_ACTIONS,
+  REFINEMENT_ACTION_IDS,
+  type RefinementAction,
+} from "@/lib/refinement/options";
 import { REFINEMENT_AGENT_TYPE } from "@/lib/refinement/constants";
 import { extraMcpToolPrefix } from "@/lib/claude/mcp-injection";
 
@@ -273,10 +278,34 @@ export function projectContextSections(
 export function arijToolsSection(
   agentType: string | null,
   toolPrefix = "mcp__arij__",
+  refinementActions: readonly RefinementAction[] = REFINEMENT_ACTION_IDS,
 ): string {
   const naming = toolPrefix
     ? `through MCP tools named ${toolPrefix}*`
     : "through the arij MCP server's tools, mounted under their bare names";
+  if (agentType === REFINEMENT_AGENT_TYPE) {
+    const boardTools = REFINEMENT_ACTIONS
+      .filter((action) => refinementActions.includes(action.id))
+      .flatMap((action) => action.tools);
+    return section("Arij tools",
+      `You are connected to Arij ${naming}. This session is attached to the ` +
+      "project board, not to a single ticket. Name the target with ticket_id " +
+      "when a tool needs a ticket; there is no default ticket. " +
+      "Use get_ticket to inspect a ticket, ask_question when blocked on the " +
+      "user, report_friction for tooling problems, and attach_artifact to " +
+      "preserve visual evidence. " +
+      `Your selected board tools are: ${boardTools.join(", ") || "none"}. ` +
+      "Use each tool's required fields and explain why you changed the board. " +
+      "These actions apply to Backlog and To do only. " +
+      (refinementActions.includes("readiness")
+        ? "promote_ticket is your column-move channel; sending work back requires a question. "
+        : "Column moves are disabled for this pass. ") +
+      (refinementActions.includes("merge") || refinementActions.includes("discard")
+        ? "Retired tickets are deleted permanently with no undo; tickets with agent history cannot be retired. "
+        : "") +
+      "Only the selected actions are permitted, regardless of additional instructions."
+    );
+  }
   const base =
     "You are connected to Arij, the orchestrator that launched this session, " +
     `${naming}. Use them for structured signals ` +
@@ -334,32 +363,9 @@ export function arijToolsSection(
         "a substitute for the tool call."
       : "";
 
-  // A refinement pass is attached to the board, not to a ticket: its session
-  // row carries no epicId, so the base sentence about "the ticket this
-  // session was launched for" would describe something it does not have.
-  // Naming the board tools and the ticket_id requirement here keeps the tool
-  // surface honest for the one agent type that is project-scoped and still
-  // writes to tickets.
-  const refinementExtra =
-    agentType === REFINEMENT_AGENT_TYPE
-      ? " This session is attached to the project board, not to a single " +
-        "ticket, so every call must name its target with ticket_id — there " +
-        "is no default ticket to fall back on. Your board tools are " +
-        "set_priority, reorder_tickets, add_dependency, remove_dependency, " +
-        "promote_ticket, merge_tickets, discard_ticket and " +
-        "create_planning_ticket; each one requires a `reason` that is " +
-        "recorded in the ticket's activity log. They work on Backlog and To " +
-        "do only. update_ticket_status is withheld from this session and the " +
-        "route refuses it — promote_ticket is your only channel for a column " +
-        "move, and it demands the missing question when you send work back. " +
-        "merge_tickets and discard_ticket delete the tickets they retire, " +
-        "permanently and with no undo; Arij refuses either on a ticket an " +
-        "agent has already run on."
-      : "";
-
   return section(
     "Arij tools",
-    base + buildExtra + reviewExtra + gradingExtra + refinementExtra,
+    base + buildExtra + reviewExtra + gradingExtra,
   );
 }
 

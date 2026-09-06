@@ -263,6 +263,8 @@ export const agentSessions = sqliteTable("agent_sessions", {
   // spawn time. JSON object; NULL for legacy rows and for sessions dispatched
   // without a named agent.
   cliOptions: text("cli_options"),
+  // Selected board-refinement actions, JSON array. NULL preserves legacy full passes.
+  refinementActions: text("refinement_actions"),
   cliCommand: text("cli_command"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 },

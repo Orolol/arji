@@ -30,6 +30,7 @@
  * the agent toolset.
  */
 
+import { refinementToolAllowed, type RefinementAction } from "@/lib/refinement/options";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -245,12 +246,15 @@ export const AGENT_TYPE_EXCLUSIVE_TOOL_NAMES: Record<string, readonly string[]> 
 export function allowedToolNamesForAgentType(
   agentType: string | null | undefined,
   provider = "claude-code",
+  refinementActions?: readonly RefinementAction[],
 ): string[] {
   const withheld = new Set(
     (agentType && AGENT_TYPE_WITHHELD_TOOL_NAMES[agentType]) || []
   );
   return ARIJ_MCP_AGENT_TOOLS.filter((tool) => {
     if (withheld.has(tool)) return false;
+    if (agentType === "refinement" && refinementActions &&
+        !refinementToolAllowed(refinementActions, tool)) return false;
     const exclusiveTo = AGENT_TYPE_EXCLUSIVE_TOOL_NAMES[tool];
     if (exclusiveTo && !(agentType && exclusiveTo.includes(agentType))) {
       return false;
@@ -395,11 +399,13 @@ export function buildMcpSpawnConfig({
   agentType = null,
   provider = "claude-code",
   extraServers = [],
+  refinementActions,
 }: {
   token: string;
   toolset?: ArijMcpToolset;
   /** Narrows the agent toolset — see AGENT_TYPE_WITHHELD_TOOL_NAMES. */
   agentType?: string | null;
+  refinementActions?: readonly RefinementAction[];
   provider?: string;
   /**
    * User-declared servers already resolved for this session
@@ -432,7 +438,7 @@ export function buildMcpSpawnConfig({
     allowedToolNames: [
       ...(toolset === "chat"
         ? ARIJ_MCP_CHAT_TOOLS.map((tool) => arijMcpToolName(provider, tool))
-        : allowedToolNamesForAgentType(agentType, provider)),
+        : allowedToolNamesForAgentType(agentType, provider, refinementActions)),
       ...extras.flatMap((server) => extraMcpAllowlistEntries(provider, server)),
     ],
   };
