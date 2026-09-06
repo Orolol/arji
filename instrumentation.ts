@@ -3,7 +3,9 @@
  * (dev and production). Applies pending database migrations and seeds
  * before any request is served, then cancels agent sessions orphaned in
  * 'queued' by the previous process (their scheduler launch closures died
- * with it — see lib/agent-sessions/boot-cleanup.ts).
+ * with it — see lib/agent-sessions/boot-cleanup.ts) and reconciles the
+ * `qa_reports` rows those dead sessions stranded on 'running'
+ * (lib/qa/boot-cleanup.ts).
  *
  * API routes remain safe even if a route module loads before this runs
  * (or in environments that skip instrumentation): lib/db initializes
@@ -51,6 +53,13 @@ export async function register(): Promise<void> {
       await import("@/lib/agent-sessions/boot-cleanup");
     cancelOrphanedQueuedSessions();
     failOrphanedRunningSessions();
+
+    // Strictly after the two sweeps above: they are what turns the previous
+    // process's sessions terminal, and this pass reads the session to decide
+    // whether a `qa_reports` row still on 'running' is live. Run first, it
+    // would see those sessions as running and skip every stranded report.
+    const { reconcileStrandedQaReports } = await import("@/lib/qa/boot-cleanup");
+    reconcileStrandedQaReports();
 
     const { startSessionWatchdog } = await import("@/lib/agents/watchdog");
     startSessionWatchdog();

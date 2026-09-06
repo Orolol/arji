@@ -12,6 +12,7 @@ const bootMocks = vi.hoisted(() => ({
   ensureDbReady: vi.fn(),
   cancelOrphanedQueuedSessions: vi.fn(),
   failOrphanedRunningSessions: vi.fn(),
+  reconcileStrandedQaReports: vi.fn(),
   startSessionWatchdog: vi.fn(),
   startAutoMode: vi.fn(),
   startRoutineScheduler: vi.fn(),
@@ -29,6 +30,10 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/agent-sessions/boot-cleanup", () => ({
   cancelOrphanedQueuedSessions: bootMocks.cancelOrphanedQueuedSessions,
   failOrphanedRunningSessions: bootMocks.failOrphanedRunningSessions,
+}));
+
+vi.mock("@/lib/qa/boot-cleanup", () => ({
+  reconcileStrandedQaReports: bootMocks.reconcileStrandedQaReports,
 }));
 
 vi.mock("@/lib/agents/watchdog", () => ({
@@ -72,6 +77,15 @@ describe("register()", () => {
     expect(bootMocks.ensureDbReady).toHaveBeenCalled();
     expect(bootMocks.cancelOrphanedQueuedSessions).toHaveBeenCalled();
     expect(bootMocks.failOrphanedRunningSessions).toHaveBeenCalled();
+    // The QA report reconciliation reads the session to decide whether a
+    // report still on 'running' is live, so it must run AFTER the sweep that
+    // makes the previous process's sessions terminal — never before.
+    expect(bootMocks.reconcileStrandedQaReports).toHaveBeenCalledTimes(1);
+    expect(
+      bootMocks.reconcileStrandedQaReports.mock.invocationCallOrder[0]
+    ).toBeGreaterThan(
+      bootMocks.failOrphanedRunningSessions.mock.invocationCallOrder[0]
+    );
     expect(bootMocks.startSessionWatchdog).toHaveBeenCalledTimes(1);
     expect(bootMocks.startAutoMode).toHaveBeenCalledTimes(1);
     expect(bootMocks.startRoutineScheduler).toHaveBeenCalledTimes(1);
@@ -106,6 +120,7 @@ describe("register()", () => {
     await register();
     expect(bootMocks.startAutoMode).not.toHaveBeenCalled();
     expect(bootMocks.startRoutineScheduler).not.toHaveBeenCalled();
+    expect(bootMocks.reconcileStrandedQaReports).not.toHaveBeenCalled();
     process.env.NEXT_RUNTIME = "nodejs";
   });
 });

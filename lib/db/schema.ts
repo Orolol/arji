@@ -691,7 +691,10 @@ export const qaReports = sqliteTable("qa_reports", {
   projectId: text("project_id")
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
-  status: text("status").notNull().default("running"), // running | completed | failed | cancelled
+  // running | completed | failed | cancelled | interrupted.
+  // `interrupted` is written only by lib/qa/boot-cleanup.ts, for a check whose
+  // session died before the one statement that finalizes this row could run.
+  status: text("status").notNull().default("running"),
   agentSessionId: text("agent_session_id").references(() => agentSessions.id, { onDelete: "set null" }),
   namedAgentId: text("named_agent_id").references(() => namedAgents.id, { onDelete: "set null" }),
   promptUsed: text("prompt_used"),

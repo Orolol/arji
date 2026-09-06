@@ -259,6 +259,12 @@ export interface QaCheckRow {
  * A `running` report with no session at all is not live either: the FK is
  * `ON DELETE SET NULL`, and the one writer that stores a NULL session id — the
  * empty failure digest — records `completed`, never `running`.
+ *
+ * `reconcileStrandedQaReports()` (`lib/qa/boot-cleanup.ts`) settles the rows at
+ * boot using this same predicate, so a database that has booted since carries
+ * no historical stranded row. This function stays necessary all the same: it is
+ * what keeps the reading honest for a row stranded DURING the current process's
+ * uptime, which no boot pass can have seen.
  */
 export function isCheckLive(row: {
   status: string | null;
@@ -270,6 +276,14 @@ export function isCheckLive(row: {
 }
 
 /**
+ * The word a report that never finalized carries.
+ *
+ * Written by `lib/qa/boot-cleanup.ts` and derived by {@link checkStatusLabel};
+ * one definition, so the boot sweep stores exactly what the screen reads.
+ */
+export const QA_CHECK_INTERRUPTED_STATUS = "interrupted";
+
+/**
  * The word the row prints.
  *
  * A stranded report gets `interrupted` rather than either of the two lies
@@ -278,8 +292,10 @@ export function isCheckLive(row: {
  * `completed` would claim a report that was never written, since
  * `report_content` is filled by the same statement that moves the status.
  *
- * `interrupted` is not a stored value and nothing writes it; it exists only
- * here, as the honest reading of two columns that disagree.
+ * The word is also what `reconcileStrandedQaReports()`
+ * (`lib/qa/boot-cleanup.ts`) STORES at boot, through this very function — so a
+ * reconciled row reads identically to the stranded row it used to be, and this
+ * branch stays the answer for a row stranded since the current process booted.
  */
 export function checkStatusLabel(row: {
   status: string | null;
@@ -287,7 +303,7 @@ export function checkStatusLabel(row: {
 }): string {
   const stored = row.status ?? "running";
   if (stored !== "running") return stored;
-  return isCheckLive(row) ? "running" : "interrupted";
+  return isCheckLive(row) ? "running" : QA_CHECK_INTERRUPTED_STATUS;
 }
 
 /**
