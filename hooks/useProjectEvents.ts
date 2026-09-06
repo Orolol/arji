@@ -26,9 +26,18 @@ const hasEventSource = () => typeof EventSource !== "undefined";
 const assumeEventSource = () => true;
 
 export function useProjectEvents(
-  projectId: string,
+  projectId: string | null | undefined,
   handlers?: Partial<Record<TicketEventType, EventHandler>>
 ) {
+  // An unresolved project is not an id. `/api/projects/${""}/events` does not
+  // keep its empty segment: the URL parser collapses it to
+  // `/api/projects/events`, a route nothing serves. Surfaces mounted before
+  // their project resolves hand this hook exactly that — the ticket overlay
+  // passes `projectId ?? ""` — and because an EventSource reconnects on error
+  // the malformed request repeats on a backoff instead of failing once. The
+  // guard therefore belongs on the identifier, before the connection.
+  const resolvedProjectId = projectId?.trim() ? projectId.trim() : null;
+
   // "connecting" is the honest state before the first open event; the previous
   // "disconnected" seed was immediately overwritten by the effect anyway.
   const [connectionStatus, setStatus] = useState<ConnectionStatus>("connecting");
@@ -37,9 +46,10 @@ export function useProjectEvents(
     hasEventSource,
     assumeEventSource,
   );
-  const status: ConnectionStatus = eventSourceSupported
-    ? connectionStatus
-    : "disconnected";
+  // With no project there is nothing to connect to, so "connecting" would be a
+  // lie — and a stale "connected" from the project left behind worse still.
+  const status: ConnectionStatus =
+    eventSourceSupported && resolvedProjectId ? connectionStatus : "disconnected";
   const [pollTick, setPollTick] = useState(0);
   // Keeps the SSE callbacks reading the newest handlers without making them an
   // effect dependency (which would tear down the connection on every render).
@@ -64,11 +74,11 @@ export function useProjectEvents(
       esRef.current = null;
     }
 
-    if (typeof EventSource === "undefined") {
+    if (!resolvedProjectId || typeof EventSource === "undefined") {
       return;
     }
 
-    const es = new EventSource(`/api/projects/${projectId}/events`);
+    const es = new EventSource(`/api/projects/${resolvedProjectId}/events`);
     esRef.current = es;
 
     es.onopen = () => {
@@ -104,7 +114,7 @@ export function useProjectEvents(
         connectRef.current?.();
       }, delay);
     };
-  }, [projectId]);
+  }, [resolvedProjectId]);
 
   useEffect(() => {
     connectRef.current = connect;
@@ -114,9 +124,15 @@ export function useProjectEvents(
   const bumpPollTick = useCallback(() => {
     setPollTick((t) => t + 1);
   }, []);
-  usePolling(bumpPollTick, FALLBACK_POLL_MS, status === "disconnected", {
-    immediate: false,
-  });
+  // A tick means "something changed, reload" to every consumer. Without a
+  // project there is nothing to reload, so the fallback stays quiet rather
+  // than driving pointless refreshes behind an unresolved surface.
+  usePolling(
+    bumpPollTick,
+    FALLBACK_POLL_MS,
+    !!resolvedProjectId && status === "disconnected",
+    { immediate: false },
+  );
 
   useEffect(() => {
     connect();
