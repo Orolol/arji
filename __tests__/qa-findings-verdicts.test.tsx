@@ -4,6 +4,13 @@
  * The verdict arrow is the ONE place on this screen where a colour leans on
  * state, and it is allowed because the arrow names a destination stratum
  * rather than a status.
+ *
+ * B-arij-S3gpcD1w-ZEB is pinned at the bottom of this file: below `sm` the row
+ * folds, because its id chip and its outcome are both unshrinkable and on a
+ * phone they leave the verdict itself nothing. jsdom has no layout engine and
+ * never loads Tailwind, so what is pinned here is the MARKUP that produced the
+ * overflow; the rendered geometry is measured in Chrome by
+ * `e2e/qa-findings-responsive.spec.ts`.
  */
 
 import { describe, expect, it } from "vitest";
@@ -162,5 +169,139 @@ describe("RubricBand", () => {
       text.indexOf("éditer"),
     );
     expect(within(header).getByTestId("qa-rubric-edit")).toBeInTheDocument();
+  });
+});
+
+/**
+ * B-arij-S3gpcD1w-ZEB — "Verdicts récents" overflows itself on a 320px screen.
+ *
+ * MEASURED IN CHROME on the unfixed row (2026-09-06, `/qa`, one seeded verdict
+ * whose readable id is the longest the generator can make — `E-<slug≤20>-NNN`,
+ * 26 characters, 173.1px of Space Mono; see `components/qa/VerdictRow.tsx` for
+ * the full table). At 320px the band reported `scrollWidth` 318 against a
+ * `clientWidth` of 292 — the 26px `e2e/qa-findings-responsive.spec.ts` fails
+ * on — and the verdict text measured 0.0px. It was still 0.0px at 360px and
+ * 12.7px at 390px: below `sm` the band drew a ticket id and an arrow, and
+ * nothing of what the review concluded.
+ *
+ * WHAT THIS FILE PROVES, AND WHAT IT DOES NOT. jsdom measures nothing, so the
+ * three facts below are string- and structure-level facts about the markup:
+ * the row may fold, the verdict and its outcome fold TOGETHER, and the fold
+ * is undone from `sm` up. That the band then fits, that the text is 148.8px
+ * wide at 320px and that the desktop row is unchanged to the byte are visual
+ * claims, measured in a real browser by the e2e spec.
+ */
+describe("VerdictRow — the band stays inside a phone screen", () => {
+  /**
+   * Does the class list carry `utility` with NO responsive prefix — the one
+   * that applies at 320px? A plain `includes()` would match `sm:flex-nowrap`
+   * and report the desktop rule as the phone's, which is exactly the confusion
+   * this fix is about. Same helper as `__tests__/qa-mobile-layout.test.tsx`.
+   */
+  function hasBaseUtility(element: HTMLElement, utility: string): boolean {
+    return element.className
+      .split(/\s+/)
+      .filter(Boolean)
+      .some((token) => token === utility);
+  }
+
+  /** Does it carry the exact token, prefix included (`sm:contents`)? */
+  function hasUtility(element: HTMLElement, utility: string): boolean {
+    return element.className.split(/\s+/).filter(Boolean).includes(utility);
+  }
+
+  function renderRow(overrides: Partial<QaVerdict> = {}) {
+    render(
+      <VerdictsBand
+        verdicts={[
+          verdict({
+            // The widest id `generateReadableId` can produce: `E-` + a 20-char
+            // slug + `-NNN`. This is what measured 173.1px in Chrome.
+            readableId: "E-e2e-keeps-every-band-001",
+            verdictText: "review unverifiable · findings jamais reçues",
+            outcome: "→ your turn",
+            kind: "attention",
+            ...overrides,
+          }),
+        ]}
+        projectsById={projectsById}
+      />,
+    );
+    return screen.getByTestId("qa-verdict-row");
+  }
+
+  /**
+   * The defect at its root: one flex line that may not wrap, holding a 173px
+   * id chip and a 71px outcome that are both `shrink-0`. A line too narrow for
+   * their sum does not fold — it overflows, which is the band's own
+   * `scrollWidth` running 26px past its `clientWidth` at 320px.
+   */
+  it("lets the row fold onto a second line on a phone", () => {
+    const row = renderRow();
+
+    expect(
+      hasBaseUtility(row, "flex-wrap"),
+      "the row still lays its icon, id chip, verdict and outcome out on one " +
+        "unwrappable line, which is what pushed the band 26px past its own " +
+        "edge at 320px",
+    ).toBe(true);
+    expect(
+      hasBaseUtility(row, "flex-nowrap"),
+      "the row forbids wrapping at 320px",
+    ).toBe(false);
+  });
+
+  /**
+   * A fold is only a fix if the verdict and its outcome fold TOGETHER: the
+   * arrow is the end of the sentence the verdict text starts, and stranding it
+   * on a third line of its own would be a worse row than the one being fixed.
+   * `basis-full` is what drops the pair off the chip's line; `min-w-0` is what
+   * lets the text clamp there instead of pushing the outcome out in turn.
+   */
+  it("drops the verdict and its outcome onto one line of their own", () => {
+    const row = renderRow();
+    const line = within(row).getByTestId("qa-verdict-line");
+
+    expect(
+      hasBaseUtility(line, "basis-full"),
+      "the verdict shares the chip's line, where 320px leaves it nothing",
+    ).toBe(true);
+    expect(hasBaseUtility(line, "min-w-0")).toBe(true);
+    expect(
+      within(line).getByText("review unverifiable · findings jamais reçues"),
+    ).toBeInTheDocument();
+    expect(within(line).getByText("→ your turn")).toBeInTheDocument();
+    // The chip is NOT in the group: it is the line the verdict folds away from.
+    expect(within(line).queryByText("E-e2e-keeps-every-band-001")).toBeNull();
+  });
+
+  /**
+   * Every phone rule is undone from `sm` up, where the text has 262px and the
+   * frame's single line is the right drawing. `sm:contents` dissolves the fold
+   * group rather than nesting a second flex level inside the row, so the four
+   * items are the direct flex children they always were — the 1280px band
+   * screenshot is byte-identical across this fix.
+   */
+  it("is the frame's single line again from sm up", () => {
+    const row = renderRow();
+    const line = within(row).getByTestId("qa-verdict-line");
+
+    expect(hasUtility(row, "sm:flex-nowrap")).toBe(true);
+    expect(
+      hasUtility(line, "sm:contents"),
+      "the fold group still takes part in the desktop layout",
+    ).toBe(true);
+  });
+
+  /**
+   * DOM order never changes: the fold is a wrapper, not a reordering, so a
+   * screen reader and the desktop row read icon · chip · verdict · outcome
+   * at every width.
+   */
+  it("keeps the frame's reading order at every width", () => {
+    const row = renderRow();
+    expect(row.textContent).toBe(
+      "E-e2e-keeps-every-band-001review unverifiable · findings jamais reçues→ your turn",
+    );
   });
 });

@@ -356,6 +356,15 @@ test("keeps every finding action inside the viewport, from 320px to 1440px", asy
  * not shrink below its content, so those are the other two places the screen
  * can push a control out of reach on a phone — and a band that overflows
  * itself is the same defect as the row that started this ticket.
+ *
+ * VERDICTS RÉCENTS IS SEEDED HERE, and that seeding is part of the fix for
+ * B-arij-S3gpcD1w-ZEB. The band is workspace-wide, so this test used to draw
+ * whatever verdicts the rest of the suite happened to have left in the shared
+ * database: alone it drew an empty band and passed, and under `--workers=4` it
+ * drew another spec's rows and failed. A band this test does not populate is
+ * not a band this test measures — the seeded review below is what makes the
+ * 26px overflow (`scrollWidth` 318 vs `clientWidth` 292 at 320px) reproduce on
+ * its own, whatever else is running.
  */
 test("keeps every band inside the phone screen when the whole screen is busy", async ({
   page,
@@ -410,6 +419,25 @@ test("keeps every band inside the phone screen when the whole screen is busy", a
       new Date().toISOString(),
     );
 
+    // The verdict this screen's fourth band draws, and the widest row it can
+    // draw: a `completed` ordinary review carrying a structured verdict, on an
+    // epic whose status is still `backlog`, so `outcomeArrow` returns the
+    // longest of the three arrows ("→ your turn"). The readable id beside it is
+    // `E-<slug≤20>-NNN` — 26 characters of Space Mono, 173px — because the
+    // fixture names a project after this test's own title.
+    db.prepare(
+      `INSERT INTO agent_sessions (id, project_id, epic_id, status, agent_type, named_agent_name, review_verdict, started_at, completed_at, created_at)
+       VALUES (?, ?, ?, 'completed', 'review_feature', ?, 'changes_requested', ?, ?, ?)`,
+    ).run(
+      `qabusy_verdict_${stamp}`,
+      project.id,
+      epic.id,
+      "Relecteur Fonctionnel",
+      new Date().toISOString(),
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
+
     db.prepare(
       `INSERT INTO review_comments (id, epic_id, file_path, line_number, body, author, status, created_at)
        VALUES (?, ?, ?, ?, ?, 'agent', 'open', ?)`,
@@ -432,6 +460,11 @@ test("keeps every band inside the phone screen when the whole screen is busy", a
       page.getByTestId("qa-finding-row").filter({ hasText: marker }),
     ).toHaveCount(1);
     await expect(page.getByTestId("qa-runs-grid")).toBeVisible();
+    // At least one — the band is workspace-wide and capped at six, so the
+    // number of rows belongs to the whole suite. What this test owns is that
+    // the band is not empty, which is what makes the measurement below mean
+    // anything.
+    await expect(page.getByTestId("qa-verdict-row").first()).toBeVisible();
     await settle(page);
 
     const overflow = await page.evaluate(() => {
