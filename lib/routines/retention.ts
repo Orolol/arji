@@ -46,9 +46,19 @@
  * them to the filesystem. Only `VACUUM` rewrites the database file, and on a
  * half-gigabyte database that is a multi-second exclusive rewrite on the one
  * synchronous connection every request shares — so it runs ONCE, after the
- * first prune that actually freed something, and never again on a schedule.
- * The claim is durable (`retentionVacuumedAt` in the routine config), so a
- * restart cannot replay it.
+ * prune that DRAINS the backlog, and never again on a schedule. The claim is
+ * durable (`retentionVacuumedAt` in the routine config), so a restart cannot
+ * replay it.
+ *
+ * "After the prune that drains the backlog" and not "after the first prune
+ * that freed something", because a run only deletes up to `maxDeletedChunks`
+ * rows: the measured 148,932-row pass takes three runs at the default budget,
+ * and reclaiming the first run's pages abandons the other two thirds to the
+ * free list for the life of the database. So a run that stops at its budget
+ * hands the claim on, carrying the debt in
+ * `retentionChunksReclaimPendingAt` — bounded by
+ * `RETENTION_RECLAIM_MAX_DEFERRAL_DAYS`, because unlike prompts the chunk
+ * backlog refills daily and "wait for it to drain" could otherwise mean never.
  *
  * There are two of those one-shot claims, one per historical backlog:
  * `retentionVacuumedAt` for the chunk prune and `retentionPromptsVacuumedAt`
@@ -86,6 +96,7 @@ import {
 import type { RoutineActionResult } from "@/lib/routines/actions";
 import {
   parseRoutineConfig,
+  RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY,
   RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY,
   RETENTION_VACUUMED_AT_CONFIG_KEY,
 } from "@/lib/routines/constants";
@@ -122,6 +133,27 @@ export const DEFAULT_SESSION_CHUNK_RETENTION_DAYS = 30;
 
 /** Chunk rows one run may delete before it leaves the rest for tomorrow. */
 export const DEFAULT_MAX_DELETED_CHUNKS_PER_RUN = 50_000;
+
+/**
+ * How long the one-shot chunk reclaim may be postponed while the backlog is
+ * still draining, before the run takes the rewrite anyway.
+ *
+ * The deferral exists because spending the claim on the first budgeted run
+ * strands every later batch's pages. The BOUND exists because the chunk
+ * backlog, unlike the prompt one, never drains permanently — sessions age past
+ * the retention window every day, so `reachedDeleteBudget` means "today's
+ * batch did not fit", not "there is more of the historical backlog left". On a
+ * project that fills the budget every single day an unbounded deferral would
+ * postpone the rewrite forever, which is strictly worse than the behaviour it
+ * replaces.
+ *
+ * A week is the routine's own cadence times seven: long enough for the
+ * measured case (148,932 rows at a 50,000-row budget — three consecutive daily
+ * runs) to drain and reclaim the whole of it, short enough that the
+ * pathological project still gets its rewrite, over seven days of accumulated
+ * deletions instead of one.
+ */
+export const RETENTION_RECLAIM_MAX_DEFERRAL_DAYS = 7;
 
 /**
  * Characters kept at the end of the `response` stream.
@@ -218,11 +250,17 @@ export interface RetentionDeps {
   }): SessionPromptBackfillResult;
   vacuum(): void;
   /**
-   * Records the one-shot VACUUM claims this run is about to spend. Takes the
-   * keys rather than assuming one, so a run that reclaims both backlogs in a
-   * single rewrite spends both claims in a single write.
+   * Patches the routine's Arij-managed config marks in one write.
+   *
+   * A patch rather than a list of keys because the marks are not all claims:
+   * the deferred-reclaim debt is SET by the run that postpones the rewrite and
+   * CLEARED (`null`) by the run that finally takes it, and a run that drains
+   * the backlog does both in the same write as the claim it is spending.
    */
-  claimVacuum(routineId: string, at: string, keys: readonly string[]): void;
+  writeConfigMarks(
+    routineId: string,
+    patch: Record<string, string | null>,
+  ): void;
 }
 
 export const defaultRetentionDeps: RetentionDeps = {
@@ -239,7 +277,7 @@ export const defaultRetentionDeps: RetentionDeps = {
   vacuum: () => {
     sqlite.exec("VACUUM");
   },
-  claimVacuum: (routineId, at, keys) => {
+  writeConfigMarks: (routineId, patch) => {
     const row = db
       .select({ config: routines.config })
       .from(routines)
@@ -255,17 +293,31 @@ export const defaultRetentionDeps: RetentionDeps = {
     } catch {
       // A malformed config must not stop the claim from being recorded.
     }
+    const next = { ...config };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) delete next[key];
+      else next[key] = value;
+    }
     db.update(routines)
-      .set({
-        config: JSON.stringify({
-          ...config,
-          ...Object.fromEntries(keys.map((key) => [key, at])),
-        }),
-      })
+      .set({ config: JSON.stringify(next) })
       .where(eq(routines.id, routineId))
       .run();
   },
 };
+
+/**
+ * A durable ISO mark, or `null` when absent OR unreadable. Unreadable counts
+ * as absent on purpose: the next run rewrites the mark from its own clock
+ * rather than deferring forever against a timestamp it cannot compare.
+ */
+function isoMark(
+  config: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = config[key];
+  if (typeof value !== "string") return null;
+  return Number.isFinite(Date.parse(value)) ? value : null;
+}
 
 function positiveInteger(
   config: Record<string, unknown>,
@@ -341,6 +393,11 @@ export async function runRetentionRoutine(
     typeof config[RETENTION_VACUUMED_AT_CONFIG_KEY] === "string";
   const promptsAlreadyVacuumed =
     typeof config[RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY] === "string";
+  // The instant an earlier run first postponed the chunk reclaim, if one did.
+  const reclaimPendingSince = isoMark(
+    config,
+    RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY,
+  );
 
   const retentionDays = deps.resolveRetentionDays(routine.projectId);
   const prunedAt = now.toISOString();
@@ -360,8 +417,23 @@ export async function runRetentionRoutine(
     maxRows: maxCappedPrompts,
   });
 
+  /**
+   * The chunk backlog's one rewrite is owed as soon as a run has deleted rows
+   * it has not reclaimed — which includes a run that deletes nothing at all,
+   * because an earlier run's deferred debt is only ever settled by the run
+   * that finds the backlog drained.
+   */
+  const reclaimOwed =
+    vacuumAllowed &&
+    !alreadyVacuumed &&
+    (result.prunedSessions > 0 || reclaimPendingSince !== null);
+
   const targetUrl = `/projects/${routine.projectId}/sessions`;
-  if (result.prunedSessions === 0 && prompts.cappedPrompts === 0) {
+  if (
+    result.prunedSessions === 0 &&
+    prompts.cappedPrompts === 0 &&
+    !reclaimOwed
+  ) {
     return {
       status: "skipped",
       message: `Nothing to prune: ${result.scannedSessions} terminal session${
@@ -376,26 +448,60 @@ export async function runRetentionRoutine(
   // something from it — so a prompt-only run cannot burn the chunk prune's
   // one rewrite, or the other way round. When both come due at once they
   // share the single VACUUM and are both marked spent.
+  const marks: Record<string, string | null> = {};
   const vacuumClaims: string[] = [];
-  if (vacuumAllowed) {
-    if (!alreadyVacuumed && result.prunedSessions > 0) {
+  let reclaimDeferred = false;
+
+  if (reclaimOwed) {
+    // `reachedDeleteBudget` is the pruner's own "I left work behind" signal.
+    // Spending the one rewrite on a run that left work behind reclaims that
+    // batch's pages and abandons every later batch's — the defect this
+    // deferral exists for.
+    const drainedBacklog = !result.reachedDeleteBudget;
+    const postponedSince = reclaimPendingSince ?? prunedAt;
+    const deferralExpired =
+      now.getTime() - Date.parse(postponedSince) >=
+      RETENTION_RECLAIM_MAX_DEFERRAL_DAYS * 86_400_000;
+
+    if (drainedBacklog || deferralExpired) {
       vacuumClaims.push(RETENTION_VACUUMED_AT_CONFIG_KEY);
+      // The debt is settled by this rewrite; nothing carries to the next run.
+      if (reclaimPendingSince !== null) {
+        marks[RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY] = null;
+      }
+    } else {
+      reclaimDeferred = true;
+      // Dated from the FIRST postponement, not refreshed each run: the bound
+      // is on how long the reclaim may be owed, and a project that fills the
+      // budget daily would otherwise reset its own deadline forever.
+      if (reclaimPendingSince === null) {
+        marks[RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY] = prunedAt;
+      }
     }
-    if (!promptsAlreadyVacuumed && prompts.cappedPrompts > 0) {
-      vacuumClaims.push(RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY);
-    }
+  }
+
+  if (vacuumAllowed && !promptsAlreadyVacuumed && prompts.cappedPrompts > 0) {
+    vacuumClaims.push(RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY);
   }
 
   const vacuumed = vacuumClaims.length > 0;
-  if (vacuumed) {
+  for (const key of vacuumClaims) marks[key] = prunedAt;
+
+  if (Object.keys(marks).length > 0) {
     // Claim BEFORE the rewrite, exactly like the scheduler's own run claim: a
     // crash mid-VACUUM must not hand the next boot a second multi-second
     // exclusive rewrite. SQLite rolls the file back on its own.
-    deps.claimVacuum(routine.id, prunedAt, vacuumClaims);
-    deps.vacuum();
+    deps.writeConfigMarks(routine.id, marks);
   }
+  if (vacuumed) deps.vacuum();
 
   const parts: string[] = [];
+  // A run that pruned nothing and capped nothing is here for one reason: it
+  // is the run that found the backlog drained and settled the debt an earlier
+  // budgeted run left behind.
+  if (result.prunedSessions === 0 && prompts.cappedPrompts === 0) {
+    parts.push("Reclaimed the pages left behind by earlier budgeted runs");
+  }
   if (result.prunedSessions > 0) {
     parts.push(
       `Pruned ${result.prunedSessions} session${
@@ -430,7 +536,11 @@ export async function runRetentionRoutine(
   }
   if (vacuumed) parts.push("database vacuumed");
   if (result.reachedDeleteBudget) {
-    parts.push(`stopped at the ${maxDeletedChunks}-chunk budget for this run`);
+    parts.push(
+      `stopped at the ${maxDeletedChunks}-chunk budget for this run${
+        reclaimDeferred ? ", page reclaim deferred until it drains" : ""
+      }`,
+    );
   }
 
   return {

@@ -98,6 +98,30 @@ export const RETENTION_VACUUMED_AT_CONFIG_KEY = "retentionVacuumedAt";
 export const RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY =
   "retentionPromptsVacuumedAt";
 
+/**
+ * Durable "a reclaim is owed" mark for the chunk backlog.
+ *
+ * The VACUUM claim above is one rewrite for the WHOLE historical backlog, and
+ * a run only deletes up to `maxDeletedChunks` rows of it. Spending the claim
+ * on the first budgeted run reclaims that run's pages and strands every later
+ * batch's for the life of the database — measured at 148,932 rows deleted by
+ * a 7-day pass against a 50,000-row budget, so two thirds of the reduction
+ * never reached the filesystem.
+ *
+ * So the claim is deferred to the run that drains the backlog, and this mark
+ * is what carries the debt across runs: the ISO instant the reclaim was first
+ * postponed. It is cleared by the run that finally takes the rewrite.
+ *
+ * The chunk backlog differs from the prompt one here, and the difference is
+ * why the deferral is bounded rather than absolute: prompts are capped on the
+ * write path, so that backlog drains once and never refills, while sessions
+ * age past the retention window every day. On a project that fills the budget
+ * daily, "wait until it drains" would postpone the rewrite forever — where
+ * the old code at least ran it once. See RETENTION_RECLAIM_MAX_DEFERRAL_DAYS.
+ */
+export const RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY =
+  "retentionChunksReclaimPendingAt";
+
 export const TIME_OF_DAY_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 /** Calendar comparison deliberately uses the server's local timezone. */

@@ -44,6 +44,7 @@ const {
   resolveSessionChunkRetentionDays,
   retentionCutoff,
   runRetentionRoutine,
+  RETENTION_RECLAIM_MAX_DEFERRAL_DAYS,
   SESSION_CHUNK_RETAINED_TAIL_CHARS,
   SESSION_CHUNK_RETENTION_DAYS_SETTING_KEY,
   sessionChunkRetentionDaysSettingKey,
@@ -54,6 +55,7 @@ const { SESSION_PROMPT_MAX_STORED_BYTES } = await import(
   "@/lib/agent-sessions/prompt-cap"
 );
 const {
+  RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY,
   RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY,
   RETENTION_VACUUMED_AT_CONFIG_KEY,
   isDailyRoutineKind,
@@ -540,7 +542,7 @@ describe("retention routine", () => {
     };
   }
 
-  function deps(pruned: number, cappedPrompts = 0) {
+  function deps(pruned: number, cappedPrompts = 0, reachedDeleteBudget = false) {
     return {
       resolveRetentionDays: vi.fn(() => 30),
       prune: vi.fn(() => ({
@@ -550,7 +552,7 @@ describe("retention routine", () => {
         truncatedChunks: 1,
         reclaimedChars: 4_000_000,
         preservedLastTexts: 1,
-        reachedDeleteBudget: false,
+        reachedDeleteBudget,
       })),
       capPrompts: vi.fn(() => ({
         scannedSessions: cappedPrompts,
@@ -559,7 +561,7 @@ describe("retention routine", () => {
         reachedRowBudget: false,
       })),
       vacuum: vi.fn(),
-      claimVacuum: vi.fn(),
+      writeConfigMarks: vi.fn(),
     };
   }
 
@@ -585,12 +587,10 @@ describe("retention routine", () => {
 
     expect(completed.status).toBe("completed");
     expect(first.vacuum).toHaveBeenCalledTimes(1);
-    expect(first.claimVacuum).toHaveBeenCalledWith(
-      "routine-retention",
-      NOW.toISOString(),
-      [RETENTION_VACUUMED_AT_CONFIG_KEY],
-    );
-    expect(first.claimVacuum.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(first.writeConfigMarks).toHaveBeenCalledWith("routine-retention", {
+      [RETENTION_VACUUMED_AT_CONFIG_KEY]: NOW.toISOString(),
+    });
+    expect(first.writeConfigMarks.mock.invocationCallOrder[0]).toBeLessThan(
       first.vacuum.mock.invocationCallOrder[0],
     );
     expect(completed.message).toContain("database vacuumed");
@@ -612,7 +612,7 @@ describe("retention routine", () => {
     expect(result.status).toBe("skipped");
     expect(result.shouldNotify).toBe(false);
     expect(quiet.vacuum).not.toHaveBeenCalled();
-    expect(quiet.claimVacuum).not.toHaveBeenCalled();
+    expect(quiet.writeConfigMarks).not.toHaveBeenCalled();
   });
 
   it("spends both one-shot claims in one rewrite when both backlogs come due", async () => {
@@ -620,14 +620,10 @@ describe("retention routine", () => {
     const result = await runRetentionRoutine(routine(), both, NOW);
 
     expect(both.vacuum).toHaveBeenCalledTimes(1);
-    expect(both.claimVacuum).toHaveBeenCalledWith(
-      "routine-retention",
-      NOW.toISOString(),
-      [
-        RETENTION_VACUUMED_AT_CONFIG_KEY,
-        RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY,
-      ],
-    );
+    expect(both.writeConfigMarks).toHaveBeenCalledWith("routine-retention", {
+      [RETENTION_VACUUMED_AT_CONFIG_KEY]: NOW.toISOString(),
+      [RETENTION_PROMPTS_VACUUMED_AT_CONFIG_KEY]: NOW.toISOString(),
+    });
     expect(result.message).toContain("Pruned 3 sessions");
     expect(result.message).toContain("2 stored prompts capped");
   });
@@ -636,6 +632,144 @@ describe("retention routine", () => {
     const optedOut = deps(3);
     await runRetentionRoutine(routine({ vacuum: false }), optedOut, NOW);
     expect(optedOut.vacuum).not.toHaveBeenCalled();
+    // And records no debt either: a reclaim nobody wants is not owed.
+    expect(optedOut.writeConfigMarks).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The deferral, at the dependency boundary. The end-to-end freelist probe
+   * below proves the pages come back; these pin WHY — which run spends the
+   * one-shot claim, and what it carries to the next one.
+   */
+  it("hands the claim on when the run stops at its budget", async () => {
+    const budgeted = deps(3, 0, true);
+    const result = await runRetentionRoutine(routine(), budgeted, NOW);
+
+    expect(budgeted.vacuum).not.toHaveBeenCalled();
+    expect(budgeted.writeConfigMarks).toHaveBeenCalledWith(
+      "routine-retention",
+      { [RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY]: NOW.toISOString() },
+    );
+    expect(result.message).toContain("page reclaim deferred until it drains");
+  });
+
+  it("spends the claim on the run that drains the backlog, clearing the debt", async () => {
+    const draining = deps(3);
+    const result = await runRetentionRoutine(
+      routine({
+        [RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY]:
+          new Date(NOW.getTime() - 2 * 86_400_000).toISOString(),
+      }),
+      draining,
+      NOW,
+    );
+
+    expect(draining.vacuum).toHaveBeenCalledTimes(1);
+    expect(draining.writeConfigMarks).toHaveBeenCalledWith(
+      "routine-retention",
+      {
+        [RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY]: null,
+        [RETENTION_VACUUMED_AT_CONFIG_KEY]: NOW.toISOString(),
+      },
+    );
+    expect(result.message).toContain("database vacuumed");
+  });
+
+  it("dates the deferral from the first postponement, not the latest", async () => {
+    const stillBudgeted = deps(3, 0, true);
+    await runRetentionRoutine(
+      routine({
+        [RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY]:
+          new Date(NOW.getTime() - 3 * 86_400_000).toISOString(),
+      }),
+      stillBudgeted,
+      NOW,
+    );
+
+    // Rewriting the mark here would reset the bound's deadline every day,
+    // which is exactly the "postpone forever" the bound exists to prevent.
+    expect(stillBudgeted.writeConfigMarks).not.toHaveBeenCalled();
+    expect(stillBudgeted.vacuum).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The trade the chunk half makes and the prompt half does not: sessions age
+   * past the window daily, so a project that fills the budget every day would
+   * defer its one rewrite forever. The bound takes it late rather than never.
+   */
+  it("takes the rewrite anyway once the deferral bound expires", async () => {
+    const expired = deps(3, 0, true);
+    await runRetentionRoutine(
+      routine({
+        [RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY]: new Date(
+          NOW.getTime() -
+            (RETENTION_RECLAIM_MAX_DEFERRAL_DAYS + 1) * 86_400_000,
+        ).toISOString(),
+      }),
+      expired,
+      NOW,
+    );
+
+    expect(expired.vacuum).toHaveBeenCalledTimes(1);
+    expect(expired.writeConfigMarks).toHaveBeenCalledWith("routine-retention", {
+      [RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY]: null,
+      [RETENTION_VACUUMED_AT_CONFIG_KEY]: NOW.toISOString(),
+    });
+
+    // One day inside the bound is still a deferral, so the boundary is a
+    // decision rather than an accident of rounding.
+    const inside = deps(3, 0, true);
+    await runRetentionRoutine(
+      routine({
+        [RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY]: new Date(
+          NOW.getTime() -
+            (RETENTION_RECLAIM_MAX_DEFERRAL_DAYS - 1) * 86_400_000,
+        ).toISOString(),
+      }),
+      inside,
+      NOW,
+    );
+    expect(inside.vacuum).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The backlog can also stop existing rather than drain — a widened
+   * retention window leaves an owed reclaim with nothing left to prune. That
+   * run is not `skipped`: it is the one that settles the debt.
+   */
+  it("settles a deferred reclaim on a run that finds nothing left to prune", async () => {
+    const idle = deps(0);
+    const result = await runRetentionRoutine(
+      routine({
+        [RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY]:
+          new Date(NOW.getTime() - 86_400_000).toISOString(),
+      }),
+      idle,
+      NOW,
+    );
+
+    expect(result.status).toBe("completed");
+    expect(idle.vacuum).toHaveBeenCalledTimes(1);
+    expect(idle.writeConfigMarks).toHaveBeenCalledWith("routine-retention", {
+      [RETENTION_CHUNKS_RECLAIM_PENDING_AT_CONFIG_KEY]: null,
+      [RETENTION_VACUUMED_AT_CONFIG_KEY]: NOW.toISOString(),
+    });
+    expect(result.message).toContain(
+      "Reclaimed the pages left behind by earlier budgeted runs",
+    );
+  });
+
+  it("stays skipped when a spent claim leaves nothing to reclaim", async () => {
+    const spent = deps(0);
+    const result = await runRetentionRoutine(
+      routine({ [RETENTION_VACUUMED_AT_CONFIG_KEY]: NOW.toISOString() }),
+      spent,
+      NOW,
+    );
+
+    expect(result.status).toBe("skipped");
+    expect(spent.vacuum).not.toHaveBeenCalled();
+    expect(spent.writeConfigMarks).not.toHaveBeenCalled();
   });
 
   it("rejects a malformed per-run budget instead of pruning with a guess", async () => {
@@ -735,5 +869,64 @@ describe("retention routine", () => {
         .get()!.config,
     ) as Record<string, unknown>;
     expect(stored[RETENTION_VACUUMED_AT_CONFIG_KEY]).toBe(NOW.toISOString());
+  });
+
+  /**
+   * The regression this ticket exists for: the one-shot VACUUM claim was
+   * spent by the FIRST run that pruned anything, whether or not that run had
+   * drained the backlog. `reachedDeleteBudget` — the pruner's own "I left work
+   * behind" signal — was read for the status line and nowhere else.
+   *
+   * The default budget is 50,000 chunk rows against a measured 148,932 rows
+   * deleted by a 7-day pass on the live database: three runs, of which only
+   * the first was ever reclaimed. Two thirds of the pages the routine exists
+   * to return to the filesystem sat on SQLite's free list for the life of the
+   * database.
+   *
+   * Probed on the free list rather than on the call count, because the claim
+   * is about pages returned, not about a function having been called.
+   */
+  it("reclaims every batch's pages, not only the first run's", async () => {
+    // ~585 deletable chunk rows against a 200-row budget: three pruning runs,
+    // and only the last of them drains the backlog.
+    for (const id of ["batch-a", "batch-b", "batch-c"]) {
+      seedSession({ id, status: "completed", endedAt: daysAgo(40) });
+      for (let index = 0; index < 200; index += 1) {
+        seedChunk(id, "raw", filler(index, 2000));
+      }
+    }
+    db.insert(routines)
+      .values({
+        id: "routine-retention",
+        projectId: PROJECT_ID,
+        kind: "retention",
+        timeOfDay: "04:30",
+        config: JSON.stringify({ maxDeletedChunks: 200 }),
+      })
+      .run();
+
+    const statuses: string[] = [];
+    let budgetedRuns = 0;
+    for (let run = 0; run < 8; run += 1) {
+      const stored = db
+        .select()
+        .from(routines)
+        .where(eq(routines.id, "routine-retention"))
+        .get()!;
+      const result = await runRetentionRoutine(stored, undefined, NOW);
+      statuses.push(result.status);
+      if (result.status === "skipped") break;
+      if (result.message.includes("-chunk budget for this run")) {
+        budgetedRuns += 1;
+      }
+    }
+
+    // The shape the bug needs: the backlog really did outlast a run's budget.
+    expect(budgetedRuns).toBeGreaterThan(0);
+    expect(statuses.at(-1)).toBe("skipped");
+
+    // The whole claim. A rewrite that happened before the last batch was
+    // deleted leaves that batch's pages on the free list forever.
+    expect(sqlite.pragma("freelist_count", { simple: true })).toBe(0);
   });
 });
