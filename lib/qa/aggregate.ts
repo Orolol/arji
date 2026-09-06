@@ -18,9 +18,15 @@
 
 import { FINDING_SEVERITY_PREFIXES } from "@/lib/review/finding-severity";
 
+// The LEAF module, not `lifecycle.ts`: this file is pure and reaches the client
+// through `QaScreen`, and `lifecycle.ts` imports `@/lib/db` — importing it here
+// pulled `better-sqlite3` into the browser bundle.
+import { TERMINAL_STATUSES } from "@/lib/agent-sessions/lifecycle-status";
+
 import {
   QA_VERDICT_LIMIT,
   type QaCheck,
+  type QaCheckTotals,
   type QaQueuedRun,
   type QaRun,
   type QaSeverityTier,
@@ -219,8 +225,69 @@ export interface QaCheckRow {
   /** Already clipped in SQL — see QA_CHECK_SUMMARY_LIMIT. */
   summary: string | null;
   agentSessionId: string | null;
+  /**
+   * `agent_sessions.status` for {@link agentSessionId}, from a LEFT JOIN —
+   * `null` when the report carries no session id, or when the session row is
+   * gone (the FK is `ON DELETE SET NULL`). This, not the report's own column,
+   * is what says whether the check is still going. See {@link isCheckLive}.
+   */
+  sessionStatus: string | null;
   createdAt: string | null;
   completedAt: string | null;
+}
+
+/**
+ * Is this check still going?
+ *
+ * NOT `report.status === "running"`, and the difference is the whole point.
+ * `qa_reports.status` has exactly ONE writer — the tail of the scheduler
+ * closure in `app/api/projects/[projectId]/qa/check/route.ts` — so it is only
+ * ever moved off `running` by a run that reaches its own end. Three ordinary
+ * paths skip that tail and strand the row on `running` forever:
+ *
+ * - a server restart mid-check: `failOrphanedRunningSessions()` fixes the
+ *   session row and never looks at `qa_reports`;
+ * - a launch closure that rejects: `handleLaunchFailure` marks the session
+ *   terminal, and the update after the `await` never runs;
+ * - cancelling a still-queued check: `agentScheduler.remove()` splices the
+ *   closure out, so nothing throws and nothing updates the report.
+ *
+ * Every one of them leaves the SESSION terminal. So the session is the source
+ * of truth for liveness, and the report's column is only trusted once it says
+ * something other than `running`.
+ *
+ * A `running` report with no session at all is not live either: the FK is
+ * `ON DELETE SET NULL`, and the one writer that stores a NULL session id — the
+ * empty failure digest — records `completed`, never `running`.
+ */
+export function isCheckLive(row: {
+  status: string | null;
+  sessionStatus: string | null;
+}): boolean {
+  if ((row.status ?? "running") !== "running") return false;
+  if (row.sessionStatus === null) return false;
+  return !TERMINAL_STATUSES.has(row.sessionStatus);
+}
+
+/**
+ * The word the row prints.
+ *
+ * A stranded report gets `interrupted` rather than either of the two lies
+ * available: `running` (its own column, contradicted by the dead session and by
+ * the dot that is not breathing beside it) and the session's own outcome —
+ * `completed` would claim a report that was never written, since
+ * `report_content` is filled by the same statement that moves the status.
+ *
+ * `interrupted` is not a stored value and nothing writes it; it exists only
+ * here, as the honest reading of two columns that disagree.
+ */
+export function checkStatusLabel(row: {
+  status: string | null;
+  sessionStatus: string | null;
+}): string {
+  const stored = row.status ?? "running";
+  if (stored !== "running") return stored;
+  return isCheckLive(row) ? "running" : "interrupted";
 }
 
 /**
@@ -250,33 +317,63 @@ export function checkTypeLabel(checkType: string | null | undefined): string {
 }
 
 /**
+ * The band's meta figures for the projects currently in scope.
+ *
+ * The route counts per project; this adds up the ones the screen is showing, so
+ * the unfiltered `/qa` sums every project and a project-scoped mount sums one.
+ * A project with no report has no key, and a missing key is zero — never a
+ * fabricated row.
+ */
+export function sumCheckTotals(
+  byProject: Record<string, QaCheckTotals>,
+  projectIds: readonly string[],
+): QaCheckTotals {
+  return projectIds.reduce<QaCheckTotals>(
+    (acc, projectId) => {
+      const totals = byProject[projectId];
+      if (!totals) return acc;
+      return {
+        running: acc.running + totals.running,
+        total: acc.total + totals.total,
+      };
+    },
+    { running: 0, total: 0 },
+  );
+}
+
+/**
  * The QA CHECKS band's rows.
  *
- * RUNNING FIRST, then newest first — the same order the SQL asks for, repeated
+ * LIVE FIRST, then newest first — the same order the SQL asks for, repeated
  * here because the derivation must not depend on the driver's row order to be
- * correct. A running check is the one thing on this band the user is waiting
- * on, and it must never be pushed off the end by six checks started after it.
+ * correct. A live check is the one thing on this band the user is waiting on,
+ * and it must never be pushed off the end by six checks started after it.
+ *
+ * "Live" is {@link isCheckLive}, not the report's own column, and the SQL uses
+ * the SAME rule. If the two ever disagreed the band would sort by one answer
+ * and paint by the other — which is precisely how a stranded report came to
+ * pin itself to the top.
  *
  * A row with no `created_at` sorts last rather than first: an empty string
  * compares below every timestamp, and a missing stamp is not a fresh one.
  */
 export function deriveChecks(rows: readonly QaCheckRow[]): QaCheck[] {
   return rows
-    .map((row) => {
-      const status = row.status ?? "running";
-      return {
-        reportId: row.id,
-        projectId: row.projectId,
-        checkType: row.checkType ?? "tech_check",
-        checkLabel: checkTypeLabel(row.checkType),
-        status,
-        live: status === "running",
-        summary: row.summary,
-        agentSessionId: row.agentSessionId,
-        createdAt: row.createdAt,
-        completedAt: row.completedAt,
-      } satisfies QaCheck;
-    })
+    .map(
+      (row) =>
+        ({
+          reportId: row.id,
+          projectId: row.projectId,
+          checkType: row.checkType ?? "tech_check",
+          checkLabel: checkTypeLabel(row.checkType),
+          status: checkStatusLabel(row),
+          live: isCheckLive(row),
+          summary: row.summary,
+          agentSessionId: row.agentSessionId,
+          createdAt: row.createdAt,
+          completedAt: row.completedAt,
+        }) satisfies QaCheck,
+    )
     .sort((a, b) => {
       if (a.live !== b.live) return a.live ? -1 : 1;
       return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");

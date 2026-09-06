@@ -29,6 +29,11 @@ import { timeAgo } from "@/lib/utils/format-date";
  * NO STATE COLOUR. `running` is told by the breathing dot and the word, the way
  * every other live thing in the Piscine is; a failed check is told by the word
  * `failed`. The only colour on the row is the project's identity chip.
+ *
+ * THE WORD AND THE DOT CANNOT DISAGREE. `check.status` is not the raw column —
+ * a report stranded on `running` behind a finished session reads `interrupted`
+ * and draws no dot (see `checkStatusLabel`), so the row never breathes beside a
+ * check that stopped hours ago.
  */
 export interface QaCheckRowProps {
   check: QaCheck;
@@ -37,11 +42,16 @@ export interface QaCheckRowProps {
 }
 
 export function QaCheckRow({ check, project, className }: QaCheckRowProps) {
-  // A check with no summary yet has genuinely nothing to say — an em-dash,
-  // never an invented sentence. A running one says so instead.
-  const line =
-    check.summary?.trim() ||
-    (check.live ? "En cours…" : "—");
+  /**
+   * A check with no summary yet has genuinely nothing to say — an em-dash,
+   * never an invented sentence.
+   *
+   * A LIVE one says nothing at all here, deliberately: the breathing dot and
+   * the word `running` beside it already carry that state, and a second
+   * "En cours…" in the summary slot printed the same fact twice, in two
+   * languages, on one row.
+   */
+  const line = check.summary?.trim() || (check.live ? "" : "—");
 
   return (
     <Link

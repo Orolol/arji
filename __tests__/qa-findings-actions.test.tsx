@@ -64,6 +64,7 @@ function payload(overrides: Partial<QaPayload> = {}): QaPayload {
       },
     ],
     checks: [],
+    checkTotals: {},
     checkableProjectIds: ["p1"],
     coveragePercent: 92,
     ...overrides,

@@ -1,17 +1,12 @@
 "use client";
 
-import { useState } from "react";
 import { Play } from "lucide-react";
 
 import { IdentityChip, Mono, PillButton, projectTone } from "@/components/piscine";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import type { DeskProject } from "@/lib/control-desk/types";
 import type { QaReviewTarget } from "@/lib/qa/types";
-import { cn } from "@/lib/utils";
+
+import { PickerPopover } from "./PickerPopover";
 
 /**
  * "Run QA pass" — the screen's one filled button outside the finding rows.
@@ -29,6 +24,9 @@ import { cn } from "@/lib/utils";
  * The named agent is resolved server-side by `resolveAgentForDispatch(...,
  * { purpose: "review" })`, which IS "the review agent per its 7a assignment".
  * No `namedAgentId` is sent.
+ *
+ * The popover shell — card, scroller, row geometry and the one focus ring — is
+ * `PickerPopover`, shared with "New check"; only the row's contents are here.
  */
 export interface RunQaPassButtonProps {
   targets: readonly QaReviewTarget[];
@@ -45,11 +43,9 @@ export function RunQaPassButton({
   pending = false,
   className,
 }: RunQaPassButtonProps) {
-  const [open, setOpen] = useState(false);
-
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+    <PickerPopover
+      trigger={
         <PillButton
           variant="filled"
           size="md"
@@ -62,52 +58,33 @@ export function RunQaPassButton({
         >
           Run QA pass
         </PillButton>
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        data-testid="qa-run-pass-menu"
-        className="w-[320px] rounded-[12px] border-[1.5px] border-border bg-card p-2 shadow-none"
-      >
-        {targets.length === 0 ? (
-          <span className="block px-2 py-[6px] font-sans text-[12.5px] text-muted-foreground">
-            Aucun ticket en review pour l&apos;instant.
-          </span>
-        ) : (
-          <div className="flex max-h-[280px] flex-col gap-1 overflow-y-auto">
-            {targets.map((target) => {
-              const project = projectsById.get(target.projectId);
-              return (
-                <button
-                  key={target.epicId}
-                  type="button"
-                  data-testid="qa-run-pass-target"
-                  onClick={() => {
-                    setOpen(false);
-                    void onRun(target);
-                  }}
-                  className={cn(
-                    "flex w-full cursor-pointer items-center gap-2 rounded-[10px] px-2 py-[6px] text-left",
-                    "outline-none hover:bg-muted",
-                    "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
-                  )}
-                >
-                  <IdentityChip
-                    label={target.readableId ?? project?.shortName ?? "—"}
-                    tone={projectTone(project?.colorIndex ?? 0)}
-                    size="sm"
-                  />
-                  <span className="min-w-0 flex-1 truncate font-sans text-[12.5px] text-foreground">
-                    {target.title}
-                  </span>
-                  <Mono size={10} tone="muted">
-                    {target.status}
-                  </Mono>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </PopoverContent>
-    </Popover>
+      }
+      items={targets}
+      keyOf={(target) => target.epicId}
+      onSelect={(target) => void onRun(target)}
+      emptyLabel="Aucun ticket en review pour l'instant."
+      width={320}
+      testId="qa-run-pass-menu"
+      itemTestId="qa-run-pass-target"
+    >
+      {(target) => {
+        const project = projectsById.get(target.projectId);
+        return (
+          <>
+            <IdentityChip
+              label={target.readableId ?? project?.shortName ?? "—"}
+              tone={projectTone(project?.colorIndex ?? 0)}
+              size="sm"
+            />
+            <span className="min-w-0 flex-1 truncate font-sans text-[12.5px] text-foreground">
+              {target.title}
+            </span>
+            <Mono size={10} tone="muted">
+              {target.status}
+            </Mono>
+          </>
+        );
+      }}
+    </PickerPopover>
   );
 }

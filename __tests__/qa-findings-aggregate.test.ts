@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   QA_UNVERIFIABLE_TEXT,
+  checkStatusLabel,
   checkTypeLabel,
   compareFindings,
   deriveChecks,
@@ -16,9 +17,11 @@ import {
   deriveRuns,
   deriveVerdicts,
   outcomeArrow,
+  isCheckLive,
   rubricItemsFromChecklist,
   runLastLine,
   severityOf,
+  sumCheckTotals,
   stripSeverityPrefix,
   type QaCheckRow,
   type QaSessionRow,
@@ -347,6 +350,7 @@ function checkRow(overrides: Partial<QaCheckRow> = {}): QaCheckRow {
     checkType: "tech_check",
     summary: "Two flaky specs and one uncapped column.",
     agentSessionId: "s1",
+    sessionStatus: "completed",
     createdAt: "2026-08-01T09:00:00.000Z",
     completedAt: "2026-08-01T09:20:00.000Z",
     ...overrides,
@@ -375,15 +379,103 @@ describe("checkTypeLabel", () => {
   });
 });
 
+/** A check that really is going: `running` report, non-terminal session. */
+function liveRow(overrides: Partial<QaCheckRow> = {}): QaCheckRow {
+  return checkRow({
+    status: "running",
+    sessionStatus: "running",
+    summary: null,
+    ...overrides,
+  });
+}
+
+describe("isCheckLive / checkStatusLabel", () => {
+  /**
+   * THE RULE THAT REPLACED `status === "running"`. `qa_reports.status` has one
+   * writer — the tail of the scheduler closure — so a restart, a rejected
+   * launch or a cancelled queue entry strands the row on `running` while the
+   * SESSION is reconciled to a terminal status. Liveness therefore comes from
+   * the session; the report's column is only trusted once it stops saying
+   * `running`.
+   */
+  it("reads a running report behind a live session as live", () => {
+    expect(isCheckLive({ status: "running", sessionStatus: "running" })).toBe(true);
+    expect(isCheckLive({ status: "running", sessionStatus: "queued" })).toBe(true);
+  });
+
+  it("reads a running report behind a finished session as stranded", () => {
+    for (const sessionStatus of ["completed", "failed", "cancelled"]) {
+      expect(isCheckLive({ status: "running", sessionStatus })).toBe(false);
+    }
+  });
+
+  it("reads a running report with no session at all as stranded", () => {
+    expect(isCheckLive({ status: "running", sessionStatus: null })).toBe(false);
+  });
+
+  it("never calls a finished report live, whatever its session says", () => {
+    expect(isCheckLive({ status: "completed", sessionStatus: "running" })).toBe(
+      false,
+    );
+    expect(isCheckLive({ status: "failed", sessionStatus: "queued" })).toBe(false);
+  });
+
+  /**
+   * `interrupted` is derived, never stored. The two alternatives are both
+   * lies: `running` is contradicted by the dead session, and the session's own
+   * outcome would claim a report whose `report_content` was never written.
+   */
+  it("labels a stranded report `interrupted`, not `running` and not the session's outcome", () => {
+    expect(
+      checkStatusLabel({ status: "running", sessionStatus: "cancelled" }),
+    ).toBe("interrupted");
+    expect(checkStatusLabel({ status: "running", sessionStatus: null })).toBe(
+      "interrupted",
+    );
+  });
+
+  it("passes a finished report's own word straight through", () => {
+    expect(
+      checkStatusLabel({ status: "completed", sessionStatus: "completed" }),
+    ).toBe("completed");
+    expect(checkStatusLabel({ status: "failed", sessionStatus: null })).toBe(
+      "failed",
+    );
+    expect(checkStatusLabel({ status: "running", sessionStatus: "running" })).toBe(
+      "running",
+    );
+  });
+});
+
+describe("sumCheckTotals", () => {
+  const byProject = {
+    p1: { running: 1, total: 4 },
+    p2: { running: 0, total: 9 },
+  };
+
+  it("adds up every project the screen is showing", () => {
+    expect(sumCheckTotals(byProject, ["p1", "p2"])).toEqual({
+      running: 1,
+      total: 13,
+    });
+  });
+
+  it("counts one project alone when the screen is scoped to it", () => {
+    expect(sumCheckTotals(byProject, ["p2"])).toEqual({ running: 0, total: 9 });
+  });
+
+  /** A project that has never run a check has no key — that is zero, not a gap. */
+  it("reads a missing key as zero rather than inventing a row", () => {
+    expect(sumCheckTotals(byProject, ["p3"])).toEqual({ running: 0, total: 0 });
+    expect(sumCheckTotals({}, ["p1"])).toEqual({ running: 0, total: 0 });
+  });
+});
+
 describe("deriveChecks", () => {
-  it("puts every running check first, then newest first", () => {
+  it("puts every live check first, then newest first", () => {
     const checks = deriveChecks([
       checkRow({ id: "done-new", createdAt: "2026-08-05T09:00:00.000Z" }),
-      checkRow({
-        id: "running-old",
-        status: "running",
-        createdAt: "2026-07-01T09:00:00.000Z",
-      }),
+      liveRow({ id: "running-old", createdAt: "2026-07-01T09:00:00.000Z" }),
       checkRow({ id: "done-old", createdAt: "2026-08-01T09:00:00.000Z" }),
     ]);
 
@@ -394,14 +486,33 @@ describe("deriveChecks", () => {
     ]);
   });
 
-  it("marks `live` for running alone — not for failed or cancelled", () => {
-    const live = (status: string) =>
-      deriveChecks([checkRow({ status })])[0].live;
+  /**
+   * The regression this ordering exists to prevent, and the one it caused: a
+   * stranded row must NOT be pinned, or `QA_CHECK_LIMIT` of them bury the band.
+   */
+  it("does not pin a stranded report above the real checks", () => {
+    const checks = deriveChecks([
+      checkRow({ id: "real", createdAt: "2026-08-20T09:00:00.000Z" }),
+      checkRow({
+        id: "zombie",
+        status: "running",
+        sessionStatus: "failed",
+        createdAt: "2026-07-01T09:00:00.000Z",
+      }),
+    ]);
 
-    expect(live("running")).toBe(true);
-    expect(live("completed")).toBe(false);
-    expect(live("failed")).toBe(false);
-    expect(live("cancelled")).toBe(false);
+    expect(checks.map((check) => check.reportId)).toEqual(["real", "zombie"]);
+    expect(checks.every((check) => !check.live)).toBe(true);
+  });
+
+  it("marks `live` from the session, not from the report's own word", () => {
+    const live = (status: string, sessionStatus: string | null) =>
+      deriveChecks([checkRow({ status, sessionStatus })])[0].live;
+
+    expect(live("running", "running")).toBe(true);
+    expect(live("running", "failed")).toBe(false);
+    expect(live("completed", "completed")).toBe(false);
+    expect(live("cancelled", null)).toBe(false);
   });
 
   /** An absent stamp is not a fresh one: it sorts last, not first. */
@@ -422,10 +533,21 @@ describe("deriveChecks", () => {
     expect(check.summary).toBe("Two flaky specs and one uncapped column.");
   });
 
+  /**
+   * A NULL `status` is read as `running` — the column's own default — and then
+   * put through the same liveness rule as any other running row.
+   */
   it("falls back to running for a row with no status, never to completed", () => {
-    const [check] = deriveChecks([checkRow({ status: null })]);
+    const [live] = deriveChecks([
+      checkRow({ status: null, sessionStatus: "running" }),
+    ]);
+    expect(live.status).toBe("running");
+    expect(live.live).toBe(true);
 
-    expect(check.status).toBe("running");
-    expect(check.live).toBe(true);
+    const [stranded] = deriveChecks([
+      checkRow({ status: null, sessionStatus: "failed" }),
+    ]);
+    expect(stranded.status).toBe("interrupted");
+    expect(stranded.live).toBe(false);
   });
 });

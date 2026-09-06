@@ -1,16 +1,11 @@
 "use client";
 
-import { useState } from "react";
 import { FlaskConical } from "lucide-react";
 
 import { IdentityChip, PillButton, projectTone } from "@/components/piscine";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import type { DeskProject } from "@/lib/control-desk/types";
-import { cn } from "@/lib/utils";
+
+import { PickerPopover } from "./PickerPopover";
 
 /**
  * "New check" — the control the redesign lost.
@@ -29,7 +24,8 @@ import { cn } from "@/lib/utils";
  * (`checkableProjectIds`) and one click picks one. With exactly one such
  * project there is nothing to disambiguate and the button dispatches straight
  * into the dialog — a one-row menu is a click that asks a question with a
- * single answer.
+ * single answer. The popover itself is `PickerPopover`, shared with
+ * "Run QA pass".
  *
  * OUTLINE, NOT FILLED. "Run QA pass" is this row's one filled button and the
  * Piscine rule is at most one per row; this one is the action outline beside
@@ -42,13 +38,20 @@ export interface NewQaCheckButtonProps {
   className?: string;
 }
 
+/**
+ * Why the button is dead, in the one workspace state where that is not obvious.
+ *
+ * A workspace whose projects were all attached to a local path with no
+ * `git_repo_path` gets a pill that never responds, and "QA checks are broken
+ * again" is exactly the reading this epic exists to stop.
+ */
+const NO_PROJECT_REASON = "Aucun projet avec un dépôt git : un QA check tourne dans le dépôt du projet.";
+
 export function NewQaCheckButton({
   projects,
   onSelect,
   className,
 }: NewQaCheckButtonProps) {
-  const [open, setOpen] = useState(false);
-
   const trigger = (
     <PillButton
       variant="outline"
@@ -66,44 +69,44 @@ export function NewQaCheckButton({
     </PillButton>
   );
 
-  if (projects.length <= 1) return trigger;
+  if (projects.length === 0) {
+    // The `title` goes on a WRAPPER, not on the button: `PillButton` carries
+    // `disabled:pointer-events-none`, and an element that takes no pointer
+    // events never shows its own native tooltip. The span does.
+    return (
+      <span title={NO_PROJECT_REASON} data-testid="qa-new-check-blocked">
+        {trigger}
+      </span>
+    );
+  }
+
+  if (projects.length === 1) return trigger;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent
-        align="end"
-        data-testid="qa-new-check-menu"
-        className="w-[280px] rounded-[12px] border-[1.5px] border-border bg-card p-2 shadow-none"
-      >
-        <div className="flex max-h-[280px] flex-col gap-1 overflow-y-auto">
-          {projects.map((project) => (
-            <button
-              key={project.id}
-              type="button"
-              data-testid="qa-new-check-project"
-              onClick={() => {
-                setOpen(false);
-                onSelect(project.id);
-              }}
-              className={cn(
-                "flex w-full cursor-pointer items-center gap-2 rounded-[10px] px-2 py-[6px] text-left",
-                "outline-none hover:bg-muted",
-                "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring",
-              )}
-            >
-              <IdentityChip
-                label={project.shortName}
-                tone={projectTone(project.colorIndex)}
-                size="sm"
-              />
-              <span className="min-w-0 flex-1 truncate font-sans text-[12.5px] text-foreground">
-                {project.name}
-              </span>
-            </button>
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
+    <PickerPopover
+      trigger={trigger}
+      items={projects}
+      keyOf={(project) => project.id}
+      onSelect={(project) => onSelect(project.id)}
+      // Unreachable while the caller only mounts this with a non-empty list,
+      // and kept because the component's contract does not promise that.
+      emptyLabel="Aucun projet avec un dépôt git."
+      width={280}
+      testId="qa-new-check-menu"
+      itemTestId="qa-new-check-project"
+    >
+      {(project) => (
+        <>
+          <IdentityChip
+            label={project.shortName}
+            tone={projectTone(project.colorIndex)}
+            size="sm"
+          />
+          <span className="min-w-0 flex-1 truncate font-sans text-[12.5px] text-foreground">
+            {project.name}
+          </span>
+        </>
+      )}
+    </PickerPopover>
   );
 }

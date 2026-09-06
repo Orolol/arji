@@ -14,6 +14,7 @@ import {
 } from "@/components/notifications/useToastStack";
 import { useTicketOverlay } from "@/components/ticket/TicketOverlayProvider";
 import { useQaFindings } from "@/hooks/useQaFindings";
+import { sumCheckTotals } from "@/lib/qa/aggregate";
 import { QA_COVERAGE_DAYS, type QaFinding, type QaReviewTarget } from "@/lib/qa/types";
 import { cn } from "@/lib/utils";
 
@@ -106,6 +107,20 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
     [projects],
   );
   const checks = useMemo(() => data?.checks ?? [], [data]);
+  /**
+   * The band's meta. Summed over the projects IN SCOPE rather than read off
+   * `checks`, which is a `QA_CHECK_LIMIT` window and would print a constant —
+   * and `projects` is already narrowed by `filterQaPayload`, so a
+   * project-scoped mount counts that project alone.
+   */
+  const checkTotals = useMemo(
+    () =>
+      sumCheckTotals(
+        data?.checkTotals ?? {},
+        projects.map((project) => project.id),
+      ),
+    [data, projects],
+  );
   /**
    * The projects "New check" may offer. The route decides, not the screen: a
    * project with no `git_repo_path` is refused with a 400, and the payload
@@ -400,6 +415,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
 
         <QaChecksBand
           checks={checks}
+          totals={checkTotals}
           projectsById={projectsById}
           action={
             <NewQaCheckButton

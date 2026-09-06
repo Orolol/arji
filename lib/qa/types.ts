@@ -151,9 +151,18 @@ export interface QaCheck {
   checkType: string;
   /** Stamp word: TECH | E2E | DIGEST, or the raw value upper-cased. */
   checkLabel: string;
-  /** running | completed | failed | cancelled. */
+  /**
+   * The word the row prints: the report's own `running | completed | failed |
+   * cancelled`, EXCEPT that a report still claiming `running` behind a session
+   * that has already ended reads `interrupted`. That value is derived and never
+   * stored — see `checkStatusLabel`.
+   */
   status: string;
-  /** True for `running` alone — the band's "N running" meta counts these. */
+  /**
+   * Is the check still going? NOT `status === "running"`: `qa_reports.status`
+   * has one writer and three ordinary paths strand it. Read from the session
+   * behind the report — see `isCheckLive`.
+   */
   live: boolean;
   /** `SUBSTR(summary, 1, QA_CHECK_SUMMARY_LIMIT)` — never the raw column. */
   summary: string | null;
@@ -161,6 +170,14 @@ export interface QaCheck {
   agentSessionId: string | null;
   createdAt: string | null;
   completedAt: string | null;
+}
+
+/** Cross-project counts behind the QA CHECKS band's meta. */
+export interface QaCheckTotals {
+  /** Reports that are genuinely still going. */
+  running: number;
+  /** Every `qa_reports` row, whatever its state. */
+  total: number;
 }
 
 export interface QaVerdict {
@@ -208,8 +225,25 @@ export interface QaPayload {
   verdicts: QaVerdict[];
   rubric: QaRubric;
   reviewable: QaReviewTarget[];
-  /** The most recent QA checks, running ones first. See {@link QaCheck}. */
+  /** The most recent QA checks, live ones first. See {@link QaCheck}. */
   checks: QaCheck[];
+  /**
+   * Totals over EVERY report, keyed by project — not over the `checks` window
+   * above.
+   *
+   * `checks` is capped at `QA_CHECK_LIMIT`, so counting it would saturate at
+   * the cap and understate exactly when several checks are in flight. `running`
+   * uses the same liveness rule the rows do, so the meta cannot claim more live
+   * checks than the band draws breathing dots.
+   *
+   * PER PROJECT rather than one workspace figure, because the screen takes an
+   * optional `projectId` and `filterQaPayload` narrows the rows. A single total
+   * would survive that narrowing unchanged and print a workspace count over one
+   * project's band — a worse lie than the capped slice it replaces. Projects
+   * with no report at all are simply absent; `sumCheckTotals` reads a missing
+   * key as zero.
+   */
+  checkTotals: Record<string, QaCheckTotals>;
   /**
    * Projects a QA check may be dispatched against — those with a
    * `git_repo_path`, because `POST /api/projects/{p}/qa/check` 400s without

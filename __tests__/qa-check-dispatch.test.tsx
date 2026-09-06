@@ -63,6 +63,7 @@ function payload(overrides: Partial<QaPayload> = {}): QaPayload {
     rubric: { items: ["Tests"], projectRuleCount: 0 },
     reviewable: [],
     checks: [],
+    checkTotals: {},
     checkableProjectIds: ["p1"],
     coveragePercent: 92,
     ...overrides,
@@ -164,7 +165,14 @@ describe("QaScreen — the QA CHECKS band", () => {
     expect(within(rows[1]).getByText("E2E")).toBeInTheDocument();
   });
 
-  it("counts the running checks in the band header", async () => {
+  /**
+   * The meta is a COUNT, so it counts the register — not the `QA_CHECK_LIMIT`
+   * rows the band draws. A capped slice rendered as a total saturates at the
+   * cap exactly when several checks are in flight, which is when the figure
+   * matters. `VerdictsBand`, the screen's other capped band, sidesteps this by
+   * showing a window descriptor ("7 jours") instead of a count.
+   */
+  it("counts the whole register in the header, not the rows it drew", async () => {
     await renderScreen(
       payload({
         checks: [
@@ -172,21 +180,85 @@ describe("QaScreen — the QA CHECKS band", () => {
           check({ reportId: "b" }),
           check({ reportId: "c", status: "failed" }),
         ],
+        checkTotals: { p1: { running: 2, total: 47 } },
       }),
     );
 
-    // One of the three is live: the meta counts `live`, not rows.
-    expect(screen.getByText("1 running · 3 recent")).toBeInTheDocument();
+    expect(screen.getByText("2 running · 47 total")).toBeInTheDocument();
+  });
+
+  it("sums the totals across the projects on screen", async () => {
+    await renderScreen(
+      payload({
+        projects: [deskProject("p1", "Arij", 0), deskProject("p2", "Ledger", 1)],
+        checkTotals: {
+          p1: { running: 1, total: 4 },
+          p2: { running: 0, total: 9 },
+        },
+      }),
+    );
+
+    expect(screen.getByText("1 running · 13 total")).toBeInTheDocument();
   });
 
   it("folds to its label line with no check at all", async () => {
     await renderScreen();
 
     expect(screen.queryAllByTestId("qa-check-row")).toHaveLength(0);
-    expect(screen.getByText("0 running · 0 recent")).toBeInTheDocument();
+    expect(screen.getByText("0 running · 0 total")).toBeInTheDocument();
     // The button is still there: an empty history is the state you start a
     // check FROM, so this is the one place it must not be hidden.
     expect(screen.getByTestId("qa-new-check")).toBeEnabled();
+  });
+
+  /**
+   * The row printed the same fact twice, in two languages: the raw column word
+   * (`running`) and then a French "En cours…" in the summary slot. The dot and
+   * the word carry the state; the summary slot stays empty until there is a
+   * summary.
+   */
+  it("says a live check is live once, not twice", async () => {
+    await renderScreen(
+      payload({
+        checks: [
+          check({
+            reportId: "live",
+            status: "running",
+            live: true,
+            summary: null,
+          }),
+        ],
+      }),
+    );
+
+    const row = screen.getByTestId("qa-check-row");
+    expect(row).toHaveTextContent("running");
+    expect(row).not.toHaveTextContent("En cours");
+  });
+
+  /**
+   * A report stranded on `running` behind a finished session is derived
+   * server-side (`checkStatusLabel`); the row must print that word rather than
+   * a `running` its own dot contradicts.
+   */
+  it("draws a stranded check as interrupted, with no live dot", async () => {
+    await renderScreen(
+      payload({
+        checks: [
+          check({
+            reportId: "zombie",
+            status: "interrupted",
+            live: false,
+            summary: null,
+          }),
+        ],
+      }),
+    );
+
+    const row = screen.getByTestId("qa-check-row");
+    expect(row).toHaveAttribute("data-status", "interrupted");
+    expect(row).toHaveTextContent("interrupted");
+    expect(row).not.toHaveTextContent("running");
   });
 });
 
@@ -201,6 +273,20 @@ describe("QaScreen — New check", () => {
     await renderScreen(payload({ checkableProjectIds: [] }));
 
     expect(screen.getByTestId("qa-new-check")).toBeDisabled();
+  });
+
+  /**
+   * A dead pill with no explanation reads as "QA checks are broken again" — the
+   * perception this epic exists to fix. The title sits on a WRAPPER because
+   * `PillButton` is `disabled:pointer-events-none`, and an element that takes
+   * no pointer events never shows its own tooltip.
+   */
+  it("says why it is dead, on an element that can actually be hovered", async () => {
+    await renderScreen(payload({ checkableProjectIds: [] }));
+
+    const blocked = screen.getByTestId("qa-new-check-blocked");
+    expect(blocked).toHaveAttribute("title", expect.stringContaining("dépôt git"));
+    expect(blocked).toContainElement(screen.getByTestId("qa-new-check"));
   });
 
   it("opens the dialog straight away with a single checkable project", async () => {

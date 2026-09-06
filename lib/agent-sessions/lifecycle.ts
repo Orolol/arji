@@ -13,12 +13,25 @@ import {
   SESSION_PROMPT_STORED_HEAD_BYTES,
   SESSION_PROMPT_STORED_TAIL_BYTES,
 } from "./prompt-cap";
-export type AgentSessionLifecycleStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled";
+/**
+ * The lifecycle vocabulary lives in a LEAF module and is re-exported here.
+ *
+ * This file imports `@/lib/db`, so anything a client component needs cannot be
+ * read from it — `lib/qa/aggregate.ts` doing exactly that pulled
+ * `better-sqlite3` into the browser bundle. Server-side importers keep using
+ * these names from here; `./lifecycle-status` is where they are defined.
+ */
+export {
+  SESSION_LIFECYCLE_STATUSES,
+  TERMINAL_STATUSES,
+  NON_TERMINAL_STATUSES,
+} from "./lifecycle-status";
+export type { AgentSessionLifecycleStatus } from "./lifecycle-status";
+
+import {
+  TERMINAL_STATUSES,
+  type AgentSessionLifecycleStatus,
+} from "./lifecycle-status";
 
 /**
  * Delivery verdict for a terminal session — the persisted, first-class signal
@@ -68,12 +81,6 @@ export interface SessionUsage {
 
 export const SESSION_LIFECYCLE_CONFLICT_CODE = "INVALID_SESSION_TRANSITION";
 export const SESSION_NOT_FOUND_CODE = "SESSION_NOT_FOUND";
-
-const TERMINAL_STATUSES: Set<string> = new Set([
-  "completed",
-  "failed",
-  "cancelled",
-]);
 
 const ALLOWED_TRANSITIONS: Record<
   AgentSessionLifecycleStatus,
