@@ -438,6 +438,154 @@ describe("conversations route", () => {
     expect(dbMockState.updateCalls).toHaveLength(0);
   });
 
+  it("PATCH clearing the named agent without a provider lands on the resolved chat default", async () => {
+    // A conversation opened on the warm Claude process — the default on any
+    // machine with `claude` installed — whose agent link is cleared by a body
+    // that names no provider. The pill never sends this shape
+    // (agentSelectionPatch carries a provider alongside `namedAgentId: null`),
+    // so this is the API contract, reachable by a client only. It must
+    // answer with the same resolution creation uses: resolveAgent() returns
+    // an AgentProvider and can therefore never name a persistent mode, which
+    // is how the warm process was silently dropped for one-shot claude-code.
+    dbMockState.getQueue.push({
+      id: "conv-1",
+      projectId: "proj-1",
+      type: "chat",
+      provider: "claude-code-persistent",
+      namedAgentId: "agent-3",
+      cliSessionId: null,
+    });
+    dbMockState.getQueue.push({
+      id: "conv-1",
+      projectId: "proj-1",
+      type: "chat",
+      provider: "claude-code-persistent",
+      namedAgentId: null,
+      cliSessionId: null,
+    });
+
+    const { PATCH } = await import(
+      "@/app/api/projects/[projectId]/conversations/[conversationId]/route"
+    );
+    const response = await PATCH(
+      { json: async () => ({ namedAgentId: null }) } as never,
+      { params: Promise.resolve({ projectId: "proj-1", conversationId: "conv-1" }) },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    // The persisted row first: this is the claim — the warm process survives
+    // the clear rather than degrading to one-shot claude-code.
+    expect(dbMockState.updateCalls).toHaveLength(1);
+    expect(dbMockState.updateCalls[0]).toEqual({
+      provider: "claude-code-persistent",
+      namedAgentId: null,
+      cliSessionId: null,
+      claudeSessionId: null,
+    });
+    expect(mockResolveDefaultChatMode).toHaveBeenCalledWith("proj-1");
+    expect(mockResolveAgent).not.toHaveBeenCalled();
+    // The execution mode changed, so the warm process is restarted like any
+    // other provider/agent switch on this route.
+    expect(restartPersistentChatSession).toHaveBeenCalledWith("conv-1");
+    expect(json.data).toMatchObject({
+      provider: "claude-code-persistent",
+      persistentSessionState: "cold",
+    });
+  });
+
+  it("PATCH clearing the named agent carries the default's own named agent", async () => {
+    // The resolution's assignment rung (and its resolveAgent fallback) can
+    // name an agent — the CHAT & SPEC assignment the user wrote, or the
+    // seeded catch-all. "Clear the conversation-specific agent" then means
+    // "back to that one", exactly as creation writes it; hard-coding
+    // `namedAgentId = null` here would leave the conversation on a bare
+    // provider the resolver never chose.
+    mockResolveDefaultChatMode.mockResolvedValue({
+      provider: "codex",
+      namedAgentId: "agent-7",
+      source: "role-assignment",
+    });
+    dbMockState.getQueue.push({
+      id: "conv-1",
+      projectId: "proj-1",
+      type: "chat",
+      provider: "oh-my-pi",
+      namedAgentId: "agent-3",
+      cliSessionId: "cli-session-old",
+    });
+    dbMockState.getQueue.push({
+      id: "conv-1",
+      projectId: "proj-1",
+      type: "chat",
+      provider: "codex",
+      namedAgentId: "agent-7",
+      cliSessionId: null,
+    });
+
+    const { PATCH } = await import(
+      "@/app/api/projects/[projectId]/conversations/[conversationId]/route"
+    );
+    const response = await PATCH(
+      { json: async () => ({ namedAgentId: "" }) } as never,
+      { params: Promise.resolve({ projectId: "proj-1", conversationId: "conv-1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockResolveAgent).not.toHaveBeenCalled();
+    expect(dbMockState.updateCalls).toContainEqual(
+      expect.objectContaining({
+        provider: "codex",
+        namedAgentId: "agent-7",
+        cliSessionId: null,
+        claudeSessionId: null,
+      }),
+    );
+  });
+
+  it("PATCH with a provider beside a cleared agent never consults the default resolution", async () => {
+    // Control, green on both sides of the fix: this is the body the pill
+    // actually sends (agentSelectionPatch), and it carries its own answer.
+    // Pins that the resolver is reached only by the provider-less clear, so
+    // an explicit choice can never be overridden by a default.
+    dbMockState.getQueue.push({
+      id: "conv-1",
+      projectId: "proj-1",
+      type: "chat",
+      provider: "claude-code-persistent",
+      namedAgentId: "agent-3",
+      cliSessionId: null,
+    });
+    dbMockState.getQueue.push({
+      id: "conv-1",
+      projectId: "proj-1",
+      type: "chat",
+      provider: "oh-my-pi-persistent",
+      namedAgentId: null,
+      cliSessionId: null,
+    });
+
+    const { PATCH } = await import(
+      "@/app/api/projects/[projectId]/conversations/[conversationId]/route"
+    );
+    const response = await PATCH(
+      {
+        json: async () => ({ provider: "oh-my-pi-persistent", namedAgentId: null }),
+      } as never,
+      { params: Promise.resolve({ projectId: "proj-1", conversationId: "conv-1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockResolveDefaultChatMode).not.toHaveBeenCalled();
+    expect(mockResolveAgent).not.toHaveBeenCalled();
+    expect(dbMockState.updateCalls).toContainEqual(
+      expect.objectContaining({
+        provider: "oh-my-pi-persistent",
+        namedAgentId: null,
+      }),
+    );
+  });
+
   it("restart endpoint terminates the warm process without clearing durable history", async () => {
     dbMockState.getQueue.push({ id: "conv-1" });
     const { DELETE } = await import(
