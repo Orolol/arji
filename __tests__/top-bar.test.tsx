@@ -293,6 +293,12 @@ describe("nav model", () => {
       "tickets /tickets",
       "spec /projects/:projectId/spec",
       "qa /qa",
+      // The exploratory QA-check agent (tech check / E2E / failure digest) and
+      // its report history. Distinct from `qa` above, which is the review
+      // layer: adding it back is what makes "run a QA check" reachable from
+      // the bar again after the redesign left it behind on the desk's
+      // project-pages dropdown.
+      "qa-checks /projects/:projectId/qa",
       "releases /projects/:projectId/releases",
       "named-agents /agents",
       "sessions /projects/:projectId/sessions",

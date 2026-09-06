@@ -7,6 +7,10 @@ import { ReportDetail } from "@/components/qa/ReportDetail";
 import { StartQaCheckDialog } from "@/components/qa/StartQaCheckDialog";
 import { Button } from "@/components/ui/button";
 import { useQaReports } from "@/hooks/useQaReports";
+// The same three badges the /qa QA CHECKS band draws. One answer, so a check
+// type cannot be labelled TECH here and DIGEST there — and an unrecognised
+// `check_type` prints itself rather than being folded into TECH.
+import { checkTypeLabel } from "@/lib/qa/aggregate";
 import { consumeQueryParam } from "@/lib/navigation/deep-link";
 import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/utils/format-date";
@@ -25,12 +29,6 @@ function statusTone(status: string): string {
   if (status === "failed") return "text-destructive";
   if (status === "running") return "text-primary";
   return "text-meta";
-}
-
-function checkTypeBadgeLabel(checkType: string): string {
-  if (checkType === "e2e_test") return "E2E";
-  if (checkType === "failure_digest") return "DIGEST";
-  return "TECH";
 }
 
 export default function QAPage() {
@@ -209,7 +207,7 @@ export default function QAPage() {
             >
               <div className="flex items-center gap-[8px]">
                 <span className="rounded-full bg-band px-[8px] py-[2px] font-mono text-[11.5px] text-muted-foreground">
-                  {checkTypeBadgeLabel(report.checkType)}
+                  {checkTypeLabel(report.checkType)}
                 </span>
                 <span className={cn("text-[12.5px]", statusTone(report.status))}>
                   {report.status}

@@ -145,5 +145,9 @@ export function filterQaPayload(
     findings: keep(payload.findings),
     verdicts: keep(payload.verdicts),
     reviewable: keep(payload.reviewable),
+    checks: keep(payload.checks),
+    checkableProjectIds: payload.checkableProjectIds.filter(
+      (id) => id === projectId,
+    ),
   };
 }

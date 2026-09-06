@@ -16,10 +16,14 @@
  * matters most: 0% review coverage and "nothing shipped in the window" are
  * different facts and must not print the same glyph.
  *
- * NAMING: this is NOT the exploratory QA-check agent
- * (`app/projects/[projectId]/qa`, `qa_prompts`, `hooks/useQaReports.ts`).
- * That surface is unrelated and untouched; everything here is prefixed `Qa…`
- * only because the screen is called QA.
+ * TWO FAMILIES LIVE IN HERE, and keeping them apart is the point of the names.
+ * `QaRun` / `QaFinding` / `QaVerdict` are the REVIEW layer: sessions bound to a
+ * ticket, and the findings they file. `QaCheck` is the exploratory QA-check
+ * agent (`qa_reports`, `app/projects/[projectId]/qa`, `hooks/useQaReports.ts`)
+ * — a project-wide tech check, E2E pass or failure digest with no ticket at
+ * all. The redesign gave the nav's QA entry to the first family only, which is
+ * how "run a tech check" stopped being reachable; `checks` and
+ * `checkableProjectIds` are what put it back on this screen.
  */
 
 import type { DeskProject } from "@/lib/control-desk/types";
@@ -105,6 +109,60 @@ export interface QaQueuedRun {
   title: string;
 }
 
+/**
+ * How many `qa_reports` rows the QA CHECKS band carries.
+ *
+ * The band is `shrink-0` on a screen whose coral findings band owns the
+ * leftover height, so this is a HEIGHT budget, not a page size: five rows plus
+ * the header is about the most the band can take without pushing the bottom
+ * split off a laptop. The full history is `/projects/:id/qa`, one click away on
+ * every row.
+ */
+export const QA_CHECK_LIMIT = 5;
+
+/** Max characters of `qa_reports.summary` this route ships. */
+export const QA_CHECK_SUMMARY_LIMIT = 200;
+
+/**
+ * The three exploratory QA passes a human can dispatch by hand.
+ *
+ * `qa_reports.check_type` is free-form TEXT with a `tech_check` default, so a
+ * row can legally hold something else; every consumer here therefore treats an
+ * unknown value as its own word rather than narrowing the column to this union.
+ */
+export type QaCheckType = "tech_check" | "e2e_test" | "failure_digest";
+
+/**
+ * One `qa_reports` row, as the QA CHECKS band draws it.
+ *
+ * NOT a {@link QaRun}. A run is a REVIEW session bound to a ticket; a check is
+ * the project-wide QA agent (tech check, E2E, failure digest) and has no epic
+ * at all. They share the screen and nothing else — which is exactly why the
+ * redesign lost the checks: the band above only ever listed review sessions.
+ *
+ * `reportContent` and `promptUsed` are deliberately absent. They are the two
+ * multi-megabyte columns of this table and this payload is polled every 8 s.
+ */
+export interface QaCheck {
+  /** `qa_reports.id` — also the `?reportId=` deep link into the report. */
+  reportId: string;
+  projectId: string;
+  /** As stored. `tech_check` | `e2e_test` | `failure_digest` | anything else. */
+  checkType: string;
+  /** Stamp word: TECH | E2E | DIGEST, or the raw value upper-cased. */
+  checkLabel: string;
+  /** running | completed | failed | cancelled. */
+  status: string;
+  /** True for `running` alone — the band's "N running" meta counts these. */
+  live: boolean;
+  /** `SUBSTR(summary, 1, QA_CHECK_SUMMARY_LIMIT)` — never the raw column. */
+  summary: string | null;
+  /** The session behind it, or `null` for the no-op digest that launched none. */
+  agentSessionId: string | null;
+  createdAt: string | null;
+  completedAt: string | null;
+}
+
 export interface QaVerdict {
   epicId: string;
   projectId: string;
@@ -150,6 +208,15 @@ export interface QaPayload {
   verdicts: QaVerdict[];
   rubric: QaRubric;
   reviewable: QaReviewTarget[];
+  /** The most recent QA checks, running ones first. See {@link QaCheck}. */
+  checks: QaCheck[];
+  /**
+   * Projects a QA check may be dispatched against — those with a
+   * `git_repo_path`, because `POST /api/projects/{p}/qa/check` 400s without
+   * one. Derived server-side for the same reason `reviewable` is: the button
+   * must never offer a dispatch the route would refuse.
+   */
+  checkableProjectIds: string[];
   /** 0..100, or `null` when nothing shipped in the window. NEVER 0-as-unknown. */
   coveragePercent: number | null;
 }

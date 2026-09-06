@@ -230,7 +230,9 @@ const sites = scanSources(outlinePairingSites);
  * gaining a site needs no edit here; a file losing its last one does, and the
  * failure says which.
  *
- * Recorded 2026-09-05 over 50 sites in these 40 files.
+ * Recorded 2026-09-05 over 50 sites in 40 files; the QA CHECKS band added two
+ * more (2026-09-06), which the scan found on its own — they are listed so a
+ * later loss of their ring fails here rather than passing silently.
  */
 const SCANNED_FILES = [
   "app/projects/[projectId]/sessions/page.tsx",
@@ -258,6 +260,8 @@ const SCANNED_FILES = [
   "components/piscine/TopBar.tsx",
   "components/piscine/TopBarMenu.tsx",
   "components/qa/FindingFilterPills.tsx",
+  "components/qa/NewQaCheckButton.tsx",
+  "components/qa/QaCheckRow.tsx",
   "components/qa/QaQueuedTile.tsx",
   "components/qa/QaRunCard.tsx",
   "components/qa/RunQaPassButton.tsx",

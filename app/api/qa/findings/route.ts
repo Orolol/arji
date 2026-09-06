@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
@@ -7,6 +7,7 @@ import {
   customReviewAgents,
   epics,
   projects,
+  qaReports,
   reviewComments,
   ticketActivityLog,
 } from "@/lib/db/schema";
@@ -24,6 +25,7 @@ import { epicSessionFactsCte } from "@/lib/workflow/review-freshness";
 import { isBuildableStatus } from "@/lib/types/kanban";
 import {
   compareFindings,
+  deriveChecks,
   deriveCoverage,
   deriveQueued,
   deriveRuns,
@@ -37,6 +39,8 @@ import {
   type QaVerdictSessionRow,
 } from "@/lib/qa/aggregate";
 import {
+  QA_CHECK_LIMIT,
+  QA_CHECK_SUMMARY_LIMIT,
   QA_COVERAGE_DAYS,
   QA_LOG_LINE_LIMIT,
   QA_VERDICT_DAYS,
@@ -117,6 +121,8 @@ function emptyPayload(now: Date): QaPayload {
       projectRuleCount: 0,
     },
     reviewable: [],
+    checks: [],
+    checkableProjectIds: [],
     coveragePercent: null,
   };
 }
@@ -130,7 +136,15 @@ export async function GET() {
   /* ---- 1. projects -------------------------------------------------- */
 
   const projectRows = db
-    .select({ id: projects.id, name: projects.name, createdAt: projects.createdAt })
+    .select({
+      id: projects.id,
+      name: projects.name,
+      createdAt: projects.createdAt,
+      // Not shown anywhere: it is the ONE fact that decides whether the "New
+      // check" button may offer this project, because the check route is
+      // `getProjectOr404(..., { requireGitRepo: true })` and 400s without it.
+      gitRepoPath: projects.gitRepoPath,
+    })
     .from(projects)
     .all();
 
@@ -403,6 +417,53 @@ export async function GET() {
           )
           .get();
 
+  /* ---- 10b. QA checks ------------------------------------------------ */
+
+  /**
+   * The exploratory QA-check history — tech checks, E2E passes and failure
+   * digests. This is the surface the redesign orphaned: the nav's QA entry
+   * points here, and until now this payload described only the review layer,
+   * so `/qa` could neither start a check nor show one running.
+   *
+   * TWO COLUMNS OF THIS TABLE ARE NEVER SELECTED. `report_content` holds a
+   * whole markdown QA report and `prompt_used` a whole composed prompt; both
+   * are uncapped, and this route is polled every 8 s. `summary` IS capped at
+   * 500 chars by the check route's `extractSummary`, but the cap lives in one
+   * writer among several, so it is clipped in SQL like every other text column
+   * this route ships.
+   *
+   * NO `project_id` BOUND ON THE SCAN, deliberately, and it is the one place
+   * this route departs from its own discipline: `qa_reports` carries no
+   * secondary index at all, so an `IN (…)` would prune nothing and only add a
+   * predicate. What bounds the read is `LIMIT`, and the table grows one row per
+   * QA check a human starts by hand — it is three orders of magnitude smaller
+   * than `agent_sessions`.
+   *
+   * RUNNING FIRST is in the ORDER BY, not just in `deriveChecks`: with a plain
+   * `created_at DESC` the LIMIT would drop a still-running check as soon as
+   * six newer ones existed, which is the one row the band exists to show.
+   */
+  const checkRows = db
+    .select({
+      id: qaReports.id,
+      projectId: qaReports.projectId,
+      status: qaReports.status,
+      checkType: qaReports.checkType,
+      summary: sql<
+        string | null
+      >`SUBSTR(${qaReports.summary}, 1, ${sql.raw(String(QA_CHECK_SUMMARY_LIMIT))})`,
+      agentSessionId: qaReports.agentSessionId,
+      createdAt: qaReports.createdAt,
+      completedAt: qaReports.completedAt,
+    })
+    .from(qaReports)
+    .orderBy(
+      desc(sql`CASE WHEN ${qaReports.status} = 'running' THEN 1 ELSE 0 END`),
+      desc(qaReports.createdAt),
+    )
+    .limit(QA_CHECK_LIMIT)
+    .all();
+
   /* ---- 11. la rubrique ----------------------------------------------- */
 
   const projectRules = db
@@ -495,6 +556,12 @@ export async function GET() {
       projectRuleCount: Number(projectRules?.rules ?? 0),
     },
     reviewable,
+    checks: deriveChecks(checkRows),
+    // A project with no `git_repo_path` is not offerable: the check route
+    // refuses it with a 400 before it looks at anything else.
+    checkableProjectIds: projectRows
+      .filter((row) => Boolean(row.gitRepoPath))
+      .map((row) => row.id),
     coveragePercent: deriveCoverage(
       Number(reviewedRow?.reviewed ?? 0),
       shippedEpicIds.length,
@@ -506,6 +573,7 @@ export async function GET() {
     epics: epicRows.length,
     findings: payload.findings.length,
     runs: payload.runs.length,
+    checks: payload.checks.length,
     queryMs: Date.now() - queryStartedAt,
   });
 

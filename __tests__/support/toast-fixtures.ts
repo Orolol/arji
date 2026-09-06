@@ -41,6 +41,8 @@ export function qaPayload(): QaPayload {
     verdicts: [],
     rubric: { items: ["Tests"], projectRuleCount: 0 },
     reviewable: [],
+    checks: [],
+    checkableProjectIds: ["p1"],
     coveragePercent: 92,
   };
 }

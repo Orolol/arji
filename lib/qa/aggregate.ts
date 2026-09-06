@@ -20,6 +20,7 @@ import { FINDING_SEVERITY_PREFIXES } from "@/lib/review/finding-severity";
 
 import {
   QA_VERDICT_LIMIT,
+  type QaCheck,
   type QaQueuedRun,
   type QaRun,
   type QaSeverityTier,
@@ -203,6 +204,83 @@ export function runLastLine(run: QaRun): string {
     return `› ${n} finding${n === 1 ? "" : "s"} filed, ${b} blocking`;
   }
   return run.lastLine ? `› ${run.lastLine}` : "› …";
+}
+
+/* ------------------------------------------------------------------ */
+/* QA CHECKS                                                           */
+/* ------------------------------------------------------------------ */
+
+/** One `qa_reports` row, projected. The two blob columns are never selected. */
+export interface QaCheckRow {
+  id: string;
+  projectId: string;
+  status: string | null;
+  checkType: string | null;
+  /** Already clipped in SQL — see QA_CHECK_SUMMARY_LIMIT. */
+  summary: string | null;
+  agentSessionId: string | null;
+  createdAt: string | null;
+  completedAt: string | null;
+}
+
+/**
+ * The stamp word for a check type.
+ *
+ * `qa_reports.check_type` is free-form TEXT, so an unrecognised value prints
+ * ITSELF, upper-cased, rather than being folded into TECH. A row written by
+ * some later check kind must not be mislabelled as a tech check — that is the
+ * data-gap rule this module follows everywhere, applied to a word instead of a
+ * figure. `app/projects/[projectId]/qa/page.tsx` draws the same three badges;
+ * this is the shared answer, and that page reads it rather than keeping a
+ * second copy.
+ */
+export function checkTypeLabel(checkType: string | null | undefined): string {
+  switch (checkType) {
+    case "e2e_test":
+      return "E2E";
+    case "failure_digest":
+      return "DIGEST";
+    case "tech_check":
+      return "TECH";
+    default:
+      return typeof checkType === "string" && checkType.trim().length > 0
+        ? checkType.trim().toUpperCase()
+        : "CHECK";
+  }
+}
+
+/**
+ * The QA CHECKS band's rows.
+ *
+ * RUNNING FIRST, then newest first — the same order the SQL asks for, repeated
+ * here because the derivation must not depend on the driver's row order to be
+ * correct. A running check is the one thing on this band the user is waiting
+ * on, and it must never be pushed off the end by six checks started after it.
+ *
+ * A row with no `created_at` sorts last rather than first: an empty string
+ * compares below every timestamp, and a missing stamp is not a fresh one.
+ */
+export function deriveChecks(rows: readonly QaCheckRow[]): QaCheck[] {
+  return rows
+    .map((row) => {
+      const status = row.status ?? "running";
+      return {
+        reportId: row.id,
+        projectId: row.projectId,
+        checkType: row.checkType ?? "tech_check",
+        checkLabel: checkTypeLabel(row.checkType),
+        status,
+        live: status === "running",
+        summary: row.summary,
+        agentSessionId: row.agentSessionId,
+        createdAt: row.createdAt,
+        completedAt: row.completedAt,
+      } satisfies QaCheck;
+    })
+    .sort((a, b) => {
+      if (a.live !== b.live) return a.live ? -1 : 1;
+      return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+    });
 }
 
 /* ------------------------------------------------------------------ */

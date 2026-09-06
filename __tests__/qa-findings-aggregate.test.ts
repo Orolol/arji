@@ -8,7 +8,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   QA_UNVERIFIABLE_TEXT,
+  checkTypeLabel,
   compareFindings,
+  deriveChecks,
   deriveCoverage,
   deriveQueued,
   deriveRuns,
@@ -18,6 +20,7 @@ import {
   runLastLine,
   severityOf,
   stripSeverityPrefix,
+  type QaCheckRow,
   type QaSessionRow,
   type QaVerdictEpic,
   type QaVerdictSessionRow,
@@ -329,5 +332,100 @@ describe("rubricItemsFromChecklist", () => {
 
   it("answers an empty list rather than fabricating one", () => {
     expect(rubricItemsFromChecklist("")).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* QA CHECKS                                                           */
+/* ------------------------------------------------------------------ */
+
+function checkRow(overrides: Partial<QaCheckRow> = {}): QaCheckRow {
+  return {
+    id: "r1",
+    projectId: "p1",
+    status: "completed",
+    checkType: "tech_check",
+    summary: "Two flaky specs and one uncapped column.",
+    agentSessionId: "s1",
+    createdAt: "2026-08-01T09:00:00.000Z",
+    completedAt: "2026-08-01T09:20:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("checkTypeLabel", () => {
+  it("draws the three check kinds the dialog can dispatch", () => {
+    expect(checkTypeLabel("tech_check")).toBe("TECH");
+    expect(checkTypeLabel("e2e_test")).toBe("E2E");
+    expect(checkTypeLabel("failure_digest")).toBe("DIGEST");
+  });
+
+  /**
+   * `qa_reports.check_type` is free-form TEXT with a `tech_check` DEFAULT, so a
+   * row can legally hold a kind this vocabulary has never seen. Folding it into
+   * TECH would label somebody else's pass as a tech check; it prints itself.
+   */
+  it("prints an unknown kind rather than folding it into TECH", () => {
+    expect(checkTypeLabel("security_sweep")).toBe("SECURITY_SWEEP");
+  });
+
+  it("answers CHECK for a missing or blank kind, never TECH", () => {
+    expect(checkTypeLabel(null)).toBe("CHECK");
+    expect(checkTypeLabel("   ")).toBe("CHECK");
+  });
+});
+
+describe("deriveChecks", () => {
+  it("puts every running check first, then newest first", () => {
+    const checks = deriveChecks([
+      checkRow({ id: "done-new", createdAt: "2026-08-05T09:00:00.000Z" }),
+      checkRow({
+        id: "running-old",
+        status: "running",
+        createdAt: "2026-07-01T09:00:00.000Z",
+      }),
+      checkRow({ id: "done-old", createdAt: "2026-08-01T09:00:00.000Z" }),
+    ]);
+
+    expect(checks.map((check) => check.reportId)).toEqual([
+      "running-old",
+      "done-new",
+      "done-old",
+    ]);
+  });
+
+  it("marks `live` for running alone — not for failed or cancelled", () => {
+    const live = (status: string) =>
+      deriveChecks([checkRow({ status })])[0].live;
+
+    expect(live("running")).toBe(true);
+    expect(live("completed")).toBe(false);
+    expect(live("failed")).toBe(false);
+    expect(live("cancelled")).toBe(false);
+  });
+
+  /** An absent stamp is not a fresh one: it sorts last, not first. */
+  it("sorts a row with no created_at last", () => {
+    const checks = deriveChecks([
+      checkRow({ id: "undated", createdAt: null }),
+      checkRow({ id: "dated", createdAt: "2026-01-01T09:00:00.000Z" }),
+    ]);
+
+    expect(checks.map((check) => check.reportId)).toEqual(["dated", "undated"]);
+  });
+
+  it("carries the report id, which is the deep link into the report", () => {
+    const [check] = deriveChecks([checkRow({ id: "rep-9" })]);
+
+    expect(check.reportId).toBe("rep-9");
+    expect(check.checkLabel).toBe("TECH");
+    expect(check.summary).toBe("Two flaky specs and one uncapped column.");
+  });
+
+  it("falls back to running for a row with no status, never to completed", () => {
+    const [check] = deriveChecks([checkRow({ status: null })]);
+
+    expect(check.status).toBe("running");
+    expect(check.live).toBe(true);
   });
 });
