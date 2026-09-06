@@ -26,7 +26,7 @@ const mockUseGitHubConfig = vi.hoisted(() => vi.fn());
 const mockUseEpicDependencies = vi.hoisted(() => vi.fn());
 const mockUseProjectEpicsList = vi.hoisted(() => vi.fn());
 const mockUseNamedAgentsList = vi.hoisted(() => vi.fn());
-const mockFetchUnifiedSessions = vi.hoisted(() => vi.fn());
+const mockFindUnifiedSession = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/useEpicDetail", () => ({
   useEpicDetail: (...args: unknown[]) => mockUseEpicDetail(...args),
@@ -56,8 +56,8 @@ vi.mock("@/hooks/useProjectEvents", () => ({
   useProjectEvents: () => ({ status: "connected", pollTick: 0 }),
 }));
 vi.mock("@/lib/agent-sessions/session-list", () => ({
-  fetchUnifiedSessions: (...args: unknown[]) =>
-    mockFetchUnifiedSessions(...args),
+  findUnifiedSession: (...args: unknown[]) =>
+    mockFindUnifiedSession(...args),
 }));
 vi.mock("@/components/review/DiffViewer", () => ({
   DiffViewer: () => <div data-testid="diff-viewer" />,
@@ -139,7 +139,7 @@ describe("TicketOverlay mark-read on open", () => {
     });
     mockUseProjectEpicsList.mockReturnValue({ epics: [] });
     mockUseNamedAgentsList.mockReturnValue({ agents: [] });
-    mockFetchUnifiedSessions.mockResolvedValue([]);
+    mockFindUnifiedSession.mockResolvedValue(null);
   });
 
   afterEach(() => {
