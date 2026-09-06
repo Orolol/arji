@@ -8,6 +8,12 @@ import {
   GITHUB_OAUTH_META_SETTING_KEY,
   githubOAuthMetaSettingSchema,
 } from "@/lib/github/oauth-meta";
+import {
+  UI_LOCALES,
+  UI_LOCALE_SETTING_KEY,
+  isUiLocale,
+  negotiateUiLocale,
+} from "@/lib/i18n/locales";
 import { OPENAI_API_KEY_SETTING_KEY } from "@/lib/openai/constants";
 import { PROJECTS_ROOT_SETTING_KEY } from "@/lib/projects/workspace-constants";
 import { defaultProjectsRoot } from "@/lib/projects/workspace";
@@ -20,7 +26,7 @@ function parseValue(raw: string): unknown {
   }
 }
 
-export async function GET() {
+export async function GET(request?: NextRequest) {
   const rows = db.select().from(settings).all();
   const data: Record<string, unknown> = {};
 
@@ -62,10 +68,17 @@ export async function GET() {
 
   // Server-computed fallbacks the client cannot derive (no process.cwd() in
   // the browser). Kept out of `data` so a round-trip never writes them back
-  // as if they were stored settings.
+  // as if they were stored settings. `ui_locale` is what this request's
+  // browser language negotiates to — the value the interface renders in when
+  // nothing is stored, so the settings UI can show the effective locale.
   return NextResponse.json({
     data,
-    defaults: { [PROJECTS_ROOT_SETTING_KEY]: defaultProjectsRoot() },
+    defaults: {
+      [PROJECTS_ROOT_SETTING_KEY]: defaultProjectsRoot(),
+      [UI_LOCALE_SETTING_KEY]: negotiateUiLocale(
+        request?.headers.get("accept-language") ?? null,
+      ),
+    },
   });
 }
 
@@ -121,6 +134,19 @@ export async function PATCH(request: NextRequest) {
     if (key === PROJECTS_ROOT_SETTING_KEY && typeof value !== "string") {
       return NextResponse.json(
         { error: "Projects directory must be saved as a string value." },
+        { status: 400 }
+      );
+    }
+
+    // The interface locale must name a catalogue that exists; an unknown tag
+    // stored here would make every request fall through to the browser
+    // language while looking like a deliberate choice. `null` clears it and
+    // hands the choice back to the browser language.
+    if (key === UI_LOCALE_SETTING_KEY && value !== null && !isUiLocale(value)) {
+      return NextResponse.json(
+        {
+          error: `Interface locale must be one of ${UI_LOCALES.join(", ")}, or null to follow the browser language.`,
+        },
         { status: 400 }
       );
     }

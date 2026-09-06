@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import createNextIntlPlugin from "next-intl/plugin";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3", "pdf-parse", "pdfjs-dist"],
@@ -46,4 +47,12 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+/**
+ * next-intl, WITHOUT its routing layer. The plugin only registers
+ * `lib/i18n/request.ts` as the per-request locale/messages source; the
+ * locale is a stored setting (see lib/i18n/locales.ts), never a `[lang]`
+ * segment, and `proxy.ts` is untouched.
+ */
+const withNextIntl = createNextIntlPlugin("./lib/i18n/request.ts");
+
+export default withNextIntl(nextConfig);

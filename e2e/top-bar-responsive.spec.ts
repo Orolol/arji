@@ -270,7 +270,7 @@ test.describe("TopBar — responsive geometry", () => {
     for (const name of ["Now", "Chat"]) {
       await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
     }
-    for (const name of ["Work", "Agents", "Réglages"]) {
+    for (const name of ["Work", "Agents", "Settings"]) {
       await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
     }
     for (const name of ["Auto", "New"]) {

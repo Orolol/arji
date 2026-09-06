@@ -222,7 +222,7 @@ describe("TopBar — the three zones share the row at every width", () => {
       ["top-bar-bubble-work", "Work"],
       ["top-bar-bubble-chat", "Chat"],
       ["top-bar-bubble-agents", "Agents"],
-      ["top-bar-bubble-settings", "Réglages"],
+      ["top-bar-bubble-settings", "Settings"],
     ] as const) {
       const pill = screen.getByTestId(testId);
       // Still readable by assistive tech and by `getByRole(name)`.

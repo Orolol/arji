@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useMemo } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Moon } from "lucide-react";
 
 import { useControlDesk } from "@/hooks/useControlDesk";
@@ -106,6 +107,7 @@ export function TopBarMenu({
   className,
 }: TopBarMenuProps) {
   const { data } = useControlDesk(null, OPEN_POLL_MS);
+  const t = useTranslations();
   const stratum = STRATUM_CLASS[category.stratum];
   const geometry = CARD[category.panel ?? "none"];
 
@@ -131,7 +133,7 @@ export function TopBarMenu({
     <div
       data-testid={`top-bar-menu-${category.id}`}
       role="menu"
-      aria-label={category.label}
+      aria-label={t(category.labelKey)}
       onMouseEnter={onPointerEnter}
       onMouseLeave={onPointerLeave}
       className={cn(
@@ -162,7 +164,7 @@ export function TopBarMenu({
           tracking={0.08}
           className={cn("px-[10px] py-[4px]", stratum.kicker)}
         >
-          {category.label}
+          {t(category.labelKey)}
         </Mono>
 
         {category.entries.map((entry) => (
@@ -224,6 +226,8 @@ function MenuRow({
   const blocked = navHrefBlockedReason(entry, activeProjectId);
   const active = isNavEntryActive(entry, pathname, activeProjectId);
   const Icon = entry.icon;
+  const t = useTranslations();
+  const label = t(entry.labelKey);
 
   const body = (
     <>
@@ -232,7 +236,7 @@ function MenuRow({
         aria-hidden="true"
         className={cn("shrink-0", active ? stratum.icon : "text-muted-foreground")}
       />
-      <span className="min-w-0 truncate">{entry.label}</span>
+      <span className="min-w-0 truncate">{label}</span>
       {blocked ? (
         <Mono size={11} tone="muted" className="ml-auto shrink-0">
           {blocked === "planned" ? "à venir" : "choisir un projet"}
@@ -259,8 +263,8 @@ function MenuRow({
         aria-disabled="true"
         title={
           blocked === "planned"
-            ? `${entry.label} — écran en cours de construction (${entry.href})`
-            : `${entry.label} — choisir un projet d'abord`
+            ? `${label} — écran en cours de construction (${entry.href})`
+            : `${label} — choisir un projet d'abord`
         }
         className={cn(ROW_CLASS, "cursor-default font-medium text-muted-foreground opacity-60")}
       >

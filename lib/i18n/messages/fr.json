@@ -1,0 +1,16 @@
+{
+  "Nav": {
+    "categories": {
+      "settings": "Réglages"
+    },
+    "entries": {
+      "integrations": "Intégrations"
+    }
+  },
+  "Settings": {
+    "tabs": {
+      "integrations": "Intégrations",
+      "appearance": "Apparence"
+    }
+  }
+}

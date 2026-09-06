@@ -269,10 +269,10 @@ describe("last visited project store", () => {
 
 describe("nav model", () => {
   it("is the three categories of frame 13a, in order", () => {
-    expect(NAV_CATEGORIES.map((category) => category.label)).toEqual([
-      "Work",
-      "Agents",
-      "Réglages",
+    expect(NAV_CATEGORIES.map((category) => category.labelKey)).toEqual([
+      "Nav.categories.work",
+      "Nav.categories.agents",
+      "Nav.categories.settings",
     ]);
     expect(NAV_CATEGORIES.map((category) => category.stratum)).toEqual([
       "next",
@@ -493,7 +493,7 @@ describe("TopBar", () => {
     expect(screen.getByTestId("top-bar-bubble-work")).toHaveTextContent("Work");
     expect(screen.getByTestId("top-bar-bubble-chat")).toHaveTextContent("Chat");
     expect(screen.getByTestId("top-bar-bubble-agents")).toHaveTextContent("Agents");
-    expect(screen.getByTestId("top-bar-bubble-settings")).toHaveTextContent("Réglages");
+    expect(screen.getByTestId("top-bar-bubble-settings")).toHaveTextContent("Settings");
     expect(screen.getByTestId("top-bar-search")).toHaveTextContent("⌘K");
     expect(screen.getByTestId("top-bar-inbox")).toBeInTheDocument();
     expect(screen.getByTestId("top-bar-auto")).toHaveTextContent("Auto");

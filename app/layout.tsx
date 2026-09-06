@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Instrument_Sans, Space_Mono } from "next/font/google";
 import "./globals.css";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale } from "next-intl/server";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { TopBar } from "@/components/piscine";
@@ -57,16 +59,29 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  /* The locale `lib/i18n/request.ts` resolved for this request: the stored
+     `ui_locale` setting, else the browser language. `<html lang>` follows it
+     so assistive tech and hyphenation read the chrome in the language it is
+     actually drawn in. */
+  const locale = await getLocale();
+
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <body
         className={`${bricolage.variable} ${instrumentSans.variable} ${spaceMono.variable} antialiased`}
       >
+        {/*
+          Rendered from a server component, so it inherits the request's
+          locale and messages from lib/i18n/request.ts — nothing is passed
+          by hand. Every `useTranslations` / `useLocale` below the bar reads
+          from here.
+        */}
+        <NextIntlClientProvider>
         <ThemeProvider>
           <TooltipProvider>
             {/*
@@ -82,6 +97,7 @@ export default function RootLayout({
             </div>
           </TooltipProvider>
         </ThemeProvider>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

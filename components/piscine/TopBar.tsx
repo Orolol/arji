@@ -11,6 +11,7 @@ import {
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   ChevronDown,
   Inbox,
@@ -800,6 +801,7 @@ function CategoryBubble({
   onActivate: () => void;
 }) {
   const Icon = category.icon;
+  const t = useTranslations();
 
   return (
     <button
@@ -822,7 +824,7 @@ function CategoryBubble({
       )}
     >
       <Icon size={14} aria-hidden="true" />
-      <span className={ISLAND_LABEL_CLASS}>{category.label}</span>
+      <span className={ISLAND_LABEL_CLASS}>{t(category.labelKey)}</span>
       {live ? (
         <span data-testid={`top-bar-live-${category.id}`} className="flex">
           <BreathingDot size={6} />
