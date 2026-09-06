@@ -309,8 +309,31 @@ const CHAT_BODY_CLASS =
  * The middle pane. `tabIndex={-1}` is not decoration: picking a conversation
  * on a phone destroys the pane holding the card you just tapped, and without
  * somewhere to put focus it would fall to `<body>`.
+ *
+ * AND THAT HAND-OFF IS A KEYBOARD EVENT, so the pane owes a ring (B-arij-231).
+ * `outline-none` alone made the destination of that focus invisible. Measured
+ * in Chrome at 390x844 on the unfixed tree, tabbing to a roster card and
+ * pressing Enter (`e2e/chat-thread-pane-focus.spec.ts` re-measures it):
+ *
+ *   activeElement          chat-thread-pane
+ *   matches(":focus-visible")  true
+ *   outline-style          none      <- nothing drawn, focus went nowhere visible
+ *
+ * The pane is NOT the TicketOverlay case that `NO_AFFORDANCE_NEEDED` exempts.
+ * It never enters the Tab order (30 presses at 390, 40 at 1440: never reached)
+ * and it is not a scroll container (`overflow: visible`, `scrollHeight ===
+ * clientHeight`, the transcript scrolls inside a Radix viewport further down),
+ * so no browser tabs to it on its own. But it IS the target of a keyboard
+ * hand-off, and `:focus-visible` matches exactly then — never after a tap,
+ * where the same measurement reads `false` and this ring stays unpainted.
+ *
+ * ONE LITERAL, on one line, deliberately: `__tests__/helpers/class-list-scan.ts`
+ * resolves a `const NAME = "…"` into its use sites only for a plain string or a
+ * no-substitution template. Splitting this across a `+` would take the whole
+ * class list out of the scan — and the rule would then pass because it no
+ * longer SEES the pane, which is the one failure mode this fix must not create.
  */
-const THREAD_PANE_CLASS = "min-h-0 min-w-0 flex-1 flex-col gap-[10px] outline-none";
+const THREAD_PANE_CLASS = "min-h-0 min-w-0 flex-1 flex-col gap-[10px] outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 /**
  * The right rail. `overflow-y-auto` belongs to the stacked layout, where the
