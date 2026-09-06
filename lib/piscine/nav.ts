@@ -5,7 +5,8 @@
  * screens that need to know where they sit, and by the tests. Three categories,
  * each reusing a strata ground, each with an ordered list of entries:
  *
- *   Work      pool blue  (next)  Tickets · Spec & Memory · QA · Releases
+ *   Work      pool blue  (next)  Tickets · Spec & Memory · QA · QA checks ·
+ *                                Releases
  *   Agents    turquoise  (live)  Named agents · Sessions · Usage
  *   Réglages  linden     (feed)  Workspace & Full Auto · Night runs ·
  *                                Notifications · Intégrations
@@ -45,6 +46,7 @@ import {
   Bell,
   Bot,
   FileText,
+  FlaskConical,
   Gauge,
   Github,
   Layers,
@@ -109,9 +111,25 @@ export const NAV_CATEGORIES: readonly NavCategory[] = [
         href: "/projects/:projectId/spec",
         forProject: (projectId) => `/projects/${projectId}/spec`,
       },
-      // 11b — cross-project QA. The per-project /projects/:id/qa still exists
-      // but is the OLD screen, not this entry.
+      // 11b — cross-project QA: the REVIEW layer (findings, verdicts, rubric).
       { id: "qa", label: "QA", icon: ShieldCheck, href: "/qa" },
+      // The exploratory QA-CHECK agent and its report history — tech checks,
+      // E2E passes, failure digests. A different surface from the entry above,
+      // not an older version of it: 11b arbitrates what reviewers filed against
+      // a ticket, this one runs a project-wide pass and produces a document.
+      //
+      // It is listed because the redesign left it reachable only from the
+      // desk's icon-only project-pages dropdown, and "run a tech check"
+      // effectively disappeared with it. The dispatch now also lives on 11b
+      // (QA CHECKS band), but the report history and the "create epics from
+      // findings" action are only here.
+      {
+        id: "qa-checks",
+        label: "QA checks",
+        icon: FlaskConical,
+        href: "/projects/:projectId/qa",
+        forProject: (projectId) => `/projects/${projectId}/qa`,
+      },
       {
         id: "releases",
         label: "Releases",

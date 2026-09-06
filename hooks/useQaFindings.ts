@@ -145,5 +145,15 @@ export function filterQaPayload(
     findings: keep(payload.findings),
     verdicts: keep(payload.verdicts),
     reviewable: keep(payload.reviewable),
+    checks: keep(payload.checks),
+    // Narrowed by KEY, which is why the route groups by project: the screen
+    // sums whichever projects are in scope (`sumCheckTotals`), so a
+    // project-scoped band counts that project's reports and nothing else.
+    checkTotals: Object.fromEntries(
+      Object.entries(payload.checkTotals).filter(([id]) => id === projectId),
+    ),
+    checkableProjectIds: payload.checkableProjectIds.filter(
+      (id) => id === projectId,
+    ),
   };
 }

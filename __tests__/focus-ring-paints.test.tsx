@@ -230,7 +230,10 @@ const sites = scanSources(outlinePairingSites);
  * gaining a site needs no edit here; a file losing its last one does, and the
  * failure says which.
  *
- * Recorded 2026-09-05 over 50 sites in these 40 files.
+ * Recorded 2026-09-05 over 50 sites in 40 files. The QA CHECKS band added two
+ * (2026-09-06), which the scan found on its own; extracting `PickerPopover`
+ * then collapsed the two copied picker rings into one, so `RunQaPassButton`
+ * and `NewQaCheckButton` left the list and the shared shell joined it.
  */
 const SCANNED_FILES = [
   "app/projects/[projectId]/sessions/page.tsx",
@@ -258,9 +261,14 @@ const SCANNED_FILES = [
   "components/piscine/TopBar.tsx",
   "components/piscine/TopBarMenu.tsx",
   "components/qa/FindingFilterPills.tsx",
+  // ONE ring for both picker menus. `RunQaPassButton` and `NewQaCheckButton`
+  // each carried a hand-copied duplicate of this class string until the
+  // popover shell was extracted; they no longer carry one at all, which is why
+  // they left this list.
+  "components/qa/PickerPopover.tsx",
+  "components/qa/QaCheckRow.tsx",
   "components/qa/QaQueuedTile.tsx",
   "components/qa/QaRunCard.tsx",
-  "components/qa/RunQaPassButton.tsx",
   "components/releases/ReleaseHistory.tsx",
   "components/session-live/LiveLogBand.tsx",
   "components/settings-piscine/OpenAiCard.tsx",

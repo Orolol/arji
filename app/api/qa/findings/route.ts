@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
@@ -7,12 +7,14 @@ import {
   customReviewAgents,
   epics,
   projects,
+  qaReports,
   reviewComments,
   ticketActivityLog,
 } from "@/lib/db/schema";
 import { REVIEW_CHECKLISTS } from "@/lib/claude/prompt-sections";
 import { deriveProjects } from "@/lib/control-desk/aggregate";
 import { sessionAtSql } from "@/lib/agent-sessions/session-time";
+import { NON_TERMINAL_STATUSES } from "@/lib/agent-sessions/lifecycle-status";
 import { BLOCKING_FINDING_PREFIXES } from "@/lib/review/finding-severity";
 import {
   ORDINARY_REVIEW_AGENT_TYPES,
@@ -24,6 +26,7 @@ import { epicSessionFactsCte } from "@/lib/workflow/review-freshness";
 import { isBuildableStatus } from "@/lib/types/kanban";
 import {
   compareFindings,
+  deriveChecks,
   deriveCoverage,
   deriveQueued,
   deriveRuns,
@@ -37,6 +40,8 @@ import {
   type QaVerdictSessionRow,
 } from "@/lib/qa/aggregate";
 import {
+  QA_CHECK_LIMIT,
+  QA_CHECK_SUMMARY_LIMIT,
   QA_COVERAGE_DAYS,
   QA_LOG_LINE_LIMIT,
   QA_VERDICT_DAYS,
@@ -103,6 +108,27 @@ function blockingPrefixSql(): SQL {
   return rest.reduce<SQL>((acc, next) => sql`${acc} OR ${next}`, first);
 }
 
+/**
+ * `1` when this `qa_reports` row is a check that is genuinely still going.
+ *
+ * The SQL twin of `isCheckLive` (`lib/qa/aggregate.ts`), and it must stay a
+ * twin: the ordering, the row flag and the totals all read this one expression,
+ * and a JavaScript answer that disagreed with the SQL one would sort the band
+ * by a different rule than it paints it by. Requires the `agent_sessions` LEFT
+ * JOIN to be in scope; a `NULL` session status fails the `IN` and yields `0`,
+ * which is the wanted answer for a report whose session is gone.
+ */
+function liveCheckSql(): SQL<number> {
+  return sql<number>`CASE WHEN ${qaReports.status} = 'running'
+    AND ${agentSessions.status} IN (${sql.raw(NON_TERMINAL_SESSION_SQL)})
+    THEN 1 ELSE 0 END`;
+}
+
+/** `'queued','running'` — `NON_TERMINAL_STATUSES` as a SQL list literal. */
+const NON_TERMINAL_SESSION_SQL = NON_TERMINAL_STATUSES.map(
+  (status) => `'${status}'`,
+).join(",");
+
 /** The empty answer, so a fresh install renders four folded label lines. */
 function emptyPayload(now: Date): QaPayload {
   return {
@@ -117,6 +143,9 @@ function emptyPayload(now: Date): QaPayload {
       projectRuleCount: 0,
     },
     reviewable: [],
+    checks: [],
+    checkTotals: {},
+    checkableProjectIds: [],
     coveragePercent: null,
   };
 }
@@ -130,7 +159,15 @@ export async function GET() {
   /* ---- 1. projects -------------------------------------------------- */
 
   const projectRows = db
-    .select({ id: projects.id, name: projects.name, createdAt: projects.createdAt })
+    .select({
+      id: projects.id,
+      name: projects.name,
+      createdAt: projects.createdAt,
+      // Not shown anywhere: it is the ONE fact that decides whether the "New
+      // check" button may offer this project, because the check route is
+      // `getProjectOr404(..., { requireGitRepo: true })` and 400s without it.
+      gitRepoPath: projects.gitRepoPath,
+    })
     .from(projects)
     .all();
 
@@ -403,6 +440,86 @@ export async function GET() {
           )
           .get();
 
+  /* ---- 10b. QA checks ------------------------------------------------ */
+
+  /**
+   * The exploratory QA-check history — tech checks, E2E passes and failure
+   * digests. This is the surface the redesign orphaned: the nav's QA entry
+   * points here, and until now this payload described only the review layer,
+   * so `/qa` could neither start a check nor show one running.
+   *
+   * TWO COLUMNS OF THIS TABLE ARE NEVER SELECTED. `report_content` holds a
+   * whole markdown QA report and `prompt_used` a whole composed prompt; both
+   * are uncapped, and this route is polled every 8 s. `summary` IS capped at
+   * 500 chars by the check route's `extractSummary`, but the cap lives in one
+   * writer among several, so it is clipped in SQL like every other text column
+   * this route ships.
+   *
+   * NO `project_id` BOUND ON THE SCAN, deliberately, and it is the one place
+   * this route departs from its own discipline: `qa_reports` carries no
+   * secondary index at all, so an `IN (…)` would prune nothing and only add a
+   * predicate. What bounds the read is `LIMIT`, and the table grows one row per
+   * QA check a human starts by hand — it is three orders of magnitude smaller
+   * than `agent_sessions`.
+   *
+   * WHY THE JOIN. Liveness cannot be read from `qa_reports.status`: that column
+   * has ONE writer, and three ordinary paths (restart, rejected launch,
+   * cancelled queue entry) skip it and strand a row on `running` for good — see
+   * `isCheckLive`. Since LIVE FIRST is in the ORDER BY, trusting the column
+   * would let five stranded rows pin themselves to the top of a
+   * `QA_CHECK_LIMIT`-row band and hide every real check: the ordering added to
+   * protect a live check would be the thing that buries them all.
+   *
+   * The join is on `agent_sessions`' PRIMARY KEY, one B-tree probe per report
+   * row, over a table already being scanned in full. `liveCheckSql()` is the
+   * ONE expression behind the ordering, the row's `live` flag and the totals —
+   * three places that must never answer differently.
+   */
+  const checkRows = db
+    .select({
+      id: qaReports.id,
+      projectId: qaReports.projectId,
+      status: qaReports.status,
+      checkType: qaReports.checkType,
+      summary: sql<
+        string | null
+      >`SUBSTR(${qaReports.summary}, 1, ${sql.raw(String(QA_CHECK_SUMMARY_LIMIT))})`,
+      agentSessionId: qaReports.agentSessionId,
+      sessionStatus: agentSessions.status,
+      createdAt: qaReports.createdAt,
+      completedAt: qaReports.completedAt,
+    })
+    .from(qaReports)
+    .leftJoin(agentSessions, eq(qaReports.agentSessionId, agentSessions.id))
+    .orderBy(desc(liveCheckSql()), desc(qaReports.createdAt))
+    .limit(QA_CHECK_LIMIT)
+    .all();
+
+  /**
+   * The band's meta counts EVERY report, not the `QA_CHECK_LIMIT` rows above.
+   *
+   * A capped slice rendered as a count saturates at the cap and understates
+   * reality exactly when the user most needs it — several checks in flight at
+   * once. The rows are a window; these are the totals, and `running` uses the
+   * same `liveCheckSql()` the rows do, so the meta can never say "3 running"
+   * over a band drawing one breathing dot.
+   *
+   * GROUPED BY PROJECT so the figure survives `filterQaPayload`: the screen
+   * takes an optional `projectId`, and one workspace total would come through
+   * that narrowing untouched and print every project's count over one
+   * project's band. `sumCheckTotals` adds up whichever projects are in scope.
+   */
+  const checkTotalRows = db
+    .select({
+      projectId: qaReports.projectId,
+      total: sql<number>`COUNT(*)`,
+      running: sql<number>`SUM(${liveCheckSql()})`,
+    })
+    .from(qaReports)
+    .leftJoin(agentSessions, eq(qaReports.agentSessionId, agentSessions.id))
+    .groupBy(qaReports.projectId)
+    .all();
+
   /* ---- 11. la rubrique ----------------------------------------------- */
 
   const projectRules = db
@@ -495,6 +612,24 @@ export async function GET() {
       projectRuleCount: Number(projectRules?.rules ?? 0),
     },
     reviewable,
+    checks: deriveChecks(checkRows),
+    checkTotals: Object.fromEntries(
+      checkTotalRows.map((row) => [
+        row.projectId,
+        {
+          // SUM over a group whose every row scores 0 still returns 0, but SUM
+          // of NULLs is NULL — the standing SQL trap. A band must read
+          // "0 running", never "NaN running".
+          running: Number(row.running ?? 0),
+          total: Number(row.total ?? 0),
+        },
+      ]),
+    ),
+    // A project with no `git_repo_path` is not offerable: the check route
+    // refuses it with a 400 before it looks at anything else.
+    checkableProjectIds: projectRows
+      .filter((row) => Boolean(row.gitRepoPath))
+      .map((row) => row.id),
     coveragePercent: deriveCoverage(
       Number(reviewedRow?.reviewed ?? 0),
       shippedEpicIds.length,
@@ -506,6 +641,7 @@ export async function GET() {
     epics: epicRows.length,
     findings: payload.findings.length,
     runs: payload.runs.length,
+    checks: payload.checks.length,
     queryMs: Date.now() - queryStartedAt,
   });
 

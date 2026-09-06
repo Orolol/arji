@@ -14,6 +14,7 @@ import {
 } from "@/components/notifications/useToastStack";
 import { useTicketOverlay } from "@/components/ticket/TicketOverlayProvider";
 import { useQaFindings } from "@/hooks/useQaFindings";
+import { sumCheckTotals } from "@/lib/qa/aggregate";
 import { QA_COVERAGE_DAYS, type QaFinding, type QaReviewTarget } from "@/lib/qa/types";
 import { cn } from "@/lib/utils";
 
@@ -23,18 +24,22 @@ import {
   applyFindingFilter,
   type FindingFilter,
 } from "./FindingFilterPills";
+import { NewQaCheckButton } from "./NewQaCheckButton";
+import { QaChecksBand } from "./QaChecksBand";
 import { QaRunsBand } from "./QaRunsBand";
 import { RubricBand } from "./RubricBand";
 import { RunQaPassButton } from "./RunQaPassButton";
+import { StartQaCheckDialog } from "./StartQaCheckDialog";
 import { VerdictsBand } from "./VerdictsBand";
 
 /**
  * QA — the cross-project review layer (frame 11b).
  *
- * Four strata, top to bottom: QA RUNS (turquoise) → FINDINGS À ARBITRER
- * (coral, the one band that grows) → VERDICTS RÉCENTS (sun) | LA RUBRIQUE
- * (pool). Everything comes from ONE poll of `GET /api/qa/findings`; see
- * `hooks/useQaFindings.ts` for why it polls at 8 s rather than the desk's 4 s.
+ * Strata, top to bottom: QA RUNS (turquoise) → QA CHECKS (linden) → FINDINGS À
+ * ARBITRER (coral, the one band that grows) → VERDICTS RÉCENTS (sun) | LA
+ * RUBRIQUE (pool). Everything comes from ONE poll of `GET /api/qa/findings`;
+ * see `hooks/useQaFindings.ts` for why it polls at 8 s rather than the desk's
+ * 4 s.
  *
  * NO PAGE HEADER. `components/piscine/TopBar.tsx` is mounted once by
  * `app/layout.tsx` and owns the logo, the project chips, ⌘K, the inbox, Auto
@@ -43,7 +48,16 @@ import { VerdictsBand } from "./VerdictsBand";
  *
  * NOTHING HERE APPROVES A TICKET. The merge is the approval. Dismiss resolves
  * exactly one finding and records why; Fix with agent dispatches a build; Run
- * QA pass dispatches a review. No status is moved from this screen.
+ * QA pass dispatches a review; New check dispatches a tech check, an E2E pass
+ * or a failure digest. No status is moved from this screen.
+ *
+ * TWO KINDS OF QA LIVE HERE, and they are different work. A REVIEW is bound to
+ * a ticket and files findings — QA RUNS, FINDINGS, VERDICTS. A CHECK is the
+ * project-wide QA agent and produces a `qa_reports` document — QA CHECKS. The
+ * redesign moved the nav's QA entry to this screen while the checks stayed
+ * behind on `/projects/:id/qa`, which is how "run a tech check" stopped being
+ * reachable; the QA CHECKS band and its "New check" button are that entry
+ * point, and the band's rows link to the report on the screen that draws it.
  */
 export type QaToastTone = ToastTone;
 export type QaToastAction = ToastAction;
@@ -66,6 +80,13 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
   const [dismissTarget, setDismissTarget] = useState<QaFinding | null>(null);
   const [dismissPending, setDismissPending] = useState(false);
   const [runPending, setRunPending] = useState(false);
+  /**
+   * The project the QA-check dialog is composing for, or `null` when it is
+   * closed. It holds the id rather than a boolean because `/qa` is
+   * cross-project and `POST /api/projects/{p}/qa/check` is not: the choice made
+   * in the button IS the dialog's scope.
+   */
+  const [checkProjectId, setCheckProjectId] = useState<string | null>(null);
 
   const markPending = useCallback((findingId: string, pending: boolean) => {
     setPendingIds((current) => {
@@ -85,6 +106,30 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
   );
+  const checks = useMemo(() => data?.checks ?? [], [data]);
+  /**
+   * The band's meta. Summed over the projects IN SCOPE rather than read off
+   * `checks`, which is a `QA_CHECK_LIMIT` window and would print a constant —
+   * and `projects` is already narrowed by `filterQaPayload`, so a
+   * project-scoped mount counts that project alone.
+   */
+  const checkTotals = useMemo(
+    () =>
+      sumCheckTotals(
+        data?.checkTotals ?? {},
+        projects.map((project) => project.id),
+      ),
+    [data, projects],
+  );
+  /**
+   * The projects "New check" may offer. The route decides, not the screen: a
+   * project with no `git_repo_path` is refused with a 400, and the payload
+   * already carries the answer as `checkableProjectIds`.
+   */
+  const checkableProjects = useMemo(() => {
+    const allowed = new Set(data?.checkableProjectIds ?? []);
+    return projects.filter((project) => allowed.has(project.id));
+  }, [data, projects]);
   const findings = useMemo(() => data?.findings ?? [], [data]);
   const visibleFindings = useMemo(
     () => applyFindingFilter(findings, filter),
@@ -251,6 +296,40 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
     [raise, reportFailure, refresh],
   );
 
+  /**
+   * A QA check was accepted. Two different things can have happened, and the
+   * toast must not tell them apart wrongly:
+   *
+   * - a session was queued (`sessionId`), and the band will show it running on
+   *   the next poll — `refresh()` pulls that forward;
+   * - an EMPTY failure digest (`noOp`), which the route journals as a completed
+   *   report WITHOUT launching an agent. Announcing "check started" for that
+   *   would be a lie about work that will never appear in QA RUNS.
+   *
+   * Either way the toast carries the deep link to the report, because the
+   * report is drawn by `/projects/:id/qa` and not by this screen.
+   */
+  const handleCheckStarted = useCallback(
+    (started: { reportId: string; sessionId: string | null; noOp?: boolean }) => {
+      const target = checkProjectId;
+      setCheckProjectId(null);
+      raise(
+        "success",
+        started.noOp
+          ? "Aucune évidence dans la fenêtre : rapport enregistré, aucun agent lancé"
+          : "QA check lancé",
+        target
+          ? {
+              href: `/projects/${target}/qa?reportId=${started.reportId}`,
+              label: "Voir le rapport",
+            }
+          : undefined,
+      );
+      void refresh();
+    },
+    [checkProjectId, raise, refresh],
+  );
+
   const handleStopRun = useCallback(
     async (sessionId: string) => {
       const run = data?.runs.find((row) => row.sessionId === sessionId);
@@ -334,6 +413,18 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
           onStopRun={handleStopRun}
         />
 
+        <QaChecksBand
+          checks={checks}
+          totals={checkTotals}
+          projectsById={projectsById}
+          action={
+            <NewQaCheckButton
+              projects={checkableProjects}
+              onSelect={setCheckProjectId}
+            />
+          }
+        />
+
         <FindingsBand
           findings={findings}
           visible={visibleFindings}
@@ -368,6 +459,21 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
           />
         </div>
       </div>
+
+      {/* Mounted only while a project is chosen: the dialog takes its project
+          id as a prop and loads the saved prompts when it opens, so a fresh
+          mount per choice is what keeps those two in step. */}
+      {checkProjectId ? (
+        <StartQaCheckDialog
+          key={checkProjectId}
+          projectId={checkProjectId}
+          open
+          onOpenChange={(next) => {
+            if (!next) setCheckProjectId(null);
+          }}
+          onStarted={handleCheckStarted}
+        />
+      ) : null}
 
       <DismissDialog
         finding={dismissTarget}
