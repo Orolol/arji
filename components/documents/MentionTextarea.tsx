@@ -1,8 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDocumentMention } from "@/lib/documents/mention-format";
+import {
+  DEFAULT_MENTION_MENU_FIT,
+  resolveMentionMenuFit,
+  type MentionMenuFit,
+} from "@/lib/documents/mention-placement";
+import { cn } from "@/lib/utils";
 
 interface MentionDocument {
   id: string;
@@ -168,8 +181,68 @@ export function MentionTextarea({
 
   const hasSuggestionMenu = Boolean(activeMention && filteredDocuments.length > 0);
 
+  // WHICH SIDE OF THE FIELD THE MENU OPENS ON, and how tall it may be.
+  //
+  // The list is anchored to a composer that sits at the bottom of a page that
+  // does not scroll (/chat), so "always below" put it off-screen on the frames
+  // where the band fits on one row. `mt-1`/`top-full` remains the default; the
+  // flip only happens when below cannot hold the list and above holds more.
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuFit, setMenuFit] = useState<MentionMenuFit>(DEFAULT_MENTION_MENU_FIT);
+
+  const measureMenuFit = useCallback(() => {
+    const anchorEl = anchorRef.current;
+    const menuEl = menuRef.current;
+    if (!anchorEl || !menuEl) return;
+
+    const anchorRect = anchorEl.getBoundingClientRect();
+    const next = resolveMentionMenuFit({
+      anchorTop: anchorRect.top,
+      anchorBottom: anchorRect.bottom,
+      viewportHeight: window.innerHeight,
+      // `scrollHeight` and not the rendered height: the clamp we applied last
+      // pass must not be mistaken for the list's natural size, or a menu that
+      // once flipped could never measure its way back.
+      contentHeight: menuEl.scrollHeight,
+    });
+
+    setMenuFit((prev) =>
+      prev.placement === next.placement && prev.maxHeight === next.maxHeight ? prev : next,
+    );
+  }, []);
+
+  // Before paint, so the menu is never seen in the wrong place. The list length
+  // is a dependency because it changes the height the decision is made against
+  // as the user narrows the query.
+  //
+  // This measures the DOM and places against it, which is the case
+  // `useLayoutEffect` exists for; `measureMenuFit` bails on an unchanged fit so
+  // there is no cascade. No reset when the menu closes: the fit is only read
+  // while it is open, and reopening re-measures before paint.
+  useLayoutEffect(() => {
+    if (!hasSuggestionMenu) return;
+    measureMenuFit();
+  }, [hasSuggestionMenu, filteredDocuments.length, measureMenuFit]);
+
+  // The anchor moves under the menu: the window resizes, or the surface the
+  // field lives in scrolls (the comment thread and the spec editor both do —
+  // /chat's composer is the one that does not). `capture` catches scrolls on
+  // the ancestors rather than only on the document.
+  useEffect(() => {
+    if (!hasSuggestionMenu) return;
+
+    const onViewportChange = () => measureMenuFit();
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
+    return () => {
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, true);
+    };
+  }, [hasSuggestionMenu, measureMenuFit]);
+
   return (
-    <div className="relative flex-1 min-w-0 w-full">
+    <div ref={anchorRef} data-slot="mention-anchor" className="relative flex-1 min-w-0 w-full">
       <Textarea
         {...props}
         ref={(node) => {
@@ -236,8 +309,20 @@ export function MentionTextarea({
       />
 
       {hasSuggestionMenu && (
-        <div className="absolute z-30 mt-1 w-full rounded-[10px] border border-border bg-popover shadow-[0_8px_20px_rgba(58,48,44,.16)]">
-          <div className="max-h-48 overflow-auto p-1">
+        <div
+          ref={menuRef}
+          data-testid="mention-suggestions"
+          data-placement={menuFit.placement}
+          // The clamp is the measured room on the chosen side, so it is a
+          // number and not a class. `max-h-48` survives as the ceiling inside
+          // `resolveMentionMenuFit`.
+          style={{ maxHeight: menuFit.maxHeight }}
+          className={cn(
+            "absolute z-30 w-full overflow-auto rounded-[10px] border border-border bg-popover shadow-[0_8px_20px_rgba(58,48,44,.16)]",
+            menuFit.placement === "above" ? "bottom-full mb-1" : "top-full mt-1",
+          )}
+        >
+          <div className="p-1">
             {filteredDocuments.map((doc, index) => (
               <button
                 key={doc.id}
