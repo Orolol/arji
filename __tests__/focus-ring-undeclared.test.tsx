@@ -83,6 +83,16 @@ const undeclared = scanSources(undeclaredFocusSites);
  * Elements allowed to clear the outline and declare nothing. Every entry must
  * match a real site, so an exception that stops applying fails rather than
  * quietly widening the rule.
+ *
+ * THE CHAT THREAD PANE IS NOT ONE OF THEM, and it was the obvious candidate:
+ * `tabIndex={-1}`, focused programmatically, never in the Tab order. It went
+ * red here on `main` for two days (B-arij-231), and the measurement is what
+ * settled it — Chrome matches `:focus-visible` on that pane, because the
+ * programmatic focus is the direct consequence of pressing Enter on a
+ * conversation card. "Never keyboard-focused" is false for it, so it took a
+ * ring. See `__tests__/chat-thread-pane-focus-ring.test.tsx` for the readings
+ * and `e2e/chat-thread-pane-focus.spec.ts` for the browser they came from —
+ * an entry added here later would have to answer them.
  */
 const NO_AFFORDANCE_NEEDED: ReadonlyArray<{
   file: string;
