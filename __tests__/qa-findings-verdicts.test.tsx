@@ -44,7 +44,7 @@ describe("VerdictsBand", () => {
   it("prints the five verdict texts as the route derived them", () => {
     const rows: QaVerdict[] = [
       verdict(),
-      verdict({ epicId: "e2", verdictText: "clean après review · 2 findings filed" }),
+      verdict({ epicId: "e2", verdictText: "clean after review · 2 findings filed" }),
       verdict({
         epicId: "e3",
         verdictText: "changes requested · 1 finding",
@@ -53,13 +53,13 @@ describe("VerdictsBand", () => {
       }),
       verdict({
         epicId: "e4",
-        verdictText: "review unverifiable · findings jamais reçues",
+        verdictText: "review unverifiable · findings never received",
         kind: "attention",
         outcome: "→ your turn",
       }),
       verdict({
         epicId: "e5",
-        verdictText: "review sans verdict structuré",
+        verdictText: "review with no structured verdict",
         outcome: "→ ready",
       }),
     ];
@@ -218,7 +218,7 @@ describe("VerdictRow — the band stays inside a phone screen", () => {
             // The widest id `generateReadableId` can produce: `E-` + a 20-char
             // slug + `-NNN`. This is what measured 173.1px in Chrome.
             readableId: "E-e2e-keeps-every-band-001",
-            verdictText: "review unverifiable · findings jamais reçues",
+            verdictText: "review unverifiable · findings never received",
             outcome: "→ your turn",
             kind: "attention",
             ...overrides,
@@ -268,7 +268,7 @@ describe("VerdictRow — the band stays inside a phone screen", () => {
     ).toBe(true);
     expect(hasBaseUtility(line, "min-w-0")).toBe(true);
     expect(
-      within(line).getByText("review unverifiable · findings jamais reçues"),
+      within(line).getByText("review unverifiable · findings never received"),
     ).toBeInTheDocument();
     expect(within(line).getByText("→ your turn")).toBeInTheDocument();
     // The chip is NOT in the group: it is the line the verdict folds away from.
@@ -301,7 +301,7 @@ describe("VerdictRow — the band stays inside a phone screen", () => {
   it("keeps the frame's reading order at every width", () => {
     const row = renderRow();
     expect(row.textContent).toBe(
-      "E-e2e-keeps-every-band-001review unverifiable · findings jamais reçues→ your turn",
+      "E-e2e-keeps-every-band-001review unverifiable · findings never received→ your turn",
     );
   });
 });
