@@ -9,12 +9,14 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createTranslator } from "next-intl";
 
 import { DraftedEpicCard } from "@/components/chat-page/DraftedEpicCard";
 import { ChatThread } from "@/components/chat-page/ChatThread";
 import { epicsByMessageId } from "@/components/chat-page/message-epics";
 import { longPlacement } from "@/components/chat-page/placement";
 import type { ChatMessage } from "@/hooks/useChat";
+import { messagesFor } from "@/lib/i18n";
 import type { ParsedEpic } from "@/lib/epic-parsing";
 
 const EPIC: ParsedEpic = {
@@ -40,6 +42,14 @@ const EPIC: ParsedEpic = {
 };
 
 const fetchMock = vi.fn();
+
+/**
+ * `placement.ts` holds full dotted KEY REFERENCES and composes its sentence
+ * outside React, so it takes the NAMESPACE-LESS translator as an argument
+ * (lib/i18n/catalogue.ts). Off a component that is a bare `createTranslator`
+ * over the same catalogue the page reads through `useTranslations()`.
+ */
+const t = createTranslator({ locale: "en", messages: messagesFor("en") });
 
 function renderCard(overrides: Partial<React.ComponentProps<typeof DraftedEpicCard>> = {}) {
   const props = {
@@ -108,7 +118,7 @@ describe("DraftedEpicCard — what it prints", () => {
       },
     });
 
-    expect(screen.getByText("1 stories")).toBeInTheDocument();
+    expect(screen.getByText("1 story")).toBeInTheDocument();
     expect(screen.queryByText("0 AC")).toBeNull();
     expect(screen.queryByText(/· 0 AC/)).toBeNull();
   });
@@ -123,13 +133,13 @@ describe("DraftedEpicCard — what it prints", () => {
     renderCard({
       epicId: "e1",
       readableId: "ARJ-143",
-      placement: longPlacement("todo", 3),
+      placement: longPlacement("todo", 3, t),
     });
 
     expect(screen.getByText("EPIC")).toBeInTheDocument();
     expect(screen.queryByText("EPIC · DRAFT")).toBeNull();
     expect(screen.getByText("ARJ-143")).toBeInTheDocument();
-    expect(screen.getByText("créé dans To Do · #3")).toBeInTheDocument();
+    expect(screen.getByText("created in To Do · #3")).toBeInTheDocument();
   });
 });
 
@@ -158,7 +168,7 @@ describe("DraftedEpicCard — the three actions", () => {
       readableId: "ARJ-9",
       status: "todo",
     });
-    expect(props.onToast).toHaveBeenCalledWith("success", "Envoyé en dev");
+    expect(props.onToast).toHaveBeenCalledWith("success", "Sent to dev");
   });
 
   it("a card already bound to a ticket skips the create and only dispatches", async () => {
@@ -216,7 +226,7 @@ describe("DraftedEpicCard — the three actions", () => {
     ).toBe(false);
     expect(props.onToast).toHaveBeenCalledWith(
       "success",
-      "Epic créé dans le backlog",
+      "Epic created in the backlog",
     );
   });
 
@@ -329,16 +339,16 @@ describe("the card stays actionable from history", () => {
 
 describe("placement notes", () => {
   it("prints the queue rank when the desk has one", () => {
-    expect(longPlacement("todo", 3)).toBe("créé dans To Do · #3");
-    expect(longPlacement("backlog", null)).toBe("créé dans Backlog");
+    expect(longPlacement("todo", 3, t)).toBe("created in To Do · #3");
+    expect(longPlacement("backlog", null, t)).toBe("created in Backlog");
   });
 
   it("is null — an em-dash — when the desk has no row", () => {
-    expect(longPlacement(null, null)).toBeNull();
-    expect(longPlacement(undefined, 3)).toBeNull();
+    expect(longPlacement(null, null, t)).toBeNull();
+    expect(longPlacement(undefined, 3, t)).toBeNull();
   });
 
   it("never prints a rank it does not have", () => {
-    expect(longPlacement("todo", null)).toBe("créé dans To Do");
+    expect(longPlacement("todo", null, t)).toBe("created in To Do");
   });
 });

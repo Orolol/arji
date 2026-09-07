@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { RefinementButton } from "@/components/kanban/RefinementButton";
 import { Mono, SelectPill } from "@/components/piscine";
@@ -18,7 +19,7 @@ import type { RegistryStateFilter } from "@/lib/tickets-registry/url-state";
 
 import { RegistryFilters, type RegistrySort } from "./RegistryFilters";
 import { RegistryTable } from "./RegistryTable";
-import { downloadCsv } from "./csv";
+import { downloadCsv, useCsvCopy } from "./csv";
 import { useRegistryUrlState } from "./useRegistryUrlState";
 import { useTicketsRegistry } from "./useTicketsRegistry";
 
@@ -65,6 +66,9 @@ function matchesQuery(row: RegistryRow, needle: string): boolean {
 }
 
 export function TicketsRegistryView() {
+  const t = useTranslations("Registry");
+  // The export's own vocabulary, resolved beside the keys it reads (./csv.ts).
+  const csvCopy = useCsvCopy();
   /**
    * THE SCOPE AND THE SORT LIVE IN THE URL, not in this component.
    *
@@ -230,8 +234,8 @@ export function TicketsRegistryView() {
   const onExportCsv = useCallback(() => {
     // Every filtered row across every group — group truncation is a display
     // device, not a scope.
-    downloadCsv(REGISTRY_GROUP_ORDER.flatMap((group) => rowsByGroup[group]));
-  }, [rowsByGroup]);
+    downloadCsv(REGISTRY_GROUP_ORDER.flatMap((group) => rowsByGroup[group]), csvCopy);
+  }, [csvCopy, rowsByGroup]);
 
   /**
    * The refinement entry point, rendered into the filter row's right cluster.
@@ -252,19 +256,19 @@ export function TicketsRegistryView() {
   const handleRefinementStarted = useCallback(() => {
     setRefinementNotice({
       tone: "success",
-      text: "Agent Refinement started — re-passing Backlog and To do",
+      text: t("refinement.started"),
     });
-  }, []);
+  }, [t]);
 
   const handleRefinementFinished = useCallback(() => {
     setRefinementNotice({
       tone: "success",
-      text: "Board refinement finished — see the notification for the summary",
+      text: t("refinement.finished"),
     });
     // The pass reshaped the planning columns: pull the new order and the
     // moved tickets in now rather than waiting for the next poll.
     void refresh();
-  }, [refresh]);
+  }, [refresh, t]);
 
   const handleRefinementError = useCallback((message: string) => {
     setRefinementNotice({ tone: "error", text: message });
@@ -302,7 +306,11 @@ export function TicketsRegistryView() {
       ) : (
         <>
           <SelectPill
-            label={selectedProject ? `refine: ${selectedProject.shortName}` : "refine: —"}
+            label={
+              selectedProject
+                ? t("refinement.target", { project: selectedProject.shortName })
+                : t("refinement.targetNone")
+            }
             tone="mono"
             fill="transparent"
             disabled={projects.length === 0}
@@ -345,10 +353,7 @@ export function TicketsRegistryView() {
   })();
   const projectCount = data?.totals.projects ?? 0;
   const footerStatus =
-    error ??
-    `${ticketCount} ticket${ticketCount === 1 ? "" : "s"} · ${projectCount} projet${
-      projectCount === 1 ? "" : "s"
-    }`;
+    error ?? t("footer.status", { tickets: ticketCount, projects: projectCount });
 
   const counts = data?.counts ?? {
     all: null,

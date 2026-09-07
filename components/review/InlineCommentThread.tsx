@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Check, Trash2, User, Bot } from "lucide-react";
@@ -19,6 +19,7 @@ export function InlineCommentThread({
   onDelete,
 }: InlineCommentThreadProps) {
   const locale = useLocale();
+  const t = useTranslations("Review");
   return (
     <div className="space-y-1">
       {comments.map((comment) => (
@@ -37,14 +38,14 @@ export function InlineCommentThread({
               <User className="h-3 w-3 text-muted-foreground" />
             )}
             <span className="font-medium">
-              {comment.author === "agent" ? "Agent" : "You"}
+              {comment.author === "agent" ? t("thread.agent") : t("thread.you")}
             </span>
             <span className="text-muted-foreground">
               {formatDateTime(comment.createdAt, { locale, style: "dayTime" })}
             </span>
             {comment.status === "resolved" && (
               <Badge variant="outline" className="text-[10px] h-4 px-1">
-                Resolved
+                {t("thread.resolved")}
               </Badge>
             )}
             <div className="flex-1" />
@@ -54,7 +55,7 @@ export function InlineCommentThread({
                 size="icon"
                 className="h-5 w-5"
                 onClick={() => onUpdate(comment.id, { status: "resolved" })}
-                title="Resolve"
+                title={t("thread.resolve")}
               >
                 <Check className="h-3 w-3" />
               </Button>
@@ -64,7 +65,7 @@ export function InlineCommentThread({
               size="icon"
               className="h-5 w-5 text-destructive"
               onClick={() => onDelete(comment.id)}
-              title="Delete"
+              title={t("thread.delete")}
             >
               <Trash2 className="h-3 w-3" />
             </Button>

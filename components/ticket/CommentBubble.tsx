@@ -45,7 +45,7 @@ export function CommentBubble({ comment }: CommentBubbleProps) {
       )}
     >
       <Mono as="span" size={10} tone="muted" className="mb-1 block">
-        {`${isUser ? "you" : "agent"} · ${formatRelative(comment.createdAt, { locale })}`}
+        {`${isUser ? t("comment.you") : t("comment.agent")} · ${formatRelative(comment.createdAt, { locale })}`}
       </Mono>
       <p className="m-0 text-[13px] leading-[1.5] whitespace-pre-wrap text-foreground">
         {body}

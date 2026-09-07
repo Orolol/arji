@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Plus } from "lucide-react";
 
 import { FieldKicker, PillButton } from "@/components/piscine";
@@ -36,6 +37,7 @@ export function AddAgentCard({
   availabilityLoading,
   onCreate,
 }: AddAgentCardProps) {
+  const t = useTranslations("AgentsWorkshop");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<AgentProvider>("claude-code");
@@ -61,12 +63,10 @@ export function AddAgentCard({
         setOpen(false);
       } else {
         // A 409 here is a duplicate name the user needs to read.
-        setError(result.error || "Could not create this agent. Try again.");
+        setError(result.error || t("roster.createFailed"));
       }
     } catch {
-      setError(
-        "Could not create this agent. Check the connection and try again.",
-      );
+      setError(t("roster.createFailedConnection"));
     } finally {
       setCreating(false);
     }
@@ -84,11 +84,10 @@ export function AddAgentCard({
       >
         <span className="flex items-center gap-[7px] font-sans text-[13.5px] font-semibold text-foreground">
           <Plus size={14} aria-hidden="true" />
-          Add agent
+          {t("roster.addAgent")}
         </span>
         <span className="font-sans text-[12px] leading-[1.5] text-muted-foreground">
-          A name and a CLI are all it takes — everything runs with sensible
-          defaults.
+          {t("roster.addAgentHint")}
         </span>
       </button>
     );
@@ -106,7 +105,7 @@ export function AddAgentCard({
     >
       <div className="flex flex-col gap-[5px]">
         <FieldKicker stratum="card" size={10}>
-          NAME
+          {t("identity.nameKicker")}
         </FieldKicker>
         <FieldBoxInput
           autoFocus
@@ -118,15 +117,15 @@ export function AddAgentCard({
               void handleCreate();
             }
           }}
-          placeholder="e.g. Fast builder"
-          aria-label="Name"
+          placeholder={t("roster.namePlaceholder")}
+          aria-label={t("identity.nameAria")}
           disabled={creating}
         />
       </div>
 
       <div className="flex flex-col gap-[5px]">
         <FieldKicker stratum="card" size={10}>
-          CLI
+          {t("identity.cliKicker")}
         </FieldKicker>
         <CliDropdown
           value={provider}
@@ -150,9 +149,9 @@ export function AddAgentCard({
           onClick={handleCreate}
           disabled={!name.trim()}
           pending={creating}
-          pendingLabel="Adding…"
+          pendingLabel={t("roster.adding")}
         >
-          Add agent
+          {t("roster.addAgent")}
         </PillButton>
         <PillButton
           variant="outline"
@@ -161,7 +160,7 @@ export function AddAgentCard({
           onClick={reset}
           disabled={creating}
         >
-          Cancel
+          {t("common.cancel")}
         </PillButton>
       </div>
     </div>

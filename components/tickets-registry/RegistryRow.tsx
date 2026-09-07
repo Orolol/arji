@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Link2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   BreathingDot,
@@ -74,11 +75,14 @@ export interface RegistryRowProps {
 }
 
 function StateCell({ row }: { row: Row }) {
+  // Namespace-less: the ACTIVE branch reads `TASK_LABEL`, a module-scope copy
+  // table holding full dotted catalogue keys (pattern 3).
+  const t = useTranslations();
   if (row.group === "active") {
     return (
       <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-strata-live-deep">
         <BreathingDot size={6} tone="live" />
-        {`${row.taskType ? TASK_LABEL[row.taskType] : "Build"} · `}
+        {`${t(row.taskType ? TASK_LABEL[row.taskType].labelKey : "Registry.task.build")} · `}
         {row.startedAt ? (
           // Through `Chrono` even though the frame draws the sans stack: a
           // per-second ticker without tabular figures jitters, which is the
@@ -104,20 +108,20 @@ function StateCell({ row }: { row: Row }) {
     if (row.yourTurnKind === "failed") {
       return (
         <Stamp tone="failed" className="justify-self-start">
-          FAILED
+          {t("Registry.state.failed")}
         </Stamp>
       );
     }
     if (row.yourTurnKind === "conflict") {
       return (
         <Stamp tone="conflict" className="justify-self-start">
-          CONFLICT
+          {t("Registry.state.conflict")}
         </Stamp>
       );
     }
     return (
       <Stamp tone="asks" className="justify-self-start">
-        ASKS YOU
+        {t("Registry.state.asks")}
       </Stamp>
     );
   }
@@ -129,7 +133,9 @@ function StateCell({ row }: { row: Row }) {
         <span className="flex min-w-0 items-center gap-[5px] text-[12px] text-muted-foreground">
           <Link2 size={11} aria-hidden className="shrink-0" />
           <span className="line-clamp-1">
-            {`waits on ${row.blockedBy[0]}${extra > 0 ? ` +${extra}` : ""}`}
+            {extra > 0
+              ? t("Registry.state.waitsOnMore", { blocker: row.blockedBy[0], count: extra })
+              : t("Registry.state.waitsOn", { blocker: row.blockedBy[0] })}
           </span>
         </span>
       );
@@ -142,7 +148,7 @@ function StateCell({ row }: { row: Row }) {
           uppercase
           className="justify-self-start rounded-full border-[1.5px] border-dashed border-border-strong px-[7px] py-[1px] text-muted-foreground"
         >
-          Draft
+          {t("Registry.state.draft")}
         </Mono>
       );
     }
@@ -151,14 +157,14 @@ function StateCell({ row }: { row: Row }) {
       // invented copy.
       return (
         <Stamp tone="next" className="justify-self-start">
-          QUEUED
+          {t("Registry.state.queued")}
         </Stamp>
       );
     }
     if (row.queueRank !== null) {
       return (
         <span className="min-w-0 text-[12px] text-muted-foreground">
-          {`${row.queueLabel ?? ""} · #${row.queueRank}`}
+          {t("Registry.state.queueRank", { label: row.queueLabel ?? "", rank: row.queueRank })}
         </span>
       );
     }
@@ -174,7 +180,7 @@ function StateCell({ row }: { row: Row }) {
       return (
         <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-strata-live-deep">
           <Check size={12} aria-hidden className="shrink-0" />
-          Ready to land
+          {t("Registry.state.readyToLand")}
         </span>
       );
     }
@@ -182,7 +188,7 @@ function StateCell({ row }: { row: Row }) {
       return (
         <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
           <Check size={12} aria-hidden className="shrink-0" />
-          Merged
+          {t("Registry.state.merged")}
         </span>
       );
     }
@@ -204,10 +210,17 @@ function StateCell({ row }: { row: Row }) {
     );
   }
   // No version recorded — the word, never a fabricated number.
-  return <span className="min-w-0 text-[12px] text-muted-foreground">released</span>;
+  return (
+    <span className="min-w-0 text-[12px] text-muted-foreground">
+      {t("Registry.state.released")}
+    </span>
+  );
 }
 
 export function RegistryRow({ row, project, striped, onOpen }: RegistryRowProps) {
+  // Namespace-less on purpose: this row reads `TASK_LABEL`, a module-scope
+  // copy table holding full dotted catalogue keys (pattern 3).
+  const t = useTranslations();
   const blocked = row.blockedBy.length > 0;
   const priorityLabel =
     row.priority === null ? null : (PRIORITY_LABELS[row.priority] ?? null);
@@ -219,7 +232,11 @@ export function RegistryRow({ row, project, striped, onOpen }: RegistryRowProps)
       data-testid="tickets-row"
       data-group={row.group}
       data-epic-id={row.epicId}
-      title={blocked ? `waits on ${row.blockedBy.join(", ")}` : undefined}
+      title={
+        blocked
+          ? t("Registry.state.waitsOn", { blocker: row.blockedBy.join(", ") })
+          : undefined
+      }
       className={cn(
         REGISTRY_GRID,
         // Taller on a phone: two stacked lines plus this padding clear the 44px

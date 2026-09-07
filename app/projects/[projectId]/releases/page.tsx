@@ -17,7 +17,6 @@ import {
   parseEpicIds,
   projectToneIndex,
   releaseState,
-  ticketExclusionReason,
   versionBumps,
   type ReleaseEpic,
   type ReleaseRow,
@@ -138,7 +137,7 @@ export default function ReleasesPage() {
 
   const isChecked = useCallback(
     (epic: ReleaseEpic) =>
-      checkOverrides.get(epic.id) ?? ticketExclusionReason(epic) === null,
+      checkOverrides.get(epic.id) ?? (epic.usCount ?? 0) <= (epic.usDone ?? 0),
     [checkOverrides]
   );
 

@@ -1,0 +1,25 @@
+{
+  "filters": {
+    "all": "All",
+    "techCheck": "Tech Check",
+    "e2eTest": "E2E Test",
+    "failureDigest": "Failure Digest"
+  },
+  "page": {
+    "heading": "QA",
+    "description": "Run tech checks, E2E tests, and recurring-failure digests; review report history and create epics from findings.",
+    "refresh": "Refresh",
+    "newCheck": "New Check",
+    "running": "{count} running",
+    "completed": "{count} completed",
+    "failed": "{count} failed",
+    "history": "History",
+    "loading": "Loading reports...",
+    "empty": "No QA reports yet. Start a check or failure digest to generate a report."
+  },
+  "actions": {
+    "digestNoOp": "Failure digest recorded: no evidence in the selected window.",
+    "started": "QA check started.",
+    "epicsCreated": "Created {count, plural, one {# epic} other {# epics}} from QA report."
+  }
+}

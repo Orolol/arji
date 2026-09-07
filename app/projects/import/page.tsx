@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useTranslations } from "next-intl";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,24 @@ type PostResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; debug?: DebugInfo };
 
+/**
+ * The phrases the module-scope import chain prints. Copy composed OUTSIDE
+ * React takes RESOLVED phrases from its caller (`lib/i18n/catalogue.ts`,
+ * pattern 3) — the parameterised ones as small builders, as `formatSaveState`
+ * takes its `saved(age)`.
+ */
+interface ImportCopy {
+  network: string;
+  requestFailed: (status: string) => string;
+  bodyNotJson: (url: string, status: string) => string;
+  noDataField: (url: string, status: string) => string;
+  projectUpdateFailed: (error: string) => string;
+  epicNoId: string;
+  epicFailed: (title: string, error: string) => string;
+  storyFailed: (title: string, epicTitle: string, error: string) => string;
+  arjiExportFailed: (error: string) => string;
+}
+
 function formatDetails(details: unknown): string {
   if (!details || typeof details !== "object") return "";
   return Object.entries(details as Record<string, unknown>)
@@ -60,6 +79,7 @@ function formatDetails(details: unknown): string {
 async function sendJson<T>(
   url: string,
   body: unknown,
+  copy: ImportCopy,
   method = "POST"
 ): Promise<PostResult<T>> {
   let response: Response;
@@ -72,7 +92,7 @@ async function sendJson<T>(
   } catch (e) {
     return {
       ok: false,
-      error: e instanceof Error ? e.message : "Network request failed",
+      error: e instanceof Error ? e.message : copy.network,
     };
   }
 
@@ -88,7 +108,7 @@ async function sendJson<T>(
     return {
       ok: false,
       error: [
-        payload?.error || `Request failed (HTTP ${response.status})`,
+        payload?.error || copy.requestFailed(String(response.status)),
         details,
       ]
         .filter(Boolean)
@@ -100,14 +120,14 @@ async function sendJson<T>(
   if (payload === null || typeof payload !== "object") {
     return {
       ok: false,
-      error: `Unexpected response from ${url} (HTTP ${response.status}): the body is not JSON`,
+      error: copy.bodyNotJson(url, String(response.status)),
     };
   }
 
   if (payload.data === undefined) {
     return {
       ok: false,
-      error: `Unexpected response from ${url} (HTTP ${response.status}): the JSON has no "data" field`,
+      error: copy.noDataField(url, String(response.status)),
     };
   }
 
@@ -121,21 +141,22 @@ async function sendJson<T>(
 async function applyProjectUpdate(
   projectId: string,
   data: ImportData,
-  spec: string | undefined
+  spec: string | undefined,
+  copy: ImportCopy
 ): Promise<string[]> {
   const result = await sendJson<unknown>(
     `/api/projects/${projectId}`,
     { status: data.project.status || "specifying", spec },
+    copy,
     "PATCH"
   );
-  return result.ok
-    ? []
-    : [`Project status and spec were not saved: ${result.error}`];
+  return result.ok ? [] : [copy.projectUpdateFailed(result.error)];
 }
 
 async function createEpicsAndStories(
   projectId: string,
-  data: ImportData
+  data: ImportData,
+  copy: ImportCopy
 ): Promise<string[]> {
   const failures: string[] = [];
 
@@ -148,14 +169,16 @@ async function createEpicsAndStories(
         status: epic.status,
         confidence: epic.confidence,
         evidence: epic.evidence,
-      }
+      },
+      copy
     );
 
     if (!epicResult.ok || !epicResult.data?.id) {
       failures.push(
-        `Epic "${epic.title}" was not created: ${
-          epicResult.ok ? "the API returned no epic id" : epicResult.error
-        }`
+        copy.epicFailed(
+          epic.title,
+          epicResult.ok ? copy.epicNoId : epicResult.error
+        )
       );
       // Its stories have nowhere to attach — skip them rather than creating
       // orphans, and keep going with the remaining epics.
@@ -173,11 +196,12 @@ async function createEpicsAndStories(
           description: us.description,
           acceptanceCriteria: us.acceptance_criteria,
           status: us.status,
-        }
+        },
+        copy
       );
       if (!storyResult.ok) {
         failures.push(
-          `User story "${us.title}" (epic "${epic.title}") was not created: ${storyResult.error}`
+          copy.storyFailed(us.title, epic.title, storyResult.error)
         );
       }
     }
@@ -187,14 +211,20 @@ async function createEpicsAndStories(
 }
 
 /** Write back arij.json with the newly created IDs. */
-async function exportArjiJson(projectId: string): Promise<string[]> {
-  const result = await sendJson<unknown>(`/api/projects/${projectId}/sync`, {
-    action: "export",
-  });
-  return result.ok ? [] : [`arji.json export failed: ${result.error}`];
+async function exportArjiJson(
+  projectId: string,
+  copy: ImportCopy
+): Promise<string[]> {
+  const result = await sendJson<unknown>(
+    `/api/projects/${projectId}/sync`,
+    { action: "export" },
+    copy
+  );
+  return result.ok ? [] : [copy.arjiExportFailed(result.error)];
 }
 
 export default function ImportProjectPage() {
+  const t = useTranslations("ProjectImport");
   const router = useRouter();
   const [state, setState] = useState<ImportState>("select");
   const [source, setSource] = useState<ImportSource>("local");
@@ -208,6 +238,23 @@ export default function ImportProjectPage() {
   const [issues, setIssues] = useState<string[]>([]);
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   const [validating, setValidating] = useState(false);
+
+  const copy = useMemo<ImportCopy>(
+    () => ({
+      network: t("errors.network"),
+      requestFailed: (status) => t("errors.requestFailed", { status }),
+      bodyNotJson: (url, status) => t("errors.bodyNotJson", { url, status }),
+      noDataField: (url, status) => t("errors.noDataField", { url, status }),
+      projectUpdateFailed: (error) =>
+        t("errors.projectUpdateFailed", { error }),
+      epicNoId: t("errors.epicNoId"),
+      epicFailed: (title, error) => t("errors.epicFailed", { title, error }),
+      storyFailed: (title, epicTitle, error) =>
+        t("errors.storyFailed", { title, epicTitle, error }),
+      arjiExportFailed: (error) => t("errors.arjiExportFailed", { error }),
+    }),
+    [t]
+  );
 
   function resetFeedback() {
     setError("");
@@ -243,7 +290,7 @@ export default function ImportProjectPage() {
     const result = await sendJson<{
       preview: ImportData;
       fromExistingFile?: boolean;
-    }>("/api/projects/import", { path });
+    }>("/api/projects/import", { path }, copy);
 
     if (!result.ok) {
       setError(result.error);
@@ -264,9 +311,7 @@ export default function ImportProjectPage() {
       typeof preview.project !== "object" ||
       !Array.isArray(preview.epics)
     ) {
-      setError(
-        "The analysis returned an unexpected preview (missing project or epics). Nothing was imported."
-      );
+      setError(t("errors.previewShape"));
       setState("select");
       return;
     }
@@ -285,9 +330,7 @@ export default function ImportProjectPage() {
           Array.isArray(epic.user_stories)
       )
     ) {
-      setError(
-        "The analysis returned an unexpected preview (an epic is missing its title or its user stories). Nothing was imported."
-      );
+      setError(t("errors.previewEpicShape"));
       setState("select");
       return;
     }
@@ -307,9 +350,15 @@ export default function ImportProjectPage() {
     setCloningRepo(ownerRepo);
     setState("cloning");
 
-    const result = await sendJson<CloneInfo>("/api/projects/clone", { url });
+    const result = await sendJson<CloneInfo>(
+      "/api/projects/clone",
+      { url },
+      copy
+    );
     if (!result.ok) {
-      setError(`Could not clone ${ownerRepo}: ${result.error}`);
+      setError(
+        t("errors.cloneFailed", { repo: ownerRepo, error: result.error })
+      );
       setState("select");
       return;
     }
@@ -324,9 +373,10 @@ export default function ImportProjectPage() {
     ).filter((field) => !result.data?.[field]);
     if (missing.length > 0) {
       setError(
-        `Could not clone ${ownerRepo}: the clone response is incomplete (missing ${missing.join(
-          ", "
-        )}).`
+        t("errors.cloneIncomplete", {
+          repo: ownerRepo,
+          fields: missing.join(", "),
+        })
       );
       setState("select");
       return;
@@ -340,25 +390,29 @@ export default function ImportProjectPage() {
     resetFeedback();
     setValidating(true);
     try {
-      const projectResult = await sendJson<{ id: string }>("/api/projects", {
-        name: data.project.name,
-        description: data.project.description,
-        gitRepoPath: folderPath,
-        // Set only for an Arij-managed clone; a local folder keeps every
-        // clone column NULL so the directory is never treated as ours.
-        githubOwnerRepo: cloneInfo?.ownerRepo,
-        gitRemoteUrl: cloneInfo?.remoteUrl,
-        cloneSource: cloneInfo ? "github" : undefined,
-        defaultBranch: cloneInfo?.defaultBranch ?? undefined,
-      });
+      const projectResult = await sendJson<{ id: string }>(
+        "/api/projects",
+        {
+          name: data.project.name,
+          description: data.project.description,
+          gitRepoPath: folderPath,
+          // Set only for an Arij-managed clone; a local folder keeps every
+          // clone column NULL so the directory is never treated as ours.
+          githubOwnerRepo: cloneInfo?.ownerRepo,
+          gitRemoteUrl: cloneInfo?.remoteUrl,
+          cloneSource: cloneInfo ? "github" : undefined,
+          defaultBranch: cloneInfo?.defaultBranch ?? undefined,
+        },
+        copy
+      );
 
       if (!projectResult.ok || !projectResult.data?.id) {
         // Stay on the preview: the user's edits are still there and the import
         // can be retried without re-running the analysis.
         setError(
           projectResult.ok
-            ? "Could not create the project: the API returned no project id."
-            : `Could not create the project: ${projectResult.error}`
+            ? t("errors.projectNoId")
+            : t("errors.projectFailed", { error: projectResult.error })
         );
         return;
       }
@@ -374,9 +428,9 @@ export default function ImportProjectPage() {
           ? `# ${data.project.name}\n\n${data.project.description}\n\n## Stack\n${data.project.stack}\n\n## Architecture\n${data.project.architecture}`
           : undefined;
 
-      failures.push(...(await applyProjectUpdate(projectId, data, spec)));
-      failures.push(...(await createEpicsAndStories(projectId, data)));
-      failures.push(...(await exportArjiJson(projectId)));
+      failures.push(...(await applyProjectUpdate(projectId, data, spec, copy)));
+      failures.push(...(await createEpicsAndStories(projectId, data, copy)));
+      failures.push(...(await exportArjiJson(projectId, copy)));
 
       if (failures.length > 0) {
         setIssues(failures);
@@ -391,7 +445,7 @@ export default function ImportProjectPage() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Import Existing Project</h1>
+      <h1 className="text-2xl font-bold mb-6">{t("page.heading")}</h1>
 
       {error && (
         <div className="bg-destructive/10 text-destructive p-3 rounded-md mb-4 text-sm">
@@ -399,15 +453,19 @@ export default function ImportProjectPage() {
           {debug && (
             <details className="mt-2">
               <summary className="cursor-pointer text-xs opacity-70 hover:opacity-100">
-                Debug info
+                {t("debug.summary")}
               </summary>
               <div className="mt-2 space-y-2 text-xs">
                 {debug.duration != null && (
-                  <p>Duration: {(debug.duration / 1000).toFixed(1)}s</p>
+                  <p>
+                    {t("debug.duration", {
+                      seconds: (debug.duration / 1000).toFixed(1),
+                    })}
+                  </p>
                 )}
                 {debug.parseError && (
                   <div>
-                    <p className="font-medium">Parse error:</p>
+                    <p className="font-medium">{t("debug.parseError")}</p>
                     <pre className="mt-1 p-2 bg-black/20 rounded overflow-auto max-h-24">
                       {debug.parseError}
                     </pre>
@@ -415,7 +473,7 @@ export default function ImportProjectPage() {
                 )}
                 {debug.parsedContent && (
                   <div>
-                    <p className="font-medium">Parsed content:</p>
+                    <p className="font-medium">{t("debug.parsedContent")}</p>
                     <pre className="mt-1 p-2 bg-black/20 rounded overflow-auto max-h-48 whitespace-pre-wrap">
                       {debug.parsedContent}
                     </pre>
@@ -423,7 +481,7 @@ export default function ImportProjectPage() {
                 )}
                 {debug.rawOutput && (
                   <div>
-                    <p className="font-medium">Raw CLI output:</p>
+                    <p className="font-medium">{t("debug.rawOutput")}</p>
                     <pre className="mt-1 p-2 bg-black/20 rounded overflow-auto max-h-48 whitespace-pre-wrap">
                       {debug.rawOutput}
                     </pre>
@@ -431,7 +489,7 @@ export default function ImportProjectPage() {
                 )}
                 {debug.metadata && (
                   <div>
-                    <p className="font-medium">Metadata:</p>
+                    <p className="font-medium">{t("debug.metadata")}</p>
                     <pre className="mt-1 p-2 bg-black/20 rounded overflow-auto max-h-24">
                       {JSON.stringify(debug.metadata, null, 2)}
                     </pre>
@@ -439,7 +497,7 @@ export default function ImportProjectPage() {
                 )}
                 {debug.rawPreview && (
                   <div>
-                    <p className="font-medium">File preview:</p>
+                    <p className="font-medium">{t("debug.filePreview")}</p>
                     <pre className="mt-1 p-2 bg-black/20 rounded overflow-auto max-h-48 whitespace-pre-wrap">
                       {debug.rawPreview}
                     </pre>
@@ -447,13 +505,13 @@ export default function ImportProjectPage() {
                 )}
                 {debug.keys && (
                   <div>
-                    <p className="font-medium">Top-level keys:</p>
+                    <p className="font-medium">{t("debug.topLevelKeys")}</p>
                     <p className="mt-1">{debug.keys.join(", ")}</p>
                   </div>
                 )}
                 {debug.stack && (
                   <div>
-                    <p className="font-medium">Stack:</p>
+                    <p className="font-medium">{t("debug.stack")}</p>
                     <pre className="mt-1 p-2 bg-black/20 rounded overflow-auto max-h-48 whitespace-pre-wrap">
                       {debug.stack}
                     </pre>
@@ -468,8 +526,7 @@ export default function ImportProjectPage() {
       {issues.length > 0 && (
         <div className="bg-destructive/10 text-destructive p-3 rounded-md mb-4 text-sm">
           <p className="font-medium">
-            The project was created, but {issues.length} step
-            {issues.length > 1 ? "s" : ""} failed:
+            {t("page.partialFailure", { count: issues.length })}
           </p>
           <ul className="mt-2 list-disc pl-5 space-y-1">
             {issues.map((issue, i) => (
@@ -485,26 +542,30 @@ export default function ImportProjectPage() {
             href={`/projects/${createdProjectId}`}
             className="underline underline-offset-4"
           >
-            Open the partially created project
+            {t("page.openPartial")}
           </Link>
         </div>
       )}
 
       {state === "select" && (
-        <div className="mb-6 flex gap-2" role="group" aria-label="Import source">
+        <div
+          className="mb-6 flex gap-2"
+          role="group"
+          aria-label={t("page.sourceLabel")}
+        >
           <Button
             variant={source === "local" ? "default" : "outline"}
             aria-pressed={source === "local"}
             onClick={() => handleSourceChange("local")}
           >
-            Local folder
+            {t("page.localFolder")}
           </Button>
           <Button
             variant={source === "github" ? "default" : "outline"}
             aria-pressed={source === "github"}
             onClick={() => handleSourceChange("github")}
           >
-            GitHub URL
+            {t("page.githubUrl")}
           </Button>
         </div>
       )}
@@ -518,7 +579,7 @@ export default function ImportProjectPage() {
 
       {cloneInfo?.reused && state !== "select" && (
         <div className="bg-blue-500/10 text-blue-400 border border-blue-500/20 p-3 rounded-md mb-4 text-sm">
-          Repository already cloned — updating.
+          {t("page.alreadyCloned")}
         </div>
       )}
 
@@ -528,7 +589,7 @@ export default function ImportProjectPage() {
       {state === "analyzing" && <ImportProgress step="analyzing" />}
       {state === "preview" && fromExistingFile && (
         <div className="bg-blue-500/10 text-blue-400 border border-blue-500/20 p-3 rounded-md mb-4 text-sm">
-          Imported from existing arij.json — Claude analysis was skipped.
+          {t("page.fromExistingFile")}
         </div>
       )}
       {state === "preview" && importData && (

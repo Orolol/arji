@@ -8,12 +8,14 @@
 import { describe, it, expect } from "vitest";
 
 import { formatRelative } from "@/lib/i18n/format";
+import { translatorFor } from "@/lib/i18n/translator";
 import { deriveProjects, type FailureSessionRow } from "@/lib/control-desk/aggregate";
 import {
   GROUP_PREVIEW,
   TASK_LABEL,
   composeActivity,
   deriveRegistryRows,
+  type ActivityCopy,
   type RegistrySessionRow,
   deriveRegistryTotals,
   type RegistryEpicRow,
@@ -21,6 +23,28 @@ import {
 import type { TicketDependencyEdge } from "@/lib/types/kanban";
 
 const NOW = new Date("2026-08-30T12:00:00.000Z");
+
+/**
+ * The resolved phrases the route hands the derivation. Built from the real
+ * catalogue, so what this file pins is the copy the screen actually renders.
+ */
+const t = translatorFor("en", "Registry");
+const copy: ActivityCopy = {
+  running: (line) => t("activity.running", { line }),
+  question: (age) => t("activity.question", { age }),
+  failed: (error, age) => t("activity.failed", { error, age }),
+  failedFallback: t("activity.failedFallback"),
+  conflict: (branch, age) => t("activity.conflict", { branch, age }),
+  branchUnknown: t("activity.branchUnknown"),
+  blocked: (age) => t("activity.blocked", { age }),
+  created: (age) => t("activity.created", { age }),
+  updated: (age) => t("activity.updated", { age }),
+  merged: (age) => t("activity.merged", { age }),
+  released: (age) => t("activity.released", { age }),
+  reviewClean: t("activity.reviewClean"),
+  findings: (count) => t("activity.findings", { count }),
+  withPr: (pr, detail) => t("activity.withPr", { pr, detail }),
+};
 
 const projects = deriveProjects([
   { id: "p1", name: "Arij", createdAt: "2026-01-01T00:00:00.000Z" },
@@ -124,7 +148,7 @@ function derive(input: {
     costByEpicId: input.costs ?? new Map(),
     locale: "en",
     now: NOW,
-  });
+  }, copy);
 }
 
 describe("group precedence", () => {
@@ -135,7 +159,7 @@ describe("group precedence", () => {
     });
     expect(row.group).toBe("active");
     expect(row.taskType).toBe("REVIEW");
-    expect(TASK_LABEL[row.taskType!]).toBe("Review");
+    expect(TASK_LABEL[row.taskType!].labelKey).toBe("Registry.task.review");
   });
 
   it("a to_merge epic with a live merge conflict lands in YOUR TURN, not DONE", () => {
@@ -298,10 +322,10 @@ describe("composeActivity", () => {
 
   it("active quotes the streamed line, or an ellipsis when there is none", () => {
     expect(
-      composeActivity({ ...base, group: "active", lastLogLine: "running vitest" })
+      composeActivity({ ...base, group: "active", lastLogLine: "running vitest" }, copy)
         .activity,
     ).toBe("› running vitest");
-    expect(composeActivity({ ...base, group: "active" }).activity).toBe("› …");
+    expect(composeActivity({ ...base, group: "active" }, copy).activity).toBe("› …");
   });
 
   it("asks / failed / conflict", () => {
@@ -311,7 +335,7 @@ describe("composeActivity", () => {
         group: "your_turn",
         yourTurnKind: "asks",
         askedAt: "2026-08-30T11:54:00.000Z",
-      }).activity,
+      }, copy).activity,
     ).toBe("question · 6m ago");
 
     const failed = composeActivity({
@@ -320,7 +344,7 @@ describe("composeActivity", () => {
       yourTurnKind: "failed",
       failureError: "exit 1",
       failedAt: "2026-08-30T11:39:00.000Z",
-    });
+    }, copy);
     expect(failed.activity).toBe("exit 1 · 21m ago");
     expect(failed.tone).toBe("you-deep");
 
@@ -331,24 +355,24 @@ describe("composeActivity", () => {
         yourTurnKind: "conflict",
         branchName: "epic/tax-export",
         conflictAt: "2026-08-30T11:00:00.000Z",
-      }).activity,
+      }, copy).activity,
     ).toBe("epic/tax-export · 1h ago");
 
     // No branch recorded: the word, never an invented file list.
     expect(
-      composeActivity({ ...base, group: "your_turn", yourTurnKind: "conflict" })
+      composeActivity({ ...base, group: "your_turn", yourTurnKind: "conflict" }, copy)
         .activity,
-    ).toBe("branche · —");
+    ).toBe("branch · —");
   });
 
   it("waiting: blocked, backlog and everything else", () => {
-    expect(composeActivity({ ...base, group: "waiting", blocked: true }).activity).toBe(
+    expect(composeActivity({ ...base, group: "waiting", blocked: true }, copy).activity).toBe(
       "blocked · 1d ago",
     );
     expect(
-      composeActivity({ ...base, group: "waiting", status: "backlog" }).activity,
+      composeActivity({ ...base, group: "waiting", status: "backlog" }, copy).activity,
     ).toBe("created · 10d ago");
-    expect(composeActivity({ ...base, group: "waiting" }).activity).toBe(
+    expect(composeActivity({ ...base, group: "waiting" }, copy).activity).toBe(
       "updated · 1d ago",
     );
   });
@@ -362,7 +386,7 @@ describe("composeActivity", () => {
         mergeReady: true,
         prNumber: 218,
         openFindings: 0,
-      }).activity,
+      }, copy).activity,
     ).toBe("#218 · review clean");
     expect(
       composeActivity({
@@ -371,19 +395,19 @@ describe("composeActivity", () => {
         status: "to_merge",
         mergeReady: true,
         openFindings: 2,
-      }).activity,
+      }, copy).activity,
     ).toBe("2 findings");
-    expect(composeActivity({ ...base, group: "done", status: "done" }).activity).toBe(
+    expect(composeActivity({ ...base, group: "done", status: "done" }, copy).activity).toBe(
       "merged · 1d ago",
     );
     expect(
-      composeActivity({ ...base, group: "done", status: "to_merge" }).activity,
+      composeActivity({ ...base, group: "done", status: "to_merge" }, copy).activity,
     ).toBe("updated · 1d ago");
   });
 
   it("released", () => {
     expect(
-      composeActivity({ ...base, group: "released", status: "released" }).activity,
+      composeActivity({ ...base, group: "released", status: "released" }, copy).activity,
     ).toBe("released · 1d ago");
   });
 });
@@ -434,7 +458,7 @@ describe("activity ages", () => {
         updatedAt,
         locale: "en",
         now: NOW,
-      }).activity;
+      }, copy).activity;
     for (const sample of [
       "2026-08-30T11:59:30.000Z",
       "2026-08-30T11:39:00.000Z",

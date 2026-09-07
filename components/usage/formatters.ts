@@ -55,15 +55,28 @@ export function numberOrDash(value: number | null): string {
  */
 
 /**
+ * The five shapes `windowLabel` picks between, ALREADY RESOLVED by the card
+ * that draws them — a pure helper takes phrases, never a translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+export interface WindowLabelCopy {
+  unknown: string;
+  weekly: string;
+  days: (count: number) => string;
+  hours: (count: number) => string;
+  minutes: (count: number) => string;
+}
+
+/**
  * Window label derived from what the provider actually emitted — never
  * asserted. Unknown window size gets the neutral "WINDOW".
  */
-export function windowLabel(windowMinutes: number | null): string {
-  if (windowMinutes === null) return "WINDOW";
-  if (windowMinutes === 10080) return "WEEKLY";
-  if (windowMinutes % 1440 === 0) return `${windowMinutes / 1440}D WINDOW`;
-  if (windowMinutes % 60 === 0) return `${windowMinutes / 60}H WINDOW`;
-  return `${windowMinutes}MIN WINDOW`;
+export function windowLabel(windowMinutes: number | null, copy: WindowLabelCopy): string {
+  if (windowMinutes === null) return copy.unknown;
+  if (windowMinutes === 10080) return copy.weekly;
+  if (windowMinutes % 1440 === 0) return copy.days(windowMinutes / 1440);
+  if (windowMinutes % 60 === 0) return copy.hours(windowMinutes / 60);
+  return copy.minutes(windowMinutes);
 }
 
 /**

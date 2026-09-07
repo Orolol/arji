@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { ListOrdered, Loader2 } from "lucide-react";
 import { RefinementDialog } from "./RefinementDialog";
 import type { RefinementOptions } from "@/lib/refinement/options";
@@ -73,6 +74,7 @@ export function RefinementButton({
   pollIntervalMs = 5000,
   idlePollIntervalMs = 30000,
 }: RefinementButtonProps) {
+  const t = useTranslations("Kanban");
   const [status, setStatus] = useState<RefinementStatus | null>(null);
   const [configuring, setConfiguring] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -146,12 +148,14 @@ export function RefinementButton({
       const payload = await response.json().catch(() => null);
 
       if (!response.ok) {
-        onError(payload?.error ?? "Failed to start board refinement");
+        // The route's own refusal wins over this fallback.
+        onError(payload?.error ?? t("refinement.errors.start"));
         return;
       }
       if (payload?.data?.started === false) {
-        // Nothing to refine — a real answer on a 200, not a failure.
-        const reason = payload.data.reason ?? "Nothing to refine right now";
+        // Nothing to refine — a real answer on a 200, not a failure. The
+        // route names the reason; this is only what stands in for silence.
+        const reason = payload.data.reason ?? t("refinement.errors.nothingToRefine");
         (onNotice ?? onError)(reason);
         setConfiguring(false);
         return;
@@ -166,11 +170,11 @@ export function RefinementButton({
       });
       if (payload?.data?.sessionId) onStarted?.(payload.data.sessionId);
     } catch {
-      onError("Failed to start board refinement");
+      onError(t("refinement.errors.start"));
     } finally {
       setStarting(false);
     }
-  }, [projectId, onError, onNotice, onStarted, starting, isRunning]);
+  }, [projectId, onError, onNotice, onStarted, starting, isRunning, t]);
 
   const running = status?.running === true;
   const busy = running || starting;
@@ -185,8 +189,8 @@ export function RefinementButton({
         aria-busy={busy}
         title={
           running
-            ? "A board refinement pass is running"
-            : "Agent Refinement — re-pass Backlog and To do: questions, priorities, order, dependencies, promotion, merges, discards and missing tickets"
+            ? t("refinement.runningTitle")
+            : t("refinement.idleTitle")
         }
         className={cn(
           "flex shrink-0 items-center gap-[6px] rounded-[7px] border px-[10px] py-[4px] text-[12px] font-medium transition-colors",
@@ -204,13 +208,13 @@ export function RefinementButton({
         ) : (
           <ListOrdered className="h-[13px] w-[13px]" aria-hidden />
         )}
-        Agent Refinement
+        {t("refinement.button")}
         {running && (
           <span
             data-testid="refinement-button-badge"
             className="rounded-full bg-agent/10 px-[6px] py-[1px] text-[11px]"
           >
-            running
+            {t("refinement.runningBadge")}
           </span>
         )}
       </button>

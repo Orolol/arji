@@ -2,9 +2,11 @@
 
 import type { ReactNode } from "react";
 import { Search } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { BreathingDot, GhostInputPill, Mono, PillButton, SelectPill } from "@/components/piscine";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { fmtCount } from "@/lib/tickets-registry/aggregate";
 import type { DeskProject } from "@/lib/control-desk/types";
 import { COLUMN_LABELS, KANBAN_COLUMNS, type KanbanStatus } from "@/lib/types/kanban";
@@ -34,15 +36,22 @@ import { cn } from "@/lib/utils";
  * border weight, not a third filled button.
  */
 
-/** Verbatim and accented, exactly as the frame writes them. */
-export const SORT_LABEL: Record<RegistrySort, string> = {
-  activite: "activité",
-  priorite: "priorité",
-  cout: "coût",
-  ticket: "ticket",
-  titre: "titre",
-  etat: "état",
-  stories: "stories",
+/**
+ * The seven sorts, as the `sort:` pill and its menu write them — lowercase,
+ * unlike the table's sentence-case column headers.
+ *
+ * A module-scope copy table, so it holds catalogue KEY REFERENCES and this
+ * row resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+export const SORT_LABEL: Record<RegistrySort, { labelKey: TranslationKey }> = {
+  activite: { labelKey: "Registry.sortOptions.activity" },
+  priorite: { labelKey: "Registry.sortOptions.priority" },
+  cout: { labelKey: "Registry.sortOptions.cost" },
+  ticket: { labelKey: "Registry.sortOptions.ticket" },
+  titre: { labelKey: "Registry.sortOptions.title" },
+  etat: { labelKey: "Registry.sortOptions.state" },
+  stories: { labelKey: "Registry.sortOptions.stories" },
 };
 
 const SORT_ORDER = REGISTRY_SORTS;
@@ -107,6 +116,8 @@ export function RegistryFilters({
   actions,
   className,
 }: RegistryFiltersProps) {
+  // Namespace-less: `SORT_LABEL` holds full dotted catalogue keys.
+  const t = useTranslations();
   const statePill = (
     key: RegistryStateFilter,
     label: string,
@@ -145,7 +156,7 @@ export function RegistryFilters({
         <GhostInputPill
           value={query}
           onChange={onQueryChange}
-          placeholder="Filter tickets…"
+          placeholder={t("Registry.filters.searchPlaceholder")}
           fill="field"
           width={220}
           autoFocusKey={focusKey}
@@ -156,7 +167,7 @@ export function RegistryFilters({
             event.currentTarget.blur();
           }}
           data-testid="tickets-filter-field"
-          aria-label="Filter tickets"
+          aria-label={t("Registry.filters.searchLabel")}
           className="pr-[42px] pl-[30px]"
         />
         <span className="pointer-events-none absolute top-1/2 right-[12px] -translate-y-1/2">
@@ -166,14 +177,29 @@ export function RegistryFilters({
         </span>
       </div>
 
-      <SelectPill className="max-w-[240px]" label={`Projet : ${projectId ? projects.find((p) => p.id === projectId)?.name ?? projectId : "Tous les projets"}`}>
-        <DropdownMenuItem onSelect={() => onProjectChange(null)}>Tous les projets</DropdownMenuItem>
+      <SelectPill
+        className="max-w-[240px]"
+        label={t("Registry.filters.project", {
+          name: projectId
+            ? projects.find((p) => p.id === projectId)?.name ?? projectId
+            : t("Registry.filters.projectAll"),
+        })}
+      >
+        <DropdownMenuItem onSelect={() => onProjectChange(null)}>
+          {t("Registry.filters.projectAll")}
+        </DropdownMenuItem>
         {projects.map((project) => (
           <DropdownMenuItem key={project.id} onSelect={() => onProjectChange(project.id)}>{project.name}</DropdownMenuItem>
         ))}
       </SelectPill>
-      <SelectPill label={`État : ${status === "all" ? "Tous les états" : COLUMN_LABELS[status]}`}>
-        <DropdownMenuItem onSelect={() => onStatusChange("all")}>Tous les états</DropdownMenuItem>
+      <SelectPill
+        label={t("Registry.filters.status", {
+          name: status === "all" ? t("Registry.filters.statusAll") : COLUMN_LABELS[status],
+        })}
+      >
+        <DropdownMenuItem onSelect={() => onStatusChange("all")}>
+          {t("Registry.filters.statusAll")}
+        </DropdownMenuItem>
         {KANBAN_COLUMNS.map((value) => (
           <DropdownMenuItem key={value} onSelect={() => onStatusChange(value)}>{COLUMN_LABELS[value]}</DropdownMenuItem>
         ))}
@@ -181,12 +207,14 @@ export function RegistryFilters({
 
       <Divider />
 
-      {statePill("all", "All", counts.all)}
-      {statePill("open", "Open", counts.open)}
-      {statePill("active", "Active", counts.active, { dot: true })}
-      {statePill("your_turn", "Your turn", counts.yourTurn, { danger: true })}
-      {statePill("done", "Done", counts.done)}
-      {statePill("released", "Released", counts.released)}
+      {statePill("all", t("Registry.filters.stateAll"), counts.all)}
+      {statePill("open", t("Registry.filters.stateOpen"), counts.open)}
+      {statePill("active", t("Registry.filters.stateActive"), counts.active, { dot: true })}
+      {statePill("your_turn", t("Registry.filters.stateYourTurn"), counts.yourTurn, {
+        danger: true,
+      })}
+      {statePill("done", t("Registry.filters.stateDone"), counts.done)}
+      {statePill("released", t("Registry.filters.stateReleased"), counts.released)}
 
       <Divider />
 
@@ -200,7 +228,7 @@ export function RegistryFilters({
         aria-pressed={bug}
         className={bug ? TOGGLE_ON : TOGGLE_OFF}
       >
-        Bug
+        {t("Registry.filters.bug")}
       </PillButton>
       <PillButton
         size="sm"
@@ -212,7 +240,7 @@ export function RegistryFilters({
         aria-pressed={highPlus}
         className={highPlus ? TOGGLE_ON : TOGGLE_OFF}
       >
-        High+
+        {t("Registry.filters.highPlus")}
       </PillButton>
 
       <div className="ml-auto flex items-center gap-[7px]">
@@ -221,7 +249,10 @@ export function RegistryFilters({
             twMerge, and Space Mono ships 400 — a mono element never carries a
             synthesised weight. */}
         <SelectPill
-          label={`sort: ${SORT_LABEL[sort]} ${direction === "asc" ? "↑" : "↓"}`}
+          label={t("Registry.filters.sort", {
+            label: t(SORT_LABEL[sort].labelKey),
+            direction: direction === "asc" ? "↑" : "↓",
+          })}
           tone="mono"
           fill="transparent"
           className="h-[26px] px-0 font-normal text-muted-foreground"
@@ -232,7 +263,7 @@ export function RegistryFilters({
               onSelect={() => onSortChange(option)}
               data-testid={`tickets-sort-${option}`}
             >
-              {SORT_LABEL[option]}
+              {t(SORT_LABEL[option].labelKey)}
             </DropdownMenuItem>
           ))}
         </SelectPill>

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Check } from "lucide-react";
 
 import {
@@ -11,6 +12,7 @@ import {
   SurfaceCard,
 } from "@/components/piscine";
 import { acceptsPersonaPrompt } from "@/lib/agent-config/constants";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import {
   isPromptElisionMarker,
   promptElisionMarkerSplitter,
@@ -19,12 +21,12 @@ import {
 import type { SessionDetail } from "./types";
 
 /**
- * PROMPT COMPOSÉ — what went INTO this run, and the door to the exact text.
+ * COMPOSED PROMPT — what went INTO this run, and the door to the exact text.
  *
  * The chips are read from `estimated_prompt_breakdown`, the section token
  * counts written at dispatch time. They are token counts, not item counts, so
  * a chip says WHICH section was included and never how many of anything:
- * `epic + stories`, not `epic + 5 stories`; `docs cités`, not `2 docs cités`.
+ * `epic + stories`, not `epic + 5 stories`; `cited docs`, not `2 cited docs`.
  * The frame draws the counted forms; the data cannot support them and a
  * fabricated numeral on an audit surface is worse than a missing one.
  *
@@ -91,11 +93,28 @@ function CheckChip({ label }: { label: string }) {
 }
 
 /**
- * Which sections the composed prompt carried, in the frame's order.
- * `system` and `other` get no chip: they are always present and say nothing.
+ * The chip name per breakdown section, in the frame's order — a MODULE-SCOPE
+ * COPY TABLE holding catalogue KEY REFERENCES (`lib/i18n/catalogue.ts`,
+ * pattern 3). `system` and `other` get no chip: they are always present and
+ * say nothing.
  */
-function chipLabels(session: SessionDetail): string[] {
-  const labels: string[] = [];
+const CHIP_KEYS: ReadonlyArray<{ field: string; labelKey: TranslationKey }> = [
+  { field: "spec", labelKey: "SessionLive.prompt.chips.spec" },
+  { field: "ticket", labelKey: "SessionLive.prompt.chips.ticket" },
+  { field: "memory", labelKey: "SessionLive.prompt.chips.memory" },
+  { field: "documents", labelKey: "SessionLive.prompt.chips.documents" },
+  { field: "findings", labelKey: "SessionLive.prompt.chips.findings" },
+  { field: "comments", labelKey: "SessionLive.prompt.chips.comments" },
+];
+
+/** The persona chip, which no breakdown key can produce (see below). */
+const PERSONA_CHIP: { labelKey: TranslationKey } = {
+  labelKey: "SessionLive.prompt.chips.persona",
+};
+
+/** Which sections the composed prompt carried, in the frame's order. */
+function chipLabelKeys(session: SessionDetail): TranslationKey[] {
+  const keys: TranslationKey[] = [];
 
   // The persona has NO breakdown key: it is prepended at spawn time, after
   // the estimate was computed. Derived from the session row instead — never
@@ -104,7 +123,7 @@ function chipLabels(session: SessionDetail): string[] {
     session.namedAgentName != null &&
     acceptsPersonaPrompt(session.agentType)
   ) {
-    labels.push("persona");
+    keys.push(PERSONA_CHIP.labelKey);
   }
 
   let breakdown: Record<string, unknown> | null = null;
@@ -117,16 +136,12 @@ function chipLabels(session: SessionDetail): string[] {
   }
 
   if (breakdown) {
-    const has = (key: string) => Number(breakdown?.[key] ?? 0) > 0;
-    if (has("spec")) labels.push("spec projet");
-    if (has("ticket")) labels.push("epic + stories");
-    if (has("memory")) labels.push("mémoire");
-    if (has("documents")) labels.push("docs cités");
-    if (has("findings")) labels.push("findings");
-    if (has("comments")) labels.push("commentaires");
+    for (const { field, labelKey } of CHIP_KEYS) {
+      if (Number(breakdown[field] ?? 0) > 0) keys.push(labelKey);
+    }
   }
 
-  return labels;
+  return keys;
 }
 
 export function PromptComposedCard({
@@ -137,12 +152,15 @@ export function PromptComposedCard({
   promptState,
   onRetry,
 }: PromptComposedCardProps) {
-  const chips = chipLabels(session);
+  const t = useTranslations("SessionLive");
+  // Namespace-less, for the chip table's KEY REFERENCES.
+  const tKey = useTranslations();
+  const chips = chipLabelKeys(session);
 
   return (
     <StrataBand stratum="next" density="rail" gap={8}>
       <BandHeader
-        label="Prompt composé"
+        label={t("prompt.label")}
         stratum="next"
         labelSize={12}
         standalone
@@ -152,14 +170,14 @@ export function PromptComposedCard({
           but the link stays, because it does not depend on the estimate. */}
       {chips.length > 0 && (
         <div className="flex flex-wrap gap-[6px]">
-          {chips.map((label) => (
-            <CheckChip key={label} label={label} />
+          {chips.map((labelKey) => (
+            <CheckChip key={labelKey} label={tKey(labelKey)} />
           ))}
         </div>
       )}
 
       <QuietLink onClick={onToggle} tone="next" size={11.5} className="self-start">
-        voir le prompt exact →
+        {t("prompt.seeExact")}
       </QuietLink>
 
       {/* Revealed in place, inside the same band — no dialog, no overlay, no
@@ -180,12 +198,12 @@ export function PromptComposedCard({
             </Mono>
           ) : promptState === "loading" ? (
             <Mono size={11} tone="muted">
-              Loading prompt...
+              {t("prompt.loading")}
             </Mono>
           ) : promptState === "error" ? (
             <div className="flex flex-col items-start gap-[8px]">
               <Mono size={11} tone="danger">
-                Could not load the prompt.
+                {t("prompt.loadFailed")}
               </Mono>
               <PillButton
                 variant="outline"
@@ -193,12 +211,12 @@ export function PromptComposedCard({
                 size="sm"
                 onClick={onRetry}
               >
-                Retry
+                {t("prompt.retry")}
               </PillButton>
             </div>
           ) : (
             <Mono size={11} tone="muted">
-              No prompt available
+              {t("prompt.empty")}
             </Mono>
           )}
         </SurfaceCard>

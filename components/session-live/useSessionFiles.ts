@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { usePolling } from "@/hooks/usePolling";
 
@@ -39,6 +40,10 @@ export function useSessionFiles(
   sessionId: string,
   isRunning: boolean
 ): SessionFilesState {
+  // Read into a plain string so `load` depends on the message rather than on
+  // the translator identity, which changes on every render.
+  const t = useTranslations("SessionLive");
+  const readFailedCopy = t("files.readFailed");
   const [ticket, setTicket] = useState<SessionFilesTicket | null>(null);
   const [project, setProject] = useState<SessionFilesProject | null>(null);
   const [diff, setDiff] = useState<SessionDiff | null>(null);
@@ -63,12 +68,12 @@ export function useSessionFiles(
       setError(null);
     } catch {
       // Never throws: this is ambient detail on a page that must keep working.
-      setError("Could not read the session's files.");
+      setError(readFailedCopy);
     } finally {
       inFlight.current = false;
       setLoading(false);
     }
-  }, [projectId, sessionId]);
+  }, [projectId, sessionId, readFailedCopy]);
 
   useEffect(() => {
     void load();

@@ -1,0 +1,39 @@
+{
+  "dialog": {
+    "title": "Full Auto Mode",
+    "close": "Close",
+    "description": "Keeps building every To\u00a0Do ticket, reviewing everything in Review, and merging each ticket as soon as its review comes back clean — continuously, until you switch it off.",
+    "runContinuously": "Run continuously on this project",
+    "loading": "Loading…",
+    "candidates": "{build} to build · {review} to review · {merge} ready to merge",
+    "inFlight": "Right now: {build} building · {review} reviewing",
+    "cancel": "Cancel",
+    "start": "Start auto mode",
+    "save": "Save"
+  },
+  "options": {
+    "buildAgent": "Build agent",
+    "parallelBuilds": "Parallel builds",
+    "parallelBuildsHint": "0 pauses builds without stopping reviews.",
+    "reviewAgent": "Review agent",
+    "parallelReviews": "Parallel reviews",
+    "parallelReviewsHint": "Reviews always run at epic level — the branch is what merges.",
+    "smartDispatch": "Pick the agent by track record",
+    "smartDispatchHint": "Only for roles left empty above: dispatches the named agent with the best 30-day success rate, once it has at least 5 finished runs for that role.",
+    "secondOpinion": "Independent second opinion",
+    "secondOpinionHint": "Before merge, spends one review slot on a short read-only pass by a provider different from both the builder and reviewer."
+  },
+  "warning": {
+    "budget": "{builds} builds + {reviews} reviews exceed this project's <strong>{budget} parallel agents</strong> budget. The extra work will sit in the queue instead of running — raise <em>Max concurrent agents</em> in Settings if you want it to run in parallel.",
+    "unattended": "Agents run <strong>unattended</strong>: they build, review and <strong>merge into main</strong> without anyone watching. A ticket whose review left open findings is never merged, and a merge conflict is handed to a resolution agent — if that fails too, the ticket is parked and you get a notification."
+  },
+  "errors": {
+    "load": "Failed to load auto mode settings",
+    "save": "Failed to save auto mode settings"
+  },
+  "toggle": {
+    "label": "Full Auto",
+    "title": "Full Auto Mode — build, review and merge continuously",
+    "badge": "{build} building · {review} reviewing"
+  }
+}

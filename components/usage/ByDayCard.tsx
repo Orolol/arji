@@ -1,3 +1,5 @@
+import { useTranslations } from "next-intl";
+
 import { BandHeader, CappedBarChart, Mono, StrataBand } from "@/components/piscine";
 import { formatCostUsd } from "@/lib/utils/format-usage";
 import type { UsageDayBar } from "@/lib/types/usage";
@@ -19,6 +21,7 @@ import type { UsageDayBar } from "@/lib/types/usage";
  * days, no strip of fabricated stubs, no 260px of empty white.
  */
 export function ByDayCard({ days }: { days: UsageDayBar[] }) {
+  const t = useTranslations("Usage");
   const maxCost = days.reduce((max, d) => Math.max(max, d.costUsd ?? 0), 0);
   const useCost = maxCost > 0;
 
@@ -29,16 +32,19 @@ export function ByDayCard({ days }: { days: UsageDayBar[] }) {
       failed: day.failedSessions > 0,
       testId: `usage-day-${day.date}`,
       capTestId: `usage-day-${day.date}-fail`,
-      title: `${day.date} · ${day.sessions} sessions${cost ? ` · ${cost}` : ""}${
-        day.failedSessions ? ` · ${day.failedSessions} failed` : ""
-      }`,
+      title: [
+        day.date,
+        t("byDay.sessions", { count: day.sessions }),
+        ...(cost ? [cost] : []),
+        ...(day.failedSessions ? [t("byDay.failed", { count: day.failedSessions })] : []),
+      ].join(" · "),
     };
   });
 
   if (days.length === 0) {
     return (
       <StrataBand stratum="card" gap={8} className="px-[18px] py-[15px]">
-        <BandHeader label="By day" stratum="neutral" labelSize={12} standalone />
+        <BandHeader label={t("byDay.label")} stratum="neutral" labelSize={12} standalone />
       </StrataBand>
     );
   }
@@ -52,15 +58,15 @@ export function ByDayCard({ days }: { days: UsageDayBar[] }) {
       className="min-h-[260px] px-[18px] py-[15px]"
     >
       <div className="flex items-baseline gap-[12px]">
-        <BandHeader label="By day" stratum="neutral" labelSize={12} standalone />
+        <BandHeader label={t("byDay.label")} stratum="neutral" labelSize={12} standalone />
         <Mono size={10.5} tone="muted">
-          {`${days.length} jours · `}
+          {`${t("byDay.days", { count: days.length })} · `}
           {/*
             The only coloured text on this card, and it names an alarm colour:
             `--strata-you-deep` is a stratum deep, so "text is never coloured
             except stratum deeps" holds.
           */}
-          <span className="text-strata-you-deep">rouge = sessions failed</span>
+          <span className="text-strata-you-deep">{t("byDay.legend")}</span>
         </Mono>
       </div>
       <CappedBarChart

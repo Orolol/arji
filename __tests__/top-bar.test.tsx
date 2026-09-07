@@ -89,6 +89,7 @@ vi.mock("@/hooks/useControlDesk", () => ({
 
 import { TopBar, categoryIsLive, projectIdFromPath } from "@/components/piscine/TopBar";
 import { deriveStatuses } from "@/components/piscine/TopBarMenu";
+import { translatorFor } from "@/lib/i18n/translator";
 
 /* ------------------------------------------------------------------ */
 /* Fixtures                                                            */
@@ -422,32 +423,47 @@ describe("scope project", () => {
 /* Statuses — no invented numerals                                     */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The three runs the menu resolves BEFORE calling `deriveStatuses` — a helper
+ * that composes a display string takes resolved phrases, never a translator
+ * (lib/i18n/catalogue.ts). Built here from the real catalogue exactly as
+ * `TopBarMenu` builds them, so the assertions below still read the app's copy.
+ */
+function statusCopy(data: ControlDeskPayload | null) {
+  const t = translatorFor("en", "TopBar");
+  return {
+    blocking: t("status.blocking", { count: String(data?.heldBackCount ?? 0) }),
+    live: t("status.live", { count: String(data?.working.length ?? 0) }),
+    usage: t("status.usage", { amount: `$${(data?.today.costUsd ?? 0).toFixed(2)}` }),
+  };
+}
+
 describe("menu statuses", () => {
   it("says nothing at all without a desk payload", () => {
-    expect(deriveStatuses(null).size).toBe(0);
+    expect(deriveStatuses(null, statusCopy(null)).size).toBe(0);
   });
 
   it("omits a count rather than printing a zero", () => {
-    const statuses = deriveStatuses(deskPayload());
+    const empty = deskPayload();
+    const statuses = deriveStatuses(empty, statusCopy(empty));
     expect(statuses.has("qa")).toBe(false);
     expect(statuses.has("sessions")).toBe(false);
     expect(statuses.has("usage")).toBe(false);
   });
 
   it("prints blocking findings in the danger tone and live sessions with a dot", () => {
-    const statuses = deriveStatuses(
-      deskPayload({
-        heldBackCount: 1,
-        working: [workingSession(), workingSession({ sessionId: "s2" })],
-        today: {
-          ticketsShipped: 7,
-          failedSessions: 0,
-          costUsd: 12.5,
-          projects: 2,
-          sessions: 9,
-        },
-      }),
-    );
+    const payload = deskPayload({
+      heldBackCount: 1,
+      working: [workingSession(), workingSession({ sessionId: "s2" })],
+      today: {
+        ticketsShipped: 7,
+        failedSessions: 0,
+        costUsd: 12.5,
+        projects: 2,
+        sessions: 9,
+      },
+    });
+    const statuses = deriveStatuses(payload, statusCopy(payload));
 
     expect(statuses.get("qa")).toEqual({ text: "1 blocking", tone: "danger" });
     expect(statuses.get("sessions")).toEqual({
@@ -937,7 +953,7 @@ describe("TopBar", () => {
     expect(screen.getByTestId("top-bar-auto")).toHaveAttribute("href", "/settings");
   });
 
-  it("fills the CE MATIN digest from the desk and drops the lines it has no figure for", () => {
+  it("fills the THIS MORNING digest from the desk and drops the lines it has no figure for", () => {
     barState.desk = deskPayload({
       heldBackCount: 2,
       today: {
@@ -957,7 +973,7 @@ describe("TopBar", () => {
     expect(screen.queryByTestId("top-bar-digest-waiting")).not.toBeInTheDocument();
   });
 
-  it("lists live agents under EN CE MOMENT, grouped", () => {
+  it("lists live agents under RIGHT NOW, grouped", () => {
     barState.desk = deskPayload({
       working: [
         workingSession(),

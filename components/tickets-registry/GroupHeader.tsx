@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { Mono } from "@/components/piscine";
 import { GROUP_LABEL } from "@/lib/tickets-registry/aggregate";
 import type { RegistryGroup } from "@/lib/tickets-registry/types";
@@ -12,6 +14,9 @@ import { cn } from "@/lib/utils";
  * eats the rest of the row. There is NO count badge and no chevron: the count
  * rides in the label (`ACTIVE · 4`), which is how every Piscine band header
  * carries its own tally.
+ *
+ * `GROUP_LABEL` is a module-scope copy table holding catalogue KEY
+ * REFERENCES, so it resolves here with the namespace-less translator.
  *
  * `total` is the TRUE group total, not the loaded row count, so a windowed
  * `RELEASED · 20` says twenty even while the table holds two.
@@ -52,6 +57,7 @@ export function GroupHeader({
   first = false,
   className,
 }: GroupHeaderProps) {
+  const t = useTranslations();
   return (
     <button
       type="button"
@@ -73,7 +79,7 @@ export function GroupHeader({
         uppercase
         className={GROUP_TONE[group]}
       >
-        {`${GROUP_LABEL[group]} · ${total}`}
+        {`${t(GROUP_LABEL[group].labelKey)} · ${total}`}
       </Mono>
       <span aria-hidden className="h-[1.5px] flex-1 bg-muted" />
     </button>

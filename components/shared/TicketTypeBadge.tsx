@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Bug } from "lucide-react";
@@ -26,10 +28,15 @@ export function TicketTypeBadge({
   iconClassName = "h-3 w-3 mr-0.5",
   variant = "badge",
 }: TicketTypeBadgeProps) {
+  const t = useTranslations("Shared");
   if (type !== "bug") return null;
 
   if (variant === "meta") {
-    return <span className={cn("text-destructive", className)}>BUG</span>;
+    return (
+      <span className={cn("text-destructive", className)}>
+        {t("ticketType.meta")}
+      </span>
+    );
   }
 
   return (
@@ -41,7 +48,7 @@ export function TicketTypeBadge({
       )}
     >
       <Bug className={iconClassName} />
-      Bug
+      {t("ticketType.badge")}
     </Badge>
   );
 }

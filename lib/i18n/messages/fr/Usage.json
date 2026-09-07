@@ -1,0 +1,31 @@
+{
+  "range": {
+    "last7d": "7 j",
+    "last30d": "30 j",
+    "all": "Tout",
+    "caption7d": "7 DERNIERS JOURS",
+    "caption30d": "30 DERNIERS JOURS",
+    "captionAll": "DEPUIS LE DÉBUT"
+  },
+  "stats": {
+    "perTicket": "PAR TICKET LIVRÉ"
+  },
+  "cap": {
+    "label": "PLAFOND MENSUEL",
+    "alert": "alerte à {percent} %",
+    "set": "définir un plafond →",
+    "invalid": "Le plafond doit être un montant positif.",
+    "saveFailed": "Échec de l'enregistrement du plafond."
+  },
+  "byAgent": {
+    "footnote": "le coût suit le modèle, pas le CLI — détail par session dans Sessions"
+  },
+  "byProject": {
+    "footnote": "night runs inclus",
+    "footnoteWithBatch": "night runs inclus — le lot d'hier : {cost}"
+  },
+  "byDay": {
+    "days": "{count, plural, one {# jour} other {# jours}}",
+    "legend": "rouge = sessions failed"
+  }
+}

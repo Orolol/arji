@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -22,6 +23,7 @@ import {
   isChatProvider,
   type BuiltinReviewType,
 } from "@/lib/agent-config/constants";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { pipelineChipLabel, usePipelineRuns } from "@/hooks/usePipelineRuns";
 
 interface ReviewResolutionPreview {
@@ -52,34 +54,47 @@ export type AgentActionsTarget =
   | { kind: "story"; story: StoryItem };
 
 interface TargetConfig {
-  /** Noun used in the "Another agent is already running…" lock message. */
-  noun: string;
+  /**
+   * The "Another agent is already running…" lock message, which names the
+   * target ("this epic", "this task"). Two whole sentences per kind rather
+   * than one sentence plus an injected noun: a language that declines the
+   * noun cannot be served by the second shape.
+   */
+  lockedWithSessionKey: TranslationKey;
+  lockedKey: TranslationKey;
   /** Statuses from which a fresh "Send to Dev" is allowed. */
   sendToDevStatuses: string[];
-  devDialogTitle: string;
-  reviewDialogTitle: string;
-  reviewDialogDescription: string;
+  devDialogTitleKey: TranslationKey;
+  reviewDialogTitleKey: TranslationKey;
+  reviewDialogDescriptionKey: TranslationKey;
   /** agentType used to filter resumable sessions for the build dialog. */
   buildAgentType: string;
 }
 
+/**
+ * A module-scope copy table, so it holds catalogue KEY REFERENCES and the bar
+ * resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ */
 const TARGET_CONFIG: Record<AgentActionsTarget["kind"], TargetConfig> = {
   epic: {
-    noun: "epic",
+    lockedWithSessionKey: "Shared.agentActions.epic.lockedWithSession",
+    lockedKey: "Shared.agentActions.epic.locked",
     sendToDevStatuses: ["backlog", "todo", "in_progress"],
-    devDialogTitle: "Send Epic to Dev",
-    reviewDialogTitle: "Epic Agent Review",
-    reviewDialogDescription:
-      "Select the review types to run on this epic. Each selected type dispatches a separate agent.",
+    devDialogTitleKey: "Shared.agentActions.epic.devDialogTitle",
+    reviewDialogTitleKey: "Shared.agentActions.epic.reviewDialogTitle",
+    reviewDialogDescriptionKey:
+      "Shared.agentActions.epic.reviewDialogDescription",
     buildAgentType: "build",
   },
   story: {
-    noun: "task",
+    lockedWithSessionKey: "Shared.agentActions.story.lockedWithSession",
+    lockedKey: "Shared.agentActions.story.locked",
     sendToDevStatuses: ["todo", "in_progress"],
-    devDialogTitle: "Send to Dev",
-    reviewDialogTitle: "Agent Review",
-    reviewDialogDescription:
-      "Select the review types to run. Each selected type dispatches a separate agent.",
+    devDialogTitleKey: "Shared.agentActions.story.devDialogTitle",
+    reviewDialogTitleKey: "Shared.agentActions.story.reviewDialogTitle",
+    reviewDialogDescriptionKey:
+      "Shared.agentActions.story.reviewDialogDescription",
     buildAgentType: "ticket_build",
   },
 };
@@ -118,6 +133,10 @@ export function AgentActionsBar({
   onComplete,
   onActionError,
 }: AgentActionsBarProps) {
+  const t = useTranslations("Shared");
+  // The target table holds full dotted paths, so it resolves through the
+  // namespace-less translator.
+  const tKey = useTranslations();
   const [sendToDevOpen, setSendToDevOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [gradingOpen, setGradingOpen] = useState(false);
@@ -192,7 +211,10 @@ export function AgentActionsBar({
 
   const segregationNotice =
     reviewResolution?.segregated && reviewResolution.builderProvider
-      ? `Review by ${providerLabel(reviewResolution.provider)} (builder was ${providerLabel(reviewResolution.builderProvider)})`
+      ? t("agentActions.segregationNotice", {
+          reviewer: providerLabel(reviewResolution.provider),
+          builder: providerLabel(reviewResolution.builderProvider),
+        })
       : undefined;
 
   const status = item.status;
@@ -208,9 +230,11 @@ export function AgentActionsBar({
   const actionsLocked = dispatching || isRunning;
   const lockMessage =
     isRunning && activeSessionId
-      ? `Another agent is already running for this ${config.noun} (#${activeSessionId.slice(0, 6)}).`
+      ? tKey(config.lockedWithSessionKey, {
+          session: activeSessionId.slice(0, 6),
+        })
       : isRunning
-        ? `Another agent is already running for this ${config.noun}.`
+        ? tKey(config.lockedKey)
         : null;
 
   // Send to Dev — the shared dialog supplies the comment, the agent choice,
@@ -287,7 +311,7 @@ export function AgentActionsBar({
       {isRunning && (
         <Badge variant="outline" className="gap-1 text-yellow-500 border-yellow-500/30">
           <Loader2 className="h-3 w-3 animate-spin" />
-          Agent running
+          {t("agentActions.running")}
         </Badge>
       )}
       {activePipeline && (
@@ -295,7 +319,7 @@ export function AgentActionsBar({
           variant="outline"
           data-testid="pipeline-chip"
           className="gap-1 text-violet-400 border-violet-500/30"
-          title="Dispatched by an autonomous pipeline run — stopping this session stops the pipeline"
+          title={t("agentActions.pipelineTitle")}
         >
           <Workflow className="h-3 w-3" />
           {pipelineChipLabel(activePipeline)}
@@ -315,7 +339,7 @@ export function AgentActionsBar({
           className="h-7 text-xs"
         >
           <Hammer className="h-3 w-3 mr-1" />
-          Send to Dev
+          {t("agentActions.sendToDev")}
         </Button>
       )}
 
@@ -332,7 +356,7 @@ export function AgentActionsBar({
           className="h-7 text-xs"
         >
           <Search className="h-3 w-3 mr-1" />
-          Agent Review
+          {t("agentActions.agentReview")}
         </Button>
       )}
 
@@ -345,7 +369,7 @@ export function AgentActionsBar({
           className="h-7 text-xs"
         >
           <ClipboardCheck className="h-3 w-3 mr-1" />
-          Grade Criteria
+          {t("agentActions.gradeCriteria")}
         </Button>
       )}
 
@@ -364,7 +388,9 @@ export function AgentActionsBar({
           ) : (
             <CheckCircle2 className="h-3 w-3 mr-1" />
           )}
-          {target.kind === "epic" ? "Merge" : "Approve"}
+          {target.kind === "epic"
+            ? t("agentActions.merge")
+            : t("agentActions.approve")}
         </Button>
       )}
 
@@ -373,11 +399,11 @@ export function AgentActionsBar({
         open={sendToDevOpen}
         onOpenChange={setSendToDevOpen}
         projectId={projectId}
-        title={config.devDialogTitle}
+        title={tKey(config.devDialogTitleKey)}
         description={
           canSendToDevFromReview
-            ? "Explain what needs to be fixed. This comment is required."
-            : "Optionally add a comment for the agent before dispatching."
+            ? t("sendToDev.descriptionFix")
+            : t("sendToDev.descriptionOptional")
         }
         epicId={sessionEpicId}
         userStoryId={sessionUserStoryId}
@@ -386,8 +412,8 @@ export function AgentActionsBar({
         commentRequired={canSendToDevFromReview}
         commentPlaceholder={
           canSendToDevFromReview
-            ? "Describe what needs to be fixed..."
-            : "Optional instructions for the agent..."
+            ? t("sendToDev.placeholderFix")
+            : t("sendToDev.placeholderOptional")
         }
         busy={dispatching}
         locked={actionsLocked}
@@ -398,8 +424,8 @@ export function AgentActionsBar({
       <AgentDispatchDialog
         open={reviewOpen}
         onOpenChange={(open) => { setReviewOpen(open); if (!open) setReviewResumeSessionId(undefined); }}
-        title={config.reviewDialogTitle}
-        description={config.reviewDialogDescription}
+        title={tKey(config.reviewDialogTitleKey)}
+        description={tKey(config.reviewDialogDescriptionKey)}
         projectId={projectId}
         agentProps={{
           value: reviewAgentId,
@@ -425,7 +451,7 @@ export function AgentActionsBar({
         extraContent={
           <ReviewTypesPicker selected={reviewTypes} onToggle={toggleReviewType} />
         }
-        confirmLabel={`Run Review (${reviewTypes.size})`}
+        confirmLabel={t("agentActions.runReview", { count: reviewTypes.size })}
         confirmIcon={<Search className="h-4 w-4 mr-1" />}
         busy={dispatching}
         confirmDisabled={actionsLocked || reviewTypes.size === 0}
@@ -436,8 +462,8 @@ export function AgentActionsBar({
       <AgentDispatchDialog
         open={gradingOpen}
         onOpenChange={setGradingOpen}
-        title="Acceptance Criteria Grading"
-        description="Evaluate each story criterion against concrete evidence. Grading does not approve or move the ticket."
+        title={t("agentActions.grading.title")}
+        description={t("agentActions.grading.description")}
         projectId={projectId}
         agentProps={{
           value: gradingAgentId,
@@ -449,7 +475,7 @@ export function AgentActionsBar({
           userStoryId: sessionUserStoryId,
           dispatchType: "grading",
         }}
-        confirmLabel="Run Grading"
+        confirmLabel={t("agentActions.grading.confirm")}
         confirmIcon={<ClipboardCheck className="h-4 w-4 mr-1" />}
         busy={dispatching}
         confirmDisabled={actionsLocked}

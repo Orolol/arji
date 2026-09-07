@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +38,7 @@ export function GitSyncBadge({
   disabled = false,
   onPushResult,
 }: GitSyncBadgeProps) {
+  const t = useTranslations("Kanban");
   const {
     ahead,
     behind,
@@ -51,7 +54,11 @@ export function GitSyncBadge({
       await push();
       onPushResult?.({ success: true });
     } catch (e) {
-      onPushResult?.({ success: false, error: e instanceof Error ? e.message : "Push failed" });
+      // The hook's own failure wins; this is only the nameless-error fallback.
+      onPushResult?.({
+        success: false,
+        error: e instanceof Error ? e.message : t("gitSync.pushFailed"),
+      });
     }
   }
 
@@ -59,7 +66,7 @@ export function GitSyncBadge({
     return (
       <div className="flex items-center gap-1.5 text-[11.5px] text-meta">
         <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
-        <span>Checking sync...</span>
+        <span>{t("gitSync.checking")}</span>
       </div>
     );
   }
@@ -96,7 +103,7 @@ export function GitSyncBadge({
             </Badge>
           </TooltipTrigger>
           <TooltipContent>
-            {ahead} commit{ahead !== 1 ? "s" : ""} ahead of remote
+            {t("gitSync.ahead", { count: ahead, value: String(ahead) })}
           </TooltipContent>
         </Tooltip>
       )}
@@ -114,14 +121,16 @@ export function GitSyncBadge({
             </Badge>
           </TooltipTrigger>
           <TooltipContent>
-            {behind} commit{behind !== 1 ? "s" : ""} behind remote
+            {t("gitSync.behind", { count: behind, value: String(behind) })}
           </TooltipContent>
         </Tooltip>
       )}
 
       {/* In-sync indicator */}
       {ahead === 0 && behind === 0 && (
-        <span className="font-mono text-[11px] text-meta">in sync</span>
+        <span className="font-mono text-[11px] text-meta">
+          {t("gitSync.inSync")}
+        </span>
       )}
 
       {/* Push button */}
@@ -143,10 +152,10 @@ export function GitSyncBadge({
         </TooltipTrigger>
         <TooltipContent>
           {pushing
-            ? "Pushing..."
+            ? t("gitSync.pushing")
             : ahead === 0
-              ? "Nothing to push"
-              : `Push ${ahead} commit${ahead !== 1 ? "s" : ""} to remote`}
+              ? t("gitSync.nothingToPush")
+              : t("gitSync.push", { count: ahead, value: String(ahead) })}
         </TooltipContent>
       </Tooltip>
 
@@ -163,7 +172,7 @@ export function GitSyncBadge({
             <RefreshCw className="h-3 w-3" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Refresh sync status</TooltipContent>
+        <TooltipContent>{t("gitSync.refresh")}</TooltipContent>
       </Tooltip>
     </div>
   );

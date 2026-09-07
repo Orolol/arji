@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { ChevronDown } from "lucide-react";
 
 import { BreathingDot } from "@/components/piscine";
@@ -14,6 +15,7 @@ import {
   PROVIDER_OPTIONS,
   type AgentProvider,
 } from "@/lib/agent-config/constants";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { cn } from "@/lib/utils";
 
 /**
@@ -29,22 +31,49 @@ import { cn } from "@/lib/utils";
  * page replaces. The third is the only place the product tells a user why a
  * configured agent will never run, so it must survive the redesign.
  */
-export function providerAvailabilityHint(
-  provider: AgentProvider,
+/**
+ * The three availability sentences and the three screen-reader suffixes, as
+ * catalogue KEY REFERENCES: the caller resolves the key with the
+ * namespace-less translator and passes the CLI's own name as `{cli}`
+ * (`lib/i18n/catalogue.ts`, pattern 3). Returning the KEY rather than the
+ * rendered string is what keeps this pair callable from a second component
+ * without threading a translator through it.
+ */
+const AVAILABILITY_KEYS: Record<
+  "loading" | "ready" | "missing",
+  { hintKey: TranslationKey; srKey: TranslationKey }
+> = {
+  loading: {
+    hintKey: "AgentsWorkshop.cli.hintChecking",
+    srKey: "AgentsWorkshop.cli.srChecking",
+  },
+  ready: {
+    hintKey: "AgentsWorkshop.cli.hintReady",
+    srKey: "AgentsWorkshop.cli.srReady",
+  },
+  missing: {
+    hintKey: "AgentsWorkshop.cli.hintMissing",
+    srKey: "AgentsWorkshop.cli.srMissing",
+  },
+};
+
+function availabilityState(
   available: boolean,
   loading: boolean,
-): string {
-  if (loading) {
-    return `Checking whether ${PROVIDER_LABELS[provider]} is ready on this machine.`;
-  }
-  return available
-    ? `${PROVIDER_LABELS[provider]} is ready to use on this machine.`
-    : `${PROVIDER_LABELS[provider]} was not detected. Install or sign in to the CLI before running this agent.`;
+): "loading" | "ready" | "missing" {
+  if (loading) return "loading";
+  return available ? "ready" : "missing";
 }
 
-function availabilitySrText(available: boolean, loading: boolean): string {
-  if (loading) return " — checking availability";
-  return available ? " — ready to use" : " — not detected";
+export function providerAvailabilityHintKey(
+  available: boolean,
+  loading: boolean,
+): TranslationKey {
+  return AVAILABILITY_KEYS[availabilityState(available, loading)].hintKey;
+}
+
+function availabilitySrKey(available: boolean, loading: boolean): TranslationKey {
+  return AVAILABILITY_KEYS[availabilityState(available, loading)].srKey;
 }
 
 export interface CliDropdownProps {
@@ -68,6 +97,7 @@ export function CliDropdown({
   className,
   ...aria
 }: CliDropdownProps) {
+  const t = useTranslations();
   const ready = !!availability[value];
 
   return (
@@ -77,7 +107,9 @@ export function CliDropdown({
           id={id}
           type="button"
           disabled={disabled}
-          title={providerAvailabilityHint(value, ready, availabilityLoading)}
+          title={t(providerAvailabilityHintKey(ready, availabilityLoading), {
+            cli: PROVIDER_LABELS[value],
+          })}
           className={cn(
             "flex h-[34px] w-full items-center gap-[7px] rounded-[10px]",
             "border-[1.5px] border-border bg-transparent px-3",
@@ -123,7 +155,7 @@ export function CliDropdown({
                 />
                 {PROVIDER_LABELS[provider]}
                 <span className="sr-only">
-                  {availabilitySrText(providerReady, availabilityLoading)}
+                  {t(availabilitySrKey(providerReady, availabilityLoading))}
                 </span>
               </span>
             </DropdownMenuItem>

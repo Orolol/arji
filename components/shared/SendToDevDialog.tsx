@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Hammer } from "lucide-react";
 
 import { AgentDispatchDialog } from "@/components/shared/AgentDispatchDialog";
@@ -66,6 +67,7 @@ export function SendToDevDialog({
   locked = false,
   onConfirm,
 }: SendToDevDialogProps) {
+  const t = useTranslations("Shared");
   const [comment, setComment] = useState(defaultComment ?? "");
   const [agentId, setAgentId] = useState<string | null>(initialAgentId ?? null);
   const [resumeSessionId, setResumeSessionId] = useState<
@@ -131,8 +133,8 @@ export function SendToDevDialog({
             placeholder={
               commentPlaceholder ??
               (commentRequired
-                ? "Describe what needs to be fixed..."
-                : "Optional instructions for the agent...")
+                ? t("sendToDev.placeholderFix")
+                : t("sendToDev.placeholderOptional"))
             }
             rows={4}
             className=""
@@ -144,7 +146,7 @@ export function SendToDevDialog({
           />
         </>
       }
-      confirmLabel="Dispatch Agent"
+      confirmLabel={t("sendToDev.dispatch")}
       confirmIcon={<Hammer className="h-4 w-4 mr-1" />}
       busy={busy}
       confirmDisabled={

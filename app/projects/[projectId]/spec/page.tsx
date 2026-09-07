@@ -163,7 +163,7 @@ export default function SpecPage({
         if (res.status === 404) {
           const errData = (await res.json().catch(() => ({}))) as { error?: string };
           setUpdateStatus("failed");
-          setUpdateError(errData?.error || "Session not found");
+          setUpdateError(errData?.error || t("page.sessionNotFound"));
           return;
         }
 
@@ -209,7 +209,7 @@ export default function SpecPage({
           refreshSpec();
         } else if (session.status === "failed") {
           setUpdateStatus("failed");
-          setUpdateError(session.error || "Agent session failed.");
+          setUpdateError(session.error || t("page.sessionFailed"));
         }
       } catch {
         // Transient network error — keep polling
@@ -222,7 +222,7 @@ export default function SpecPage({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [updateSessionId, updateStatus, projectId, refreshSpec, pollIntervalMs]);
+  }, [updateSessionId, updateStatus, projectId, refreshSpec, pollIntervalMs, t]);
 
   function handleUpdateStarted(data: { sessionId: string }) {
     setUpdateSessionId(data.sessionId);

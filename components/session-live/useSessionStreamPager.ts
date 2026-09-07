@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { usePolling } from "@/hooks/usePolling";
 import type { SessionStreamSeed } from "@/components/sessions/SessionOutputStream";
@@ -60,6 +61,11 @@ export function useSessionStreamPager({
   unavailable = false,
   isRunning,
 }: SessionStreamPagerOptions): SessionStreamPager {
+  // Read into plain strings so `loadMore` depends on the two messages rather
+  // than on the translator identity, which changes on every render.
+  const t = useTranslations("SessionLive");
+  const unreadableCopy = t("log.streamUnreadable");
+  const loadFailedCopy = t("log.loadMoreFailed");
   const [chunks, setChunks] = useState<BoundedSessionChunk[]>(
     seed?.chunks ?? []
   );
@@ -100,20 +106,18 @@ export function useSessionStreamPager({
       cursorOffset.current = page.nextOffset ?? 0;
       setHasMore(page.hasMore);
       setError(
-        page.chunkStreamsUnavailable
-          ? "This session's output could not be read."
-          : null
+        page.chunkStreamsUnavailable ? unreadableCopy : null
       );
       if (Array.isArray(page.chunks) && page.chunks.length > 0) {
         setChunks((current) => [...current, ...page.chunks]);
       }
     } catch {
-      setError("Could not load more output.");
+      setError(loadFailedCopy);
     } finally {
       inFlight.current = false;
       setLoading(false);
     }
-  }, [projectId, sessionId, streamType]);
+  }, [projectId, sessionId, streamType, unreadableCopy, loadFailedCopy]);
 
   // A running session appends as it writes; a finished one waits for a click.
   usePolling(loadMore, 3000, isRunning && !unavailable, { immediate: false });

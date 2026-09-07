@@ -1,0 +1,27 @@
+{
+  "page": {
+    "heading": "Frictions",
+    "description": "Recurring obstacles reported by coding agents while they kept working.",
+    "openCount": "{count} open",
+    "filtersLabel": "Friction filters",
+    "category": "Category",
+    "allCategories": "All categories",
+    "status": "Status",
+    "open": "Open",
+    "allStatuses": "All statuses",
+    "loading": "Loading frictions",
+    "empty": "No frictions match these filters.",
+    "occurrences": "{count, plural, one {# occurrence} other {# occurrences}}",
+    "sourceSession": "Source session",
+    "createTicket": "Create ticket",
+    "dismiss": "Dismiss",
+    "viewTicket": "View ticket",
+    "loadFailed": "Failed to load frictions",
+    "dismissFailed": "Failed to dismiss friction"
+  },
+  "createDialog": {
+    "title": "Create ticket from friction",
+    "description": "Review the agent report, then edit the ticket before creating it.",
+    "submit": "Create Ticket"
+  }
+}

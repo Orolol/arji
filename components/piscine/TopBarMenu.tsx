@@ -70,6 +70,20 @@ const STRATUM_CLASS: Record<
   },
 };
 
+/**
+ * The three runs `deriveStatuses` can print, ALREADY RESOLVED by the menu.
+ *
+ * `deriveStatuses` decides WHICH entry carries a figure and in what tone; the
+ * words are the caller's, per `lib/i18n/catalogue.ts` — a helper that composes
+ * a display string takes resolved phrases rather than a translator, so every
+ * key stays a literal next to a `useTranslations` binding.
+ */
+export interface EntryStatusCopy {
+  blocking: string;
+  live: string;
+  usage: string;
+}
+
 /** The mono run printed at the right of an entry. */
 interface EntryStatus {
   text: string;
@@ -103,10 +117,21 @@ export function TopBarMenu({
 }: TopBarMenuProps) {
   const { data } = useControlDesk(null, OPEN_POLL_MS);
   const t = useTranslations();
+  const tBar = useTranslations("TopBar");
   const stratum = STRATUM_CLASS[category.stratum];
   const geometry = CARD[category.panel ?? "none"];
 
-  const statuses = useMemo(() => deriveStatuses(data), [data]);
+  const statuses = useMemo(
+    () =>
+      deriveStatuses(data, {
+        blocking: tBar("status.blocking", { count: String(data?.heldBackCount ?? 0) }),
+        live: tBar("status.live", { count: String(data?.working.length ?? 0) }),
+        usage: tBar("status.usage", {
+          amount: `$${(data?.today.costUsd ?? 0).toFixed(2)}`,
+        }),
+      }),
+    [data, tBar],
+  );
 
   /*
    * The 8px offset below the bar is PADDING on a transparent wrapper, never a
@@ -222,6 +247,7 @@ function MenuRow({
   const active = isNavEntryActive(entry, pathname, activeProjectId);
   const Icon = entry.icon;
   const t = useTranslations();
+  const tBar = useTranslations("TopBar");
   const label = t(entry.labelKey);
 
   const body = (
@@ -234,7 +260,7 @@ function MenuRow({
       <span className="min-w-0 truncate">{label}</span>
       {blocked ? (
         <Mono size={11} tone="muted" className="ml-auto shrink-0">
-          {blocked === "planned" ? "à venir" : "choisir un projet"}
+          {blocked === "planned" ? tBar("menu.planned") : tBar("menu.needsProject")}
         </Mono>
       ) : status ? (
         <span className="ml-auto flex shrink-0 items-center gap-[5px]">
@@ -258,8 +284,8 @@ function MenuRow({
         aria-disabled="true"
         title={
           blocked === "planned"
-            ? `${label} — écran en cours de construction (${entry.href})`
-            : `${label} — choisir un projet d'abord`
+            ? tBar("menu.plannedTitle", { label, href: entry.href })
+            : tBar("menu.needsProjectTitle", { label })
         }
         className={cn(ROW_CLASS, "cursor-default font-medium text-muted-foreground opacity-60")}
       >
@@ -320,39 +346,39 @@ function MorningPanel({
 }) {
   // Agreement lives in the catalogue as ICU plurals (`{count, plural, …}`),
   // where the language that needs it declares it — not in a helper here.
-  const t = useTranslations("TopBar");
+  const tBar = useTranslations("TopBar");
   const lines: { key: string; text: string; danger?: boolean }[] = [];
 
   if (data) {
     const shipped = data.today.ticketsShipped;
     if (shipped !== null && shipped > 0) {
-      lines.push({ key: "shipped", text: t("digest.shipped", { count: shipped }) });
+      lines.push({ key: "shipped", text: tBar("digest.shipped", { count: shipped }) });
     }
     if (data.heldBackCount > 0) {
       lines.push({
         key: "blocking",
-        text: t("digest.blocking", { count: data.heldBackCount }),
+        text: tBar("digest.blocking", { count: data.heldBackCount }),
         danger: true,
       });
     }
     if (data.readyToLand.length > 0) {
-      lines.push({ key: "ready", text: t("digest.ready", { count: data.readyToLand.length }) });
+      lines.push({ key: "ready", text: tBar("digest.ready", { count: data.readyToLand.length }) });
     }
     const waiting =
       data.yourTurn.awaitingReply.length +
       data.yourTurn.failed.length +
       data.yourTurn.conflicts.length;
     if (waiting > 0) {
-      lines.push({ key: "waiting", text: t("digest.waiting", { count: waiting }) });
+      lines.push({ key: "waiting", text: tBar("digest.waiting", { count: waiting }) });
     }
   }
 
   return (
     <>
-      <PanelKicker>CE MATIN</PanelKicker>
+      <PanelKicker>{tBar("digest.kicker")}</PanelKicker>
       {lines.length === 0 ? (
         <span className="font-sans text-[12px] leading-[1.5] text-muted-foreground">
-          {data ? "Rien à signaler." : "…"}
+          {data ? tBar("digest.empty") : tBar("loading")}
         </span>
       ) : (
         lines.map((line) => (
@@ -377,7 +403,7 @@ function MorningPanel({
           linkClass,
         )}
       >
-        ouvrir le digest →
+        {tBar("digest.open")}
       </Link>
     </>
   );
@@ -390,6 +416,7 @@ function MorningPanel({
  * agent falls back to its dispatch role, which is what the desk's own cards do.
  */
 function RightNowPanel({ data }: { data: ReturnType<typeof useControlDesk>["data"] }) {
+  const tBar = useTranslations("TopBar");
   const groups = useMemo(() => {
     if (!data) return [];
     const counts = new Map<string, number>();
@@ -406,10 +433,10 @@ function RightNowPanel({ data }: { data: ReturnType<typeof useControlDesk>["data
 
   return (
     <>
-      <PanelKicker>EN CE MOMENT</PanelKicker>
+      <PanelKicker>{tBar("live.kicker")}</PanelKicker>
       {groups.length === 0 ? (
         <span className="font-sans text-[12px] leading-[1.5] text-muted-foreground">
-          {data ? "Aucun agent en cours." : "…"}
+          {data ? tBar("live.empty") : tBar("loading")}
         </span>
       ) : (
         groups.map(([label, count]) => (
@@ -419,14 +446,14 @@ function RightNowPanel({ data }: { data: ReturnType<typeof useControlDesk>["data
             className="flex items-center gap-[7px] font-sans text-[12px] text-foreground"
           >
             <BreathingDot size={6} />
-            {count > 1 ? `${label} × ${count}` : label}
+            {count > 1 ? tBar("live.agent", { label, count: String(count) }) : label}
           </span>
         ))
       )}
       {nightRuns > 0 ? (
         <span className="flex items-center gap-[7px] font-sans text-[12px] text-muted-foreground">
           <Moon size={12} aria-hidden="true" />
-          {`night run · ${nightRuns} ${nightRuns === 1 ? "session" : "sessions"}`}
+          {tBar("live.nightRuns", { count: nightRuns })}
         </span>
       ) : null}
     </>
@@ -447,23 +474,24 @@ function RightNowPanel({ data }: { data: ReturnType<typeof useControlDesk>["data
  */
 export function deriveStatuses(
   data: ReturnType<typeof useControlDesk>["data"],
+  copy: EntryStatusCopy,
 ): Map<string, EntryStatus> {
   const statuses = new Map<string, EntryStatus>();
   if (!data) return statuses;
 
   if (data.heldBackCount > 0) {
-    statuses.set("qa", { text: `${data.heldBackCount} blocking`, tone: "danger" });
+    statuses.set("qa", { text: copy.blocking, tone: "danger" });
   }
   if (data.working.length > 0) {
     statuses.set("sessions", {
-      text: `${data.working.length} live`,
+      text: copy.live,
       tone: "live-deep",
       live: true,
     });
   }
   if (data.today.costUsd !== null && data.today.costUsd > 0) {
     statuses.set("usage", {
-      text: `$${data.today.costUsd.toFixed(2)} today`,
+      text: copy.usage,
       tone: "muted",
     });
   }

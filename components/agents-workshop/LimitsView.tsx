@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 
 import { FieldBoxInput } from "@/components/agents-workshop/FieldBox";
@@ -66,6 +67,7 @@ function RuntimeBand({
   scope: "global" | "project";
   projectId?: string;
 }) {
+  const t = useTranslations("AgentsWorkshop");
   // null = not loaded yet, which is why the checkbox is disabled until it
   // resolves rather than showing an unchecked box that means nothing.
   const [segregation, setSegregation] = useState<boolean | null>(null);
@@ -235,8 +237,8 @@ function RuntimeBand({
       <BandHeader
         stratum="land"
         labelSize={12}
-        label="Runtime"
-        meta="ce que le scheduler applique, pas ce qu'un agent sait faire"
+        label={t("limits.runtimeLabel")}
+        meta={t("limits.runtimeMeta")}
       />
 
       <SurfaceCard radius={12} className="flex items-start gap-3 px-4 py-3">
@@ -249,12 +251,10 @@ function RuntimeBand({
         />
         <div className="flex flex-col gap-1">
           <span className="font-sans text-[13px] font-semibold text-foreground">
-            Reviewer must differ from builder
+            {t("limits.segregationTitle")}
           </span>
           <p className="font-sans text-[12px] text-muted-foreground">
-            When enabled, review agents avoid the CLI that built the ticket,
-            when another CLI is available. An explicitly picked named agent
-            always wins. Applies globally.
+            {t("limits.segregationBody")}
           </p>
         </div>
       </SurfaceCard>
@@ -265,28 +265,35 @@ function RuntimeBand({
             htmlFor="agent-max-concurrent"
             className="cursor-pointer font-sans text-[13px] font-semibold text-foreground"
           >
-            Max concurrent agents
+            {t("limits.maxConcurrentTitle")}
           </label>
           <p className="font-sans text-[12px] text-muted-foreground">
             {projectScoped
-              ? `How many batch agents (builds, reviews, merges, QA) may run at once for this project. Extra launches wait in a queue. 0 means no limit; leave empty to inherit the global default (${formatMaxConcurrent(inheritedMaxConcurrent)}).`
-              : `Default cap on batch agents (builds, reviews, merges, QA) running at once per project. Extra launches wait in a queue. 0 means no limit; leave empty for the built-in default (${formatMaxConcurrent(DEFAULT_MAX_CONCURRENT_AGENTS)}).`}
+              ? t("limits.maxConcurrentProjectBody", {
+                  fallback: formatMaxConcurrent(inheritedMaxConcurrent),
+                })
+              : t("limits.maxConcurrentGlobalBody", {
+                  fallback: formatMaxConcurrent(DEFAULT_MAX_CONCURRENT_AGENTS),
+                })}
           </p>
           <p
             className="font-sans text-[12px] text-muted-foreground"
             data-testid="agent-max-concurrent-effective"
           >
             {maxConcurrent === null
-              ? "Loading…"
+              ? t("common.loading")
               : status === "error"
-                ? "Could not save — try again."
-                : `In effect: ${formatMaxConcurrent(effectiveMaxConcurrent)}${
-                    savedMaxConcurrent === null
-                      ? projectScoped
-                        ? " (inherited)"
-                        : " (built-in)"
-                      : ""
-                  }${status === "saved" ? " · saved" : ""}`}
+                ? t("limits.saveFailed")
+                : t("limits.inEffect", {
+                    value: formatMaxConcurrent(effectiveMaxConcurrent),
+                    origin:
+                      savedMaxConcurrent !== null
+                        ? "explicit"
+                        : projectScoped
+                          ? "inherited"
+                          : "builtin",
+                    saved: status === "saved" ? "yes" : "no",
+                  })}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -319,9 +326,9 @@ function RuntimeBand({
             onClick={saveMaxConcurrent}
             disabled={!maxConcurrentDirty || !inputValid}
             pending={savingMaxConcurrent}
-            pendingLabel="Saving…"
+            pendingLabel={t("common.saving")}
           >
-            Save
+            {t("common.save")}
           </PillButton>
         </div>
       </SurfaceCard>
@@ -342,6 +349,7 @@ interface ProjectReviewBounceRow {
 }
 
 function ReviewBounceCard({ projectId }: { projectId?: string }) {
+  const t = useTranslations("AgentsWorkshop");
   // Stamped with the scope it was fetched for, so switching scope shows the
   // loading state again without the effect having to clear state synchronously
   // on the way in — and a slow response for the previous scope can never paint
@@ -352,6 +360,10 @@ function ReviewBounceCard({ projectId }: { projectId?: string }) {
     error: string | null;
   } | null>(null);
   const scopeKey = projectId ?? "";
+
+  // Read into a plain string so the effect depends on the message rather than
+  // on the translator identity, which changes on every render.
+  const statsFailed = t("limits.statsFailed");
 
   useEffect(() => {
     let cancelled = false;
@@ -368,9 +380,7 @@ function ReviewBounceCard({ projectId }: { projectId?: string }) {
             key,
             rows: [],
             error:
-              typeof json.error === "string"
-                ? json.error
-                : "Failed to load stats",
+              typeof json.error === "string" ? json.error : statsFailed,
           });
         } else {
           setResult({
@@ -382,13 +392,13 @@ function ReviewBounceCard({ projectId }: { projectId?: string }) {
       })
       .catch(() => {
         if (cancelled) return;
-        setResult({ key, rows: [], error: "Failed to load stats" });
+        setResult({ key, rows: [], error: statsFailed });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, statsFailed]);
 
   const current = result && result.key === scopeKey ? result : null;
   const rows = current ? current.rows : null;
@@ -396,10 +406,14 @@ function ReviewBounceCard({ projectId }: { projectId?: string }) {
 
   return (
     <SurfaceCard radius={12} className="flex flex-col gap-[10px] px-[18px] py-[14px]">
-      <BandHeader stratum="neutral" labelSize={12} standalone label="Review bounce" />
+      <BandHeader
+        stratum="neutral"
+        labelSize={12}
+        standalone
+        label={t("limits.reviewBounceLabel")}
+      />
       <p className="font-sans text-[12px] text-muted-foreground">
-        Review → dev bounces per epic that reached review (from the ticket
-        activity log). Over 100% means epics bounced more than once on average.
+        {t("limits.reviewBounceBody")}
       </p>
 
       {error ? (
@@ -412,7 +426,7 @@ function ReviewBounceCard({ projectId }: { projectId?: string }) {
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground motion-reduce:animate-none" />
       ) : rows.length === 0 ? (
         <p className="font-sans text-[12px] text-muted-foreground">
-          No epic has reached review yet.
+          {t("limits.reviewBounceEmpty")}
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -421,22 +435,22 @@ function ReviewBounceCard({ projectId }: { projectId?: string }) {
               <tr>
                 <th className="pb-1 text-left">
                   <FieldKicker stratum="card" size={9.5}>
-                    PROJECT
+                    {t("limits.columns.project")}
                   </FieldKicker>
                 </th>
                 <th className="pb-1 text-right">
                   <FieldKicker stratum="card" size={9.5}>
-                    EPICS REVIEWED
+                    {t("limits.columns.epicsReviewed")}
                   </FieldKicker>
                 </th>
                 <th className="pb-1 text-right">
                   <FieldKicker stratum="card" size={9.5}>
-                    BOUNCES
+                    {t("limits.columns.bounces")}
                   </FieldKicker>
                 </th>
                 <th className="pb-1 text-right">
                   <FieldKicker stratum="card" size={9.5}>
-                    RATE
+                    {t("limits.columns.rate")}
                   </FieldKicker>
                 </th>
               </tr>

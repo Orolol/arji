@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { formatDateTime } from "@/lib/i18n/format";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
@@ -48,6 +48,7 @@ interface ChatMessage {
 
 export default function ChatDetailPage() {
   const locale = useLocale();
+  const t = useTranslations("ProjectSessions");
   const params = useParams();
   const projectId = params.projectId as string;
   const conversationId = params.conversationId as string;
@@ -133,7 +134,9 @@ export default function ChatDetailPage() {
 
   if (loading) {
     return (
-      <div className="p-6 text-muted-foreground">Loading conversation...</div>
+      <div className="p-6 text-muted-foreground">
+        {t("conversation.loading")}
+      </div>
     );
   }
 
@@ -144,9 +147,11 @@ export default function ChatDetailPage() {
           href={`/projects/${projectId}/sessions`}
           className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1 mb-4"
         >
-          <ArrowLeft className="h-3 w-3" /> Back to sessions
+          <ArrowLeft className="h-3 w-3" /> {t("conversation.back")}
         </Link>
-        <p className="text-muted-foreground text-sm">Conversation not found</p>
+        <p className="text-muted-foreground text-sm">
+          {t("conversation.notFound")}
+        </p>
       </div>
     );
   }
@@ -161,7 +166,7 @@ export default function ChatDetailPage() {
         href={`/projects/${projectId}/sessions`}
         className="flex items-center gap-1 text-[12.5px] text-muted-foreground hover:text-foreground"
       >
-        <ArrowLeft className="h-3 w-3" /> Back to sessions
+        <ArrowLeft className="h-3 w-3" /> {t("conversation.back")}
       </Link>
 
       {/* Identity line */}
@@ -219,7 +224,7 @@ export default function ChatDetailPage() {
           <RefreshCw
             className={`h-3 w-3 mr-1 ${refreshing ? "animate-spin" : ""}`}
           />
-          Refresh
+          {t("conversation.refresh")}
         </Button>
       </div>
 
@@ -230,7 +235,7 @@ export default function ChatDetailPage() {
         <div className="flex items-center justify-between gap-4 border-t border-border-soft py-[11px]">
           <span className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
             <Calendar className="h-[13px] w-[13px]" />
-            Created
+            {t("conversation.created")}
           </span>
           <span className="text-[13px]">
             {formatDateTime(meta.createdAt, { locale, style: "dateTimeSeconds" })}
@@ -239,7 +244,7 @@ export default function ChatDetailPage() {
         <div className="flex items-center justify-between gap-4 border-y border-border-soft py-[11px]">
           <span className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
             <Hash className="h-[13px] w-[13px]" />
-            Messages
+            {t("conversation.messages")}
           </span>
           <span className="font-mono text-[13px]">{messages.length}</span>
         </div>
@@ -250,7 +255,7 @@ export default function ChatDetailPage() {
         <MessageList
           messages={messages}
           loading={false}
-          streamStatus={isGenerating ? "Generating..." : null}
+          streamStatus={isGenerating ? t("conversation.generating") : null}
         />
       </Card>
     </div>

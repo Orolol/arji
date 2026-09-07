@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { GhostInputPill, SelectPill } from "@/components/piscine";
 import {
@@ -37,6 +38,7 @@ export function VersionPill({
   onSelect,
   readOnly = false,
 }: VersionPillProps) {
+  const t = useTranslations("Releases");
   const [draft, setDraft] = useState("");
 
   if (readOnly) {
@@ -69,19 +71,19 @@ export function VersionPill({
               className="font-mono text-[11px] font-normal tabular-nums"
               onSelect={() => onSelect(bumps.patch)}
             >
-              {`patch · ${bumps.patch}`}
+              {t("versionPill.patch", { version: bumps.patch })}
             </DropdownMenuItem>
             <DropdownMenuItem
               className="font-mono text-[11px] font-normal tabular-nums"
               onSelect={() => onSelect(bumps.minor)}
             >
-              {`minor · ${bumps.minor}`}
+              {t("versionPill.minor", { version: bumps.minor })}
             </DropdownMenuItem>
             <DropdownMenuItem
               className="font-mono text-[11px] font-normal tabular-nums"
               onSelect={() => onSelect(bumps.major)}
             >
-              {`major · ${bumps.major}`}
+              {t("versionPill.major", { version: bumps.major })}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
           </>
@@ -95,7 +97,7 @@ export function VersionPill({
             through `className`.
           */}
           <GhostInputPill
-            aria-label="Version"
+            aria-label={t("versionPill.inputLabel")}
             data-testid="release-version-input"
             value={draft}
             onChange={setDraft}

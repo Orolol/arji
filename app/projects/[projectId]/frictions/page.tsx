@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { formatDateTime } from "@/lib/i18n/format";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -43,6 +43,7 @@ function isOpen(friction: Friction): boolean {
 
 export default function ProjectFrictionsPage() {
   const locale = useLocale();
+  const t = useTranslations("ProjectFrictions");
   const { projectId } = useParams<{ projectId: string }>();
   const [frictions, setFrictions] = useState<Friction[]>([]);
   const [openCount, setOpenCount] = useState(0);
@@ -57,18 +58,18 @@ export default function ProjectFrictionsPage() {
     try {
       const response = await fetch(`/api/projects/${projectId}/frictions`);
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Failed to load frictions");
+      if (!response.ok) throw new Error(payload.error || t("page.loadFailed"));
       setFrictions(payload.data?.frictions ?? []);
       setOpenCount(payload.data?.openCount ?? 0);
       setError(null);
     } catch (loadError) {
       setError(
-        loadError instanceof Error ? loadError.message : "Failed to load frictions",
+        loadError instanceof Error ? loadError.message : t("page.loadFailed"),
       );
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   useEffect(() => {
     void loadFrictions();
@@ -113,13 +114,13 @@ export default function ProjectFrictionsPage() {
         },
       );
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Failed to dismiss friction");
+      if (!response.ok) throw new Error(payload.error || t("page.dismissFailed"));
       await loadFrictions();
     } catch (dismissError) {
       setError(
         dismissError instanceof Error
           ? dismissError.message
-          : "Failed to dismiss friction",
+          : t("page.dismissFailed"),
       );
     } finally {
       setPendingId(null);
@@ -133,20 +134,20 @@ export default function ProjectFrictionsPage() {
           <div>
             <h2 className="flex items-center gap-2 text-xl font-semibold">
               <TriangleAlert className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-              Frictions
+              {t("page.heading")}
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Recurring obstacles reported by coding agents while they kept working.
+              {t("page.description")}
             </p>
           </div>
           <Badge variant="outline" className="px-2.5 py-1 text-xs">
-            {openCount} open
+            {t("page.openCount", { count: openCount })}
           </Badge>
         </div>
 
-        <div className="flex flex-wrap gap-3" aria-label="Friction filters">
+        <div className="flex flex-wrap gap-3" aria-label={t("page.filtersLabel")}>
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            Category
+            {t("page.category")}
             <select
               value={categoryFilter}
               onChange={(event) =>
@@ -154,7 +155,7 @@ export default function ProjectFrictionsPage() {
               }
               className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
             >
-              <option value="all">All categories</option>
+              <option value="all">{t("page.allCategories")}</option>
               {FRICTION_CATEGORIES.map((category) => (
                 <option key={category} value={category}>
                   {FRICTION_CATEGORY_LABELS[category]}
@@ -163,14 +164,14 @@ export default function ProjectFrictionsPage() {
             </select>
           </label>
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            Status
+            {t("page.status")}
             <select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
               className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
             >
-              <option value="open">Open</option>
-              <option value="all">All statuses</option>
+              <option value="open">{t("page.open")}</option>
+              <option value="all">{t("page.allStatuses")}</option>
               {FRICTION_STATUSES.map((status) => (
                 <option key={status} value={status}>
                   {FRICTION_STATUS_LABELS[status]}
@@ -189,11 +190,11 @@ export default function ProjectFrictionsPage() {
         {loading ? (
           <div className="flex justify-center py-16 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" />
-            <span className="sr-only">Loading frictions</span>
+            <span className="sr-only">{t("page.loading")}</span>
           </div>
         ) : visibleFrictions.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border py-16 text-center text-sm text-muted-foreground">
-            No frictions match these filters.
+            {t("page.empty")}
           </div>
         ) : (
           <div className="space-y-3" data-testid="friction-list">
@@ -203,7 +204,9 @@ export default function ProjectFrictionsPage() {
                   <div className="flex flex-wrap items-start gap-3">
                     <div
                       className="flex h-10 min-w-10 items-center justify-center rounded-lg bg-amber-500/10 px-2 text-sm font-semibold text-amber-700 dark:text-amber-300"
-                      title={`${friction.occurrences} occurrences`}
+                      title={t("page.occurrences", {
+                        count: friction.occurrences,
+                      })}
                     >
                       ×{friction.occurrences}
                     </div>
@@ -233,7 +236,7 @@ export default function ProjectFrictionsPage() {
                           href={`/projects/${projectId}/sessions/${friction.agentSessionId}`}
                           className="hover:text-foreground hover:underline"
                         >
-                          Source session
+                          {t("page.sourceSession")}
                         </Link>
                         <time dateTime={friction.createdAt}>
                           {formatDateTime(friction.createdAt, { locale, style: "dateTimeSeconds" })}
@@ -248,7 +251,7 @@ export default function ProjectFrictionsPage() {
                             onClick={() => setSelectedFriction(friction)}
                             disabled={pendingId === friction.id}
                           >
-                            Create ticket
+                            {t("page.createTicket")}
                           </Button>
                           <Button
                             size="sm"
@@ -261,7 +264,7 @@ export default function ProjectFrictionsPage() {
                             ) : (
                               <X className="h-4 w-4" />
                             )}
-                            Dismiss
+                            {t("page.dismiss")}
                           </Button>
                         </>
                       )}
@@ -269,7 +272,7 @@ export default function ProjectFrictionsPage() {
                         <Button asChild size="sm" variant="outline">
                           <Link href={`/projects/${projectId}?ticket=${friction.epicId}`}>
                             <CheckCircle2 className="h-4 w-4" />
-                            View ticket
+                            {t("page.viewTicket")}
                           </Link>
                         </Button>
                       )}
@@ -290,9 +293,9 @@ export default function ProjectFrictionsPage() {
         }}
         initialDraft={selectedDraft}
         frictionId={selectedFriction?.id}
-        dialogTitle="Create ticket from friction"
-        dialogDescription="Review the agent report, then edit the ticket before creating it."
-        submitLabel="Create Ticket"
+        dialogTitle={t("createDialog.title")}
+        dialogDescription={t("createDialog.description")}
+        submitLabel={t("createDialog.submit")}
         onCreated={() => {
           setSelectedFriction(null);
           void loadFrictions();

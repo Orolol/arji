@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import {
   BandHeader,
   CappedBarChart,
@@ -48,6 +50,7 @@ export interface TheNumbersBandProps {
 }
 
 export function TheNumbersBand({ stats }: TheNumbersBandProps) {
+  const t = useTranslations("AgentsWorkshop");
   const runCount = stats?.runCount ?? null;
   const cleanRate = stats?.cleanRate ?? null;
   const medianMs = stats?.medianDurationMs ?? null;
@@ -59,14 +62,15 @@ export function TheNumbersBand({ stats }: TheNumbersBandProps) {
 
   const terminal = (stats?.completedCount ?? 0) + (stats?.failedCount ?? 0);
   const sampleTitle = stats
-    ? `${stats.completedCount}/${terminal} terminal runs in ${stats.windowDays} days`
+    ? t("numbers.sampleTitle", {
+        completed: stats.completedCount,
+        terminal,
+        days: stats.windowDays,
+      })
     : undefined;
 
-  const meta = stats
-    ? hasRuns
-      ? "14 derniers jours, tous projets"
-      : "14 derniers jours, tous projets — aucun run sur la période"
-    : "14 derniers jours, tous projets";
+  const meta =
+    stats && !hasRuns ? t("numbers.metaEmpty") : t("numbers.meta");
 
   const topRoles = (stats?.byRole ?? [])
     .slice()
@@ -79,11 +83,11 @@ export function TheNumbersBand({ stats }: TheNumbersBandProps) {
         stratum="land"
         labelSize={12}
         align="baseline"
-        label="The numbers"
+        label={t("numbers.label")}
         meta={meta}
         right={
           <QuietLink href="/usage" tone="next" size={12}>
-            open usage →
+            {t("numbers.openUsage")}
           </QuietLink>
         }
       />
@@ -93,7 +97,7 @@ export function TheNumbersBand({ stats }: TheNumbersBandProps) {
           <StatNumeral
             size={22}
             captionStratum="land"
-            caption="RUNS"
+            caption={t("numbers.captions.runs")}
             value={runCount}
           />
           {/* The sample size rides in the title rather than gating the
@@ -104,7 +108,7 @@ export function TheNumbersBand({ stats }: TheNumbersBandProps) {
             <StatNumeral
               size={22}
               captionStratum="land"
-              caption="CLEAN"
+              caption={t("numbers.captions.clean")}
               tone={cleanRate === null ? "ink" : "live"}
               value={
                 cleanRate === null ? null : formatReliabilityPercent(cleanRate)
@@ -115,20 +119,20 @@ export function TheNumbersBand({ stats }: TheNumbersBandProps) {
             <StatNumeral
               size={22}
               captionStratum="land"
-              caption="MEDIAN"
+              caption={t("numbers.captions.median")}
               value={medianMs === null ? null : compactDuration(medianLabel)}
             />
           </span>
           <StatNumeral
             size={22}
             captionStratum="land"
-            caption="COST"
+            caption={t("numbers.captions.cost")}
             value={formatCostUsd(cost)}
           />
           <StatNumeral
             size={22}
             captionStratum="land"
-            caption="ESCALATIONS"
+            caption={t("numbers.captions.escalations")}
             tone={escalations !== null && escalations > 0 ? "danger" : "ink"}
             value={escalations}
           />
@@ -154,8 +158,10 @@ export function TheNumbersBand({ stats }: TheNumbersBandProps) {
                 }))}
               />
               <Mono size={9.5} tone="land-mid">
-                {"runs / day · "}
-                <span className="text-destructive">rouge = failed</span>
+                {t("numbers.sparkline")}
+                <span className="text-destructive">
+                  {t("numbers.sparklineFailed")}
+                </span>
               </Mono>
             </div>
             <span

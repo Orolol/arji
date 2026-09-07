@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { useTranslations } from "next-intl";
 
 import {
   DiffDelta,
@@ -31,10 +32,6 @@ import { useSessionStreamPager } from "./useSessionStreamPager";
  * (`"final-output"` / `"final-response"`), so neither of them streams. The old
  * page hid `raw` in a third tab; here the raw stream IS the screen.
  */
-
-/** Verbatim, from the sentence the old Raw Logs tab showed. */
-const UNAVAILABLE_COPY =
-  "This session's raw output could not be read — the record may be damaged. This is not the same as a session that produced no output.";
 
 export interface SessionLogTailProps {
   projectId: string;
@@ -96,6 +93,7 @@ export function SessionLogTail({
   pinKey,
   onTailBreak,
 }: SessionLogTailProps) {
+  const t = useTranslations("SessionLive");
   const { chunks, hasMore, loading, error, truncatedCount, loadMore } =
     useSessionStreamPager({
       projectId,
@@ -179,8 +177,9 @@ export function SessionLogTail({
     if (unavailable) {
       return (
         <span data-testid="stream-unavailable-raw">
+          {/* Verbatim, from the sentence the old Raw Logs tab showed. */}
           <Mono size={11.5} tone="danger">
-            {UNAVAILABLE_COPY}
+            {t("log.rawUnavailable")}
           </Mono>
         </span>
       );
@@ -190,7 +189,7 @@ export function SessionLogTail({
       if (logsFallback) return <>{logsFallback}</>;
       return (
         <Mono size={11.5} tone="muted">
-          {isRunning ? "Waiting for agent output…" : "No logs available"}
+          {isRunning ? t("log.waitingOutput") : t("log.logsEmpty")}
         </Mono>
       );
     }
@@ -270,16 +269,14 @@ export function SessionLogTail({
             className="self-start"
             data-testid="stream-load-more-raw"
           >
-            {loading ? "Loading..." : "Load more output"}
+            {loading ? t("log.loadingMore") : t("log.loadMore")}
           </PillButton>
         )}
         {truncatedCount > 0 && (
           <span data-testid="stream-truncated-raw">
             <Mono size={10.5} tone="live-mid">
-              {truncatedCount === 1
-                ? "One oversized chunk is shown in part."
-                : `${truncatedCount} oversized chunks are shown in part.`}
-              {hasMore ? " Load more to continue reading it." : ""}
+              {t("log.truncated", { count: truncatedCount })}
+              {hasMore ? t("log.truncatedLoadMore") : ""}
             </Mono>
           </span>
         )}

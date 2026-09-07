@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Infinity as InfinityIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AutoModeStatus } from "@/lib/auto-mode/status";
@@ -27,6 +28,7 @@ export function AutoModeToggle({
   refreshTrigger = 0,
   pollIntervalMs = 5000,
 }: AutoModeToggleProps) {
+  const t = useTranslations("AutoMode");
   const [status, setStatus] = useState<AutoModeStatus | null>(null);
 
   // One effect owns both the initial read and the poll, and every setState
@@ -61,7 +63,10 @@ export function AutoModeToggle({
 
   const active = status?.enabled === true;
   const badge = active
-    ? `${status.inFlight.build} building · ${status.inFlight.review} reviewing`
+    ? t("toggle.badge", {
+        build: status.inFlight.build,
+        review: status.inFlight.review,
+      })
     : null;
 
   return (
@@ -70,7 +75,7 @@ export function AutoModeToggle({
       onClick={onOpen}
       data-testid="auto-mode-toggle"
       aria-pressed={active}
-      title="Full Auto Mode — build, review and merge continuously"
+      title={t("toggle.title")}
       className={cn(
         "flex shrink-0 items-center gap-[6px] rounded-[7px] border px-[10px] py-[4px] text-[12px] font-medium transition-colors",
         active
@@ -79,7 +84,7 @@ export function AutoModeToggle({
       )}
     >
       <InfinityIcon className="h-[13px] w-[13px]" aria-hidden />
-      Full Auto
+      {t("toggle.label")}
       <span
         aria-hidden
         className={cn(

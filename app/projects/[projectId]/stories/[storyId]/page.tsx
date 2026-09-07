@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { useStoryDetail } from "@/hooks/useStoryDetail";
@@ -17,6 +18,7 @@ import Link from "next/link";
 import { isAgentAlreadyRunningError } from "@/lib/agents/client-error";
 
 export default function StoryDetailPage() {
+  const t = useTranslations("ProjectStories");
   const params = useParams();
   const router = useRouter();
   const projectId = params.projectId as string;
@@ -65,7 +67,9 @@ export default function StoryDetailPage() {
       );
       return;
     }
-    addToast(error instanceof Error ? error.message : "Failed to run agent action");
+    addToast(
+      error instanceof Error ? error.message : t("detail.actionFailed")
+    );
   }
 
   async function handleDeleteStory() {
@@ -80,14 +84,14 @@ export default function StoryDetailPage() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || data.error) {
-        addToast(data.error || "Failed to delete story");
+        addToast(data.error || t("detail.deleteFailed"));
         return;
       }
 
       setDeleteDialogOpen(false);
       router.push(`/projects/${projectId}?deleted=story`);
     } catch {
-      addToast("Failed to delete story");
+      addToast(t("detail.deleteFailed"));
     } finally {
       deleteInFlightRef.current = false;
       setDeletingStory(false);
@@ -105,12 +109,12 @@ export default function StoryDetailPage() {
   if (!story) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2">
-        <p className="text-muted-foreground">Story not found</p>
+        <p className="text-muted-foreground">{t("detail.notFound")}</p>
         <Link
           href={`/projects/${projectId}`}
           className="text-sm text-primary hover:underline"
         >
-          Back to board
+          {t("detail.backToBoard")}
         </Link>
       </div>
     );
@@ -125,7 +129,7 @@ export default function StoryDetailPage() {
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-          Board
+          {t("detail.board")}
         </Link>
         {story.epic && (
           <span className="text-sm text-muted-foreground">
@@ -166,9 +170,11 @@ export default function StoryDetailPage() {
             onUpdate={updateStory}
           />
           <div className="px-6 pb-6 space-y-2">
-            <h4 className="text-sm font-medium text-destructive">Danger Zone</h4>
+            <h4 className="text-sm font-medium text-destructive">
+              {t("detail.dangerZone")}
+            </h4>
             <p className="text-xs text-muted-foreground">
-              Permanently delete this user story and all dependent records.
+              {t("detail.dangerHint")}
             </p>
             <Button
               size="sm"
@@ -177,7 +183,7 @@ export default function StoryDetailPage() {
               onClick={() => setDeleteDialogOpen(true)}
               disabled={deletingStory}
             >
-              Delete User Story
+              {t("detail.delete")}
             </Button>
           </div>
         </div>
@@ -198,9 +204,9 @@ export default function StoryDetailPage() {
       <PermanentDeleteDialog
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
-        title="Delete User Story"
-        description="Permanently delete this user story and its linked planning data."
-        confirmLabel="Confirm Delete"
+        title={t("detail.delete")}
+        description={t("detail.deleteDescription")}
+        confirmLabel={t("detail.deleteConfirm")}
         deleting={deletingStory}
         onConfirm={handleDeleteStory}
       />

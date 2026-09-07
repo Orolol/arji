@@ -1,8 +1,10 @@
 "use client";
 
 import { Suspense } from "react";
+import { useTranslations } from "next-intl";
 
 import { UnderlineTabNav } from "@/components/piscine";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 
 import { FrictionsPill } from "./FrictionsPill";
 
@@ -27,22 +29,35 @@ import { FrictionsPill } from "./FrictionsPill";
  *
  * It lives in app/agents/layout.tsx so every tab shares one instance and the
  * tab bar never remounts on navigation.
+ *
+ * A MODULE-SCOPE COPY TABLE, so it holds catalogue KEY REFERENCES and the row
+ * resolves them at render (`lib/i18n/catalogue.ts`, pattern 3).
  */
-const TABS = [
-  { href: "/agents", label: "Named agents", exact: true },
-  { href: "/agents/assignments", label: "Assignments" },
-  { href: "/agents/prompts", label: "Prompts" },
-  { href: "/agents/limits", label: "Limits" },
-  { href: "/usage", label: "Usage" },
+const TABS: ReadonlyArray<{
+  href: string;
+  labelKey: TranslationKey;
+  exact?: boolean;
+}> = [
+  { href: "/agents", labelKey: "AgentsWorkshop.tabs.namedAgents", exact: true },
+  { href: "/agents/assignments", labelKey: "AgentsWorkshop.tabs.assignments" },
+  { href: "/agents/prompts", labelKey: "AgentsWorkshop.tabs.prompts" },
+  { href: "/agents/limits", labelKey: "AgentsWorkshop.tabs.limits" },
+  { href: "/usage", labelKey: "AgentsWorkshop.tabs.usage" },
 ];
 
 export function WorkshopHeader() {
+  const t = useTranslations();
+  const tabs = TABS.map(({ labelKey, ...tab }) => ({
+    ...tab,
+    label: t(labelKey),
+  }));
+
   return (
     <div
       data-testid="workshop-controls"
       className="flex h-[44px] shrink-0 items-center gap-[12px] px-[14px]"
     >
-      <UnderlineTabNav items={TABS} />
+      <UnderlineTabNav items={tabs} />
       <div className="ml-auto flex items-center gap-2">
         <Suspense fallback={null}>
           <FrictionsPill />

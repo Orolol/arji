@@ -1,0 +1,18 @@
+{
+  "scan": {
+    "trigger": "Scanner le projet",
+    "title": "Scanner le projet",
+    "description": "Documents détectés dans le dépôt (pdf, md, txt, doc, docx). Les répertoires .git, node_modules, dist, build, etc. sont ignorés. Cochez les fichiers à importer.",
+    "running": "Scan en cours...",
+    "truncated": "Liste tronquée aux 500 premiers fichiers.",
+    "empty": "Aucun document détecté dans le projet.",
+    "selectAll": "Tout sélectionner",
+    "selectFile": "Sélectionner {path}",
+    "alreadyImported": "déjà importé",
+    "counts": "{count, plural, one {# document détecté} other {# documents détectés}} · {selected, plural, one {# sélectionné} other {# sélectionnés}}",
+    "rescan": "Relancer le scan",
+    "import": "{count, plural, =0 {Importer la sélection} other {Importer la sélection (#)}}",
+    "imported": "{count, plural, one {# document importé.} other {# documents importés.}}",
+    "missingSources": "{count, plural, one {# document déjà importé ne correspond à aucun fichier du dépôt — il reste accessible dans Arij.} other {# documents déjà importés ne correspondent à aucun fichier du dépôt — ils restent accessibles dans Arij.}}"
+  }
+}

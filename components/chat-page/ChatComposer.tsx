@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRef, useState } from "react";
 import { ImagePlus, Sparkles } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { MentionTextarea } from "@/components/documents/MentionTextarea";
 import { PillButton, SelectPill, StrataBand, projectTone } from "@/components/piscine";
@@ -17,16 +18,14 @@ import { useImageAttachments } from "@/hooks/useImageAttachments";
 import type { DeskProject } from "@/lib/control-desk/types";
 import { cn } from "@/lib/utils";
 
-export const CHAT_COMPOSER_PLACEHOLDER =
-  "Écris — ⏎ envoie, ⇧⏎ saute une ligne, @ cite un doc";
-
 /**
  * The linden composer band (frame 11a).
  *
  * ⏎ SENDS, ⇧⏎ IS A NEWLINE — the OPPOSITE of `DeskComposer`'s contract, and
- * exactly what the frame's own placeholder promises. The IME guard is the same
- * one `DeskComposer` carries: without it an Enter that only closes a candidate
- * window sends half a word.
+ * exactly what the frame's own placeholder promises — the catalogue's
+ * `Chat.composer.placeholder`, which is where that promise now lives. The IME
+ * guard is the same one `DeskComposer` carries: without it an Enter that only
+ * closes a candidate window sends half a word.
  *
  * The ground comes from `StrataBand stratum="feed"`, never a hand-rolled
  * linden: the band also carries the `.stratum-feed` figure-colour scope, and a
@@ -69,6 +68,7 @@ export function ChatComposer({
   disabled = false,
   onSend,
 }: ChatComposerProps) {
+  const t = useTranslations("Chat");
   const [value, setValue] = useState("");
   const composingRef = useRef(false);
 
@@ -187,8 +187,8 @@ export function ChatComposer({
             onCompositionEnd={() => {
               composingRef.current = false;
             }}
-            placeholder={CHAT_COMPOSER_PLACEHOLDER}
-            aria-label="Écris un message"
+            placeholder={t("composer.placeholder")}
+            aria-label={t("composer.label")}
             data-testid="chat-composer-input"
             rows={1}
             disabled={disabled}
@@ -205,7 +205,7 @@ export function ChatComposer({
           disabled={disabled || attachmentsDisabled || uploading}
           className="h-[28px] w-[28px]"
         >
-          Joindre une image
+          {t("composer.attachImage")}
         </PillButton>
 
         <SelectPill

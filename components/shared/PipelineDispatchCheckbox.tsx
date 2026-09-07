@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 interface PipelineDispatchCheckboxProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
@@ -20,6 +22,8 @@ export function PipelineDispatchCheckbox({
   onChange,
   unresolved = false,
 }: PipelineDispatchCheckboxProps) {
+  const t = useTranslations("Shared");
+
   return (
     <div className="space-y-1">
       <label className="flex items-start gap-2 text-sm cursor-pointer">
@@ -31,13 +35,9 @@ export function PipelineDispatchCheckbox({
           onChange={(e) => onChange(e.target.checked)}
         />
         <span>
-          <span className="font-medium">
-            Run full pipeline (build → review → auto-fix)
-          </span>
+          <span className="font-medium">{t("pipelineDispatch.label")}</span>
           <span className="block text-xs text-muted-foreground">
-            After the build, Arij runs a code review and dispatches fix agents
-            until the review is clean. Stopping the running session stops the
-            pipeline.
+            {t("pipelineDispatch.hint")}
           </span>
         </span>
       </label>
@@ -46,9 +46,9 @@ export function PipelineDispatchCheckbox({
           className="text-xs text-muted-foreground pl-6"
           data-testid="pipeline-setting-unresolved"
         >
-          Couldn&apos;t read the configured default. The server&apos;s{" "}
-          <code>pipeline_enabled</code> setting applies unless you tick or
-          untick the box.
+          {t.rich("pipelineDispatch.unresolved", {
+            code: (chunks) => <code>{chunks}</code>,
+          })}
         </p>
       )}
     </div>

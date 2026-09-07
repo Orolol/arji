@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   BandHeader,
@@ -17,6 +18,7 @@ import {
 } from "@/components/piscine";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useProjects } from "@/hooks/useProjects";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { PRIORITY_LABELS } from "@/lib/types/kanban";
 import { cn } from "@/lib/utils";
 
@@ -40,12 +42,14 @@ import { cn } from "@/lib/utils";
  * reached from the one global button.
  */
 
-const STATUS_CHOICES = [
-  { value: "backlog", label: "Backlog" },
-  { value: "todo", label: "To Do" },
-] as const;
+/** A module-scope copy table: it holds the catalogue key, not the word. */
+const STATUS_CHOICES: readonly { value: "backlog" | "todo"; labelKey: TranslationKey }[] = [
+  { value: "backlog", labelKey: "Registry.newTicket.columnBacklog" },
+  { value: "todo", labelKey: "Registry.newTicket.columnTodo" },
+];
 
 type NewTicketStatus = (typeof STATUS_CHOICES)[number]["value"];
+
 
 const PRIORITY_CHOICES = [3, 2, 1, 0] as const;
 
@@ -54,6 +58,8 @@ export interface NewTicketViewProps {
 }
 
 export function NewTicketView({ projectId }: NewTicketViewProps) {
+  // Namespace-less: `STATUS_CHOICES` holds full dotted catalogue keys.
+  const t = useTranslations();
   const router = useRouter();
   const { allProjects, loading } = useProjects();
 
@@ -102,16 +108,20 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
       if (!res.ok) {
         // The typed title is KEPT on failure, so a rejected POST costs a retry
         // and not a re-type.
-        setError(body?.error ? String(body.error) : `Création refusée (${res.status})`);
+        setError(
+          body?.error
+            ? String(body.error)
+            : t("Registry.newTicket.refused", { status: res.status }),
+        );
         return;
       }
       router.push(`/tickets?project=${encodeURIComponent(project.id)}`);
     } catch {
-      setError("Création impossible — le serveur n'a pas répondu");
+      setError(t("Registry.newTicket.unreachable"));
     } finally {
       setBusy(false);
     }
-  }, [busy, description, isBug, priority, project, router, status, title]);
+  }, [busy, description, isBug, priority, project, router, status, t, title]);
 
   return (
     <div
@@ -120,7 +130,7 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
     >
       <div className="flex shrink-0 items-center gap-[7px] px-[24px] pb-[12px]">
         <QuietLink href="/tickets" tone="next" size={12} testId="new-ticket-back">
-          ← Tickets
+          {t("Registry.newTicket.back")}
         </QuietLink>
       </div>
 
@@ -128,17 +138,17 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
         <StrataBand stratum="card" gap={14} className="mx-auto w-full max-w-[720px]">
           <BandHeader
             stratum="card"
-            label="Nouveau ticket"
+            label={t("Registry.newTicket.band")}
             meta={project ? project.name : undefined}
           />
 
           <label className="flex flex-col gap-[6px]">
-            <FieldKicker stratum="card">Titre</FieldKicker>
+            <FieldKicker stratum="card">{t("Registry.newTicket.fieldTitle")}</FieldKicker>
             <GhostInputPill
               value={title}
               onChange={setTitle}
               onSubmit={() => void submit()}
-              placeholder="Ce que le ticket doit livrer"
+              placeholder={t("Registry.newTicket.titlePlaceholder")}
               fill="field"
               width="flex"
               disabled={busy}
@@ -147,7 +157,9 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
           </label>
 
           <label className="flex flex-col gap-[6px]">
-            <FieldKicker stratum="card">Description</FieldKicker>
+            <FieldKicker stratum="card">
+              {t("Registry.newTicket.fieldDescription")}
+            </FieldKicker>
             {/* No multiline primitive exists in the Piscine set, so this field
                 is written from the same tokens `GhostInputPill` uses — border
                 `--input`, fill `--field` — at the house radius for a field (10)
@@ -157,7 +169,7 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
               onChange={(event) => setDescription(event.target.value)}
               disabled={busy}
               rows={5}
-              placeholder="Contexte, contraintes, critères — optionnel"
+              placeholder={t("Registry.newTicket.descriptionPlaceholder")}
               data-testid="new-ticket-description"
               className={cn(
                 "w-full resize-y rounded-[10px] border-[1.5px] border-input bg-field px-3 py-[9px]",
@@ -171,9 +183,11 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
 
           <div className="flex flex-wrap items-center gap-[10px]">
             <div className="flex flex-col gap-[6px]">
-              <FieldKicker stratum="card">Projet</FieldKicker>
+              <FieldKicker stratum="card">{t("Registry.newTicket.fieldProject")}</FieldKicker>
               <SelectPill
-                label={project?.name ?? (loading ? "…" : "Aucun projet")}
+                label={
+                  project?.name ?? (loading ? "…" : t("Registry.newTicket.projectNone"))
+                }
                 tone="project"
                 projectTone={projectTone(colorIndex)}
                 disabled={allProjects.length === 0}
@@ -190,8 +204,11 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
             </div>
 
             <div className="flex flex-col gap-[6px]">
-              <FieldKicker stratum="card">Priorité</FieldKicker>
-              <SelectPill label={PRIORITY_LABELS[priority] ?? "Medium"} tone="ink">
+              <FieldKicker stratum="card">{t("Registry.newTicket.fieldPriority")}</FieldKicker>
+              <SelectPill
+                label={PRIORITY_LABELS[priority] ?? t("Registry.newTicket.priorityFallback")}
+                tone="ink"
+              >
                 {PRIORITY_CHOICES.map((value) => (
                   <DropdownMenuItem key={value} onSelect={() => setPriority(value)}>
                     {PRIORITY_LABELS[value]}
@@ -201,12 +218,12 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
             </div>
 
             <div className="flex flex-col gap-[6px]">
-              <FieldKicker stratum="card">Colonne</FieldKicker>
+              <FieldKicker stratum="card">{t("Registry.newTicket.fieldColumn")}</FieldKicker>
               <SelectPill
-                label={
-                  STATUS_CHOICES.find((choice) => choice.value === status)?.label ??
-                  "Backlog"
-                }
+                label={t(
+                  STATUS_CHOICES.find((choice) => choice.value === status)?.labelKey ??
+                    "Registry.newTicket.columnBacklog",
+                )}
                 tone="ink"
               >
                 {STATUS_CHOICES.map((choice) => (
@@ -214,14 +231,14 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
                     key={choice.value}
                     onSelect={() => setStatus(choice.value)}
                   >
-                    {choice.label}
+                    {t(choice.labelKey)}
                   </DropdownMenuItem>
                 ))}
               </SelectPill>
             </div>
 
             <div className="flex flex-col gap-[6px]">
-              <FieldKicker stratum="card">Type</FieldKicker>
+              <FieldKicker stratum="card">{t("Registry.newTicket.fieldType")}</FieldKicker>
               {/* A toggle is a SELECTION: 2px ink border, never a second filled
                   control — the row already carries "Créer le ticket". */}
               <PillButton
@@ -235,7 +252,7 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
                   isBug ? "border-2 border-foreground text-foreground" : "text-muted-foreground"
                 }
               >
-                Bug
+                {t("Registry.newTicket.bug")}
               </PillButton>
             </div>
           </div>
@@ -248,10 +265,10 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
               onClick={() => void submit()}
               disabled={!project || title.trim().length === 0}
               pending={busy}
-              pendingLabel="Création…"
+              pendingLabel={t("Registry.newTicket.submitPending")}
               data-testid="new-ticket-submit"
             >
-              Créer le ticket
+              {t("Registry.newTicket.submit")}
             </PillButton>
             {error ? (
               <Mono size={11} tone="danger">

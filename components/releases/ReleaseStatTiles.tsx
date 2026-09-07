@@ -1,4 +1,4 @@
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { StatNumeral } from "@/components/piscine";
 import { formatRelative } from "@/lib/i18n/format";
 
@@ -36,6 +36,7 @@ export function ReleaseStatTiles({
   version,
 }: ReleaseStatTilesProps) {
   const locale = useLocale();
+  const t = useTranslations("Releases");
   const age = latest ? upperAge(formatRelative(latest.createdAt, { locale })) : "";
 
   return (
@@ -45,7 +46,7 @@ export function ReleaseStatTiles({
           size={22}
           captionStratum="card"
           value={latest ? displayVersion(latest.version) : null}
-          caption={age ? `CURRENT · ${age}` : "CURRENT"}
+          caption={age ? t("stats.currentWithAge", { age }) : t("stats.current")}
         />
       </div>
       <div className={TILE} data-testid="release-stat-ready">
@@ -54,7 +55,7 @@ export function ReleaseStatTiles({
           tone="live"
           captionStratum="card"
           value={loading ? null : readyCount}
-          caption={`READY FOR v${version}`}
+          caption={t("stats.readyFor", { version })}
         />
       </div>
       <div className={TILE} data-testid="release-stat-shipped">
@@ -62,7 +63,7 @@ export function ReleaseStatTiles({
           size={22}
           captionStratum="card"
           value={loading ? null : releaseCount}
-          caption="RELEASES SHIPPED"
+          caption={t("stats.shipped")}
         />
       </div>
     </div>

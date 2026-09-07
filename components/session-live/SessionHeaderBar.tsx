@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { ArrowLeft, StopCircle } from "lucide-react";
 
 import {
@@ -11,11 +12,12 @@ import {
   Stamp,
   pillButtonVariants,
 } from "@/components/piscine";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { formatCostUsd } from "@/lib/utils/format-usage";
 import { formatElapsed } from "@/lib/utils/format-elapsed";
 import { cn } from "@/lib/utils";
 
-import { AGENT_TYPE_LABELS, projectShortLabel, statusStamp } from "./labels";
+import { AGENT_TYPE_LABEL_KEYS, projectShortLabel, statusStamp } from "./labels";
 import type { SessionDetail, SessionFilesProject, SessionFilesTicket } from "./types";
 
 /**
@@ -69,6 +71,9 @@ export function SessionHeaderBar({
   stopping,
   stopError,
 }: SessionHeaderBarProps) {
+  const t = useTranslations("SessionLive");
+  // Namespace-less, for the KEY REFERENCES `labels.ts` holds.
+  const tKey = useTranslations();
   const stamp = statusStamp(session.status);
   const showStop = isRunning || session.status === "queued";
 
@@ -76,11 +81,13 @@ export function SessionHeaderBar({
   // Never "$0.00" and never "0": total_cost_usd is written by the CLI at
   // session END and is NULL for the whole life of a running session, for
   // legacy rows, and for every provider that does not report usage.
-  const costLabel = cost === null ? "—" : isRunning ? `${cost} live` : cost;
+  const costLabel =
+    cost === null ? "—" : isRunning ? t("header.costLive", { cost }) : cost;
 
   const endedAt = session.endedAt || session.completedAt;
   const title =
-    ticket?.title ?? `${providerLabel} · ${typeLabel}`;
+    ticket?.title ??
+    t("header.title", { provider: providerLabel, type: typeLabel });
 
   return (
     <div
@@ -102,7 +109,7 @@ export function SessionHeaderBar({
         )}
       >
         <ArrowLeft size={13} aria-hidden="true" />
-        Sessions
+        {t("header.sessions")}
       </Link>
 
       {/* Colour here is PROJECT IDENTITY, never the stratum that shares the
@@ -125,7 +132,10 @@ export function SessionHeaderBar({
       )}
 
       <Stamp tone={stamp.tone} dot={stamp.dot}>
-        {`${stamp.word} · ${typeLabel.toUpperCase()}`}
+        {t("header.stamp", {
+          word: stamp.wordKey ? tKey(stamp.wordKey) : stamp.fallbackWord,
+          type: typeLabel.toUpperCase(),
+        })}
       </Stamp>
 
       <span className="min-w-0 truncate font-display text-[18px] font-bold text-foreground">
@@ -173,9 +183,9 @@ export function SessionHeaderBar({
             icon={StopCircle}
             onClick={onStop}
             pending={stopping}
-            pendingLabel="Stopping…"
+            pendingLabel={t("header.stopping")}
           >
-            Stop session
+            {t("header.stopSession")}
           </PillButton>
         )}
       </div>
@@ -197,9 +207,18 @@ function compactElapsed(elapsed: string): string {
   return `${match[1]}${match[2]}${match[3].padStart(2, "0")}`;
 }
 
-/** The agent's display name, exactly as the old page derived it. */
-export function deriveTypeLabel(session: SessionDetail): string {
-  return session.agentType
-    ? (AGENT_TYPE_LABELS[session.agentType] ?? session.agentType)
-    : session.mode;
+/**
+ * The agent's display name, exactly as the old page derived it — as a
+ * catalogue KEY REFERENCE plus the text to print when there is none. An
+ * `agentType` the table does not name, and the raw spawn `mode`, are DATA:
+ * they are returned verbatim and never given a catalogue key.
+ */
+export function deriveTypeLabel(session: SessionDetail): {
+  labelKey: TranslationKey | null;
+  fallback: string;
+} {
+  const labelKey = session.agentType
+    ? (AGENT_TYPE_LABEL_KEYS[session.agentType] ?? null)
+    : null;
+  return { labelKey, fallback: session.agentType ?? session.mode };
 }

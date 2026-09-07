@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { Check, Trash2 } from "lucide-react";
 
 import { Mono, PillButton, QuietDangerAction } from "@/components/piscine";
 import { PermanentDeleteDialog } from "@/components/shared/PermanentDeleteDialog";
+import { formatRelative } from "@/lib/i18n/format";
+import type { UiLocale } from "@/lib/i18n/locales";
 
 /**
  * The bare footer row: Delete · created-stamp · Discard · Save.
@@ -24,24 +27,10 @@ import { PermanentDeleteDialog } from "@/components/shared/PermanentDeleteDialog
  * safe only because both referencing columns are ON DELETE SET NULL — so
  * assignments silently fall back to the Arij default and escalation edges
  * pointing at it vanish.
+ *
+ * The age comes from `lib/i18n/format.ts` like every other relative stamp in
+ * the interface — this row used to carry its own sixth copy of the rule.
  */
-
-/** "3d ago" / "5h ago" / "just now" from an ISO timestamp. */
-function relativeFromNow(iso: string): string | null {
-  const then = Date.parse(iso);
-  if (!Number.isFinite(then)) return null;
-  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.floor(months / 12)}y ago`;
-}
 
 export interface EditorFooterBarProps {
   agentName: string;
@@ -68,8 +57,12 @@ export function EditorFooterBar({
   onDiscard,
   onDelete,
 }: EditorFooterBarProps) {
+  const t = useTranslations("AgentsWorkshop");
+  const locale = useLocale() as UiLocale;
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const created = createdAt ? relativeFromNow(createdAt) : null;
+  // Empty when the stamp cannot be read (legacy rows): "created —" would be a
+  // sentence about a fact we do not have, so the whole line is dropped.
+  const created = createdAt ? formatRelative(createdAt, { locale }) : "";
 
   return (
     <div className="flex shrink-0 flex-col gap-1.5">
@@ -90,12 +83,12 @@ export function EditorFooterBar({
           size={12}
           onClick={() => setConfirmOpen(true)}
         >
-          Delete agent
+          {t("editor.deleteAgent")}
         </QuietDangerAction>
 
         {created ? (
           <Mono size={10.5} tone="muted">
-            {`created ${created}`}
+            {t("editor.created", { age: created })}
           </Mono>
         ) : null}
 
@@ -107,7 +100,7 @@ export function EditorFooterBar({
           onClick={onDiscard}
           disabled={!dirty || saving || deleting}
         >
-          Discard
+          {t("editor.discard")}
         </PillButton>
         <PillButton
           variant="filled"
@@ -116,18 +109,18 @@ export function EditorFooterBar({
           onClick={onSave}
           disabled={!canSave || deleting}
           pending={saving}
-          pendingLabel="Saving…"
+          pendingLabel={t("common.saving")}
         >
-          Save
+          {t("common.save")}
         </PillButton>
       </div>
 
       <PermanentDeleteDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        title="Delete this agent?"
-        description={`"${agentName}" will be removed. Assignments pointing at it fall back to the Arij default.`}
-        confirmLabel="Delete agent"
+        title={t("editor.deleteTitle")}
+        description={t("editor.deleteDescription", { name: agentName })}
+        confirmLabel={t("editor.deleteAgent")}
         deleting={deleting}
         onConfirm={async () => {
           await onDelete();

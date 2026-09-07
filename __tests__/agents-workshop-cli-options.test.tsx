@@ -14,13 +14,22 @@ import { CliOptionsBand } from "@/components/agents-workshop/CliOptionsBand";
 import {
   cliOptionControlKind,
   cliOptionKicker,
+  cliOptionKickerSuffixKey,
   resetOptionsForProvider,
 } from "@/components/agents-workshop/cli-options";
 import { PROVIDER_OPTIONS } from "@/lib/agent-config/constants";
+import { catalogueValue, type TranslationKey } from "@/lib/i18n/catalogue";
 import {
   getProviderOptionDefinitions,
   type NamedAgentCliOptions,
 } from "@/lib/providers/options-registry";
+
+/**
+ * The namespace-less translator, resolved against the source catalogue — the
+ * registry holds catalogue KEY REFERENCES, so a test that wants the rendered
+ * word has to resolve one exactly as the band does.
+ */
+const t = (key: TranslationKey) => catalogueValue("en", key);
 
 function Harness({
   provider,
@@ -51,8 +60,16 @@ function Harness({
  * The kicker text comes from `cliOptionKicker`, not from a copy of the string:
  * the test locates the group the same way the band labels it.
  */
-function groupFor(definition: { key: string; label: string }): HTMLElement {
-  const kicker = screen.getByText(cliOptionKicker(definition), {
+function groupFor(definition: {
+  key: string;
+  labelKey: TranslationKey;
+}): HTMLElement {
+  const suffixKey = cliOptionKickerSuffixKey(definition.key);
+  const text = cliOptionKicker({
+    label: t(definition.labelKey),
+    suffix: suffixKey ? t(suffixKey) : "",
+  });
+  const kicker = screen.getByText(text, {
     selector: '[data-slot="field-kicker"]',
   });
   const group = kicker.parentElement;
@@ -85,7 +102,7 @@ describe("CLI options band — control kind is decided by the registry", () => {
           );
           expect(segments[0]).toHaveTextContent("CLI default");
           expect(segments.slice(1).map((s) => s.textContent)).toEqual(
-            definition.choices?.map((choice) => choice.label),
+            definition.choices?.map((choice) => t(choice.labelKey)),
           );
         } else if (kind === "menu") {
           expect(

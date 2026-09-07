@@ -13,11 +13,9 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import {
-  ChatComposer,
-  CHAT_COMPOSER_PLACEHOLDER,
-} from "@/components/chat-page/ChatComposer";
+import { ChatComposer } from "@/components/chat-page/ChatComposer";
 import { agentSelectionPatch } from "@/components/chat-page/agent-selection";
+import { catalogueValue } from "@/lib/i18n/catalogue";
 import type { DeskProject } from "@/lib/control-desk/types";
 
 vi.mock("@/hooks/useNamedAgentsList", () => ({
@@ -162,15 +160,15 @@ describe("the composer's keyboard contract", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("prints the frame's placeholder, accents and glyphs included", async () => {
+  it("prints the frame's placeholder, glyphs included", async () => {
     await renderComposer();
-    expect(CHAT_COMPOSER_PLACEHOLDER).toBe(
-      "Écris — ⏎ envoie, ⇧⏎ saute une ligne, @ cite un doc",
+    // The glyphs are the frame's own and survive the sweep to English: the
+    // catalogue holds them, the composer only resolves the key.
+    expect(catalogueValue("en", "Chat.composer.placeholder")).toBe(
+      "Write — ⏎ sends, ⇧⏎ new line, @ cites a doc",
     );
     expect(
-      screen.getByPlaceholderText(
-        "Écris — ⏎ envoie, ⇧⏎ saute une ligne, @ cite un doc",
-      ),
+      screen.getByPlaceholderText("Write — ⏎ sends, ⇧⏎ new line, @ cites a doc"),
     ).toBeInTheDocument();
   });
 });
@@ -229,7 +227,7 @@ describe("attachments", () => {
     const { onSend } = await renderComposer({ attachmentsDisabled: true });
 
     expect(
-      screen.getByRole("button", { name: "Joindre une image" }),
+      screen.getByRole("button", { name: "Attach an image" }),
     ).toBeDisabled();
 
     fireEvent.paste(field(), {

@@ -301,7 +301,7 @@ describe("Usage page — tile row", () => {
     expect(screen.getByTestId("usage-stat-per-ticket")).toHaveTextContent(
       "$0.45"
     );
-    expect(screen.getByText("30 DERNIERS JOURS")).toBeInTheDocument();
+    expect(screen.getByText("LAST 30 DAYS")).toBeInTheDocument();
   });
 
   it("shows an em-dash, not $0, when no cost was ever reported", async () => {

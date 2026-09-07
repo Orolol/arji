@@ -1,0 +1,65 @@
+{
+  "bool": {
+    "on": "on",
+    "off": "off"
+  },
+  "effort": {
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "xhigh": "Extra high",
+    "max": "Max"
+  },
+  "claudeCode": {
+    "effort": {
+      "label": "Effort",
+      "hint": "How much thinking Claude Code puts into each turn. Empty uses the CLI's own default."
+    },
+    "permissionMode": {
+      "label": "Permission mode",
+      "hint": "Applies to code-producing sessions (build, ticket build, team build). Reviews, grading and every read-only session keep the posture their tool channel needs.",
+      "choices": {
+        "acceptEdits": "Accept edits",
+        "auto": "Auto",
+        "bypassPermissions": "Bypass permissions",
+        "manual": "Manual",
+        "dontAsk": "Don't ask"
+      }
+    }
+  },
+  "codex": {
+    "reasoningEffort": {
+      "label": "Reasoning effort",
+      "hint": "Codex's reasoning budget. Empty uses the model's own default."
+    },
+    "profile": {
+      "label": "Config profile",
+      "hint": "Layers $CODEX_HOME/'<name>'.config.toml over the base config. Empty uses no profile."
+    }
+  },
+  "ohMyPi": {
+    "thinking": {
+      "label": "Thinking",
+      "hint": "Oh My Pi's thinking level. Empty uses the CLI's own default.",
+      "choices": {
+        "off": "Off",
+        "minimal": "Minimal",
+        "auto": "Auto"
+      }
+    },
+    "maxTime": {
+      "label": "Time limit (seconds)",
+      "hint": "Stops the session after this many seconds. Empty lets Arij's watchdog own the timing."
+    },
+    "advisor": {
+      "label": "Advisor",
+      "hint": "Runs Oh My Pi's advisor, which passively reviews each turn and injects notes."
+    }
+  },
+  "agy": {
+    "effort": {
+      "label": "Reasoning effort",
+      "hint": "Antigravity's reasoning effort. Empty uses the CLI's own default."
+    }
+  }
+}

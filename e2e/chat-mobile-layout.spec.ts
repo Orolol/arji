@@ -544,7 +544,7 @@ test.describe("Chat — the thread and the composer on a narrow viewport", () =>
     // "La liste des conversations et le contexte restent accessibles". Both by
     // KEYBOARD — `press` focuses the control first, so this is the tab path
     // and the click path at once.
-    await page.getByRole("button", { name: "Contexte" }).press("Enter");
+    await page.getByRole("button", { name: "Context" }).press("Enter");
     await expect(page.getByTestId("chat-context")).toBeVisible();
     await expect(page.getByTestId("chat-thread-pane")).toBeHidden();
     await capture(page, testInfo, "chat-390-context.png");

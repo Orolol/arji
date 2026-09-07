@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -85,6 +86,8 @@ export function AgentDispatchDialog({
   onConfirm,
   onCancel,
 }: AgentDispatchDialogProps) {
+  const t = useTranslations("Shared");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -95,7 +98,9 @@ export function AgentDispatchDialog({
           )}
         </DialogHeader>
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-sm text-muted-foreground">Agent:</span>
+          <span className="text-sm text-muted-foreground">
+            {t("dispatchDialog.agentLabel")}
+          </span>
           <NamedAgentSelect
             value={agentProps.value}
             onChange={agentProps.onChange}
@@ -132,7 +137,7 @@ export function AgentDispatchDialog({
             variant="outline"
             onClick={onCancel ?? (() => onOpenChange(false))}
           >
-            Cancel
+            {t("cancel")}
           </Button>
           <Button onClick={onConfirm} disabled={confirmDisabled}>
             {busy ? (

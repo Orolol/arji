@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { Hammer } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   CheckMark,
@@ -51,7 +52,7 @@ export interface DraftedEpicCardProps {
   epicId: string | null;
   /** Resolved `ARJ-143`. `null` renders an em-dash — never a fabricated id. */
   readableId: string | null;
-  /** `créé dans To Do · #3`. `null` renders an em-dash. */
+  /** `created in To Do · #3`. `null` renders an em-dash. */
   placement: string | null;
   /** The composer's named agent, forwarded to the build dispatch. */
   namedAgentId: string | null;
@@ -78,6 +79,7 @@ export function DraftedEpicCard({
   onOpenTicket,
   onToast,
 }: DraftedEpicCardProps) {
+  const t = useTranslations("Chat");
   const [pending, setPending] = useState<PendingAction>(null);
 
   const storyCount = epic.userStories.length;
@@ -85,8 +87,8 @@ export function DraftedEpicCard({
   // Never "0 AC": a count we do not have is a phrase that does not appear.
   const meta =
     acTotal > 0
-      ? `${storyCount} stories · ${acTotal} AC`
-      : `${storyCount} stories`;
+      ? t("epicCard.storiesWithAc", { count: storyCount, ac: acTotal })
+      : t("epicCard.stories", { count: storyCount });
 
   /** Create the ticket. Returns its id, or null when the route refused. */
   const createEpic = useCallback(
@@ -105,7 +107,7 @@ export function DraftedEpicCard({
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok || body.error || !body.data?.id) {
-          onToast("error", body.error || "Failed to create the epic");
+          onToast("error", body.error || t("epicCard.createFailed"));
           return null;
         }
         onCreated({
@@ -116,11 +118,11 @@ export function DraftedEpicCard({
         });
         return body.data.id as string;
       } catch {
-        onToast("error", "Failed to create the epic");
+        onToast("error", t("epicCard.createFailed"));
         return null;
       }
     },
-    [projectId, epic, onCreated, onToast],
+    [projectId, epic, onCreated, onToast, t],
   );
 
   /** Create-then-dispatch, in that order: the builder's prompt must see it. */
@@ -136,12 +138,12 @@ export function DraftedEpicCard({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.error) {
-        onToast("error", body.error || "Epic créé, mais le build n'a pas démarré");
+        onToast("error", body.error || t("epicCard.buildNotStarted"));
         return;
       }
-      onToast("success", "Envoyé en dev");
+      onToast("success", t("epicCard.sentToDev"));
     } catch {
-      onToast("error", "Failed to launch the build");
+      onToast("error", t("epicCard.buildFailed"));
     } finally {
       setPending(null);
     }
@@ -151,7 +153,7 @@ export function DraftedEpicCard({
     setPending("backlog");
     try {
       const id = await createEpic("backlog");
-      if (id) onToast("success", "Epic créé dans le backlog");
+      if (id) onToast("success", t("epicCard.createdInBacklog"));
     } finally {
       setPending(null);
     }
@@ -181,7 +183,7 @@ export function DraftedEpicCard({
       <div className="flex items-center gap-[9px]">
         <IdentityChip label={readableId ?? "—"} tone={tone} size="sm" />
         <Stamp tone="next" className="bg-card tracking-[.08em]">
-          {epicId ? "EPIC" : "EPIC · DRAFT"}
+          {epicId ? t("epicCard.stamp") : t("epicCard.stampDraft")}
         </Stamp>
         <Mono size={10} tone="next-mid" className="ml-auto">
           {meta}
@@ -207,7 +209,7 @@ export function DraftedEpicCard({
               </span>
               {acCount > 0 ? (
                 <Mono size={10} tone="muted" className="shrink-0">
-                  {`${acCount} AC`}
+                  {t("epicCard.acceptanceCriteria", { count: acCount })}
                 </Mono>
               ) : null}
             </div>
@@ -221,19 +223,19 @@ export function DraftedEpicCard({
           size="sm"
           icon={Hammer}
           pending={pending === "dev"}
-          pendingLabel="Envoi…"
+          pendingLabel={t("epicCard.sendToDevPending")}
           onClick={() => void handleSendToDev()}
         >
-          Send to dev
+          {t("epicCard.sendToDev")}
         </PillButton>
         <PillButton
           variant="outline"
           size="sm"
           pending={pending === "edit"}
-          pendingLabel="Création…"
+          pendingLabel={t("epicCard.createPending")}
           onClick={() => void handleEditStories()}
         >
-          Edit stories
+          {t("epicCard.editStories")}
         </PillButton>
         <PillButton
           variant="outline"
@@ -241,10 +243,10 @@ export function DraftedEpicCard({
           // Already a ticket: there is nothing left to send to the backlog.
           disabled={Boolean(epicId)}
           pending={pending === "backlog"}
-          pendingLabel="Création…"
+          pendingLabel={t("epicCard.createPending")}
           onClick={() => void handleBacklog()}
         >
-          Backlog
+          {t("epicCard.backlog")}
         </PillButton>
         <Mono size={10} tone="next-mid" className="ml-auto">
           {placement ?? "—"}

@@ -1,3 +1,6 @@
+import { createTranslator } from "next-intl";
+import { messagesFor } from "@/lib/i18n/catalogue";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -72,24 +75,26 @@ describe("versionBumps", () => {
 });
 
 describe("ticketExclusionReason", () => {
+  const t = createTranslator({ locale: "en", messages: messagesFor("en"), namespace: "Releases" });
+  const copy = (count: number) => t("next.storiesLeft", { count });
   it("reports the stories still open", () => {
-    expect(ticketExclusionReason({ usCount: 3, usDone: 1 })).toBe(
+    expect(ticketExclusionReason({ usCount: 3, usDone: 1 }, copy)).toBe(
       "2 stories left"
     );
   });
 
   it("uses the singular for one", () => {
-    expect(ticketExclusionReason({ usCount: 2, usDone: 1 })).toBe("1 story left");
+    expect(ticketExclusionReason({ usCount: 2, usDone: 1 }, copy)).toBe("1 story left");
   });
 
   it("is null for a clean ticket", () => {
-    expect(ticketExclusionReason({ usCount: 2, usDone: 2 })).toBeNull();
+    expect(ticketExclusionReason({ usCount: 2, usDone: 2 }, copy)).toBeNull();
   });
 
   it("never reports 0 stories left", () => {
-    expect(ticketExclusionReason({})).toBeNull();
-    expect(ticketExclusionReason({ usCount: 0, usDone: 0 })).toBeNull();
-    expect(ticketExclusionReason({ usCount: 1, usDone: 3 })).toBeNull();
+    expect(ticketExclusionReason({}, copy)).toBeNull();
+    expect(ticketExclusionReason({ usCount: 0, usDone: 0 }, copy)).toBeNull();
+    expect(ticketExclusionReason({ usCount: 1, usDone: 3 }, copy)).toBeNull();
   });
 });
 

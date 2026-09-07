@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Select,
   SelectContent,
@@ -8,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatRelative } from "@/lib/i18n/format";
 
 interface ResumableSession {
   id: string;
@@ -32,19 +34,6 @@ interface SessionPickerProps {
   onSelect: (sessionId: string | undefined) => void;
 }
 
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
-}
-
 function truncate(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen - 1) + "\u2026";
@@ -60,6 +49,8 @@ export function SessionPicker({
   selectedSessionId,
   onSelect,
 }: SessionPickerProps) {
+  const t = useTranslations("Shared");
+  const locale = useLocale();
   // Codex has no resumable-session endpoint, so it has no request at all.
   const requestKey =
     provider === "codex"
@@ -128,26 +119,37 @@ export function SessionPicker({
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-sm text-muted-foreground whitespace-nowrap">Resume:</span>
+      <span className="text-sm text-muted-foreground whitespace-nowrap">
+        {t("sessionPicker.resume")}
+      </span>
       <Select
         value={selectedSessionId ?? "__fresh__"}
         onValueChange={(v) => onSelect(v === "__fresh__" ? undefined : v)}
       >
         <SelectTrigger className="w-64 h-8 text-xs">
-          <SelectValue placeholder={loading ? "Loading..." : "Start fresh"} />
+          <SelectValue
+            placeholder={
+              loading
+                ? t("sessionPicker.loading")
+                : t("sessionPicker.startFresh")
+            }
+          />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__fresh__">Start fresh (no resume)</SelectItem>
+          <SelectItem value="__fresh__">
+            {t("sessionPicker.startFreshItem")}
+          </SelectItem>
           {sessions.map((s) => (
             <SelectItem key={s.id} value={s.id}>
               <span className="truncate">
+                {/* The session's own last line is trace, not copy. */}
                 {s.lastNonEmptyText
                   ? truncate(s.lastNonEmptyText, 60)
-                  : `Session ${s.id.slice(0, 8)}`}
+                  : t("sessionPicker.session", { id: s.id.slice(0, 8) })}
               </span>
               {s.completedAt && (
                 <span className="ml-1 text-muted-foreground">
-                  ({formatRelativeTime(s.completedAt)})
+                  ({formatRelative(s.completedAt, { locale })})
                 </span>
               )}
             </SelectItem>

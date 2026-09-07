@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { formatDateTime } from "@/lib/i18n/format";
 import type { UiLocale } from "@/lib/i18n/locales";
 import { Card } from "@/components/ui/card";
@@ -74,15 +74,21 @@ export function formatArijActionTime(at: string | null, locale: UiLocale): strin
  * effects the agent had on the board (status changes, comments, questions,
  * review findings, visual proofs, MCP tool calls). Renders nothing when there are none —
  * sessions without MCP injection stay visually unchanged.
+ *
+ * `summary` and `detail` are NOT catalogue copy: they are the server-side
+ * rendering of what the agent did (lib/agent-sessions/arij-actions.ts), stored
+ * alongside the session, and they are printed exactly as the trace recorded
+ * them.
  */
 export function ArijActionsList({ actions }: { actions?: ArijActionItem[] | null }) {
   const locale = useLocale();
+  const t = useTranslations("Shared");
   if (!actions || actions.length === 0) return null;
 
   return (
     <Card className="mb-6 rounded-[11px] p-4" data-testid="arij-actions">
       <h3 className="mb-3 text-[11.5px] uppercase tracking-[.08em] text-meta">
-        Arij actions
+        {t("arijActions.title")}
       </h3>
       <ul className="space-y-2">
         {actions.map((action, idx) => {

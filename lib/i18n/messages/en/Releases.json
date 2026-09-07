@@ -1,0 +1,71 @@
+{
+  "next": {
+    "label": "Next release",
+    "inspectLabel": "Release",
+    "backToDraft": "← back to draft",
+    "noCandidates": "No completed epics available for release",
+    "draft": "draft",
+    "merged": "merged {age}",
+    "changelog": "CHANGELOG",
+    "changelogCompose": "CHANGELOG — GENERATED ON CREATION",
+    "viewOnGitHub": "View on GitHub",
+    "publishing": "Publishing…",
+    "publish": "Publish",
+    "githubDraft": "GitHub draft",
+    "creating": "Creating…",
+    "create": "Create release",
+    "storiesLeft": "{count, plural, one {# story left} other {# stories left}}"
+  },
+  "state": {
+    "published": "published",
+    "draft": "draft",
+    "local": "local"
+  },
+  "summary": {
+    "compose": "{count, plural, one {# ticket} other {# tickets}} · tag v{version} on release/v{version}",
+    "tagAndBranch": "{count, plural, one {# ticket} other {# tickets}} · tag {tag} on {branch}",
+    "tagOnly": "{count, plural, one {# ticket} other {# tickets}} · tag {tag}",
+    "branchOnly": "{count, plural, one {# ticket} other {# tickets}} · on {branch}",
+    "ticketsOnly": "{count, plural, one {# ticket} other {# tickets}}"
+  },
+  "changelogAgent": {
+    "link": "changelog agent",
+    "kicker": "CHANGELOG AGENT",
+    "selectLabel": "Changelog agent"
+  },
+  "changelogCard": {
+    "empty": "No changelog generated for this release."
+  },
+  "controls": {
+    "repoLine": "{branch} · ↑ {ahead} to push",
+    "worktrees": "{count, plural, one {# worktree} other {# worktrees}}",
+    "fetch": "Fetch",
+    "push": "Push {branch}",
+    "pushing": "Pushing…"
+  },
+  "history": {
+    "label": "History",
+    "empty": "No releases yet",
+    "rowMeta": "{count, plural, one {# ticket} other {# tickets}} · {age}",
+    "tag": "TAG",
+    "githubRelease": "GH RELEASE",
+    "githubDraft": "GH DRAFT",
+    "noTickets": "no tickets recorded",
+    "viewChangelog": "view the changelog →"
+  },
+  "stats": {
+    "current": "CURRENT",
+    "currentWithAge": "CURRENT · {age}",
+    "readyFor": "READY FOR v{version}",
+    "shipped": "RELEASES SHIPPED"
+  },
+  "ticketRow": {
+    "notIncluded": "not included"
+  },
+  "versionPill": {
+    "inputLabel": "Version",
+    "patch": "patch · {version}",
+    "minor": "minor · {version}",
+    "major": "major · {version}"
+  }
+}

@@ -137,6 +137,8 @@
     }
   },
   "page": {
-    "regenerate": "Regenerate via chat"
+    "regenerate": "Regenerate via chat",
+    "sessionNotFound": "Session not found",
+    "sessionFailed": "Agent session failed."
   }
 }

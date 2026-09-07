@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 
 import { usePolling } from "@/hooks/usePolling";
 import { PROVIDER_LABELS } from "@/lib/agent-config/constants";
@@ -25,6 +26,9 @@ import type { SessionDetail } from "@/components/session-live/types";
  *    sessions.
  */
 export default function SessionDetailPage() {
+  const t = useTranslations("SessionLive");
+  // Namespace-less, for the KEY REFERENCES `session-live/labels.ts` holds.
+  const tKey = useTranslations();
   const params = useParams();
   const router = useRouter();
   const projectId = params.projectId as string;
@@ -157,7 +161,9 @@ export default function SessionDetailPage() {
   }
 
   if (loading || !session) {
-    return <div className="p-6 text-muted-foreground">Loading...</div>;
+    return (
+      <div className="p-6 text-muted-foreground">{t("page.loading")}</div>
+    );
   }
 
   const isRunning = session.status === "running";
@@ -166,8 +172,10 @@ export default function SessionDetailPage() {
     (session.provider
       ? (PROVIDER_LABELS[session.provider as keyof typeof PROVIDER_LABELS] ??
         session.provider)
-      : "Agent");
-  const typeLabel = deriveTypeLabel(session);
+      : t("page.agentFallback"));
+  const { labelKey: typeLabelKey, fallback: typeFallback } =
+    deriveTypeLabel(session);
+  const typeLabel = typeLabelKey ? tKey(typeLabelKey) : typeFallback;
 
   return (
     <LiveSessionScreen

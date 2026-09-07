@@ -1,0 +1,92 @@
+{
+  "loading": "Loading sessions...",
+  "empty": "No sessions yet",
+  "incomplete": "Could not load every session; the list below may be incomplete.",
+  "band": {
+    "running": "RUNNING",
+    "today": "TODAY",
+    "successRate": "SUCCESS RATE",
+    "queue": "QUEUE",
+    "noneRunning": "None right now",
+    "sessions": "{count, plural, one {# session} other {# sessions}}",
+    "sessionsWithCost": "{count, plural, one {# session} other {# sessions}} · {cost}",
+    "nothingToday": "Nothing today",
+    "noFinished": "No finished sessions",
+    "nothingQueued": "Nothing queued",
+    "queued": "{count} queued"
+  },
+  "filters": {
+    "all": "All",
+    "running": "Running",
+    "failed": "Failed",
+    "night": "Night run",
+    "claudeCode": "Claude Code",
+    "codex": "Codex",
+    "sort": "Sort sessions",
+    "sortCreated": "Created",
+    "sortLastActivity": "Last activity",
+    "ticket": "Filter by ticket"
+  },
+  "nightRuns": {
+    "title": "Night runs",
+    "retry": "Retry",
+    "loading": "Loading night runs…",
+    "empty": "No night runs recorded yet.",
+    "rebuilt": "rebuilt from history",
+    "live": "Running",
+    "summary": "Summary"
+  },
+  "columns": {
+    "session": "Session",
+    "state": "State",
+    "duration": "Duration",
+    "activity": "Activity",
+    "cost": "Cost"
+  },
+  "rows": {
+    "noMatch": "No sessions match these filters.",
+    "agent": "Agent",
+    "chatProvider": "Chat",
+    "chatKind": "chat",
+    "messages": "{count, plural, one {# message} other {# messages}}",
+    "generating": "Generating",
+    "chat": "Chat",
+    "costTitle": "Session cost (when reported by the provider)",
+    "open": "Open"
+  },
+  "status": {
+    "queued": "Queued",
+    "pending": "Pending",
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled"
+  },
+  "agentType": {
+    "build": "Build",
+    "ticketBuild": "Ticket",
+    "teamBuild": "Team",
+    "reviewSecurity": "Security",
+    "reviewCode": "Code Review",
+    "reviewCompliance": "Compliance",
+    "reviewFeature": "Feature Review",
+    "reviewSecondOpinion": "Second Opinion",
+    "grading": "Acceptance Grading",
+    "merge": "Merge",
+    "techCheck": "Tech Check",
+    "releaseNotes": "Release Notes",
+    "memoryDistill": "Memory Distill",
+    "dreaming": "Dreaming",
+    "forensic": "Forensic",
+    "failureDigest": "Failure Digest"
+  },
+  "conversation": {
+    "loading": "Loading conversation...",
+    "back": "Back to sessions",
+    "notFound": "Conversation not found",
+    "refresh": "Refresh",
+    "created": "Created",
+    "messages": "Messages",
+    "generating": "Generating..."
+  }
+}

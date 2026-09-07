@@ -1,0 +1,14 @@
+{
+  "detail": {
+    "notFound": "Story not found",
+    "backToBoard": "Back to board",
+    "board": "Board",
+    "dangerZone": "Danger Zone",
+    "dangerHint": "Permanently delete this user story and all dependent records.",
+    "delete": "Delete User Story",
+    "deleteDescription": "Permanently delete this user story and its linked planning data.",
+    "deleteConfirm": "Confirm Delete",
+    "actionFailed": "Failed to run agent action",
+    "deleteFailed": "Failed to delete story"
+  }
+}

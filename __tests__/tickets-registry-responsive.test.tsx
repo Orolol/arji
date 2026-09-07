@@ -86,7 +86,7 @@ function renderTable(rows: RegistryRow[] = [row({ epicId: "1" })]) {
       onToggleGroup={() => {}}
       onShowAll={() => {}}
       onOpenTicket={() => {}}
-      footerStatus="1 ticket · 1 projet"
+      footerStatus="1 ticket · 1 project"
       cost30dUsd={12.5}
       exportCount={rows.length}
       onExportCsv={() => {}}
@@ -192,16 +192,16 @@ describe("the column header row", () => {
     );
   });
 
-  it("keeps all seven accented labels for the widths that draw the table", () => {
+  it("keeps all seven labels for the widths that draw the table", () => {
     renderTable();
     for (const label of [
       "Ticket",
-      "Titre",
-      "État",
+      "Title",
+      "State",
       "Stories",
-      "Priorité",
-      "Dernière activité",
-      "Coût",
+      "Priority",
+      "Last activity",
+      "Cost",
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }

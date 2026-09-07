@@ -1,3 +1,5 @@
+import type { TranslationKey } from "@/lib/i18n/catalogue";
+
 /**
  * Pure derivations for the Releases desk (frame 8c).
  *
@@ -46,6 +48,12 @@ export type ReleaseState = "published" | "draft" | "local";
  * publish — the two-field test is the only thing separating a pushed draft
  * from a published release.
  */
+export const RELEASE_STATE_KEYS = {
+  draft: "Releases.state.draft",
+  published: "Releases.state.published",
+  local: "Releases.state.local",
+} as const satisfies Record<ReleaseState, TranslationKey>;
+
 export function releaseState(release: ReleaseRow): ReleaseState {
   if (release.githubReleaseId !== null && release.pushedAt !== null) {
     return "published";
@@ -113,10 +121,10 @@ export function versionBumps(
 export function ticketExclusionReason(epic: {
   usCount?: number;
   usDone?: number;
-}): string | null {
+}, copy: (count: number) => string): string | null {
   const left = (epic.usCount ?? 0) - (epic.usDone ?? 0);
   if (left <= 0) return null;
-  return `${left} ${left === 1 ? "story" : "stories"} left`;
+  return copy(left);
 }
 
 /**

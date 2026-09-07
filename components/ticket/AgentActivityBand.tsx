@@ -29,6 +29,7 @@
  */
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 
 import {
   BandHeader,
@@ -53,6 +54,7 @@ export function AgentActivityBand({
   meta,
   sessionHref,
 }: AgentActivityBandProps) {
+  const t = useTranslations("Ticket");
   const hasBody = lines.length > 0;
 
   return (
@@ -64,14 +66,14 @@ export function AgentActivityBand({
       className="pb-[15px]"
     >
       <BandHeader
-        label="What the agent is doing"
+        label={t("activity.label")}
         stratum="live"
         className="gap-[10px]"
         meta={meta ?? undefined}
         right={
           sessionHref ? (
             <QuietLink tone="live" href={sessionHref}>
-              open full session →
+              {t("activity.openSession")}
             </QuietLink>
           ) : undefined
         }
@@ -96,6 +98,7 @@ export function AgentActivityBand({
 }
 
 function ActivityLine({ line }: { line: TimelineEntry }) {
+  const t = useTranslations("Ticket");
   const [expanded, setExpanded] = useState(false);
 
   if (!line.group || line.group.length === 0) {
@@ -118,7 +121,7 @@ function ActivityLine({ line }: { line: TimelineEntry }) {
           onClick={() => setExpanded((value) => !value)}
           testId="ticket-activity-group-toggle"
         >
-          {expanded ? "hide" : "show"}
+          {expanded ? t("activity.collapseGroup") : t("activity.expandGroup")}
         </QuietLink>
       </span>
       {expanded

@@ -22,6 +22,7 @@
  *   released/done/waiting membership → `lib/types/kanban.ts` statuses
  */
 
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { formatRelative } from "@/lib/i18n/format";
 import type { UiLocale } from "@/lib/i18n/locales";
 import {
@@ -64,26 +65,35 @@ import {
  * An explicit map, not `taskType[0] + taskType.slice(1).toLowerCase()`: that
  * would render "Qa" for QA. Tailwind's "write the class out in full" rule has
  * a copy analogue, and this is it.
+ *
+ * NO COPY IN THIS TABLE, per `lib/i18n/catalogue.ts` pattern 3: it is
+ * evaluated at import time and read by the route as well as by the row, so it
+ * holds catalogue KEY REFERENCES and the component that draws it resolves
+ * them with the namespace-less translator — `t(TASK_LABEL[taskType].labelKey)`.
  */
-export const TASK_LABEL: Record<DeskTaskType, string> = {
-  BUILD: "Build",
-  REVIEW: "Review",
-  MERGE: "Merge",
-  GRADING: "Grading",
-  QA: "QA",
-  MEMORY: "Memory",
-  RELEASE: "Release",
-  REFINEMENT: "Refinement",
-  CHAT: "Chat",
+export const TASK_LABEL: Record<DeskTaskType, { labelKey: TranslationKey }> = {
+  BUILD: { labelKey: "Registry.task.build" },
+  REVIEW: { labelKey: "Registry.task.review" },
+  MERGE: { labelKey: "Registry.task.merge" },
+  GRADING: { labelKey: "Registry.task.grading" },
+  QA: { labelKey: "Registry.task.qa" },
+  MEMORY: { labelKey: "Registry.task.memory" },
+  RELEASE: { labelKey: "Registry.task.release" },
+  REFINEMENT: { labelKey: "Registry.task.refinement" },
+  CHAT: { labelKey: "Registry.task.chat" },
 };
 
-/** Group header copy. Source form is sentence case; CSS uppercases it. */
-export const GROUP_LABEL: Record<RegistryGroup, string> = {
-  active: "Active",
-  your_turn: "Your turn",
-  waiting: "Waiting",
-  done: "Done",
-  released: "Released",
+/**
+ * Group header copy. Source form is sentence case; CSS uppercases it — and
+ * the table holds the catalogue key, not the word (pattern 3 again: the group
+ * header draws it, the CSV writes it, and neither may fork the vocabulary).
+ */
+export const GROUP_LABEL: Record<RegistryGroup, { labelKey: TranslationKey }> = {
+  active: { labelKey: "Registry.groups.active" },
+  your_turn: { labelKey: "Registry.groups.yourTurn" },
+  waiting: { labelKey: "Registry.groups.waiting" },
+  done: { labelKey: "Registry.groups.done" },
+  released: { labelKey: "Registry.groups.released" },
 };
 
 /** Rows a collapsed group shows before the "+ n autres" line, per the frame. */
@@ -190,6 +200,37 @@ export interface ActivityInput {
 }
 
 /**
+ * The phrases the sixth column is built from, ALREADY RESOLVED by the caller.
+ *
+ * A `lib/` derivation that composes copy takes resolved phrases rather than a
+ * translator (`lib/i18n/catalogue.ts`, pattern 3): that keeps every
+ * `Registry.activity.*` key literal next to a real `translatorFor` binding —
+ * `app/api/tickets/route.ts`, the one place that knows the request's locale —
+ * where both a reader and `scripts/i18n/check-keys.mjs` can see it.
+ *
+ * The entries that vary with the row are small closures, exactly as
+ * `components/spec/spec-format.ts` takes `copy.saved(age)`.
+ */
+export interface ActivityCopy {
+  running: (line: string) => string;
+  question: (age: string) => string;
+  failed: (error: string, age: string) => string;
+  /** The word standing in for an unreadable failure line. */
+  failedFallback: string;
+  conflict: (branch: string, age: string) => string;
+  /** The word standing in for a ticket with no recorded branch. */
+  branchUnknown: string;
+  blocked: (age: string) => string;
+  created: (age: string) => string;
+  updated: (age: string) => string;
+  merged: (age: string) => string;
+  released: (age: string) => string;
+  reviewClean: string;
+  findings: (count: number) => string;
+  withPr: (pr: number, detail: string) => string;
+}
+
+/**
  * The one place the sixth column's string is built, so the CSV and the DOM can
  * never say different things about the same row.
  *
@@ -200,7 +241,10 @@ export interface ActivityInput {
  * "21m ago" is the shared `formatRelative` (seconds while fresh, the same
  * stamp the desk's failure rows print); an unreadable timestamp is an em dash.
  */
-export function composeActivity(input: ActivityInput): {
+export function composeActivity(
+  input: ActivityInput,
+  copy: ActivityCopy,
+): {
   activity: string | null;
   tone: "muted" | "you-deep";
 } {
@@ -208,53 +252,55 @@ export function composeActivity(input: ActivityInput): {
     formatRelative(at, { locale: input.locale, now: input.now, precision: "second" }) || "—";
 
   if (input.group === "active") {
-    return { activity: `› ${input.lastLogLine ?? "…"}`, tone: "muted" };
+    return { activity: copy.running(input.lastLogLine ?? "…"), tone: "muted" };
   }
 
   if (input.group === "your_turn") {
     if (input.yourTurnKind === "asks") {
-      return { activity: `question · ${age(input.askedAt)}`, tone: "muted" };
+      return { activity: copy.question(age(input.askedAt)), tone: "muted" };
     }
     if (input.yourTurnKind === "failed") {
-      const error = normalizeLogLine(input.failureError) ?? "failed";
-      return { activity: `${error} · ${age(input.failedAt)}`, tone: "you-deep" };
+      const error = normalizeLogLine(input.failureError) ?? copy.failedFallback;
+      return { activity: copy.failed(error, age(input.failedAt)), tone: "you-deep" };
     }
     // conflict. The frame draws "2 files vs main"; nothing durable records the
     // conflicting file list (the activity-log reason is free prose), so the
     // branch is named instead of inventing files.
     return {
-      activity: `${input.branchName ?? "branche"} · ${age(input.conflictAt)}`,
+      activity: copy.conflict(input.branchName ?? copy.branchUnknown, age(input.conflictAt)),
       tone: "muted",
     };
   }
 
   if (input.group === "waiting") {
     if (input.blocked) {
-      return { activity: `blocked · ${age(input.updatedAt)}`, tone: "muted" };
+      return { activity: copy.blocked(age(input.updatedAt)), tone: "muted" };
     }
     if (input.status === "backlog") {
-      return { activity: `created · ${age(input.createdAt)}`, tone: "muted" };
+      return { activity: copy.created(age(input.createdAt)), tone: "muted" };
     }
-    return { activity: `updated · ${age(input.updatedAt)}`, tone: "muted" };
+    return { activity: copy.updated(age(input.updatedAt)), tone: "muted" };
   }
 
   if (input.group === "done") {
     if (input.status === "to_merge" && input.mergeReady) {
-      const pr = input.prNumber ? `#${input.prNumber} · ` : "";
-      const findings =
+      const detail =
         input.openFindings !== null && input.openFindings > 0
-          ? `${input.openFindings} findings`
-          : "review clean";
-      return { activity: `${pr}${findings}`, tone: "muted" };
+          ? copy.findings(input.openFindings)
+          : copy.reviewClean;
+      return {
+        activity: input.prNumber ? copy.withPr(input.prNumber, detail) : detail,
+        tone: "muted",
+      };
     }
     if (input.status === "done") {
-      return { activity: `merged · ${age(input.updatedAt)}`, tone: "muted" };
+      return { activity: copy.merged(age(input.updatedAt)), tone: "muted" };
     }
     // to_merge, blocked: the blocker line already fills ÉTAT.
-    return { activity: `updated · ${age(input.updatedAt)}`, tone: "muted" };
+    return { activity: copy.updated(age(input.updatedAt)), tone: "muted" };
   }
 
-  return { activity: `released · ${age(input.updatedAt)}`, tone: "muted" };
+  return { activity: copy.released(age(input.updatedAt)), tone: "muted" };
 }
 
 /* ------------------------------------------------------------------ */
@@ -276,7 +322,10 @@ export function composeActivity(input: ActivityInput): {
  * conflict lands in YOUR TURN exactly as it does on the desk, and a `to_merge`
  * ticket that is ready lands in DONE as "Ready to land".
  */
-export function deriveRegistryRows(input: RegistryDeriveInput): RegistryRow[] {
+export function deriveRegistryRows(
+  input: RegistryDeriveInput,
+  copy: ActivityCopy,
+): RegistryRow[] {
   const now = input.now ?? new Date();
   const projectsById = new Map(input.projects.map((project) => [project.id, project]));
 
@@ -349,25 +398,28 @@ export function deriveRegistryRows(input: RegistryDeriveInput): RegistryRow[] {
     }
 
     const blockedBy = queue?.blockedBy ?? [];
-    const { activity, tone } = composeActivity({
-      locale: input.locale,
-      group,
-      yourTurnKind,
-      status,
-      blocked: blockedBy.length > 0,
-      mergeReady: readiness.ready,
-      lastLogLine: live?.lastLogLine ?? null,
-      askedAt: ask?.askedAt ?? null,
-      failedAt: failure?.failedAt ?? null,
-      failureError: failure?.error ?? null,
-      conflictAt: conflict?.at ?? null,
-      branchName: epic.branchName,
-      prNumber: epic.prNumber,
-      openFindings: epic.openFindings,
-      createdAt: epic.createdAt,
-      updatedAt: epic.updatedAt,
-      now,
-    });
+    const { activity, tone } = composeActivity(
+      {
+        locale: input.locale,
+        group,
+        yourTurnKind,
+        status,
+        blocked: blockedBy.length > 0,
+        mergeReady: readiness.ready,
+        lastLogLine: live?.lastLogLine ?? null,
+        askedAt: ask?.askedAt ?? null,
+        failedAt: failure?.failedAt ?? null,
+        failureError: failure?.error ?? null,
+        conflictAt: conflict?.at ?? null,
+        branchName: epic.branchName,
+        prNumber: epic.prNumber,
+        openFindings: epic.openFindings,
+        createdAt: epic.createdAt,
+        updatedAt: epic.updatedAt,
+        now,
+      },
+      copy,
+    );
 
     const cost = input.costByEpicId.get(epic.id);
 

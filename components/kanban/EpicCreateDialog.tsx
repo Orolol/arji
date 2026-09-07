@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -53,11 +54,12 @@ export function EpicCreateDialog({
   onOpenChange,
   initialDraft,
   frictionId,
-  dialogTitle = "New Epic",
-  dialogDescription = "Write the ticket yourself — no agent involved.",
-  submitLabel = "Create Epic",
+  dialogTitle,
+  dialogDescription,
+  submitLabel,
   onCreated,
 }: EpicCreateDialogProps) {
+  const t = useTranslations("Kanban");
   const [draft, setDraft] = useState<ManualEpicDraft>(createEmptyEpicDraft);
   const [collapsedStories, setCollapsedStories] = useState<Record<string, boolean>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -211,7 +213,7 @@ export function EpicCreateDialog({
       onOpenChange(false);
       onCreated?.(epicId ?? "");
     } catch {
-      setError("Failed to create epic");
+      setError(t("epicCreate.errors.create"));
     } finally {
       setSubmitting(false);
     }
@@ -225,10 +227,10 @@ export function EpicCreateDialog({
       >
         <DialogHeader>
           <DialogTitle className="text-[16px] font-semibold">
-            {dialogTitle}
+            {dialogTitle ?? t("epicCreate.title")}
           </DialogTitle>
           <DialogDescription className="text-[12.5px]">
-            {dialogDescription}
+            {dialogDescription ?? t("epicCreate.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -241,14 +243,14 @@ export function EpicCreateDialog({
               htmlFor="epic-title"
               className="mb-1 block text-[12.5px] text-muted-foreground"
             >
-              Title *
+              {t("epicCreate.titleLabel")}
             </label>
             <Input
               id="epic-title"
               ref={titleRef}
               value={draft.title}
               onChange={(e) => setDraft((prev) => ({ ...prev, title: e.target.value }))}
-              placeholder="Epic title..."
+              placeholder={t("epicCreate.titlePlaceholder")}
               aria-invalid={showErrors && validation.titleError !== null}
               aria-describedby={
                 showErrors && validation.titleError ? "epic-title-error" : undefined
@@ -273,7 +275,7 @@ export function EpicCreateDialog({
               htmlFor="epic-description"
               className="mb-1 block text-[12.5px] text-muted-foreground"
             >
-              Description
+              {t("epicCreate.descriptionLabel")}
             </label>
             <Textarea
               id="epic-description"
@@ -282,7 +284,7 @@ export function EpicCreateDialog({
               onChange={(e) =>
                 setDraft((prev) => ({ ...prev, description: e.target.value }))
               }
-              placeholder="Context, goals, constraints... (markdown)"
+              placeholder={t("epicCreate.descriptionPlaceholder")}
               rows={4}
               aria-invalid={showErrors && validation.descriptionError !== null}
               aria-describedby={
@@ -307,8 +309,11 @@ export function EpicCreateDialog({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[12.5px] text-muted-foreground">
-                User stories
-                {draft.userStories.length > 0 && ` (${draft.userStories.length})`}
+                {draft.userStories.length > 0
+                  ? t("epicCreate.userStoriesCount", {
+                      count: draft.userStories.length,
+                    })
+                  : t("epicCreate.userStories")}
               </span>
               <Button
                 type="button"
@@ -319,13 +324,13 @@ export function EpicCreateDialog({
                 data-testid="add-user-story"
               >
                 <Plus className="mr-1 h-3 w-3" />
-                Add user story
+                {t("epicCreate.addUserStory")}
               </Button>
             </div>
 
             {draft.userStories.length === 0 && (
               <p className="text-[12.5px] text-meta">
-                None yet — an epic without stories is fine.
+                {t("epicCreate.noStories")}
               </p>
             )}
 
@@ -355,8 +360,8 @@ export function EpicCreateDialog({
                       aria-expanded={!collapsed}
                       aria-label={
                         collapsed
-                          ? `Expand user story ${index + 1}`
-                          : `Collapse user story ${index + 1}`
+                          ? t("epicCreate.expandStory", { index: index + 1 })
+                          : t("epicCreate.collapseStory", { index: index + 1 })
                       }
                       className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                     >
@@ -373,8 +378,10 @@ export function EpicCreateDialog({
                         storyTitleRefs.current.set(story.key, node);
                       }}
                       onChange={(e) => updateUserStory(story.key, "title", e.target.value)}
-                      placeholder="As a user, I want..."
-                      aria-label={`User story ${index + 1} title`}
+                      placeholder={t("epicCreate.storyTitlePlaceholder")}
+                      aria-label={t("epicCreate.storyTitleLabel", {
+                        index: index + 1,
+                      })}
                       aria-invalid={Boolean(storyError)}
                       aria-describedby={storyError ? storyErrorId : undefined}
                       className="h-[30px] text-[13px]"
@@ -385,7 +392,9 @@ export function EpicCreateDialog({
                       variant="ghost"
                       size="sm"
                       onClick={() => removeUserStory(story.key)}
-                      aria-label={`Remove user story ${index + 1}`}
+                      aria-label={t("epicCreate.removeStory", {
+                        index: index + 1,
+                      })}
                       className="h-[27px] w-[27px] shrink-0 rounded-[7px] p-0 text-muted-foreground hover:text-destructive"
                       data-testid="remove-user-story"
                     >
@@ -410,8 +419,10 @@ export function EpicCreateDialog({
                         onChange={(e) =>
                           updateUserStory(story.key, "description", e.target.value)
                         }
-                        placeholder="Description (markdown)"
-                        aria-label={`User story ${index + 1} description`}
+                        placeholder={t("epicCreate.storyDescriptionPlaceholder")}
+                        aria-label={t("epicCreate.storyDescriptionLabel", {
+                          index: index + 1,
+                        })}
                         rows={2}
                         className="text-[13px]"
                         data-testid="user-story-description-input"
@@ -421,8 +432,10 @@ export function EpicCreateDialog({
                         onChange={(e) =>
                           updateUserStory(story.key, "acceptanceCriteria", e.target.value)
                         }
-                        placeholder={"Acceptance criteria\n- [ ] ..."}
-                        aria-label={`User story ${index + 1} acceptance criteria`}
+                        placeholder={t("epicCreate.storyCriteriaPlaceholder")}
+                        aria-label={t("epicCreate.storyCriteriaLabel", {
+                          index: index + 1,
+                        })}
                         rows={3}
                         className="text-[13px]"
                         data-testid="user-story-criteria-input"
@@ -458,7 +471,7 @@ export function EpicCreateDialog({
             onClick={() => handleOpenChange(false)}
             disabled={submitting}
           >
-            Cancel
+            {t("cancel")}
           </Button>
           <Button
             type="button"
@@ -473,7 +486,7 @@ export function EpicCreateDialog({
                 data-testid="epic-create-spinner"
               />
             )}
-            {submitLabel}
+            {submitLabel ?? t("epicCreate.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { RoutinesSettings } from "@/components/routines/RoutinesSettings";
@@ -13,6 +14,7 @@ import {
 } from "@/lib/tokens/budget-settings";
 
 function ProjectTokenBudgetSection({ projectId }: { projectId: string }) {
+  const t = useTranslations("ProjectSettings");
   const [budget, setBudget] = useState("");
   const [globalDefault, setGlobalDefault] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -44,9 +46,7 @@ function ProjectTokenBudgetSection({ projectId }: { projectId: string }) {
     if (raw !== "") {
       const parsed = parsePromptTokenBudget(raw);
       if (parsed === null || parsed <= 0) {
-        setMessage(
-          "Budget must be a positive integer token count (e.g. 50000 or 50k)."
-        );
+        setMessage(t("tokenBudget.invalid"));
         setSaving(false);
         return;
       }
@@ -60,17 +60,15 @@ function ProjectTokenBudgetSection({ projectId }: { projectId: string }) {
         body: JSON.stringify({ [settingKey]: val }),
       });
       if (!res.ok) {
-        setMessage("Failed to save project prompt token budget.");
+        setMessage(t("tokenBudget.saveFailed"));
         return;
       }
       setBudget(val === null ? "" : String(val));
       setMessage(
-        val === null
-          ? "Project override cleared (using global default)."
-          : "Project budget saved."
+        val === null ? t("tokenBudget.cleared") : t("tokenBudget.saved")
       );
     } catch {
-      setMessage("Failed to save project prompt token budget.");
+      setMessage(t("tokenBudget.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -82,9 +80,9 @@ function ProjectTokenBudgetSection({ projectId }: { projectId: string }) {
       data-testid="project-prompt-budget-settings"
     >
       <div>
-        <h2 className="text-lg font-semibold">Prompt Token Budget (Project Override)</h2>
+        <h2 className="text-lg font-semibold">{t("tokenBudget.heading")}</h2>
         <p className="text-xs text-muted-foreground">
-          Override the global prompt token budget threshold for this project.
+          {t("tokenBudget.description")}
         </p>
       </div>
 
@@ -93,7 +91,7 @@ function ProjectTokenBudgetSection({ projectId }: { projectId: string }) {
           htmlFor="project-prompt-token-budget-setting"
           className="block text-sm font-medium"
         >
-          Max prompt tokens warning threshold
+          {t("tokenBudget.fieldLabel")}
         </label>
         <Input
           id="project-prompt-token-budget-setting"
@@ -103,13 +101,17 @@ function ProjectTokenBudgetSection({ projectId }: { projectId: string }) {
           disabled={saving}
           placeholder={
             globalDefault != null
-              ? `Global default: ${globalDefault} tokens (leave empty to use global)`
-              : "e.g. 50000 or 50k (no threshold by default)"
+              ? t("tokenBudget.placeholderGlobal", {
+                  // The raw digits, as the template literal printed them: a
+                  // number argument would pick up locale grouping.
+                  tokens: String(globalDefault),
+                })
+              : t("tokenBudget.placeholder")
           }
           onChange={(e) => setBudget(e.target.value)}
         />
         <p className="text-xs text-muted-foreground">
-          Optional absolute token count warning threshold (e.g. 50000 or 50k). When dispatch estimation exceeds this threshold, a non-blocking warning is shown highlighting the largest context section.
+          {t("tokenBudget.hint")}
         </p>
       </div>
 
@@ -119,7 +121,7 @@ function ProjectTokenBudgetSection({ projectId }: { projectId: string }) {
         disabled={saving}
         data-testid="project-prompt-token-budget-save"
       >
-        {saving ? "Saving..." : "Save Project Budget"}
+        {saving ? t("tokenBudget.savePending") : t("tokenBudget.save")}
       </Button>
 
       {message && (

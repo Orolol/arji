@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { formatDateTime } from "@/lib/i18n/format";
 import type { UiLocale } from "@/lib/i18n/locales";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -59,6 +59,13 @@ interface RoutinesResponse {
 
 const DEFAULT_TIME_OF_DAY = "22:00";
 
+/*
+ * NO COPY IN THE HELPERS BELOW. `parseConfig`, `formatLastRun` and
+ * `statusLabel` are pure and evaluated outside React, so they take their
+ * phrases ALREADY RESOLVED from the component that calls them — they compose,
+ * they do not word (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+
 function fallbackKindOptions(): RoutineKindOption[] {
   return AVAILABLE_ROUTINE_KINDS.map((kind) => ({
     kind,
@@ -93,15 +100,18 @@ function formatConfig(config: Record<string, unknown>): string {
   return JSON.stringify(config, null, 2);
 }
 
-function parseConfig(config: string): Record<string, unknown> {
+function parseConfig(
+  config: string,
+  copy: { notJson: string; notObject: string },
+): Record<string, unknown> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(config);
   } catch {
-    throw new Error("Configuration must be valid JSON.");
+    throw new Error(copy.notJson);
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Configuration must be a JSON object.");
+    throw new Error(copy.notObject);
   }
   return parsed as Record<string, unknown>;
 }
@@ -110,8 +120,9 @@ function formatLastRun(
   value: string | null,
   serverTimezone: string,
   locale: UiLocale,
+  never: string,
 ): string {
-  if (!value) return "Never run";
+  if (!value) return never;
   return (
     formatDateTime(value, {
       locale,
@@ -121,8 +132,14 @@ function formatLastRun(
   );
 }
 
-function statusLabel(status: string | null): string {
-  if (!status) return "Not run";
+/**
+ * The routine's last outcome. `status` is the SERVER's own value
+ * (`completed`, `failed`, `running`, `scheduled`) and stays out of the
+ * catalogue like every other persisted string; only the "no run yet" wording
+ * is copy.
+ */
+function statusLabel(status: string | null, notRun: string): string {
+  if (!status) return notRun;
   return status.replaceAll("_", " ");
 }
 
@@ -153,6 +170,7 @@ function RoutineEditor({
   onCancelNew,
 }: RoutineEditorProps) {
   const locale = useLocale();
+  const t = useTranslations("Routines");
   const initialKind = routine?.kind ?? kindOptions[0]?.kind ?? "night_run";
   const [kind, setKind] = useState<AvailableRoutineKind>(initialKind);
   const [enabled, setEnabled] = useState(routine?.enabled ?? true);
@@ -190,12 +208,15 @@ function RoutineEditor({
     setMessage(null);
     let config: Record<string, unknown>;
     try {
-      config = parseConfig(configText);
+      config = parseConfig(configText, {
+        notJson: t("errors.configNotJson"),
+        notObject: t("errors.configNotObject"),
+      });
     } catch (parseError) {
       setError(
         parseError instanceof Error
           ? parseError.message
-          : "Invalid configuration.",
+          : t("errors.invalidConfig"),
       );
       return;
     }
@@ -215,15 +236,13 @@ function RoutineEditor({
         error?: string;
       };
       if (!response.ok || !payload.data) {
-        throw new Error(payload.error || "Failed to save routine.");
+        throw new Error(payload.error || t("errors.save"));
       }
       onSaved(payload.data);
-      setMessage(isNew ? "Routine created." : "Routine saved.");
+      setMessage(isNew ? t("editor.created") : t("editor.saved"));
     } catch (saveError) {
       setError(
-        saveError instanceof Error
-          ? saveError.message
-          : "Failed to save routine.",
+        saveError instanceof Error ? saveError.message : t("errors.save"),
       );
     } finally {
       setSaving(false);
@@ -254,16 +273,14 @@ function RoutineEditor({
         error?: string;
       };
       if (!response.ok || !payload.data) {
-        throw new Error(payload.error || "Failed to update routine.");
+        throw new Error(payload.error || t("errors.update"));
       }
       preserveDraftOnNextRoutineUpdate.current = true;
       onSaved(payload.data);
     } catch (toggleError) {
       setEnabled(previous);
       setError(
-        toggleError instanceof Error
-          ? toggleError.message
-          : "Failed to update routine.",
+        toggleError instanceof Error ? toggleError.message : t("errors.update"),
       );
     } finally {
       setSaving(false);
@@ -283,14 +300,12 @@ function RoutineEditor({
         error?: string;
       };
       if (!response.ok) {
-        throw new Error(payload.error || "Failed to delete routine.");
+        throw new Error(payload.error || t("errors.delete"));
       }
       onDeleted(routine.id);
     } catch (deleteError) {
       setError(
-        deleteError instanceof Error
-          ? deleteError.message
-          : "Failed to delete routine.",
+        deleteError instanceof Error ? deleteError.message : t("errors.delete"),
       );
     } finally {
       setDeleting(false);
@@ -314,7 +329,7 @@ function RoutineEditor({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-[9px]">
             <h3 className="text-[14px] font-semibold">
-              {isNew ? "New routine" : ROUTINE_KIND_LABELS[routine.kind]}
+              {isNew ? t("editor.newRoutine") : ROUTINE_KIND_LABELS[routine.kind]}
             </h3>
             {!isNew && (
               <span
@@ -322,7 +337,7 @@ function RoutineEditor({
                   routine.lastStatus,
                 )}`}
               >
-                {statusLabel(routine.lastStatus)}
+                {statusLabel(routine.lastStatus, t("editor.statusNotRun"))}
               </span>
             )}
           </div>
@@ -336,14 +351,16 @@ function RoutineEditor({
             id={`enabled-${routine?.id ?? "new"}`}
             checked={enabled}
             disabled={saving || deleting}
-            aria-label={`Enable ${selectedKind?.label ?? "routine"}`}
+            aria-label={t("editor.enableAria", {
+              label: selectedKind?.label ?? t("editor.routineFallback"),
+            })}
             onCheckedChange={(checked) => void toggleEnabled(checked === true)}
           />
           <label
             className="cursor-pointer text-[12.5px] font-medium"
             htmlFor={`enabled-${routine?.id ?? "new"}`}
           >
-            Enabled
+            {t("editor.enabled")}
           </label>
         </div>
       </div>
@@ -354,7 +371,7 @@ function RoutineEditor({
             className="text-[12px] font-medium"
             htmlFor={`kind-${routine?.id ?? "new"}`}
           >
-            Kind
+            {t("editor.kind")}
           </label>
           <Select
             value={kind}
@@ -384,7 +401,7 @@ function RoutineEditor({
             className="text-[12px] font-medium"
             htmlFor={`time-${routine?.id ?? "new"}`}
           >
-            Daily time
+            {t("editor.dailyTime")}
           </label>
           <Input
             id={`time-${routine?.id ?? "new"}`}
@@ -395,7 +412,7 @@ function RoutineEditor({
           />
           {kind === "ci_watch" && (
             <p className="text-[11px] text-muted-foreground">
-              CI watch uses its interval; this time is retained but not used.
+              {t("editor.ciWatchTimeNote")}
             </p>
           )}
         </div>
@@ -405,7 +422,7 @@ function RoutineEditor({
             className="text-[12px] font-medium"
             htmlFor={`config-${routine?.id ?? "new"}`}
           >
-            Configuration (JSON)
+            {t("editor.configuration")}
           </label>
           <Textarea
             id={`config-${routine?.id ?? "new"}`}
@@ -418,12 +435,12 @@ function RoutineEditor({
           />
           <p className="text-[11px] text-muted-foreground">
             {kind === "night_run"
-              ? "Supports includeBacklog, failurePolicy, circuitBreaker, costCapUsd and namedAgentId."
+              ? t("editor.configHintNightRun")
               : kind === "github_issue_sync"
-                ? "intervalMinutes is a freshness TTL; the selected daily time remains the schedule."
+                ? t("editor.configHintGithubIssueSync")
                 : kind === "retention"
-                  ? "maxDeletedChunks bounds one run; vacuum allows the one-off reclaim after the first prune. The window itself is the session_chunk_retention_days setting."
-                  : "intervalMinutes sets the polling cadence and must be a positive integer."}
+                  ? t("editor.configHintRetention")
+                  : t("editor.configHintInterval")}
           </p>
         </div>
       </div>
@@ -431,17 +448,28 @@ function RoutineEditor({
       {!isNew && routine.lastStatus === "scheduled" && (
         <div className="mt-[13px] flex items-center gap-[7px] text-[11.5px] text-muted-foreground">
           <Clock3 className="h-[13px] w-[13px]" />
-          Saved after today&apos;s {routine.timeOfDay} slot — first run
-          scheduled for tomorrow ({serverTimezone}).
+          {t("editor.scheduledTomorrow", {
+            time: routine.timeOfDay,
+            timezone: serverTimezone,
+          })}
         </div>
       )}
 
       {!isNew && routine.lastStatus !== "scheduled" && (
         <div className="mt-[13px] flex items-center gap-[7px] text-[11.5px] text-muted-foreground">
           <Clock3 className="h-[13px] w-[13px]" />
-          Last run: {formatLastRun(routine.lastRunAt, serverTimezone, locale)}
+          {t("editor.lastRun", {
+            time: formatLastRun(
+              routine.lastRunAt,
+              serverTimezone,
+              locale,
+              t("editor.lastRunNever"),
+            ),
+          })}
           <span aria-hidden="true">·</span>
-          Status: {statusLabel(routine.lastStatus)}
+          {t("editor.status", {
+            status: statusLabel(routine.lastStatus, t("editor.statusNotRun")),
+          })}
         </div>
       )}
 
@@ -464,12 +492,12 @@ function RoutineEditor({
           onClick={() => void save()}
         >
           {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          {isNew ? "Create routine" : "Save changes"}
+          {isNew ? t("editor.create") : t("editor.save")}
         </Button>
 
         {isNew ? (
           <Button type="button" size="sm" variant="ghost" onClick={onCancelNew}>
-            Cancel
+            {t("editor.cancel")}
           </Button>
         ) : confirmDelete ? (
           <>
@@ -481,7 +509,7 @@ function RoutineEditor({
               onClick={() => void remove()}
             >
               {deleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              Confirm delete
+              {t("editor.confirmDelete")}
             </Button>
             <Button
               type="button"
@@ -490,7 +518,7 @@ function RoutineEditor({
               disabled={deleting}
               onClick={() => setConfirmDelete(false)}
             >
-              Cancel
+              {t("editor.cancel")}
             </Button>
           </>
         ) : (
@@ -499,11 +527,13 @@ function RoutineEditor({
             size="sm"
             variant="ghost"
             className="ml-auto text-destructive hover:text-destructive"
-            aria-label={`Delete ${selectedKind?.label ?? "routine"}`}
+            aria-label={t("editor.deleteAria", {
+              label: selectedKind?.label ?? t("editor.routineFallback"),
+            })}
             onClick={() => setConfirmDelete(true)}
           >
             <Trash2 className="h-3.5 w-3.5" />
-            Delete
+            {t("editor.delete")}
           </Button>
         )}
       </div>
@@ -512,6 +542,7 @@ function RoutineEditor({
 }
 
 export function RoutinesSettings({ projectId }: { projectId: string }) {
+  const t = useTranslations("Routines");
   const [routines, setRoutines] = useState<RoutineRecord[]>([]);
   const [kindOptions, setKindOptions] = useState<RoutineKindOption[]>(
     fallbackKindOptions(),
@@ -536,7 +567,7 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
           .json()
           .catch(() => ({}))) as RoutinesResponse;
         if (!response.ok) {
-          throw new Error(payload.error || "Failed to load routines.");
+          throw new Error(payload.error || t("errors.load"));
         }
         const options = parseKindOptions(payload.meta);
         const allowed = new Set(options.map((option) => option.kind));
@@ -552,16 +583,14 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
         setCiAutofixEnabled(payload.meta?.ciAutofixEnabled === true);
       } catch (loadError) {
         setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load routines.",
+          loadError instanceof Error ? loadError.message : t("errors.load"),
         );
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [projectId],
+    [projectId, t],
   );
 
   useEffect(() => {
@@ -611,15 +640,13 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
         error?: string;
       };
       if (!response.ok) {
-        throw new Error(payload.error || "Failed to update CI autofix.");
+        throw new Error(payload.error || t("errors.autofix"));
       }
       setCiAutofixEnabled(payload.data?.enabled === true);
     } catch (saveError) {
       setCiAutofixEnabled(previous);
       setAutofixError(
-        saveError instanceof Error
-          ? saveError.message
-          : "Failed to update CI autofix.",
+        saveError instanceof Error ? saveError.message : t("errors.autofix"),
       );
     } finally {
       setSavingAutofix(false);
@@ -630,9 +657,9 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
     <div className="flex min-h-full flex-col px-[26px] pb-[30px] pt-[24px]">
       <div className="flex flex-wrap items-start gap-[16px]">
         <div>
-          <h2 className="text-[19px] font-semibold">Project settings</h2>
+          <h2 className="text-[19px] font-semibold">{t("page.title")}</h2>
           <p className="mt-[4px] text-[13px] text-muted-foreground">
-            Configure server-owned automation for this project.
+            {t("page.subtitle")}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-[8px]">
@@ -646,7 +673,7 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
             <RefreshCw
               className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
             />
-            Refresh
+            {t("page.refresh")}
           </Button>
           <Button
             type="button"
@@ -655,7 +682,7 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
             onClick={() => setCreating(true)}
           >
             <Plus className="h-3.5 w-3.5" />
-            Add routine
+            {t("page.addRoutine")}
           </Button>
         </div>
       </div>
@@ -664,10 +691,10 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
         <TabsList
           variant="line"
           className="w-full justify-start border-b border-border px-0"
-          aria-label="Project settings"
+          aria-label={t("page.title")}
         >
           <TabsTrigger value="routines" className="px-[12px] pb-[9px]">
-            Routines
+            {t("page.routinesTab")}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="routines">
@@ -675,17 +702,17 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
             <div className="flex flex-wrap items-start gap-[16px]">
               <div>
                 <h3 id="routines-heading" className="text-[16px] font-semibold">
-                  Scheduled routines
+                  {t("section.heading")}
                 </h3>
                 <p className="mt-[4px] max-w-3xl text-[12.5px] text-muted-foreground">
-                  Daily times use the Arij server&apos;s local timezone
-                  {serverTimezone !== "local" ? ` (${serverTimezone})` : ""},
-                  not the browser&apos;s timezone. The in-process scheduler must
-                  be running for routines to trigger.
+                  {serverTimezone !== "local"
+                    ? t("section.timezoneNoteZoned", {
+                        timezone: serverTimezone,
+                      })
+                    : t("section.timezoneNote")}
                 </p>
                 <p className="mt-[3px] text-[11.5px] text-muted-foreground">
-                  Available kinds: {availableKindsLabel}. Unavailable kinds are
-                  hidden until their scheduler integration ships.
+                  {t("section.availableKinds", { kinds: availableKindsLabel })}
                 </p>
               </div>
             </div>
@@ -697,17 +724,15 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
                   className="mt-[2px]"
                   checked={ciAutofixEnabled}
                   disabled={savingAutofix}
-                  aria-label="Enable CI autofix"
+                  aria-label={t("autofix.label")}
                   onCheckedChange={(checked) =>
                     void toggleAutofix(checked === true)
                   }
                 />
                 <label className="cursor-pointer" htmlFor="ci-autofix-enabled">
-                  <span className="font-medium">Enable CI autofix</span>
+                  <span className="font-medium">{t("autofix.label")}</span>
                   <span className="block text-[12px] text-muted-foreground">
-                    Off by default. When enabled, a newly failing PR head may
-                    queue one normal fix session after CI watch sends its
-                    notification.
+                    {t("autofix.description")}
                   </span>
                 </label>
               </div>
@@ -724,7 +749,7 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
             {loading ? (
               <div className="mt-[22px] flex items-center gap-[8px] text-[13px] text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Loading routines…
+                {t("page.loading")}
               </div>
             ) : error ? (
               <p
@@ -750,11 +775,10 @@ export function RoutinesSettings({ projectId }: { projectId: string }) {
                 {routines.length === 0 && !creating && (
                   <div className="rounded-[12px] border border-dashed border-border px-[20px] py-[28px] text-center">
                     <p className="text-[13.5px] font-medium">
-                      No routines configured
+                      {t("empty.title")}
                     </p>
                     <p className="mt-[4px] text-[12.5px] text-muted-foreground">
-                      Existing manual and automated paths are unchanged until
-                      you add and enable a routine.
+                      {t("empty.description")}
                     </p>
                   </div>
                 )}

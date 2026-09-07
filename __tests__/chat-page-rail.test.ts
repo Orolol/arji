@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { createTranslator } from "next-intl";
 
 import {
   citedDocuments,
@@ -15,7 +16,16 @@ import {
   tokensOf,
 } from "@/components/chat-page/chat-context-tokens";
 import { shortPlacement } from "@/components/chat-page/placement";
+import { messagesFor } from "@/lib/i18n";
 import { formatRelative } from "@/lib/i18n/format";
+
+/**
+ * The rail's note is composed outside React from full dotted KEY REFERENCES,
+ * so `shortPlacement` takes the NAMESPACE-LESS translator as an argument
+ * (lib/i18n/catalogue.ts) — here a bare `createTranslator` over the same
+ * catalogue the page reads through `useTranslations()`.
+ */
+const t = createTranslator({ locale: "en", messages: messagesFor("en") });
 
 const NOW = Date.parse("2026-08-30T12:00:00.000Z");
 
@@ -128,11 +138,11 @@ describe("which documents a conversation cites", () => {
 
 describe("the rail's short placement", () => {
   it("prints the frame's `To Do #4` and `Backlog`", () => {
-    expect(shortPlacement("todo", 4)).toBe("To Do #4");
-    expect(shortPlacement("backlog", null)).toBe("Backlog");
+    expect(shortPlacement("todo", 4, t)).toBe("To Do #4");
+    expect(shortPlacement("backlog", null, t)).toBe("Backlog");
   });
 
   it("is null — an em-dash — when nothing resolved", () => {
-    expect(shortPlacement(null, null)).toBeNull();
+    expect(shortPlacement(null, null, t)).toBeNull();
   });
 });

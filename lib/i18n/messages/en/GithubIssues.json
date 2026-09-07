@@ -1,0 +1,50 @@
+{
+  "header": {
+    "title": "GitHub Issue Triage",
+    "subtitle": "Import issues as epics or bugs, based on their labels.",
+    "sync": "Sync",
+    "importSelected": "Import Selected ({count})"
+  },
+  "filters": {
+    "notConnected": "Not connected",
+    "label": "Filter by label",
+    "milestone": "Filter by milestone",
+    "summary": "{count, plural, one {# issue} other {# issues}} · {notImported} not imported"
+  },
+  "columns": {
+    "title": "Title",
+    "labels": "Labels",
+    "milestone": "Milestone"
+  },
+  "list": {
+    "loading": "Loading issues...",
+    "empty": "No open issues found.",
+    "select": "Select issue #{number}",
+    "imported": "imported",
+    "toImport": "to import",
+    "loadFailed": "Failed to load issues"
+  },
+  "sync": {
+    "failed": "Failed to sync issues",
+    "done": "Issues synced"
+  },
+  "import": {
+    "failed": "Import failed",
+    "done": "{count, plural, one {Imported # issue} other {Imported # issues}}"
+  },
+  "config": {
+    "repoTitle": "No GitHub repository is connected to this project.",
+    "repoDetail": "Connect this project to a GitHub repository from the Git sync page to triage its issues here.",
+    "patTitle": "No GitHub personal access token is stored.",
+    "patDetail": "Add a GitHub PAT in Settings so Arij can read this repository's issues."
+  },
+  "mapping": {
+    "title": "Label mapping",
+    "feature": "Feature labels (comma-separated)",
+    "featurePlaceholder": "feature, enhancement, epic",
+    "bug": "Bug labels (comma-separated)",
+    "bugPlaceholder": "bug, defect, error",
+    "hint": "Configure which GitHub labels map to Feature (Epic) or Bug ticket types.",
+    "save": "Save Mapping"
+  }
+}

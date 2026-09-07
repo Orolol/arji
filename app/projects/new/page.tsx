@@ -1,14 +1,14 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-const NAME_REQUIRED = "Project name is required.";
-
 export default function NewProjectPage() {
+  const t = useTranslations("ProjectImport");
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -49,9 +49,14 @@ export default function NewProjectPage() {
 
       // A rejected path or a validation error used to leave the form silently
       // stuck on "Creating..." — say what went wrong instead.
-      setError(data?.error || `Failed to create project (HTTP ${res.status})`);
+      setError(
+        data?.error ||
+          t("newProject.createFailedStatus", { status: String(res.status) })
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create project");
+      setError(
+        e instanceof Error ? e.message : t("newProject.createFailed")
+      );
     } finally {
       setLoading(false);
     }
@@ -59,7 +64,7 @@ export default function NewProjectPage() {
 
   return (
     <div className="p-6 max-w-lg mx-auto">
-      <h1 className="text-2xl font-bold mb-6">New Project</h1>
+      <h1 className="text-2xl font-bold mb-6">{t("newProject.heading")}</h1>
       {error && (
         <div
           role="alert"
@@ -74,14 +79,14 @@ export default function NewProjectPage() {
             htmlFor="project-name"
             className="block text-sm font-medium mb-1"
           >
-            Project Name *
+            {t("newProject.nameLabel")}
           </label>
           <Input
             id="project-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             onBlur={() => setNameTouched(true)}
-            placeholder="My Awesome Project"
+            placeholder={t("newProject.namePlaceholder")}
             required
             aria-invalid={nameInvalid || undefined}
             aria-describedby={nameInvalid ? "project-name-error" : undefined}
@@ -92,7 +97,7 @@ export default function NewProjectPage() {
               role="alert"
               className="text-xs text-destructive mt-1"
             >
-              {NAME_REQUIRED}
+              {t("newProject.nameRequired")}
             </p>
           )}
         </div>
@@ -101,13 +106,13 @@ export default function NewProjectPage() {
             htmlFor="project-description"
             className="block text-sm font-medium mb-1"
           >
-            Description
+            {t("newProject.descriptionLabel")}
           </label>
           <Textarea
             id="project-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="What is this project about?"
+            placeholder={t("newProject.descriptionPlaceholder")}
             rows={3}
           />
         </div>
@@ -116,28 +121,28 @@ export default function NewProjectPage() {
             htmlFor="project-git-repo-path"
             className="block text-sm font-medium mb-1"
           >
-            Git Repository Path
+            {t("newProject.gitPathLabel")}
           </label>
           <Input
             id="project-git-repo-path"
             value={gitRepoPath}
             onChange={(e) => setGitRepoPath(e.target.value)}
-            placeholder="/path/to/your/repo (optional)"
+            placeholder={t("newProject.gitPathPlaceholder")}
             aria-describedby="project-git-repo-path-hint"
           />
           <p
             id="project-git-repo-path-hint"
             className="text-xs text-muted-foreground mt-1"
           >
-            Path to an existing local git repository
+            {t("newProject.gitPathHint")}
           </p>
         </div>
         <div className="flex gap-2 pt-2">
           <Button type="submit" disabled={loading || !name.trim()}>
-            {loading ? "Creating..." : "Create Project"}
+            {loading ? t("newProject.submitPending") : t("newProject.submit")}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.back()}>
-            Cancel
+            {t("newProject.cancel")}
           </Button>
         </div>
       </form>

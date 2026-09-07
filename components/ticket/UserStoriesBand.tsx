@@ -21,6 +21,8 @@
  * "No stories yet" copy anywhere in this design.
  */
 
+import { useTranslations } from "next-intl";
+
 import {
   BandHeader,
   CheckMark,
@@ -31,6 +33,7 @@ import {
   type StampTone,
 } from "@/components/piscine";
 import type { GradingStatus } from "@/lib/grading/report";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { cn } from "@/lib/utils";
 import { countAcceptanceCriteria } from "@/components/ticket/derive";
 
@@ -56,11 +59,18 @@ export interface UserStoriesBandProps {
  * met → the land family (this is what "ready" looks like on this screen),
  * partial and missed → the coral family, which is the screen's one colour for
  * "this wants you". Two families, no third loud colour.
+ *
+ * A module-scope copy table, so it holds catalogue KEY REFERENCES resolved at
+ * render with the namespace-less translator (`lib/i18n/catalogue.ts`,
+ * pattern 3).
  */
-const GRADING_STAMP: Record<GradingStatus, { tone: StampTone; label: string }> = {
-  met: { tone: "land", label: "GRADED · MET" },
-  partial: { tone: "asks", label: "GRADED · PARTIAL" },
-  missed: { tone: "failed", label: "GRADED · MISSED" },
+const GRADING_STAMP: Record<
+  GradingStatus,
+  { tone: StampTone; labelKey: TranslationKey }
+> = {
+  met: { tone: "land", labelKey: "Ticket.stories.gradedMet" },
+  partial: { tone: "asks", labelKey: "Ticket.stories.gradedPartial" },
+  missed: { tone: "failed", labelKey: "Ticket.stories.gradedMissed" },
 };
 
 export function UserStoriesBand({
@@ -69,6 +79,10 @@ export function UserStoriesBand({
   gradingStatus = null,
   gradingSummary = null,
 }: UserStoriesBandProps) {
+  const t = useTranslations("Ticket");
+  // `GRADING_STAMP` holds full dotted paths, so the stamp resolves through the
+  // namespace-less translator.
+  const tKey = useTranslations();
   const done = stories.filter((story) => story.status === "done").length;
   const grading = gradingStatus ? GRADING_STAMP[gradingStatus] : null;
 
@@ -80,15 +94,22 @@ export function UserStoriesBand({
       className="shrink-0 pb-[15px]"
     >
       <BandHeader
-        label="User stories"
+        label={t("stories.label")}
         stratum="next"
         // BandHeader hard-codes gap-[12px]; every 6a band draws 10.
         className="gap-[10px]"
-        meta={stories.length > 0 ? `${done}/${stories.length} done` : undefined}
+        meta={
+          stories.length > 0
+            ? t("stories.meta", {
+                done: String(done),
+                total: String(stories.length),
+              })
+            : undefined
+        }
         right={
           grading ? (
             <Stamp tone={grading.tone} className="shrink-0">
-              {grading.label}
+              {tKey(grading.labelKey)}
             </Stamp>
           ) : undefined
         }
@@ -116,6 +137,7 @@ function StoryRow({
   story: UserStoryRow;
   projectId?: string;
 }) {
+  const t = useTranslations("Ticket");
   const isDone = story.status === "done";
   const criteria = countAcceptanceCriteria(story.acceptanceCriteria);
 
@@ -137,7 +159,7 @@ function StoryRow({
           omitted rather than rendered as "0 AC" or "— AC". */}
       {criteria > 0 ? (
         <Mono size={10} tone="muted" className="shrink-0">
-          {`${criteria} AC`}
+          {t("stories.criteria", { count: String(criteria) })}
         </Mono>
       ) : null}
       {projectId ? (
@@ -148,7 +170,7 @@ function StoryRow({
           testId="ticket-story-link"
           className="shrink-0"
         >
-          open →
+          {t("stories.open")}
         </QuietLink>
       ) : null}
     </div>

@@ -1,0 +1,92 @@
+{
+  "cancel": "Cancel",
+  "bugCreate": {
+    "title": "New Bug",
+    "titleLabel": "Title *",
+    "titlePlaceholder": "Bug title...",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Steps to reproduce, expected vs actual behavior...",
+    "screenshotsLabel": "Screenshots",
+    "attachImage": "Attach image",
+    "screenshotsHint": "Paste a screenshot with Ctrl/Cmd+V, drop an image here, or attach one.",
+    "priorityLabel": "Priority",
+    "submit": "Create Bug",
+    "submitAndFix": "Create And Fix",
+    "errors": {
+      "create": "Failed to create bug",
+      "createAndFix": "Failed to create bug and start fix agent",
+      "fixAgentMissingId": "Bug created, but failed to start fix agent: missing bug ID",
+      "fixAgent": "Bug created, but failed to start fix agent",
+      "fixAgentReason": "Bug created, but failed to start fix agent: {reason}"
+    }
+  },
+  "epicCreate": {
+    "title": "New Epic",
+    "description": "Write the ticket yourself — no agent involved.",
+    "submit": "Create Epic",
+    "titleLabel": "Title *",
+    "titlePlaceholder": "Epic title...",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Context, goals, constraints... (markdown)",
+    "userStories": "User stories",
+    "userStoriesCount": "User stories ({count})",
+    "addUserStory": "Add user story",
+    "noStories": "None yet — an epic without stories is fine.",
+    "expandStory": "Expand user story {index}",
+    "collapseStory": "Collapse user story {index}",
+    "removeStory": "Remove user story {index}",
+    "storyTitlePlaceholder": "As a user, I want...",
+    "storyTitleLabel": "User story {index} title",
+    "storyDescriptionPlaceholder": "Description (markdown)",
+    "storyDescriptionLabel": "User story {index} description",
+    "storyCriteriaPlaceholder": "Acceptance criteria\n- [ ] ...",
+    "storyCriteriaLabel": "User story {index} acceptance criteria",
+    "errors": {
+      "create": "Failed to create epic"
+    }
+  },
+  "gitSync": {
+    "checking": "Checking sync...",
+    "ahead": "{count, plural, one {{value} commit} other {{value} commits}} ahead of remote",
+    "behind": "{count, plural, one {{value} commit} other {{value} commits}} behind remote",
+    "inSync": "in sync",
+    "pushing": "Pushing...",
+    "nothingToPush": "Nothing to push",
+    "push": "Push {count, plural, one {{value} commit} other {{value} commits}} to remote",
+    "refresh": "Refresh sync status",
+    "pushFailed": "Push failed"
+  },
+  "inlineEdit": {
+    "empty": "Click to edit"
+  },
+  "quickCapture": {
+    "placeholder": "Quick capture — Enter adds to Backlog",
+    "label": "Quick capture idea",
+    "error": "Failed to capture idea"
+  },
+  "refinement": {
+    "button": "Agent Refinement",
+    "runningBadge": "running",
+    "runningTitle": "A board refinement pass is running",
+    "idleTitle": "Agent Refinement — re-pass Backlog and To do: questions, priorities, order, dependencies, promotion, merges, discards and missing tickets",
+    "errors": {
+      "start": "Failed to start board refinement",
+      "nothingToRefine": "Nothing to refine right now"
+    }
+  },
+  "refinementDialog": {
+    "title": "Configure board refinement",
+    "description": "Choose what the agent may change in Backlog and To do for this pass.",
+    "agentLabel": "Agent",
+    "agentClearLabel": "Use refinement default",
+    "agentHint": "Uses the project or workspace refinement default unless you select an agent. Claude Code or Codex is required.",
+    "actionsLegend": "Actions",
+    "instructionsLabel": "Additional instructions (optional)",
+    "instructionsPlaceholder": "For example: prioritize onboarding and combine duplicate search tickets.",
+    "instructionsHint": "{used} / {max} characters. Instructions apply only to checked actions.",
+    "alreadyRunning": "A refinement pass is already running. You can close this dialog.",
+    "selectAction": "Select at least one action.",
+    "starting": "Starting…",
+    "start": "Start refinement"
+  }
+}

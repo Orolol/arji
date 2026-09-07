@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Plus } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { BandHeader, PillButton, QuietLink, StrataBand } from "@/components/piscine";
 
@@ -39,18 +40,25 @@ export function TowardSpecBand({
   onPropose,
   specHref,
 }: TowardSpecBandProps) {
+  const t = useTranslations("Chat");
+
   return (
     <StrataBand
       stratum="feed"
       gap={7}
       className="rounded-[14px] px-[15px] py-[13px]"
     >
-      <BandHeader stratum="feed" label="Vers la spec" labelSize={12} standalone />
+      <BandHeader
+        stratum="feed"
+        label={t("towardSpec.label")}
+        labelSize={12}
+        standalone
+      />
 
       {available ? (
         <>
           <span className="text-[12px] leading-[1.55] text-strata-feed-deep">
-            Cette décision mérite d&apos;entrer dans la spec.
+            {t("towardSpec.body")}
           </span>
           <PillButton
             variant="filled"
@@ -58,17 +66,17 @@ export function TowardSpecBand({
             icon={Plus}
             className="h-[28px] self-start px-3"
             pending={pending}
-            pendingLabel="Envoi…"
+            pendingLabel={t("towardSpec.proposePending")}
             onClick={onPropose}
           >
-            Proposer l&apos;ajout
+            {t("towardSpec.propose")}
           </PillButton>
           {specHref ? (
             /* `QuietLinkTone` has no `feed` member (next | live | land |
                muted) and the primitive set is frozen, so the linden band's
                link is the quiet muted variant rather than a fifth tone. */
             <QuietLink href={specHref} tone="muted" size={11.5}>
-              voir la spec →
+              {t("towardSpec.viewSpec")}
             </QuietLink>
           ) : null}
         </>

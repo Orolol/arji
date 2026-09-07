@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 /**
  * Frame 6a — the ticket, opened as a modal over a still-live desk.
  *
@@ -66,6 +66,7 @@ export function TicketOverlay({
   refreshTrigger = 0,
 }: TicketOverlayProps) {
   const locale = useLocale();
+  const t = useTranslations("Ticket");
   const [statusError, setStatusError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [commentError, setCommentError] = useState<string | null>(null);
@@ -279,7 +280,9 @@ export function TicketOverlay({
       setResolveMergeResumeSessionId(undefined);
     } catch (e) {
       reportConflict(e);
-      setMergeError(e instanceof Error ? e.message : "Failed to resolve merge");
+      setMergeError(
+        e instanceof Error ? e.message : t("overlay.resolveMergeError"),
+      );
     }
     setResolvingMerge(false);
   }
@@ -350,7 +353,7 @@ export function TicketOverlay({
       // The typed text stays in the field: losing a written reply to a
       // transient failure is worse than the failure.
       setCommentError(
-        error instanceof Error ? error.message : "Failed to add comment",
+        error instanceof Error ? error.message : t("overlay.commentError"),
       );
     }
     setSending(false);
@@ -428,7 +431,7 @@ export function TicketOverlay({
                 onClick={() => setDiffView(false)}
                 data-testid="ticket-diff-back"
               >
-                Ticket
+                {t("overlay.backToTicket")}
               </PillButton>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
@@ -544,7 +547,7 @@ export function TicketOverlay({
                 onClick={() => setDeleteDialogOpen(true)}
                 className="mt-auto self-end"
               >
-                Delete ticket
+                {t("overlay.delete")}
               </QuietDangerAction>
             </div>
           </div>
@@ -557,8 +560,8 @@ export function TicketOverlay({
           setResolveMergeOpen(next);
           if (!next) setResolveMergeResumeSessionId(undefined);
         }}
-        title="Resolve Merge Conflicts"
-        description="Launch an agent to resolve merge conflicts for this epic."
+        title={t("overlay.resolveMergeTitle")}
+        description={t("overlay.resolveMergeDescription")}
         projectId={projectId}
         agentProps={{
           value: resolveMergeAgentId,
@@ -578,7 +581,7 @@ export function TicketOverlay({
               }
             : undefined
         }
-        confirmLabel="Dispatch Agent"
+        confirmLabel={t("overlay.resolveMergeConfirm")}
         confirmIcon={<Wrench className="mr-1 h-4 w-4" />}
         busy={resolvingMerge}
         confirmDisabled={resolvingMerge || isRunning}
@@ -592,8 +595,8 @@ export function TicketOverlay({
         open={rebuildOpen}
         onOpenChange={setRebuildOpen}
         projectId={projectId}
-        title="Re-build this epic"
-        description="Dispatch a build agent on this epic's branch."
+        title={t("overlay.rebuildTitle")}
+        description={t("overlay.rebuildDescription")}
         epicId={epicId ?? undefined}
         initialAgentId={selectedAgentId}
         busy={dispatching}
@@ -605,13 +608,13 @@ export function TicketOverlay({
         open={backToDevOpen}
         onOpenChange={setBackToDevOpen}
         projectId={projectId}
-        title="Send back to dev"
-        description="Explain what needs to be fixed. This comment is required."
+        title={t("overlay.backToDevTitle")}
+        description={t("overlay.backToDevDescription")}
         epicId={epicId ?? undefined}
         initialAgentId={selectedAgentId}
         defaultComment={backToDevSeed}
         commentRequired
-        commentPlaceholder="Describe what needs to be fixed..."
+        commentPlaceholder={t("overlay.backToDevPlaceholder")}
         busy={dispatching}
         locked={dispatching || isRunning}
         onConfirm={handleDispatchDev}
@@ -619,9 +622,9 @@ export function TicketOverlay({
       <PermanentDeleteDialog
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
-        title="Delete Epic"
-        description="Permanently delete this epic and all related user stories."
-        confirmLabel="Confirm Delete"
+        title={t("overlay.deleteTitle")}
+        description={t("overlay.deleteDescription")}
+        confirmLabel={t("overlay.deleteConfirm")}
         deleting={deletingEpic}
         onConfirm={deleteEpic}
       />

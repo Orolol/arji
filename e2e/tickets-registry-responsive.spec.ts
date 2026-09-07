@@ -264,7 +264,7 @@ test.describe("the tickets registry on a phone", () => {
       ).toBeLessThanOrEqual(short.titleClientWidth + 1);
 
       // The column legend belongs to the table, and only to it.
-      const header = page.getByRole("columnheader", { name: "Titre" });
+      const header = page.getByRole("columnheader", { name: "Title" });
       if (viewport.shape === "table") {
         await expect(header, `${where}: the table lost its column header`).toBeVisible();
       } else {
@@ -295,7 +295,7 @@ test.describe("the tickets registry on a phone", () => {
       insert.run(`${project.id}-open`, project.id, LONG_TITLE, "ARJ-911", "todo", 3, 0, "2026-09-05T08:00:00Z");
       insert.run(`${project.id}-other`, project.id, "Autre ticket ouvert", "ARJ-912", "todo", 1, 1, "2026-09-05T07:00:00Z");
       // GROUP_PREVIEW.done is 3, so six shipped tickets guarantee the
-      // truncation line and its "tout montrer" link.
+      // truncation line and its "show all" link.
       for (let index = 0; index < 6; index++) {
         insert.run(
           `${project.id}-done-${index}`,
@@ -317,7 +317,7 @@ test.describe("the tickets registry on a phone", () => {
     // Two open + the first three shipped: the group preview, not the total.
     await expect(rows).toHaveCount(5);
 
-    // « tout montrer » — reachable, and it really expands.
+    // "show all" — reachable, and it really expands.
     const showAll = page.getByTestId("tickets-show-all");
     await expect(showAll).toBeVisible();
     const showAllBox = (await showAll.boundingBox())!;
@@ -356,7 +356,7 @@ test.describe("the tickets registry on a phone", () => {
     // `sort:` pill offers the same seven sorts.
     await page.getByRole("button", { name: /^sort:/ }).click();
     await page.getByTestId("tickets-sort-titre").click();
-    await expect(page.getByRole("button", { name: /^sort: titre/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^sort: title/ })).toBeVisible();
     await expect(page.getByRole("menu")).toHaveCount(0);
 
     await page.screenshot({

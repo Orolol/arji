@@ -1,0 +1,31 @@
+{
+  "log": {
+    "metaTailing": "{provider} · session #{id} · suit le flux",
+    "paneResponse": "Réponse"
+  },
+  "files": {
+    "inProgress": "en cours"
+  },
+  "worktree": {
+    "path": "{path} · isolé",
+    "upToDate": " · à jour",
+    "behind": " · {count} derrière"
+  },
+  "prompt": {
+    "label": "Prompt composé",
+    "seeExact": "voir le prompt exact →",
+    "chips": {
+      "spec": "spec projet",
+      "memory": "mémoire",
+      "documents": "docs cités",
+      "comments": "commentaires"
+    }
+  },
+  "chain": {
+    "label": "Ensuite",
+    "running": "{label} — en cours",
+    "stages": {
+      "landIfClean": "Land si review clean"
+    }
+  }
+}

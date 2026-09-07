@@ -20,6 +20,8 @@
  * under a separator rather than being silently lost.
  */
 
+import { useTranslations } from "next-intl";
+
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -44,6 +46,7 @@ export function StatusControl({
   onStatusChange,
   onPriorityChange,
 }: StatusControlProps) {
+  const t = useTranslations("Ticket");
   // "(current)" is plain sans, so it lives under the system's 11px floor —
   // the 9.5px exception is for uppercase tracked mono kickers only, which
   // this is not.
@@ -67,7 +70,7 @@ export function StatusControl({
   return (
     <span data-testid="ticket-status-control" className="ml-auto">
       <SelectPill label={currentStatusLabel} tone="ink" fill="card">
-        <DropdownMenuLabel>Status</DropdownMenuLabel>
+        <DropdownMenuLabel>{t("status.statusHeading")}</DropdownMenuLabel>
         {options.map((option) => (
           <DropdownMenuItem
             key={option.status}
@@ -82,7 +85,7 @@ export function StatusControl({
               <span>{option.label}</span>
               {option.isCurrent ? (
                 <span className="text-[11px] font-normal text-muted-foreground">
-                  (current)
+                  {t("status.current")}
                 </span>
               ) : null}
             </span>
@@ -90,7 +93,7 @@ export function StatusControl({
         ))}
 
         <DropdownMenuSeparator />
-        <DropdownMenuLabel>Priority</DropdownMenuLabel>
+        <DropdownMenuLabel>{t("status.priorityHeading")}</DropdownMenuLabel>
         {Object.entries(PRIORITY_LABELS).map(([value, label]) => (
           <DropdownMenuItem
             key={value}
@@ -100,7 +103,7 @@ export function StatusControl({
               <span>{label}</span>
               {Number(value) === priority ? (
                 <span className="text-[11px] font-normal text-muted-foreground">
-                  (current)
+                  {t("status.current")}
                 </span>
               ) : null}
             </span>

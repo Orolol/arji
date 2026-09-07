@@ -1,4 +1,68 @@
 {
+  "overlay": {
+    "dialogLabel": "Ticket",
+    "backToTicket": "Ticket",
+    "delete": "Delete ticket",
+    "resolveMergeTitle": "Resolve Merge Conflicts",
+    "resolveMergeDescription": "Launch an agent to resolve merge conflicts for this epic.",
+    "resolveMergeConfirm": "Dispatch Agent",
+    "resolveMergeError": "Failed to resolve merge",
+    "rebuildTitle": "Re-build this epic",
+    "rebuildDescription": "Dispatch a build agent on this epic's branch.",
+    "backToDevTitle": "Send back to dev",
+    "backToDevDescription": "Explain what needs to be fixed. This comment is required.",
+    "backToDevPlaceholder": "Describe what needs to be fixed...",
+    "deleteTitle": "Delete Epic",
+    "deleteDescription": "Permanently delete this epic and all related user stories.",
+    "deleteConfirm": "Confirm Delete",
+    "commentError": "Failed to add comment"
+  },
+  "header": {
+    "stop": "Stop",
+    "stopping": "Stop…",
+    "escHint": "esc",
+    "close": "Close ticket"
+  },
+  "pipeline": {
+    "label": "Pipeline"
+  },
+  "status": {
+    "statusHeading": "Status",
+    "priorityHeading": "Priority",
+    "current": "(current)"
+  },
+  "stories": {
+    "label": "User stories",
+    "meta": "{done}/{total} done",
+    "criteria": "{count} AC",
+    "open": "open →",
+    "gradedMet": "GRADED · MET",
+    "gradedPartial": "GRADED · PARTIAL",
+    "gradedMissed": "GRADED · MISSED"
+  },
+  "screenshots": {
+    "kicker": "{count, plural, one {Screenshot} other {Screenshots}}",
+    "open": "Open {fileName}"
+  },
+  "activity": {
+    "label": "What the agent is doing",
+    "openSession": "open full session →",
+    "expandGroup": "show",
+    "collapseGroup": "hide"
+  },
+  "agents": {
+    "label": "Agents",
+    "defaultAgent": "Default agent",
+    "review": "Review now",
+    "rebuild": "Re-build",
+    "grade": "Grade"
+  },
+  "dependencies": {
+    "label": "Dependencies",
+    "edit": "Edit",
+    "blocks": "BLOCKS",
+    "waitsOn": "WAITS ON"
+  },
   "git": {
     "label": "Git",
     "diffstat": "· {files} files · isolated worktree",
@@ -23,6 +87,8 @@
   },
   "comment": {
     "expand": "see all",
-    "collapse": "less"
+    "collapse": "less",
+    "you": "you",
+    "agent": "agent"
   }
 }

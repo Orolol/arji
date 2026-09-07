@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { RotateCcw } from "lucide-react";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { Mono, PillButton, SurfaceCard } from "@/components/piscine";
 import type { Conversation } from "@/hooks/useConversations";
@@ -50,6 +50,7 @@ export function ConversationRosterCard({
   );
   const shortName = project?.shortName?.toUpperCase() ?? "—";
   const locale = useLocale();
+  const t = useTranslations("Chat");
   // An unreadable timestamp is an em dash upstream of the join, never a guess.
   const age = formatRelative(conversation.createdAt, { locale, now }) || "—";
   const meta = `${shortName} · ${agentLabel} · ${age}`;
@@ -83,9 +84,7 @@ export function ConversationRosterCard({
       {active && ticketCount > 0 ? (
         // Never "0 tickets": an empty count is a line that does not exist.
         <span className="line-clamp-1 text-[12px] text-muted-foreground">
-          {`${ticketCount} ticket${ticketCount === 1 ? "" : "s"} créé${
-            ticketCount === 1 ? "" : "s"
-          } dans cette conversation`}
+          {t("roster.ticketsCreated", { count: ticketCount })}
         </span>
       ) : null}
 
@@ -101,13 +100,13 @@ export function ConversationRosterCard({
             // is the WORD, never a colour.
             <span data-testid="persistent-session-state">
               <Mono size={10} tone="muted">
-                {hot ? "session warm" : "session cold"}
+                {hot ? t("roster.sessionWarm") : t("roster.sessionCold")}
               </Mono>
             </span>
           ) : (
             <span data-testid="linked-session-state">
               <Mono size={10} tone="muted">
-                session linked
+                {t("roster.sessionLinked")}
               </Mono>
             </span>
           )}
@@ -120,11 +119,11 @@ export function ConversationRosterCard({
               outlineTone="neutral"
               iconOnly
               icon={RotateCcw}
-              aria-label="Restart persistent chat session"
+              aria-label={t("roster.restartSession")}
               className="ml-auto h-[24px] w-[24px]"
               onClick={onRestartPersistentSession}
             >
-              Restart persistent chat session
+              {t("roster.restartSession")}
             </PillButton>
           ) : null}
         </div>

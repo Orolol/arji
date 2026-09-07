@@ -26,6 +26,7 @@
 
 import * as React from "react";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
 import { TicketOverlay } from "@/components/ticket/TicketOverlay";
@@ -86,6 +87,7 @@ export function TicketOverlayProvider({
   children,
   renderPanel,
 }: TicketOverlayProviderProps) {
+  const t = useTranslations("Ticket");
   const [ticketId, setTicketId] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
 
@@ -141,7 +143,7 @@ export function TicketOverlayProvider({
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="Ticket"
+            aria-label={t("overlay.dialogLabel")}
             onClick={(event) => event.stopPropagation()}
             className={cn(
               "w-[min(1200px,92vw)] rounded-[20px] bg-background p-6",

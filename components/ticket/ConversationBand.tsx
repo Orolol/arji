@@ -16,6 +16,7 @@
  */
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { Send } from "lucide-react";
 
 import {
@@ -44,6 +45,8 @@ export function ConversationBand({
   sending,
   error,
 }: ConversationBandProps) {
+  const t = useTranslations("Ticket");
+
   return (
     <StrataBand
       stratum="you"
@@ -52,7 +55,7 @@ export function ConversationBand({
       className="shrink-0 pb-[14px]"
     >
       <BandHeader
-        label="Conversation"
+        label={t("conversation.label")}
         stratum="you"
         className="gap-[10px]"
         meta={comments.length > 0 ? String(comments.length) : undefined}
@@ -80,8 +83,8 @@ export function ConversationBand({
           onChange={onDraftChange}
           onSubmit={onSend}
           disabled={sending}
-          placeholder="Répondre — @ pour citer un doc…"
-          aria-label="Répondre"
+          placeholder={t("conversation.placeholder")}
+          aria-label={t("conversation.replyLabel")}
           data-testid="ticket-reply-input"
         />
         <PillButton
@@ -90,10 +93,10 @@ export function ConversationBand({
           icon={Send}
           onClick={onSend}
           pending={sending}
-          pendingLabel="Envoi…"
+          pendingLabel={t("conversation.sending")}
           data-testid="ticket-reply-send"
         >
-          Send
+          {t("conversation.send")}
         </PillButton>
       </div>
     </StrataBand>

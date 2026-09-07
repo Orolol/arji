@@ -1,6 +1,7 @@
 "use client";
 
 import { GitMerge, RefreshCw } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Mono, PillButton } from "@/components/piscine";
 import { useGitStatus } from "@/hooks/useGitStatus";
@@ -37,6 +38,7 @@ export function ReleaseHeaderCluster({
   branch,
   enabled,
 }: ReleaseHeaderClusterProps) {
+  const t = useTranslations("Releases");
   const { ahead, loading, error, refresh, push, pushing } = useGitStatus(
     projectId,
     branch,
@@ -53,10 +55,12 @@ export function ReleaseHeaderCluster({
   // meaningless is worse than an absent cluster.
   if (!enabled) return null;
 
+  // The ` · ` is frame furniture, so it stays inline; the clause it joins is
+  // an ICU plural in the catalogue rather than a bespoke ternary here.
   const worktreeClause =
     worktreeCount === null
       ? ""
-      : ` · ${worktreeCount} ${worktreeCount === 1 ? "worktree" : "worktrees"}`;
+      : ` · ${t("controls.worktrees", { count: worktreeCount })}`;
 
   return (
     <div
@@ -72,7 +76,7 @@ export function ReleaseHeaderCluster({
           </Mono>
         ) : (
           <Mono size={11} tone="muted">
-            {`${branch} · ↑ ${ahead} to push${worktreeClause}`}
+            {`${t("controls.repoLine", { branch, ahead: String(ahead) })}${worktreeClause}`}
           </Mono>
         )}
       </span>
@@ -92,7 +96,7 @@ export function ReleaseHeaderCluster({
           loading && "[&_svg]:animate-spin motion-reduce:[&_svg]:animate-none",
         )}
       >
-        Fetch
+        {t("controls.fetch")}
       </PillButton>
 
       <PillButton
@@ -101,11 +105,11 @@ export function ReleaseHeaderCluster({
         icon={GitMerge}
         disabled={pushing || ahead === 0}
         pending={pushing}
-        pendingLabel="Pushing…"
+        pendingLabel={t("controls.pushing")}
         onClick={() => void push()}
         data-testid="release-push-button"
       >
-        {`Push ${branch}`}
+        {t("controls.push", { branch })}
       </PillButton>
     </div>
   );

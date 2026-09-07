@@ -37,12 +37,13 @@ import {
   selectionForConversation,
 } from "@/components/chat-page/agent-selection";
 import {
-  AGENT_SELECT_LOADING_LABEL,
+  AGENT_SELECT_LOADING_LABEL_KEY,
   AgentSelectPill,
-  DEFAULT_AGENT_LABEL,
+  DEFAULT_AGENT_LABEL_KEY,
   type AgentSelectMode,
   type AgentSelection,
 } from "@/components/shared/AgentSelectPill";
+import { catalogueValue } from "@/lib/i18n";
 import { ChatWorkspaceHeader } from "@/components/chat/ChatWorkspaceHeader";
 import { ChatComposer } from "@/components/chat-page/ChatComposer";
 import { DeskComposer } from "@/components/desk/DeskComposer";
@@ -54,6 +55,14 @@ import type { Conversation } from "@/hooks/useConversations";
 import type { DeskProject } from "@/lib/control-desk/types";
 
 const NOTHING_SELECTED: AgentSelection = { namedAgentId: null, provider: null };
+
+// The pill exports catalogue KEY REFERENCES; these are the English words the
+// suite runs against, resolved once from the same catalogue the mock renders.
+const DEFAULT_AGENT_LABEL = catalogueValue("en", DEFAULT_AGENT_LABEL_KEY);
+const AGENT_SELECT_LOADING_LABEL = catalogueValue(
+  "en",
+  AGENT_SELECT_LOADING_LABEL_KEY,
+);
 
 function renderPill(
   mode: AgentSelectMode,

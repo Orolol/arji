@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,6 +35,7 @@ export function ImportPreview({
   onCancel,
 }: ImportPreviewProps) {
   const [editData, setEditData] = useState<ImportData>(structuredClone(data));
+  const t = useTranslations("Import");
 
   function updateEpic(index: number, field: string, value: string) {
     const updated = structuredClone(editData);
@@ -65,7 +67,7 @@ export function ImportPreview({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold mb-2">Project</h2>
+        <h2 className="text-lg font-semibold mb-2">{t("preview.project")}</h2>
         <Input
           value={editData.project.name}
           onChange={(e) =>
@@ -90,7 +92,7 @@ export function ImportPreview({
 
       <div>
         <h2 className="text-lg font-semibold mb-3">
-          Epics ({editData.epics.length})
+          {t("preview.epics", { count: editData.epics.length })}
         </h2>
         <div className="space-y-3">
           {editData.epics.map((epic, ei) => {
@@ -156,17 +158,17 @@ export function ImportPreview({
       <div className="flex gap-2">
         <Button onClick={() => onValidate(editData)} disabled={busy || locked}>
           {busy
-            ? "Importing..."
+            ? t("preview.importing")
             : locked
-              ? "Already imported"
-              : "Validate & Import"}
+              ? t("preview.alreadyImported")
+              : t("preview.validate")}
         </Button>
         <Button
           variant="outline"
           onClick={onCancel}
           disabled={cancelDisabled}
         >
-          Cancel
+          {t("preview.cancel")}
         </Button>
       </div>
     </div>

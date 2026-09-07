@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Infinity as InfinityIcon, Loader2, TriangleAlert, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -96,6 +97,7 @@ export function AutoModeDialog({
   onSaved,
   onError,
 }: AutoModeDialogProps) {
+  const t = useTranslations("AutoMode");
   const [status, setStatus] = useState<AutoModeStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -141,13 +143,13 @@ export function AutoModeDialog({
         const body = await r.json().catch(() => null);
         if (cancelled) return;
         if (!r.ok || !body?.data) {
-          setError(body?.error || "Failed to load auto mode settings");
+          setError(body?.error || t("errors.load"));
           return;
         }
         applyStatus(body.data as AutoModeStatus, defaultNamedAgentId);
       })
       .catch(() => {
-        if (!cancelled) setError("Failed to load auto mode settings");
+        if (!cancelled) setError(t("errors.load"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -155,7 +157,7 @@ export function AutoModeDialog({
     return () => {
       cancelled = true;
     };
-  }, [projectId, open, applyStatus, defaultNamedAgentId]);
+  }, [projectId, open, applyStatus, defaultNamedAgentId, t]);
 
   const buildBudget =
     parseAutoModeConcurrency(buildConcurrency) ?? DEFAULT_AUTO_BUILD_CONCURRENCY;
@@ -185,7 +187,7 @@ export function AutoModeDialog({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.error) {
-        const message = data?.error || "Failed to save auto mode settings";
+        const message = data?.error || t("errors.save");
         setError(message);
         onError?.(message);
         return;
@@ -194,7 +196,7 @@ export function AutoModeDialog({
       onSaved?.(data.data as AutoModeStatus);
       onOpenChange(false);
     } catch {
-      const message = "Failed to save auto mode settings";
+      const message = t("errors.save");
       setError(message);
       onError?.(message);
     } finally {
@@ -211,19 +213,17 @@ export function AutoModeDialog({
         <DialogHeader className="flex-row items-center gap-[10px] space-y-0 border-b border-border-soft px-[24px] py-[20px] text-left">
           <InfinityIcon className="h-[17px] w-[17px] shrink-0" />
           <DialogTitle className="text-[16px] font-semibold leading-none">
-            Full Auto Mode
+            {t("dialog.title")}
           </DialogTitle>
           <DialogClose className="ml-auto rounded-[6px] text-meta transition-opacity hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
             <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t("dialog.close")}</span>
           </DialogClose>
         </DialogHeader>
 
         <div className="flex flex-col gap-[20px] px-[24px] py-[22px]">
           <DialogDescription className="text-[13.5px] leading-[1.6] text-muted-foreground">
-            Keeps building every To&nbsp;Do ticket, reviewing everything in
-            Review, and merging each ticket as soon as its review comes back
-            clean — continuously, until you switch it off.
+            {t("dialog.description")}
           </DialogDescription>
 
           <div className="flex flex-col gap-[8px] rounded-[11px] bg-band px-[16px] py-[14px]">
@@ -236,41 +236,47 @@ export function AutoModeDialog({
                 onChange={(e) => setEnabled(e.target.checked)}
                 className="h-3.5 w-3.5 rounded border-border"
               />
-              Run continuously on this project
+              {t("dialog.runContinuously")}
             </label>
             <span
               className="text-[12.5px] text-muted-foreground"
               data-testid="auto-mode-candidates"
             >
               {loading
-                ? "Loading…"
+                ? t("dialog.loading")
                 : status
-                  ? `${status.candidates.build} to build · ${status.candidates.review} to review · ${status.candidates.merge} ready to merge`
+                  ? t("dialog.candidates", {
+                      build: status.candidates.build,
+                      review: status.candidates.review,
+                      merge: status.candidates.merge,
+                    })
                   : "—"}
             </span>
             {status && (status.inFlight.build > 0 || status.inFlight.review > 0) && (
               <span className="text-[11.5px] text-meta">
-                Right now: {status.inFlight.build} building ·{" "}
-                {status.inFlight.review} reviewing
+                {t("dialog.inFlight", {
+                  build: status.inFlight.build,
+                  review: status.inFlight.review,
+                })}
               </span>
             )}
           </div>
 
           <div className="flex flex-col">
-            <OptionRow label="Build agent">
+            <OptionRow label={t("options.buildAgent")}>
               <NamedAgentSelect
                 value={buildAgent}
                 onChange={setBuildAgent}
-                aria-label="Build agent"
+                aria-label={t("options.buildAgent")}
                 className="h-[28px] w-[186px] text-[13px]"
                 dispatchRole="build"
               />
             </OptionRow>
 
             <OptionRow
-              label="Parallel builds"
+              label={t("options.parallelBuilds")}
               htmlFor="auto-mode-build-concurrency"
-              hint="0 pauses builds without stopping reviews."
+              hint={t("options.parallelBuildsHint")}
             >
               <Input
                 id="auto-mode-build-concurrency"
@@ -284,20 +290,20 @@ export function AutoModeDialog({
               />
             </OptionRow>
 
-            <OptionRow label="Review agent">
+            <OptionRow label={t("options.reviewAgent")}>
               <NamedAgentSelect
                 value={reviewAgent}
                 onChange={setReviewAgent}
-                aria-label="Review agent"
+                aria-label={t("options.reviewAgent")}
                 className="h-[28px] w-[186px] text-[13px]"
                 dispatchRole="review"
               />
             </OptionRow>
 
             <OptionRow
-              label="Parallel reviews"
+              label={t("options.parallelReviews")}
               htmlFor="auto-mode-review-concurrency"
-              hint="Reviews always run at epic level — the branch is what merges."
+              hint={t("options.parallelReviewsHint")}
             >
               <Input
                 id="auto-mode-review-concurrency"
@@ -312,14 +318,14 @@ export function AutoModeDialog({
             </OptionRow>
 
             <OptionRow
-              label="Pick the agent by track record"
-              hint="Only for roles left empty above: dispatches the named agent with the best 30-day success rate, once it has at least 5 finished runs for that role."
+              label={t("options.smartDispatch")}
+              hint={t("options.smartDispatchHint")}
             >
               <input
                 type="checkbox"
                 role="switch"
                 data-testid="auto-mode-smart-dispatch"
-                aria-label="Pick the agent by track record"
+                aria-label={t("options.smartDispatch")}
                 checked={smartDispatch}
                 onChange={(e) => setSmartDispatch(e.target.checked)}
                 className="h-3.5 w-3.5 rounded border-border"
@@ -327,15 +333,15 @@ export function AutoModeDialog({
             </OptionRow>
 
             <OptionRow
-              label="Independent second opinion"
-              hint="Before merge, spends one review slot on a short read-only pass by a provider different from both the builder and reviewer."
+              label={t("options.secondOpinion")}
+              hint={t("options.secondOpinionHint")}
               last
             >
               <input
                 type="checkbox"
                 role="switch"
                 data-testid="auto-mode-second-opinion"
-                aria-label="Independent second opinion"
+                aria-label={t("options.secondOpinion")}
                 checked={secondOpinion}
                 onChange={(e) => setSecondOpinion(e.target.checked)}
                 className="h-3.5 w-3.5 rounded border-border"
@@ -352,11 +358,13 @@ export function AutoModeDialog({
             >
               <TriangleAlert className="h-4 w-4 shrink-0 text-priority-yellow" />
               <span>
-                {buildBudget} builds + {reviewBudget} reviews exceed this
-                project&apos;s <strong>{schedulerBudget} parallel agents</strong>{" "}
-                budget. The extra work will sit in the queue instead of running —
-                raise <em>Max concurrent agents</em> in Settings if you want it
-                to run in parallel.
+                {t.rich("warning.budget", {
+                  builds: buildBudget,
+                  reviews: reviewBudget,
+                  budget: schedulerBudget,
+                  strong: (chunks) => <strong>{chunks}</strong>,
+                  em: (chunks) => <em>{chunks}</em>,
+                })}
               </span>
             </div>
           )}
@@ -367,11 +375,9 @@ export function AutoModeDialog({
           >
             <TriangleAlert className="h-4 w-4 shrink-0 text-priority-yellow" />
             <span>
-              Agents run <strong>unattended</strong>: they build, review and{" "}
-              <strong>merge into main</strong> without anyone watching. A ticket
-              whose review left open findings is never merged, and a merge
-              conflict is handed to a resolution agent — if that fails too, the
-              ticket is parked and you get a notification.
+              {t.rich("warning.unattended", {
+                strong: (chunks) => <strong>{chunks}</strong>,
+              })}
             </span>
           </div>
 
@@ -395,7 +401,7 @@ export function AutoModeDialog({
             className="h-[31px] rounded-[8px] px-[12px] text-[13px]"
             onClick={() => onOpenChange(false)}
           >
-            Cancel
+            {t("dialog.cancel")}
           </Button>
           <Button
             onClick={handleSave}
@@ -409,7 +415,7 @@ export function AutoModeDialog({
             ) : (
               <InfinityIcon className="h-4 w-4 mr-1" />
             )}
-            {enabled ? "Start auto mode" : "Save"}
+            {enabled ? t("dialog.start") : t("dialog.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

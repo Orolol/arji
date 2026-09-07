@@ -16,6 +16,7 @@
  * action the message points at, not in a global toast.
  */
 
+import { useTranslations } from "next-intl";
 import { ArrowUpRight, FileDiff, GitMerge, GitPullRequest, Wrench } from "lucide-react";
 
 import {
@@ -75,6 +76,7 @@ export function GitBand({
   resolvingMerge,
   isRunning,
 }: GitBandProps) {
+  const t = useTranslations("Ticket");
   const hasDiff = diffstat.files !== null;
 
   return (
@@ -84,7 +86,7 @@ export function GitBand({
       gap={8}
       className="shrink-0"
     >
-      <BandHeader label="Git" stratum="land" standalone className="gap-[10px]" />
+      <BandHeader label={t("git.label")} stratum="land" standalone className="gap-[10px]" />
 
       {branchName ? (
         <>
@@ -106,11 +108,11 @@ export function GitBand({
                     removed={diffstat.removed}
                     size={11}
                   />{" "}
-                  · {diffstat.files} files · worktree isolé
+                  {t("git.diffstat", { files: String(diffstat.files) })}
                 </>
               ) : (
                 // Unavailable numerals are em-dashes, never zeros.
-                <>— · — files · worktree isolé</>
+                <>{t("git.diffstatUnknown")}</>
               )}
             </Mono>
           </div>
@@ -131,7 +133,7 @@ export function GitBand({
                   })}
                 >
                   <ArrowUpRight size={12} aria-hidden="true" />
-                  {`PR #${pr.number}`}
+                  {t("git.prLink", { number: String(pr.number) })}
                 </a>
               ) : (
                 <PillButton
@@ -140,10 +142,10 @@ export function GitBand({
                   icon={GitPullRequest}
                   onClick={onCreatePr}
                   pending={prLoading}
-                  pendingLabel="Création…"
+                  pendingLabel={t("git.creatingPr")}
                   data-testid="ticket-create-pr"
                 >
-                  Create PR
+                  {t("git.createPr")}
                 </PillButton>
               )
             ) : null}
@@ -156,7 +158,7 @@ export function GitBand({
               onClick={onOpenDiff}
               data-testid="ticket-open-diff"
             >
-              Diff
+              {t("git.diff")}
             </PillButton>
 
             {githubConfigured && pr ? (
@@ -166,10 +168,10 @@ export function GitBand({
                 size="sm"
                 onClick={onSyncPr}
                 pending={prLoading}
-                pendingLabel="Sync…"
+                pendingLabel={t("git.syncing")}
                 data-testid="ticket-sync-pr"
               >
-                Sync
+                {t("git.sync")}
               </PillButton>
             ) : null}
           </div>
@@ -190,17 +192,17 @@ export function GitBand({
                 icon={GitMerge}
                 onClick={onMerge}
                 pending={merging}
-                pendingLabel="Merge…"
+                pendingLabel={t("git.merging")}
                 data-testid="ticket-merge"
               >
-                Merge into main
+                {t("git.merge")}
               </PillButton>
             </div>
           ) : null}
 
           {mergeError ? (
             <div className="flex flex-col gap-2" data-testid="ticket-merge-error">
-              {mergeConflict ? <Stamp tone="conflict">CONFLICT</Stamp> : null}
+              {mergeConflict ? <Stamp tone="conflict">{t("git.conflict")}</Stamp> : null}
               <p className="m-0 text-[12px] leading-[1.5] text-strata-you-deep">
                 {mergeError}
               </p>
@@ -224,7 +226,7 @@ export function GitBand({
                     disabled={resolvingMerge || isRunning}
                     data-testid="ticket-resolve-merge"
                   >
-                    Resolve with agent
+                    {t("git.resolveWithAgent")}
                   </PillButton>
                 </div>
               ) : null}

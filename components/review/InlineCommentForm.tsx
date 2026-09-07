@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Send, X } from "lucide-react";
@@ -18,6 +19,7 @@ export function InlineCommentForm({
 }: InlineCommentFormProps) {
   const [value, setValue] = useState(initialValue);
   const [submitting, setSubmitting] = useState(false);
+  const t = useTranslations("Review");
 
   async function handleSubmit() {
     if (!value.trim() || submitting) return;
@@ -44,7 +46,7 @@ export function InlineCommentForm({
             onCancel();
           }
         }}
-        placeholder="Leave a review comment..."
+        placeholder={t("commentForm.placeholder")}
         rows={2}
         className="text-xs resize-none"
         autoFocus
@@ -57,7 +59,7 @@ export function InlineCommentForm({
           className="h-7 text-xs"
         >
           <X className="h-3 w-3 mr-1" />
-          Cancel
+          {t("commentForm.cancel")}
         </Button>
         <Button
           size="sm"
@@ -70,7 +72,7 @@ export function InlineCommentForm({
           ) : (
             <Send className="h-3 w-3 mr-1" />
           )}
-          Comment
+          {t("commentForm.submit")}
         </Button>
       </div>
     </div>

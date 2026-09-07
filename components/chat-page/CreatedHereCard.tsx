@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import { BandHeader, IdentityChip, Mono, StrataBand } from "@/components/piscine";
 import type { ProjectTone } from "@/lib/piscine/tokens";
@@ -37,6 +38,8 @@ export function CreatedHereCard({
   tone,
   onOpenTicket,
 }: CreatedHereCardProps) {
+  const t = useTranslations("Chat");
+
   return (
     <StrataBand
       stratum="card"
@@ -45,7 +48,7 @@ export function CreatedHereCard({
     >
       <BandHeader
         stratum="card"
-        label="Créé dans ce chat"
+        label={t("createdHere.label")}
         labelSize={12}
         standalone
       />

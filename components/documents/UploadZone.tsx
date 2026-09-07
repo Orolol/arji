@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useState, useCallback } from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -10,6 +11,7 @@ interface UploadZoneProps {
 }
 
 export function UploadZone({ projectId, onUploaded }: UploadZoneProps) {
+  const t = useTranslations("Documents");
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +30,7 @@ export function UploadZone({ projectId, onUploaded }: UploadZoneProps) {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           setError(
-            body.error || `Failed to upload "${file.name}" (HTTP ${res.status})`
+            body.error || t("errors.uploadFailed", { name: file.name, status: res.status })
           );
           break;
         }
@@ -36,7 +38,7 @@ export function UploadZone({ projectId, onUploaded }: UploadZoneProps) {
       setUploading(false);
       onUploaded();
     },
-    [projectId, onUploaded]
+    [projectId, onUploaded, t]
   );
 
   return (
@@ -59,15 +61,15 @@ export function UploadZone({ projectId, onUploaded }: UploadZoneProps) {
       {uploading ? (
         <div className="flex items-center gap-2 text-[13.5px] text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          <span>Uploading...</span>
+          <span>{t("upload.uploading")}</span>
         </div>
       ) : (
         <label className="flex cursor-pointer flex-col gap-[8px]">
           <span className="text-[13.5px] font-medium text-primary">
-            Drag &amp; drop files here, or click to select
+            {t("upload.prompt")}
           </span>
           <span className="text-[12.5px] text-muted-foreground">
-            PDF, DOCX, MD, TXT, and images
+            {t("upload.formats")}
           </span>
           <input
             type="file"

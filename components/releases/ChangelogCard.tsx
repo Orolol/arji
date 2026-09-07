@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 
 import { FieldKicker, Mono, SurfaceCard } from "@/components/piscine";
 
@@ -27,6 +28,7 @@ const TOP_HEADING = /^#\s/;
  * returns verbatim the day a PATCH route lands.
  */
 export function ChangelogCard({ caption, right, markdown }: ChangelogCardProps) {
+  const t = useTranslations("Releases");
   const empty = markdown === null || markdown.trim() === "";
 
   // Everything after a heading whose text mentions "notes" is dimmed, the way
@@ -72,7 +74,7 @@ export function ChangelogCard({ caption, right, markdown }: ChangelogCardProps) 
       >
         {empty ? (
           <Mono size={11} tone="muted">
-            No changelog generated for this release.
+            {t("changelogCard.empty")}
           </Mono>
         ) : (
           lines

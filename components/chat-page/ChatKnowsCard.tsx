@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import { Mono } from "@/components/piscine";
 
@@ -11,16 +12,18 @@ import { Mono } from "@/components/piscine";
  * bottom of the column.
  */
 export function ChatKnowsCard() {
+  const t = useTranslations("Chat");
+
   return (
     <div
       data-testid="chat-knows-card"
       className="mt-auto flex shrink-0 flex-col gap-[5px] rounded-[14px] bg-muted px-[15px] py-[12px]"
     >
       <Mono size={10} weight={700} uppercase tracking={0.08} tone="muted">
-        LE CHAT SAIT
+        {t("roster.knows.label")}
       </Mono>
       <span className="text-[12px] leading-[1.5] text-muted-foreground">
-        spec du projet, mémoire, tickets ouverts — cite un doc avec{" "}
+        {t("roster.knows.body")}{" "}
         <Mono size={11} tone="muted">
           @
         </Mono>

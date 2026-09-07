@@ -1,26 +1,38 @@
 "use client";
 
-const REVIEW_TYPES = [
+import { useTranslations } from "next-intl";
+
+import type { TranslationKey } from "@/lib/i18n/catalogue";
+
+/**
+ * A module-scope copy table, so it holds catalogue KEY REFERENCES and the
+ * picker resolves them at render with the namespace-less translator
+ * (`lib/i18n/catalogue.ts`, pattern 3).
+ */
+const REVIEW_TYPES: ReadonlyArray<{
+  value: string;
+  labelKey: TranslationKey;
+  descriptionKey: TranslationKey;
+}> = [
   {
     value: "feature_review",
-    label: "Feature Review",
-    description:
-      "Verifies feature completeness against acceptance criteria using all available tools",
+    labelKey: "Shared.reviewTypes.featureReview.label",
+    descriptionKey: "Shared.reviewTypes.featureReview.description",
   },
   {
     value: "security",
-    label: "Security",
-    description: "OWASP top 10, input validation, auth/authz, secrets exposure",
+    labelKey: "Shared.reviewTypes.security.label",
+    descriptionKey: "Shared.reviewTypes.security.description",
   },
   {
     value: "code_review",
-    label: "Code Review",
-    description: "Readability, DRY, error handling, performance, naming",
+    labelKey: "Shared.reviewTypes.codeReview.label",
+    descriptionKey: "Shared.reviewTypes.codeReview.description",
   },
   {
     value: "compliance",
-    label: "Compliance / Accessibility",
-    description: "WCAG accessibility, i18n readiness, license compliance",
+    labelKey: "Shared.reviewTypes.compliance.label",
+    descriptionKey: "Shared.reviewTypes.compliance.description",
   },
 ];
 
@@ -31,6 +43,10 @@ interface ReviewTypesPickerProps {
 
 /** Checkbox cards for choosing which agent review types to dispatch. */
 export function ReviewTypesPicker({ selected, onToggle }: ReviewTypesPickerProps) {
+  // The table above holds full dotted paths, so it resolves through the
+  // namespace-less translator.
+  const t = useTranslations();
+
   return (
     <div className="space-y-3">
       {REVIEW_TYPES.map((type) => (
@@ -45,8 +61,10 @@ export function ReviewTypesPicker({ selected, onToggle }: ReviewTypesPickerProps
             className="mt-0.5 h-4 w-4 rounded border-border"
           />
           <div>
-            <p className="text-sm font-medium">{type.label}</p>
-            <p className="text-xs text-muted-foreground">{type.description}</p>
+            <p className="text-sm font-medium">{t(type.labelKey)}</p>
+            <p className="text-xs text-muted-foreground">
+              {t(type.descriptionKey)}
+            </p>
           </div>
         </label>
       ))}

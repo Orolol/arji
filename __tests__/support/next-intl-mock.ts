@@ -37,9 +37,18 @@ export function resetTestUiLocale(): void {
 /**
  * The overrides laid over the real module. `actual` supplies
  * `createTranslator` / `createFormatter`, which are pure and context-free.
+ *
+ * ONE INSTANCE PER (locale, namespace), which is not an optimisation: the real
+ * hooks memoise (use-intl wraps `createBaseTranslator` and `createFormatter`
+ * in `useMemo`), so a component may legitimately list `t` among a
+ * `useCallback`/`useEffect` dependencies — several already do. A stand-in that
+ * minted a fresh function on every render made those dependencies change every
+ * render, and an effect calling such a callback looped until React's
+ * "Maximum update depth exceeded". That was the mock's identity churn, never
+ * the component's logic.
  */
 export function buildNextIntlMock(actual: ActualNextIntl) {
-  const translator = (namespace?: string) =>
+  const create = (namespace?: string) =>
     actual.createTranslator({
       locale: intlTestState.locale,
       messages: messagesFor(intlTestState.locale),
@@ -51,7 +60,26 @@ export function buildNextIntlMock(actual: ActualNextIntl) {
       ...(namespace ? { namespace: namespace as never } : {}),
     });
 
-  const formatter = () => actual.createFormatter({ locale: intlTestState.locale });
+  const translators = new Map<string, ReturnType<typeof create>>();
+  const translator = (namespace?: string) => {
+    const cacheKey = `${intlTestState.locale}|${namespace ?? ""}`;
+    let cached = translators.get(cacheKey);
+    if (!cached) {
+      cached = create(namespace);
+      translators.set(cacheKey, cached);
+    }
+    return cached;
+  };
+
+  const formatters = new Map<UiLocale, ReturnType<typeof actual.createFormatter>>();
+  const formatter = () => {
+    let cached = formatters.get(intlTestState.locale);
+    if (!cached) {
+      cached = actual.createFormatter({ locale: intlTestState.locale });
+      formatters.set(intlTestState.locale, cached);
+    }
+    return cached;
+  };
 
   return {
     useTranslations: (namespace?: string) => translator(namespace),

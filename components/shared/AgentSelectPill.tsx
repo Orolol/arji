@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import { SelectPill } from "@/components/piscine";
 import {
@@ -17,6 +18,7 @@ import {
   PROVIDER_OPTIONS,
   type ChatModeProvider,
 } from "@/lib/agent-config/constants";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 
 /**
  * The one agent picker. Three menus used to answer "who runs this?" — the
@@ -166,8 +168,16 @@ function checkedValue(selection: AgentSelection): string {
   return DEFAULT_AGENT_VALUE;
 }
 
-export const DEFAULT_AGENT_LABEL = "Default agent";
-export const AGENT_SELECT_LOADING_LABEL = "Loading…";
+/**
+ * The two labels the pill draws for itself rather than reading off an agent
+ * row. Exported as catalogue KEY REFERENCES (`lib/i18n/catalogue.ts`, pattern
+ * 3) so the trigger and the menu item cannot drift apart, and so a test can
+ * assert on the same string the menu resolves.
+ */
+export const DEFAULT_AGENT_LABEL_KEY: TranslationKey =
+  "Shared.agentSelectPill.defaultAgent";
+export const AGENT_SELECT_LOADING_LABEL_KEY: TranslationKey =
+  "Shared.agentSelectPill.loading";
 
 /** Label of a provider, tolerating a legacy value stored before a cleanup. */
 function providerLabel(provider: AgentSelection["provider"]): string | null {
@@ -183,6 +193,10 @@ export function AgentSelectPill({
   className,
   testId = "chat-agent-select",
 }: AgentSelectPillProps) {
+  const t = useTranslations("Shared");
+  // The two exported labels above are full dotted paths, so they resolve
+  // through the namespace-less translator.
+  const tKey = useTranslations();
   const { agents, loading } = useNamedAgentsList();
   const safeAgents: NamedAgentOption[] = Array.isArray(agents) ? agents : [];
 
@@ -199,9 +213,9 @@ export function AgentSelectPill({
     // The name lives in a list that has not landed yet — say so rather than
     // flashing the provider underneath and then swapping it.
     (loading && selection.namedAgentId
-      ? AGENT_SELECT_LOADING_LABEL
+      ? tKey(AGENT_SELECT_LOADING_LABEL_KEY)
       : (providerLabel(selection.provider) ??
-        (mode === "dispatch" ? DEFAULT_AGENT_LABEL : "—")));
+        (mode === "dispatch" ? tKey(DEFAULT_AGENT_LABEL_KEY) : "—")));
 
   const agentItems = safeAgents.map((agent) => (
     <DropdownMenuRadioItem
@@ -237,7 +251,7 @@ export function AgentSelectPill({
             data-testid="chat-option-default-agent"
             onSelect={() => onSelect({ namedAgentId: null, provider: null })}
           >
-            {DEFAULT_AGENT_LABEL}
+            {tKey(DEFAULT_AGENT_LABEL_KEY)}
           </DropdownMenuRadioItem>
           {agentItems.length > 0 ? (
             <>
@@ -249,7 +263,7 @@ export function AgentSelectPill({
       ) : (
         <>
           <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-            Direct API
+            {t("agentSelectPill.directApi")}
           </DropdownMenuLabel>
           <DropdownMenuRadioItem
             value={providerValue(OPENAI_COMPATIBLE_PROVIDER)}
@@ -268,7 +282,7 @@ export function AgentSelectPill({
             <>
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-                Named Agents
+                {t("agentSelectPill.namedAgents")}
               </DropdownMenuLabel>
               {agentItems}
             </>
@@ -276,7 +290,7 @@ export function AgentSelectPill({
 
           <DropdownMenuSeparator />
           <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-            Persistent CLI
+            {t("agentSelectPill.persistentCli")}
           </DropdownMenuLabel>
           {PERSISTENT_CHAT_PROVIDER_OPTIONS.map((provider) => (
             <DropdownMenuRadioItem
@@ -291,7 +305,7 @@ export function AgentSelectPill({
 
           <DropdownMenuSeparator />
           <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-            CLI Providers
+            {t("agentSelectPill.cliProviders")}
           </DropdownMenuLabel>
           {PROVIDER_OPTIONS.map((provider) => (
             <DropdownMenuRadioItem
@@ -300,7 +314,9 @@ export function AgentSelectPill({
               data-testid={`chat-option-provider-${provider}`}
               onSelect={() => onSelect({ namedAgentId: null, provider })}
             >
-              {`${PROVIDER_LABELS[provider]} (CLI)`}
+              {t("agentSelectPill.cliProvider", {
+                label: PROVIDER_LABELS[provider],
+              })}
             </DropdownMenuRadioItem>
           ))}
         </>

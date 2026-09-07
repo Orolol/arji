@@ -22,6 +22,7 @@
  */
 
 import { ClipboardCheck, Hammer, Search } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
@@ -57,14 +58,16 @@ export function AgentsBand({
   onGrade,
   locked,
 }: AgentsBandProps) {
+  const t = useTranslations("Ticket");
   const selected = agents.find((agent) => agent.id === selectedAgentId);
   // Em-dash, never a fabricated default name.
-  const label = selected?.name ?? (agents.length > 0 ? "Default agent" : "—");
+  const label =
+    selected?.name ?? (agents.length > 0 ? t("agents.defaultAgent") : "—");
 
   return (
     <StrataBand stratum="feed" density="rail" gap={8} className="shrink-0">
       <BandHeader
-        label="Agents"
+        label={t("agents.label")}
         stratum="feed"
         standalone
         className="gap-[10px]"
@@ -78,7 +81,7 @@ export function AgentsBand({
           disabled={agents.length === 0}
         >
           <DropdownMenuItem onSelect={() => onSelectAgent(null)}>
-            Default agent
+            {t("agents.defaultAgent")}
           </DropdownMenuItem>
           {agents.map((agent) => (
             <DropdownMenuItem
@@ -101,7 +104,7 @@ export function AgentsBand({
           disabled={locked}
           data-testid="ticket-review-now"
         >
-          Review now
+          {t("agents.review")}
         </PillButton>
         <PillButton
           variant="outline"
@@ -112,7 +115,7 @@ export function AgentsBand({
           disabled={locked}
           data-testid="ticket-rebuild"
         >
-          Re-build
+          {t("agents.rebuild")}
         </PillButton>
         {onGrade ? (
           <PillButton
@@ -124,7 +127,7 @@ export function AgentsBand({
             disabled={locked}
             data-testid="ticket-grade"
           >
-            Grade
+            {t("agents.grade")}
           </PillButton>
         ) : null}
       </div>

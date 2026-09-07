@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   ChevronDown,
   ChevronRight,
@@ -14,7 +15,7 @@ import {
 
 import { FieldBoxInput } from "@/components/agents-workshop/FieldBox";
 import { ScopeSwitcher } from "@/components/agents-workshop/ScopeSwitcher";
-import { sourceLabel } from "@/components/agents-workshop/agent-initials";
+import { sourceLabelKey } from "@/components/agents-workshop/agent-initials";
 import {
   BandHeader,
   Mono,
@@ -34,6 +35,7 @@ import {
   DEFAULT_REVIEW_AGENT_PROMPT,
   type AgentType,
 } from "@/lib/agent-config/constants";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 
 /**
  * Role prompts and review agents.
@@ -50,6 +52,7 @@ const PROMPT_TEXTAREA =
   "min-h-32 w-full resize-y rounded-[10px] border-0 bg-card px-3 py-2 font-mono text-[12.5px] leading-[1.5] text-foreground outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring placeholder:text-muted-foreground disabled:opacity-60";
 
 export function PromptsView({ projectId }: { projectId?: string }) {
+  const t = useTranslations("AgentsWorkshop");
   const [scope, setScope] = useState<"global" | "project">(
     projectId ? "project" : "global",
   );
@@ -74,8 +77,8 @@ export function PromptsView({ projectId }: { projectId?: string }) {
         <BandHeader
           stratum="feed"
           labelSize={12}
-          label="Role prompts"
-          meta="ce que chaque rôle fait quand il tourne — les valeurs actuelles marchent déjà"
+          label={t("prompts.rolePromptsLabel")}
+          meta={t("prompts.rolePromptsMeta")}
         />
         {loading ? (
           <Loader2 className="h-4 w-4 animate-spin text-strata-feed-deep motion-reduce:animate-none" />
@@ -120,6 +123,9 @@ function PromptRow({
   onSave: (agentType: AgentType, text: string) => Promise<boolean>;
   onReset: (agentType: AgentType) => Promise<boolean>;
 }) {
+  const t = useTranslations("AgentsWorkshop");
+  // Namespace-less, for the KEY REFERENCES `agent-initials.ts` holds.
+  const tKey = useTranslations();
   const [expanded, setExpanded] = useState(false);
   const [value, setValue] = useState(prompt.systemPrompt);
   const [saving, setSaving] = useState(false);
@@ -144,7 +150,7 @@ function PromptRow({
           {AGENT_TYPE_LABELS[prompt.agentType]}
         </span>
         <Mono size={10} tone="muted">
-          {sourceLabel(prompt.source)}
+          {tKey(sourceLabelKey(prompt.source))}
         </Mono>
       </button>
       {expanded ? (
@@ -152,8 +158,10 @@ function PromptRow({
           <textarea
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            placeholder="Describe how this role should behave"
-            aria-label={`${AGENT_TYPE_LABELS[prompt.agentType]} instructions`}
+            placeholder={t("prompts.promptPlaceholder")}
+            aria-label={t("prompts.instructionsAria", {
+              role: AGENT_TYPE_LABELS[prompt.agentType],
+            })}
             className={PROMPT_TEXTAREA}
           />
           <div className="flex items-center justify-end gap-2">
@@ -171,7 +179,7 @@ function PromptRow({
                   setSaving(false);
                 }}
               >
-                Reset to all projects
+                {t("prompts.resetToGlobal")}
               </PillButton>
             ) : null}
             <PillButton
@@ -179,14 +187,14 @@ function PromptRow({
               size="sm"
               disabled={saving || !dirty}
               pending={saving}
-              pendingLabel="Saving…"
+              pendingLabel={t("common.saving")}
               onClick={async () => {
                 setSaving(true);
                 await onSave(prompt.agentType, value);
                 setSaving(false);
               }}
             >
-              Save
+              {t("common.save")}
             </PillButton>
           </div>
         </div>
@@ -218,6 +226,12 @@ const BUILTIN_REVIEWS = [
   },
 ];
 
+/** The two words the row's provenance stamp uses, per editability. */
+const INHERITED_KEYS: Record<"shared" | "own", { labelKey: TranslationKey }> = {
+  shared: { labelKey: "AgentsWorkshop.prompts.sharedAcrossProjects" },
+  own: { labelKey: "AgentsWorkshop.prompts.editableHere" },
+};
+
 function ReviewAgentsBand({
   scope,
   projectId,
@@ -225,6 +239,7 @@ function ReviewAgentsBand({
   scope: "global" | "project";
   projectId?: string;
 }) {
+  const t = useTranslations("AgentsWorkshop");
   const { data, loading, createAgent, updateAgent, deleteAgent } =
     useReviewAgents(scope, projectId);
 
@@ -233,8 +248,8 @@ function ReviewAgentsBand({
       <BandHeader
         stratum="next"
         labelSize={12}
-        label="Review agents"
-        meta="les quatre reviews intégrées, plus les vôtres"
+        label={t("prompts.reviewAgentsLabel")}
+        meta={t("prompts.reviewAgentsMeta")}
       />
 
       <div className="flex flex-col gap-1.5">
@@ -249,13 +264,13 @@ function ReviewAgentsBand({
               {label}
             </span>
             <Mono size={10} tone="muted">
-              Included
+              {t("prompts.included")}
             </Mono>
           </SurfaceCard>
         ))}
       </div>
       <p className="font-sans text-[11.5px] text-strata-next-mid">
-        Built-in review instructions are editable from the role prompts above.
+        {t("prompts.builtinNote")}
       </p>
 
       {loading ? (
@@ -295,6 +310,8 @@ function CustomReviewAgentRow({
   ) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
 }) {
+  const t = useTranslations("AgentsWorkshop");
+  const tKey = useTranslations();
   const [name, setName] = useState(agent.name);
   const [prompt, setPrompt] = useState(agent.systemPrompt);
   const [saving, setSaving] = useState(false);
@@ -313,11 +330,9 @@ function CustomReviewAgentRow({
     if (prompt !== agent.systemPrompt) updates.systemPrompt = prompt;
     try {
       const saved = await onUpdate(agent.id, updates);
-      if (!saved) setError("Could not save this review agent. Try again.");
+      if (!saved) setError(t("prompts.saveReviewFailed"));
     } catch {
-      setError(
-        "Could not save this review agent. Check the connection and try again.",
-      );
+      setError(t("prompts.saveReviewFailedConnection"));
     } finally {
       setSaving(false);
     }
@@ -329,11 +344,9 @@ function CustomReviewAgentRow({
     setDeleting(true);
     try {
       const deleted = await onDelete(agent.id);
-      if (!deleted) setError("Could not delete this review agent. Try again.");
+      if (!deleted) setError(t("prompts.deleteReviewFailed"));
     } catch {
-      setError(
-        "Could not delete this review agent. Check the connection and try again.",
-      );
+      setError(t("prompts.deleteReviewFailedConnection"));
     } finally {
       setDeleting(false);
     }
@@ -346,20 +359,20 @@ function CustomReviewAgentRow({
           value={name}
           onChange={(event) => setName(event.target.value)}
           disabled={inherited}
-          aria-label="Review agent name"
-          placeholder="Agent name"
+          aria-label={t("prompts.reviewNameAria")}
+          placeholder={t("common.agentNamePlaceholder")}
           className="flex-1"
         />
         <Mono size={10} tone="muted">
-          {inherited ? "Shared across projects" : "Editable here"}
+          {tKey(INHERITED_KEYS[inherited ? "shared" : "own"].labelKey)}
         </Mono>
       </div>
       <textarea
         value={prompt}
         onChange={(event) => setPrompt(event.target.value)}
         disabled={inherited}
-        aria-label="Review agent instructions"
-        placeholder="Describe what this reviewer should check"
+        aria-label={t("prompts.reviewInstructionsAria")}
+        placeholder={t("prompts.reviewPlaceholder")}
         className={`${PROMPT_TEXTAREA} bg-muted`}
       />
       {error ? (
@@ -377,9 +390,9 @@ function CustomReviewAgentRow({
             onClick={handleDelete}
             disabled={saving}
             pending={deleting}
-            pendingLabel="Deleting…"
+            pendingLabel={t("common.deleting")}
           >
-            Delete
+            {t("common.delete")}
           </PillButton>
           <PillButton
             variant="filled"
@@ -387,9 +400,9 @@ function CustomReviewAgentRow({
             onClick={handleSave}
             disabled={deleting || !dirty}
             pending={saving}
-            pendingLabel="Saving…"
+            pendingLabel={t("common.saving")}
           >
-            Save
+            {t("common.save")}
           </PillButton>
         </div>
       ) : null}
@@ -402,6 +415,7 @@ function NewReviewAgentForm({
 }: {
   onCreate: (name: string, systemPrompt: string) => Promise<boolean>;
 }) {
+  const t = useTranslations("AgentsWorkshop");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   // Pre-filled on purpose: the form is meant to be useful after typing only a
@@ -427,7 +441,7 @@ function NewReviewAgentForm({
         className="w-fit"
         onClick={() => setOpen(true)}
       >
-        Add review agent
+        {t("prompts.addReviewAgent")}
       </PillButton>
     );
   }
@@ -438,14 +452,14 @@ function NewReviewAgentForm({
         autoFocus
         value={name}
         onChange={(event) => setName(event.target.value)}
-        aria-label="New review agent name"
-        placeholder="New agent name"
+        aria-label={t("prompts.newReviewNameAria")}
+        placeholder={t("prompts.newAgentNamePlaceholder")}
       />
       <textarea
         value={prompt}
         onChange={(event) => setPrompt(event.target.value)}
-        aria-label="New review agent instructions"
-        placeholder="Describe what this reviewer should check"
+        aria-label={t("prompts.newReviewInstructionsAria")}
+        placeholder={t("prompts.reviewPlaceholder")}
         className={PROMPT_TEXTAREA}
       />
       {error ? (
@@ -461,14 +475,14 @@ function NewReviewAgentForm({
           onClick={reset}
           disabled={creating}
         >
-          Cancel
+          {t("common.cancel")}
         </PillButton>
         <PillButton
           variant="filled"
           size="sm"
           disabled={!name.trim() || !prompt.trim()}
           pending={creating}
-          pendingLabel="Creating…"
+          pendingLabel={t("common.creating")}
           onClick={async () => {
             if (!name.trim() || !prompt.trim()) return;
             setError(null);
@@ -478,20 +492,16 @@ function NewReviewAgentForm({
               if (ok) {
                 reset();
               } else {
-                setError(
-                  "Could not create this review agent. Check its name and try again.",
-                );
+                setError(t("prompts.createReviewFailed"));
               }
             } catch {
-              setError(
-                "Could not create this review agent. Check the connection and try again.",
-              );
+              setError(t("prompts.createReviewFailedConnection"));
             } finally {
               setCreating(false);
             }
           }}
         >
-          Create
+          {t("common.create")}
         </PillButton>
       </div>
     </div>

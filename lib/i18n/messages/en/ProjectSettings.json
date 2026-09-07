@@ -1,0 +1,16 @@
+{
+  "tokenBudget": {
+    "heading": "Prompt Token Budget (Project Override)",
+    "description": "Override the global prompt token budget threshold for this project.",
+    "fieldLabel": "Max prompt tokens warning threshold",
+    "placeholderGlobal": "Global default: {tokens} tokens (leave empty to use global)",
+    "placeholder": "e.g. 50000 or 50k (no threshold by default)",
+    "hint": "Optional absolute token count warning threshold (e.g. 50000 or 50k). When dispatch estimation exceeds this threshold, a non-blocking warning is shown highlighting the largest context section.",
+    "save": "Save Project Budget",
+    "savePending": "Saving...",
+    "invalid": "Budget must be a positive integer token count (e.g. 50000 or 50k).",
+    "saveFailed": "Failed to save project prompt token budget.",
+    "cleared": "Project override cleared (using global default).",
+    "saved": "Project budget saved."
+  }
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import { useTranslations } from "next-intl";
 
 import {
   BandHeader,
@@ -12,6 +13,7 @@ import {
   type SegmentedControlOption,
 } from "@/components/piscine";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import {
   getProviderOptionDefinitions,
   type NamedAgentCliOptions,
@@ -19,10 +21,10 @@ import {
 } from "@/lib/providers/options-registry";
 
 import {
-  CLI_DEFAULT_LABEL,
   CLI_DEFAULT_VALUE,
   cliOptionControlKind,
   cliOptionKicker,
+  cliOptionKickerSuffixKey,
 } from "./cli-options";
 import { FieldBoxInput } from "./FieldBox";
 
@@ -62,8 +64,18 @@ export function CliOptionsBand({
   onChange,
   disabled,
 }: CliOptionsBandProps) {
+  const t = useTranslations("AgentsWorkshop");
+  // Namespace-less: the registry's labels, hints and choices are KEY
+  // REFERENCES in the `ProviderOptions` namespace, not in this band's.
+  const tKey = useTranslations();
   const uid = useId();
   const definitions = getProviderOptionDefinitions(provider);
+
+  /** The explanatory clause the frame appends to two of the kickers. */
+  const suffixOf = (key: string) => {
+    const suffixKey = cliOptionKickerSuffixKey(key);
+    return suffixKey ? tKey(suffixKey) : "";
+  };
 
   function setOption(
     key: string,
@@ -83,22 +95,25 @@ export function CliOptionsBand({
       <BandHeader
         stratum="next"
         labelSize={12}
-        label="CLI options"
-        meta="s'appliquent aux sessions qui produisent du code — les reviews gardent leur posture"
+        label={t("cliOptions.label")}
+        meta={t("cliOptions.meta")}
       />
       {definitions.length > 0 ? (
         <div className="flex flex-wrap gap-x-[22px] gap-y-[10px]">
           {definitions.map((definition) => (
             <div
               key={definition.key}
-              title={definition.hint}
+              title={tKey(definition.hintKey)}
               className="flex min-w-[220px] flex-1 flex-col gap-[6px]"
             >
-              {/* `normal-case` so the French clause the frame appends stays
-                  lower-case; the label half is already uppercased in the
+              {/* `normal-case` so the explanatory clause the frame appends
+                  stays lower-case; the label half is already uppercased in the
                   string. FieldKicker's own `uppercase` would shout both. */}
               <FieldKicker stratum="next" size={10} className="normal-case">
-                {cliOptionKicker(definition)}
+                {cliOptionKicker({
+                  label: tKey(definition.labelKey),
+                  suffix: suffixOf(definition.key),
+                })}
               </FieldKicker>
               <OptionControl
                 idPrefix={`${uid}-${definition.key}`}
@@ -106,6 +121,8 @@ export function CliOptionsBand({
                 value={options[definition.key]}
                 onChange={(value) => setOption(definition.key, value)}
                 disabled={disabled}
+                tKey={tKey}
+                defaultLabel={t("common.cliDefault")}
               />
             </div>
           ))}
@@ -121,12 +138,18 @@ function OptionControl({
   value,
   onChange,
   disabled,
+  tKey,
+  defaultLabel,
 }: {
   idPrefix: string;
   definition: ProviderOptionDefinition;
   value: NamedAgentCliOptions[string] | undefined;
   onChange: (value: NamedAgentCliOptions[string] | undefined) => void;
   disabled: boolean;
+  /** The namespace-less translator, for the registry's KEY REFERENCES. */
+  tKey: (key: TranslationKey) => string;
+  /** Already resolved by the band: the leading "CLI default" on every control. */
+  defaultLabel: string;
 }) {
   const kind = cliOptionControlKind(definition);
 
@@ -142,7 +165,7 @@ function OptionControl({
           // option explicitly switched off are the same argv.
           onToggle={() => onChange(value === true ? undefined : true)}
         />
-        {definition.label}
+        {tKey(definition.labelKey)}
       </span>
     );
   }
@@ -151,13 +174,13 @@ function OptionControl({
     const segments: SegmentedControlOption<string>[] = [
       {
         value: CLI_DEFAULT_VALUE,
-        label: CLI_DEFAULT_LABEL,
+        label: defaultLabel,
         flex: 1.3,
         disabled,
       },
       ...(definition.choices ?? []).map((choice) => ({
         value: choice.value,
-        label: choice.label,
+        label: tKey(choice.labelKey),
         flex: 1,
         disabled,
       })),
@@ -191,18 +214,18 @@ function OptionControl({
         tone="ink"
         fill="card"
         disabled={disabled}
-        label={current?.label ?? CLI_DEFAULT_LABEL}
+        label={current ? tKey(current.labelKey) : defaultLabel}
         className="h-[34px] rounded-[10px]"
       >
         <DropdownMenuItem onSelect={() => onChange(undefined)}>
-          {CLI_DEFAULT_LABEL}
+          {defaultLabel}
         </DropdownMenuItem>
         {(definition.choices ?? []).map((choice) => (
           <DropdownMenuItem
             key={choice.value}
             onSelect={() => onChange(choice.value)}
           >
-            {choice.label}
+            {tKey(choice.labelKey)}
           </DropdownMenuItem>
         ))}
       </SelectPill>
@@ -218,7 +241,7 @@ function OptionControl({
         inputMode="numeric"
         min={definition.min}
         max={definition.max}
-        aria-label={definition.label}
+        aria-label={tKey(definition.labelKey)}
         value={typeof value === "number" ? String(value) : ""}
         onChange={(event) => {
           const raw = event.target.value.trim();
@@ -226,7 +249,7 @@ function OptionControl({
           const parsed = Number(raw);
           onChange(Number.isFinite(parsed) ? parsed : undefined);
         }}
-        placeholder={CLI_DEFAULT_LABEL}
+        placeholder={defaultLabel}
         disabled={disabled}
       />
     );
@@ -235,12 +258,12 @@ function OptionControl({
   return (
     <FieldBoxInput
       id={idPrefix}
-      aria-label={definition.label}
+      aria-label={tKey(definition.labelKey)}
       value={typeof value === "string" ? value : ""}
       onChange={(event) =>
         onChange(event.target.value.trim() ? event.target.value : undefined)
       }
-      placeholder={CLI_DEFAULT_LABEL}
+      placeholder={defaultLabel}
       disabled={disabled}
     />
   );

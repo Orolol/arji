@@ -1,0 +1,33 @@
+{
+  "identity": {
+    "retryStrongerHint": "aucun autre agent n'utilise ce CLI",
+    "retryOtherCliHint": "toujours tenté en dernier recours — tentative 3 sans modèle plus fort, tentative 4 avec."
+  },
+  "numbers": {
+    "meta": "14 derniers jours, tous projets",
+    "metaEmpty": "14 derniers jours, tous projets — aucun run sur la période",
+    "sparklineFailed": "rouge = failed"
+  },
+  "persona": {
+    "meta": "injectée en tête de chaque prompt de cet agent — vide = rien"
+  },
+  "cliOptions": {
+    "meta": "s'appliquent aux sessions qui produisent du code — les reviews gardent leur posture",
+    "kickerSuffix": {
+      "effort": " — combien l'agent réfléchit par tour",
+      "permissionMode": " — ce qu'il peut toucher sans demander"
+    }
+  },
+  "whereHeWorks": {
+    "meta": "l'agent par défaut de chaque type de tâche — cet agent est surligné",
+    "allRoles": "tous les rôles →",
+    "footnote": "Full Auto et Night runs suivent ces défauts ; un dispatch manuel peut toujours choisir un autre agent."
+  },
+  "prompts": {
+    "rolePromptsMeta": "ce que chaque rôle fait quand il tourne — les valeurs actuelles marchent déjà",
+    "reviewAgentsMeta": "les quatre reviews intégrées, plus les vôtres"
+  },
+  "limits": {
+    "runtimeMeta": "ce que le scheduler applique, pas ce qu'un agent sait faire"
+  }
+}

@@ -12,6 +12,8 @@
  * `PipelineChain` owns that; nothing here restyles it.
  */
 
+import { useTranslations } from "next-intl";
+
 import { PipelineChain, SurfaceCard, type PipelineStep } from "@/components/piscine";
 import { StatusControl } from "@/components/ticket/StatusControl";
 
@@ -34,6 +36,8 @@ export function PipelineCard({
   onStatusChange,
   onPriorityChange,
 }: PipelineCardProps) {
+  const t = useTranslations("Ticket");
+
   return (
     <SurfaceCard
       radius={12}
@@ -42,7 +46,7 @@ export function PipelineCard({
     >
       <div className="flex items-baseline gap-[10px]">
         <span className="font-display text-[12px] font-bold uppercase tracking-[.1em] text-foreground">
-          Pipeline
+          {t("pipeline.label")}
         </span>
         <StatusControl
           status={status}

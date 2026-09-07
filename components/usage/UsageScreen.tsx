@@ -1,7 +1,10 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, PillButton, StrataBand } from "@/components/piscine";
 import { useUsage } from "@/hooks/useUsage";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { formatCostUsd } from "@/lib/utils/format-usage";
 import type { UsageRange, UsageReport } from "@/lib/types/usage";
 
@@ -39,14 +42,18 @@ import { UsageHeader } from "@/components/usage/UsageHeader";
  * Keyed off `dashboard.range` — what the payload ON SCREEN actually covers —
  * not off the pending selection, so a slow refetch never mislabels stale
  * figures.
+ *
+ * A module-scope copy table, so it holds catalogue KEY REFERENCES resolved at
+ * render with the namespace-less translator (`lib/i18n/catalogue.ts`).
  */
-const RANGE_CAPTION: Record<UsageRange, string> = {
-  "7d": "7 DERNIERS JOURS",
-  "30d": "30 DERNIERS JOURS",
-  all: "DEPUIS LE DÉBUT",
+const RANGE_CAPTION: Record<UsageRange, { captionKey: TranslationKey }> = {
+  "7d": { captionKey: "Usage.range.caption7d" },
+  "30d": { captionKey: "Usage.range.caption30d" },
+  all: { captionKey: "Usage.range.captionAll" },
 };
 
 export function UsageScreen() {
+  const t = useTranslations();
   const { report, loading, error, range, setRange, refresh } = useUsage();
 
   // State precedence is the contract: skeleton only before the FIRST report,
@@ -82,7 +89,7 @@ export function UsageScreen() {
           size="md"
           onClick={() => void refresh()}
         >
-          Retry
+          {t("Usage.retry")}
         </PillButton>
       </div>
     );
@@ -114,6 +121,8 @@ function UsageBody({
   report: UsageReport;
   onCapSaved: () => void;
 }) {
+  // Namespace-less: `RANGE_CAPTION` holds full dotted catalogue keys.
+  const t = useTranslations();
   const dashboard = report.dashboard;
   const { totals } = dashboard;
   // Same check the page has always made, now against the range-scoped block.
@@ -121,8 +130,8 @@ function UsageBody({
 
   const nightTail = formatCostUsd(dashboard.nightYesterdayUsd);
   const projectFootnote = nightTail
-    ? `night runs inclus — le lot d'hier : ${nightTail}`
-    : "night runs inclus";
+    ? t("Usage.byProject.footnoteWithBatch", { cost: nightTail })
+    : t("Usage.byProject.footnote");
 
   return (
     // No TOP padding: row 1 butts against the range/Refresh row above, which
@@ -132,13 +141,13 @@ function UsageBody({
         <StatTile
           testId="usage-stat-cost"
           value={formatCostUsd(totals.costUsd)}
-          caption={RANGE_CAPTION[dashboard.range]}
+          caption={t(RANGE_CAPTION[dashboard.range].captionKey)}
         />
         {/* A run counter's 0 is a fact, not a claim — the one tile that keeps it. */}
         <StatTile
           testId="usage-stat-sessions"
           value={String(totals.sessions)}
-          caption="SESSIONS"
+          caption={t("Usage.stats.sessions")}
         />
         <StatTile
           testId="usage-stat-clean"
@@ -147,13 +156,13 @@ function UsageBody({
               ? null
               : `${Math.round(totals.cleanPercent)}%`
           }
-          caption="CLEAN"
+          caption={t("Usage.stats.clean")}
           tone="live"
         />
         <StatTile
           testId="usage-stat-per-ticket"
           value={formatCostUsd(totals.costPerTicketUsd)}
-          caption="PAR TICKET LIVRÉ"
+          caption={t("Usage.stats.perTicket")}
         />
         <MonthlyCapTile cap={dashboard.cap} onSaved={onCapSaved} />
       </div>
@@ -163,17 +172,17 @@ function UsageBody({
           className="text-center text-[13px] text-muted-foreground"
           data-testid="usage-empty"
         >
-          No agent sessions recorded yet.
+          {t("Usage.empty")}
         </div>
       )}
 
       <div className="grid grid-cols-1 gap-[12px] min-[1100px]:min-h-[260px] min-[1100px]:flex-1 min-[1100px]:grid-cols-2">
         <UsageBarBand
-          label="By agent"
+          label={t("Usage.byAgent.label")}
           stratum="live"
           listTestId="usage-agent-table"
           rowCount={dashboard.byAgent.length}
-          footnote="le coût suit le modèle, pas le CLI — détail par session dans Sessions"
+          footnote={t("Usage.byAgent.footnote")}
         >
           {dashboard.byAgent.map((bar, i) => (
             <AgentBarRow
@@ -186,7 +195,7 @@ function UsageBody({
         </UsageBarBand>
 
         <UsageBarBand
-          label="By project"
+          label={t("Usage.byProject.label")}
           stratum="next"
           listTestId="usage-project-list"
           rowCount={dashboard.byProject.length}
@@ -207,7 +216,12 @@ function UsageBody({
         fetch and the next Refresh moves the anchor forward.
       */}
       <StrataBand stratum="card" gap={10} className="px-[18px] py-[15px]">
-        <BandHeader label="Provider quota" stratum="neutral" labelSize={12} standalone />
+        <BandHeader
+          label={t("Usage.providerQuota")}
+          stratum="neutral"
+          labelSize={12}
+          standalone
+        />
         <div className="flex flex-wrap gap-[14px]" data-testid="usage-subscriptions">
           {report.subscriptions.map((sub) => (
             <SubscriptionCard
