@@ -1,0 +1,9 @@
+{
+  "deviceFlow": {
+    "expired": "This code has expired. Start the connection again to get a new one.",
+    "unreadableStart": "GitHub did not return a usable code. Try again.",
+    "unreadablePoll": "GitHub confirmed the connection but the response could not be read. Try again.",
+    "unreachable": "Could not reach Arij. Check that the server is running, then try again.",
+    "fallbackPoll": "The GitHub connection failed. Try again."
+  }
+}

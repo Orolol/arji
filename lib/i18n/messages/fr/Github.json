@@ -1,0 +1,9 @@
+{
+  "deviceFlow": {
+    "expired": "Ce code a expiré. Relancez la connexion pour en obtenir un nouveau.",
+    "unreadableStart": "GitHub n'a pas renvoyé de code utilisable. Réessayez.",
+    "unreadablePoll": "GitHub a confirmé la connexion mais la réponse est illisible. Réessayez.",
+    "unreachable": "Connexion à Arij impossible. Vérifiez que le serveur tourne, puis réessayez.",
+    "fallbackPoll": "La connexion GitHub a échoué. Réessayez."
+  }
+}
