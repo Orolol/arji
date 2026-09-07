@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { Mono } from "@/components/piscine";
 import {
@@ -71,6 +72,7 @@ export interface QaScreenProps {
 }
 
 export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
+  const t = useTranslations("Qa");
   const { openTicket } = useTicketOverlay();
   const { data, error, refresh } = useQaFindings(projectId ?? null);
 
@@ -181,18 +183,18 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
         );
         const body = await res.json().catch(() => ({}));
         if (!res.ok || body.error) {
-          reportFailure(res, body, "Failed to launch the build", finding.projectId);
+          reportFailure(res, body, t("toasts.buildFailed"), finding.projectId);
           return;
         }
-        raise("success", "Build ciblé lancé sur le finding");
+        raise("success", t("toasts.buildLaunched"));
         await refresh();
       } catch {
-        raise("error", "Failed to launch the build");
+        raise("error", t("toasts.buildFailed"));
       } finally {
         markPending(finding.findingId, false);
       }
     },
-    [markPending, raise, reportFailure, refresh],
+    [markPending, raise, reportFailure, refresh, t],
   );
 
   /**
@@ -222,7 +224,7 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
         );
         const body = await res.json().catch(() => ({}));
         if (!res.ok || body.error) {
-          raise("error", body.error || "Failed to dismiss the finding");
+          raise("error", body.error || t("toasts.dismissFailed"));
           return;
         }
 
@@ -240,24 +242,19 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
           .then((response) => response.ok)
           .catch(() => false);
 
-        if (echoed) raise("success", "Finding dismissed");
-        else {
-          raise(
-            "warning",
-            "Finding dismissed, mais la raison n'a pas été enregistrée dans le ticket",
-          );
-        }
+        if (echoed) raise("success", t("toasts.findingDismissed"));
+        else raise("warning", t("toasts.findingDismissedWithoutReason"));
 
         setDismissTarget(null);
         await refresh();
       } catch {
-        raise("error", "Failed to dismiss the finding");
+        raise("error", t("toasts.dismissFailed"));
       } finally {
         markPending(finding.findingId, false);
         setDismissPending(false);
       }
     },
-    [markPending, raise, refresh],
+    [markPending, raise, refresh, t],
   );
 
   /**
@@ -282,18 +279,18 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
         );
         const body = await res.json().catch(() => ({}));
         if (!res.ok || body.error) {
-          reportFailure(res, body, "Failed to launch the review", target.projectId);
+          reportFailure(res, body, t("toasts.reviewFailed"), target.projectId);
           return;
         }
-        raise("success", "Review lancée");
+        raise("success", t("toasts.reviewLaunched"));
         await refresh();
       } catch {
-        raise("error", "Failed to launch the review");
+        raise("error", t("toasts.reviewFailed"));
       } finally {
         setRunPending(false);
       }
     },
-    [raise, reportFailure, refresh],
+    [raise, reportFailure, refresh, t],
   );
 
   /**
@@ -315,19 +312,17 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
       setCheckProjectId(null);
       raise(
         "success",
-        started.noOp
-          ? "Aucune évidence dans la fenêtre : rapport enregistré, aucun agent lancé"
-          : "QA check lancé",
+        started.noOp ? t("toasts.checkNoOp") : t("toasts.checkLaunched"),
         target
           ? {
               href: `/projects/${target}/qa?reportId=${started.reportId}`,
-              label: "Voir le rapport",
+              label: t("toasts.viewReport"),
             }
           : undefined,
       );
       void refresh();
     },
-    [checkProjectId, raise, refresh],
+    [checkProjectId, raise, refresh, t],
   );
 
   const handleStopRun = useCallback(
@@ -340,16 +335,16 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
           { method: "DELETE" },
         );
         if (!res.ok) {
-          raise("error", "Failed to stop the session");
+          raise("error", t("toasts.stopFailed"));
           return;
         }
-        raise("success", "Session stopped");
+        raise("success", t("toasts.sessionStopped"));
         await refresh();
       } catch {
-        raise("error", "Failed to stop the session");
+        raise("error", t("toasts.stopFailed"));
       }
     },
-    [data, raise, refresh],
+    [data, raise, refresh, t],
   );
 
   /* ---- render -------------------------------------------------------- */
@@ -377,11 +372,11 @@ export function QaScreen({ projectId, onToast, className }: QaScreenProps) {
               wrapper rather than on the primitive. */}
           <span data-testid="qa-coverage">
             <Mono size={11} tone="muted">
-              {"review coverage "}
+              {`${t("coverage.label")} `}
               <Mono size={11} weight={700} tone="ink">
                 {coverage}
               </Mono>
-              {` · ${QA_COVERAGE_DAYS}j`}
+              {` ${t("coverage.window", { days: QA_COVERAGE_DAYS })}`}
             </Mono>
           </span>
           <RunQaPassButton

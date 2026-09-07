@@ -31,7 +31,7 @@ describe("SuggestionBand", () => {
   it("collapses to its label line when no spec-update session exists", () => {
     renderBand();
 
-    expect(screen.getByText("Suggestion d'agent")).toBeInTheDocument();
+    expect(screen.getByText("Agent suggestion")).toBeInTheDocument();
     expect(screen.queryByTestId("spec-update-progress")).toBeNull();
     // Nothing else: no proposal prose, no buttons, no links.
     expect(screen.queryAllByRole("button")).toHaveLength(0);

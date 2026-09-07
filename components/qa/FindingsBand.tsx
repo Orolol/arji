@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, StrataBand } from "@/components/piscine";
 import type { DeskProject } from "@/lib/control-desk/types";
 import type { QaFinding } from "@/lib/qa/types";
@@ -60,6 +62,7 @@ export function FindingsBand({
   onDismiss,
   className,
 }: FindingsBandProps) {
+  const t = useTranslations("Qa");
   const blocking = findings.filter((finding) => finding.blocking).length;
 
   return (
@@ -76,10 +79,10 @@ export function FindingsBand({
       className={cn("max-lg:flex-none", className)}
     >
       <BandHeader
-        label="Findings à arbitrer"
+        label={t("findings.label")}
         stratum="you"
         labelSize={13}
-        meta={`${findings.length} open · ${blocking} blocking`}
+        meta={t("findings.meta", { open: findings.length, blocking })}
         right={<FindingFilterPills value={filter} onChange={onFilterChange} />}
       />
 
@@ -93,7 +96,7 @@ export function FindingsBand({
         >
           {visible.length === 0 ? (
             <span className="font-sans text-[11.5px] text-strata-you-mid">
-              Aucun finding pour ce filtre.
+              {t("findings.emptyForFilter")}
             </span>
           ) : (
             visible.map((finding) => (
@@ -115,9 +118,9 @@ export function FindingsBand({
         data-testid="qa-findings-footnote"
         className="font-sans text-[11.5px] text-strata-you-mid"
       >
-        {"Un finding "}
-        <strong className="font-semibold">blocking</strong>
-        {" retire le ticket de Ready to land ; Fix with agent relance un build ciblé sur le finding."}
+        {t.rich("findings.footnote", {
+          strong: (chunks) => <strong className="font-semibold">{chunks}</strong>,
+        })}
       </span>
     </StrataBand>
   );

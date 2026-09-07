@@ -1,0 +1,41 @@
+{
+  "coverage": {
+    "window": "· {days}j"
+  },
+  "toasts": {
+    "buildLaunched": "Build ciblé lancé sur le finding",
+    "findingDismissedWithoutReason": "Finding dismissed, mais la raison n'a pas été enregistrée dans le ticket",
+    "reviewLaunched": "Review lancée",
+    "checkLaunched": "QA check lancé",
+    "checkNoOp": "Aucune évidence dans la fenêtre : rapport enregistré, aucun agent lancé",
+    "viewReport": "Voir le rapport"
+  },
+  "newCheck": {
+    "emptyLabel": "Aucun projet avec un dépôt git.",
+    "noProjectReason": "Aucun projet avec un dépôt git : un QA check tourne dans le dépôt du projet."
+  },
+  "runPass": {
+    "emptyLabel": "Aucun ticket en review pour l'instant."
+  },
+  "findings": {
+    "label": "Findings à arbitrer",
+    "emptyForFilter": "Aucun finding pour ce filtre.",
+    "footnote": "Un finding <strong>blocking</strong> retire le ticket de Ready to land ; Fix with agent relance un build ciblé sur le finding."
+  },
+  "dismissDialog": {
+    "title": "Dismiss ce finding",
+    "reasonPlaceholder": "Pourquoi ? une ligne suffit…",
+    "cancel": "Annuler"
+  },
+  "verdicts": {
+    "label": "Verdicts récents",
+    "meta": "7 jours"
+  },
+  "rubric": {
+    "label": "La rubrique",
+    "helper": "ce que chaque reviewer vérifie — injectée dans son prompt",
+    "edit": "éditer →",
+    "footnote": "Review unverifiable (tests KO) = verdict à part : le ticket remonte en Your turn au lieu de passer.",
+    "projectRules": "+ {count, plural, one {# règle projet} other {# règles projet}}"
+  }
+}

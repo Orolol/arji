@@ -1,0 +1,157 @@
+{
+  "coverage": {
+    "label": "review coverage",
+    "window": "· {days}d"
+  },
+  "toasts": {
+    "buildLaunched": "Targeted build launched on the finding",
+    "buildFailed": "Failed to launch the build",
+    "findingDismissed": "Finding dismissed",
+    "findingDismissedWithoutReason": "Finding dismissed, but the reason was not recorded on the ticket",
+    "dismissFailed": "Failed to dismiss the finding",
+    "reviewLaunched": "Review launched",
+    "reviewFailed": "Failed to launch the review",
+    "checkLaunched": "QA check launched",
+    "checkNoOp": "No evidence in the window: report recorded, no agent launched",
+    "viewReport": "View the report",
+    "sessionStopped": "Session stopped",
+    "stopFailed": "Failed to stop the session"
+  },
+  "runs": {
+    "label": "QA runs",
+    "meta": "{live} live · {queued} queued",
+    "kicker": "REVIEW",
+    "stop": "Stop this review"
+  },
+  "queued": {
+    "label": "QUEUED · {count}",
+    "overflow": "+{count}"
+  },
+  "checks": {
+    "label": "QA checks",
+    "meta": "{running} running · {total} total"
+  },
+  "newCheck": {
+    "label": "New check",
+    "emptyLabel": "No project with a git repo.",
+    "noProjectReason": "No project with a git repo: a QA check runs inside the project's repo."
+  },
+  "runPass": {
+    "label": "Run QA pass",
+    "pending": "Dispatch…",
+    "emptyLabel": "No ticket in review right now."
+  },
+  "findings": {
+    "label": "Findings to arbitrate",
+    "meta": "{open} open · {blocking} blocking",
+    "emptyForFilter": "No finding for this filter.",
+    "footnote": "A <strong>blocking</strong> finding removes the ticket from Ready to land; Fix with agent relaunches a build targeted at the finding."
+  },
+  "filters": {
+    "all": "All",
+    "blocking": "Blocking",
+    "security": "Security"
+  },
+  "finding": {
+    "meta": "{reviewer} · {age}",
+    "location": "· {path}:{line}",
+    "fix": "Fix with agent",
+    "diff": "Diff",
+    "dismiss": "Dismiss",
+    "dispatchPending": "Dispatch…"
+  },
+  "dismissDialog": {
+    "title": "Dismiss this finding",
+    "reasonPlaceholder": "Why? one line is enough…",
+    "cancel": "Cancel",
+    "confirm": "Dismiss",
+    "pending": "Dismiss…"
+  },
+  "verdicts": {
+    "label": "Recent verdicts",
+    "meta": "7 days"
+  },
+  "rubric": {
+    "label": "The rubric",
+    "helper": "what every reviewer checks — injected into their prompt",
+    "edit": "edit →",
+    "footnote": "Review unverifiable (tests KO) = a verdict of its own: the ticket goes back to Your turn instead of passing.",
+    "projectRules": "+ {count, plural, one {# project rule} other {# project rules}}"
+  },
+  "checkTypes": {
+    "techCheck": {
+      "name": "Tech Check",
+      "title": "Start Tech Check",
+      "description": "Launch a full project QA audit and generate a markdown report."
+    },
+    "e2eTest": {
+      "name": "E2E Test",
+      "title": "Start E2E Test",
+      "description": "Run comprehensive end-to-end tests across all app features."
+    },
+    "failureDigest": {
+      "name": "Failure Digest",
+      "title": "Start Failure Digest",
+      "description": "Analyze mechanically grouped recurring failures in a read-only plan session."
+    }
+  },
+  "checkDialog": {
+    "checkTypeLabel": "Check Type",
+    "e2eWarning": "E2E testing requires an agent with access to browser automation and testing tools (e.g. Playwright, Puppeteer). Ensure your selected agent has the appropriate tool permissions.",
+    "windowLabel": "Collection Window (days)",
+    "windowHint": "If the window is empty, Arij records a completed no-op report without launching an agent.",
+    "namedAgentLabel": "Named Agent (optional)",
+    "namedAgentHint": "No agent selected: Arij will automatically use the configured default.",
+    "useDefault": "Use Default",
+    "savedPromptLabel": "Saved Prompt",
+    "loadingPrompts": "Loading prompts...",
+    "selectSavedPrompt": "Select saved prompt",
+    "none": "None",
+    "customPromptLabel": "Custom Prompt (optional)",
+    "customPromptPlaceholder": "Add custom QA instructions...",
+    "promptNamePlaceholder": "Prompt name for reuse",
+    "savePrompt": "Save Prompt",
+    "cancel": "Cancel",
+    "errors": {
+      "loadPrompts": "Failed to load saved prompts",
+      "savePrompt": "Failed to save prompt",
+      "start": "Failed to start {checkType}"
+    }
+  },
+  "report": {
+    "heading": "{label} #{id}",
+    "fallbackHeading": "Report",
+    "emptySelection": "Select a report from history to view details.",
+    "loading": "Loading report...",
+    "notFound": "Report not found.",
+    "statusDuration": "{status} · {duration}",
+    "severityLabels": {
+      "critical": "CRITICAL",
+      "major": "MAJOR",
+      "minor": "MINOR"
+    },
+    "severityNames": {
+      "critical": "critical",
+      "major": "major",
+      "minor": "minor"
+    },
+    "stillRunning": {
+      "techCheck": "Tech check is still running...",
+      "e2eTest": "E2E test is still running...",
+      "failureDigest": "Failure digest is still running..."
+    },
+    "findingsHeading": "Findings",
+    "selectFinding": "Select finding: {title}",
+    "fullReport": "Full report",
+    "waitingOutput": "Waiting for report output...",
+    "noContent": "No report content available.",
+    "createdEpics": "{count, plural, one {Created # epic.} other {Created # epics.}}",
+    "selectedFindings": "{count, plural, one {# finding selected} other {# findings selected}}",
+    "exportMarkdown": "Export markdown",
+    "createEpics": "Create Epics From Report",
+    "errors": {
+      "load": "Failed to load report",
+      "createEpics": "Failed to create epics from report"
+    }
+  }
+}

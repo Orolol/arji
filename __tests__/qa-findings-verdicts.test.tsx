@@ -70,8 +70,8 @@ describe("VerdictsBand", () => {
     for (const row of rows) {
       expect(screen.getByText(row.verdictText)).toBeInTheDocument();
     }
-    expect(screen.getByText("Verdicts récents")).toBeInTheDocument();
-    expect(screen.getByText("7 jours")).toBeInTheDocument();
+    expect(screen.getByText("Recent verdicts")).toBeInTheDocument();
+    expect(screen.getByText("7 days")).toBeInTheDocument();
   });
 
   it("paints '→ your turn' in the coral deep and the others muted", () => {
@@ -98,7 +98,7 @@ describe("VerdictsBand", () => {
 
   it("folds to its label line when no review completed in the window", () => {
     render(<VerdictsBand verdicts={[]} projectsById={projectsById} />);
-    expect(screen.getByText("Verdicts récents")).toBeInTheDocument();
+    expect(screen.getByText("Recent verdicts")).toBeInTheDocument();
     expect(screen.queryByTestId("qa-verdict-row")).toBeNull();
   });
 
@@ -133,13 +133,13 @@ describe("RubricBand", () => {
       <RubricBand rubric={{ items: ["Tests"], projectRuleCount: 4 }} />,
     );
     expect(screen.getByTestId("qa-rubric-project-rules").textContent).toBe(
-      "+ 4 règles projet",
+      "+ 4 project rules",
     );
     unmount();
 
     render(<RubricBand rubric={{ items: ["Tests"], projectRuleCount: 1 }} />);
     expect(screen.getByTestId("qa-rubric-project-rules").textContent).toBe(
-      "+ 1 règle projet",
+      "+ 1 project rule",
     );
   });
 
@@ -147,26 +147,26 @@ describe("RubricBand", () => {
     render(<RubricBand rubric={{ items: [], projectRuleCount: 0 }} />);
     expect(screen.queryByTestId("qa-rubric-chip")).toBeNull();
     expect(screen.getByTestId("qa-rubric-helper").textContent).toBe(
-      "ce que chaque reviewer vérifie — injectée dans son prompt",
+      "what every reviewer checks — injected into their prompt",
     );
     expect(screen.getByTestId("qa-rubric-edit")).toHaveAttribute(
       "href",
       "/agents/prompts",
     );
     expect(screen.getByTestId("qa-rubric-footnote").textContent).toBe(
-      "Review unverifiable (tests KO) = verdict à part : le ticket remonte en Your turn au lieu de passer.",
+      "Review unverifiable (tests KO) = a verdict of its own: the ticket goes back to Your turn instead of passing.",
     );
   });
 
   it("keeps the frame's reading order: label, helper, then the link", () => {
     render(<RubricBand rubric={{ items: [], projectRuleCount: 0 }} />);
-    const header = screen.getByText("La rubrique").parentElement as HTMLElement;
+    const header = screen.getByText("The rubric").parentElement as HTMLElement;
     const text = header.textContent ?? "";
-    expect(text.indexOf("La rubrique")).toBeLessThan(
-      text.indexOf("ce que chaque reviewer"),
+    expect(text.indexOf("The rubric")).toBeLessThan(
+      text.indexOf("what every reviewer checks"),
     );
-    expect(text.indexOf("ce que chaque reviewer")).toBeLessThan(
-      text.indexOf("éditer"),
+    expect(text.indexOf("what every reviewer checks")).toBeLessThan(
+      text.indexOf("edit"),
     );
     expect(within(header).getByTestId("qa-rubric-edit")).toBeInTheDocument();
   });

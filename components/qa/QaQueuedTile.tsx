@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { IdentityChip, Mono, SurfaceCard, projectTone } from "@/components/piscine";
 import type { DeskProject } from "@/lib/control-desk/types";
 import type { QaQueuedRun } from "@/lib/qa/types";
@@ -33,6 +35,8 @@ export function QaQueuedTile({
   onOpenTicket,
   className,
 }: QaQueuedTileProps) {
+  const t = useTranslations("Qa");
+
   if (queued.length === 0) return null;
 
   const visible = queued.slice(0, VISIBLE_ROWS);
@@ -50,7 +54,7 @@ export function QaQueuedTile({
     >
       {/* Space Mono is non-variable: 700 is the only heavier weight there is. */}
       <Mono size={10.5} weight={700} uppercase tracking={0.08} tone="live-mid">
-        {`QUEUED · ${queued.length}`}
+        {t("queued.label", { count: queued.length })}
       </Mono>
 
       {visible.map((run) => {
@@ -81,7 +85,7 @@ export function QaQueuedTile({
 
       {overflow > 0 ? (
         <Mono size={10} weight={700} uppercase tracking={0.08} tone="live-mid">
-          {`+${overflow}`}
+          {t("queued.overflow", { count: overflow })}
         </Mono>
       ) : null}
     </SurfaceCard>

@@ -1,6 +1,139 @@
 {
   "footer": {
     "unsaved": "unsaved",
-    "saved": "saved {age}"
+    "saved": "saved {age}",
+    "line": "markdown · {words} words · {state}"
+  },
+  "band": {
+    "heading": "Specification",
+    "label": "Spec",
+    "helper": "injected into every agent prompt",
+    "tabs": {
+      "edit": "Write",
+      "preview": "Preview"
+    },
+    "save": "Save",
+    "savePending": "Saving…"
+  },
+  "editor": {
+    "placeholder": "Write the project spec in markdown…"
+  },
+  "preview": {
+    "empty": "No specification written yet. Use the editor or generate one from the chat."
+  },
+  "docs": {
+    "label": "Docs",
+    "more": "{count} more →",
+    "dropZone": "Drop a doc — cited with @ in the chat",
+    "suffix": {
+      "size": "· {kilobytes} KB",
+      "converted": "· converted"
+    },
+    "errors": {
+      "importFile": "Failed to import {name}.",
+      "import": "Failed to import the document."
+    }
+  },
+  "anatomy": {
+    "label": "Prompt anatomy",
+    "helper": "what every agent receives at the start of a session, in tokens",
+    "legend": {
+      "system": "SYSTEM",
+      "persona": "PERSONA",
+      "spec": "SPEC",
+      "memory": "MEMORY",
+      "ticket": "TICKET / DIFF",
+      "docs": "DOCS"
+    },
+    "note": "The spec (linden green) and the memory (turquoise) weigh on <em>every</em> session of <em>every</em> agent — pruning here pays everywhere. The white at the end of a bar: what the agent did not receive (no cited docs).",
+    "empty": "No session has recorded its prompt yet — the first dispatch will fill this table.",
+    "role": "· {role}",
+    "rowTitle": "{agent} · {sampledAt}",
+    "segment": "{tokens} — {annotation}"
+  },
+  "suggestion": {
+    "label": "Agent suggestion"
+  },
+  "updateProgress": {
+    "running": "Spec update running",
+    "done": "Spec updated by agent.",
+    "failed": "Spec update failed — the saved spec was left unchanged.",
+    "viewSession": "view session",
+    "dismiss": "Dismiss spec update result",
+    "waiting": "Waiting for agent output…",
+    "response": "Agent response"
+  },
+  "updateDialog": {
+    "title": "Update the specification with an agent",
+    "description": "The agent runs in the project workspace and updates the project specification from its current state. The saved spec is only replaced if the session succeeds.",
+    "instructionLabel": "Instruction",
+    "instructionPlaceholder": "Optional — e.g. “update the architecture section after the Full Auto mode”. Leave empty to let the agent refresh the spec from the current project state.",
+    "confirm": "Update spec",
+    "error": "Failed to start the spec update session."
+  },
+  "memory": {
+    "heading": "Project memory",
+    "label": "Memory",
+    "helper": "what the agents have learned",
+    "capIndicator": "{tokens} / {max}",
+    "loading": "Loading project memory...",
+    "reloadHint": "Reload the page to try again.",
+    "editorPlaceholder": "No project memory yet. Write durable conventions here, or distill them from a completed session.",
+    "emptyPreview": "No project memory yet.",
+    "conflictNotice": "The memory was updated in the background while you were editing. Your unsaved changes are preserved. You can review and save them, or click Discard to reload the latest version.",
+    "pendingWriter": {
+      "dreaming": "A Dreaming rewrite is currently in progress.",
+      "distill": "A distillation rewrite is currently in progress.",
+      "readOnly": "The editor is in read-only mode.",
+      "viewSession": "View session"
+    },
+    "skeleton": {
+      "empty": "No project memory yet. Start with the 4 Dreaming sections:",
+      "missing": "Missing Dreaming section(s): {sections}.",
+      "useTemplate": "Use 4-sections template",
+      "append": "Append missing sections"
+    },
+    "archive": {
+      "exists": "A pre-dream snapshot exists.",
+      "existsAt": "A pre-dream snapshot exists (from {date}).",
+      "confirmQuestion": "Replace with snapshot?",
+      "confirm": "Confirm",
+      "cancel": "Cancel",
+      "restore": "Restore snapshot",
+      "restorePending": "Restoring...",
+      "restoreTitle": "Restore the memory to the pre-dream snapshot",
+      "restoreBlockedTitle": "Save or discard your edits first — restoring replaces the memory with the snapshot"
+    },
+    "sources": {
+      "manual": "Manual edit",
+      "dreaming": "Dreaming",
+      "distill": "Session distillation",
+      "unknown": "Unknown"
+    },
+    "provenance": "{source} · {stamp}",
+    "viewSession": "view session",
+    "discard": "Discard",
+    "discardTitle": "Restore the saved memory, discarding your edits",
+    "dream": "Dream",
+    "dreamPending": "Dreaming...",
+    "dreamTitle": "Rewrite this memory from the recent sessions of every ticket",
+    "dreamBlockedTitle": "Save or discard your edits first — the agent rewrites the SAVED memory",
+    "save": "Save memory",
+    "savePending": "Saving...",
+    "saved": "Project memory saved.",
+    "restored": "Restored the memory to the pre-dream snapshot.",
+    "skeletonInserted": "Inserted the 4-sections Dreaming skeleton.",
+    "sectionsAppended": "Appended missing Dreaming section(s): {sections}.",
+    "allSectionsPresent": "All 4 required Dreaming sections are already present.",
+    "nothingToDream": "Nothing to dream about yet.",
+    "nothingToDreamReason": "Nothing to dream about: {reason}.",
+    "approachingCap": "Approaching the {max}-token cap ({tokens}/{max}).",
+    "overCap": "Over the {max}-token cap ({tokens}/{max}). Trim the content to save.",
+    "errors": {
+      "load": "Failed to load project memory.",
+      "save": "Failed to save project memory.",
+      "restore": "Failed to restore the memory snapshot.",
+      "dream": "Failed to start the dreaming session."
+    }
   }
 }

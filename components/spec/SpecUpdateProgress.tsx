@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Check, CircleAlert, X } from "lucide-react";
 
@@ -43,6 +44,7 @@ export function SpecUpdateProgress({
   error,
   onDismiss,
 }: SpecUpdateProgressProps) {
+  const t = useTranslations("Spec");
   const streamRef = useRef<HTMLPreElement | null>(null);
 
   // Keep the live output pinned to the newest line while the agent works.
@@ -63,7 +65,7 @@ export function SpecUpdateProgress({
             <>
               <BreathingDot size={7} tone="live" />
               <span className="text-[12px] text-muted-foreground">
-                Spec update running
+                {t("updateProgress.running")}
               </span>
             </>
           ) : status === "done" ? (
@@ -74,7 +76,7 @@ export function SpecUpdateProgress({
                 className="shrink-0 text-strata-live-deep"
               />
               <span className="text-[12px] text-foreground">
-                Spec updated by agent.
+                {t("updateProgress.done")}
               </span>
             </>
           ) : (
@@ -85,7 +87,7 @@ export function SpecUpdateProgress({
                 className="shrink-0 text-destructive"
               />
               <span className="text-[12px] text-destructive">
-                Spec update failed — the saved spec was left unchanged.
+                {t("updateProgress.failed")}
               </span>
             </>
           )}
@@ -93,13 +95,13 @@ export function SpecUpdateProgress({
             href={`/projects/${projectId}/sessions/${sessionId}`}
             className="ml-auto text-[11.5px] font-normal text-strata-next-deep no-underline hover:brightness-[0.92]"
           >
-            view session
+            {t("updateProgress.viewSession")}
           </Link>
           {status !== "running" && (
             <button
               type="button"
               onClick={onDismiss}
-              aria-label="Dismiss spec update result"
+              aria-label={t("updateProgress.dismiss")}
               className="flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               <X size={12} aria-hidden="true" />
@@ -113,14 +115,14 @@ export function SpecUpdateProgress({
             className="max-h-[160px] overflow-y-auto rounded-[10px] bg-muted p-[10px] font-mono text-[11.5px] leading-[1.5] tabular-nums break-words whitespace-pre-wrap text-muted-foreground"
             data-testid="spec-update-stream"
           >
-            {stream ? stream : "Waiting for agent output…"}
+            {stream ? stream : t("updateProgress.waiting")}
           </pre>
         )}
 
         {status === "done" && response && (
           <div className="flex flex-col gap-[5px]">
             <Mono size={9.5} tone="muted" uppercase tracking={0.08}>
-              Agent response
+              {t("updateProgress.response")}
             </Mono>
             <pre
               className="max-h-[160px] overflow-y-auto rounded-[10px] bg-muted p-[10px] font-mono text-[11.5px] leading-[1.5] tabular-nums break-words whitespace-pre-wrap text-muted-foreground"

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { BandHeader, StrataBand } from "@/components/piscine";
 import { SpecUpdateProgress } from "@/components/spec/SpecUpdateProgress";
 
@@ -47,6 +49,8 @@ export function SuggestionBand({
   onDismiss,
   className,
 }: SuggestionBandProps) {
+  const t = useTranslations("Spec");
+
   return (
     // `rail` gives the 16px horizontal padding; the frame's 14px vertical is
     // 1px off the preset, so it is overridden here rather than in the primitive.
@@ -58,7 +62,7 @@ export function SuggestionBand({
     >
       <BandHeader
         stratum="next"
-        label="Suggestion d'agent"
+        label={t("suggestion.label")}
         labelSize={12}
         standalone
       />

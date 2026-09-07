@@ -129,14 +129,14 @@ describe("QaScreen — the coverage stat", () => {
   it("prints the percentage", async () => {
     await renderScreen();
     expect(screen.getByTestId("qa-coverage").textContent).toBe(
-      "review coverage 92% · 30j",
+      "review coverage 92% · 30d",
     );
   });
 
   it("prints an em-dash — never 0% — when nothing shipped in the window", async () => {
     await renderScreen(payload({ coveragePercent: null }));
     expect(screen.getByTestId("qa-coverage").textContent).toBe(
-      "review coverage — · 30j",
+      "review coverage — · 30d",
     );
   });
 });
@@ -239,7 +239,7 @@ describe("QaScreen — Dismiss", () => {
 
     const toast = await screen.findByTestId("qa-toast");
     expect(toast.textContent).toContain(
-      "Finding dismissed, mais la raison n'a pas été enregistrée dans le ticket",
+      "Finding dismissed, but the reason was not recorded on the ticket",
     );
     // The finding stays resolved: losing the dismissal is worse than losing
     // its echo, so nothing is rolled back.

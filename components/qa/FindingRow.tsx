@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Hammer } from "lucide-react";
 
 import {
@@ -91,6 +91,7 @@ export function FindingRow({
   className,
 }: FindingRowProps) {
   const locale = useLocale();
+  const t = useTranslations("Qa");
   const minor = finding.tier === "minor";
   const tone = projectTone(project?.colorIndex ?? 0);
 
@@ -131,7 +132,10 @@ export function FindingRow({
         {finding.text}
         {!minor && finding.filePath ? (
           <Mono size={11.5} tone="muted">
-            {` · ${finding.filePath}:${finding.lineNumber}`}
+            {` ${t("finding.location", {
+              path: finding.filePath,
+              line: finding.lineNumber,
+            })}`}
           </Mono>
         ) : null}
       </span>
@@ -146,7 +150,10 @@ export function FindingRow({
         className="order-none ml-auto min-w-0 truncate lg:ml-0 lg:shrink-0"
       >
         <Mono size={10} tone={minor ? "you-mid" : "muted"}>
-          {`${finding.reviewer ?? "—"} · ${findingAge(finding.filedAt, locale)}`}
+          {t("finding.meta", {
+            reviewer: finding.reviewer ?? "—",
+            age: findingAge(finding.filedAt, locale),
+          })}
         </Mono>
       </span>
 
@@ -167,10 +174,10 @@ export function FindingRow({
             icon={Hammer}
             onClick={() => onFix?.(finding)}
             pending={pending}
-            pendingLabel="Dispatch…"
+            pendingLabel={t("finding.dispatchPending")}
             data-testid="qa-finding-fix"
           >
-            Fix with agent
+            {t("finding.fix")}
           </PillButton>
         ) : null}
 
@@ -182,7 +189,7 @@ export function FindingRow({
             onClick={() => onDiff?.(finding)}
             data-testid="qa-finding-diff"
           >
-            Diff
+            {t("finding.diff")}
           </PillButton>
         ) : null}
 
@@ -198,7 +205,7 @@ export function FindingRow({
           className="text-muted-foreground"
           data-testid="qa-finding-dismiss"
         >
-          Dismiss
+          {t("finding.dismiss")}
         </PillButton>
       </div>
     </SurfaceCard>

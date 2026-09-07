@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { FlaskConical } from "lucide-react";
 
 import { IdentityChip, PillButton, projectTone } from "@/components/piscine";
@@ -38,20 +39,13 @@ export interface NewQaCheckButtonProps {
   className?: string;
 }
 
-/**
- * Why the button is dead, in the one workspace state where that is not obvious.
- *
- * A workspace whose projects were all attached to a local path with no
- * `git_repo_path` gets a pill that never responds, and "QA checks are broken
- * again" is exactly the reading this epic exists to stop.
- */
-const NO_PROJECT_REASON = "Aucun projet avec un dépôt git : un QA check tourne dans le dépôt du projet.";
-
 export function NewQaCheckButton({
   projects,
   onSelect,
   className,
 }: NewQaCheckButtonProps) {
+  const t = useTranslations("Qa");
+
   const trigger = (
     <PillButton
       variant="outline"
@@ -65,7 +59,7 @@ export function NewQaCheckButton({
       // owns the click and this handler must not also fire.
       onClick={projects.length === 1 ? () => onSelect(projects[0].id) : undefined}
     >
-      New check
+      {t("newCheck.label")}
     </PillButton>
   );
 
@@ -74,7 +68,15 @@ export function NewQaCheckButton({
     // `disabled:pointer-events-none`, and an element that takes no pointer
     // events never shows its own native tooltip. The span does.
     return (
-      <span title={NO_PROJECT_REASON} data-testid="qa-new-check-blocked">
+      // `newCheck.noProjectReason` says why the button is dead, in the one
+      // workspace state where that is not obvious: a workspace whose projects
+      // were all attached to a local path with no `git_repo_path` gets a pill
+      // that never responds, and "QA checks are broken again" is exactly the
+      // reading this epic exists to stop.
+      <span
+        title={t("newCheck.noProjectReason")}
+        data-testid="qa-new-check-blocked"
+      >
         {trigger}
       </span>
     );
@@ -90,7 +92,7 @@ export function NewQaCheckButton({
       onSelect={(project) => onSelect(project.id)}
       // Unreachable while the caller only mounts this with a non-empty list,
       // and kept because the component's contract does not promise that.
-      emptyLabel="Aucun projet avec un dépôt git."
+      emptyLabel={t("newCheck.emptyLabel")}
       width={280}
       testId="qa-new-check-menu"
       itemTestId="qa-new-check-project"
