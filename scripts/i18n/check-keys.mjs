@@ -129,28 +129,34 @@ function literalOf(node) {
     : null;
 }
 
-/** The identifier a translator was bound to, and the namespace it carries. */
-function collectTranslatorBindings(source) {
-  /** @type {Map<string, string | null>} name → namespace (`null` = namespace-less) */
-  const bindings = new Map();
-  const visit = (node) => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
-      let call = node.initializer;
-      if (ts.isAwaitExpression(call)) call = call.expression;
-      if (ts.isCallExpression(call) && ts.isIdentifier(call.expression)) {
-        const fn = call.expression.text;
-        if (NAMESPACE_FACTORIES.has(fn)) {
-          bindings.set(node.name.text, literalOf(call.arguments[0]));
-        } else if (fn === "translatorFor") {
-          // translatorFor(locale, "Ns") — the namespace is the second argument.
-          bindings.set(node.name.text, literalOf(call.arguments[1]));
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-  return bindings;
+/**
+ * The namespace a `const t = useTranslations("Ns")` declaration carries, or
+ * `undefined` when the declaration is not a translator at all. `null` is a
+ * real answer: the namespace-less translator, whose keys are full paths.
+ */
+function translatorNamespaceOf(node) {
+  if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name) || !node.initializer) {
+    return undefined;
+  }
+  let call = node.initializer;
+  if (ts.isAwaitExpression(call)) call = call.expression;
+  if (!ts.isCallExpression(call) || !ts.isIdentifier(call.expression)) return undefined;
+  const fn = call.expression.text;
+  if (NAMESPACE_FACTORIES.has(fn)) return literalOf(call.arguments[0]);
+  // translatorFor(locale, "Ns") — the namespace is the second argument.
+  if (fn === "translatorFor") return literalOf(call.arguments[1]);
+  return undefined;
+}
+
+/** Does this node open a new scope for a `const` declared inside it? */
+function opensScope(node) {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isBlock(node)
+  );
 }
 
 export function referencedKeys() {
@@ -170,19 +176,33 @@ export function referencedKeys() {
    * reading it as a key reported a missing string nobody wrote.
    */
   const asCatalogueKey = (value) =>
-    value && value.includes(".") && namespaces.has(value.split(".")[0]) ? value : null;
+    value && /^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9_]+)+$/.test(value) && namespaces.has(value.split(".")[0]) ? value : null;
   const files = SOURCE_ROOTS.flatMap((root) => walkFiles(path.join(ROOT, root)));
 
   for (const file of files) {
     const text = readFileSync(file, "utf8");
-    // Cheap prefilter: a file with no translator and no `…Key:` property
-    // cannot contribute a reference, and most of the tree is that.
-    if (!/useTranslations|getTranslations|translatorFor|catalogueValue|Key:|Key=/.test(text)) {
-      continue;
-    }
     const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-    const bindings = collectTranslatorBindings(source);
     const rel = path.relative(ROOT, file);
+    /**
+     * Translator bindings, SCOPED — a stack of `name → namespace` frames, not
+     * one map per file.
+     *
+     * A file-wide map is wrong in a way that lies rather than fails:
+     * `app/projects/[projectId]/sessions/page.tsx` binds
+     * `useTranslations("NightRuns")` inside one component and
+     * `useTranslations("ProjectSessions")` inside three siblings, all to `t`.
+     * Last-wins attributed one component's keys to the other's namespace and
+     * reported two phantom missing keys, which cost a band real time and was
+     * "fixed" by renaming a variable. The scope stack is what makes the
+     * obvious code correct.
+     */
+    const scopes = [new Map()];
+    const namespaceOf = (name) => {
+      for (let i = scopes.length - 1; i >= 0; i -= 1) {
+        if (scopes[i].has(name)) return scopes[i].get(name);
+      }
+      return undefined;
+    };
 
     const record = (key) => {
       if (!key) return;
@@ -192,6 +212,11 @@ export function referencedKeys() {
     };
 
     const visit = (node) => {
+      const scoped = opensScope(node);
+      if (scoped) scopes.push(new Map());
+      const namespace = translatorNamespaceOf(node);
+      if (namespace !== undefined) scopes[scopes.length - 1].set(node.name.text, namespace);
+
       if (ts.isCallExpression(node)) {
         const callee = node.expression;
         // `t(...)`, and the `t.rich` / `t.raw` / `t.has` members.
@@ -204,10 +229,12 @@ export function referencedKeys() {
         ) {
           name = callee.expression.text;
         }
-        if (name && bindings.has(name)) {
-          const key = literalOf(node.arguments[0]);
-          const namespace = bindings.get(name);
-          if (key) record(namespace ? `${namespace}.${key}` : key);
+        if (name) {
+          const namespace = namespaceOf(name);
+          if (namespace !== undefined) {
+            const key = literalOf(node.arguments[0]);
+            if (key) record(namespace ? `${namespace}.${key}` : key);
+          }
         }
         // `catalogueValue(locale, "Full.Dotted.Key")`
         if (ts.isIdentifier(callee) && callee.text === "catalogueValue") {
@@ -237,6 +264,7 @@ export function referencedKeys() {
         }
       }
       ts.forEachChild(node, visit);
+      if (scoped) scopes.pop();
     };
     visit(source);
   }

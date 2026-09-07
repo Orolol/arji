@@ -109,25 +109,44 @@ export default {
     );
     const show = (text) => JSON.stringify(text.trim().slice(0, 40));
 
+    // Only expressions whose values render as copy: conditions, call arguments,
+    // object keys and enum comparisons are data, not rendered words.
+    function renderedLiterals(node, report) {
+      if (!node) return;
+      if (node.type === "Literal" && typeof node.value === "string") {
+        if (isCopy(node.value, allowPattern)) report(node, node.value);
+      } else if (node.type === "ConditionalExpression") {
+        renderedLiterals(node.consequent, report);
+        renderedLiterals(node.alternate, report);
+      } else if (node.type === "LogicalExpression") {
+        if (node.operator !== "&&") renderedLiterals(node.left, report);
+        renderedLiterals(node.right, report);
+      } else if (node.type === "TemplateLiteral") {
+        for (const part of node.quasis) {
+          if (isCopy(part.value.cooked ?? part.value.raw, allowPattern)) {
+            report(part, part.value.cooked ?? part.value.raw);
+          }
+        }
+        for (const part of node.expressions) renderedLiterals(part, report);
+      } else if (node.type === "BinaryExpression" && node.operator === "+") {
+        renderedLiterals(node.left, report);
+        renderedLiterals(node.right, report);
+      } else if (node.type === "TSAsExpression" || node.type === "TSNonNullExpression") {
+        renderedLiterals(node.expression, report);
+      }
+    }
+
     return {
       JSXText(node) {
         if (isCopy(node.value, allowPattern)) {
           context.report({ node, messageId: "bareText", data: { text: show(node.value) } });
         }
       },
-
-      // `{"Ready to land"}` as a child — the same copy, one syntax along.
       JSXExpressionContainer(node) {
         if (node.parent?.type !== "JSXElement" && node.parent?.type !== "JSXFragment") return;
-        const expression = node.expression;
-        if (expression?.type !== "Literal" || typeof expression.value !== "string") return;
-        if (isCopy(expression.value, allowPattern)) {
-          context.report({
-            node: expression,
-            messageId: "bareText",
-            data: { text: show(expression.value) },
-          });
-        }
+        renderedLiterals(node.expression, (literal, text) => {
+          context.report({ node: literal, messageId: "bareText", data: { text: show(text) } });
+        });
       },
 
       JSXAttribute(node) {
@@ -137,20 +156,12 @@ export default {
             : node.name.name;
         if (!copyAttributes.has(name) && !copyAttributePattern.test(name)) return;
         const value = node.value;
-        const literal =
-          value?.type === "Literal"
-            ? value
-            : value?.type === "JSXExpressionContainer" && value.expression.type === "Literal"
-              ? value.expression
-              : null;
-        if (!literal || typeof literal.value !== "string") return;
-        if (isCopy(literal.value, allowPattern)) {
-          context.report({
-            node: literal,
-            messageId: "bareAttribute",
-            data: { attribute: name, text: show(literal.value) },
-          });
-        }
+        renderedLiterals(value?.type === "JSXExpressionContainer" ? value.expression : value,
+          (literal, text) => context.report({
+            node: literal, messageId: "bareAttribute",
+            data: { attribute: name, text: show(text) },
+          }),
+        );
       },
     };
   },

@@ -61,6 +61,55 @@ describe("the i18n key-coverage gate", () => {
     expect(orphans).toContain("CoverageProbe.unreferenced");
   });
 
+  it("keeps two namespaces apart when one file binds both to `t`", () => {
+    // A file-wide `name → namespace` map reads this as one binding and
+    // last-wins: `t("entries.tickets")` in `A` gets attributed to `TopBar`
+    // and reported missing, while `Nav.entries.tickets` is reported orphan.
+    // Both are phantoms, and the "fix" is to rename a variable in correct
+    // code — so the walk is scoped instead.
+    mkdirSync(SCRATCH_DIR, { recursive: true });
+    writeFileSync(
+      SCRATCH_TSX,
+      [
+        'import { useTranslations } from "next-intl";',
+        "export function A() {",
+        '  const t = useTranslations("Nav");',
+        '  return <span>{t("entries.tickets")}</span>;',
+        "}",
+        "export function B() {",
+        '  const t = useTranslations("TopBar");',
+        '  return <span>{t("pills.now")}</span>;',
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    const { missing, referenced } = audit();
+    expect(missing).toEqual([]);
+    expect(referenced.get("Nav.entries.tickets")).toEqual(
+      expect.arrayContaining([expect.stringContaining("__i18n_coverage_probe__")]),
+    );
+    expect(referenced.get("TopBar.pills.now")).toEqual(
+      expect.arrayContaining([expect.stringContaining("__i18n_coverage_probe__")]),
+    );
+  });
+
+  it("reads key-reference tables without a hook or a Key-suffixed field", () => {
+    mkdirSync(SCRATCH_DIR, { recursive: true });
+    writeFileSync(SCRATCH_TSX, 'export const labels = { tickets: "Nav.entries.tickets", broken: "Nav.entries.missingProbe" };');
+    const { missing, referenced } = audit();
+    expect(missing).toContain("Nav.entries.missingProbe");
+    expect(referenced.get("Nav.entries.tickets")).toEqual(
+      expect.arrayContaining([expect.stringContaining("__i18n_coverage_probe__")]),
+    );
+  });
+
+  it("does not mistake prose beginning with a namespace word for a key", () => {
+    mkdirSync(SCRATCH_DIR, { recursive: true });
+    writeFileSync(SCRATCH_TSX, 'export const prompt = "Review. If the move is refused, leave a comment.";');
+    expect(audit().missing).toEqual([]);
+  });
+
   it("puts the tree back, so the two probes above cannot mask a real break", () => {
     expect(existsSync(SCRATCH_TSX)).toBe(false);
     expect(existsSync(SCRATCH_NS)).toBe(false);

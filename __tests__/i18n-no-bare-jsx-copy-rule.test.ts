@@ -43,6 +43,10 @@ describe("i18n/no-bare-jsx-copy", () => {
         },
       ],
       invalid: [
+        { code: 'const A = () => <p>{ready ? "Ready" : "Waiting"}</p>;', errors: [{ messageId: "bareText" }, { messageId: "bareText" }] },
+        { code: 'const A = () => <p>{`Hello ${name}`}</p>;', errors: [{ messageId: "bareText" }] },
+        { code: 'const A = () => <p>{name || "Anonymous"}</p>;', errors: [{ messageId: "bareText" }] },
+        { code: 'const A = () => <p title={ready ? "Ready" : "Waiting"} />;', errors: [{ messageId: "bareAttribute" }, { messageId: "bareAttribute" }] },
         {
           code: "const A = () => <p>Ready to land</p>;",
           errors: [{ messageId: "bareText" }],
