@@ -77,6 +77,9 @@ export function NamedAgentSelect({
 }: NamedAgentSelectProps) {
   const { agents, loading } = useNamedAgentsList();
   const reliability = useDispatchReliability(dispatchRole);
+  // Every branch shares a controlled value, including before the roster
+  // arrives. An empty string shows the placeholder when clearing is disabled.
+  const selectedValue = value || (allowClear ? NO_AGENT_VALUE : "");
   // Carried by every branch below: the loading and empty states render a
   // trigger too, and a picker that is only named once its agents arrive is
   // still an unlabeled combobox for the reader who reaches it first.
@@ -87,21 +90,12 @@ export function NamedAgentSelect({
     ...(ariaDescribedBy ? { "aria-describedby": ariaDescribedBy } : {}),
   };
 
-  if (loading) {
+  if (loading || agents.length === 0) {
+    const placeholder = loading ? "Loading..." : "No agents configured";
     return (
-      <Select disabled>
+      <Select value={selectedValue} disabled>
         <SelectTrigger {...labelProps} className={className ?? "w-44 h-7 text-xs"}>
-          <SelectValue placeholder="Loading..." />
-        </SelectTrigger>
-      </Select>
-    );
-  }
-
-  if (agents.length === 0) {
-    return (
-      <Select disabled>
-        <SelectTrigger {...labelProps} className={className ?? "w-44 h-7 text-xs"}>
-          <SelectValue placeholder="No agents configured" />
+          <SelectValue placeholder={placeholder}>{placeholder}</SelectValue>
         </SelectTrigger>
       </Select>
     );
@@ -109,7 +103,7 @@ export function NamedAgentSelect({
 
   return (
     <Select
-      value={value ?? (allowClear ? NO_AGENT_VALUE : undefined)}
+      value={selectedValue}
       onValueChange={(next) =>
         onChange(next === NO_AGENT_VALUE ? "" : next)
       }
