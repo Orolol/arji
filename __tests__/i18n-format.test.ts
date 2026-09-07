@@ -42,6 +42,15 @@ describe("parseTimestamp", () => {
 });
 
 describe("formatRelative — en", () => {
+  it.each([[29, "29d ago"], [30, "1mo ago"], [359, "11mo ago"], [360, "1y ago"], [425, "1y ago"]])(
+    "preserves the editor's month/year bands at %d days", (days, expected) => {
+      expect(formatRelative(ago(Number(days) * DAY), { locale: "en", now: NOW, maxUnit: "year" })).toBe(expected);
+    },
+  );
+  it("formats the extended bands through the same locale-aware family", () => {
+    expect(formatRelative(ago(60 * DAY), { locale: "fr", now: NOW, maxUnit: "year" })).toBe("il y a 2 m.");
+    expect(formatRelative(ago(425 * DAY), { locale: "fr", now: NOW, maxUnit: "year" })).toBe("il y a 1 a");
+  });
   const en = (value: string | null, precision?: "minute" | "second") =>
     formatRelative(value, { locale: "en", now: NOW, precision });
 

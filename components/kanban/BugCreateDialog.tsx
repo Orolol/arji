@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import { ImageAttachmentStrip } from "@/components/shared/ImageAttachmentStrip";
 import { useImageAttachments } from "@/hooks/useImageAttachments";
-import { PRIORITY_LABELS } from "@/lib/types/kanban";
+import { PRIORITY_LABEL_KEYS } from "@/lib/types/kanban";
 import { apiErrorMessage } from "@/lib/validation/error-message";
 import { cn } from "@/lib/utils";
 import { ImagePlus, Loader2 } from "lucide-react";
@@ -41,6 +41,7 @@ export function BugCreateDialog({
   onCreated,
   namedAgentId = null,
 }: BugCreateDialogProps) {
+  const tKey = useTranslations();
   const t = useTranslations("Kanban");
   const fieldId = useId();
   const titleId = `${fieldId}-title`;
@@ -302,9 +303,9 @@ export function BugCreateDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {Object.entries(PRIORITY_LABELS).map(([k, v]) => (
+                {Object.entries(PRIORITY_LABEL_KEYS).map(([k, v]) => (
                   <SelectItem key={k} value={k}>
-                    {v}
+                    {tKey(v)}
                   </SelectItem>
                 ))}
               </SelectContent>

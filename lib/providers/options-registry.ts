@@ -44,9 +44,11 @@
  */
 
 import { isCodeProducingAgentType } from "@/lib/agent-config/constants";
-import { catalogueValue, type TranslationKey } from "@/lib/i18n/catalogue";
-import { DEFAULT_UI_LOCALE } from "@/lib/i18n/locales";
+import type { TranslationKey } from "@/lib/i18n/catalogue";
+import enProviderOptions from "@/lib/i18n/messages/en/ProviderOptions.json";
 import type { ProviderType } from "./types";
+
+type ProviderOptionKey = Extract<TranslationKey, `ProviderOptions.${string}`>;
 
 export type ProviderOptionType = "select" | "bool" | "number" | "text";
 
@@ -59,16 +61,16 @@ export type NamedAgentCliOptions = Record<string, ProviderOptionValue>;
 export interface ProviderOptionChoice {
   value: string;
   /** Catalogue key of the visible name — `t(choice.labelKey)` at render. */
-  labelKey: TranslationKey;
+  labelKey: ProviderOptionKey;
 }
 
 export interface ProviderOptionDefinition {
   /** Stable storage key. Never renamed — it is persisted per agent. */
   key: string;
   /** Catalogue key of the option's visible name. */
-  labelKey: TranslationKey;
+  labelKey: ProviderOptionKey;
   /** Catalogue key of the sentence the band shows on hover. */
-  hintKey: TranslationKey;
+  hintKey: ProviderOptionKey;
   type: ProviderOptionType;
   /**
    * The value that means "leave it to the CLI". A stored value equal to the
@@ -337,7 +339,11 @@ export interface ProviderOptionValidation {
  * catalogue — only the resolution is pinned here.
  */
 function optionLabel(definition: ProviderOptionDefinition): string {
-  return catalogueValue(DEFAULT_UI_LOCALE, definition.labelKey);
+  // Validation is pinned to English; import only this namespace so UI callers
+  // of the registry do not bundle every locale alongside the provider payload.
+  return definition.labelKey.split(".").slice(1).reduce<unknown>(
+    (node, part) => (node as Record<string, unknown>)[part], enProviderOptions,
+  ) as string;
 }
 
 function validateOne(
@@ -588,7 +594,7 @@ const BOOL_VALUE_KEYS: { onKey: TranslationKey; offKey: TranslationKey } = {
 export interface DescribedProviderOption {
   key: string;
   /** Catalogue key of the option's name; null once the registry drops it. */
-  labelKey: TranslationKey | null;
+  labelKey: ProviderOptionKey | null;
   /** The storage key, printed when there is no catalogue name. */
   fallbackLabel: string;
   /** Catalogue key of the value's word (a choice, or on/off); null for data. */

@@ -185,17 +185,22 @@ describe("buildChangelogPreview", () => {
 });
 
 describe("upperAge", () => {
-  it("uppercases only the unit word", () => {
-    expect(upperAge("4d ago")).toBe("4d AGO");
-    expect(upperAge("12m ago")).toBe("12m AGO");
+  it("copes with non-English and reworded catalogue values without inspecting words", () => {
+    expect(upperAge("il y a 4 j", "fr")).toBe("IL Y A 4 J");
+    expect(upperAge("à l'instant", "fr")).toBe("À L'INSTANT");
+    expect(upperAge("moments earlier", "en")).toBe("MOMENTS EARLIER");
+  });
+  it("uppercases the caption, including its abbreviated unit", () => {
+    expect(upperAge("4d ago", "en")).toBe("4D AGO");
+    expect(upperAge("12m ago", "en")).toBe("12M AGO");
   });
 
   it("uppercases just now whole", () => {
-    expect(upperAge("just now")).toBe("JUST NOW");
+    expect(upperAge("just now", "en")).toBe("JUST NOW");
   });
 
   it("renders an unknown age as an em-dash", () => {
-    expect(upperAge("")).toBe("—");
+    expect(upperAge("", "en")).toBe("—");
   });
 });
 

@@ -62,7 +62,7 @@ export function EditorFooterBar({
   const [confirmOpen, setConfirmOpen] = useState(false);
   // Empty when the stamp cannot be read (legacy rows): "created —" would be a
   // sentence about a fact we do not have, so the whole line is dropped.
-  const created = createdAt ? formatRelative(createdAt, { locale }) : "";
+  const created = createdAt ? formatRelative(createdAt, { locale, maxUnit: "year" }) : "";
 
   return (
     <div className="flex shrink-0 flex-col gap-1.5">

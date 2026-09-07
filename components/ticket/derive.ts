@@ -13,7 +13,7 @@ import type { EpicActivityEntry } from "@/hooks/useEpicActivity";
 import type { FeedItem } from "@/lib/kanban/activity-feed";
 import { MCP_CREATE_BUG_ACTIVITY_PREFIX } from "@/lib/mcp/create-bug-contract";
 import type { ProjectTone } from "@/lib/piscine/tokens";
-import { COLUMN_LABELS, PRIORITY_LABELS } from "@/lib/types/kanban";
+import type { TicketDerivedCopy } from "./copy";
 import { formatRelative } from "@/lib/i18n/format";
 import type { UiLocale } from "@/lib/i18n/locales";
 
@@ -337,21 +337,11 @@ export interface TimelineLineItem {
   group?: string[];
 }
 
-const ACTIVITY_ACTOR_WORD: Record<string, string> = {
-  user: "you",
-  agent: "agent",
-  system: "system",
-};
-
-function columnLabel(status: string): string {
-  return (COLUMN_LABELS as Record<string, string>)[status] ?? status;
-}
-
 /** `you · Review → To Merge`, with the recorded reason when there is one. */
-function transitionText(entry: EpicActivityEntry): string {
-  const actor = ACTIVITY_ACTOR_WORD[entry.actor] ?? entry.actor;
+function transitionText(entry: EpicActivityEntry, copy: TicketDerivedCopy): string {
+  const actor = copy.actors[entry.actor] ?? entry.actor;
   // U+2192 RIGHTWARDS ARROW — the system's move glyph, never "->".
-  const move = `${columnLabel(entry.fromStatus)} → ${columnLabel(entry.toStatus)}`;
+  const move = `${copy.columns[entry.fromStatus] ?? entry.fromStatus} → ${copy.columns[entry.toStatus] ?? entry.toStatus}`;
   const reason = entry.reason?.trim();
   return reason ? `${actor} · ${move} — ${reason}` : `${actor} · ${move}`;
 }
@@ -365,7 +355,7 @@ function transitionText(entry: EpicActivityEntry): string {
  * stays anyway: `buildActivityFeed` is shared, and a future caller passing
  * comments must not silently duplicate them into the timeline.
  */
-export function activityTimelineLines(feed: FeedItem[]): TimelineLineItem[] {
+export function activityTimelineLines(feed: FeedItem[], copy: TicketDerivedCopy): TimelineLineItem[] {
   const lines: TimelineLineItem[] = [];
 
   feed.forEach((item, index) => {
@@ -375,9 +365,9 @@ export function activityTimelineLines(feed: FeedItem[]): TimelineLineItem[] {
       lines.push({
         key: `activity-group-${index}`,
         kind: "summary",
-        text: `${item.entries.length} automatic transitions`,
+        text: copy.transitions(item.entries.length),
         at: item.ts || null,
-        group: item.entries.map(transitionText),
+        group: item.entries.map((entry) => transitionText(entry, copy)),
       });
       return;
     }
@@ -386,7 +376,7 @@ export function activityTimelineLines(feed: FeedItem[]): TimelineLineItem[] {
       lines.push({
         key: `activity-${item.entry.id}`,
         kind: "summary",
-        text: item.entry.reason?.trim() || "Pipeline event",
+        text: item.entry.reason?.trim() || copy.pipelineEvent,
         at: item.entry.createdAt,
       });
       return;
@@ -400,8 +390,8 @@ export function activityTimelineLines(feed: FeedItem[]): TimelineLineItem[] {
         key: `activity-${item.entry.id}`,
         kind: "summary",
         text: detail
-          ? `agent created this bug — ${detail}`
-          : "agent created this bug",
+          ? copy.bugDetail(detail)
+          : copy.bugCreated,
         at: item.entry.createdAt,
       });
       return;
@@ -410,7 +400,7 @@ export function activityTimelineLines(feed: FeedItem[]): TimelineLineItem[] {
     lines.push({
       key: `activity-${item.entry.id}`,
       kind: "done",
-      text: transitionText(item.entry),
+      text: transitionText(item.entry, copy),
       at: item.entry.createdAt,
     });
   });
@@ -471,18 +461,18 @@ export function descriptionMeta(epic: {
   priority?: number | null;
   createdAt?: string | null;
   githubIssueNumber?: number | null;
-}, locale: UiLocale): string {
+}, locale: UiLocale, copy: TicketDerivedCopy): string {
   const segments: string[] = [];
 
   const priorityLabel =
-    typeof epic.priority === "number" ? PRIORITY_LABELS[epic.priority] : undefined;
-  if (priorityLabel) segments.push(`priority ${priorityLabel.toLowerCase()}`);
+    typeof epic.priority === "number" ? copy.priorities[epic.priority] : undefined;
+  if (priorityLabel) segments.push(copy.priority(priorityLabel.toLocaleLowerCase(locale)));
 
   const created = formatRelative(epic.createdAt, { locale });
-  if (created) segments.push(`created ${created}`);
+  if (created) segments.push(copy.created(created));
 
   if (typeof epic.githubIssueNumber === "number") {
-    segments.push(`from GH #${epic.githubIssueNumber}`);
+    segments.push(copy.github(epic.githubIssueNumber));
   }
 
   return segments.join(" · ");

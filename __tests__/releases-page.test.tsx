@@ -430,7 +430,7 @@ describe("Releases screen — stat tiles", () => {
     await renderPage();
 
     expect(screen.getByTestId("release-stat-current").textContent).toBe(
-      "v0.4.2CURRENT · 4d AGO"
+      "v0.4.2CURRENT · 4D AGO"
     );
     expect(screen.getByTestId("release-stat-ready").textContent).toBe(
       "1READY FOR v0.4.3"

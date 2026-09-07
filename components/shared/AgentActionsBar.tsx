@@ -24,6 +24,7 @@ import {
   type BuiltinReviewType,
 } from "@/lib/agent-config/constants";
 import type { TranslationKey } from "@/lib/i18n/catalogue";
+import { PIPELINE_STAGE_LABEL_KEYS } from "@/lib/pipeline/constants";
 import { pipelineChipLabel, usePipelineRuns } from "@/hooks/usePipelineRuns";
 
 interface ReviewResolutionPreview {
@@ -322,7 +323,7 @@ export function AgentActionsBar({
           title={t("agentActions.pipelineTitle")}
         >
           <Workflow className="h-3 w-3" />
-          {pipelineChipLabel(activePipeline)}
+          {pipelineChipLabel(activePipeline, { pipeline: tKey("Kanban.pipelineChip"), stage: (stage) => tKey("Kanban.pipelineChipStage", { stage: tKey(PIPELINE_STAGE_LABEL_KEYS[stage]) }) })}
         </Badge>
       )}
       {lockMessage && (

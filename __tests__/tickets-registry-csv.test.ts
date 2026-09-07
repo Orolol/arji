@@ -1,3 +1,5 @@
+import { PRIORITY_LABEL_KEYS } from "@/lib/types/kanban";
+import { catalogueValue } from "@/lib/i18n/catalogue";
 /**
  * The registry's CSV export.
  *
@@ -17,6 +19,7 @@ import type { RegistryRow } from "@/lib/tickets-registry/types";
  */
 const t = translatorFor("en", "Registry");
 const copy: CsvCopy = {
+  priority: Object.fromEntries(Object.entries(PRIORITY_LABEL_KEYS).map(([value, key]) => [value, catalogueValue("en", key)])),
   headers: [
     t("columns.ticket"),
     t("columns.title"),

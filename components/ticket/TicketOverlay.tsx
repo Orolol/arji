@@ -1,5 +1,6 @@
 "use client";
 
+import { useTicketDerivedCopy } from "@/components/ticket/copy";
 import { useLocale, useTranslations } from "next-intl";
 /**
  * Frame 6a — the ticket, opened as a modal over a still-live desk.
@@ -65,6 +66,7 @@ export function TicketOverlay({
   onAgentConflict,
   refreshTrigger = 0,
 }: TicketOverlayProps) {
+  const derivedCopy = useTicketDerivedCopy();
   const locale = useLocale();
   const t = useTranslations("Ticket");
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -458,7 +460,7 @@ export function TicketOverlay({
             <div className="flex min-h-0 min-w-0 flex-[7] flex-col gap-3 overflow-y-auto max-[1272px]:flex-none max-[1272px]:overflow-visible">
               <TicketDescriptionCard
                 description={epic?.description ?? null}
-                meta={epic ? descriptionMeta(epic, locale) : ""}
+                meta={epic ? descriptionMeta(epic, locale, derivedCopy) : ""}
                 projectId={projectId}
                 images={epic?.images ?? null}
               />

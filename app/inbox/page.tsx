@@ -17,7 +17,7 @@ import { useInbox, type InboxItem } from "@/hooks/useInbox";
 import { formatRelative } from "@/lib/i18n/format";
 import {
   isBuildableStatus,
-  COLUMN_LABELS,
+  COLUMN_LABEL_KEYS,
   type KanbanStatus,
 } from "@/lib/types/kanban";
 
@@ -47,17 +47,6 @@ function groupByProject(items: InboxItem[]): ProjectGroup[] {
   return groups;
 }
 
-/**
- * The ticket status chip. `COLUMN_LABELS` is the workspace-wide status
- * vocabulary — the registry, the ticket overlay and the transition rules all
- * read it — so it is NOT extracted here: one band cannot fork a table four
- * surfaces share. It moves to the catalogue with that table, in one change.
- */
-function statusLabel(status: string | null): string {
-  if (!status) return "";
-  return COLUMN_LABELS[status as KanbanStatus] ?? status;
-}
-
 function InboxRow({
   item,
   onReply,
@@ -71,6 +60,7 @@ function InboxRow({
   onMarkRead: (epicId: string) => Promise<void>;
 }) {
   const locale = useLocale();
+  const tKey = useTranslations();
   const t = useTranslations("Inbox");
   const [replyText, setReplyText] = useState("");
   const [busy, setBusy] = useState<"reply" | "dispatch" | "read" | null>(null);
@@ -183,7 +173,7 @@ function InboxRow({
           </span>
         )}
         <span className="ml-auto text-xs text-muted-foreground shrink-0">
-          {statusLabel(item.status)}
+          {item.status ? (COLUMN_LABEL_KEYS[item.status as KanbanStatus] ? tKey(COLUMN_LABEL_KEYS[item.status as KanbanStatus]) : item.status) : ""}
         </span>
       </div>
 

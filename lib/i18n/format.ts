@@ -36,8 +36,16 @@
  * (`il y a 12 s`, `il y a 4 min`) were drawn with U+0020 on the same grid.
  */
 
-import { catalogueValue } from "./catalogue";
 import type { UiLocale } from "./locales";
+import enFormat from "./messages/en/Format.json";
+import frFormat from "./messages/fr/Format.json";
+
+// Only this tiny namespace belongs in the formatter's client graph. The full
+// resolved catalogue reaches components through NextIntlClientProvider.
+const FORMAT_MESSAGES = { en: enFormat, fr: { ...enFormat, ...frFormat } };
+function formatValue(locale: UiLocale, key: `Format.${keyof typeof enFormat}`): string {
+  return FORMAT_MESSAGES[locale][key.slice("Format.".length) as keyof typeof enFormat];
+}
 
 /** Anything the app stores or receives as a point in time. */
 export type Timestamp = string | number | Date | null | undefined;
@@ -82,6 +90,8 @@ export interface FormatRelativeOptions {
    * footer's save stamp want to be seen moving.
    */
   precision?: "minute" | "second";
+  /** Agent editor ages retain their historical 30-day months / 12-month years. */
+  maxUnit?: "day" | "year";
 }
 
 const RELATIVE_STYLES = new Set<Intl.RelativeTimeFormatStyle>(["long", "short", "narrow"]);
@@ -100,7 +110,7 @@ const relativeFormatters = new Map<string, Intl.RelativeTimeFormat>();
  * `narrow` is the unusable `-5 min` and `short` is the frame's `il y a 5 min`.
  */
 function relativeFormatter(locale: UiLocale): Intl.RelativeTimeFormat {
-  const style = catalogueValue(locale, "Format.relativeStyle") as Intl.RelativeTimeFormatStyle;
+  const style = formatValue(locale, "Format.relativeStyle") as Intl.RelativeTimeFormatStyle;
   const resolved = RELATIVE_STYLES.has(style) ? style : "narrow";
   const cacheKey = `${locale}:${resolved}`;
   let formatter = relativeFormatters.get(cacheKey);
@@ -122,7 +132,7 @@ function relativeFormatter(locale: UiLocale): Intl.RelativeTimeFormat {
  */
 export function formatRelative(
   value: Timestamp,
-  { locale, now, precision = "minute" }: FormatRelativeOptions,
+  { locale, now, precision = "minute", maxUnit = "day" }: FormatRelativeOptions,
 ): string {
   const then = parseTimestamp(value);
   if (!Number.isFinite(then)) return "";
@@ -132,13 +142,20 @@ export function formatRelative(
 
   if (seconds < 60) {
     if (precision === "second" && seconds >= 5) return onMonoGrid(rtf.format(-seconds, "second"));
-    return catalogueValue(locale, "Format.justNow");
+    return formatValue(locale, "Format.justNow");
   }
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return onMonoGrid(rtf.format(-minutes, "minute"));
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return onMonoGrid(rtf.format(-hours, "hour"));
-  return onMonoGrid(rtf.format(-Math.floor(hours / 24), "day"));
+  const days = Math.floor(hours / 24);
+  if (maxUnit === "year" && days >= 30) {
+    const months = Math.floor(days / 30);
+    return onMonoGrid(months < 12
+      ? rtf.format(-months, "month")
+      : rtf.format(-Math.floor(months / 12), "year"));
+  }
+  return onMonoGrid(rtf.format(-days, "day"));
 }
 
 /* ------------------------------------------------------------------ */

@@ -1,3 +1,4 @@
+import type { UiLocale } from "@/lib/i18n/locales";
 import type { TranslationKey } from "@/lib/i18n/catalogue";
 
 /**
@@ -162,16 +163,9 @@ export function buildChangelogPreview(
   ].join("\n");
 }
 
-/**
- * `formatRelative` output → the stat-caption casing the frame draws: only the unit
- * word is uppercased, so "4d ago" reads "4d AGO" and not "4D AGO".
- * An unknown age is an em-dash, never a zero and never "just now".
- */
-export function upperAge(relative: string): string {
-  if (!relative) return "—";
-  if (relative === "just now") return "JUST NOW";
-  if (relative.endsWith(" ago")) return `${relative.slice(0, -4)} AGO`;
-  return relative;
+/** Caption casing is presentation, independent of translated wording. */
+export function upperAge(relative: string, locale: UiLocale): string {
+  return relative ? relative.toLocaleUpperCase(locale) : "—";
 }
 
 /**

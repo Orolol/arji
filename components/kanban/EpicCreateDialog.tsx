@@ -17,6 +17,7 @@ import { ChevronDown, ChevronRight, Loader2, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createId } from "@/lib/utils/nanoid";
 import {
+  EPIC_TITLE_MAX_LENGTH, EPIC_DESCRIPTION_MAX_LENGTH, STORY_TITLE_MAX_LENGTH, STORY_TEXT_MAX_LENGTH, STORY_TITLE_TOO_LONG,
   buildManualEpicPayload,
   createEmptyEpicDraft,
   createEmptyUserStory,
@@ -59,6 +60,7 @@ export function EpicCreateDialog({
   submitLabel,
   onCreated,
 }: EpicCreateDialogProps) {
+  const tKey = useTranslations();
   const t = useTranslations("Kanban");
   const [draft, setDraft] = useState<ManualEpicDraft>(createEmptyEpicDraft);
   const [collapsedStories, setCollapsedStories] = useState<Record<string, boolean>>({});
@@ -204,7 +206,7 @@ export function EpicCreateDialog({
       if (!res.ok || json.error) {
         // The dialog stays open with the draft intact so a failed request
         // never costs the user what they typed.
-        setError(formatEpicCreateError(json));
+        setError(formatEpicCreateError(json, t("epicCreate.errors.create")));
         return;
       }
 
@@ -265,7 +267,7 @@ export function EpicCreateDialog({
                 className="mt-1 text-[12px] text-destructive"
                 data-testid="epic-title-error"
               >
-                {validation.titleError}
+                {tKey(validation.titleError, { max: EPIC_TITLE_MAX_LENGTH })}
               </p>
             )}
           </div>
@@ -301,7 +303,7 @@ export function EpicCreateDialog({
                 className="mt-1 text-[12px] text-destructive"
                 data-testid="epic-description-error"
               >
-                {validation.descriptionError}
+                {tKey(validation.descriptionError, { max: EPIC_DESCRIPTION_MAX_LENGTH })}
               </p>
             )}
           </div>
@@ -408,7 +410,7 @@ export function EpicCreateDialog({
                       role="alert"
                       className="mt-1 pl-[28px] text-[12px] text-destructive"
                     >
-                      {storyError}
+                      {tKey(storyError, { max: storyError === STORY_TITLE_TOO_LONG ? STORY_TITLE_MAX_LENGTH : STORY_TEXT_MAX_LENGTH })}
                     </p>
                   )}
 

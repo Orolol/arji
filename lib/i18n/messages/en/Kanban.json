@@ -88,5 +88,44 @@
     "selectAction": "Select at least one action.",
     "starting": "Starting…",
     "start": "Start refinement"
-  }
+  },
+  "columns": {
+    "backlog": "Backlog",
+    "todo": "To Do",
+    "in_progress": "In Progress",
+    "review": "Review",
+    "to_merge": "To Merge",
+    "done": "Done",
+    "released": "Released"
+  },
+  "priorities": {
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "critical": "Critical"
+  },
+  "pipelineStages": {
+    "build": "Build",
+    "grading": "Grading",
+    "review": "Review",
+    "fix": "Fix",
+    "forensic": "Forensic"
+  },
+  "transitionReasons": {
+    "mergeRequired": "Done requires a merge — use the Merge action.",
+    "releasedSystemOnly": "Tickets reach Released automatically when a release is created.",
+    "sessionRunning": "An agent session is running or queued for this ticket.",
+    "noDirect": "No direct transition from {status}"
+  },
+  "validation": {
+    "epicTitleRequired": "Title is required",
+    "epicTitleTooLong": "Title must be {max} characters or fewer",
+    "epicDescriptionTooLong": "Description must be {max} characters or fewer",
+    "storyTitleRequired": "User story title is required",
+    "storyTitleTooLong": "User story title must be {max} characters or fewer",
+    "storyDescriptionTooLong": "User story description must be {max} characters or fewer",
+    "storyCriteriaTooLong": "User story acceptance criteria must be {max} characters or fewer"
+  },
+  "pipelineChip": "Pipeline",
+  "pipelineChipStage": "Pipeline · {stage}"
 }

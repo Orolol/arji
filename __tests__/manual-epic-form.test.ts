@@ -219,7 +219,7 @@ describe("formatEpicCreateError", () => {
     const message = formatEpicCreateError({
       error: "Validation failed",
       details: { title: ["Too big: expected string to have <=200 characters"] },
-    });
+    }, "Failed to create epic");
 
     expect(message).toBe(
       "Validation failed — title: Too big: expected string to have <=200 characters",
@@ -230,27 +230,27 @@ describe("formatEpicCreateError", () => {
     const message = formatEpicCreateError({
       error: "Validation failed",
       details: { title: ["Too big"], description: ["Too big", "Also bad"] },
-    });
+    }, "Failed to create epic");
 
     expect(message).toBe("Validation failed — title: Too big; description: Too big, Also bad");
   });
 
   it("passes a plain error through untouched", () => {
-    expect(formatEpicCreateError({ error: "Project not found" })).toBe("Project not found");
+    expect(formatEpicCreateError({ error: "Project not found" }, "Failed to create epic")).toBe("Project not found");
   });
 
   it("falls back when the body carries nothing usable", () => {
     const fallback = "Failed to create epic";
-    expect(formatEpicCreateError({})).toBe(fallback);
-    expect(formatEpicCreateError(null)).toBe(fallback);
-    expect(formatEpicCreateError("boom")).toBe(fallback);
-    expect(formatEpicCreateError({ error: "   " })).toBe(fallback);
+    expect(formatEpicCreateError({}, "Failed to create epic")).toBe(fallback);
+    expect(formatEpicCreateError(null, "Failed to create epic")).toBe(fallback);
+    expect(formatEpicCreateError("boom", "Failed to create epic")).toBe(fallback);
+    expect(formatEpicCreateError({ error: "   " }, "Failed to create epic")).toBe(fallback);
     // Empty or malformed details must not leave a dangling separator.
-    expect(formatEpicCreateError({ error: "Validation failed", details: {} })).toBe(
+    expect(formatEpicCreateError({ error: "Validation failed", details: {} }, "Failed to create epic")).toBe(
       "Validation failed",
     );
     expect(
-      formatEpicCreateError({ error: "Validation failed", details: { title: "nope" } }),
+      formatEpicCreateError({ error: "Validation failed", details: { title: "nope" } }, "Failed to create epic"),
     ).toBe("Validation failed");
   });
 });

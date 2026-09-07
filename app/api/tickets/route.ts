@@ -1,3 +1,5 @@
+import { COLUMN_LABEL_KEYS } from "@/lib/types/kanban";
+import { catalogueValue } from "@/lib/i18n/catalogue";
 import { NextResponse } from "next/server";
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 
@@ -808,6 +810,7 @@ export async function GET(request: Request) {
   const locale = resolveUiLocaleForRequest(request);
   const t = translatorFor(locale, "Registry");
   const activityCopy: ActivityCopy = {
+    columns: Object.fromEntries(Object.entries(COLUMN_LABEL_KEYS).map(([status, key]) => [status, catalogueValue(locale, key)])),
     running: (line) => t("activity.running", { line }),
     question: (age) => t("activity.question", { age }),
     failed: (error, age) => t("activity.failed", { error, age }),

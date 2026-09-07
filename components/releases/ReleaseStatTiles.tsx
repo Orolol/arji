@@ -37,7 +37,7 @@ export function ReleaseStatTiles({
 }: ReleaseStatTilesProps) {
   const locale = useLocale();
   const t = useTranslations("Releases");
-  const age = latest ? upperAge(formatRelative(latest.createdAt, { locale })) : "";
+  const age = latest ? upperAge(formatRelative(latest.createdAt, { locale }), locale) : "";
 
   return (
     <div className="flex shrink-0 gap-[12px]">

@@ -1,3 +1,5 @@
+import { COLUMN_LABEL_KEYS } from "@/lib/types/kanban";
+import { catalogueValue } from "@/lib/i18n/catalogue";
 /**
  * The registry's pure derivation, from plain objects.
  *
@@ -30,6 +32,7 @@ const NOW = new Date("2026-08-30T12:00:00.000Z");
  */
 const t = translatorFor("en", "Registry");
 const copy: ActivityCopy = {
+  columns: Object.fromEntries(Object.entries(COLUMN_LABEL_KEYS).map(([value, key]) => [value, catalogueValue("en", key)])),
   running: (line) => t("activity.running", { line }),
   question: (age) => t("activity.question", { age }),
   failed: (error, age) => t("activity.failed", { error, age }),

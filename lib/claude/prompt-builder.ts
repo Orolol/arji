@@ -1,3 +1,6 @@
+import { catalogueValue } from "@/lib/i18n/catalogue";
+// Agent-facing priority words stay pinned to English, independent of the UI locale.
+import { DEFAULT_UI_LOCALE } from "@/lib/i18n/locales";
 /**
  * Prompt composition for all Claude Code interactions in Arij.
  *
@@ -55,7 +58,7 @@ import { DREAMING_MEMORY_SECTIONS } from "@/lib/workflow/dreaming-constants";
 import type { TelescopeCollectionResult } from "@/lib/telescope/collect";
 import { utf8Head } from "@/lib/routines/ci-autofix-limits";
 import type { RefinementSnapshot } from "@/lib/refinement/snapshot";
-import { PRIORITY_LABELS } from "@/lib/types/kanban";
+import { PRIORITY_LABEL_KEYS } from "@/lib/types/kanban";
 import {
   fenceAgentOutput,
   fenceOnly,
@@ -2306,7 +2309,7 @@ function renderRefinementColumn(
   tickets.forEach((ticket, index) => {
     lines.push("");
     lines.push(
-      `  ${index + 1}. [${ticket.label}] ${ticket.title}  (${ticket.type}, priority ${ticket.priority} = ${PRIORITY_LABELS[ticket.priority] ?? "unknown"}, position ${ticket.position})`,
+      `  ${index + 1}. [${ticket.label}] ${ticket.title}  (${ticket.type}, priority ${ticket.priority} = ${PRIORITY_LABEL_KEYS[ticket.priority] ? catalogueValue(DEFAULT_UI_LOCALE, PRIORITY_LABEL_KEYS[ticket.priority]) : "unknown"}, position ${ticket.position})`,
     );
     lines.push(`     ticket_id: ${ticket.id}`);
     if (ticket.awaitingReply) {

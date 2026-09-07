@@ -143,8 +143,9 @@ export function messagesFor(locale: UiLocale): Messages {
 }
 
 /**
- * One catalogue string by its full key, outside React — for the formatting
- * family, which is pure and reads its two locale-data values this way.
+ * One catalogue string by its full key for server-side callers. Client
+ * helpers must use resolved copy or import only their tiny data namespace;
+ * importing this module bundles every locale as well as the provider payload.
  * Everything that renders goes through `useTranslations` / `getTranslations`.
  */
 export function catalogueValue(locale: UiLocale, key: TranslationKey): string {

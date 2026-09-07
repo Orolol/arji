@@ -9,7 +9,7 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { TranslationKey } from "@/lib/i18n/catalogue";
 import { fmtCount } from "@/lib/tickets-registry/aggregate";
 import type { DeskProject } from "@/lib/control-desk/types";
-import { COLUMN_LABELS, KANBAN_COLUMNS, type KanbanStatus } from "@/lib/types/kanban";
+import { COLUMN_LABEL_KEYS, KANBAN_COLUMNS, type KanbanStatus } from "@/lib/types/kanban";
 import { REGISTRY_SORTS, type RegistrySort, type RegistrySortDirection } from "@/lib/tickets-registry/sort";
 export type { RegistrySort } from "@/lib/tickets-registry/sort";
 // The pills are the UI of a URL parameter now — the vocabulary is the
@@ -194,14 +194,14 @@ export function RegistryFilters({
       </SelectPill>
       <SelectPill
         label={t("Registry.filters.status", {
-          name: status === "all" ? t("Registry.filters.statusAll") : COLUMN_LABELS[status],
+          name: status === "all" ? t("Registry.filters.statusAll") : t(COLUMN_LABEL_KEYS[status]),
         })}
       >
         <DropdownMenuItem onSelect={() => onStatusChange("all")}>
           {t("Registry.filters.statusAll")}
         </DropdownMenuItem>
         {KANBAN_COLUMNS.map((value) => (
-          <DropdownMenuItem key={value} onSelect={() => onStatusChange(value)}>{COLUMN_LABELS[value]}</DropdownMenuItem>
+          <DropdownMenuItem key={value} onSelect={() => onStatusChange(value)}>{t(COLUMN_LABEL_KEYS[value])}</DropdownMenuItem>
         ))}
       </SelectPill>
 

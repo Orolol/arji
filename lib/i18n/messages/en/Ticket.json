@@ -90,5 +90,19 @@
     "collapse": "less",
     "you": "you",
     "agent": "agent"
+  },
+  "derived": {
+    "actors": {
+      "user": "you",
+      "agent": "agent",
+      "system": "system"
+    },
+    "transitions": "{count} automatic transitions",
+    "pipelineEvent": "Pipeline event",
+    "bugCreated": "agent created this bug",
+    "bugDetail": "agent created this bug — {detail}",
+    "priority": "priority {priority}",
+    "created": "created {age}",
+    "github": "from GH #{number}"
   }
 }

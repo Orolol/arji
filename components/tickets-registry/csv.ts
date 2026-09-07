@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 
-import { PRIORITY_LABELS } from "@/lib/types/kanban";
+import { PRIORITY_LABEL_KEYS } from "@/lib/types/kanban";
 import type { RegistryGroup, RegistryRow } from "@/lib/tickets-registry/types";
 
 /**
@@ -46,6 +46,7 @@ const BOM = "\uFEFF";
  * `useTranslations` binding in `useCsvCopy` below (`lib/i18n/catalogue.ts`).
  */
 export interface CsvCopy {
+  priority: Record<number, string>;
   /** The nine header cells, in the order `toCsv` writes them. */
   headers: readonly string[];
   /** The GROUPE column: the same five words the group headers print. */
@@ -74,8 +75,10 @@ export interface CsvCopy {
  */
 export function useCsvCopy(): CsvCopy {
   const t = useTranslations("Registry");
+  const tKey = useTranslations();
   return useMemo(
     () => ({
+      priority: Object.fromEntries(Object.entries(PRIORITY_LABEL_KEYS).map(([value, key]) => [value, tKey(key)])),
       headers: [
         t("columns.ticket"),
         t("columns.title"),
@@ -108,7 +111,7 @@ export function useCsvCopy(): CsvCopy {
         queueRank: (label, rank) => t("state.queueRank", { label, rank }),
       },
     }),
-    [t],
+    [t, tKey],
   );
 }
 
@@ -162,7 +165,7 @@ export function toCsv(rows: readonly RegistryRow[], copy: CsvCopy): string {
 
   for (const row of rows) {
     const priority =
-      row.priority === null ? "" : (PRIORITY_LABELS[row.priority] ?? String(row.priority));
+      row.priority === null ? "" : (copy.priority[row.priority] ?? String(row.priority));
     const fields = [
       row.readableId ?? row.epicId,
       row.title,

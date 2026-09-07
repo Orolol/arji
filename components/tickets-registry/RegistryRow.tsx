@@ -15,7 +15,7 @@ import { shortId } from "@/components/ticket/derive";
 import type { DeskProject } from "@/lib/control-desk/types";
 import { TASK_LABEL } from "@/lib/tickets-registry/aggregate";
 import type { RegistryRow as Row } from "@/lib/tickets-registry/types";
-import { PRIORITY_LABELS } from "@/lib/types/kanban";
+import { PRIORITY_LABEL_KEYS } from "@/lib/types/kanban";
 import { cn } from "@/lib/utils";
 
 /**
@@ -223,7 +223,7 @@ export function RegistryRow({ row, project, striped, onOpen }: RegistryRowProps)
   const t = useTranslations();
   const blocked = row.blockedBy.length > 0;
   const priorityLabel =
-    row.priority === null ? null : (PRIORITY_LABELS[row.priority] ?? null);
+    row.priority === null ? null : (PRIORITY_LABEL_KEYS[row.priority] ? t(PRIORITY_LABEL_KEYS[row.priority]) : null);
 
   return (
     <button

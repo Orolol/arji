@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SelectPill } from "@/components/piscine";
 import { ticketStatusOptions } from "@/lib/kanban/status-transitions";
-import { PRIORITY_LABELS } from "@/lib/types/kanban";
+import { COLUMN_LABEL_KEYS, PRIORITY_LABEL_KEYS, type KanbanStatus } from "@/lib/types/kanban";
 
 export interface StatusControlProps {
   status: string;
@@ -46,11 +46,18 @@ export function StatusControl({
   onStatusChange,
   onPriorityChange,
 }: StatusControlProps) {
+  const tKey = useTranslations();
   const t = useTranslations("Ticket");
   // "(current)" is plain sans, so it lives under the system's 11px floor —
   // the 9.5px exception is for uppercase tracked mono kickers only, which
   // this is not.
-  const options = ticketStatusOptions(status, { hasRunningSession });
+  const options = ticketStatusOptions(status, { hasRunningSession }).map((option) => ({
+    ...option,
+    label: tKey(option.labelKey),
+    disabledReason: option.disabledReasonKey ? tKey(option.disabledReasonKey, {
+      status: COLUMN_LABEL_KEYS[status as KanbanStatus] ? tKey(COLUMN_LABEL_KEYS[status as KanbanStatus]) : status,
+    }) : null,
+  }));
 
   /**
    * Radix `Select` portals the selected item's ItemText children into the
@@ -94,13 +101,13 @@ export function StatusControl({
 
         <DropdownMenuSeparator />
         <DropdownMenuLabel>{t("status.priorityHeading")}</DropdownMenuLabel>
-        {Object.entries(PRIORITY_LABELS).map(([value, label]) => (
+        {Object.entries(PRIORITY_LABEL_KEYS).map(([value, label]) => (
           <DropdownMenuItem
             key={value}
             onSelect={() => onPriorityChange(Number(value))}
           >
             <span className="flex items-center gap-2">
-              <span>{label}</span>
+              <span>{tKey(label)}</span>
               {Number(value) === priority ? (
                 <span className="text-[11px] font-normal text-muted-foreground">
                   {t("status.current")}

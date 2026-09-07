@@ -27,6 +27,7 @@
  *     every SSE bump, polled only while a session is live.
  */
 
+import { useTicketDerivedCopy } from "@/components/ticket/copy";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useAgentDispatch } from "@/hooks/useAgentDispatch";
@@ -106,6 +107,7 @@ export function useTicketOverlayData(
    * — or one opened without a resolved project — must not fetch, and each of
    * these hooks already treats a null epic id as "no target".
    */
+  const derivedCopy = useTicketDerivedCopy();
   const activeEpicId = open && projectId ? epicId : null;
 
   const {
@@ -388,8 +390,9 @@ export function useTicketOverlayData(
         // or unexpected payload reaches here as a non-array. The band showing
         // nothing is the correct failure; a thrown render is not.
         buildActivityFeed([], Array.isArray(activityEntries) ? activityEntries : []),
+        derivedCopy,
       ),
-    [activityEntries],
+    [activityEntries, derivedCopy],
   );
 
   const timeline: TimelineEntry[] = useMemo(() => {

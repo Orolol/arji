@@ -4,7 +4,6 @@ import { useCallback, useMemo, useState } from "react";
 import { usePolling } from "@/hooks/usePolling";
 import {
   isPipelineRunActive,
-  PIPELINE_STAGE_LABELS,
   type PipelineRunSnapshot,
   type PipelineStage,
 } from "@/lib/pipeline/constants";
@@ -51,10 +50,10 @@ export function indexPipelineSessions(
 }
 
 /** "Pipeline · Review" / "Pipeline" — the chip label for one session. */
-export function pipelineChipLabel(info: PipelineSessionInfo): string {
+export function pipelineChipLabel(info: PipelineSessionInfo, copy: { pipeline: string; stage: (stage: PipelineStage) => string }): string {
   return info.stage
-    ? `Pipeline · ${PIPELINE_STAGE_LABELS[info.stage]}`
-    : "Pipeline";
+    ? copy.stage(info.stage)
+    : copy.pipeline;
 }
 
 /**

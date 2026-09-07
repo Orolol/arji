@@ -44,7 +44,7 @@ import {
   evaluateMergeReadiness,
   type MergeReadinessFacts,
 } from "@/lib/kanban/merge-readiness";
-import { COLUMN_LABELS, type KanbanStatus } from "@/lib/types/kanban";
+
 import type { TicketDependencyEdge } from "@/lib/types/kanban";
 
 import {
@@ -171,9 +171,7 @@ function mergeFactsOf(epic: RegistryEpicRow): MergeReadinessFacts {
   };
 }
 
-function columnLabel(status: string): string | null {
-  return COLUMN_LABELS[status as KanbanStatus] ?? null;
-}
+
 
 /* ------------------------------------------------------------------ */
 /* The composed DERNIÈRE ACTIVITÉ string                               */
@@ -212,6 +210,7 @@ export interface ActivityInput {
  * `components/spec/spec-format.ts` takes `copy.saved(age)`.
  */
 export interface ActivityCopy {
+  columns: Record<string, string>;
   running: (line: string) => string;
   question: (age: string) => string;
   failed: (error: string, age: string) => string;
@@ -435,7 +434,7 @@ export function deriveRegistryRows(
       taskType: live?.taskType ?? null,
       startedAt: live?.startedAt ?? null,
       yourTurnKind,
-      queueLabel: group === "waiting" ? columnLabel(status) : null,
+      queueLabel: group === "waiting" ? (copy.columns[status] ?? null) : null,
       queueRank: group === "waiting" ? (queue?.rank ?? null) : null,
       blockedBy: group === "waiting" ? blockedBy : [],
       isDraft: group === "waiting" && status === "backlog",

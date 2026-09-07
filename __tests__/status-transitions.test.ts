@@ -9,9 +9,9 @@ import { describe, it, expect } from "vitest";
 import {
   ticketStatusOptions,
   isTicketTransitionSelectable,
-  REASON_MERGE_REQUIRED,
-  REASON_RELEASED_SYSTEM_ONLY,
-  REASON_SESSION_RUNNING,
+  REASON_MERGE_REQUIRED_KEY,
+  REASON_RELEASED_SYSTEM_ONLY_KEY,
+  REASON_SESSION_RUNNING_KEY,
 } from "@/lib/kanban/status-transitions";
 
 function enabledStatuses(current: string, ctx?: { hasRunningSession?: boolean }) {
@@ -44,7 +44,7 @@ describe("ticketStatusOptions", () => {
     // Done is no longer structurally reachable from review — the merge
     // boundary (to_merge) sits between.
     expect(done?.enabled).toBe(false);
-    expect(done?.disabledReason).toBe("No direct transition from Review");
+    expect(done?.disabledReasonKey).toBe("Kanban.transitionReasons.noDirect");
     expect(options.filter((o) => o.enabled).map((o) => o.status)).toEqual([
       "in_progress",
       "to_merge",
@@ -56,7 +56,7 @@ describe("ticketStatusOptions", () => {
     const done = options.find((option) => option.status === "done");
 
     expect(done?.enabled).toBe(false);
-    expect(done?.disabledReason).toBe(REASON_MERGE_REQUIRED);
+    expect(done?.disabledReasonKey).toBe(REASON_MERGE_REQUIRED_KEY);
     // Send-back edges stay selectable; Done only opens through the merge.
     expect(options.filter((o) => o.enabled).map((o) => o.status)).toEqual([
       "in_progress",
@@ -76,7 +76,7 @@ describe("ticketStatusOptions", () => {
       (option) => option.status === "released"
     );
     expect(fromDone?.enabled).toBe(false);
-    expect(fromDone?.disabledReason).toBe(REASON_RELEASED_SYSTEM_ONLY);
+    expect(fromDone?.disabledReasonKey).toBe(REASON_RELEASED_SYSTEM_ONLY_KEY);
 
     // done → in_progress / review stay enabled.
     expect(enabledStatuses("done")).toEqual(["in_progress", "review"]);
@@ -100,7 +100,7 @@ describe("ticketStatusOptions", () => {
     for (const status of ["backlog", "todo", "review"]) {
       const option = options.find((o) => o.status === status);
       expect(option?.enabled).toBe(false);
-      expect(option?.disabledReason).toBe(REASON_SESSION_RUNNING);
+      expect(option?.disabledReasonKey).toBe(REASON_SESSION_RUNNING_KEY);
     }
   });
 

@@ -6,6 +6,8 @@
  * `createEpicSchema` without the component having to know that schema.
  */
 
+import type { TranslationKey } from "@/lib/i18n/catalogue";
+
 export interface ManualUserStoryDraft {
   /** Client-side key only — the server mints the persisted story id. */
   key: string;
@@ -23,11 +25,11 @@ export interface ManualEpicDraft {
 export interface ManualEpicValidation {
   valid: boolean;
   /** Set when the epic title is missing or over length; `null` when it is fine. */
-  titleError: string | null;
+  titleError: TranslationKey | null;
   /** Set when the description is over length; `null` when it is fine. */
-  descriptionError: string | null;
-  /** Keyed by `ManualUserStoryDraft.key` — only untitled stories appear. */
-  storyErrors: Record<string, string>;
+  descriptionError: TranslationKey | null;
+  /** Message keys indexed by story id; interpolation limits are resolved at render. */
+  storyErrors: Record<string, TranslationKey>;
 }
 
 export interface ManualEpicPayload {
@@ -60,13 +62,13 @@ export const EPIC_DESCRIPTION_MAX_LENGTH = 10000;
 export const STORY_TITLE_MAX_LENGTH = 500;
 export const STORY_TEXT_MAX_LENGTH = 10000;
 
-export const EPIC_TITLE_REQUIRED = "Title is required";
-export const EPIC_TITLE_TOO_LONG = `Title must be ${EPIC_TITLE_MAX_LENGTH} characters or fewer`;
-export const EPIC_DESCRIPTION_TOO_LONG = `Description must be ${EPIC_DESCRIPTION_MAX_LENGTH} characters or fewer`;
-export const STORY_TITLE_REQUIRED = "User story title is required";
-export const STORY_TITLE_TOO_LONG = `User story title must be ${STORY_TITLE_MAX_LENGTH} characters or fewer`;
-export const STORY_DESCRIPTION_TOO_LONG = `User story description must be ${STORY_TEXT_MAX_LENGTH} characters or fewer`;
-export const STORY_CRITERIA_TOO_LONG = `User story acceptance criteria must be ${STORY_TEXT_MAX_LENGTH} characters or fewer`;
+export const EPIC_TITLE_REQUIRED = "Kanban.validation.epicTitleRequired" satisfies TranslationKey;
+export const EPIC_TITLE_TOO_LONG = "Kanban.validation.epicTitleTooLong" satisfies TranslationKey;
+export const EPIC_DESCRIPTION_TOO_LONG = "Kanban.validation.epicDescriptionTooLong" satisfies TranslationKey;
+export const STORY_TITLE_REQUIRED = "Kanban.validation.storyTitleRequired" satisfies TranslationKey;
+export const STORY_TITLE_TOO_LONG = "Kanban.validation.storyTitleTooLong" satisfies TranslationKey;
+export const STORY_DESCRIPTION_TOO_LONG = "Kanban.validation.storyDescriptionTooLong" satisfies TranslationKey;
+export const STORY_CRITERIA_TOO_LONG = "Kanban.validation.storyCriteriaTooLong" satisfies TranslationKey;
 
 export function createEmptyUserStory(key: string): ManualUserStoryDraft {
   return { key, title: "", description: "", acceptanceCriteria: "" };
@@ -88,7 +90,7 @@ export function createEmptyEpicDraft(): ManualEpicDraft {
  * permanently un-renamable. Catching it here means the whole epic isn't
  * rejected server-side for a field the user can still fix in place.
  */
-function validateStoryDraft(story: ManualUserStoryDraft): string | null {
+function validateStoryDraft(story: ManualUserStoryDraft): TranslationKey | null {
   const title = story.title.trim();
   if (title.length === 0) return STORY_TITLE_REQUIRED;
   if (title.length > STORY_TITLE_MAX_LENGTH) return STORY_TITLE_TOO_LONG;
@@ -123,7 +125,7 @@ export function validateManualEpicDraft(draft: ManualEpicDraft): ManualEpicValid
       ? EPIC_DESCRIPTION_TOO_LONG
       : null;
 
-  const storyErrors: Record<string, string> = {};
+  const storyErrors: Record<string, TranslationKey> = {};
   for (const story of draft.userStories) {
     const error = validateStoryDraft(story);
     if (error) storyErrors[story.key] = error;
@@ -147,8 +149,7 @@ export function validateManualEpicDraft(draft: ManualEpicDraft): ManualEpicValid
  * failed"` and puts the actionable part in `details`, so showing `error` alone
  * tells the user nothing about which field to fix.
  */
-export function formatEpicCreateError(payload: unknown): string {
-  const fallback = "Failed to create epic";
+export function formatEpicCreateError(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") return fallback;
 
   const { error, details } = payload as { error?: unknown; details?: unknown };

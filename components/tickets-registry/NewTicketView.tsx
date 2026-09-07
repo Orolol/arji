@@ -19,7 +19,7 @@ import {
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useProjects } from "@/hooks/useProjects";
 import type { TranslationKey } from "@/lib/i18n/catalogue";
-import { PRIORITY_LABELS } from "@/lib/types/kanban";
+import { PRIORITY_LABEL_KEYS } from "@/lib/types/kanban";
 import { cn } from "@/lib/utils";
 
 /**
@@ -206,12 +206,12 @@ export function NewTicketView({ projectId }: NewTicketViewProps) {
             <div className="flex flex-col gap-[6px]">
               <FieldKicker stratum="card">{t("Registry.newTicket.fieldPriority")}</FieldKicker>
               <SelectPill
-                label={PRIORITY_LABELS[priority] ?? t("Registry.newTicket.priorityFallback")}
+                label={PRIORITY_LABEL_KEYS[priority] ? t(PRIORITY_LABEL_KEYS[priority]) : t("Registry.newTicket.priorityFallback")}
                 tone="ink"
               >
                 {PRIORITY_CHOICES.map((value) => (
                   <DropdownMenuItem key={value} onSelect={() => setPriority(value)}>
-                    {PRIORITY_LABELS[value]}
+                    {t(PRIORITY_LABEL_KEYS[value])}
                   </DropdownMenuItem>
                 ))}
               </SelectPill>

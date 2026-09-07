@@ -14,14 +14,14 @@ export const KANBAN_COLUMNS = [
 
 export type KanbanStatus = (typeof KANBAN_COLUMNS)[number];
 
-export const COLUMN_LABELS: Record<KanbanStatus, string> = {
-  backlog: "Backlog",
-  todo: "To Do",
-  in_progress: "In Progress",
-  review: "Review",
-  to_merge: "To Merge",
-  done: "Done",
-  released: "Released",
+export const COLUMN_LABEL_KEYS: Record<KanbanStatus, TranslationKey> = {
+  backlog: "Kanban.columns.backlog",
+  todo: "Kanban.columns.todo",
+  in_progress: "Kanban.columns.in_progress",
+  review: "Kanban.columns.review",
+  to_merge: "Kanban.columns.to_merge",
+  done: "Kanban.columns.done",
+  released: "Kanban.columns.released",
 };
 
 /** Columns that support drag-and-drop (all except released) */
@@ -81,11 +81,11 @@ export function isDeliveredStatus(status: string | null | undefined): boolean {
   return status != null && DELIVERED_STATUS_SET.has(status);
 }
 
-export const PRIORITY_LABELS: Record<number, string> = {
-  0: "Low",
-  1: "Medium",
-  2: "High",
-  3: "Critical",
+export const PRIORITY_LABEL_KEYS: Record<number, TranslationKey> = {
+  0: "Kanban.priorities.low",
+  1: "Kanban.priorities.medium",
+  2: "Kanban.priorities.high",
+  3: "Kanban.priorities.critical",
 };
 
 export const PRIORITY_COLORS: Record<number, string> = {

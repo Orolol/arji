@@ -1,3 +1,4 @@
+import { catalogueValue } from "@/lib/i18n/catalogue";
 /**
  * The frame-6a ticket overlay: header, the workflow-aware status control,
  * derived-state reset, the polling gate, the non-live collapse, and the three
@@ -13,9 +14,9 @@ import type { ComponentProps, ReactNode } from "react";
 
 import { TicketOverlay } from "@/components/ticket/TicketOverlay";
 import {
-  REASON_MERGE_REQUIRED,
-  REASON_RELEASED_SYSTEM_ONLY,
-  REASON_SESSION_RUNNING,
+  REASON_MERGE_REQUIRED_KEY,
+  REASON_RELEASED_SYSTEM_ONLY_KEY,
+  REASON_SESSION_RUNNING_KEY,
 } from "@/lib/kanban/status-transitions";
 
 const mockUseEpicDetail = vi.hoisted(() => vi.fn());
@@ -503,3 +504,9 @@ describe("TicketOverlay closing", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+const REASON_MERGE_REQUIRED = catalogueValue("en", REASON_MERGE_REQUIRED_KEY);
+
+const REASON_RELEASED_SYSTEM_ONLY = catalogueValue("en", REASON_RELEASED_SYSTEM_ONLY_KEY);
+
+const REASON_SESSION_RUNNING = catalogueValue("en", REASON_SESSION_RUNNING_KEY);
