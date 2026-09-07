@@ -124,11 +124,14 @@ export function NamedAgentSelect({
         )}
         {agents.map((agent) => {
           const isComposite = agent.kind === "composite";
+          // `?? []` for the same reason as in AgentSelectPill: the list is
+          // fetched, and an older payload must degrade rather than crash.
+          const members = agent.members ?? [];
           // A COMPOSITE'S LADDER, in the row's title. The list is what
           // predicts the run, and it is the whole difference between the two
           // kinds of row.
           const ladder = isComposite
-            ? agent.members.map((member) => member.name).join(" → ") ||
+            ? members.map((member) => member.name).join(" → ") ||
               "no members — unusable"
             : undefined;
 
@@ -137,8 +140,8 @@ export function NamedAgentSelect({
               data-testid={`agent-kind-${agent.id}`}
               className="shrink-0 font-mono text-[10px] uppercase tracking-[.06em] text-muted-foreground"
             >
-              {agent.members.length > 0
-                ? `composite · ${agent.members.length}`
+              {members.length > 0
+                ? `composite · ${members.length}`
                 : "composite · empty"}
             </span>
           ) : null;

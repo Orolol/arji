@@ -128,8 +128,8 @@ export function AgentRosterCard({
                   its LADDER instead — the members in order, which is the only
                   thing that predicts what it will run. */}
               {agent.kind === "composite"
-                ? agent.members.length > 0
-                  ? `composite · ${agent.members.map((member) => member.name).join(" → ")}`
+                ? (agent.members ?? []).length > 0
+                  ? `composite · ${(agent.members ?? []).map((member) => member.name).join(" → ")}`
                   : "composite · no members — unusable"
                 : `${agent.provider} · ${agent.model || "CLI default"}`}
             </Mono>

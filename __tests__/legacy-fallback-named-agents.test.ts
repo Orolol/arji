@@ -150,6 +150,9 @@ describe("resolveAgentByNamedId", () => {
     // A legacy raw default is ignored in favour of the seeded agent.
     dbMockState.getQueue = [
       { provider: "gemini-cli", namedAgentId: null }, // global scope default
+      // resolveAgent() probes the designated default composite — one
+      // settings read — before the seeded catch-all agent.
+      null, // no designated default composite
       {
         id: "seeded-cc",
         name: "Claude Code",
@@ -172,6 +175,9 @@ describe("resolveAgentByNamedId", () => {
     // Legacy raw defaults no longer pin a role invisibly.
     dbMockState.getQueue = [
       { provider: "codex", namedAgentId: null }, // global scope default
+      // resolveAgent() probes the designated default composite — one
+      // settings read — before the seeded catch-all agent.
+      null, // no designated default composite
       {
         id: "seeded-cc",
         name: "Claude Code",
@@ -204,6 +210,9 @@ describe("resolveAgent fallback chain", () => {
     dbMockState.getQueue = [
       { provider: "gemini-cli", namedAgentId: null }, // project scope
       null, // global scope
+      // resolveAgent() probes the designated default composite — one
+      // settings read — before the seeded catch-all agent.
+      null, // no designated default composite
       {
         id: "seeded-cc",
         name: "Claude Code",
@@ -243,6 +252,9 @@ describe("resolveAgent fallback chain", () => {
     dbMockState.getQueue = [
       null, // project scope: not found
       { provider: "codex", namedAgentId: null }, // global scope
+      // resolveAgent() probes the designated default composite — one
+      // settings read — before the seeded catch-all agent.
+      null, // no designated default composite
       {
         id: "seeded-cc",
         name: "Claude Code",
@@ -285,6 +297,9 @@ describe("resolveAgent fallback chain", () => {
     dbMockState.getQueue = [
       null, // project scope
       null, // global scope
+      // resolveAgent() probes the designated default composite — one
+      // settings read — before the seeded catch-all agent.
+      null, // no designated default composite
       {
         id: "seeded-cc",
         name: "Claude Code",
@@ -307,6 +322,9 @@ describe("resolveAgent fallback chain", () => {
     // seeded default agent lookup: returns the "Claude Code" agent
     dbMockState.getQueue = [
       null, // global scope
+      // resolveAgent() probes the designated default composite — one
+      // settings read — before the seeded catch-all agent.
+      null, // no designated default composite
       {
         id: "seeded-cc",
         name: "Claude Code",
@@ -375,6 +393,9 @@ describe("resolveAgent fallback chain", () => {
       null, // project scope
       { provider: "gemini-cli", namedAgentId: "deleted-agent" },
       null, // named agent not found
+      // resolveAgent() probes the designated default composite — one
+      // settings read — before the seeded catch-all agent.
+      null, // no designated default composite
       {
         id: "seeded-cc",
         name: "Claude Code",
@@ -413,6 +434,9 @@ describe("seeded global default agent", () => {
     // No project, no global default — only the seeded "Claude Code" agent exists
     dbMockState.getQueue = [
       null, // global scope default
+      // resolveAgent() probes the designated default composite — one
+      // settings read — before the seeded catch-all agent.
+      null, // no designated default composite
       {
         id: "seed-1",
         name: "Claude Code",
@@ -434,6 +458,9 @@ describe("seeded global default agent", () => {
     // Falls through to resolveAgent -> seeded agent
     dbMockState.getQueue = [
       null, // global scope default
+      // resolveAgent() probes the designated default composite — one
+      // settings read — before the seeded catch-all agent.
+      null, // no designated default composite
       {
         id: "seed-1",
         name: "Claude Code",

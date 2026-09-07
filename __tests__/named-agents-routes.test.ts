@@ -22,7 +22,13 @@ vi.mock("@/lib/agent-config/named-agents", () => ({
   deleteNamedAgent: mockDelete,
 }));
 
-vi.mock("@/lib/agent-config/constants", () => ({
+// PARTIAL mock: only the provider/type predicates are widened (this suite
+// exercises historical provider strings the registry no longer lists). Every
+// other constant — the composite kind the route discriminates on among them —
+// comes from the real module, so a rename there fails here rather than
+// silently un-defining a branch.
+vi.mock("@/lib/agent-config/constants", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/agent-config/constants")>()),
   isAgentProvider: vi.fn(
     (v: string) => [
       "claude-code", "codex", "gemini-cli",

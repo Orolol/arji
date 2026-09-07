@@ -33,7 +33,9 @@ const AGENT: NamedAgent = {
   model: "claude-opus-5",
   options: {},
   personaPrompt: null,
-  escalatesTo: null,
+  kind: "simple",
+  members: [],
+  isDefault: false,
   createdAt: null,
 };
 

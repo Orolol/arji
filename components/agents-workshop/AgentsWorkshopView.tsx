@@ -61,7 +61,10 @@ function draftFrom(agent: NamedAgent): Draft {
     // `?? {}` covers a legacy row whose options were never written.
     options: agent.options ?? {},
     personaPrompt: agent.personaPrompt ?? "",
-    memberIds: agent.members.map((member) => member.id),
+    // `?? []` covers a payload shaped by an older route: a simple agent has
+    // no members, and a missing array must read as "none" rather than crash
+    // the editor.
+    memberIds: (agent.members ?? []).map((member) => member.id),
   };
 }
 
@@ -73,7 +76,7 @@ function isDirty(draft: Draft, agent: NamedAgent): boolean {
     return (
       draft.name !== agent.name ||
       draft.memberIds.join("\u0000") !==
-        agent.members.map((member) => member.id).join("\u0000")
+        (agent.members ?? []).map((member) => member.id).join("\u0000")
     );
   }
   return (
@@ -159,7 +162,9 @@ export function AgentsWorkshopView({ projectId }: { projectId?: string }) {
   const draftMembers = draft
     ? draft.memberIds
         .map((id) => {
-          const stored = agent?.members.find((member) => member.id === id);
+          const stored = (agent?.members ?? []).find(
+            (member) => member.id === id
+          );
           if (stored) return stored;
           const added = agents.find((candidate) => candidate.id === id);
           return added

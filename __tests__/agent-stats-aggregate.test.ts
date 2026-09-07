@@ -5,10 +5,13 @@
  *
  * The things worth pinning here are the ones a rewrite gets wrong:
  * `julianday()` over two incompatible `created_at` formats, the odd/even
- * median, a NULL-preserving cost sum, a zero-filled 14-entry day series, and
- * the escalation BLAME attribution (the trace's own session carries no named
- * agent for a provider escalation, so the count has to land on the failed
- * session that preceded it).
+ * median, a NULL-preserving cost sum, and a zero-filled 14-entry day series.
+ *
+ * The escalation-count assertions are GONE with the mechanism they measured.
+ * It was a blame heuristic over trace strings, not a recorded event, and the
+ * escalation it attributed no longer exists — composite agents replaced it,
+ * and their rank-downs are recorded per session (`composite_agent_id`) rather
+ * than inferred from prose.
  */
 import { describe, expect, it, vi, beforeAll } from "vitest";
 
@@ -152,9 +155,10 @@ beforeAll(() => {
     startedAt: dayIso("2026-08-25", "13:00:00.000Z"),
   });
 
-  /* Escalation blame: a failed agent-blame session for epic-1 ends just
-   * before the trace; the trace's OWN session (agent-other) is irrelevant, and
-   * for a provider escalation would carry no named agent at all. */
+  /* Two sessions on epic-1 that the day series and role split still read.
+   * They used to be the escalation-blame fixture; the blame heuristic is gone
+   * with the mechanism, and they are kept because the aggregates below count
+   * them. */
   insertSession({
     namedAgentId: "agent-blame",
     status: "failed",
@@ -238,8 +242,6 @@ describe("getNamedAgentStats", () => {
     expect(stats.cleanRate).toBe(null);
     expect(stats.medianDurationMs).toBe(null);
     expect(stats.totalCostUsd).toBe(null);
-    // No terminal run means "unknown", not "zero escalations".
-    expect(stats.escalationCount).toBe(null);
   });
 
   it("reports the clean rate over terminal runs only", () => {
@@ -285,22 +287,12 @@ describe("getNamedAgentStats", () => {
     expect(split).toEqual({ build: 2, review: 1 });
   });
 
-  it("blames an escalation on the last failed session before the trace", () => {
-    // The trace's own session belongs to agent-other and is still running; the
-    // escalation must land on the agent whose run actually failed.
-    expect(
-      getNamedAgentStats("agent-blame", { nowIso: NOW }).escalationCount,
-    ).toBe(1);
-    expect(
-      getNamedAgentStats("agent-other", { nowIso: NOW }).escalationCount,
-    ).toBe(null);
-  });
-
-  it("counts a real zero in ink territory, not as a gap", () => {
-    // agent-odd has terminal runs but no escalation trace of its own.
-    expect(
-      getNamedAgentStats("agent-odd", { nowIso: NOW }).escalationCount,
-    ).toBe(0);
+  it("reports no escalation figure at all", () => {
+    // The field is gone from the payload, not zeroed: a 0 would read as a
+    // measurement ("nothing escalated") of a mechanism that no longer exists.
+    expect(getNamedAgentStats("agent-odd", { nowIso: NOW })).not.toHaveProperty(
+      "escalationCount",
+    );
   });
 });
 

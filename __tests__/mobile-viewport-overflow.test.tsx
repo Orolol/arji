@@ -113,7 +113,6 @@ const state = vi.hoisted(() => ({
       model: "claude-opus-5",
       options: {},
       personaPrompt: "You're an experienced developer.",
-      escalatesTo: null,
       createdAt: "2026-08-01T10:00:00.000Z",
     },
   ],

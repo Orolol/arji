@@ -213,7 +213,11 @@ export function AgentSelectPill({
    */
   const agentItems = safeAgents.map((agent) => {
     const isComposite = agent.kind === "composite";
-    const ladder = agent.members.map((member) => member.name).join(" → ");
+    // `?? []` rather than a bare `.map`: this list is fetched, and a payload
+    // shaped by an older route (or a stub) must degrade to "a simple agent",
+    // not crash the picker every surface in the app mounts.
+    const members = agent.members ?? [];
+    const ladder = members.map((member) => member.name).join(" → ");
     return (
       <DropdownMenuRadioItem
         key={agent.id}
@@ -231,8 +235,8 @@ export function AgentSelectPill({
               data-testid={`chat-option-agent-kind-${agent.id}`}
               className="shrink-0 font-mono text-[9.5px] uppercase tracking-[.06em] text-muted-foreground"
             >
-              {agent.members.length > 0
-                ? `composite · ${agent.members.length}`
+              {members.length > 0
+                ? `composite · ${members.length}`
                 : "composite · empty"}
             </span>
           ) : null}

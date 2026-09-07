@@ -7,7 +7,6 @@ import {
   agentSessions,
   epics,
   gradingReports,
-  namedAgents,
   projects,
   reviewComments,
   ticketComments,
@@ -45,7 +44,6 @@ import {
 import { resolveAgentPrompt } from "@/lib/agent-config/prompts";
 import {
   REVIEW_TYPE_TO_AGENT_TYPE,
-  type AgentProvider,
   type AgentType,
 } from "@/lib/agent-config/constants";
 import {

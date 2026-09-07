@@ -22,8 +22,8 @@ interface ScriptedStage {
   success?: boolean;
   outcome?: string | null;
   error?: string | null;
-  escalatedToNamedAgent?: string | null;
-  escalatedToProvider?: string | null;
+  /** This attempt moved one rank down a composite agent. */
+  compositeDescent?: { from: string; to: string } | null;
   /** Row status after settle (default: completed/failed by success). */
   rowStatus?: string;
   /** The settled promise never resolves (session stopped while queued). */
@@ -53,6 +53,12 @@ interface HarnessConfig {
   assessments?: ScriptedAssessment[];
   guards?: PipelineGuardCheck[];
   maxAttempts?: number;
+  /**
+   * Per-stage attempt budget the driver reports — a composite's member count.
+   * Absent means "no `attemptBudget` callback at all", which is the shape
+   * every pre-existing caller had and must keep behaving identically.
+   */
+  attemptBudget?: number;
   maxFixCycles?: number;
   maxSessions?: number;
   forensicSessionId?: string | null;
@@ -114,6 +120,9 @@ function runScripted(config: HarnessConfig = {}) {
 
   const promise = runPipeline({
     maxAttempts: config.maxAttempts ?? 2,
+    ...(config.attemptBudget !== undefined
+      ? { attemptBudget: () => config.attemptBudget as number }
+      : {}),
     maxFixCycles: config.maxFixCycles ?? 2,
     maxSessions: config.maxSessions ?? 12,
     initialBuild: { sessionId: buildSessionId, settled: buildSettled },
@@ -154,8 +163,7 @@ function runScripted(config: HarnessConfig = {}) {
         settled: script.neverSettle
           ? new Promise<PipelineStageResult>(() => {})
           : Promise.resolve(result),
-        escalatedToNamedAgent: script.escalatedToNamedAgent ?? null,
-        escalatedToProvider: script.escalatedToProvider ?? null,
+        compositeDescent: script.compositeDescent ?? null,
       };
     },
     assessReview: async () => {
@@ -421,44 +429,98 @@ describe("runPipeline — retry ladder and forensic", () => {
     });
   });
 
-  it("attempt >= 3 escalates and traces the alternative provider", async () => {
+  it("traces a composite rank-down naming both ends and the reason", async () => {
     const h = runScripted({
-      maxAttempts: 3,
+      attemptBudget: 3,
       stages: [
         { success: false },
-        { success: false },
-        { escalatedToProvider: "codex" },
+        { compositeDescent: { from: "Sonnet reviewer", to: "Codex reviewer" } },
       ],
       assessments: [false],
     });
     const summary = await h.promise;
 
     expect(summary.state).toBe("succeeded");
-    expect(h.requests.map((r) => r.attempt)).toEqual([1, 2, 3]);
+    expect(h.requests.map((r) => r.attempt)).toEqual([1, 2]);
+    // The reason travels INTO the request, so the stage driver could act on
+    // it, and out into the trace so a reader can see what the descent was for.
+    expect(h.requests[1].descentReason).toBe("the session failed");
     expect(h.reasons()).toContain(
-      PIPELINE_REASONS.escalation("review", "codex")
+      PIPELINE_REASONS.compositeRankDown(
+        "review",
+        "Sonnet reviewer",
+        "Codex reviewer",
+        "the session failed",
+        2,
+        3
+      )
     );
+  });
+
+  it("names the descent reason for a silent and for a refused attempt", async () => {
+    const silent = runScripted({
+      attemptBudget: 2,
+      stages: [
+        { success: false, outcome: "silent" },
+        { compositeDescent: { from: "A", to: "B" } },
+      ],
+      assessments: [false],
+    });
+    await silent.promise;
+    expect(silent.requests[1].descentReason).toBe(
+      "the agent delivered nothing"
+    );
+
+    const refused = runScripted({
+      attemptBudget: 2,
+      stages: [
+        { success: false, outcome: "transition_refused" },
+        { compositeDescent: { from: "A", to: "B" } },
+      ],
+      assessments: [false],
+    });
+    await refused.promise;
+    expect(refused.requests[1].descentReason).toBe(
+      "its workflow transition was refused"
+    );
+  });
+
+  it("spends a composite's member count, not the configured attempt cap", async () => {
+    // `maxAttempts` stays at the product default of 2 while the composite
+    // reports three members. The ladder must follow the LIST — this is the
+    // whole reason `pipeline_max_attempts` no longer gates an agent switch.
+    const h = runScripted({
+      maxAttempts: 2,
+      attemptBudget: 3,
+      stages: [{ success: false }, { success: false }, { success: false }],
+    });
+    const summary = await h.promise;
+
+    expect(summary.reason).toBe("stage review failed after 3 attempts");
+    expect(h.requests.map((r) => r.attempt)).toEqual([1, 2, 3]);
     expect(h.reasons()).toContain(PIPELINE_REASONS.retry("review", 3, 3));
   });
 
-  it("traces a same-provider effort escalation by named agent", async () => {
+  it("lets the session ceiling cut a composite longer than the run's budget", async () => {
+    // Five members, but the run may only own three sessions in total — the
+    // initial build plus two. PIPELINE_MAX_SESSIONS_PER_RUN is the runaway
+    // guard and it outranks the list.
     const h = runScripted({
-      maxAttempts: 3,
+      attemptBudget: 5,
+      maxSessions: 3,
       stages: [
         { success: false },
         { success: false },
-        { escalatedToNamedAgent: "Opus reviewer" },
+        { success: false },
+        { success: false },
       ],
-      assessments: [false],
     });
     const summary = await h.promise;
 
-    expect(summary.state).toBe("succeeded");
-    expect(h.reasons()).toContain(
-      PIPELINE_REASONS.effortEscalation("review", "Opus reviewer")
-    );
-    expect(h.reasons()).not.toContain(
-      PIPELINE_REASONS.escalation("review", "claude-code")
+    expect(h.requests.map((r) => r.attempt)).toEqual([1, 2]);
+    expect(summary.state).toBe("failed");
+    expect(summary.reason).toBe(
+      "stage review failed after 2 attempts (session ceiling reached)"
     );
   });
 
