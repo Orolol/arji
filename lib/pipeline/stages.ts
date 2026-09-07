@@ -64,7 +64,7 @@ import { runVerification as executeVerification } from "@/lib/verify/runner";
 import { assertManagedEpicWorktreePath } from "@/lib/verify/worktree";
 import { readRegressionConfig } from "@/lib/pipeline/verify";
 import { emitTicketUpdated } from "@/lib/events/emit";
-import { dispatchGradingSession } from "@/lib/grading/dispatch";
+import { dispatchGradingSession, GRADING_AGENT_TYPE } from "@/lib/grading/dispatch";
 import {
   buildGradingFixSection,
   parseGradingEntries,
@@ -275,7 +275,7 @@ export function createPipelineStageDriver(
     launchStage: async (request) => {
       try {
         if (request.stage === "grading") {
-          return await dispatchPipelineGradingStage(init);
+          return await dispatchPipelineGradingStage(init, request, configuredAgent);
         }
         return await dispatchPipelineStage(
           init,
@@ -364,12 +364,20 @@ export function createPipelineStageDriver(
 /** Adapts the reusable grader dispatcher to the pipeline stage contract. */
 async function dispatchPipelineGradingStage(
   init: PipelineStageDriverInit,
+  request: PipelineStageRequest,
+  configuredAgent: (stage: PipelineStageKind) => Promise<ResolvedAgent>,
 ): Promise<PipelineStageHandle> {
+  let compositeDescent: ResolvedStageAgent["compositeDescent"] = null;
   const result = await dispatchGradingSession({
     projectId: init.projectId,
     epicId: init.epicId,
     userStoryId: init.scope === "story" ? init.userStoryId : null,
     batchRunId: init.batchRunId ?? null,
+    resolveAgent: async () => {
+      const selected = resolveStageAgent(request, await configuredAgent("grading"));
+      compositeDescent = selected.compositeDescent;
+      return selected.resolved;
+    },
   });
 
   if (result.skipped) {
@@ -397,7 +405,7 @@ async function dispatchPipelineGradingStage(
       gradingReportId: terminal.reportId,
       gradingSkipped: false,
     })),
-    compositeDescent: null,
+    compositeDescent,
   };
 }
 
@@ -760,9 +768,9 @@ async function resolveConfiguredStageAgent(
 ): Promise<ResolvedAgent> {
   if (stage === "review" || stage === "grading") {
     return resolveAgentForDispatch(
-      reviewAgentType,
+      stage === "grading" ? GRADING_AGENT_TYPE : reviewAgentType,
       init.projectId,
-      init.reviewNamedAgentId ?? null,
+      stage === "grading" ? null : init.reviewNamedAgentId ?? null,
       {
         purpose: stage === "grading" ? "grading" : "review",
         projectId: init.projectId,

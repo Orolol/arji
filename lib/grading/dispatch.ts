@@ -24,7 +24,10 @@ import {
   classifySessionOutcome,
   extractSessionUsage,
 } from "@/lib/claude/resolve-session-output";
-import { resolveAgentForDispatch } from "@/lib/agent-config/agent-resolution";
+import {
+  resolveAgentForDispatch,
+  type ResolvedAgent,
+} from "@/lib/agent-config/agent-resolution";
 import { providerAcceptsAssignedSessionId } from "@/lib/agent-sessions/resume-capability";
 import {
   createQueuedSession,
@@ -101,6 +104,8 @@ export interface DispatchGradingInput {
   userStoryId?: string | null;
   namedAgentId?: string | null;
   batchRunId?: string | null;
+  /** Pipeline-owned ranked resolution; deferred so rubric-free runs still skip. */
+  resolveAgent?: () => Promise<ResolvedAgent>;
 }
 
 /** Non-empty criteria are the rubric; stories without criteria are omitted. */
@@ -242,7 +247,7 @@ export async function dispatchGradingSession(
     stories: rubric,
   });
   const prompt = assembled.prompt;
-  const resolvedAgent = await resolveAgentForDispatch(
+  const resolvedAgent = await (input.resolveAgent?.() ?? resolveAgentForDispatch(
     GRADING_AGENT_TYPE,
     input.projectId,
     input.namedAgentId ?? null,
@@ -252,7 +257,7 @@ export async function dispatchGradingSession(
       epicId: input.epicId,
       ...(input.userStoryId ? { storyId: input.userStoryId } : {}),
     },
-  );
+  ));
 
   const { worktreePath, branchName } = await createWorktree(
     project.gitRepoPath,
