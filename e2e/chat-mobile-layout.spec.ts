@@ -153,6 +153,13 @@ interface PageGeometry {
   input: Box | null;
   /** `true` when the point at the composer input's centre belongs to it. */
   inputHittable: boolean;
+  /**
+   * Scroll and client heights of the composer input (textarea).
+   * Used to assert that the empty placeholder does not wrap onto multiple lines
+   * and overflow vertically (B-arij-180 regression finding / B-arij-245).
+   */
+  inputScrollHeight: number;
+  inputClientHeight: number;
   /** Every composer control, and whether its centre point reaches it. */
   controls: { label: string; box: Box | null; hittable: boolean }[];
   /** `display:none` panes have no offsetParent, so nothing in them can tab. */
@@ -302,6 +309,8 @@ async function readGeometry(page: Page): Promise<PageGeometry> {
       bandStyled: !!band && getComputedStyle(band).display === "flex",
       input: box(input),
       inputHittable: hittable(input),
+      inputScrollHeight: (input as HTMLElement | null)?.scrollHeight ?? 0,
+      inputClientHeight: (input as HTMLElement | null)?.clientHeight ?? 0,
       controls: buttons.map((button, index) => ({
         label:
           button.getAttribute("aria-label") ||
@@ -373,6 +382,14 @@ function expectComposerUsable(geometry: PageGeometry, where: string) {
       `by the controls beside it (band ${geometry.band?.width}px, ` +
       `flex-wrap ${geometry.bandWrap})`,
   ).toBeGreaterThanOrEqual(MIN_INPUT_WIDTH_PX);
+  // The placeholder must stay on a single line and not wrap/overflow vertically.
+  // Before placeholder:truncate, the 51-char placeholder wrapped to 2 lines on
+  // narrow widths (e.g. 1280x800 desktop frame), causing scrollHeight (66px) > clientHeight (50px).
+  expect(
+    geometry.inputScrollHeight,
+    `${where}: composer input placeholder wraps to multiple lines and overflows vertically ` +
+      `(scrollHeight ${geometry.inputScrollHeight} > clientHeight ${geometry.inputClientHeight})`,
+  ).toBeLessThanOrEqual(geometry.inputClientHeight);
   expect(
     geometry.controls.length,
     `${where}: the composer rendered no controls to check`,
